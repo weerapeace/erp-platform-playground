@@ -113,6 +113,11 @@ const APPS: AppEntry[] = [
 
   // ============= Admin (ผู้ดูแลระบบ) =============
   {
+    key: "schema-sync", icon: "🗂️", name: "Schema Sync", subtitle: "Field Registry v2 ⭐",
+    href: "/admin/schema-sync", category: "Admin",
+    color: "from-orange-600 to-red-600", status: "live",
+  },
+  {
     key: "users", icon: "👥", name: "ผู้ใช้ระบบ", subtitle: "Users & Access",
     href: "/admin/users", category: "Admin",
     color: "from-purple-500 to-purple-600", status: "live",
