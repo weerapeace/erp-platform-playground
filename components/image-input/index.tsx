@@ -135,20 +135,48 @@ export function ImageInput({
 // ImageCell — แสดง thumbnail ในตาราง (auto load signed URL)
 // ============================================================
 
+// shared cache (per session) — กันยิงซ้ำสำหรับ key เดิม
+const SIGNED_URL_CACHE = new Map<string, { url: string; expiresAt: number }>();
+
 export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefined; size?: number }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [visible, setVisible] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // lazy load ด้วย IntersectionObserver
+  useEffect(() => {
+    if (!ref.current || visible) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setVisible(true); obs.disconnect(); }
+    }, { rootMargin: "200px" });
+    obs.observe(ref.current);
+    return () => obs.disconnect();
+  }, [visible]);
 
   useEffect(() => {
-    if (!r2Key) { setUrl(null); return; }
+    if (!visible || !r2Key) return;
+
+    // check cache
+    const cached = SIGNED_URL_CACHE.get(r2Key);
+    if (cached && cached.expiresAt > Date.now()) {
+      setUrl(cached.url);
+      return;
+    }
+
     apiFetch(`/api/master-v2/r2-signed-url?key=${encodeURIComponent(r2Key)}&ttl=3600`)
       .then((r) => r.json())
-      .then((j) => setUrl(j.url ?? null))
+      .then((j) => {
+        if (j.url) {
+          SIGNED_URL_CACHE.set(r2Key, { url: j.url, expiresAt: Date.now() + 50 * 60 * 1000 }); // 50min
+          setUrl(j.url);
+        }
+      })
       .catch(() => setUrl(null));
-  }, [r2Key]);
+  }, [visible, r2Key]);
 
   if (!r2Key) {
     return (
-      <div className="flex items-center justify-center rounded bg-slate-100 text-slate-300" style={{ width: size, height: size }}>
+      <div ref={ref} className="flex items-center justify-center rounded bg-slate-100 text-slate-300" style={{ width: size, height: size }}>
         <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
         </svg>
@@ -157,11 +185,13 @@ export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefin
   }
 
   if (!url) {
-    return <div className="rounded bg-slate-100 animate-pulse" style={{ width: size, height: size }} />;
+    return <div ref={ref} className="rounded bg-slate-100 animate-pulse" style={{ width: size, height: size }} />;
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt="" className="rounded object-cover border border-slate-200 bg-white" style={{ width: size, height: size }} />
+    <div ref={ref} className="inline-block">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt="" loading="lazy" className="rounded object-cover border border-slate-200 bg-white" style={{ width: size, height: size }} />
+    </div>
   );
 }

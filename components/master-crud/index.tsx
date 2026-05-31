@@ -260,7 +260,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const fetchList = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=200&include_inactive=true`);
+      // limit 50 (free Workers ~10ms/request) — ตอน scale ค่อยใช้ server pagination
+      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=50&include_inactive=true`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       setRows((json.data ?? []) as Row[]);
