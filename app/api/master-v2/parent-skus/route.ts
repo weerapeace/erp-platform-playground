@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 /**
  * Master Data v2 — Parent SKUs (Product Templates) API
  *

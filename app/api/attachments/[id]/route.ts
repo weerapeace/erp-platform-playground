@@ -1,5 +1,3 @@
-export const runtime = "edge";
-
 import { NextRequest, NextResponse } from "next/server";
 import { r2DeleteObject, isR2Configured } from "@/lib/r2";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
