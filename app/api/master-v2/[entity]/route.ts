@@ -74,11 +74,11 @@ export const ENTITIES: Record<string, EntityConfig> = {
                     special_descriptions ( name ),
                     size_descriptions ( name ),
                     platform_categories ( name )`,
-    // F10a: list view — เล็ก ไม่มี description/materials/html (กัน truncate)
+    // F10a + F16: list view — เล็กกว่าเดิม ตัด updated_at/created_at (ไม่ใช้)
     listColumns: `id, code, name_th, name_en, sku_name, product_family,
                   brand_id, collection_id, category_id, parcel_size_id,
                   special_description_id, size_description_id, platform_category_id,
-                  cover_image_r2_key, is_active, updated_at, created_at,
+                  cover_image_r2_key, is_active,
                   brands ( name ), collections ( name ),
                   product_categories ( name ),
                   parcel_sizes ( name, size_text ),
@@ -108,7 +108,6 @@ export const ENTITIES: Record<string, EntityConfig> = {
     listColumns: `id, code, name_th, barcode, parent_sku_id, seller_partner_id,
                   uom_id, purchase_uom_id, price_thb, retail_price_thb,
                   stock_min, stock_max, is_active, sale_ok, purchase_ok,
-                  updated_at, created_at,
                   parent_skus_v2 ( code, name_th ),
                   partners_v2!seller_partner_id ( name_th, code ),
                   uom:uoms!uom_id ( name ),
@@ -202,9 +201,9 @@ export async function GET(
 
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
-  // Workers Paid $5/mo — รองรับ 2000 สบาย (50ms/req)
-  // ถ้า dataset > 5000 ค่อย switch server-side pagination
-  const limit  = Math.min(5000, Math.max(1, parseInt(searchParams.get("limit") ?? "2000", 10)));
+  // F16: ลด default 2000 → 500 (กัน Worker 1102 'exceeded resource limits')
+  // คำขอใหญ่ + Supabase JOINs ใช้ CPU มาก — 500 ทำงาน stable
+  const limit  = Math.min(2000, Math.max(1, parseInt(searchParams.get("limit") ?? "500", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const includeInactive = searchParams.get("include_inactive") === "true";
 

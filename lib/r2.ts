@@ -22,16 +22,29 @@ export function isR2Configured(): boolean {
   );
 }
 
-// dynamic import — webpackIgnore กัน build fail ถ้า SDK ยังไม่ลง
-async function loadAws(): Promise<Record<string, unknown>> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return await import(/* webpackIgnore: true */ ("@aws-sdk/client-s3" as string)) as any;
+// F16: cache AWS SDK module + S3Client + presigner per Worker isolate
+// (เร็วขึ้นมาก: SDK load ครั้งเดียว, ไม่ต้องสร้าง S3Client ซ้ำทุก request)
+/* eslint-disable @typescript-eslint/no-explicit-any */
+let _aws: any | null = null;
+let _presigner: any | null = null;
+let _client: any | null = null;
+
+async function loadAws(): Promise<any> {
+  if (_aws) return _aws;
+  _aws = await import(/* webpackIgnore: true */ ("@aws-sdk/client-s3" as string));
+  return _aws;
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+async function loadPresigner(): Promise<any> {
+  if (_presigner) return _presigner;
+  _presigner = await import(/* webpackIgnore: true */ ("@aws-sdk/s3-request-presigner" as string));
+  return _presigner;
+}
+
 async function makeClient(): Promise<any> {
-  const aws: any = await loadAws();
-  return new aws.S3Client({
+  if (_client) return _client;
+  const aws = await loadAws();
+  _client = new aws.S3Client({
     region: "auto",
     endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
     credentials: {
@@ -39,6 +52,7 @@ async function makeClient(): Promise<any> {
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
     },
   });
+  return _client;
 }
 
 /** อัปโหลดไฟล์ขึ้น R2 */
@@ -63,9 +77,8 @@ export async function r2DeleteObject(key: string): Promise<void> {
  * @param ttl   อายุ URL วินาที (default 3600 = 1 ชั่วโมง)
  */
 export async function r2GetSignedUrl(key: string, ttl = 3600): Promise<string> {
-  const aws: any = await loadAws();
-  // dynamic import presigner
-  const presigner: any = await import(/* webpackIgnore: true */ ("@aws-sdk/s3-request-presigner" as string));
+  const aws = await loadAws();
+  const presigner = await loadPresigner();
   const client = await makeClient();
   const cmd = new aws.GetObjectCommand({ Bucket: R2_BUCKET, Key: key });
   return await presigner.getSignedUrl(client, cmd, { expiresIn: ttl });
