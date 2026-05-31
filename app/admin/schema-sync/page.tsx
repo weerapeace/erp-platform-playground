@@ -113,13 +113,14 @@ export default function SchemaSyncAdminPage() {
   }, [data, filter, groupFilter]);
 
   const stats = useMemo(() => {
-    if (!data) return { total: 0, visible: 0, filterable: 0, sortable: 0, searchable: 0, newDB: 0 };
+    if (!data) return { total: 0, visible: 0, filterable: 0, sortable: 0, searchable: 0, sensitive: 0, newDB: 0 };
     return {
       total: data.registry.length,
       visible: data.registry.filter((f) => f.is_visible).length,
       filterable: data.registry.filter((f) => f.is_filterable).length,
       sortable: data.registry.filter((f) => f.is_sortable).length,
       searchable: data.registry.filter((f) => f.is_searchable).length,
+      sensitive: data.registry.filter((f) => f.is_sensitive).length,
       newDB: data.diff.new_in_db.length,
     };
   }, [data]);
@@ -193,6 +194,11 @@ export default function SchemaSyncAdminPage() {
                 <span className="px-2.5 py-1 bg-pink-50 text-pink-700 rounded-md">
                   Searchable: {stats.searchable}
                 </span>
+                {stats.sensitive > 0 && (
+                  <span className="px-2.5 py-1 bg-red-50 text-red-700 rounded-md" title="ซ่อนจากคนไม่มี permission">
+                    🔒 Sensitive: {stats.sensitive}
+                  </span>
+                )}
                 {stats.newDB > 0 && (
                   <span className="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-md font-semibold" title="DB columns ที่ยังไม่อยู่ใน registry — กด Sync เพื่อเพิ่ม">
                     ✨ มี {stats.newDB} field ใหม่ใน DB — กด Sync
@@ -224,6 +230,7 @@ export default function SchemaSyncAdminPage() {
                       <th className="px-3 py-2 text-center font-medium" title="ค้นหาเจอ (รวมในช่อง search)">🔎 Search</th>
                       <th className="px-3 py-2 text-center font-medium" title="เรียงได้">↕ Sort</th>
                       <th className="px-3 py-2 text-center font-medium" title="บังคับกรอก">⚠ Req</th>
+                      <th className="px-3 py-2 text-center font-medium" title="ซ่อนจากคนไม่มี permission">🔒 Sensitive</th>
                       <th className="px-3 py-2 text-center font-medium">Width</th>
                     </tr>
                   </thead>
@@ -327,6 +334,30 @@ function FieldRow({
       </td>
       <td className="px-3 py-1.5 text-center">
         <input type="checkbox" checked={field.is_required} onChange={(e) => onUpdate({ is_required: e.target.checked })} className="rounded" />
+      </td>
+      <td className="px-3 py-1.5 text-center">
+        <div className="flex items-center justify-center gap-1">
+          <input
+            type="checkbox"
+            checked={field.is_sensitive}
+            onChange={(e) => onUpdate({
+              is_sensitive: e.target.checked,
+              sensitive_permission: e.target.checked ? (field.sensitive_permission ?? "products.cost.view") : null,
+            })}
+            className="rounded accent-red-500"
+            title="ซ่อน field จากคนที่ไม่มี permission"
+          />
+          {field.is_sensitive && (
+            <input
+              type="text"
+              value={field.sensitive_permission ?? ""}
+              onChange={(e) => onUpdate({ sensitive_permission: e.target.value })}
+              placeholder="products.cost.view"
+              className="w-32 text-[10px] px-1.5 py-0.5 border border-slate-200 rounded"
+              title="permission key"
+            />
+          )}
+        </div>
       </td>
       <td className="px-3 py-1.5 text-center">
         <input

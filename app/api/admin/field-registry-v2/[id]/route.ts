@@ -12,6 +12,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 const ALLOWED_FIELDS = [
   "field_label", "group_key", "ui_field_type",
   "is_visible", "is_required", "is_editable", "is_filterable", "is_sortable", "is_pinned", "is_searchable",
+  "is_sensitive", "sensitive_permission",
+  "show_in_form", "form_column_span", "placeholder", "help_text",
   "width", "min_width", "display_order", "is_active",
   "options", "validation_rules", "relation_config",
 ];
@@ -41,7 +43,12 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
   // ใช้ service-role client เขียน (กัน RLS) — sprint 2 จะใส่ erp_can() check
-  const { data, error } = await supabaseAdmin()
+  const admin = supabaseAdmin();
+
+  // Sprint 10: fetch before-state for audit
+  const before = await admin.from("erp_module_fields").select("*").eq("id", id).single();
+
+  const { data, error } = await admin
     .from("erp_module_fields")
     .update(patch)
     .eq("id", id)
@@ -49,5 +56,27 @@ export async function PATCH(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Sprint 10: audit log — บันทึก field ที่เปลี่ยน + before/after
+  if (before.data) {
+    const changes: Record<string, { from: unknown; to: unknown }> = {};
+    for (const k of Object.keys(patch)) {
+      const oldV = (before.data as Record<string, unknown>)[k];
+      const newV = patch[k];
+      if (JSON.stringify(oldV) !== JSON.stringify(newV)) {
+        changes[k] = { from: oldV, to: newV };
+      }
+    }
+    if (Object.keys(changes).length > 0) {
+      // fire-and-forget — ไม่ block response
+      admin.from("erp_field_registry_audit").insert({
+        module_field_id: id,
+        actor_email:     user.email,
+        action:          "update",
+        changes,
+      }).then(() => {}, () => {});
+    }
+  }
+
   return NextResponse.json({ data, error: null });
 }

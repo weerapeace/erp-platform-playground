@@ -62,6 +62,9 @@ function registryToFieldDef(
             ? (v: unknown) => <ImageCell r2Key={v as string | null} size={40} />
             : undefined);
 
+  // Sprint 9: validation_rules → validations array
+  const valRules = rf.validation_rules as { rules?: string[] } | undefined;
+
   return {
     key,
     label:       rf.field_label,
@@ -71,7 +74,9 @@ function registryToFieldDef(
     placeholder: rf.placeholder ?? undefined,
     helpText:    rf.help_text ?? undefined,
     colSize:     rf.is_visible ? rf.width : undefined,
-    hideInForm:  !rf.show_in_form || !rf.is_editable,
+    // Sprint 9: เปลี่ยน is_editable=false → readonly (แสดงแต่ disable) ไม่ใช่ซ่อน
+    hideInForm:  !rf.show_in_form,
+    readonly:    !rf.is_editable,
     formSpan:    (rf.form_column_span >= 2 ? 2 : 1) as 1 | 2,
     filterable:  rf.is_filterable,
     sortable:    rf.is_sortable,
@@ -79,6 +84,7 @@ function registryToFieldDef(
     relationConfig: relCfg && relCfg.target_table ? relCfg : undefined,
     groupKey:    rf.group_key,
     order:       rf.display_order,
+    validations: Array.isArray(valRules?.rules) ? valRules.rules : undefined,
   };
 }
 
@@ -118,6 +124,8 @@ export type FieldDef = {
   colSize?:   number;
   /** ซ่อนใน form drawer */
   hideInForm?: boolean;
+  /** Sprint 9: แสดงใน form แต่แก้ไม่ได้ (disabled) */
+  readonly?:  boolean;
   /** custom cell render ใน table (row available เพื่ออ่าน sibling fields เช่น *_label สำหรับ relation) */
   cellRender?: (value: unknown, row?: Record<string, unknown>) => React.ReactNode;
   /** กว้างใน form drawer: 1 / 2 / 3 (default 1 = col-span-1 from 2-col grid) */
@@ -217,12 +225,20 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, [config.moduleKey]);
 
   // คำนวณ effective fields — Registry มาก่อน, fallback ไป static config.fields
+  // Sprint 8: filter sensitive fields ที่ user ไม่มี permission
   const effectiveFields: FieldDef[] = useMemo(() => {
     if (registryFields && registryFields.length > 0) {
-      return registryFields.map((rf) => registryToFieldDef(rf, config.cellRenderers));
+      return registryFields
+        .filter((rf) => {
+          if (rf.is_sensitive && rf.sensitive_permission) {
+            return can(rf.sensitive_permission as Parameters<typeof can>[0]);
+          }
+          return true;
+        })
+        .map((rf) => registryToFieldDef(rf, config.cellRenderers));
     }
     return config.fields ?? [];
-  }, [registryFields, config.fields, config.cellRenderers]);
+  }, [registryFields, config.fields, config.cellRenderers, can]);
 
   // auto-derive searchKeys จาก Registry ถ้ามี
   const effectiveSearchKeys: string[] = useMemo(() => {
@@ -493,16 +509,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const v = form[f.key];
     const errs = fieldErrors[f.key];
     const hasErr = errs && errs.length > 0;
+    const disabled = !!f.readonly;
     const common = `w-full h-9 mt-0.5 px-3 text-sm border rounded-md focus:outline-none focus:ring-1 ${
-      hasErr ? "border-red-300 focus:ring-red-500" : "border-slate-200 focus:ring-blue-500"
+      hasErr ? "border-red-300 focus:ring-red-500"
+      : disabled ? "border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed"
+      : "border-slate-200 focus:ring-orange-500 focus:border-orange-500"
     }`;
     return (
       <label key={f.key} className={`block ${f.formSpan === 2 ? "col-span-2" : ""}`}>
         <span className="text-xs font-medium text-slate-600">
-          {f.label} {f.required && <span className="text-red-500">*</span>}
-          {f.validations && f.validations.length > 0 && (
-            <span className="ml-1 text-[10px] text-slate-400">{f.validations.join(", ")}</span>
-          )}
+          {f.label}
+          {f.required && <span className="text-red-500 ml-0.5">*</span>}
+          {f.readonly && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
         </span>
         {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
         {f.type === "image" ? (
@@ -511,7 +529,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             onChange={(val) => updateForm({ [f.key]: val })}
             folder={config.apiPath}
             required={f.required}
-            disabled={false}
+            disabled={disabled}
             hasError={hasErr}
           />
         ) : f.type === "relation" && f.relationConfig ? (
@@ -522,28 +540,37 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               config={f.relationConfig}
               placeholder={f.placeholder ?? `— เลือก ${f.label} —`}
               required={f.required}
+              disabled={disabled}
               hasError={hasErr}
             />
           </div>
         ) : f.type === "select" ? (
-          <select value={(v as string) || ""} onChange={e => updateForm({ [f.key]: e.target.value })}
+          <select value={(v as string) || ""} disabled={disabled}
+            onChange={e => updateForm({ [f.key]: e.target.value })}
             className={`${common} bg-white`}>
             <option value="">— เลือก —</option>
             {f.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
           </select>
         ) : f.type === "textarea" ? (
-          <textarea value={(v as string) || ""} onChange={e => updateForm({ [f.key]: e.target.value })}
-            rows={2} placeholder={f.placeholder}
-            className="w-full mt-0.5 px-3 py-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          <textarea value={(v as string) || ""} disabled={disabled}
+            onChange={e => updateForm({ [f.key]: e.target.value })}
+            rows={3} placeholder={f.placeholder}
+            className={`w-full mt-0.5 px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-1 ${
+              hasErr ? "border-red-300 focus:ring-red-500"
+              : disabled ? "border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed"
+              : "border-slate-200 focus:ring-orange-500 focus:border-orange-500"
+            }`} />
         ) : f.type === "boolean" ? (
           <div className="h-9 mt-0.5 flex items-center">
-            <input type="checkbox" checked={!!v} onChange={e => updateForm({ [f.key]: e.target.checked })}
+            <input type="checkbox" disabled={disabled} checked={!!v}
+              onChange={e => updateForm({ [f.key]: e.target.checked })}
               className="rounded border-slate-300" />
             <span className="ml-2 text-xs text-slate-500">{v ? "เปิด" : "ปิด"}</span>
           </div>
         ) : (
           <input
             type={f.type === "number" ? "number" : "text"}
+            disabled={disabled}
             value={(v as string | number | undefined) ?? ""}
             onChange={e => updateForm({ [f.key]: e.target.value })}
             placeholder={f.placeholder}
@@ -551,8 +578,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           />
         )}
         {hasErr && (
-          <div className="text-[11px] text-red-600 mt-1 space-y-0.5">
-            {errs.map((m, i) => <div key={i}>⚠ {m}</div>)}
+          <div className="text-[11px] text-red-600 mt-1 space-y-0.5 flex flex-col">
+            {errs.map((m, i) => <span key={i} className="flex items-center gap-1">⚠ <span>{m}</span></span>)}
           </div>
         )}
       </label>
