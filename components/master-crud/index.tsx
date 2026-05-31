@@ -312,7 +312,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
+  // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
+  // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'
+  // → ย้ายเช็ค canView ไปก่อน return JSX หลัก
 
   // ---- Form ops ----
   // Sprint 12: prefill defaults (static + dynamic expression)
@@ -677,6 +679,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       </label>
     );
   };
+
+  // F14: early return AFTER all hooks — กัน React error #310
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>
