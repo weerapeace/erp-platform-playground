@@ -16,7 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          # ไม่ใช้ npm cache เพราะยังไม่มี package-lock.json
+          # (จะ regenerate ตอน first successful build)
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
