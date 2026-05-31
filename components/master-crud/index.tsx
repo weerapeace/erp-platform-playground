@@ -15,6 +15,39 @@ import { useAuth, usePermission, AccessDenied, type Permission } from "@/compone
 import { apiFetch } from "@/lib/api";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
 import type { ColumnDef } from "@tanstack/react-table";
+import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-registry-v2/route";
+
+// ---- Helper: map FormField (Registry) → FieldDef (MasterCRUDPage internal) ----
+
+function registryToFieldDef(
+  rf: FormField,
+  cellRenderers?: Record<string, (v: unknown) => React.ReactNode>,
+): FieldDef {
+  // map ui_field_type → FieldDef.type
+  const fieldType: FieldDef["type"] =
+    rf.ui_field_type === "boolean" ? "boolean"
+    : rf.ui_field_type === "number" ? "number"
+    : rf.ui_field_type === "select" || rf.ui_field_type === "relation" ? "select"
+    : rf.ui_field_type === "textarea" || rf.ui_field_type === "json" ? "textarea"
+    : "text";
+
+  const opts = (rf.options as { options?: string[] })?.options;
+
+  return {
+    key:         rf.column_name ?? rf.field_key,
+    label:       rf.field_label,
+    type:        fieldType,
+    required:    rf.is_required,
+    options:     opts,
+    placeholder: rf.placeholder ?? undefined,
+    colSize:     rf.is_visible ? rf.width : undefined,
+    hideInForm:  !rf.show_in_form || !rf.is_editable,
+    formSpan:    (rf.form_column_span >= 2 ? 2 : 1) as 1 | 2,
+    filterable:  rf.is_filterable,
+    sortable:    rf.is_sortable,
+    cellRender:  cellRenderers?.[rf.column_name ?? rf.field_key],
+  };
+}
 
 // ---- Field types ----
 
@@ -60,8 +93,17 @@ export type MasterCRUDConfig = {
     create: Permission;
     edit:   Permission;
   };
-  /** field schema */
-  fields:    FieldDef[];
+  /**
+   * field schema — สอง mode:
+   *   - static: ให้ fields[] array (legacy)
+   *   - dynamic: ให้ moduleKey → MasterCRUDPage โหลดจาก Field Registry (sprint 2+)
+   * ระบุได้ทั้งสอง (dynamic จะ override static)
+   */
+  fields?:   FieldDef[];
+  /** dynamic field loading จาก erp_module_fields */
+  moduleKey?: string;
+  /** ฟังก์ชัน custom สำหรับ cellRender override (key → fn) — ใช้กับ dynamic mode */
+  cellRenderers?: Record<string, (value: unknown) => React.ReactNode>;
   /** unique key field (default: 'code') */
   uniqueKey?: string;
   /** entity_type สำหรับ audit log export */
@@ -92,6 +134,43 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const apiBase    = config.apiBase ?? "/api/master/";
   const activeField = config.activeField ?? "active";
   const isRest     = (config.apiBase ?? "").includes("master-v2");
+
+  // ---- Dynamic field loading (Sprint 2) ----
+  // ถ้ามี moduleKey — load fields config จาก Field Registry
+  // ไม่งั้นใช้ config.fields ที่ส่งมา (static legacy)
+  const [registryFields, setRegistryFields] = useState<FormField[] | null>(null);
+  const [registryLoading, setRegistryLoading] = useState(!!config.moduleKey);
+
+  useEffect(() => {
+    if (!config.moduleKey) return;
+    setRegistryLoading(true);
+    apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`)
+      .then((r) => r.json() as Promise<FieldRegistryV2Response>)
+      .then((res) => {
+        if (res.error) console.error("Field Registry load error:", res.error);
+        else setRegistryFields(res.fields);
+      })
+      .catch((e) => console.error("Field Registry load failed:", e))
+      .finally(() => setRegistryLoading(false));
+  }, [config.moduleKey]);
+
+  // คำนวณ effective fields — Registry มาก่อน, fallback ไป static config.fields
+  const effectiveFields: FieldDef[] = useMemo(() => {
+    if (registryFields && registryFields.length > 0) {
+      return registryFields.map((rf) => registryToFieldDef(rf, config.cellRenderers));
+    }
+    return config.fields ?? [];
+  }, [registryFields, config.fields, config.cellRenderers]);
+
+  // auto-derive searchKeys จาก Registry ถ้ามี
+  const effectiveSearchKeys: string[] = useMemo(() => {
+    if (registryFields && registryFields.length > 0) {
+      return registryFields
+        .filter((f) => f.is_searchable)
+        .map((f) => f.column_name ?? f.field_key);
+    }
+    return config.searchKeys ?? ["name", "code"];
+  }, [registryFields, config.searchKeys]);
 
   const [rows,    setRows]    = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,11 +216,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ---- Form ops ----
   const emptyForm = useMemo(() => {
     const e: Record<string, unknown> = {};
-    config.fields.forEach(f => {
+    effectiveFields.forEach(f => {
       e[f.key] = f.type === "boolean" ? false : "";
     });
     return e;
-  }, [config.fields]);
+  }, [effectiveFields]);
 
   const updateForm = (patch: Partial<Record<string, unknown>>) => {
     setForm(p => ({ ...p, ...patch })); setDirty(true);
@@ -153,7 +232,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const openEdit = (r: Row) => {
     setEditingId(r.id);
     const f: Record<string, unknown> = {};
-    config.fields.forEach(field => {
+    effectiveFields.forEach(field => {
       const v = r[field.key];
       f[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
     });
@@ -166,7 +245,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // 1. รัน validation rules per field
     const fErr: Record<string, string[]> = {};
     let hasErr = false;
-    for (const f of config.fields) {
+    for (const f of effectiveFields) {
       const keys = [
         ...(f.required ? ["required"] : []),
         ...(f.validations ?? []),
@@ -186,7 +265,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       //   REST mode (v2): proper types (number → number, boolean → boolean)
       //   RPC mode (legacy): everything → string (for jsonb cast)
       const serialized: Record<string, unknown> = {};
-      config.fields.forEach((f) => {
+      effectiveFields.forEach((f) => {
         // skip read-only fields (no key in form)
         if (f.hideInForm) return;
         const v = form[f.key];
@@ -243,7 +322,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // ---- Columns ----
   const columns: ColumnDef<Row>[] = useMemo(() => {
-    const tableFields = config.fields.filter(f => f.colSize !== undefined);
+    const tableFields = effectiveFields.filter(f => f.colSize !== undefined);
     const cols: ColumnDef<Row>[] = tableFields.map(f => ({
       id: f.key, accessorKey: f.key, header: f.label, size: f.colSize,
       enableSorting: f.sortable !== false,
@@ -275,7 +354,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     });
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config.fields, activeField]);
+  }, [effectiveFields, activeField]);
 
   // ---- Views ----
   // ⚠️ DataTableView field คือ "filter" (ไม่ใช่ "predicate")
@@ -316,7 +395,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ---- Bulk edit fields ----
   const bulkEditFields: BulkEditField[] = useMemo(() => {
     if (!canEdit) return [];
-    return config.fields
+    return effectiveFields
       .filter((f) => f.bulkEditable)
       .map((f) => ({
         key: f.key,
@@ -324,7 +403,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         type: f.type === "textarea" ? "text" : (f.type as "text" | "number" | "select" | "boolean"),
         options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: o })) : undefined,
       }));
-  }, [canEdit, config.fields]);
+  }, [canEdit, effectiveFields]);
 
   const onBulkEdit = useCallback(async (
     edits: { row: Row; changes: Record<string, unknown> }[]
@@ -420,8 +499,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           tableId={config.tableId}
           data={rows}
           columns={columns}
-          loading={loading}
-          searchableKeys={(config.searchKeys ?? ["name","code"]) as (keyof Row)[]}
+          loading={loading || registryLoading}
+          searchableKeys={effectiveSearchKeys as (keyof Row)[]}
           searchPlaceholder={`ค้นหา ${config.title}...`}
           views={views}
           rowActions={rowActions}
@@ -454,7 +533,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         <div className="space-y-4">
           {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
           <div className="grid grid-cols-2 gap-3">
-            {config.fields.filter(f => !f.hideInForm).map(renderField)}
+            {effectiveFields.filter(f => !f.hideInForm).map(renderField)}
           </div>
         </div>
       </ERPModal>

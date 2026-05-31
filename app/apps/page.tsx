@@ -39,6 +39,16 @@ const APPS: AppEntry[] = [
     href: "/master/parent-skus", category: "Master Data v2",
     color: "from-orange-500 to-amber-500", status: "live",
   },
+  {
+    key: "skus", icon: "🏷️", name: "SKUs", subtitle: "Product Variants (v2)",
+    href: "/master/skus", category: "Master Data v2",
+    color: "from-violet-500 to-purple-500", status: "live",
+  },
+  {
+    key: "partners", icon: "🤝", name: "Partners", subtitle: "Customers + Suppliers (v2)",
+    href: "/master/partners", category: "Master Data v2",
+    color: "from-emerald-500 to-teal-500", status: "live",
+  },
 
   // ============= Operations (การปฏิบัติงาน) =============
   {
