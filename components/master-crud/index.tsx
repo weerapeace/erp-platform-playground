@@ -17,6 +17,7 @@ import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/v
 import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
+import { ImageInput, ImageCell } from "@/components/image-input";
 
 // ---- Helper: map FormField (Registry) → FieldDef (MasterCRUDPage internal) ----
 
@@ -42,6 +43,7 @@ function registryToFieldDef(
     rf.ui_field_type === "boolean" ? "boolean"
     : rf.ui_field_type === "number" ? "number"
     : rf.ui_field_type === "relation" ? "relation"
+    : rf.ui_field_type === "image" ? "image"
     : rf.ui_field_type === "select" ? "select"
     : rf.ui_field_type === "textarea" || rf.ui_field_type === "json" ? "textarea"
     : "text";
@@ -51,10 +53,14 @@ function registryToFieldDef(
   const key = rf.column_name ?? rf.field_key;
   const customRender = cellRenderers?.[key];
 
-  // default cellRender สำหรับ relation field — อ่าน label จาก {base}_label / {base}_name
-  const effectiveCellRender =
+  // default cellRender
+  const effectiveCellRender: ((v: unknown, row?: Record<string, unknown>) => React.ReactNode) | undefined =
     customRender
-      ?? (fieldType === "relation" ? defaultRelationCellRender(key) : undefined);
+      ?? (fieldType === "relation"
+          ? defaultRelationCellRender(key)
+          : fieldType === "image"
+            ? (v: unknown) => <ImageCell r2Key={v as string | null} size={40} />
+            : undefined);
 
   return {
     key,
@@ -63,6 +69,7 @@ function registryToFieldDef(
     required:    rf.is_required,
     options:     opts,
     placeholder: rf.placeholder ?? undefined,
+    helpText:    rf.help_text ?? undefined,
     colSize:     rf.is_visible ? rf.width : undefined,
     hideInForm:  !rf.show_in_form || !rf.is_editable,
     formSpan:    (rf.form_column_span >= 2 ? 2 : 1) as 1 | 2,
@@ -70,7 +77,27 @@ function registryToFieldDef(
     sortable:    rf.is_sortable,
     cellRender:  effectiveCellRender,
     relationConfig: relCfg && relCfg.target_table ? relCfg : undefined,
+    groupKey:    rf.group_key,
+    order:       rf.display_order,
   };
+}
+
+// ---- Group config (Sprint 7) ----
+const GROUP_CONFIG: Record<string, { label: string; icon: string; defaultOpen: boolean; order: number }> = {
+  core:      { label: "ข้อมูลหลัก",     icon: "📋", defaultOpen: true,  order: 10 },
+  relations: { label: "ความสัมพันธ์",  icon: "🔗", defaultOpen: true,  order: 20 },
+  specs:     { label: "ขนาด/สเปก",     icon: "📐", defaultOpen: true,  order: 30 },
+  content:   { label: "เนื้อหา",        icon: "📝", defaultOpen: false, order: 40 },
+  pricing:   { label: "ราคา & ต้นทุน",  icon: "💰", defaultOpen: true,  order: 50 },
+  status:    { label: "สถานะ",          icon: "🟢", defaultOpen: false, order: 60 },
+  system:    { label: "ระบบ",           icon: "⚙️", defaultOpen: false, order: 90 },
+  other:     { label: "อื่น ๆ",         icon: "📦", defaultOpen: false, order: 80 },
+  supplier:  { label: "ผู้จำหน่าย",     icon: "🏭", defaultOpen: false, order: 35 },
+  product:   { label: "คุณสมบัติ",      icon: "✨", defaultOpen: true,  order: 25 },
+};
+
+function getGroupConfig(key: string) {
+  return GROUP_CONFIG[key] ?? { label: key, icon: "📁", defaultOpen: false, order: 99 };
 }
 
 // ---- Field types ----
@@ -78,10 +105,12 @@ function registryToFieldDef(
 export type FieldDef = {
   key:        string;
   label:      string;
-  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation";
+  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image";
   required?:  boolean;
   options?:   string[];                   // สำหรับ select
   placeholder?: string;
+  /** help text แสดงใต้ label ใน form */
+  helpText?:  string;
   /** ขนาดในตาราง (ไม่ระบุ = ซ่อนจาก table) */
   colSize?:   number;
   /** ซ่อนใน form drawer */
@@ -102,6 +131,10 @@ export type FieldDef = {
   bulkEditable?: boolean;
   /** config สำหรับ relation field (FK picker) */
   relationConfig?: RelationConfig;
+  /** Sprint 7: section group สำหรับ form layout */
+  groupKey?:  string;
+  /** Sprint 7: lower number = ขึ้นก่อนใน group + section ordering */
+  order?:     number;
 };
 
 export type MasterCRUDConfig = {
@@ -467,7 +500,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             <span className="ml-1 text-[10px] text-slate-400">{f.validations.join(", ")}</span>
           )}
         </span>
-        {f.type === "relation" && f.relationConfig ? (
+        {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
+        {f.type === "image" ? (
+          <ImageInput
+            value={(v as string) || null}
+            onChange={(val) => updateForm({ [f.key]: val })}
+            folder={config.apiPath}
+            required={f.required}
+            disabled={false}
+            hasError={hasErr}
+          />
+        ) : f.type === "relation" && f.relationConfig ? (
           <div className="mt-0.5">
             <RelationPicker
               value={(v as string) || null}
@@ -569,9 +612,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         }>
         <div className="space-y-4">
           {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
-          <div className="grid grid-cols-2 gap-3">
-            {effectiveFields.filter(f => !f.hideInForm).map(renderField)}
-          </div>
+          <FormSections
+            fields={effectiveFields.filter(f => !f.hideInForm)}
+            renderField={renderField}
+          />
         </div>
       </ERPModal>
 
@@ -584,5 +628,77 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         confirmText="ปิดบัญชี" cancelText="ยกเลิก" variant="danger"
         onConfirm={() => { if (archiveTarget) archive(archiveTarget); }} />
     </PlaygroundShell>
+  );
+}
+
+// ============================================================
+// FormSections — Sprint 7: group fields by groupKey + collapsible
+// ============================================================
+
+function FormSections({
+  fields, renderField,
+}: {
+  fields: FieldDef[];
+  renderField: (f: FieldDef) => React.ReactNode;
+}) {
+  // group fields by groupKey, sort each group by order
+  const grouped = useMemo(() => {
+    const map = new Map<string, FieldDef[]>();
+    for (const f of fields) {
+      const k = f.groupKey ?? "other";
+      const list = map.get(k) ?? [];
+      list.push(f);
+      map.set(k, list);
+    }
+    // sort fields within each group by order
+    for (const [, list] of map) {
+      list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    }
+    // sort groups by GROUP_CONFIG.order
+    return Array.from(map.entries()).sort(
+      ([a], [b]) => getGroupConfig(a).order - getGroupConfig(b).order
+    );
+  }, [fields]);
+
+  // expand state per group
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    for (const [key] of grouped) init[key] = getGroupConfig(key).defaultOpen;
+    return init;
+  });
+
+  return (
+    <div className="space-y-3">
+      {grouped.map(([groupKey, groupFields]) => {
+        const cfg = getGroupConfig(groupKey);
+        const isOpen = expanded[groupKey] ?? cfg.defaultOpen;
+        return (
+          <div key={groupKey} className="border border-slate-200 rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setExpanded((p) => ({ ...p, [groupKey]: !isOpen }))}
+              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors border-b border-slate-100"
+            >
+              <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                <span>{cfg.icon}</span>
+                {cfg.label}
+                <span className="text-xs text-slate-400 font-normal">({groupFields.length})</span>
+              </span>
+              <svg
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                className={`text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </button>
+            {isOpen && (
+              <div className="px-3 py-3 grid grid-cols-2 gap-3">
+                {groupFields.map(renderField)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
