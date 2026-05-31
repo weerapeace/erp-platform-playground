@@ -25,6 +25,12 @@ export type RelationConfig = {
   secondary_label_field?: string;
   /** F6: ถ้า true และ target_module_key อยู่ใน v2 ENTITIES — แสดงปุ่ม "+ สร้างใหม่" ใน picker */
   allow_create?:          boolean;
+  /**
+   * F9: ถ้าระบุ lookup_type → ดึงจาก erp_lookups (generic lookup) แทน table จริง
+   * เช่น 'product_category' / 'parcel_size' / 'uom'
+   * ตอนนั้น target_table จะถูก ignore — quick create จะ POST /api/lookups
+   */
+  lookup_type?:           string;
 };
 
 interface RelationPickerProps {
@@ -49,26 +55,39 @@ export function RelationPicker({
   const inputRef     = useRef<HTMLInputElement>(null);
 
   // ---- load options ----
+  // F9: ถ้า config.lookup_type → ใช้ /api/lookups (generic) | ไม่งั้น /api/admin/picker (table จริง)
   const loadOptions = useCallback(async (query: string, includeCurrent: string | null) => {
     setLoading(true);
-    const params = new URLSearchParams({
-      table:     config.target_table,
-      label:     config.target_label_field,
-      limit:     "20",
-    });
-    if (query) params.set("search", query);
-    if (config.target_search_fields?.length) {
-      params.set("search_in", config.target_search_fields.join(","));
-    }
-    if (config.secondary_label_field) {
-      params.set("secondary", config.secondary_label_field);
-    }
-    if (includeCurrent) params.set("include_ids", includeCurrent);
-
     try {
-      const res = await apiFetch(`/api/admin/picker?${params}`);
-      const json = await res.json();
-      setOptions((json.data ?? []) as PickerOption[]);
+      let opts: PickerOption[] = [];
+      if (config.lookup_type) {
+        const params = new URLSearchParams({ type: config.lookup_type, limit: "100" });
+        if (query)           params.set("search", query);
+        if (includeCurrent)  params.set("include_ids", includeCurrent);
+        const res = await apiFetch(`/api/lookups?${params}`);
+        const json = await res.json();
+        opts = ((json.data ?? []) as Array<{ id: string; name: string; code: string | null; is_active: boolean }>)
+          .map((r) => ({
+            id:        r.id,
+            label:     r.name,
+            secondary: r.code ?? undefined,
+            active:    r.is_active,
+          }));
+      } else {
+        const params = new URLSearchParams({
+          table: config.target_table,
+          label: config.target_label_field,
+          limit: "20",
+        });
+        if (query) params.set("search", query);
+        if (config.target_search_fields?.length) params.set("search_in", config.target_search_fields.join(","));
+        if (config.secondary_label_field)        params.set("secondary", config.secondary_label_field);
+        if (includeCurrent)                       params.set("include_ids", includeCurrent);
+        const res = await apiFetch(`/api/admin/picker?${params}`);
+        const json = await res.json();
+        opts = (json.data ?? []) as PickerOption[];
+      }
+      setOptions(opts);
     } finally {
       setLoading(false);
     }
@@ -77,18 +96,31 @@ export function RelationPicker({
   // ---- resolve current value to label (initial + when value changes) ----
   useEffect(() => {
     if (!value) { setCurrent(null); return; }
-    // find in already-loaded options
     const inOpts = options.find((o) => o.id === value);
     if (inOpts) { setCurrent(inOpts); return; }
-    // fetch this single id
-    apiFetch(`/api/admin/picker?table=${config.target_table}&label=${config.target_label_field}&include_ids=${value}&limit=1${config.secondary_label_field ? `&secondary=${config.secondary_label_field}` : ""}`)
+    // fetch this single id — F9 path
+    const url = config.lookup_type
+      ? `/api/lookups?type=${config.lookup_type}&include_ids=${value}&limit=1`
+      : `/api/admin/picker?table=${config.target_table}&label=${config.target_label_field}&include_ids=${value}&limit=1${config.secondary_label_field ? `&secondary=${config.secondary_label_field}` : ""}`;
+    apiFetch(url)
       .then((r) => r.json())
       .then((j) => {
-        const found = (j.data as PickerOption[] | undefined)?.find((o) => o.id === value);
-        if (found) setCurrent(found);
+        const data = (j.data ?? []) as Array<Record<string, unknown>>;
+        const row  = data.find((o) => o.id === value);
+        if (!row) return;
+        if (config.lookup_type) {
+          setCurrent({
+            id:        String(row.id),
+            label:     String(row.name ?? ""),
+            secondary: (row.code as string | null) ?? undefined,
+            active:    typeof row.is_active === "boolean" ? row.is_active : undefined,
+          });
+        } else {
+          setCurrent(row as unknown as PickerOption);
+        }
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, config.target_table, config.target_label_field, config.secondary_label_field]);
+  }, [value, config.target_table, config.target_label_field, config.secondary_label_field, config.lookup_type]);
 
   // ---- load on open ----
   useEffect(() => {
@@ -119,24 +151,30 @@ export function RelationPicker({
   const [creating, setCreating] = useState(false);
   const [createErr, setCreateErr] = useState<string | null>(null);
 
-  const canCreate = !!(config.allow_create && config.target_module_key);
+  // F9: lookup_type → /api/lookups, ไม่งั้น → /api/master-v2/<entity>
+  const canCreate = !!config.allow_create && (!!config.lookup_type || !!config.target_module_key);
 
   const quickCreate = async (name: string) => {
     if (!canCreate || !name.trim()) return;
     setCreating(true);
     setCreateErr(null);
     try {
-      const res = await apiFetch(`/api/master-v2/${config.target_module_key}`, {
+      const url     = config.lookup_type ? "/api/lookups" : `/api/master-v2/${config.target_module_key}`;
+      const payload = config.lookup_type
+        ? { lookup_type: config.lookup_type, name: name.trim() }
+        : { [config.target_label_field]: name.trim() };
+      const res = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [config.target_label_field]: name.trim() }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (json.error) { setCreateErr(json.error); return; }
       // select ตัวใหม่ทันที
+      const row = json.data as Record<string, unknown>;
       const newOpt: PickerOption = {
-        id:    String(json.data.id),
-        label: String(json.data[config.target_label_field] ?? name),
+        id:    String(row.id),
+        label: String(config.lookup_type ? row.name : row[config.target_label_field] ?? name),
       };
       select(newOpt);
     } catch (e) {
