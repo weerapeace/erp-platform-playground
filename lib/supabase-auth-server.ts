@@ -11,9 +11,15 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
  * read ทั่วไปยังใช้ lib/supabase.ts (anon) ได้
  */
 export function supabaseFromRequest(request: Request): SupabaseClient {
-  const authHeader = request.headers.get("authorization") ?? "";
+  const authHeader = request.headers.get("authorization");
+  // override Authorization เฉพาะเมื่อ user login (มี Bearer token ส่งมา)
+  // ถ้าไม่มี — ปล่อย supabase-js ใช้ default (anon key)
+  const globalHeaders: Record<string, string> = {};
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    globalHeaders.Authorization = authHeader;
+  }
   return createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: authHeader } },
+    global: { headers: globalHeaders },
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
