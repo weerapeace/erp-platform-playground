@@ -89,7 +89,34 @@ function registryToFieldDef(
     defaultValue:      rf.default_value,
     defaultExpression: rf.default_expression,
     inlineEditable:    rf.is_inline_editable,
+    // Sprint 13
+    conditionRules:    rf.condition_rules ?? null,
   };
+}
+
+// ---- Sprint 13: evaluate condition rule ----
+type ShowIfRule = {
+  field?:    string;
+  operator?: "=" | "!=" | "in" | "not_in" | "is_set" | "is_empty";
+  value?:    unknown;
+};
+
+function evaluateCondition(rules: Record<string, unknown> | null | undefined, form: Record<string, unknown>): boolean {
+  if (!rules || typeof rules !== "object") return true;
+  const showIf = (rules as { show_if?: ShowIfRule }).show_if;
+  if (!showIf || !showIf.field) return true;
+  const fieldVal = form[showIf.field];
+  const op       = showIf.operator ?? "=";
+  const expected = showIf.value;
+  switch (op) {
+    case "=":        return fieldVal === expected;
+    case "!=":       return fieldVal !== expected;
+    case "in":       return Array.isArray(expected) && expected.includes(fieldVal as never);
+    case "not_in":   return Array.isArray(expected) && !expected.includes(fieldVal as never);
+    case "is_set":   return fieldVal != null && fieldVal !== "" && fieldVal !== false;
+    case "is_empty": return fieldVal == null || fieldVal === "" || fieldVal === false;
+    default: return true;
+  }
 }
 
 // ---- Sprint 12: resolve dynamic default expression ----
@@ -189,6 +216,8 @@ export type FieldDef = {
   defaultExpression?: string | null;
   /** Sprint 12: เปิดดับเบิ้ลคลิก cell แก้ในตารางได้ */
   inlineEditable?: boolean;
+  /** Sprint 13: เงื่อนไขแสดงในฟอร์ม — {show_if: {field, operator, value}} */
+  conditionRules?: Record<string, unknown> | null;
 };
 
 export type MasterCRUDConfig = {
@@ -365,10 +394,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const discard  = () => { setConfirmDiscard(false); setModalOpen(false); setDirty(false); };
 
   const save = async () => {
-    // 1. รัน validation rules per field
+    // 1. รัน validation rules per field — Sprint 13: skip field ที่ condition ไม่ผ่าน
     const fErr: Record<string, string[]> = {};
     let hasErr = false;
     for (const f of effectiveFields) {
+      // ถ้า condition rule ซ่อนอยู่ → ไม่ต้อง validate (รวม required)
+      if (!evaluateCondition(f.conditionRules, form)) continue;
       const keys = [
         ...(f.required ? ["required"] : []),
         ...(f.validations ?? []),
@@ -736,7 +767,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         <div className="space-y-4">
           {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
           <FormSections
-            fields={effectiveFields.filter(f => !f.hideInForm)}
+            fields={effectiveFields.filter(f => !f.hideInForm && evaluateCondition(f.conditionRules, form))}
             renderField={renderField}
           />
         </div>

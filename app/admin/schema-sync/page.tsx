@@ -15,7 +15,7 @@
  * - ☑ Checkbox + bulk action bar → set visible/filter/sort หลาย row พร้อมกัน
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
@@ -51,8 +51,26 @@ const GROUP_OPTIONS = [
 
 const UI_TYPE_OPTIONS = ["text", "number", "boolean", "date", "select", "relation", "json", "textarea"];
 
-// 12 columns — ต้อง match กับ FieldRow + thead ด้านล่าง
-const COLUMN_COUNT = 13;
+// 15 columns — ต้อง match กับ FieldRow + thead ด้านล่าง (sprint 13: +🎯 Condition col)
+const COLUMN_COUNT = 15;
+
+// Sprint 13: ลำดับ + label ของ group สำหรับ collapsible header
+const GROUP_META: Record<string, { icon: string; label: string; order: number }> = {
+  core:      { icon: "📋", label: "ข้อมูลหลัก",     order: 10 },
+  relations: { icon: "🔗", label: "ความสัมพันธ์",  order: 20 },
+  product:   { icon: "✨", label: "คุณสมบัติ",      order: 25 },
+  specs:     { icon: "📐", label: "ขนาด/สเปก",     order: 30 },
+  supplier:  { icon: "🏭", label: "ผู้จำหน่าย",     order: 35 },
+  content:   { icon: "📝", label: "เนื้อหา",        order: 40 },
+  pricing:   { icon: "💰", label: "ราคา",           order: 50 },
+  media:     { icon: "🖼️", label: "รูปภาพ/ไฟล์",    order: 55 },
+  status:    { icon: "🟢", label: "สถานะ",          order: 60 },
+  other:     { icon: "📦", label: "อื่น ๆ",         order: 80 },
+  system:    { icon: "⚙️", label: "ระบบ",           order: 90 },
+};
+function groupMeta(key: string) {
+  return GROUP_META[key] ?? { icon: "📁", label: key, order: 99 };
+}
 
 export default function SchemaSyncAdminPage() {
   const { user: _user } = useAuth();
@@ -69,6 +87,10 @@ export default function SchemaSyncAdminPage() {
   const [selected,    setSelected]    = useState<Set<string>>(new Set());
   const [bulkSaving,  setBulkSaving]  = useState(false);
   const [reordering,  setReordering]  = useState(false);
+
+  // Sprint 13: collapsible groups + condition editor modal
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [conditionEditing, setConditionEditing] = useState<RegistryField | null>(null);
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
@@ -211,6 +233,36 @@ export default function SchemaSyncAdminPage() {
   const allFilteredSelected = filtered.length > 0 && filtered.every((f) => selected.has(f.id));
   const someSelected = filtered.some((f) => selected.has(f.id));
 
+  // Sprint 13: group filtered fields by group_key — keep stable group order
+  const grouped = useMemo(() => {
+    const map = new Map<string, RegistryField[]>();
+    for (const f of filtered) {
+      const k = f.group_key ?? "other";
+      const list = map.get(k) ?? [];
+      list.push(f);
+      map.set(k, list);
+    }
+    return Array.from(map.entries()).sort(
+      ([a], [b]) => groupMeta(a).order - groupMeta(b).order
+    );
+  }, [filtered]);
+
+  const allCollapsed = grouped.length > 0 && grouped.every(([k]) => collapsedGroups.has(k));
+  const toggleAllGroups = () => {
+    if (allCollapsed) setCollapsedGroups(new Set());
+    else setCollapsedGroups(new Set(grouped.map(([k]) => k)));
+  };
+
+  const toggleGroupSelect = (groupFields: RegistryField[]) => {
+    const allInGroupSelected = groupFields.every((f) => selected.has(f.id));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allInGroupSelected) groupFields.forEach((f) => next.delete(f.id));
+      else                    groupFields.forEach((f) => next.add(f.id));
+      return next;
+    });
+  };
+
   const toggleAll = () => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -280,6 +332,16 @@ export default function SchemaSyncAdminPage() {
                 <option value="">ทุก group</option>
                 {GROUP_OPTIONS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
               </select>
+
+              {grouped.length > 0 && (
+                <button
+                  onClick={toggleAllGroups}
+                  className="h-9 px-3 text-xs text-slate-600 border border-slate-300 rounded-md hover:bg-slate-50"
+                  title="ยุบ/ขยายทุก group"
+                >
+                  {allCollapsed ? "▶ ขยายทั้งหมด" : "▼ ยุบทั้งหมด"}
+                </button>
+              )}
             </div>
 
             {/* stats */}
@@ -386,22 +448,62 @@ export default function SchemaSyncAdminPage() {
                       <th className="px-3 py-2 text-center font-medium" title="ซ่อนจากคนไม่มี permission">🔒 Sensitive</th>
                       <th className="px-3 py-2 text-center font-medium" title="ดับเบิ้ลคลิก cell แก้ในตาราง">✎ Inline</th>
                       <th className="px-3 py-2 text-left font-medium" title="Default ตอน Create — รองรับ now() today() current_user() uuid()">Default</th>
+                      <th className="px-3 py-2 text-center font-medium" title="เงื่อนไขแสดงในฟอร์ม (show_if)">🎯 Cond</th>
                       <th className="px-3 py-2 text-center font-medium">Width</th>
                     </tr>
                   </thead>
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                     <SortableContext items={filtered.map((f) => f.id)} strategy={verticalListSortingStrategy}>
                       <tbody className="divide-y divide-slate-100">
-                        {filtered.map((f) => (
-                          <SortableFieldRow
-                            key={f.id}
-                            field={f}
-                            saving={savingId === f.id}
-                            selected={selected.has(f.id)}
-                            onToggle={() => toggleOne(f.id)}
-                            onUpdate={(patch) => updateField(f.id, patch)}
-                          />
-                        ))}
+                        {grouped.map(([groupKey, groupFields]) => {
+                          const meta = groupMeta(groupKey);
+                          const isCollapsed = collapsedGroups.has(groupKey);
+                          const allGroupSelected = groupFields.every((f) => selected.has(f.id));
+                          const someGroupSelected = groupFields.some((f) => selected.has(f.id));
+                          return (
+                            <React.Fragment key={groupKey}>
+                              <tr className="bg-slate-100/60 hover:bg-slate-100 border-y border-slate-200">
+                                <td className="px-2 py-1.5 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={allGroupSelected}
+                                    ref={(el) => { if (el) el.indeterminate = someGroupSelected && !allGroupSelected; }}
+                                    onChange={() => toggleGroupSelect(groupFields)}
+                                    className="rounded"
+                                    title="เลือกทั้งกลุ่ม"
+                                  />
+                                </td>
+                                <td colSpan={COLUMN_COUNT - 1} className="px-2 py-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setCollapsedGroups((prev) => {
+                                      const next = new Set(prev);
+                                      if (next.has(groupKey)) next.delete(groupKey); else next.add(groupKey);
+                                      return next;
+                                    })}
+                                    className="flex items-center gap-2 w-full text-left text-sm font-semibold text-slate-700 hover:text-orange-600"
+                                  >
+                                    <span className={`inline-block w-3 text-slate-400 transition-transform ${isCollapsed ? "" : "rotate-90"}`}>▶</span>
+                                    <span>{meta.icon}</span>
+                                    <span>{meta.label}</span>
+                                    <span className="text-xs text-slate-400 font-normal">({groupFields.length})</span>
+                                  </button>
+                                </td>
+                              </tr>
+                              {!isCollapsed && groupFields.map((f) => (
+                                <SortableFieldRow
+                                  key={f.id}
+                                  field={f}
+                                  saving={savingId === f.id}
+                                  selected={selected.has(f.id)}
+                                  onToggle={() => toggleOne(f.id)}
+                                  onUpdate={(patch) => updateField(f.id, patch)}
+                                  onEditCondition={() => setConditionEditing(f)}
+                                />
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
                       </tbody>
                     </SortableContext>
                   </DndContext>
@@ -419,6 +521,19 @@ export default function SchemaSyncAdminPage() {
             {toast}
           </div>
         )}
+
+        {/* Sprint 13: Condition editor modal */}
+        {conditionEditing && (
+          <ConditionEditorModal
+            field={conditionEditing}
+            allFields={data?.registry ?? []}
+            onClose={() => setConditionEditing(null)}
+            onSave={async (rules) => {
+              await updateField(conditionEditing.id, { condition_rules: rules });
+              setConditionEditing(null);
+            }}
+          />
+        )}
       </div>
     </PlaygroundShell>
   );
@@ -429,13 +544,14 @@ export default function SchemaSyncAdminPage() {
 // ============================================================
 
 function SortableFieldRow({
-  field, saving, selected, onToggle, onUpdate,
+  field, saving, selected, onToggle, onUpdate, onEditCondition,
 }: {
   field:    RegistryField;
   saving:   boolean;
   selected: boolean;
   onToggle: () => void;
   onUpdate: (patch: Record<string, unknown>) => void | Promise<void>;
+  onEditCondition?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
   const style: React.CSSProperties = {
@@ -551,6 +667,9 @@ function SortableFieldRow({
         <DefaultValueCell field={field} onUpdate={onUpdate} />
       </td>
       <td className="px-3 py-1.5 text-center">
+        <ConditionCell rules={field.condition_rules} onClick={onEditCondition} />
+      </td>
+      <td className="px-3 py-1.5 text-center">
         <input
           type="number"
           value={width}
@@ -649,3 +768,174 @@ function BulkBtn({
 
 // silence unused — keep underscore-prefix for future use
 void COLUMN_COUNT;
+
+// ============================================================
+// ConditionCell — Sprint 13: show summary + click to edit
+// ============================================================
+
+type ShowIfRule = {
+  field?:    string;
+  operator?: "=" | "!=" | "in" | "not_in" | "is_set" | "is_empty";
+  value?:    unknown;
+};
+
+function ConditionCell({
+  rules, onClick,
+}: {
+  rules:    Record<string, unknown> | null;
+  onClick?: () => void;
+}) {
+  const showIf = (rules as { show_if?: ShowIfRule } | null)?.show_if;
+  const hasRule = !!(showIf && showIf.field);
+  const summary = hasRule
+    ? `${showIf!.field} ${showIf!.operator ?? "="} ${
+        Array.isArray(showIf!.value) ? `[${(showIf!.value as unknown[]).length}]` : String(showIf!.value ?? "")
+      }`
+    : "—";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-[10px] px-2 py-1 rounded whitespace-nowrap ${
+        hasRule
+          ? "bg-amber-100 text-amber-800 hover:bg-amber-200 font-mono"
+          : "text-slate-300 hover:text-slate-500 hover:bg-slate-100"
+      }`}
+      title={hasRule ? `แสดงเมื่อ: ${summary}` : "ไม่มีเงื่อนไข — คลิกเพื่อตั้ง"}
+    >
+      {hasRule ? `🎯 ${summary}` : "—"}
+    </button>
+  );
+}
+
+// ============================================================
+// ConditionEditorModal — Sprint 13
+// ============================================================
+
+const COND_OPERATORS = [
+  { value: "=",        label: "เท่ากับ (=)" },
+  { value: "!=",       label: "ไม่เท่ากับ (≠)" },
+  { value: "in",       label: "อยู่ในรายการ (in)" },
+  { value: "not_in",   label: "ไม่อยู่ในรายการ" },
+  { value: "is_set",   label: "มีค่า (is set)" },
+  { value: "is_empty", label: "ว่างเปล่า (is empty)" },
+];
+
+function ConditionEditorModal({
+  field, allFields, onClose, onSave,
+}: {
+  field:     RegistryField;
+  allFields: RegistryField[];
+  onClose:   () => void;
+  onSave:    (rules: Record<string, unknown>) => void | Promise<void>;
+}) {
+  const current = (field.condition_rules as { show_if?: ShowIfRule } | null)?.show_if ?? {};
+  const [hasRule,  setHasRule]  = useState<boolean>(!!current.field);
+  const [triggerField, setTriggerField] = useState<string>(current.field ?? "");
+  const [operator, setOperator] = useState<string>(current.operator ?? "=");
+  const [value,    setValue]    = useState<string>(
+    current.value == null ? "" : Array.isArray(current.value) ? (current.value as unknown[]).join(", ") : String(current.value)
+  );
+  const [saving, setSaving] = useState(false);
+
+  // exclude self + non-form fields
+  const candidates = allFields.filter((f) => f.id !== field.id && f.column_name);
+
+  const needsValue = operator !== "is_set" && operator !== "is_empty";
+  const isListOp   = operator === "in" || operator === "not_in";
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      if (!hasRule || !triggerField) {
+        await onSave({});
+        return;
+      }
+      const rule: ShowIfRule = { field: triggerField, operator: operator as ShowIfRule["operator"] };
+      if (needsValue) {
+        if (isListOp) rule.value = value.split(",").map((s) => s.trim()).filter(Boolean);
+        else          rule.value = value;
+      }
+      await onSave({ show_if: rule });
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-slate-900 mb-1">🎯 เงื่อนไขแสดง field</h3>
+        <p className="text-xs text-slate-500 mb-4">
+          field <code className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{field.column_name ?? field.field_key}</code> จะแสดงในฟอร์มเมื่อ...
+        </p>
+
+        <label className="flex items-center gap-2 mb-3 text-sm">
+          <input
+            type="checkbox"
+            checked={hasRule}
+            onChange={(e) => setHasRule(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-slate-700">เปิดเงื่อนไข (ปิดไว้ = แสดงเสมอ)</span>
+        </label>
+
+        {hasRule && (
+          <div className="space-y-3 border-l-2 border-amber-200 pl-3">
+            <div>
+              <label className="text-xs text-slate-600 block mb-1">เมื่อ field</label>
+              <select
+                value={triggerField}
+                onChange={(e) => setTriggerField(e.target.value)}
+                className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md bg-white"
+              >
+                <option value="">— เลือก field —</option>
+                {candidates.map((f) => (
+                  <option key={f.id} value={f.column_name ?? f.field_key}>
+                    {f.field_label} ({f.column_name ?? f.field_key})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-600 block mb-1">เงื่อนไข</label>
+              <select
+                value={operator}
+                onChange={(e) => setOperator(e.target.value)}
+                className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md bg-white"
+              >
+                {COND_OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+
+            {needsValue && (
+              <div>
+                <label className="text-xs text-slate-600 block mb-1">
+                  ค่า {isListOp && <span className="text-slate-400">(คั่นด้วย comma เช่น  a, b, c)</span>}
+                </label>
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  placeholder={isListOp ? "a, b, c" : "value"}
+                  className="w-full h-9 px-3 text-sm border border-slate-300 rounded-md"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button
+            onClick={onClose}
+            className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50"
+          >ยกเลิก</button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="h-9 px-4 text-sm bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50"
+          >{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}

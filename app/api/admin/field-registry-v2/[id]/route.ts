@@ -18,6 +18,8 @@ const ALLOWED_FIELDS = [
   "options", "validation_rules", "relation_config",
   // Sprint 12
   "default_value", "default_expression", "is_inline_editable",
+  // Sprint 13
+  "condition_rules",
 ];
 
 export async function PATCH(
