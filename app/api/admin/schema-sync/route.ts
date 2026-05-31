@@ -55,6 +55,10 @@ export type RegistryField = {
   options:        Record<string, unknown>;
   validation_rules: Record<string, unknown>;
   relation_config:  Record<string, unknown>;
+  // Sprint 12
+  default_value:        string | null;
+  default_expression:   string | null;
+  is_inline_editable:   boolean;
 };
 
 export type SchemaSyncResponse = {
@@ -109,7 +113,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SchemaSync
   // 3. fetch registry entries
   const { data: reg, error: regErr } = await supabase
     .from("erp_module_fields")
-    .select("id, field_key, column_name, field_label, ui_field_type, data_type, source, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, width, min_width, display_order, is_active, options, validation_rules, relation_config")
+    .select("id, field_key, column_name, field_label, ui_field_type, data_type, source, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, width, min_width, display_order, is_active, options, validation_rules, relation_config, default_value, default_expression, is_inline_editable")
     .eq("module_id", mod.id)
     .order("display_order");
 

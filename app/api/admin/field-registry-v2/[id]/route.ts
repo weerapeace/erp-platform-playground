@@ -16,6 +16,8 @@ const ALLOWED_FIELDS = [
   "show_in_form", "form_column_span", "placeholder", "help_text",
   "width", "min_width", "display_order", "is_active",
   "options", "validation_rules", "relation_config",
+  // Sprint 12
+  "default_value", "default_expression", "is_inline_editable",
 ];
 
 export async function PATCH(

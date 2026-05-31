@@ -20,6 +20,8 @@ const ALLOWED_BULK_FIELDS = [
   "is_visible", "is_required", "is_editable", "is_filterable", "is_sortable",
   "is_pinned", "is_searchable", "is_sensitive", "show_in_form", "is_active",
   "group_key", "ui_field_type", "sensitive_permission",
+  // Sprint 12
+  "is_inline_editable",
 ];
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

@@ -331,6 +331,9 @@ export default function SchemaSyncAdminPage() {
                 <BulkBtn onClick={() => bulkUpdate({ is_sortable: false })}   disabled={bulkSaving} variant="muted">↕ ปิด sort</BulkBtn>
                 <BulkBtn onClick={() => bulkUpdate({ is_searchable: true })}  disabled={bulkSaving}>🔎 เปิด search</BulkBtn>
                 <BulkBtn onClick={() => bulkUpdate({ is_searchable: false })} disabled={bulkSaving} variant="muted">🔎 ปิด search</BulkBtn>
+                <div className="h-5 w-px bg-orange-300 mx-1" />
+                <BulkBtn onClick={() => bulkUpdate({ is_inline_editable: true })}  disabled={bulkSaving}>✎ เปิด inline edit</BulkBtn>
+                <BulkBtn onClick={() => bulkUpdate({ is_inline_editable: false })} disabled={bulkSaving} variant="muted">✎ ปิด inline edit</BulkBtn>
                 <div className="ml-auto flex items-center gap-2">
                   <button
                     onClick={() => setSelected(new Set())}
@@ -381,6 +384,8 @@ export default function SchemaSyncAdminPage() {
                       <th className="px-3 py-2 text-center font-medium" title="เรียงได้">↕ Sort</th>
                       <th className="px-3 py-2 text-center font-medium" title="บังคับกรอก">⚠ Req</th>
                       <th className="px-3 py-2 text-center font-medium" title="ซ่อนจากคนไม่มี permission">🔒 Sensitive</th>
+                      <th className="px-3 py-2 text-center font-medium" title="ดับเบิ้ลคลิก cell แก้ในตาราง">✎ Inline</th>
+                      <th className="px-3 py-2 text-left font-medium" title="Default ตอน Create — รองรับ now() today() current_user() uuid()">Default</th>
                       <th className="px-3 py-2 text-center font-medium">Width</th>
                     </tr>
                   </thead>
@@ -535,6 +540,18 @@ function SortableFieldRow({
       </td>
       <td className="px-3 py-1.5 text-center">
         <input
+          type="checkbox"
+          checked={field.is_inline_editable}
+          onChange={(e) => onUpdate({ is_inline_editable: e.target.checked })}
+          className="rounded accent-amber-500"
+          title="ดับเบิ้ลคลิก cell ในตารางเพื่อแก้"
+        />
+      </td>
+      <td className="px-3 py-1.5">
+        <DefaultValueCell field={field} onUpdate={onUpdate} />
+      </td>
+      <td className="px-3 py-1.5 text-center">
+        <input
           type="number"
           value={width}
           onChange={(e) => setWidth(Number(e.target.value))}
@@ -543,6 +560,62 @@ function SortableFieldRow({
         />
       </td>
     </tr>
+  );
+}
+
+// ============================================================
+// DefaultValueCell — Sprint 12: textbox + expression dropdown
+// ============================================================
+
+const EXPRESSION_PRESETS = [
+  { value: "",                label: "— static value —" },
+  { value: "now()",           label: "🕓 now() — เวลาปัจจุบัน" },
+  { value: "today()",         label: "📅 today() — วันที่วันนี้" },
+  { value: "current_user()",  label: "👤 current_user() — email ผู้ใช้" },
+  { value: "uuid()",          label: "🆔 uuid() — สุ่ม UUID" },
+];
+
+function DefaultValueCell({
+  field, onUpdate,
+}: {
+  field:    RegistryField;
+  onUpdate: (patch: Record<string, unknown>) => void | Promise<void>;
+}) {
+  const [val, setVal] = useState(field.default_value ?? "");
+  const [expr, setExpr] = useState(field.default_expression ?? "");
+
+  useEffect(() => { setVal(field.default_value ?? ""); }, [field.default_value]);
+  useEffect(() => { setExpr(field.default_expression ?? ""); }, [field.default_expression]);
+
+  const onBlurVal = () => {
+    if (val !== (field.default_value ?? "")) onUpdate({ default_value: val === "" ? null : val });
+  };
+  const onChangeExpr = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const next = e.target.value;
+    setExpr(next);
+    onUpdate({ default_expression: next === "" ? null : next });
+  };
+
+  return (
+    <div className="flex items-center gap-1 min-w-[200px]">
+      <select
+        value={expr}
+        onChange={onChangeExpr}
+        className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white w-[110px]"
+        title="dynamic expression — ชนะ static value"
+      >
+        {EXPRESSION_PRESETS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+      </select>
+      <input
+        type="text"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={onBlurVal}
+        disabled={!!expr}
+        placeholder={expr ? "expression ชนะ" : "—"}
+        className="flex-1 text-xs px-1.5 py-1 border border-slate-200 rounded disabled:bg-slate-50 disabled:text-slate-400"
+      />
+    </div>
   );
 }
 

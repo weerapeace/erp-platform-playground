@@ -85,7 +85,44 @@ function registryToFieldDef(
     groupKey:    rf.group_key,
     order:       rf.display_order,
     validations: Array.isArray(valRules?.rules) ? valRules.rules : undefined,
+    // Sprint 12
+    defaultValue:      rf.default_value,
+    defaultExpression: rf.default_expression,
+    inlineEditable:    rf.is_inline_editable,
   };
+}
+
+// ---- Sprint 12: resolve dynamic default expression ----
+function resolveDefault(
+  fieldType: FieldDef["type"],
+  staticVal: string | null | undefined,
+  expr: string | null | undefined,
+  userEmail: string | null | undefined,
+): unknown {
+  // expression ชนะ static
+  if (expr) {
+    const e = expr.trim().toLowerCase();
+    if (e === "now()")          return new Date().toISOString();
+    if (e === "today()")        return new Date().toISOString().slice(0, 10);
+    if (e === "current_user()") return userEmail ?? "";
+    if (e === "uuid()") {
+      // ใช้ crypto.randomUUID() ใน browser (มีตั้งแต่ Chrome 92+)
+      if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+      return "";
+    }
+    // unknown expr → fallback empty
+    return fieldType === "boolean" ? false : "";
+  }
+  if (staticVal == null || staticVal === "") {
+    return fieldType === "boolean" ? false : "";
+  }
+  // coerce ตาม fieldType
+  if (fieldType === "boolean") return staticVal === "true" || staticVal === "1";
+  if (fieldType === "number") {
+    const n = Number(staticVal);
+    return isNaN(n) ? "" : n;
+  }
+  return staticVal;
 }
 
 // ---- Group config (Sprint 7) ----
@@ -146,6 +183,12 @@ export type FieldDef = {
   groupKey?:  string;
   /** Sprint 7: lower number = ขึ้นก่อนใน group + section ordering */
   order?:     number;
+  /** Sprint 12: static default ตอน Create */
+  defaultValue?: string | null;
+  /** Sprint 12: dynamic default — 'now()' | 'today()' | 'current_user()' | 'uuid()' */
+  defaultExpression?: string | null;
+  /** Sprint 12: เปิดดับเบิ้ลคลิก cell แก้ในตารางได้ */
+  inlineEditable?: boolean;
 };
 
 export type MasterCRUDConfig = {
@@ -293,13 +336,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   // ---- Form ops ----
+  // Sprint 12: prefill defaults (static + dynamic expression)
   const emptyForm = useMemo(() => {
     const e: Record<string, unknown> = {};
     effectiveFields.forEach(f => {
-      e[f.key] = f.type === "boolean" ? false : "";
+      e[f.key] = resolveDefault(f.type, f.defaultValue, f.defaultExpression, user?.email ?? null);
     });
     return e;
-  }, [effectiveFields]);
+  }, [effectiveFields, user?.email]);
 
   const updateForm = (patch: Partial<Record<string, unknown>>) => {
     setForm(p => ({ ...p, ...patch })); setDirty(true);
@@ -471,6 +515,52 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     },
   ] : [], [canEdit, user?.name, apiBase, config.apiPath, fetchList]);
 
+  // ---- Sprint 12: Inline editing ----
+  // เปิดเฉพาะ field ที่ admin tick is_inline_editable + user มีสิทธิ์ edit + ไม่ใช่ sensitive
+  const inlineEditFields = useMemo(() => {
+    if (!canEdit) return [];
+    return effectiveFields
+      .filter((f) => f.inlineEditable && !f.readonly && f.type !== "image" && f.type !== "relation" && f.type !== "textarea")
+      .map((f) => f.key);
+  }, [canEdit, effectiveFields]);
+
+  const onInlineEdit = useCallback(async (
+    row: Row,
+    field: string,
+    value: string,
+  ): Promise<string | null> => {
+    // หา field def เพื่อ coerce type
+    const def = effectiveFields.find((f) => f.key === field);
+    if (!def) return "field ไม่พบ";
+    let coerced: unknown = value;
+    if (def.type === "number") {
+      if (value === "" || value == null) coerced = null;
+      else {
+        const n = Number(value);
+        if (isNaN(n)) return "ต้องเป็นตัวเลข";
+        coerced = isRest ? n : String(n);
+      }
+    } else if (def.type === "boolean") {
+      coerced = isRest ? (value === "true") : value;
+    } else {
+      coerced = isRest ? (value === "" ? null : value) : value;
+    }
+    try {
+      const res = await apiFetch(`${apiBase}${config.apiPath}/${row.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [field]: coerced, actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) return json.error;
+      // optimistic update local
+      setRows((prev) => prev.map((r) => r.id === row.id ? { ...r, [field]: coerced } as Row : r));
+      flash(`✓ บันทึก ${def.label}`);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : "บันทึกไม่สำเร็จ";
+    }
+  }, [effectiveFields, apiBase, config.apiPath, user?.name, isRest]);
+
   // ---- Bulk edit fields ----
   const bulkEditFields: BulkEditField[] = useMemo(() => {
     if (!canEdit) return [];
@@ -618,6 +708,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           bulkActions={bulkActions}
           bulkEditFields={bulkEditFields.length > 0 ? bulkEditFields : undefined}
           onBulkEdit={bulkEditFields.length > 0 ? onBulkEdit : undefined}
+          inlineEditFields={inlineEditFields.length > 0 ? inlineEditFields : undefined}
+          onInlineEdit={inlineEditFields.length > 0 ? onInlineEdit : undefined}
           exportFilename={config.apiPath}
           exportEntityType={config.exportEntityType}
           canCheck={(p) => can(p as Parameters<typeof can>[0])}
