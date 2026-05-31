@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { DataTable, type DataTableView, type RowAction, type BulkAction } from "@/components/data-table";
+import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -35,6 +35,14 @@ export type FieldDef = {
   formSpan?:  1 | 2;
   /** validation rule keys ที่จะรัน (เช่น ['required','email']) */
   validations?: string[];
+  /** เปิด column filter ใน DataTable */
+  filterable?: boolean;
+  /** filter type override (default: auto จาก type) */
+  filterType?: "text" | "number" | "select";
+  /** เปิด sort ใน DataTable (default: true) */
+  sortable?: boolean;
+  /** เปิด bulk edit สำหรับ field นี้ */
+  bulkEditable?: boolean;
 };
 
 export type MasterCRUDConfig = {
@@ -238,6 +246,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const tableFields = config.fields.filter(f => f.colSize !== undefined);
     const cols: ColumnDef<Row>[] = tableFields.map(f => ({
       id: f.key, accessorKey: f.key, header: f.label, size: f.colSize,
+      enableSorting: f.sortable !== false,
+      meta: {
+        filterable: f.filterable ?? false,
+        filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "select" ? "select" : "text"),
+        ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: o })) } : {}),
+      },
       cell: f.cellRender
         ? ({ getValue }) => f.cellRender!(getValue())
         : ({ getValue }) => {
@@ -264,10 +278,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, [config.fields, activeField]);
 
   // ---- Views ----
+  // ⚠️ DataTableView field คือ "filter" (ไม่ใช่ "predicate")
   const views: DataTableView[] = useMemo(() => [
-    { id: "active",   label: "เปิดอยู่",  predicate: (r: Record<string, unknown>) => r[activeField] === true },
-    { id: "all",      label: "ทั้งหมด",   predicate: () => true },
-    { id: "inactive", label: "ปิดอยู่",   predicate: (r: Record<string, unknown>) => r[activeField] === false },
+    { id: "active",   label: "เปิดอยู่",  filter: (r) => r[activeField] === true },
+    { id: "all",      label: "ทั้งหมด",   filter: () => true },
+    { id: "inactive", label: "ปิดอยู่",   filter: (r) => r[activeField] === false },
   ], [activeField]);
 
   // ---- Row actions ----
@@ -297,6 +312,39 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       },
     },
   ] : [], [canEdit, user?.name, apiBase, config.apiPath, fetchList]);
+
+  // ---- Bulk edit fields ----
+  const bulkEditFields: BulkEditField[] = useMemo(() => {
+    if (!canEdit) return [];
+    return config.fields
+      .filter((f) => f.bulkEditable)
+      .map((f) => ({
+        key: f.key,
+        label: f.label,
+        type: f.type === "textarea" ? "text" : (f.type as "text" | "number" | "select" | "boolean"),
+        options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: o })) : undefined,
+      }));
+  }, [canEdit, config.fields]);
+
+  const onBulkEdit = useCallback(async (
+    edits: { row: Row; changes: Record<string, unknown> }[]
+  ): Promise<BulkEditResult> => {
+    let success = 0, failed = 0;
+    for (const e of edits) {
+      try {
+        const res = await apiFetch(`${apiBase}${config.apiPath}/${e.row.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...e.changes, actor: user?.name }),
+        });
+        const json = await res.json();
+        if (json.error) { failed++; continue; }
+        success++;
+      } catch { failed++; }
+    }
+    await fetchList();
+    flash(`แก้ ${success} ราย${failed > 0 ? ` (พลาด ${failed})` : ""}`);
+    return { success, failed };
+  }, [apiBase, config.apiPath, user?.name, fetchList]);
 
   // ---- Render form field ----
   const renderField = (f: FieldDef) => {
@@ -378,6 +426,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           views={views}
           rowActions={rowActions}
           bulkActions={bulkActions}
+          bulkEditFields={bulkEditFields.length > 0 ? bulkEditFields : undefined}
+          onBulkEdit={bulkEditFields.length > 0 ? onBulkEdit : undefined}
           exportFilename={config.apiPath}
           exportEntityType={config.exportEntityType}
           canCheck={(p) => can(p as Parameters<typeof can>[0])}

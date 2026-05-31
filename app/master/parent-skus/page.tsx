@@ -45,10 +45,13 @@ const CONFIG: MasterCRUDConfig = {
     {
       key: "code", label: "Code", type: "text", colSize: 130,
       required: true, placeholder: "เช่น WL44, BMG12",
+      filterable: true, sortable: true,
     },
     {
       key: "product_family", label: "หมวด", type: "select", colSize: 110,
       options: ["general", "bag", "belt", "jewelry", "spare"],
+      filterable: true, filterType: "select",
+      bulkEditable: true,
       cellRender: (v) => {
         const s = (v as string) ?? "general";
         return (
@@ -61,23 +64,25 @@ const CONFIG: MasterCRUDConfig = {
     {
       key: "name_th", label: "ชื่อสินค้า (ไทย)", type: "text", colSize: 260,
       required: true, formSpan: 2,
+      filterable: true, sortable: true,
     },
     {
       key: "name_en", label: "ชื่อสินค้า (English)", type: "text", formSpan: 2,
     },
     {
       key: "sku_name", label: "ชื่อย่อ (Marketing)", type: "text", colSize: 160,
+      filterable: true,
     },
 
     // ---- ความสัมพันธ์ (read-only ใน Phase 1; picker จะมาใน Phase 2) ----
     {
       key: "brand_name", label: "Brand", type: "text", colSize: 140,
-      hideInForm: true,
+      hideInForm: true, filterable: true,
       cellRender: (v) => v ? <span className="text-sm text-slate-700">{v as string}</span> : <span className="text-xs text-slate-300">—</span>,
     },
     {
       key: "collection_name", label: "Collection", type: "text", colSize: 160,
-      hideInForm: true,
+      hideInForm: true, filterable: true,
       cellRender: (v) => v ? <span className="text-sm text-slate-600">{v as string}</span> : <span className="text-xs text-slate-300">—</span>,
     },
 
@@ -93,6 +98,7 @@ const CONFIG: MasterCRUDConfig = {
     // ---- ราคา ----
     {
       key: "sale_price", label: "ราคาขาย", type: "number", colSize: 110,
+      filterable: true, filterType: "number", sortable: true, bulkEditable: true,
       cellRender: (v) => {
         const n = v as number | null;
         return n != null && n > 0
@@ -100,12 +106,12 @@ const CONFIG: MasterCRUDConfig = {
           : <span className="text-xs text-slate-300">—</span>;
       },
     },
-    { key: "final_price", label: "ราคาสุทธิ",   type: "number" },
-    { key: "fake_price",  label: "ราคาเปรียบเทียบ", type: "number" },
+    { key: "final_price", label: "ราคาสุทธิ",   type: "number", bulkEditable: true },
+    { key: "fake_price",  label: "ราคาเปรียบเทียบ", type: "number", bulkEditable: true },
 
     // ---- รายละเอียดสินค้า ----
-    { key: "materials", label: "วัสดุ",   type: "text", formSpan: 2 },
-    { key: "warranty",  label: "Warranty", type: "text", colSize: 130 },
+    { key: "materials", label: "วัสดุ",   type: "text", formSpan: 2, bulkEditable: true },
+    { key: "warranty",  label: "Warranty", type: "text", colSize: 130, bulkEditable: true },
 
     // ---- Marketplace URLs ----
     { key: "shopee_url", label: "Shopee URL", type: "text", formSpan: 2 },
