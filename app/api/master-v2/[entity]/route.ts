@@ -209,30 +209,49 @@ export async function GET(
   const includeInactive = searchParams.get("include_inactive") === "true";
 
   // F10a: ใช้ listColumns ถ้ามี (เล็กกว่า, กัน JSON truncate)
-  // F10b: .range() แทน .limit() เพื่อข้าม Supabase REST 1000-row cap
+  // F12b: Supabase PostgREST hard-caps ที่ db.max_rows (default 1000)
+  //       → loop fetch batch ละ 1000 จน reach limit หรือหมด
   const selectCols = cfg.listColumns ?? cfg.selectColumns;
   const supabase = supabaseFromRequest(request);
-  let query = supabase
-    .from(cfg.table)
-    .select(selectCols, { count: "exact" })
-    .order("updated_at", { ascending: false })
-    .range(offset, offset + limit - 1);
 
-  if (cfg.softDeleteColumn && !includeInactive) {
-    query = query.eq(cfg.softDeleteColumn, true);
+  const BATCH = 1000;
+  const allRows: Record<string, unknown>[] = [];
+  let totalCount = 0;
+  let cursor = offset;
+  const stopAt = offset + limit;
+
+  while (allRows.length < limit) {
+    const batchEnd = Math.min(cursor + BATCH - 1, stopAt - 1);
+
+    let q = supabase
+      .from(cfg.table)
+      .select(selectCols, { count: cursor === offset ? "exact" : undefined })
+      .order("updated_at", { ascending: false })
+      .range(cursor, batchEnd);
+
+    if (cfg.softDeleteColumn && !includeInactive) {
+      q = q.eq(cfg.softDeleteColumn, true);
+    }
+    if (search && cfg.searchColumns.length > 0) {
+      const orFilter = cfg.searchColumns.map((c) => `${c}.ilike.%${search}%`).join(",");
+      q = q.or(orFilter);
+    }
+
+    const { data, error, count } = await q;
+    if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+
+    const batchRows = (data ?? []) as unknown as Record<string, unknown>[];
+    allRows.push(...batchRows);
+    if (cursor === offset && count != null) totalCount = count;
+
+    // หยุดถ้า batch สั้นกว่า BATCH (หมดข้อมูล) หรือถึง limit
+    if (batchRows.length < BATCH) break;
+    cursor += BATCH;
+    if (cursor >= stopAt) break;
   }
-  if (search && cfg.searchColumns.length > 0) {
-    const orFilter = cfg.searchColumns.map((c) => `${c}.ilike.%${search}%`).join(",");
-    query = query.or(orFilter);
-  }
 
-  const { data, error, count } = await query;
-  if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-
-  const raw = (data ?? []) as unknown as Record<string, unknown>[];
-  const rows = cfg.postProcess ? raw.map(cfg.postProcess) : raw;
-
-  return NextResponse.json({ data: rows, total: count ?? rows.length, error: null });
+  const rows = cfg.postProcess ? allRows.map(cfg.postProcess) : allRows;
+  return NextResponse.json({ data: rows, total: totalCount || rows.length, error: null });
 }
 
 // ---- POST — create ----
