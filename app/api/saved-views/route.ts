@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export type SavedView = {
   id:          string;
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest) {
 // ---- PATCH /api/saved-views?id=... ----
 // รองรับ: { is_default: boolean, label?: string }
 // ถ้า is_default=true → unset default ของ view อื่นใน table+owner เดียวกันก่อน
+// F10d: ใช้ supabaseAdmin หลัง auth check (เพราะ RLS policy block UPDATE)
 export async function PATCH(request: NextRequest) {
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
@@ -59,17 +61,21 @@ export async function PATCH(request: NextRequest) {
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
-  const supa = supabaseFromRequest(request);
+  // auth check
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+
+  const admin = supabaseAdmin();
 
   // ถ้า set is_default=true — clear default ของ view อื่นในตารางเดียวกันของ owner เดียวกัน
   if (body.is_default === true) {
-    const { data: target } = await supa
+    const { data: target } = await admin
       .from("erp_playground_saved_views")
       .select("table_id, owner_id")
       .eq("id", id)
       .maybeSingle();
     if (target) {
-      await supa
+      await admin
         .from("erp_playground_saved_views")
         .update({ is_default: false })
         .eq("table_id", target.table_id)
@@ -83,7 +89,7 @@ export async function PATCH(request: NextRequest) {
   if (body.label !== undefined)      patch.label      = body.label;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มี field ที่ update" }, { status: 400 });
 
-  const { data, error } = await supa
+  const { data, error } = await admin
     .from("erp_playground_saved_views")
     .update(patch)
     .eq("id", id)

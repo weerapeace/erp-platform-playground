@@ -18,7 +18,14 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type EntityConfig = {
   table:         string;
+  /** Columns ใช้กับ detail/POST/PATCH — '*' ทุก field (รวม html/jsonb ใหญ่) */
   selectColumns: string;
+  /**
+   * F10a: Columns สำหรับ list view — เล็ก ไม่มี html/text ใหญ่
+   * ถ้าไม่ระบุ → fallback ใช้ selectColumns
+   * ใช้กับ GET list เพื่อกัน JSON truncate (Workers payload limit)
+   */
+  listColumns?:  string;
   searchColumns: string[];
   /** ค่า default ตอน insert ที่ไม่ได้รับจาก body */
   defaults?:     Record<string, unknown>;
@@ -67,6 +74,17 @@ export const ENTITIES: Record<string, EntityConfig> = {
                     special_descriptions ( name ),
                     size_descriptions ( name ),
                     platform_categories ( name )`,
+    // F10a: list view — เล็ก ไม่มี description/materials/html (กัน truncate)
+    listColumns: `id, code, name_th, name_en, sku_name, product_family,
+                  brand_id, collection_id, category_id, parcel_size_id,
+                  special_description_id, size_description_id, platform_category_id,
+                  cover_image_r2_key, is_active, updated_at, created_at,
+                  brands ( name ), collections ( name ),
+                  product_categories ( name ),
+                  parcel_sizes ( name, size_text ),
+                  special_descriptions ( name ),
+                  size_descriptions ( name ),
+                  platform_categories ( name )`,
     searchColumns: ["code", "name_th", "name_en", "sku_name"],
     softDeleteColumn: "is_active",
     defaults: { product_family: "general", is_active: true, attribute_values: {} },
@@ -87,6 +105,14 @@ export const ENTITIES: Record<string, EntityConfig> = {
                     partners_v2!seller_partner_id ( name_th, code ),
                     uom:uoms!uom_id ( name ),
                     purchase_uom:uoms!purchase_uom_id ( name )`,
+    listColumns: `id, code, name_th, barcode, parent_sku_id, seller_partner_id,
+                  uom_id, purchase_uom_id, price_thb, retail_price_thb,
+                  stock_min, stock_max, is_active, sale_ok, purchase_ok,
+                  updated_at, created_at,
+                  parent_skus_v2 ( code, name_th ),
+                  partners_v2!seller_partner_id ( name_th, code ),
+                  uom:uoms!uom_id ( name ),
+                  purchase_uom:uoms!purchase_uom_id ( name )`,
     searchColumns: ["code", "name_th", "barcode"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true, sale_ok: true, purchase_ok: true, attribute_values: {} },
@@ -100,6 +126,8 @@ export const ENTITIES: Record<string, EntityConfig> = {
   partners: {
     table: "partners_v2",
     selectColumns: `*`,
+    listColumns: `id, code, name_th, name_en, phone, email, tax_id,
+                  is_company, country, is_active, updated_at, created_at`,
     searchColumns: ["code", "name_th", "name_en", "phone", "email", "tax_id"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true, is_company: true, country: "TH", tax_branch: "00000" },
@@ -124,6 +152,42 @@ export const ENTITIES: Record<string, EntityConfig> = {
       { alias: "brands", labelField: "name", resultKey: "brand_label" },
     ]),
   },
+
+  // F10c: lookup tables (สำหรับ RelationPicker "+ create new")
+  product_categories: {
+    table: "product_categories",
+    selectColumns: "*",
+    searchColumns: ["name", "display_name"],
+  },
+  platform_categories: {
+    table: "platform_categories",
+    selectColumns: "*",
+    searchColumns: ["name"],
+    softDeleteColumn: "active",
+    defaults: { active: true },
+  },
+  parcel_sizes: {
+    table: "parcel_sizes",
+    selectColumns: "*",
+    searchColumns: ["name", "size_text"],
+  },
+  special_descriptions: {
+    table: "special_descriptions",
+    selectColumns: "*",
+    searchColumns: ["name", "description"],
+  },
+  size_descriptions: {
+    table: "size_descriptions",
+    selectColumns: "*",
+    searchColumns: ["name", "description"],
+  },
+  uoms: {
+    table: "uoms",
+    selectColumns: "*",
+    searchColumns: ["name", "display_name"],
+    softDeleteColumn: "active",
+    defaults: { active: true },
+  },
 };
 
 // ---- GET — list ----
@@ -144,10 +208,13 @@ export async function GET(
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const includeInactive = searchParams.get("include_inactive") === "true";
 
+  // F10a: ใช้ listColumns ถ้ามี (เล็กกว่า, กัน JSON truncate)
+  // F10b: .range() แทน .limit() เพื่อข้าม Supabase REST 1000-row cap
+  const selectCols = cfg.listColumns ?? cfg.selectColumns;
   const supabase = supabaseFromRequest(request);
   let query = supabase
     .from(cfg.table)
-    .select(cfg.selectColumns, { count: "exact" })
+    .select(selectCols, { count: "exact" })
     .order("updated_at", { ascending: false })
     .range(offset, offset + limit - 1);
 

@@ -331,14 +331,34 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const openCreate = () => {
     setEditingId(null); setForm(emptyForm); setFormErr(null); setDirty(false); setModalOpen(true);
   };
-  const openEdit = (r: Row) => {
+  const openEdit = async (r: Row) => {
     setEditingId(r.id);
-    const f: Record<string, unknown> = {};
+    setFormErr(null); setDirty(false); setModalOpen(true);
+
+    // เริ่มด้วยค่าจาก list (มี field พื้นฐาน) — กันฟอร์มว่าง
+    const partial: Record<string, unknown> = {};
     effectiveFields.forEach(field => {
       const v = r[field.key];
-      f[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
+      partial[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
     });
-    setForm(f); setFormErr(null); setDirty(false); setModalOpen(true);
+    setForm(partial);
+
+    // F10a: list response เล็ก (compact projection) — fetch full row จาก /[id] เพื่อได้ทุก field
+    if (isRest) {
+      try {
+        const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}`);
+        const json = await res.json();
+        if (!json.error && json.data) {
+          const full = json.data as Record<string, unknown>;
+          const f: Record<string, unknown> = {};
+          effectiveFields.forEach(field => {
+            const v = full[field.key];
+            f[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
+          });
+          setForm(f);
+        }
+      } catch { /* keep partial — ดีกว่าค้าง */ }
+    }
   };
   const tryClose = () => { if (dirty) setConfirmDiscard(true); else setModalOpen(false); };
   const discard  = () => { setConfirmDiscard(false); setModalOpen(false); setDirty(false); };
