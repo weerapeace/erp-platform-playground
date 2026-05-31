@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const ALLOWED_FIELDS = [
   "field_label", "group_key", "ui_field_type",
-  "is_visible", "is_required", "is_editable", "is_filterable", "is_sortable", "is_pinned",
+  "is_visible", "is_required", "is_editable", "is_filterable", "is_sortable", "is_pinned", "is_searchable",
   "width", "min_width", "display_order", "is_active",
   "options", "validation_rules", "relation_config",
 ];

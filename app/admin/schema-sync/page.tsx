@@ -113,12 +113,13 @@ export default function SchemaSyncAdminPage() {
   }, [data, filter, groupFilter]);
 
   const stats = useMemo(() => {
-    if (!data) return { total: 0, visible: 0, filterable: 0, sortable: 0, newDB: 0 };
+    if (!data) return { total: 0, visible: 0, filterable: 0, sortable: 0, searchable: 0, newDB: 0 };
     return {
       total: data.registry.length,
       visible: data.registry.filter((f) => f.is_visible).length,
       filterable: data.registry.filter((f) => f.is_filterable).length,
       sortable: data.registry.filter((f) => f.is_sortable).length,
+      searchable: data.registry.filter((f) => f.is_searchable).length,
       newDB: data.diff.new_in_db.length,
     };
   }, [data]);
@@ -189,6 +190,9 @@ export default function SchemaSyncAdminPage() {
                 <span className="px-2.5 py-1 bg-cyan-50 text-cyan-700 rounded-md">
                   Sortable: {stats.sortable}
                 </span>
+                <span className="px-2.5 py-1 bg-pink-50 text-pink-700 rounded-md">
+                  Searchable: {stats.searchable}
+                </span>
                 {stats.newDB > 0 && (
                   <span className="px-2.5 py-1 bg-amber-50 text-amber-700 rounded-md font-semibold" title="DB columns ที่ยังไม่อยู่ใน registry — กด Sync เพื่อเพิ่ม">
                     ✨ มี {stats.newDB} field ใหม่ใน DB — กด Sync
@@ -217,6 +221,7 @@ export default function SchemaSyncAdminPage() {
                       <th className="px-3 py-2 text-left font-medium">Group</th>
                       <th className="px-3 py-2 text-center font-medium" title="แสดงในตาราง">👁 Vis</th>
                       <th className="px-3 py-2 text-center font-medium" title="กรองได้">🔍 Filt</th>
+                      <th className="px-3 py-2 text-center font-medium" title="ค้นหาเจอ (รวมในช่อง search)">🔎 Search</th>
                       <th className="px-3 py-2 text-center font-medium" title="เรียงได้">↕ Sort</th>
                       <th className="px-3 py-2 text-center font-medium" title="บังคับกรอก">⚠ Req</th>
                       <th className="px-3 py-2 text-center font-medium">Width</th>
@@ -313,6 +318,9 @@ function FieldRow({
       </td>
       <td className="px-3 py-1.5 text-center">
         <input type="checkbox" checked={field.is_filterable} onChange={(e) => onUpdate({ is_filterable: e.target.checked })} className="rounded" />
+      </td>
+      <td className="px-3 py-1.5 text-center">
+        <input type="checkbox" checked={field.is_searchable} onChange={(e) => onUpdate({ is_searchable: e.target.checked })} className="rounded accent-pink-500" />
       </td>
       <td className="px-3 py-1.5 text-center">
         <input type="checkbox" checked={field.is_sortable} onChange={(e) => onUpdate({ is_sortable: e.target.checked })} className="rounded" />
