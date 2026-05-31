@@ -16,20 +16,14 @@
 
 import { NextRequest } from "next/server";
 import { r2GetSignedUrl } from "@/lib/r2";
-import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 // SAFE: key อนุญาตเฉพาะ a-z0-9_-/. (กัน path traversal)
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 
 export async function GET(request: NextRequest): Promise<Response> {
-  // auth check
-  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  if (!user) {
-    return new Response(JSON.stringify({ error: "ต้อง login" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  // F17: ไม่ต้อง auth — Cloudflare Access protects URL (email allow-list)
+  // image proxy = read-only public ตามมาตรฐาน CDN
+  // ทำให้ <img src=...> ใช้งานได้ (browser ไม่ส่ง Authorization header)
 
   const key = new URL(request.url).searchParams.get("key");
   if (!key || !SAFE_KEY.test(key)) {
