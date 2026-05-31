@@ -31,13 +31,14 @@ export default function Error({
           ระบบทำงานผิดพลาดในส่วนนี้ ลองรีโหลดดูใหม่
         </p>
         {error.message && (
-          <details className="text-left mb-5">
+          <details className="text-left mb-5" open>
             <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-600">
               รายละเอียดเทคนิค
             </summary>
-            <pre className="mt-2 p-3 bg-slate-100 rounded text-[11px] font-mono text-slate-700 overflow-auto max-h-32 text-left">
+            <pre className="mt-2 p-3 bg-slate-100 rounded text-[11px] font-mono text-slate-700 overflow-auto max-h-64 text-left whitespace-pre-wrap break-words">
               {error.message}
               {error.digest && `\n\nDigest: ${error.digest}`}
+              {error.stack && `\n\nStack:\n${error.stack}`}
             </pre>
           </details>
         )}
