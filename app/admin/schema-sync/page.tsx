@@ -18,7 +18,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
-import { useAuth } from "@/components/auth";
 import type { SchemaSyncResponse, RegistryField } from "@/app/api/admin/schema-sync/route";
 import {
   DndContext, DragEndEvent, PointerSensor, KeyboardSensor,
@@ -73,7 +72,6 @@ function groupMeta(key: string) {
 }
 
 export default function SchemaSyncAdminPage() {
-  const { user: _user } = useAuth();
   const [moduleKey, setModuleKey] = useState("parent-skus-v2");
   const [data,      setData]      = useState<SchemaSyncResponse | null>(null);
   const [loading,   setLoading]   = useState(true);
@@ -765,9 +763,6 @@ function BulkBtn({
     </button>
   );
 }
-
-// silence unused — keep underscore-prefix for future use
-void COLUMN_COUNT;
 
 // ============================================================
 // ConditionCell — Sprint 13: show summary + click to edit

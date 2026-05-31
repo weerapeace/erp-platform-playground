@@ -18,6 +18,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput, ImageCell } from "@/components/image-input";
+import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 
 // ---- Helper: map FormField (Registry) → FieldDef (MasterCRUDPage internal) ----
 
@@ -94,63 +95,8 @@ function registryToFieldDef(
   };
 }
 
-// ---- Sprint 13: evaluate condition rule ----
-type ShowIfRule = {
-  field?:    string;
-  operator?: "=" | "!=" | "in" | "not_in" | "is_set" | "is_empty";
-  value?:    unknown;
-};
 
-function evaluateCondition(rules: Record<string, unknown> | null | undefined, form: Record<string, unknown>): boolean {
-  if (!rules || typeof rules !== "object") return true;
-  const showIf = (rules as { show_if?: ShowIfRule }).show_if;
-  if (!showIf || !showIf.field) return true;
-  const fieldVal = form[showIf.field];
-  const op       = showIf.operator ?? "=";
-  const expected = showIf.value;
-  switch (op) {
-    case "=":        return fieldVal === expected;
-    case "!=":       return fieldVal !== expected;
-    case "in":       return Array.isArray(expected) && expected.includes(fieldVal as never);
-    case "not_in":   return Array.isArray(expected) && !expected.includes(fieldVal as never);
-    case "is_set":   return fieldVal != null && fieldVal !== "" && fieldVal !== false;
-    case "is_empty": return fieldVal == null || fieldVal === "" || fieldVal === false;
-    default: return true;
-  }
-}
-
-// ---- Sprint 12: resolve dynamic default expression ----
-function resolveDefault(
-  fieldType: FieldDef["type"],
-  staticVal: string | null | undefined,
-  expr: string | null | undefined,
-  userEmail: string | null | undefined,
-): unknown {
-  // expression ชนะ static
-  if (expr) {
-    const e = expr.trim().toLowerCase();
-    if (e === "now()")          return new Date().toISOString();
-    if (e === "today()")        return new Date().toISOString().slice(0, 10);
-    if (e === "current_user()") return userEmail ?? "";
-    if (e === "uuid()") {
-      // ใช้ crypto.randomUUID() ใน browser (มีตั้งแต่ Chrome 92+)
-      if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-      return "";
-    }
-    // unknown expr → fallback empty
-    return fieldType === "boolean" ? false : "";
-  }
-  if (staticVal == null || staticVal === "") {
-    return fieldType === "boolean" ? false : "";
-  }
-  // coerce ตาม fieldType
-  if (fieldType === "boolean") return staticVal === "true" || staticVal === "1";
-  if (fieldType === "number") {
-    const n = Number(staticVal);
-    return isNaN(n) ? "" : n;
-  }
-  return staticVal;
-}
+// resolveDefault + evaluateCondition: ย้ายไป @/lib/field-helpers (Sprint 14)
 
 // ---- Group config (Sprint 7) ----
 // defaultOpen = true ทุก section — user ขอ "ดึงมาไม่ครบ" ปัญหามาจาก collapse
