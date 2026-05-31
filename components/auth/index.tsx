@@ -130,6 +130,8 @@ type AuthState = {
   ready: boolean;
   loginError: string | null;
   login: (email: string, password: string) => Promise<boolean>;
+  loginWithMagicLink: (email: string) => Promise<boolean>;
+  loginWithGoogle: () => Promise<boolean>;
   logout: () => Promise<void>;
   can: (perm: Permission) => boolean;
 };
@@ -175,6 +177,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, []);
 
+  // Magic Link — ส่ง link เข้า email, user คลิก → login เสร็จ
+  const loginWithMagicLink = useCallback(async (email: string) => {
+    setLoginError(null);
+    const redirectTo = typeof window !== "undefined"
+      ? `${window.location.origin}/auth/callback`
+      : undefined;
+    const { error } = await supabaseBrowser.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
+    if (error) {
+      setLoginError(error.message);
+      return false;
+    }
+    return true;
+  }, []);
+
+  // Google OAuth — redirect ไป Google login → กลับมาที่ /auth/callback
+  const loginWithGoogle = useCallback(async () => {
+    setLoginError(null);
+    const redirectTo = typeof window !== "undefined"
+      ? `${window.location.origin}/auth/callback`
+      : undefined;
+    const { error } = await supabaseBrowser.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+    if (error) {
+      setLoginError(error.message);
+      return false;
+    }
+    return true;
+  }, []);
+
   const logout = useCallback(async () => {
     await supabaseBrowser.auth.signOut();
     setUser(null);
@@ -186,7 +222,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, ready, loginError, login, logout, can }}>
+    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, logout, can }}>
       {children}
     </AuthContext.Provider>
   );
