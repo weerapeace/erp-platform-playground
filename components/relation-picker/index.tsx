@@ -23,6 +23,8 @@ export type RelationConfig = {
   target_label_field:     string;
   target_search_fields?:  string[];
   secondary_label_field?: string;
+  /** F6: ถ้า true และ target_module_key อยู่ใน v2 ENTITIES — แสดงปุ่ม "+ สร้างใหม่" ใน picker */
+  allow_create?:          boolean;
 };
 
 interface RelationPickerProps {
@@ -113,6 +115,37 @@ export function RelationPicker({
     setSearch("");
   };
 
+  // ---- F6: Quick create ----
+  const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState<string | null>(null);
+
+  const canCreate = !!(config.allow_create && config.target_module_key);
+
+  const quickCreate = async (name: string) => {
+    if (!canCreate || !name.trim()) return;
+    setCreating(true);
+    setCreateErr(null);
+    try {
+      const res = await apiFetch(`/api/master-v2/${config.target_module_key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [config.target_label_field]: name.trim() }),
+      });
+      const json = await res.json();
+      if (json.error) { setCreateErr(json.error); return; }
+      // select ตัวใหม่ทันที
+      const newOpt: PickerOption = {
+        id:    String(json.data.id),
+        label: String(json.data[config.target_label_field] ?? name),
+      };
+      select(newOpt);
+    } catch (e) {
+      setCreateErr(String((e as Error).message ?? e));
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div ref={containerRef} className="relative">
       <button
@@ -156,8 +189,6 @@ export function RelationPicker({
           <div className="overflow-y-auto flex-1 max-h-64">
             {loading ? (
               <div className="px-3 py-4 text-xs text-slate-400 text-center">กำลังโหลด...</div>
-            ) : options.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-slate-400 text-center">ไม่พบ</div>
             ) : (
               <>
                 {/* clear option */}
@@ -169,6 +200,9 @@ export function RelationPicker({
                   >
                     ✕ ล้างค่า
                   </button>
+                )}
+                {options.length === 0 && !canCreate && (
+                  <div className="px-3 py-4 text-xs text-slate-400 text-center">ไม่พบ</div>
                 )}
                 {options.map((opt) => (
                   <button
@@ -190,6 +224,26 @@ export function RelationPicker({
                     )}
                   </button>
                 ))}
+
+                {/* F6: Quick create button */}
+                {canCreate && search.trim() && !options.some((o) => o.label.toLowerCase() === search.trim().toLowerCase()) && (
+                  <div className="border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => quickCreate(search)}
+                      disabled={creating}
+                      className="w-full px-3 py-2.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-2"
+                    >
+                      <span className="text-base">＋</span>
+                      <span>
+                        {creating ? "กำลังสร้าง..." : <>สร้างใหม่: <strong>&ldquo;{search.trim()}&rdquo;</strong></>}
+                      </span>
+                    </button>
+                    {createErr && (
+                      <div className="px-3 py-1.5 text-[11px] text-red-600 bg-red-50 border-t border-red-100">⚠ {createErr}</div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>

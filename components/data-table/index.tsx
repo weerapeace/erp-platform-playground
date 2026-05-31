@@ -1372,17 +1372,32 @@ export function DataTable<T extends Record<string, unknown>>({
                             )}
                           </div>
                         )}
-                        {/* ---- Column resize handle ---- */}
+                        {/* ---- Column resize handle ---- F4: mutex กับ reorder ---- */}
                         <div
-                          onMouseDown={header.getResizeHandler()}
-                          onTouchStart={header.getResizeHandler()}
-                          onClick={e => e.stopPropagation()}
-                          className={`absolute right-0 top-0 h-full w-[4px] cursor-col-resize select-none touch-none transition-colors z-10 ${
-                            header.column.getIsResizing()
-                              ? "bg-blue-500 opacity-100"
-                              : "opacity-0 hover:opacity-100 hover:bg-slate-300"
+                          draggable={false}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();        // กัน HTML5 drag (reorder) trigger
+                            e.preventDefault();          // กัน text selection
+                            header.getResizeHandler()(e);
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation();
+                            header.getResizeHandler()(e);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                          // กว้าง 8px แทน 4px = grab ง่ายขึ้น + เส้นกลาง 1px เห็นชัด
+                          className={`group/resize absolute right-0 top-0 h-full w-2 cursor-col-resize select-none touch-none z-20 flex items-center justify-center ${
+                            header.column.getIsResizing() ? "" : "opacity-0 hover:opacity-100"
                           }`}
-                        />
+                          title="ลากเพื่อปรับขนาด"
+                        >
+                          <div className={`h-full transition-colors ${
+                            header.column.getIsResizing()
+                              ? "w-[2px] bg-blue-500"
+                              : "w-[1px] bg-slate-300 group-hover/resize:bg-blue-400 group-hover/resize:w-[2px]"
+                          }`} />
+                        </div>
                       </th>
                     );
                   })}
