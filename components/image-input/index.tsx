@@ -28,13 +28,9 @@ export function ImageInput({
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // resolve r2_key → signed URL
+  // F15: ใช้ /api/r2-image proxy ตรงๆ (ไม่ติด CORS + เร็วขึ้น)
   useEffect(() => {
-    if (!value) { setPreviewUrl(null); return; }
-    apiFetch(`/api/master-v2/r2-signed-url?key=${encodeURIComponent(value)}&ttl=3600`)
-      .then((r) => r.json())
-      .then((j) => setPreviewUrl(j.url ?? null))
-      .catch(() => setPreviewUrl(null));
+    setPreviewUrl(value ? `/api/r2-image?key=${encodeURIComponent(value)}` : null);
   }, [value]);
 
   const handleFile = async (file: File) => {
@@ -135,15 +131,17 @@ export function ImageInput({
 // ImageCell — แสดง thumbnail ในตาราง (auto load signed URL)
 // ============================================================
 
-// shared cache (per session) — กันยิงซ้ำสำหรับ key เดิม
-const SIGNED_URL_CACHE = new Map<string, { url: string; expiresAt: number }>();
-
+/**
+ * F15: ImageCell ใช้ /api/r2-image?key=X (Worker proxy)
+ * - ไม่ติด CORS เพราะ same-origin
+ * - ไม่ต้องสร้าง signed URL ผ่าน fetch แยก (เร็วขึ้น 1 round trip)
+ * - <img src> โหลดตรงจาก proxy → Cloudflare Edge cache อัตโนมัติ
+ * - ยังคง lazy load ด้วย IntersectionObserver
+ */
 export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefined; size?: number }) {
-  const [url, setUrl] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // lazy load ด้วย IntersectionObserver
   useEffect(() => {
     if (!ref.current || visible) return;
     const obs = new IntersectionObserver(([entry]) => {
@@ -152,27 +150,6 @@ export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefin
     obs.observe(ref.current);
     return () => obs.disconnect();
   }, [visible]);
-
-  useEffect(() => {
-    if (!visible || !r2Key) return;
-
-    // check cache
-    const cached = SIGNED_URL_CACHE.get(r2Key);
-    if (cached && cached.expiresAt > Date.now()) {
-      setUrl(cached.url);
-      return;
-    }
-
-    apiFetch(`/api/master-v2/r2-signed-url?key=${encodeURIComponent(r2Key)}&ttl=3600`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.url) {
-          SIGNED_URL_CACHE.set(r2Key, { url: j.url, expiresAt: Date.now() + 50 * 60 * 1000 }); // 50min
-          setUrl(j.url);
-        }
-      })
-      .catch(() => setUrl(null));
-  }, [visible, r2Key]);
 
   if (!r2Key) {
     return (
@@ -184,14 +161,20 @@ export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefin
     );
   }
 
-  if (!url) {
+  if (!visible) {
     return <div ref={ref} className="rounded bg-slate-100 animate-pulse" style={{ width: size, height: size }} />;
   }
 
   return (
     <div ref={ref} className="inline-block">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt="" loading="lazy" className="rounded object-cover border border-slate-200 bg-white" style={{ width: size, height: size }} />
+      <img
+        src={`/api/r2-image?key=${encodeURIComponent(r2Key)}`}
+        alt=""
+        loading="lazy"
+        className="rounded object-cover border border-slate-200 bg-white"
+        style={{ width: size, height: size }}
+      />
     </div>
   );
 }
