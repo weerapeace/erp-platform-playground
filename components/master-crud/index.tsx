@@ -206,6 +206,8 @@ export type MasterCRUDConfig = {
   apiBase?: string;
   /** field ที่เป็น soft-delete (default 'active' for RPC, 'is_active' for v2) */
   activeField?: string;
+  /** จำนวน row ที่ดึงตอนโหลด (default 2000) — อนาคตจะเปลี่ยนเป็น server pagination */
+  pageLimit?: number;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -297,14 +299,16 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const fetchList = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      // limit 50 (free Workers ~10ms/request) — ตอน scale ค่อยใช้ server pagination
-      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=50&include_inactive=true`);
+      // default limit 2000 — Workers Paid $5/mo รองรับสบาย (50 ms/req)
+      // ถ้า dataset > 5000 ค่อย switch เป็น server-side pagination
+      const limit = config.pageLimit ?? 2000;
+      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       setRows((json.data ?? []) as Row[]);
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [config.apiPath]);
+  }, [config.apiPath, apiBase, config.pageLimit]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 

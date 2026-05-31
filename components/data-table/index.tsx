@@ -610,6 +610,21 @@ export function DataTable<T extends Record<string, unknown>>({
 
   useEffect(() => { fetchUserViews(); }, [fetchUserViews]);
 
+  // Auto-apply default view ตอนโหลดครั้งแรก (ถ้ามี is_default + ยังไม่เคย apply)
+  const defaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (defaultAppliedRef.current) return;
+    if (userViews.length === 0) return;
+    const def = userViews.find(v => v.is_default);
+    if (def) {
+      defaultAppliedRef.current = true;
+      applyUserView(def);
+    } else {
+      defaultAppliedRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userViews.length]);
+
   // ---- Auto-detect fields from data not in defined columns ----
   const definedColumnKeys = useMemo(() => new Set(
     columns.map(c => String(
@@ -725,7 +740,17 @@ export function DataTable<T extends Record<string, unknown>>({
   };
 
   const deleteUserView = async (id: string) => {
+    if (!confirm("ลบ view นี้?")) return;
     await apiFetch(`/api/saved-views?id=${id}`, { method: "DELETE" });
+    await fetchUserViews();
+  };
+
+  // Toggle default flag — clear default ของ view อื่นใน table+owner เดียวกัน
+  const setDefaultView = async (id: string, makeDefault: boolean) => {
+    await apiFetch(`/api/saved-views?id=${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_default: makeDefault }),
+    });
     await fetchUserViews();
   };
 
@@ -970,40 +995,52 @@ export function DataTable<T extends Record<string, unknown>>({
       {/* ---- View Tabs + Saved Views ---- */}
       {!isServer && (views.length > 0 || userViews.length > 0 || tableId) && (
         <div className="flex items-center border-b border-slate-200 bg-white px-4 overflow-x-auto gap-0">
-          {/* System views (from props) */}
-          {views.map(view => (
-            <button key={view.id} onClick={() => { setActiveView(view.id); setRowSelection({}); }}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                activeView === view.id && userViews.every(uv => uv.id !== activeView)
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}>
-              {view.label}
-            </button>
-          ))}
+          {/* System views (from props) — สไตล์ tab เดียวกับ saved view */}
+          {views.map(view => {
+            const isActive = activeView === view.id && userViews.every(uv => uv.id !== activeView);
+            return (
+              <button key={view.id} onClick={() => { setActiveView(view.id); setRowSelection({}); }}
+                className={`h-10 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors inline-flex items-center ${
+                  isActive
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}>
+                {view.label}
+              </button>
+            );
+          })}
 
-          {/* User saved views — system/team views มี icon นำหน้า */}
+          {/* User saved views — สูง h-10 เท่ากับ system views, ดาวกดได้ */}
           {userViews.map(view => {
             const visIcon = view.visibility === "system" ? "⭐"
                           : view.visibility === "team"   ? "👥" : "";
             const visTitle = view.visibility === "system" ? "System view"
                           : view.visibility === "team"   ? `Team view${view.owner_name ? " · " + view.owner_name : ""}`
                           : "View ของฉัน";
+            const isActive = activeView === view.baseViewId;
             return (
-              <div key={view.id} className="relative group flex-shrink-0">
+              <div key={view.id} className="relative group flex-shrink-0 inline-flex items-center">
                 <button onClick={() => applyUserView(view)} title={visTitle}
-                  className={`pl-4 pr-6 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                    activeView === view.baseViewId
-                      ? "border-purple-500 text-purple-600"
+                  className={`h-10 pl-3 pr-2 text-sm font-medium border-b-2 whitespace-nowrap transition-colors inline-flex items-center gap-1 ${
+                    isActive
+                      ? "border-blue-600 text-blue-600"
                       : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}>
-                  <span className="mr-1 text-xs opacity-60"><IconBookmark /></span>
-                  {visIcon && <span className="mr-1 text-xs">{visIcon}</span>}
-                  {view.label}
-                  {view.is_default && <span className="ml-1 text-amber-500" title="Default view">★</span>}
+                  {visIcon && <span className="text-xs">{visIcon}</span>}
+                  <span>{view.label}</span>
                 </button>
+                {/* ดาว — กดสลับ default */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setDefaultView(view.id, !view.is_default); }}
+                  title={view.is_default ? "ยกเลิก default" : "ตั้งเป็น default view"}
+                  className={`h-10 w-6 inline-flex items-center justify-center transition-colors ${
+                    view.is_default ? "text-amber-500 hover:text-amber-600" : "text-slate-300 hover:text-amber-500"
+                  }`}
+                >{view.is_default ? "★" : "☆"}</button>
+                {/* X delete — โผล่ตอน hover */}
                 <button onClick={() => deleteUserView(view.id)}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity">
+                  title="ลบ view"
+                  className="h-10 w-5 inline-flex items-center justify-center text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
                   <IconX />
                 </button>
               </div>

@@ -48,6 +48,51 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ data, error: null });
 }
 
+// ---- PATCH /api/saved-views?id=... ----
+// รองรับ: { is_default: boolean, label?: string }
+// ถ้า is_default=true → unset default ของ view อื่นใน table+owner เดียวกันก่อน
+export async function PATCH(request: NextRequest) {
+  const id = new URL(request.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  let body: { is_default?: boolean; label?: string };
+  try { body = await request.json(); }
+  catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  const supa = supabaseFromRequest(request);
+
+  // ถ้า set is_default=true — clear default ของ view อื่นในตารางเดียวกันของ owner เดียวกัน
+  if (body.is_default === true) {
+    const { data: target } = await supa
+      .from("erp_playground_saved_views")
+      .select("table_id, owner_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (target) {
+      await supa
+        .from("erp_playground_saved_views")
+        .update({ is_default: false })
+        .eq("table_id", target.table_id)
+        .eq("owner_id", target.owner_id)
+        .neq("id", id);
+    }
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (body.is_default !== undefined) patch.is_default = body.is_default;
+  if (body.label !== undefined)      patch.label      = body.label;
+  if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มี field ที่ update" }, { status: 400 });
+
+  const { data, error } = await supa
+    .from("erp_playground_saved_views")
+    .update(patch)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ data, error: null });
+}
+
 // ---- DELETE /api/saved-views?id=... ----
 export async function DELETE(request: NextRequest) {
   const { searchParams } = new URL(request.url);

@@ -138,8 +138,9 @@ export async function GET(
 
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
-  // Workers free CPU limit 10ms — default 50 instead of 200
-  const limit  = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
+  // Workers Paid $5/mo — รองรับ 2000 สบาย (50ms/req)
+  // ถ้า dataset > 5000 ค่อย switch server-side pagination
+  const limit  = Math.min(5000, Math.max(1, parseInt(searchParams.get("limit") ?? "2000", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const includeInactive = searchParams.get("include_inactive") === "true";
 
