@@ -51,6 +51,11 @@ async function makeClient(): Promise<any> {
       accessKeyId:     process.env.R2_ACCESS_KEY_ID!,
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
     },
+    // F18: AWS SDK v3 (3.729+) เพิ่ม checksum headers อัตโนมัติ
+    //      ('x-amz-checksum-mode=ENABLED' ฯลฯ) → R2 ตอบ 403 SignatureDoesNotMatch
+    //      ปิดทั้ง 2 ตัว = presigned URL ไม่มี param เกิน → R2 ยอมรับ
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
   });
   return _client;
 }
