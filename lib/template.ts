@@ -1,0 +1,116 @@
+/**
+ * Template renderer กลาง — แทน {{token}} ในสตริง HTML
+ *
+ * Syntax:
+ *   {{name}}                 — แทนค่า data.name
+ *   {{user.email}}           — nested path
+ *   {{#items}}{{x}}{{/items}}— loop array; ใน loop, scope = item
+ *   {{#name}}value{{/name}}  — show ถ้า truthy (อาจเป็น scalar)
+ *
+ * ไม่ใช้ regex engine ภายนอก เพื่อความเรียบง่ายและปลอดภัย
+ */
+
+// ---- get value by path "a.b.c" ----
+function getPath(obj: unknown, path: string): unknown {
+  if (!path || path === ".") return obj;
+  const parts = path.split(".");
+  let cur: unknown = obj;
+  for (const p of parts) {
+    if (cur && typeof cur === "object" && p in (cur as Record<string, unknown>)) {
+      cur = (cur as Record<string, unknown>)[p];
+    } else { return undefined; }
+  }
+  return cur;
+}
+
+// ---- escape HTML (basic) ----
+function esc(v: unknown): string {
+  if (v == null) return "";
+  const s = String(v);
+  return s.replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]!));
+}
+
+// ---- main render ----
+// แทน {{#section}}...{{/section}} ก่อน แล้วค่อย {{token}}
+export function renderTemplate(tpl: string, data: Record<string, unknown>): string {
+  let out = tpl;
+
+  // 1. Section loops {{#name}}...{{/name}}
+  // จับเริ่มจากบล็อกในสุดก่อน (greedy ไม่ทำเพราะอาจมี nest ไม่กี่ชั้น)
+  // วน loop จนไม่เจอ section
+  let safety = 100;
+  while (safety-- > 0) {
+    const m = out.match(/\{\{#([\w.]+)\}\}([\s\S]*?)\{\{\/\1\}\}/);
+    if (!m) break;
+    const [full, key, inner] = m;
+    const val = getPath(data, key);
+    let replaced: string;
+    if (Array.isArray(val)) {
+      replaced = val.map((item, idx) => {
+        // scope ใน loop = ตัว item ผสม index + parent data (เผื่อ {{globalToken}})
+        const scope = { ...data, ...(typeof item === "object" && item ? item as Record<string, unknown> : { value: item }), idx: idx + 1 };
+        return renderTemplate(inner, scope);
+      }).join("");
+    } else if (val) {
+      // truthy scalar/object — render inner ด้วย data ปกติ
+      replaced = renderTemplate(inner, data);
+    } else {
+      replaced = "";
+    }
+    out = out.slice(0, m.index!) + replaced + out.slice(m.index! + full.length);
+  }
+
+  // 2. Plain tokens {{token}}
+  out = out.replace(/\{\{([\w.]+)\}\}/g, (_, path) => esc(getPath(data, path)));
+
+  return out;
+}
+
+// ---- full document builder ----
+export type ReportTemplate = {
+  paper_size:  "A4" | "A5" | "Letter";
+  orientation: "portrait" | "landscape";
+  header_html: string;
+  body_html:   string;
+  footer_html: string;
+  custom_css:  string;
+};
+
+const PAPER_DIMS: Record<string, { w: string; h: string }> = {
+  A4:     { w: "210mm", h: "297mm" },
+  A5:     { w: "148mm", h: "210mm" },
+  Letter: { w: "215.9mm", h: "279.4mm" },
+};
+
+export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknown>): string {
+  const dims = PAPER_DIMS[tpl.paper_size] ?? PAPER_DIMS.A4;
+  const isLandscape = tpl.orientation === "landscape";
+  const pageW = isLandscape ? dims.h : dims.w;
+  const pageH = isLandscape ? dims.w : dims.h;
+
+  const css = `
+    *,*::before,*::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", "Sarabun", sans-serif; color: #0f172a; }
+    .doc { width: ${pageW}; min-height: ${pageH}; padding: 20mm 16mm; margin: 0 auto; background: white; }
+    @media print { .doc { box-shadow: none; padding: 14mm 12mm; } }
+    @page { size: ${tpl.paper_size} ${tpl.orientation}; margin: 0; }
+    ${tpl.custom_css}
+  `;
+
+  return `<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Print</title>
+<style>${css}</style>
+</head>
+<body>
+<div class="doc">
+  <header>${renderTemplate(tpl.header_html, data)}</header>
+  <main>${renderTemplate(tpl.body_html, data)}</main>
+  <footer>${renderTemplate(tpl.footer_html, data)}</footer>
+</div>
+</body>
+</html>`;
+}

@@ -1,0 +1,22 @@
+{
+  "extends": "next/core-web-vitals",
+  "overrides": [
+    {
+      "files": ["app/admin/**/*.tsx", "app/admin/**/*.ts"],
+      "excludedFiles": [
+        "app/admin/roles-permissions/**",
+        "app/admin/calculator-preview/**",
+        "app/admin/table-layouts/**"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "JSXElement[openingElement.name.name='table']",
+            "message": "ห้ามใช้ raw <table> ในหน้า admin list — ใช้ <DataTable> กลางจาก @/components/data-table แทน (ดู docs/data-table-spec.md). ถ้าจำเป็นจริงๆ ให้เพิ่มไฟล์ใน .eslintrc.json excludedFiles พร้อมเหตุผลใน comment ที่ส่วนหัวไฟล์"
+          }
+        ]
+      }
+    }
+  ]
+}

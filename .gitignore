@@ -1,0 +1,37 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# next.js
+.next
+out
+.open-next
+.vercel
+.wrangler
+
+# logs
+*.log
+.cf-build.log
+dev-output.log
+
+# environment (NEVER commit)
+.env
+.env.local
+.env*.local
+.env.production
+.env.development
+
+# OS junk
+.DS_Store
+desktop.ini
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# misc
+*.tsbuildinfo
+next-env.d.ts
