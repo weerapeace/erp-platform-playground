@@ -8,7 +8,9 @@
  *   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_URL
  */
 
-export const R2_BUCKET     = process.env.R2_BUCKET ?? "erp-playground-images";
+// F13: default bucket = ตามที่ admin app เดิมใช้ (รูป Odoo migrate มาที่นี่)
+//      override ได้ผ่าน R2_BUCKET secret ถ้า bucket เปลี่ยน
+export const R2_BUCKET     = process.env.R2_BUCKET ?? "odoo-product-images";
 export const R2_PUBLIC_URL = (process.env.R2_PUBLIC_URL ?? "").replace(/\/$/, "");
 
 export function isR2Configured(): boolean {
