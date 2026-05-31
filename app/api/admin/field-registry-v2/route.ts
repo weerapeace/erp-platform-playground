@@ -30,6 +30,7 @@ export type FormField = {
   width:             number;
   display_order:     number;
   options:           Record<string, unknown>;
+  relation_config:   Record<string, unknown>;
   placeholder:       string | null;
   help_text:         string | null;
 };
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
 
   const { data, error } = await supabase
     .from("erp_module_fields")
-    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, show_in_form, form_column_span, width, display_order, options, placeholder, help_text")
+    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, show_in_form, form_column_span, width, display_order, options, relation_config, placeholder, help_text")
     .eq("module_id", mod.id)
     .eq("is_active", true)
     .order("display_order");

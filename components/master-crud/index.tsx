@@ -16,25 +16,48 @@ import { apiFetch } from "@/lib/api";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-registry-v2/route";
+import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 
 // ---- Helper: map FormField (Registry) → FieldDef (MasterCRUDPage internal) ----
 
+// Default render สำหรับ relation field — อ่าน label จาก row[`{key}_label`] หรือ row[`{key}_name`]
+function defaultRelationCellRender(key: string) {
+  // strip _id suffix สำหรับหา key ของ label
+  const base = key.endsWith("_id") ? key.slice(0, -3) : key;
+  return (value: unknown, row?: Record<string, unknown>): React.ReactNode => {
+    if (!row) return value ? <code className="text-xs text-slate-400">{String(value).slice(0, 8)}...</code> : <span className="text-slate-300">—</span>;
+    const label = row[`${base}_label`] ?? row[`${base}_name`];
+    if (label) return <span className="text-sm text-slate-700">{String(label)}</span>;
+    if (value) return <code className="text-xs text-slate-400" title="ยังไม่ได้ resolve label">{String(value).slice(0, 8)}...</code>;
+    return <span className="text-slate-300">—</span>;
+  };
+}
+
 function registryToFieldDef(
   rf: FormField,
-  cellRenderers?: Record<string, (v: unknown) => React.ReactNode>,
+  cellRenderers?: Record<string, (v: unknown, row?: Record<string, unknown>) => React.ReactNode>,
 ): FieldDef {
   // map ui_field_type → FieldDef.type
   const fieldType: FieldDef["type"] =
     rf.ui_field_type === "boolean" ? "boolean"
     : rf.ui_field_type === "number" ? "number"
-    : rf.ui_field_type === "select" || rf.ui_field_type === "relation" ? "select"
+    : rf.ui_field_type === "relation" ? "relation"
+    : rf.ui_field_type === "select" ? "select"
     : rf.ui_field_type === "textarea" || rf.ui_field_type === "json" ? "textarea"
     : "text";
 
   const opts = (rf.options as { options?: string[] })?.options;
+  const relCfg = rf.relation_config as RelationConfig | undefined;
+  const key = rf.column_name ?? rf.field_key;
+  const customRender = cellRenderers?.[key];
+
+  // default cellRender สำหรับ relation field — อ่าน label จาก {base}_label / {base}_name
+  const effectiveCellRender =
+    customRender
+      ?? (fieldType === "relation" ? defaultRelationCellRender(key) : undefined);
 
   return {
-    key:         rf.column_name ?? rf.field_key,
+    key,
     label:       rf.field_label,
     type:        fieldType,
     required:    rf.is_required,
@@ -45,7 +68,8 @@ function registryToFieldDef(
     formSpan:    (rf.form_column_span >= 2 ? 2 : 1) as 1 | 2,
     filterable:  rf.is_filterable,
     sortable:    rf.is_sortable,
-    cellRender:  cellRenderers?.[rf.column_name ?? rf.field_key],
+    cellRender:  effectiveCellRender,
+    relationConfig: relCfg && relCfg.target_table ? relCfg : undefined,
   };
 }
 
@@ -54,7 +78,7 @@ function registryToFieldDef(
 export type FieldDef = {
   key:        string;
   label:      string;
-  type:       "text" | "number" | "boolean" | "select" | "textarea";
+  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation";
   required?:  boolean;
   options?:   string[];                   // สำหรับ select
   placeholder?: string;
@@ -62,8 +86,8 @@ export type FieldDef = {
   colSize?:   number;
   /** ซ่อนใน form drawer */
   hideInForm?: boolean;
-  /** custom cell render ใน table */
-  cellRender?: (value: unknown) => React.ReactNode;
+  /** custom cell render ใน table (row available เพื่ออ่าน sibling fields เช่น *_label สำหรับ relation) */
+  cellRender?: (value: unknown, row?: Record<string, unknown>) => React.ReactNode;
   /** กว้างใน form drawer: 1 / 2 / 3 (default 1 = col-span-1 from 2-col grid) */
   formSpan?:  1 | 2;
   /** validation rule keys ที่จะรัน (เช่น ['required','email']) */
@@ -76,6 +100,8 @@ export type FieldDef = {
   sortable?: boolean;
   /** เปิด bulk edit สำหรับ field นี้ */
   bulkEditable?: boolean;
+  /** config สำหรับ relation field (FK picker) */
+  relationConfig?: RelationConfig;
 };
 
 export type MasterCRUDConfig = {
@@ -103,7 +129,7 @@ export type MasterCRUDConfig = {
   /** dynamic field loading จาก erp_module_fields */
   moduleKey?: string;
   /** ฟังก์ชัน custom สำหรับ cellRender override (key → fn) — ใช้กับ dynamic mode */
-  cellRenderers?: Record<string, (value: unknown) => React.ReactNode>;
+  cellRenderers?: Record<string, (value: unknown, row?: Record<string, unknown>) => React.ReactNode>;
   /** unique key field (default: 'code') */
   uniqueKey?: string;
   /** entity_type สำหรับ audit log export */
@@ -332,7 +358,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: o })) } : {}),
       },
       cell: f.cellRender
-        ? ({ getValue }) => f.cellRender!(getValue())
+        ? ({ getValue, row }) => f.cellRender!(getValue(), row.original as Record<string, unknown>)
         : ({ getValue }) => {
             const v = getValue();
             if (v == null || v === "") return <span className="text-slate-300">—</span>;
@@ -441,7 +467,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             <span className="ml-1 text-[10px] text-slate-400">{f.validations.join(", ")}</span>
           )}
         </span>
-        {f.type === "select" ? (
+        {f.type === "relation" && f.relationConfig ? (
+          <div className="mt-0.5">
+            <RelationPicker
+              value={(v as string) || null}
+              onChange={(val) => updateForm({ [f.key]: val })}
+              config={f.relationConfig}
+              placeholder={f.placeholder ?? `— เลือก ${f.label} —`}
+              required={f.required}
+              hasError={hasErr}
+            />
+          </div>
+        ) : f.type === "select" ? (
           <select value={(v as string) || ""} onChange={e => updateForm({ [f.key]: e.target.value })}
             className={`${common} bg-white`}>
             <option value="">— เลือก —</option>

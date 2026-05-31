@@ -27,70 +27,101 @@ type EntityConfig = {
   postProcess?:  (row: Record<string, unknown>) => Record<string, unknown>;
 };
 
-const flattenName = (k: string) => (j: Record<string, unknown> | null) => {
+/**
+ * Helper: flatten Supabase nested join (returns array or object) → single value
+ */
+const pickField = (k: string) => (j: unknown): string | null => {
   if (!j) return null;
   const obj = (Array.isArray(j) ? j[0] : j) as Record<string, unknown> | undefined;
   return (obj?.[k] as string) ?? null;
 };
 
+/**
+ * Generic helper: สำหรับแต่ละ relation_join key ใน config — flatten เป็น `${base}_label`
+ */
+function flattenRelations(
+  r: Record<string, unknown>,
+  joins: Array<{ alias: string; labelField: string; resultKey: string; secondaryField?: string; secondaryKey?: string }>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...r };
+  for (const j of joins) {
+    out[j.resultKey] = pickField(j.labelField)(r[j.alias]);
+    if (j.secondaryField && j.secondaryKey) {
+      out[j.secondaryKey] = pickField(j.secondaryField)(r[j.alias]);
+    }
+    out[j.alias] = undefined;  // clean up nested
+  }
+  return out;
+}
+
 export const ENTITIES: Record<string, EntityConfig> = {
   "parent-skus": {
+    // ใช้ * เพื่อให้ get ทุก column (รวม field ใหม่ที่ admin sync มา) + JOIN labels
     table: "parent_skus_v2",
-    selectColumns: `id, code, product_family, name_th, name_en, sku_name,
-                    introduction, description,
-                    brand_id, collection_id, category_id,
-                    size_summary, weight_g, custom_size,
-                    materials, warranty,
-                    sale_price, final_price, fake_price,
-                    shopee_url, lazada_url, tiktok_url,
-                    is_active, created_at, updated_at,
+    selectColumns: `*,
                     brands ( name ),
-                    collections ( name )`,
+                    collections ( name ),
+                    product_categories ( name ),
+                    parcel_sizes ( name, size_text ),
+                    special_descriptions ( name ),
+                    size_descriptions ( name ),
+                    platform_categories ( name )`,
     searchColumns: ["code", "name_th", "name_en", "sku_name"],
     softDeleteColumn: "is_active",
     defaults: { product_family: "general", is_active: true, attribute_values: {} },
-    postProcess: (r) => ({
-      ...r,
-      brand_name:      flattenName("name")(r.brands as Record<string, unknown> | null),
-      collection_name: flattenName("name")(r.collections as Record<string, unknown> | null),
-      brands: undefined,
-      collections: undefined,
-    }),
+    postProcess: (r) => flattenRelations(r, [
+      { alias: "brands",               labelField: "name", resultKey: "brand_label" },
+      { alias: "collections",          labelField: "name", resultKey: "collection_label" },
+      { alias: "product_categories",   labelField: "name", resultKey: "category_label" },
+      { alias: "parcel_sizes",         labelField: "name", resultKey: "parcel_size_label", secondaryField: "size_text", secondaryKey: "parcel_size_size_text" },
+      { alias: "special_descriptions", labelField: "name", resultKey: "special_description_label" },
+      { alias: "size_descriptions",    labelField: "name", resultKey: "size_description_label" },
+      { alias: "platform_categories",  labelField: "name", resultKey: "platform_category_label" },
+    ]),
   },
   skus: {
     table: "skus_v2",
-    selectColumns: `id, code, name_th, barcode, parent_sku_id,
-                    color, list_price, standard_price,
-                    is_active, sale_ok, purchase_ok,
-                    created_at, updated_at,
-                    parent_skus_v2 ( code, name_th )`,
+    selectColumns: `*,
+                    parent_skus_v2 ( code, name_th ),
+                    partners_v2!seller_partner_id ( name_th, code ),
+                    uom:uoms!uom_id ( name ),
+                    purchase_uom:uoms!purchase_uom_id ( name )`,
     searchColumns: ["code", "name_th", "barcode"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true, sale_ok: true, purchase_ok: true, attribute_values: {} },
-    postProcess: (r) => {
-      const parent = r.parent_skus_v2 as { code?: string; name_th?: string }[] | { code?: string; name_th?: string } | null;
-      const p = Array.isArray(parent) ? parent[0] : parent;
-      return {
-        ...r,
-        parent_code:    p?.code ?? null,
-        parent_name_th: p?.name_th ?? null,
-        parent_skus_v2: undefined,
-      };
-    },
+    postProcess: (r) => flattenRelations(r, [
+      { alias: "parent_skus_v2", labelField: "code", resultKey: "parent_sku_label", secondaryField: "name_th", secondaryKey: "parent_sku_name_th" },
+      { alias: "partners_v2",    labelField: "name_th", resultKey: "seller_partner_label", secondaryField: "code", secondaryKey: "seller_partner_code" },
+      { alias: "uom",            labelField: "name", resultKey: "uom_label" },
+      { alias: "purchase_uom",   labelField: "name", resultKey: "purchase_uom_label" },
+    ]),
   },
   partners: {
     table: "partners_v2",
-    selectColumns: `id, code, name_th, name_en, display_name,
-                    is_customer, is_supplier, is_company,
-                    phone, mobile, email, line_id, website,
-                    address_line, sub_district, district, province, postal_code, country,
-                    tax_id, tax_branch,
-                    payment_terms_days, credit_limit, default_currency,
-                    notes, tags, is_active,
-                    created_at, updated_at`,
+    selectColumns: `*`,
     searchColumns: ["code", "name_th", "name_en", "phone", "email", "tax_id"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true, is_company: true, country: "TH", tax_branch: "00000" },
+  },
+  brands: {
+    table: "brands",
+    selectColumns: `*, parent_brand:brands!parent_brand_id ( name )`,
+    searchColumns: ["name", "slug"],
+    softDeleteColumn: "is_active",
+    defaults: { is_active: true },
+    postProcess: (r) => flattenRelations(r, [
+      { alias: "parent_brand", labelField: "name", resultKey: "parent_brand_label" },
+    ]),
+  },
+  collections: {
+    table: "collections",
+    selectColumns: `*, brands ( name )`,
+    searchColumns: ["name", "slug"],
+    softDeleteColumn: "is_active",
+    defaults: { is_active: true },
+    postProcess: (r) => flattenRelations(r, [
+      { alias: "brands", labelField: "name", resultKey: "brand_label" },
+    ]),
   },
 };
 
