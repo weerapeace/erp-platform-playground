@@ -1,51 +1,87 @@
 # ERP Platform — Playground
 
 Next.js 15 ERP playground เชื่อม Supabase + Cloudflare R2
+Deploy บน **Cloudflare Workers** ผ่าน GitHub Actions
 
-## 🚀 Deploy: Cloudflare Pages (GitHub Connect)
+## 🚀 Deploy Setup (One-time)
 
-### Build Settings ใน Cloudflare Pages dashboard
+### 1. Push code ขึ้น GitHub
+```powershell
+cd "G:\My Drive\Codex\erp-platform\apps\playground"
+git remote add origin https://github.com/USERNAME/erp-platform-playground.git
+git push -u origin main
+```
 
-| Setting | Value |
+### 2. สร้าง Cloudflare API Token
+
+1. ไป https://dash.cloudflare.com/profile/api-tokens
+2. **Create Token** → ใช้ template **"Edit Cloudflare Workers"**
+3. Account Resources: include account ของคุณ
+4. Zone Resources: All zones (หรือเฉพาะที่ใช้)
+5. คลิก Create → copy token (เห็นครั้งเดียว!)
+
+### 3. หา Cloudflare Account ID
+
+CF dashboard → Workers & Pages (sidebar) → ขวาบนจะมี Account ID
+
+### 4. ตั้ง GitHub Secrets
+
+ไป GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+
+ตั้ง 7 secrets ตามนี้ (copy ค่าจาก `C:\erp-local\playground\.env.local`):
+
+| Secret Name | ค่า |
 |---|---|
-| Framework preset | **Next.js** |
-| Build command | `npx @cloudflare/next-on-pages@1` |
-| Build output directory | `.vercel/output/static` |
-| Root directory | (ว่าง — หรือ `apps/playground` ถ้าใช้ monorepo) |
-| Node version | `22` |
+| `CLOUDFLARE_API_TOKEN` | จาก step 2 |
+| `CLOUDFLARE_ACCOUNT_ID` | จาก step 3 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | จาก `.env.local` |
+| `SUPABASE_SERVICE_ROLE_KEY` | จาก `.env.local` |
+| `R2_ACCOUNT_ID` | จาก `.env.local` |
+| `R2_ACCESS_KEY_ID` | จาก `.env.local` |
+| `R2_SECRET_ACCESS_KEY` | จาก `.env.local` |
 
-### Environment Variables (set in CF Pages dashboard)
+### 5. Trigger deploy
 
-**Production:**
-```
-NEXT_PUBLIC_SUPABASE_URL          = https://cyivhkecxeoonlowcvaz.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY     = <copy from local .env.local>
-SUPABASE_SERVICE_ROLE_KEY         = <copy from local .env.local>
-R2_ACCOUNT_ID                     = <copy from admin app .env>
-R2_ACCESS_KEY_ID                  = <copy from admin app .env>
-R2_SECRET_ACCESS_KEY              = <copy from admin app .env>
-R2_BUCKET                         = odoo-product-images
-```
+Push commit ใหม่ใด ๆ → GitHub Actions รัน build + deploy auto
 
-**Note:** `SUPABASE_SERVICE_ROLE_KEY` + `R2_SECRET_ACCESS_KEY` ต้องตั้งเป็น **Secret** (encrypted) ใน CF Pages
+หรือ manual trigger: GitHub repo → Actions → "Deploy to Cloudflare Workers" → Run workflow
 
-### Compatibility Flags (ตั้งใน CF Pages → Settings → Functions)
+หลัง deploy สำเร็จ จะได้ URL: `https://erp-platform-playground.<ACCOUNT_SUBDOMAIN>.workers.dev`
 
-- `nodejs_compat` — ใส่ทั้ง Production + Preview
+### 6. Cloudflare Access (optional — จำกัด email)
 
-### Cloudflare Access (จำกัด email)
-
-หลัง deploy ครั้งแรก:
-1. Cloudflare dashboard → Zero Trust → Access → Applications
-2. Add Application → Self-hosted
-3. Application domain: `<your-pages-domain>.pages.dev`
-4. Policy: Allow → Include → Email → ใส่ email ที่อนุญาต
+1. CF dashboard → **Zero Trust** → **Access** → **Applications**
+2. **Add Application** → **Self-hosted**
+3. Application domain: ใส่ URL ของ Worker
+4. Policy: **Allow** → Include → **Emails** → ใส่ email ที่อนุญาต
 
 ## 🛠️ Local Dev
 
 ```bash
-# จาก C:\erp-local\playground (ไม่ใช่จาก Drive โดยตรง — slow)
-npm run dev
+# work จาก C:\erp-local\playground (ไม่ใช่จาก Drive — slow)
+npm run dev          # localhost:3001
 ```
 
-เปิด http://localhost:3001
+## 📁 Project Layout
+
+```
+app/
+  apps/              — App Launcher (Odoo-style home)
+  master/parent-skus — Master Data v2: Parent SKUs
+  api/master-v2/     — APIs for v2 tables
+  api/...            — Other module APIs (44 routes, all edge runtime)
+components/
+  data-table/        — Universal DataTable (TanStack)
+  modal, form, ...   — Shared UI components
+lib/
+  supabase*.ts       — Supabase clients (auth/admin/browser)
+  r2.ts              — Cloudflare R2 helper (signed URLs)
+```
+
+## 🔑 Important Notes
+
+- **Bundle size:** Workers free = 3MB compressed, paid = 10MB. ถ้า bundle เกิน 3MB → ต้องอัป Workers Paid ($5/mo)
+- **Edge runtime:** ทุก API route ใส่ `export const runtime = "edge"` ไว้แล้ว (44 ไฟล์)
+- **nodejs_compat:** เปิดใน `wrangler.jsonc` แล้ว
+- **R2:** ใช้ bucket `odoo-product-images` ของ admin app
+- **Supabase:** project `cyivhkecxeoonlowcvaz` (shared กับ admin app + payroll)

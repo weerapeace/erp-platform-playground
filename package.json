@@ -11,8 +11,9 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "pages:build":   "npx @cloudflare/next-on-pages@1",
-    "pages:preview": "npx wrangler pages dev .vercel/output/static --compatibility-flag=nodejs_compat"
+    "cf:build":   "npx @opennextjs/cloudflare@latest build",
+    "cf:preview": "npx @opennextjs/cloudflare@latest preview",
+    "cf:deploy":  "npx @opennextjs/cloudflare@latest deploy"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1056.0",

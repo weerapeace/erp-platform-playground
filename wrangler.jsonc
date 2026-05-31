@@ -1,0 +1,35 @@
+/**
+ * Cloudflare Workers config — OpenNext adapter
+ * Deploy: GitHub Actions (.github/workflows/deploy.yml)
+ *
+ * Settings ที่ต้องตั้งใน CF Dashboard + GitHub Secrets:
+ *   CLOUDFLARE_API_TOKEN          (GitHub Secret — สร้างที่ CF → My Profile → API Tokens)
+ *   CLOUDFLARE_ACCOUNT_ID         (GitHub Secret)
+ *   NEXT_PUBLIC_SUPABASE_ANON_KEY (GitHub Secret)
+ *   SUPABASE_SERVICE_ROLE_KEY     (GitHub Secret)
+ *   R2_ACCOUNT_ID                 (GitHub Secret)
+ *   R2_ACCESS_KEY_ID              (GitHub Secret)
+ *   R2_SECRET_ACCESS_KEY          (GitHub Secret)
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "erp-platform-playground",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-05-31",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Non-secret vars (committed) — secrets ผ่าน wrangler-action's secrets parameter
+  "vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": "https://cyivhkecxeoonlowcvaz.supabase.co",
+    "R2_BUCKET":                 "odoo-product-images"
+  }
+}
