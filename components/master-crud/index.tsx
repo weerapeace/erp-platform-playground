@@ -60,6 +60,14 @@ export type MasterCRUDConfig = {
   exportEntityType?: string;
   /** searchableKeys */
   searchKeys?: string[];
+  /**
+   * Base URL ก่อน apiPath
+   * default = "/api/master/"  → RPC pattern (legacy: customers/employees/etc.)
+   * override = "/api/master-v2/" → REST pattern (Master Data v2: parent-skus/skus/partners)
+   */
+  apiBase?: string;
+  /** field ที่เป็น soft-delete (default 'active' for RPC, 'is_active' for v2) */
+  activeField?: string;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -73,6 +81,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const canCreate = usePermission(config.permissions.create);
   const canEdit   = usePermission(config.permissions.edit);
   const { user, can } = useAuth();
+  const apiBase    = config.apiBase ?? "/api/master/";
+  const activeField = config.activeField ?? "active";
+  const isRest     = (config.apiBase ?? "").includes("master-v2");
 
   const [rows,    setRows]    = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,7 +114,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const fetchList = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await apiFetch(`/api/master/${config.apiPath}?limit=200&include_inactive=true`);
+      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=200&include_inactive=true`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       setRows((json.data ?? []) as Row[]);
@@ -163,50 +174,35 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     }
     setSaving(true); setFormErr(null);
     try {
-      const payload: Record<string, unknown> = { actor: user?.name };
-      // serialize: number/boolean → string สำหรับ jsonb cast ใน RPC update
-      config.fields.forEach(f => {
+      // serialize fields:
+      //   REST mode (v2): proper types (number → number, boolean → boolean)
+      //   RPC mode (legacy): everything → string (for jsonb cast)
+      const serialized: Record<string, unknown> = {};
+      config.fields.forEach((f) => {
+        // skip read-only fields (no key in form)
+        if (f.hideInForm) return;
         const v = form[f.key];
         if (f.type === "number") {
-          payload[f.key] = v === "" || v == null ? null : String(v);
+          if (v === "" || v == null) serialized[f.key] = null;
+          else serialized[f.key] = isRest ? Number(v) : String(v);
         } else if (f.type === "boolean") {
-          payload[f.key] = String(!!v);
+          serialized[f.key] = isRest ? !!v : String(!!v);
         } else {
-          payload[f.key] = (v as string) || "";
+          serialized[f.key] = (v as string) || (isRest ? null : "");
         }
       });
 
       const url    = editingId
-        ? `/api/master/${config.apiPath}/${editingId}`
-        : `/api/master/${config.apiPath}`;
+        ? `${apiBase}${config.apiPath}/${editingId}`
+        : `${apiBase}${config.apiPath}`;
       const method = editingId ? "PATCH" : "POST";
 
-      // POST รับเฉพาะ flat fields → unwrap
-      if (!editingId) {
-        // create ใช้ JSON.stringify ตรง ๆ
-        const res = await apiFetch(url, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...config.fields.reduce<Record<string, unknown>>((acc, f) => {
-              const v = form[f.key];
-              if (f.type === "number") acc[f.key] = v === "" ? 0 : Number(v);
-              else if (f.type === "boolean") acc[f.key] = !!v;
-              else acc[f.key] = (v as string) || null;
-              return acc;
-            }, {}),
-            actor: user?.name,
-          }),
-        });
-        const json = await res.json();
-        if (json.error) throw new Error(json.error);
-      } else {
-        const res = await apiFetch(url, {
-          method, headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const json = await res.json();
-        if (json.error) throw new Error(json.error);
-      }
+      const res = await apiFetch(url, {
+        method, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...serialized, actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
       setModalOpen(false); setDirty(false);
       await fetchList();
@@ -216,7 +212,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   const archive = async (r: Row) => {
     try {
-      const res = await apiFetch(`/api/master/${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+      const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       flash("ปิดบัญชีแล้ว");
@@ -226,9 +222,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   };
   const restore = async (r: Row) => {
     try {
-      const res = await apiFetch(`/api/master/${config.apiPath}/${r.id}`, {
+      const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: true, actor: user?.name }),
+        body: JSON.stringify({ [activeField]: isRest ? true : "true", actor: user?.name }),
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -251,9 +247,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             return String(v);
           },
     }));
-    // active column สุดท้ายเสมอ
+    // active column สุดท้ายเสมอ (รองรับทั้ง 'active' และ 'is_active')
     cols.push({
-      id: "active", accessorKey: "active", header: "สถานะ", size: 90,
+      id: activeField, accessorKey: activeField, header: "สถานะ", size: 90,
       cell: ({ getValue }) => {
         const a = getValue() as boolean;
         return a ? (
@@ -264,14 +260,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       },
     });
     return cols;
-  }, [config.fields]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.fields, activeField]);
 
   // ---- Views ----
   const views: DataTableView[] = useMemo(() => [
-    { id: "active",   label: "เปิดอยู่",  predicate: (r: Record<string, unknown>) => (r as unknown as Row).active === true },
+    { id: "active",   label: "เปิดอยู่",  predicate: (r: Record<string, unknown>) => r[activeField] === true },
     { id: "all",      label: "ทั้งหมด",   predicate: () => true },
-    { id: "inactive", label: "ปิดอยู่",   predicate: (r: Record<string, unknown>) => (r as unknown as Row).active === false },
-  ], []);
+    { id: "inactive", label: "ปิดอยู่",   predicate: (r: Record<string, unknown>) => r[activeField] === false },
+  ], [activeField]);
 
   // ---- Row actions ----
   const rowActions: RowAction<Row>[] = useMemo(() => {
@@ -279,12 +276,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (canEdit) {
       acts.push({
         label: "เปิด/ปิด", icon: "⏻",
-        onClick: (r: Row) => r.active ? setArchiveTarget(r) : restore(r),
+        onClick: (r: Row) => r[activeField] ? setArchiveTarget(r) : restore(r),
       });
     }
     return acts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canEdit]);
+  }, [canEdit, activeField]);
 
   // ---- Bulk archive ----
   const bulkActions: BulkAction<Row>[] = useMemo(() => canEdit ? [
@@ -293,13 +290,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       onClick: async (selected: Row[]) => {
         if (!confirm(`ปิด ${selected.length} ราย?`)) return;
         for (const r of selected) {
-          await apiFetch(`/api/master/${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+          await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
         }
         flash(`ปิด ${selected.length} ราย`);
         await fetchList();
       },
     },
-  ] : [], [canEdit, user?.name, config.apiPath, fetchList]);
+  ] : [], [canEdit, user?.name, apiBase, config.apiPath, fetchList]);
 
   // ---- Render form field ----
   const renderField = (f: FieldDef) => {
