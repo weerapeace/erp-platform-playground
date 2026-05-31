@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 import { ENTITIES } from "../route";
 
 // ---- GET — single ----
@@ -42,6 +43,10 @@ export async function PATCH(
   const cfg = ENTITIES[entity];
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
+  // ตรวจ user login
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+
   let body: Record<string, unknown>;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -60,8 +65,8 @@ export async function PATCH(
     return NextResponse.json({ error: "ไม่มี field ที่ต้อง update" }, { status: 400 });
   }
 
-  const supabase = supabaseFromRequest(request);
-  const { data, error } = await supabase
+  // ใช้ supabaseAdmin (service-role bypass RLS)
+  const { data, error } = await supabaseAdmin()
     .from(cfg.table)
     .update(patch)
     .eq("id", id)
@@ -83,10 +88,13 @@ export async function DELETE(
   const cfg = ENTITIES[entity];
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
-  const supabase = supabaseFromRequest(request);
+  // ตรวจ user login
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+
   const col = cfg.softDeleteColumn ?? "is_active";
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin()
     .from(cfg.table)
     .update({ [col]: false })
     .eq("id", id);

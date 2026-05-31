@@ -83,17 +83,20 @@ function registryToFieldDef(
 }
 
 // ---- Group config (Sprint 7) ----
+// defaultOpen = true ทุก section — user ขอ "ดึงมาไม่ครบ" ปัญหามาจาก collapse
+// ปุ่ม "ยุบทั้งหมด" มีอยู่ใน FormSections header
 const GROUP_CONFIG: Record<string, { label: string; icon: string; defaultOpen: boolean; order: number }> = {
-  core:      { label: "ข้อมูลหลัก",     icon: "📋", defaultOpen: true,  order: 10 },
-  relations: { label: "ความสัมพันธ์",  icon: "🔗", defaultOpen: true,  order: 20 },
-  specs:     { label: "ขนาด/สเปก",     icon: "📐", defaultOpen: true,  order: 30 },
-  content:   { label: "เนื้อหา",        icon: "📝", defaultOpen: false, order: 40 },
-  pricing:   { label: "ราคา & ต้นทุน",  icon: "💰", defaultOpen: true,  order: 50 },
-  status:    { label: "สถานะ",          icon: "🟢", defaultOpen: false, order: 60 },
+  core:      { label: "ข้อมูลหลัก",     icon: "📋", defaultOpen: true, order: 10 },
+  relations: { label: "ความสัมพันธ์",  icon: "🔗", defaultOpen: true, order: 20 },
+  product:   { label: "คุณสมบัติ",      icon: "✨", defaultOpen: true, order: 25 },
+  specs:     { label: "ขนาด/สเปก",     icon: "📐", defaultOpen: true, order: 30 },
+  supplier:  { label: "ผู้จำหน่าย",     icon: "🏭", defaultOpen: true, order: 35 },
+  content:   { label: "เนื้อหา",        icon: "📝", defaultOpen: true, order: 40 },
+  pricing:   { label: "ราคา & ต้นทุน",  icon: "💰", defaultOpen: true, order: 50 },
+  media:     { label: "รูปภาพ/ไฟล์",    icon: "🖼️", defaultOpen: true, order: 55 },
+  status:    { label: "สถานะ",          icon: "🟢", defaultOpen: true, order: 60 },
+  other:     { label: "อื่น ๆ",         icon: "📦", defaultOpen: true, order: 80 },
   system:    { label: "ระบบ",           icon: "⚙️", defaultOpen: false, order: 90 },
-  other:     { label: "อื่น ๆ",         icon: "📦", defaultOpen: false, order: 80 },
-  supplier:  { label: "ผู้จำหน่าย",     icon: "🏭", defaultOpen: false, order: 35 },
-  product:   { label: "คุณสมบัติ",      icon: "✨", defaultOpen: true,  order: 25 },
 };
 
 function getGroupConfig(key: string) {
@@ -668,8 +671,24 @@ function FormSections({
     return init;
   });
 
+  const allExpanded = grouped.every(([k]) => expanded[k] ?? getGroupConfig(k).defaultOpen);
+
   return (
     <div className="space-y-3">
+      {/* Expand/collapse all */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => {
+            const next: Record<string, boolean> = {};
+            for (const [k] of grouped) next[k] = !allExpanded;
+            setExpanded(next);
+          }}
+          className="text-xs text-slate-500 hover:text-orange-600 hover:underline"
+        >
+          {allExpanded ? "▼ ยุบทั้งหมด" : "▶ ขยายทั้งหมด"}
+        </button>
+      </div>
       {grouped.map(([groupKey, groupFields]) => {
         const cfg = getGroupConfig(groupKey);
         const isOpen = expanded[groupKey] ?? cfg.defaultOpen;

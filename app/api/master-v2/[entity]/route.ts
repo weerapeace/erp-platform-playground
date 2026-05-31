@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
 
 // ---- Entity config ----
 
@@ -176,6 +177,10 @@ export async function POST(
   const cfg = ENTITIES[entity];
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
+  // ตรวจ user login (authenticated role)
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+
   let body: Record<string, unknown>;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -190,8 +195,8 @@ export async function POST(
     if (v !== undefined) payload[k] = v;
   }
 
-  const supabase = supabaseFromRequest(request);
-  const { data, error } = await supabase
+  // ใช้ supabaseAdmin (service-role bypass RLS) — sprint 8 จะใส่ erp_can() check
+  const { data, error } = await supabaseAdmin()
     .from(cfg.table)
     .insert(payload)
     .select(cfg.selectColumns)
