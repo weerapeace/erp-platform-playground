@@ -1,14 +1,18 @@
 "use client";
 
 /**
- * Admin Schema Sync — Sprint 1
+ * Admin Schema Sync — Sprint 1 + Sprint 11
  *
  * URL: /admin/schema-sync
  *
+ * Sprint 1:
  * - เลือก module
  * - ปุ่ม "Sync from Supabase" — ดึง column ใหม่จาก DB
  * - ตาราง field — แก้ visible/filterable/sortable/required/label/group/width
- * - Save inline (auto-flush เมื่อ blur)
+ *
+ * Sprint 11:
+ * - ✋ Drag-drop reorder fields → PATCH bulk display_order
+ * - ☑ Checkbox + bulk action bar → set visible/filter/sort หลาย row พร้อมกัน
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -16,6 +20,15 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import type { SchemaSyncResponse, RegistryField } from "@/app/api/admin/schema-sync/route";
+import {
+  DndContext, DragEndEvent, PointerSensor, KeyboardSensor,
+  useSensor, useSensors, closestCenter,
+} from "@dnd-kit/core";
+import {
+  SortableContext, sortableKeyboardCoordinates, useSortable,
+  verticalListSortingStrategy, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 const MODULES = [
   { key: "parent-skus-v2", label: "Parent SKUs (v2)" },
@@ -38,8 +51,11 @@ const GROUP_OPTIONS = [
 
 const UI_TYPE_OPTIONS = ["text", "number", "boolean", "date", "select", "relation", "json", "textarea"];
 
+// 12 columns — ต้อง match กับ FieldRow + thead ด้านล่าง
+const COLUMN_COUNT = 13;
+
 export default function SchemaSyncAdminPage() {
-  const { user } = useAuth();
+  const { user: _user } = useAuth();
   const [moduleKey, setModuleKey] = useState("parent-skus-v2");
   const [data,      setData]      = useState<SchemaSyncResponse | null>(null);
   const [loading,   setLoading]   = useState(true);
@@ -49,6 +65,11 @@ export default function SchemaSyncAdminPage() {
   const [filter,    setFilter]    = useState("");
   const [groupFilter, setGroupFilter] = useState("");
 
+  // Sprint 11
+  const [selected,    setSelected]    = useState<Set<string>>(new Set());
+  const [bulkSaving,  setBulkSaving]  = useState(false);
+  const [reordering,  setReordering]  = useState(false);
+
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
   const load = useCallback(async () => {
@@ -57,6 +78,7 @@ export default function SchemaSyncAdminPage() {
       const res = await apiFetch(`/api/admin/schema-sync?module=${moduleKey}`);
       const json: SchemaSyncResponse = await res.json();
       setData(json);
+      setSelected(new Set());  // เคลียร์ selection เมื่อเปลี่ยน module
     } finally { setLoading(false); }
   }, [moduleKey]);
 
@@ -89,12 +111,73 @@ export default function SchemaSyncAdminPage() {
         flash("❌ " + json.error);
         return;
       }
-      // optimistic update local state
       setData((prev) => prev ? {
         ...prev,
         registry: prev.registry.map((f) => f.id === id ? { ...f, ...patch } : f),
       } : prev);
     } finally { setSavingId(null); }
+  };
+
+  // ========== Sprint 11: Bulk update ==========
+  const bulkUpdate = async (patch: Record<string, unknown>) => {
+    if (selected.size === 0) return;
+    setBulkSaving(true);
+    try {
+      const ids = [...selected];
+      const res = await apiFetch("/api/admin/field-registry-v2/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, patch }),
+      });
+      const json = await res.json();
+      if (json.error) flash("❌ " + json.error);
+      else {
+        flash(`✓ อัปเดต ${json.success} field (${Object.keys(patch).join(", ")})`);
+        // optimistic update local
+        setData((prev) => prev ? {
+          ...prev,
+          registry: prev.registry.map((f) => selected.has(f.id) ? { ...f, ...patch } : f),
+        } : prev);
+        setSelected(new Set());
+      }
+    } finally { setBulkSaving(false); }
+  };
+
+  // ========== Sprint 11: Drag-drop reorder ==========
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const onDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !data) return;
+
+    const oldIdx = data.registry.findIndex((f) => f.id === active.id);
+    const newIdx = data.registry.findIndex((f) => f.id === over.id);
+    if (oldIdx < 0 || newIdx < 0) return;
+
+    const reordered = arrayMove(data.registry, oldIdx, newIdx);
+    // คำนวณ display_order ใหม่ — รักษา gap step 10 เพื่อแทรกง่าย
+    const updates = reordered.map((f, i) => ({ id: f.id, display_order: (i + 1) * 10 }));
+
+    // optimistic update
+    setData((prev) => prev ? {
+      ...prev,
+      registry: reordered.map((f, i) => ({ ...f, display_order: (i + 1) * 10 })),
+    } : prev);
+
+    setReordering(true);
+    try {
+      const res = await apiFetch("/api/admin/field-registry-v2/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reorder: updates }),
+      });
+      const json = await res.json();
+      if (json.error) flash("❌ reorder failed: " + json.error);
+      else flash(`✓ เรียงลำดับใหม่ ${json.success} field`);
+    } finally { setReordering(false); }
   };
 
   // filter rows
@@ -125,6 +208,29 @@ export default function SchemaSyncAdminPage() {
     };
   }, [data]);
 
+  const allFilteredSelected = filtered.length > 0 && filtered.every((f) => selected.has(f.id));
+  const someSelected = filtered.some((f) => selected.has(f.id));
+
+  const toggleAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        filtered.forEach((f) => next.delete(f.id));
+      } else {
+        filtered.forEach((f) => next.add(f.id));
+      }
+      return next;
+    });
+  };
+
+  const toggleOne = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
   return (
     <PlaygroundShell>
       <div className="min-h-screen bg-slate-50">
@@ -136,7 +242,7 @@ export default function SchemaSyncAdminPage() {
                   🗂️ Schema Sync + Field Registry
                 </h1>
                 <p className="text-sm text-slate-500 mt-0.5">
-                  อ่าน fields จริงจาก Supabase + admin tick visible/filterable/sortable/required
+                  อ่าน fields จริงจาก Supabase + admin tick visible/filterable/sortable/required • ✋ลากเรียงลำดับ • ☑ เลือกหลายเพื่อแก้พร้อมกัน
                 </p>
               </div>
               <button
@@ -207,6 +313,39 @@ export default function SchemaSyncAdminPage() {
               </div>
             )}
           </div>
+
+          {/* Sprint 11: Bulk action bar */}
+          {selected.size > 0 && (
+            <div className="border-t border-orange-200 bg-orange-50">
+              <div className="max-w-[1600px] mx-auto px-6 py-2.5 flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-orange-900">
+                  ☑ เลือก {selected.size} field
+                </span>
+                <div className="h-5 w-px bg-orange-300 mx-1" />
+                <BulkBtn onClick={() => bulkUpdate({ is_visible: true })}  disabled={bulkSaving} variant="success">👁 แสดง</BulkBtn>
+                <BulkBtn onClick={() => bulkUpdate({ is_visible: false })} disabled={bulkSaving} variant="muted">👁 ซ่อน</BulkBtn>
+                <div className="h-5 w-px bg-orange-300 mx-1" />
+                <BulkBtn onClick={() => bulkUpdate({ is_filterable: true })}  disabled={bulkSaving}>🔍 เปิด filter</BulkBtn>
+                <BulkBtn onClick={() => bulkUpdate({ is_filterable: false })} disabled={bulkSaving} variant="muted">🔍 ปิด filter</BulkBtn>
+                <BulkBtn onClick={() => bulkUpdate({ is_sortable: true })}    disabled={bulkSaving}>↕ เปิด sort</BulkBtn>
+                <BulkBtn onClick={() => bulkUpdate({ is_sortable: false })}   disabled={bulkSaving} variant="muted">↕ ปิด sort</BulkBtn>
+                <BulkBtn onClick={() => bulkUpdate({ is_searchable: true })}  disabled={bulkSaving}>🔎 เปิด search</BulkBtn>
+                <BulkBtn onClick={() => bulkUpdate({ is_searchable: false })} disabled={bulkSaving} variant="muted">🔎 ปิด search</BulkBtn>
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    onClick={() => setSelected(new Set())}
+                    className="text-xs text-orange-700 hover:text-orange-900 underline"
+                  >ล้างการเลือก</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {reordering && (
+            <div className="border-t border-blue-200 bg-blue-50 text-center text-xs text-blue-700 py-1">
+              ⏳ กำลังบันทึกลำดับใหม่...
+            </div>
+          )}
         </header>
 
         <main className="max-w-[1600px] mx-auto px-6 py-6">
@@ -220,6 +359,17 @@ export default function SchemaSyncAdminPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-600">
                     <tr>
+                      <th className="w-8 px-2 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={allFilteredSelected}
+                          ref={(el) => { if (el) el.indeterminate = someSelected && !allFilteredSelected; }}
+                          onChange={toggleAll}
+                          className="rounded"
+                          title="เลือกทั้งหมด"
+                        />
+                      </th>
+                      <th className="w-6 px-1 py-2" title="ลากเรียง">✋</th>
                       <th className="px-3 py-2 text-left font-medium">#</th>
                       <th className="px-3 py-2 text-left font-medium">Column</th>
                       <th className="px-3 py-2 text-left font-medium">Label</th>
@@ -234,16 +384,22 @@ export default function SchemaSyncAdminPage() {
                       <th className="px-3 py-2 text-center font-medium">Width</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filtered.map((f) => (
-                      <FieldRow
-                        key={f.id}
-                        field={f}
-                        saving={savingId === f.id}
-                        onUpdate={(patch) => updateField(f.id, patch)}
-                      />
-                    ))}
-                  </tbody>
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+                    <SortableContext items={filtered.map((f) => f.id)} strategy={verticalListSortingStrategy}>
+                      <tbody className="divide-y divide-slate-100">
+                        {filtered.map((f) => (
+                          <SortableFieldRow
+                            key={f.id}
+                            field={f}
+                            saving={savingId === f.id}
+                            selected={selected.has(f.id)}
+                            onToggle={() => toggleOne(f.id)}
+                            onUpdate={(patch) => updateField(f.id, patch)}
+                          />
+                        ))}
+                      </tbody>
+                    </SortableContext>
+                  </DndContext>
                 </table>
               </div>
               {filtered.length === 0 && (
@@ -254,7 +410,7 @@ export default function SchemaSyncAdminPage() {
         </main>
 
         {toast && (
-          <div className="fixed bottom-6 right-6 px-4 py-3 bg-slate-900 text-white rounded-lg shadow-lg text-sm max-w-md">
+          <div className="fixed bottom-6 right-6 px-4 py-3 bg-slate-900 text-white rounded-lg shadow-lg text-sm max-w-md z-50">
             {toast}
           </div>
         )}
@@ -264,32 +420,50 @@ export default function SchemaSyncAdminPage() {
 }
 
 // ============================================================
-// FieldRow — บรรทัดเดียวของ table
+// SortableFieldRow — แถวที่ลากเรียงได้
 // ============================================================
 
-function FieldRow({
-  field, saving, onUpdate,
+function SortableFieldRow({
+  field, saving, selected, onToggle, onUpdate,
 }: {
-  field: RegistryField;
-  saving: boolean;
+  field:    RegistryField;
+  saving:   boolean;
+  selected: boolean;
+  onToggle: () => void;
   onUpdate: (patch: Record<string, unknown>) => void | Promise<void>;
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity:   isDragging ? 0.5 : 1,
+    background: isDragging ? "#fef3c7" : undefined,
+  };
+
   const [label, setLabel] = useState(field.field_label);
   const [width, setWidth] = useState(field.width);
 
-  // sync local เมื่อ field เปลี่ยน (จาก parent update)
   useEffect(() => { setLabel(field.field_label); }, [field.field_label]);
   useEffect(() => { setWidth(field.width); }, [field.width]);
 
-  const onBlurLabel = () => {
-    if (label !== field.field_label) onUpdate({ field_label: label });
-  };
-  const onBlurWidth = () => {
-    if (width !== field.width) onUpdate({ width });
-  };
+  const onBlurLabel = () => { if (label !== field.field_label) onUpdate({ field_label: label }); };
+  const onBlurWidth = () => { if (width !== field.width)       onUpdate({ width });            };
 
   return (
-    <tr className={`hover:bg-slate-50 ${saving ? "opacity-60" : ""}`}>
+    <tr
+      ref={setNodeRef}
+      style={style}
+      className={`hover:bg-slate-50 ${saving ? "opacity-60" : ""} ${selected ? "bg-orange-50" : ""}`}
+    >
+      <td className="w-8 px-2 py-1.5 text-center">
+        <input type="checkbox" checked={selected} onChange={onToggle} className="rounded" />
+      </td>
+      <td
+        className="w-6 px-1 py-1.5 text-center text-slate-400 cursor-grab active:cursor-grabbing select-none"
+        {...attributes}
+        {...listeners}
+        title="ลากเพื่อเรียงลำดับ"
+      >⋮⋮</td>
       <td className="px-3 py-1.5 text-xs text-slate-400 tabular-nums">{field.display_order}</td>
       <td className="px-3 py-1.5">
         <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{field.column_name ?? field.field_key}</code>
@@ -321,7 +495,7 @@ function FieldRow({
         </select>
       </td>
       <td className="px-3 py-1.5 text-center">
-        <input type="checkbox" checked={field.is_visible} onChange={(e) => onUpdate({ is_visible: e.target.checked })} className="rounded" />
+        <input type="checkbox" checked={field.is_visible}    onChange={(e) => onUpdate({ is_visible:    e.target.checked })} className="rounded" />
       </td>
       <td className="px-3 py-1.5 text-center">
         <input type="checkbox" checked={field.is_filterable} onChange={(e) => onUpdate({ is_filterable: e.target.checked })} className="rounded" />
@@ -330,10 +504,10 @@ function FieldRow({
         <input type="checkbox" checked={field.is_searchable} onChange={(e) => onUpdate({ is_searchable: e.target.checked })} className="rounded accent-pink-500" />
       </td>
       <td className="px-3 py-1.5 text-center">
-        <input type="checkbox" checked={field.is_sortable} onChange={(e) => onUpdate({ is_sortable: e.target.checked })} className="rounded" />
+        <input type="checkbox" checked={field.is_sortable}   onChange={(e) => onUpdate({ is_sortable:   e.target.checked })} className="rounded" />
       </td>
       <td className="px-3 py-1.5 text-center">
-        <input type="checkbox" checked={field.is_required} onChange={(e) => onUpdate({ is_required: e.target.checked })} className="rounded" />
+        <input type="checkbox" checked={field.is_required}   onChange={(e) => onUpdate({ is_required:   e.target.checked })} className="rounded" />
       </td>
       <td className="px-3 py-1.5 text-center">
         <div className="flex items-center justify-center gap-1">
@@ -371,3 +545,34 @@ function FieldRow({
     </tr>
   );
 }
+
+// ============================================================
+// BulkBtn — ปุ่มเล็กในแถบ bulk action
+// ============================================================
+
+function BulkBtn({
+  children, onClick, disabled, variant = "default",
+}: {
+  children: React.ReactNode;
+  onClick:  () => void;
+  disabled?: boolean;
+  variant?: "default" | "success" | "muted";
+}) {
+  const cls = variant === "success"
+    ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+    : variant === "muted"
+    ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
+    : "bg-white text-orange-900 hover:bg-orange-100 border border-orange-200";
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`h-7 px-2.5 text-xs font-medium rounded-md disabled:opacity-50 ${cls}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// silence unused — keep underscore-prefix for future use
+void COLUMN_COUNT;
