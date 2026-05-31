@@ -31,9 +31,10 @@ jobs:
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken:   ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId:  ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command:    deploy
+          apiToken:        ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId:       ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.95.0"
+          command:         deploy
           # secrets ที่จะส่งเข้า Worker runtime (ผ่าน `wrangler secret put` ก่อน deploy)
           secrets: |
             NEXT_PUBLIC_SUPABASE_ANON_KEY
