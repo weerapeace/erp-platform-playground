@@ -9,12 +9,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { r2GetSignedUrl, R2_BUCKET } from "@/lib/r2";
-import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export async function GET(request: NextRequest) {
-  // auth check
-  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+  // F18: public diagnostic ชั่วคราว — CF Access กั้นด้านนอกอยู่แล้ว
+  // (ไม่ตรวจ login เพื่อให้ดู R2 status code จริงได้)
 
   const key = new URL(request.url).searchParams.get("key") ?? "parent_skus/19230/2025-10-31-02-17-25/original";
 
