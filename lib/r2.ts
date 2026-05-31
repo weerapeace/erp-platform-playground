@@ -8,10 +8,16 @@
  *   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_URL
  */
 
+// F18: strip BOM (U+FEFF) + whitespace จาก env values
+// PowerShell อาจใส่ BOM นำหน้าตอนตั้ง GitHub Secret → R2 signature ไม่ match (403)
+function cleanEnv(v: string | undefined): string {
+  return (v ?? "").replace(/^﻿/, "").trim();
+}
+
 // F13: default bucket = ตามที่ admin app เดิมใช้ (รูป Odoo migrate มาที่นี่)
 //      override ได้ผ่าน R2_BUCKET secret ถ้า bucket เปลี่ยน
-export const R2_BUCKET     = process.env.R2_BUCKET ?? "odoo-product-images";
-export const R2_PUBLIC_URL = (process.env.R2_PUBLIC_URL ?? "").replace(/\/$/, "");
+export const R2_BUCKET     = cleanEnv(process.env.R2_BUCKET) || "odoo-product-images";
+export const R2_PUBLIC_URL = cleanEnv(process.env.R2_PUBLIC_URL).replace(/\/$/, "");
 
 export function isR2Configured(): boolean {
   return !!(
@@ -46,10 +52,10 @@ async function makeClient(): Promise<any> {
   const aws = await loadAws();
   _client = new aws.S3Client({
     region: "auto",
-    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    endpoint: `https://${cleanEnv(process.env.R2_ACCOUNT_ID)}.r2.cloudflarestorage.com`,
     credentials: {
-      accessKeyId:     process.env.R2_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+      accessKeyId:     cleanEnv(process.env.R2_ACCESS_KEY_ID),
+      secretAccessKey: cleanEnv(process.env.R2_SECRET_ACCESS_KEY),
     },
     // F18: AWS SDK v3 (3.729+) เพิ่ม checksum headers อัตโนมัติ
     //      ('x-amz-checksum-mode=ENABLED' ฯลฯ) → R2 ตอบ 403 SignatureDoesNotMatch
