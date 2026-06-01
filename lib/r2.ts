@@ -34,13 +34,20 @@ export const R2_PUBLIC_URL = (process.env.R2_PUBLIC_URL ?? "").replace(/^﻿/, "
  * คืน null ถ้าไม่มี (local dev ที่ไม่ได้ผูก binding)
  */
 export async function getR2Binding(): Promise<R2BucketLike | null> {
+  // วิธีที่ 1 (แนะนำโดย CF docs): import { env } from "cloudflare:workers"
+  try {
+    const wk: any = await import(/* webpackIgnore: true */ ("cloudflare:workers" as string));
+    if (wk?.env?.R2_IMAGES) return wk.env.R2_IMAGES;
+  } catch { /* ไม่ใช่ runtime CF — ลองวิธี 2 */ }
+
+  // วิธีที่ 2 (fallback): getCloudflareContext จาก opennext
   try {
     const mod: any = await import(/* webpackIgnore: true */ ("@opennextjs/cloudflare" as string));
     const ctx = mod.getCloudflareContext ? mod.getCloudflareContext() : null;
-    return ctx?.env?.R2_IMAGES ?? null;
-  } catch {
-    return null;
-  }
+    if (ctx?.env?.R2_IMAGES) return ctx.env.R2_IMAGES;
+  } catch { /* noop */ }
+
+  return null;
 }
 
 /** R2 ถูกตั้งค่าพร้อมใช้ไหม (มี binding) */
