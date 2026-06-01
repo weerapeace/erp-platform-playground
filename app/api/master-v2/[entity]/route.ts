@@ -123,8 +123,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
   partners: {
     table: "partners_v2",
     selectColumns: `*`,
-    listColumns: `id, code, name_th, name_en, phone, email, tax_id,
-                  is_company, country, is_active, updated_at, created_at`,
+    // F29: ลบ listColumns เก่า (ตัด field) → ใช้ * (partners เล็ก 262 rows) → ได้ครบทุก field
     searchColumns: ["code", "name_th", "name_en", "phone", "email", "tax_id"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true, is_company: true, country: "TH", tax_branch: "00000" },

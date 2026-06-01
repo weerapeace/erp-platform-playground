@@ -2084,7 +2084,13 @@ function CardsView<T extends Record<string, unknown>>({
     <div className={`grid ${colsCls} gap-3 p-4`}>
       {rows.map((row, i) => {
         const v = (k: string) => (row as Record<string, unknown>)[k];
-        const url = showImg && image ? v(image.id) : null;
+        // F29: image field เก็บ r2_key → แปลงเป็น proxy URL
+        const rawImg = showImg && image ? v(image.id) : null;
+        const url = rawImg
+          ? (String(rawImg).startsWith("http") || String(rawImg).startsWith("/api/")
+              ? String(rawImg)
+              : `/api/r2-image?key=${encodeURIComponent(String(rawImg))}`)
+          : null;
         const imgBox = showImg && image ? (
           isHorizontal ? (
             <div className={`shrink-0 w-24 ${imgAsp || "aspect-square"} bg-slate-50 flex items-center justify-center overflow-hidden`}>
