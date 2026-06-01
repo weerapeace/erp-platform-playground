@@ -19,6 +19,7 @@ import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-r
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput, ImageCell } from "@/components/image-input";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
+import { StudioPanel, type StudioField } from "@/components/master-crud/studio-panel";
 
 // ---- Helper: map FormField (Registry) → FieldDef (MasterCRUDPage internal) ----
 
@@ -68,6 +69,7 @@ function registryToFieldDef(
 
   return {
     key,
+    fieldId:     rf.id,            // F11B: registry id สำหรับ Studio save
     label:       rf.field_label,
     type:        fieldType,
     required:    rf.is_required,
@@ -123,6 +125,8 @@ function getGroupConfig(key: string) {
 
 export type FieldDef = {
   key:        string;
+  /** F11B: erp_module_fields.id — ใช้ตอน Studio บันทึก layout (group/order) */
+  fieldId?:   string;
   label:      string;
   type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image";
   required?:  boolean;
@@ -306,6 +310,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // F19: refresh trigger สำหรับ server mode (เพิ่มค่า → DataTable โหลดหน้าใหม่)
   const [serverRefresh, setServerRefresh] = useState(0);
+
+  // F11B: Studio v1 (drag-drop layout builder)
+  const [studioOpen, setStudioOpen] = useState(false);
 
   // ---- Fetch (client mode) ----
   const fetchList = useCallback(async () => {
@@ -776,12 +783,22 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             </h1>
             {config.description && <p className="text-sm text-slate-500 mt-0.5">{config.description}</p>}
           </div>
-          {canCreate && (
-            <button onClick={openCreate}
-              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              ＋ เพิ่ม{config.title}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {/* F11B: Studio button — เฉพาะหน้าที่ใช้ Field Registry + admin */}
+            {config.moduleKey && canEdit && (
+              <button onClick={() => setStudioOpen(true)}
+                title="ลากจัด layout ฟอร์ม + บันทึกลง Field Registry"
+                className="h-9 px-3 text-sm font-medium border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-50 inline-flex items-center gap-1.5">
+                🎨 ออกแบบหน้า
+              </button>
+            )}
+            {canCreate && (
+              <button onClick={openCreate}
+                className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                ＋ เพิ่ม{config.title}
+              </button>
+            )}
+          </div>
         </div>
 
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
@@ -901,6 +918,35 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         title="ปิดบัญชี" message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}
         confirmText="ปิดบัญชี" cancelText="ยกเลิก" variant="danger"
         onConfirm={() => { if (archiveTarget) archive(archiveTarget); }} />
+
+      {/* F11B: Studio v1 — drag-drop layout builder (full-screen) */}
+      {studioOpen && (
+        <StudioPanel
+          moduleLabel={config.title}
+          fields={effectiveFields
+            .filter((f) => f.fieldId)
+            .map<StudioField>((f) => ({
+              fieldId:  f.fieldId,
+              key:      f.key,
+              label:    f.label,
+              groupKey: f.groupKey ?? "other",
+              order:    f.order ?? 999,
+              type:     f.type,
+            }))}
+          onClose={() => setStudioOpen(false)}
+          onSaved={() => {
+            setStudioOpen(false);
+            // reload field registry → layout ใหม่มีผลทันที
+            if (config.moduleKey) {
+              setRegistryLoading(true);
+              apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`)
+                .then((r) => r.json() as Promise<FieldRegistryV2Response>)
+                .then((res) => { if (!res.error) setRegistryFields(res.fields); })
+                .finally(() => setRegistryLoading(false));
+            }
+          }}
+        />
+      )}
     </PlaygroundShell>
   );
 }
