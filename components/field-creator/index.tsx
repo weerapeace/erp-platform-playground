@@ -35,6 +35,26 @@ type TableOpt = { table_name: string; is_module: boolean };
 type RelFieldOpt = { key: string; column: string; label: string; targetTable: string; targetModuleKey: string };
 type TargetFieldOpt = { column: string; label: string };
 type NumFieldOpt = { column: string; label: string };
+// computed builder — แต่ละ "ขั้น" ในสูตรแบบง่าย
+type Term = { kind: "field" | "number"; value: string; op: string };
+
+const OPERATORS = [
+  { v: "*", label: "× (คูณ)" },
+  { v: "/", label: "÷ (หาร)" },
+  { v: "+", label: "+ (บวก)" },
+  { v: "-", label: "− (ลบ)" },
+];
+
+/** แปลง terms (โหมดง่าย) → สตริงสูตร เช่น "qty * price_est" */
+function buildFormula(terms: Term[]): string {
+  return terms
+    .filter((t) => (t.kind === "number" ? t.value.trim() !== "" : t.value !== ""))
+    .map((t, i) => {
+      const operand = t.kind === "number" ? t.value.trim() : t.value;
+      return i === 0 ? operand : `${t.op || "*"} ${operand}`;
+    })
+    .join(" ");
+}
 
 export function FieldCreatorModal({
   moduleKey, moduleTitle, onClose, onCreated,
@@ -69,6 +89,12 @@ export function FieldCreatorModal({
   const [computeDecimals, setComputeDecimals] = useState(2);
   const [computeSummary, setComputeSummary] = useState(false);
   const [numFields, setNumFields] = useState<NumFieldOpt[]>([]);
+  // computed builder: โหมดง่าย (dropdown) vs ขั้นสูง (พิมพ์สูตร)
+  const [formulaMode, setFormulaMode] = useState<"simple" | "advanced">("simple");
+  const [terms, setTerms] = useState<Term[]>([
+    { kind: "field", value: "", op: "*" },
+    { kind: "field", value: "", op: "*" },
+  ]);
 
   // auto-gen field_key จาก label (snake_case) จนกว่าจะแก้เอง
   useEffect(() => {
@@ -122,7 +148,16 @@ export function FieldCreatorModal({
     }).catch(() => {});
   }, [uiType, moduleKey]);
 
+  // โหมดง่าย: terms เปลี่ยน → สร้างสูตรอัตโนมัติ
+  useEffect(() => {
+    if (uiType === "computed" && formulaMode === "simple") setFormula(buildFormula(terms));
+  }, [terms, formulaMode, uiType]);
+
   const insertToken = (tok: string) => setFormula(prev => (prev && !prev.endsWith(" ") ? prev + " " : prev) + tok + " ");
+  // helpers สำหรับ builder โหมดง่าย
+  const updateTerm = (i: number, patch: Partial<Term>) => setTerms(ts => ts.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+  const addTerm = () => setTerms(ts => [...ts, { kind: "field", value: "", op: "*" }]);
+  const removeTerm = (i: number) => setTerms(ts => ts.length > 1 ? ts.filter((_, j) => j !== i) : ts);
 
   const submit = async () => {
     setErr(null);
@@ -263,31 +298,83 @@ export function FieldCreatorModal({
 
           {uiType === "computed" && (
             <div className="space-y-3 p-3 bg-violet-50/60 border border-violet-100 rounded-lg">
-              <p className="text-[11px] text-violet-700">ช่องคำนวณอัตโนมัติ (อ่านอย่างเดียว ไม่สร้าง column จริง) — พิมพ์สูตรโดยอ้างชื่อ field</p>
-              <div>
-                <label className="text-xs font-medium text-slate-600">สูตร *</label>
-                <textarea value={formula} onChange={e => setFormula(e.target.value)} rows={2}
-                  placeholder="เช่น  qty * price_est"
-                  className="mt-1 w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-violet-500" />
-                <p className="text-[11px] text-slate-400 mt-0.5">ใช้ได้: + − × (*) ÷ (/) วงเล็บ ( ) และ round() abs() min() max()</p>
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-violet-700">ช่องคำนวณอัตโนมัติ (อ่านอย่างเดียว ไม่สร้าง column จริง)</p>
+                {/* สลับโหมด ง่าย / สูตร */}
+                <div className="flex rounded-md border border-violet-200 overflow-hidden text-[11px]">
+                  <button type="button" onClick={() => setFormulaMode("simple")}
+                    className={`px-2 py-1 ${formulaMode === "simple" ? "bg-violet-600 text-white" : "bg-white text-violet-700"}`}>เลือกจากช่อง</button>
+                  <button type="button" onClick={() => setFormulaMode("advanced")}
+                    className={`px-2 py-1 ${formulaMode === "advanced" ? "bg-violet-600 text-white" : "bg-white text-violet-700"}`}>พิมพ์สูตรเอง</button>
+                </div>
               </div>
-              {numFields.length > 0 && (
+
+              {formulaMode === "simple" ? (
+                <div className="space-y-2">
+                  {terms.map((t, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      {/* เครื่องหมายระหว่างขั้น (ขั้นแรกไม่มี) */}
+                      {i === 0 ? (
+                        <span className="w-16 text-xs text-slate-400 flex-shrink-0">เริ่มจาก</span>
+                      ) : (
+                        <select value={t.op} onChange={e => updateTerm(i, { op: e.target.value })}
+                          className="w-16 h-9 px-1 text-sm border border-slate-200 rounded-md bg-white flex-shrink-0 focus:outline-none focus:ring-1 focus:ring-violet-500">
+                          {OPERATORS.map(o => <option key={o.v} value={o.v}>{o.label.split(" ")[0]}</option>)}
+                        </select>
+                      )}
+                      {/* ชนิด operand: ช่อง / ตัวเลข */}
+                      <select value={t.kind} onChange={e => updateTerm(i, { kind: e.target.value as Term["kind"], value: "" })}
+                        className="w-20 h-9 px-1 text-sm border border-slate-200 rounded-md bg-white flex-shrink-0 focus:outline-none focus:ring-1 focus:ring-violet-500">
+                        <option value="field">ช่อง</option>
+                        <option value="number">ตัวเลข</option>
+                      </select>
+                      {/* ค่า: dropdown ช่อง หรือ input ตัวเลข */}
+                      {t.kind === "field" ? (
+                        <select value={t.value} onChange={e => updateTerm(i, { value: e.target.value })}
+                          className="flex-1 min-w-0 h-9 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+                          <option value="">— เลือกช่อง —</option>
+                          {numFields.map(nf => <option key={nf.column} value={nf.column}>{nf.label}</option>)}
+                        </select>
+                      ) : (
+                        <input type="number" step="any" value={t.value} onChange={e => updateTerm(i, { value: e.target.value })}
+                          placeholder="เช่น 1.07"
+                          className="flex-1 min-w-0 h-9 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                      )}
+                      {terms.length > 1 && (
+                        <button type="button" onClick={() => removeTerm(i)} title="ลบขั้นนี้"
+                          className="w-7 h-9 flex-shrink-0 text-slate-300 hover:text-red-500">✕</button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" onClick={addTerm}
+                    className="text-xs text-violet-700 hover:text-violet-900 font-medium">＋ เพิ่มขั้น</button>
+                  {numFields.length === 0 && <p className="text-[11px] text-amber-600">module นี้ยังไม่มีช่องตัวเลข — เลือก &quot;ตัวเลข&quot; เพื่อพิมพ์ค่าเอง หรือเพิ่มช่องตัวเลขก่อน</p>}
+                  {/* preview สูตรที่ได้ */}
+                  <div className="text-[11px] text-slate-500">สูตรที่ได้: <code className="font-mono text-slate-700">{formula || "—"}</code></div>
+                </div>
+              ) : (
                 <div>
-                  <label className="text-[11px] text-slate-500">กดเพื่อใส่ช่องลงในสูตร:</label>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {numFields.map(nf => (
-                      <button key={nf.column} type="button" onClick={() => insertToken(nf.column)}
-                        className="px-2 py-0.5 text-[11px] font-mono bg-white border border-violet-200 rounded text-violet-700 hover:bg-violet-100">
-                        {nf.column}
-                      </button>
-                    ))}
-                    {["*", "/", "+", "-", "(", ")"].map(op => (
-                      <button key={op} type="button" onClick={() => insertToken(op)}
-                        className="px-2 py-0.5 text-[11px] font-mono bg-white border border-slate-200 rounded text-slate-600 hover:bg-slate-100">
-                        {op}
-                      </button>
-                    ))}
-                  </div>
+                  <label className="text-xs font-medium text-slate-600">สูตร *</label>
+                  <textarea value={formula} onChange={e => setFormula(e.target.value)} rows={2}
+                    placeholder="เช่น  qty * price_est"
+                    className="mt-1 w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                  <p className="text-[11px] text-slate-400 mt-0.5">ใช้ได้: + − × (*) ÷ (/) วงเล็บ ( ) และ round() abs() min() max()</p>
+                  {numFields.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {numFields.map(nf => (
+                        <button key={nf.column} type="button" onClick={() => insertToken(nf.column)}
+                          className="px-2 py-0.5 text-[11px] font-mono bg-white border border-violet-200 rounded text-violet-700 hover:bg-violet-100" title={nf.label}>
+                          {nf.column}
+                        </button>
+                      ))}
+                      {["*", "/", "+", "-", "(", ")"].map(op => (
+                        <button key={op} type="button" onClick={() => insertToken(op)}
+                          className="px-2 py-0.5 text-[11px] font-mono bg-white border border-slate-200 rounded text-slate-600 hover:bg-slate-100">
+                          {op}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               <div className="flex gap-2">
