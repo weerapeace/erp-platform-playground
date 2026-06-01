@@ -41,7 +41,7 @@ export default function PurchasingShopPage() {
   const [cards, setCards] = useState<Card[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState(0);   // หน้า (0-based)
   const [q, setQ] = useState("");
   const [cols, setCols] = useState(4);
 
@@ -66,6 +66,8 @@ export default function PurchasingShopPage() {
   const [partnerCountry, setPartnerCountry] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  // วันที่สั่ง — ใส่ครั้งเดียวตอนกดสร้าง ใช้กับทุกใบ (default = วันนี้)
+  const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   // โหลด preference (จำนวนคอลัมน์ + filter ที่เคยเลือก)
   useEffect(() => {
@@ -107,14 +109,14 @@ export default function PurchasingShopPage() {
     return out;
   }, [activeKeys, filterValues, filterFields]);
 
-  // ดึงการ์ด (server-side สำหรับ SKU, append เมื่อ load more)
-  const fetchCards = useCallback(async (off: number, append: boolean) => {
+  // ดึงการ์ดแบบทีละหน้า (แทนที่ทั้งหน้า ไม่ใช่ต่อท้าย)
+  const fetchCards = useCallback(async (pg: number) => {
     setLoading(true);
     try {
       if (source === "sku") {
         const fp = Object.keys(builtFilters).length ? `&filters=${encodeURIComponent(JSON.stringify(builtFilters))}` : "";
         const sp = q ? `&search=${encodeURIComponent(q)}` : "";
-        const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${off}${sp}${fp}`).then(r => r.json());
+        const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${fp}`).then(r => r.json());
         const mapped: Card[] = (j.data ?? []).map((s: Record<string, unknown>) => {
           const sid = String(s.seller_partner_id ?? "");
           const country = partnerCountry[sid] ?? "TH";
@@ -128,8 +130,8 @@ export default function PurchasingShopPage() {
             },
           } as Card;
         });
-        setTotal(num(j.count) || (off + mapped.length));
-        setCards(p => append ? [...p, ...mapped] : mapped);
+        setTotal(num(j.count) || (pg * PAGE + mapped.length));
+        setCards(mapped);
       } else {
         const j = await apiFetch("/api/master-v2/product-groups?limit=500").then(r => r.json());
         const mapped: Card[] = (j.data ?? []).map((g: Record<string, unknown>) => ({
@@ -142,14 +144,20 @@ export default function PurchasingShopPage() {
     } finally { setLoading(false); }
   }, [source, q, builtFilters, partnerCountry]);
 
-  // refetch เมื่อ source/filter เปลี่ยน + debounce สำหรับ q
+  // refetch + reset ไปหน้าแรก เมื่อ source/filter/q เปลี่ยน (debounce สำหรับ q)
   useEffect(() => {
-    setOffset(0);
-    const t = setTimeout(() => { void fetchCards(0, false); }, 300);
+    setPage(0);
+    const t = setTimeout(() => { void fetchCards(0); }, 300);
     return () => clearTimeout(t);
   }, [fetchCards]);
 
-  const loadMore = () => { const off = offset + PAGE; setOffset(off); void fetchCards(off, true); };
+  const totalPages = Math.max(1, Math.ceil(total / PAGE));
+  const goToPage = (pg: number) => {
+    const clamped = Math.min(Math.max(0, pg), totalPages - 1);
+    setPage(clamped);
+    void fetchCards(clamped);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  };
 
   // group mode: เปิด variation modal
   const openGroup = async (c: Card) => {
@@ -186,17 +194,25 @@ export default function PurchasingShopPage() {
     if (cart.length === 0) return;
     setSaving(true);
     try {
-      const prNo = "PR-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + String(Date.now()).slice(-4);
-      const hr = await apiFetch("/api/master-v2/purchase-requests-v2", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pr_no: prNo, requester: user?.name ?? "", status: "waiting", actor: user?.name }) });
-      const prId = (await hr.json()).data?.id;
-      if (!prId) throw new Error("สร้างหัว PR ไม่สำเร็จ");
-      for (const l of cart) {
+      // Logic ใหม่: 1 สินค้า = 1 ใบขอซื้อ (แยกใบ) + วันที่สั่งเดียวกันทุกใบ
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const base = String(Date.now()).slice(-4);
+      let count = 0;
+      for (let i = 0; i < cart.length; i++) {
+        const l = cart[i];
+        const prNo = `PR-${stamp}-${base}-${i + 1}`;
+        const hr = await apiFetch("/api/master-v2/purchase-requests-v2", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          pr_no: prNo, requester: user?.name ?? "", status: "waiting", order_date: orderDate, actor: user?.name,
+        }) });
+        const prId = (await hr.json()).data?.id;
+        if (!prId) continue;
         await apiFetch("/api/master-v2/pr-lines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
           pr_id: prId, variation_id: l.variationId, sku_ref: l.skuRef, item_name: l.label, qty: l.qty, uom: l.uom,
           seller_name: l.seller, price_est: l.price, currency: l.currency, image_key: l.image, note: l.note || null, status: "waiting", actor: user?.name,
         }) });
+        count++;
       }
-      setDone(prNo); setCart([]);
+      setDone(`${count} ใบ`); setCart([]);
     } catch (e) { alert(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -307,9 +323,13 @@ export default function PurchasingShopPage() {
           </div>
 
           {loading && <div className="text-center text-slate-400 py-6 text-sm">กำลังโหลด…</div>}
-          {source === "sku" && !loading && cards.length < total && (
-            <div className="text-center py-6">
-              <button onClick={loadMore} className="px-5 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ดูเพิ่มเติม ({(total - cards.length).toLocaleString()})</button>
+          {source === "sku" && !loading && total > PAGE && (
+            <div className="flex items-center justify-center gap-3 py-6">
+              <button onClick={() => goToPage(page - 1)} disabled={page <= 0}
+                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">← ก่อนหน้า</button>
+              <span className="text-sm text-slate-500">หน้า {page + 1} / {totalPages}</span>
+              <button onClick={() => goToPage(page + 1)} disabled={page >= totalPages - 1}
+                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">ถัดไป →</button>
             </div>
           )}
         </main>
@@ -342,11 +362,16 @@ export default function PurchasingShopPage() {
               </div>
             ))}
           </div>
-          <div className="p-3 border-t border-slate-100">
-            {done && <div className="mb-2 px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">✅ สร้าง {done} แล้ว — <a href="/m/purchase-requests-v2" className="underline">ดูใบขอซื้อ</a></div>}
+          <div className="p-3 border-t border-slate-100 space-y-2">
+            {done && <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">✅ สร้างใบขอซื้อ {done} แล้ว (แยกใบละ 1 สินค้า) — <a href="/m/purchase-requests-v2" className="underline">ดูใบขอซื้อ</a></div>}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">📅 วันที่สั่ง (ใช้กับทุกใบ)</label>
+              <input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)}
+                className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+            </div>
             <button onClick={save} disabled={saving || cart.length === 0}
               className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-              {saving ? "กำลังสร้าง..." : "สร้างใบขอซื้อ →"}
+              {saving ? "กำลังสร้าง..." : `สร้างใบขอซื้อ (${cart.length} ใบ) →`}
             </button>
           </div>
         </aside>
@@ -388,7 +413,7 @@ export default function PurchasingShopPage() {
       {/* ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) */}
       {skuForm && (
         <SkuFormModal mode={skuForm.mode} skuId={skuForm.id} onClose={() => setSkuForm(null)}
-          onSaved={() => { setSkuForm(null); setConfirmSku(null); setOffset(0); void fetchCards(0, false); }} />
+          onSaved={() => { setSkuForm(null); setConfirmSku(null); setPage(0); void fetchCards(0); }} />
       )}
 
       {/* Group variation modal */}
