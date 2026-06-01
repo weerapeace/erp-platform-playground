@@ -309,6 +309,7 @@ export default function PurchasingShopPage() {
                   <div className="font-medium text-slate-800 text-sm line-clamp-2">{c.name}</div>
                   {c.sku ? (
                     <>
+                      {c.sub && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{c.sub}</div>}
                       <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">🏪 {c.sku.seller}</div>
                       <div className="text-sm font-semibold text-blue-600 mt-1">{c.sku.price.toLocaleString()} {c.sku.currency}<span className="text-xs font-normal text-slate-400"> / {c.sku.uom}</span></div>
                     </>
