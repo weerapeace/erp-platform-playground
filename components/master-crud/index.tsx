@@ -979,6 +979,22 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     return { success, failed };
   }, [apiBase, config.apiPath, user?.name, refreshData]);
 
+  // แก้ "ทั้งหมดที่ตรงตัวกรอง" (server mode) — ยิง bulk-update ฝั่ง server
+  const onBulkEditAllMatching = useCallback(async (
+    changes: Record<string, unknown>,
+    scope: { search: string; filters: Record<string, unknown> },
+  ): Promise<{ affected: number }> => {
+    const res = await apiFetch(`${apiBase}${config.apiPath}/bulk-update`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changes, search: scope.search, filters: scope.filters, base_filter: config.baseFilter, actor: user?.name }),
+    });
+    const j = await res.json();
+    if (j.error) throw new Error(j.error);
+    await refreshData();
+    flash(`แก้ ${j.affected ?? 0} รายการ (ทั้งหมดที่ตรง)`);
+    return { affected: (j.affected as number) ?? 0 };
+  }, [apiBase, config.apiPath, config.baseFilter, user?.name, refreshData]);
+
   // ---- Render form field ----
   // ---- Status summary cards (ของกลาง) ----
   // หา field สถานะ (select ที่ชื่อ 'status') + นับจำนวนจาก rows ที่โหลด (client mode)
@@ -1230,6 +1246,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           bulkActions={bulkActions}
           bulkEditFields={bulkEditFields.length > 0 ? bulkEditFields : undefined}
           onBulkEdit={bulkEditFields.length > 0 ? onBulkEdit : undefined}
+          onBulkEditAllMatching={config.serverMode && bulkEditFields.length > 0 ? onBulkEditAllMatching : undefined}
           inlineEditFields={inlineEditFields.length > 0 ? inlineEditFields : undefined}
           onInlineEdit={inlineEditFields.length > 0 ? onInlineEdit : undefined}
           exportFilename={config.apiPath}

@@ -62,6 +62,49 @@ type RelationResolve = {
 
 const SAFE_IDENT = /^[a-z_][a-z0-9_]*$/i;
 
+export type ColFilter =
+  | { type: "text"; value: string }
+  | { type: "number"; min: string; max: string }
+  | { type: "select"; selected: string[] }
+  | { type: "boolean"; value: "true" | "false" };
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * ใส่เงื่อนไข soft-delete + ค้นหาหลายคำ + column filters ลงใน query
+ * ของกลาง — ใช้ทั้ง list GET และ bulk-update เพื่อให้ "แถวที่กระทบ" ตรงกับที่แสดงเป๊ะ
+ */
+export function applyListFilters(q: any, opts: {
+  searchColumns: string[];
+  search: string;
+  colFilters: Record<string, ColFilter>;
+  softDeleteColumn?: string;
+  includeInactive: boolean;
+}): any {
+  if (opts.softDeleteColumn && !opts.includeInactive) q = q.eq(opts.softDeleteColumn, true);
+  const search = (opts.search ?? "").trim();
+  if (search && opts.searchColumns.length > 0) {
+    const tokens = search.split(/\s+/).map((t) => t.replace(/[,()*]/g, "").trim()).filter(Boolean).slice(0, 6);
+    if (tokens.length === 0) q = q.or(opts.searchColumns.map((c) => `${c}.ilike.%${search}%`).join(","));
+    else for (const tok of tokens) q = q.or(opts.searchColumns.map((c) => `${c}.ilike.%${tok}%`).join(","));
+  }
+  for (const [col, f] of Object.entries(opts.colFilters)) {
+    if (!SAFE_IDENT.test(col)) continue;
+    if (f.type === "text" && f.value) {
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(f.value)) q = q.eq(col, f.value);
+      else q = q.ilike(col, `%${f.value}%`);
+    } else if (f.type === "number") {
+      if (f.min !== "" && f.min != null) q = q.gte(col, Number(f.min));
+      if (f.max !== "" && f.max != null) q = q.lte(col, Number(f.max));
+    } else if (f.type === "select" && Array.isArray(f.selected) && f.selected.length > 0) {
+      q = q.in(col, f.selected);
+    } else if (f.type === "boolean" && (f.value === "true" || f.value === "false")) {
+      q = q.eq(col, f.value === "true");
+    }
+  }
+  return q;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 /**
  * แปลง FK id → ชื่อ สำหรับ relation fields (ของกลาง) — ใช้ทั้ง list + detail
  * ดึงเฉพาะ id ที่ปรากฏใน rows (distinct) จึงเบาแม้ตารางปลายทางมีหลายหมื่นแถว
@@ -397,11 +440,6 @@ export async function GET(
   const sortBy  = searchParams.get("sort_by");
   const sortDir = searchParams.get("sort_dir") === "desc" ? false : true;  // asc=true
   const SAFE_COL = /^[a-z_][a-z0-9_]*$/i;
-  type ColFilter =
-    | { type: "text"; value: string }
-    | { type: "number"; min: string; max: string }
-    | { type: "select"; selected: string[] }
-    | { type: "boolean"; value: "true" | "false" };
   let colFilters: Record<string, ColFilter> = {};
   try {
     const raw = searchParams.get("filters");
@@ -433,46 +471,10 @@ export async function GET(
       .order(orderCol, { ascending: orderAsc })
       .range(cursor, batchEnd);
 
-    if (cfg.softDeleteColumn && !includeInactive) {
-      q = q.eq(cfg.softDeleteColumn, true);
-    }
-    if (search && cfg.searchColumns.length > 0) {
-      // ค้นหาแบบหลายคำ: ตัด search เป็น token แล้ว AND ทุก token (OR ข้าม column)
-      // เช่น "ซิป 234" → ต้องมีทั้ง "ซิป" และ "234" อยู่ใน column ใดก็ได้ (ไม่ต้องติดกัน)
-      // sanitize: ตัด , ( ) * ที่ทำให้ PostgREST or() syntax พัง
-      const tokens = search
-        .split(/\s+/)
-        .map((t) => t.replace(/[,()*]/g, "").trim())
-        .filter(Boolean)
-        .slice(0, 6);   // กัน query ยาวเกิน
-      if (tokens.length === 0) {
-        // search มีแต่ตัวอักษรพิเศษ → fallback หาแบบทั้งก้อน
-        q = q.or(cfg.searchColumns.map((c) => `${c}.ilike.%${search}%`).join(","));
-      } else {
-        for (const tok of tokens) {
-          q = q.or(cfg.searchColumns.map((c) => `${c}.ilike.%${tok}%`).join(","));
-        }
-      }
-    }
-    // F27: column filters → Supabase query (เฉพาะ column จริงในตาราง)
-    for (const [col, f] of Object.entries(colFilters)) {
-      if (!SAFE_COL.test(col)) continue;   // กัน injection + ข้าม relation alias
-      if (f.type === "text" && f.value) {
-        // ถ้าค่าเป็น uuid → ใช้ eq (relation/_id) ไม่งั้น ilike กับ uuid column จะ error/ไม่ match
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(f.value)) {
-          q = q.eq(col, f.value);
-        } else {
-          q = q.ilike(col, `%${f.value}%`);
-        }
-      } else if (f.type === "number") {
-        if (f.min !== "" && f.min != null) q = q.gte(col, Number(f.min));
-        if (f.max !== "" && f.max != null) q = q.lte(col, Number(f.max));
-      } else if (f.type === "select" && Array.isArray(f.selected) && f.selected.length > 0) {
-        q = q.in(col, f.selected);
-      } else if (f.type === "boolean" && (f.value === "true" || f.value === "false")) {
-        q = q.eq(col, f.value === "true");
-      }
-    }
+    q = applyListFilters(q, {
+      searchColumns: cfg.searchColumns, search, colFilters,
+      softDeleteColumn: cfg.softDeleteColumn, includeInactive,
+    });
 
     const { data, error, count } = await q;
     if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });

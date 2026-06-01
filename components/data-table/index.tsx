@@ -267,6 +267,14 @@ export interface DataTableProps<T extends Record<string, unknown>> {
   onBulkEdit?: (edits: { row: T; changes: Record<string, unknown> }[]) => Promise<BulkEditResult>;
   /** label แสดงชื่อแถวใน bulk edit grid (default: name/sku) */
   bulkRowLabel?: (row: T) => string;
+  /**
+   * (server mode) แก้ "ทั้งหมดที่ตรงตัวกรอง" ข้ามหน้า — รับค่าใหม่ชุดเดียว + ขอบเขตตัวกรองปัจจุบัน
+   * ถ้าระบุ + อยู่ server mode จะมีปุ่ม "แก้ทั้งหมดที่ตรง (N)"
+   */
+  onBulkEditAllMatching?: (
+    changes: Record<string, unknown>,
+    scope: { search: string; filters: Record<string, unknown> },
+  ) => Promise<{ affected: number }>;
   /** column id ที่ดับเบิลคลิกแก้ในตารางได้ (inline edit) */
   inlineEditFields?: string[];
   /** callback บันทึก inline edit — return error string ถ้าพลาด */
@@ -411,6 +419,7 @@ export function DataTable<T extends Record<string, unknown>>({
   bulkEditFields = [],
   onBulkEdit,
   bulkRowLabel,
+  onBulkEditAllMatching,
   inlineEditFields = [],
   onInlineEdit,
   serverFetch,
@@ -559,6 +568,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
   // ---- Bulk edit state ----
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkAllOpen,  setBulkAllOpen]  = useState(false);  // แก้ทั้งหมดที่ตรงตัวกรอง (server mode)
 
   // ---- Inline edit state ----
   const [editCell,  setEditCell]  = useState<{ rowId: string; colId: string } | null>(null);
@@ -1372,7 +1382,13 @@ export function DataTable<T extends Record<string, unknown>>({
             {bulkEditFields.length > 0 && onBulkEdit && (
               <button onClick={() => setBulkEditOpen(true)}
                 className="h-7 px-3 text-xs font-medium rounded-md border bg-white border-blue-200 text-blue-700 hover:bg-blue-100 transition-colors">
-                ✏️ แก้หลายรายการ
+                ✏️ แก้รายการที่เลือก
+              </button>
+            )}
+            {isServer && onBulkEditAllMatching && bulkEditFields.length > 0 && srvTotal > selectedCount && (
+              <button onClick={() => setBulkAllOpen(true)}
+                className="h-7 px-3 text-xs font-medium rounded-md border bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors">
+                ✏️ แก้ทั้งหมดที่ตรงตัวกรอง ({srvTotal.toLocaleString()})
               </button>
             )}
             {bulkActions.map((action, i) => (
@@ -1682,6 +1698,21 @@ export function DataTable<T extends Record<string, unknown>>({
         />
       )}
 
+      {/* Bulk Edit ALL MATCHING (server mode, ข้ามหน้า) */}
+      {bulkAllOpen && onBulkEditAllMatching && (
+        <BulkEditAllModal
+          fields={bulkEditFields}
+          count={srvTotal}
+          onClose={() => setBulkAllOpen(false)}
+          onApply={async (changes) => {
+            const res = await onBulkEditAllMatching(changes, { search: debouncedSearch, filters: activeServerFilters });
+            setBulkAllOpen(false);
+            setRowSelection({});
+            return res;
+          }}
+        />
+      )}
+
       {/* Card config panel */}
       {showCardCfg && (
         <CardConfigDialog
@@ -1951,6 +1982,92 @@ function SelectFilterCard({ field, opts, selected, onChange }: {
 // ============================================================
 // ---- Bulk Edit Modal (CLAUDE.md §18) ----
 // ============================================================
+
+// แก้ "ทั้งหมดที่ตรงตัวกรอง" (server mode) — เลือก field + ใส่ค่าเดียวต่อ field → ใช้กับทุกแถวที่ตรง
+function BulkEditAllModal({
+  fields, count, onClose, onApply,
+}: {
+  fields: BulkEditField[];
+  count: number;
+  onClose: () => void;
+  onApply: (changes: Record<string, unknown>) => Promise<{ affected: number }>;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const [typed, setTyped] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [result, setResult] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const toggle = (k: string) => setSelected((p) => { const n = new Set(p); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const needConfirm = count > 20;
+  const canApply = selected.size > 0 && (!needConfirm || typed === "CONFIRM");
+
+  const apply = async () => {
+    setApplying(true); setErr(null);
+    try {
+      const changes: Record<string, unknown> = {};
+      for (const f of fields) {
+        if (!selected.has(f.key)) continue;
+        const raw = vals[f.key] ?? "";
+        changes[f.key] = f.type === "boolean" ? raw === "true" : f.type === "number" ? (raw === "" ? null : Number(raw)) : raw;
+      }
+      const r = await onApply(changes);
+      setResult(r.affected);
+    } catch (e) { setErr(String(e)); }
+    finally { setApplying(false); }
+  };
+
+  const btn = "h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50";
+  return (
+    <ERPModal open onClose={onClose} title={`แก้ทั้งหมดที่ตรงตัวกรอง (${count.toLocaleString()} รายการ)`} size="md"
+      footer={result != null ? (
+        <button onClick={onClose} className={`${btn} text-white bg-blue-600 hover:bg-blue-700`}>เสร็จสิ้น</button>
+      ) : (
+        <>
+          <button onClick={onClose} disabled={applying} className={`${btn} text-slate-700 border border-slate-200 hover:bg-slate-50`}>ยกเลิก</button>
+          <button onClick={apply} disabled={applying || !canApply} className={`${btn} text-white bg-amber-600 hover:bg-amber-700`}>{applying ? "กำลังแก้..." : "แก้ทั้งหมด"}</button>
+        </>
+      )}>
+      {result != null ? (
+        <div className="py-6 text-center text-sm text-emerald-700">✅ แก้สำเร็จ {result.toLocaleString()} รายการ</div>
+      ) : (
+        <div className="space-y-3">
+          <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+            ⚠ จะแก้ <b>ทุกแถวที่ตรงตัวกรอง/ค้นหาปัจจุบัน</b> ({count.toLocaleString()} รายการ) ไม่ใช่แค่ที่เลือกในหน้านี้
+          </div>
+          {err && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">⚠ {err}</div>}
+          <p className="text-xs font-medium text-slate-600">เลือกข้อมูลที่จะแก้ + ใส่ค่าใหม่:</p>
+          <div className="space-y-2 max-h-[40vh] overflow-auto">
+            {fields.map((f) => (
+              <div key={f.key} className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 w-40 flex-shrink-0 text-sm text-slate-700">
+                  <input type="checkbox" checked={selected.has(f.key)} onChange={() => toggle(f.key)} /> {f.label}
+                </label>
+                {selected.has(f.key) && (
+                  f.type === "boolean" ? (
+                    <select value={vals[f.key] ?? "false"} onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded bg-white"><option value="true">ใช่</option><option value="false">ไม่ใช่</option></select>
+                  ) : f.type === "select" && f.options ? (
+                    <select value={vals[f.key] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded bg-white"><option value="">—</option>{f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+                  ) : (
+                    <input type={f.type === "number" ? "number" : "text"} value={vals[f.key] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded" />
+                  )
+                )}
+              </div>
+            ))}
+          </div>
+          {needConfirm && (
+            <div>
+              <p className="text-xs text-slate-500 mb-1">พิมพ์ <b>CONFIRM</b> เพื่อยืนยันแก้จำนวนมาก</p>
+              <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="CONFIRM"
+                className="w-full h-8 px-2 text-sm border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-500" />
+            </div>
+          )}
+        </div>
+      )}
+    </ERPModal>
+  );
+}
 
 function BulkEditGrid<T extends Record<string, unknown>>({
   fields, rows, rowLabel, onClose, onApply,
