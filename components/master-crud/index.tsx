@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { PlaygroundShell } from "@/components/playground-shell";
+import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
@@ -885,10 +885,16 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const coverKey    = (form["cover_image_r2_key"] as string) || null;
 
   // F14: early return AFTER all hooks — กัน React error #310
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
+  // ข้อ 3: ถ้าอยู่ใต้ layout ร่วม (มี shell แล้ว) → ไม่เรนเดอร์ shell ซ้อน (sidebar นิ่ง ไม่เด้ง)
+  const insideShell = useShellPresent();
+  const Wrap = insideShell
+    ? ({ children }: { children: React.ReactNode }) => <>{children}</>
+    : PlaygroundShell;
+
+  if (!canView) return <Wrap><AccessDenied /></Wrap>;
 
   return (
-    <PlaygroundShell>
+    <Wrap>
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -1156,7 +1162,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           }}
         />
       )}
-    </PlaygroundShell>
+    </Wrap>
   );
 }
 

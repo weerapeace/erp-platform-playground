@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
+
+/**
+ * ShellPresentContext — บอกลูกหลานว่า "มี PlaygroundShell ครอบอยู่แล้ว"
+ * ใช้โดย MasterCRUDPage/MasterPage เพื่อไม่เรนเดอร์ shell ซ้อน
+ * เมื่อหน้าอยู่ใต้ layout ร่วม (app/master/layout.tsx, app/m/layout.tsx)
+ * → sidebar อยู่นิ่ง ไม่ remount ตอนเปลี่ยนเมนู (ไม่เด้งขึ้นบนสุด)
+ */
+export const ShellPresentContext = createContext(false);
+export const useShellPresent = () => useContext(ShellPresentContext);
 import { useAuth, roleLabel, roleColor } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
@@ -363,7 +372,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
 
       {/* Content */}
       <main id="main-content" className="flex-1 overflow-y-auto pt-12 md:pt-0" tabIndex={-1}>
-        {children}
+        <ShellPresentContext.Provider value={true}>{children}</ShellPresentContext.Provider>
       </main>
     </div>
   );
