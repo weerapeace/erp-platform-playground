@@ -936,17 +936,28 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, [editingId, onInlineEdit, effectiveFields]);
 
   // ---- Bulk edit fields ----
+  // Bulk edit (ของกลาง): ดึง field ที่แก้ได้ + ชนิดง่าย ๆ มาให้อัตโนมัติ
+  // (ไม่ต้องตั้ง flag ราย field) — ยกเว้น read-only, unique key (code) และ field สถานะระบบ (is_active)
+  // ผู้ใช้เลือกเองว่าจะแก้ field ไหนใน popup → ปลอดภัยด้วย confirm + รายงานสำเร็จ/พลาด
   const bulkEditFields: BulkEditField[] = useMemo(() => {
     if (!canEdit) return [];
+    const uniqueKey = config.uniqueKey ?? "code";
     return effectiveFields
-      .filter((f) => f.bulkEditable)
+      .filter((f) =>
+        (f.bulkEditable === true) || (
+          !f.readonly &&
+          f.key !== uniqueKey &&
+          f.key !== activeField &&
+          (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select")
+        ),
+      )
       .map((f) => ({
         key: f.key,
         label: f.label,
         type: (["number", "select", "boolean"].includes(f.type) ? f.type : "text") as "text" | "number" | "select" | "boolean",
         options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: o })) : undefined,
       }));
-  }, [canEdit, effectiveFields]);
+  }, [canEdit, effectiveFields, config.uniqueKey, activeField]);
 
   const onBulkEdit = useCallback(async (
     edits: { row: Row; changes: Record<string, unknown> }[]
