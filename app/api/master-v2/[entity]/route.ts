@@ -37,7 +37,59 @@ type EntityConfig = {
   softDeleteColumn?: string;
   /** map response row → flat ตามที่ frontend คาดหวัง (resolve nested join) */
   postProcess?:  (row: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * Generic relation resolve — สำหรับโมดูลที่ไม่ได้ hardcode join
+   * อ่านจาก Field Registry (ui_field_type=relation) แล้วแปลง FK id → ชื่อ ตอน GET
+   * โดยดึงเฉพาะ id ที่อยู่ในหน้านั้น (.in) → scale ได้แม้ตารางปลายทางใหญ่
+   */
+  relationResolves?: RelationResolve[];
 };
+
+type RelationResolve = {
+  column:       string;        // FK column บนตารางนี้ เช่น item_sku_id
+  targetTable:  string;        // ตารางปลายทาง เช่น skus_v2
+  labelField:   string;        // field หลักที่จะโชว์ เช่น code
+  secondaryField: string | null; // field รองโชว์ตัวเล็ก เช่น name_th
+  labelKey:     string;        // key ผลลัพธ์ เช่น item_sku_label
+  secondaryKey: string;        // เช่น item_sku_secondary
+};
+
+const SAFE_IDENT = /^[a-z_][a-z0-9_]*$/i;
+
+/**
+ * แปลง FK id → ชื่อ สำหรับ relation fields (ของกลาง) — ใช้ทั้ง list + detail
+ * ดึงเฉพาะ id ที่ปรากฏใน rows (distinct) จึงเบาแม้ตารางปลายทางมีหลายหมื่นแถว
+ */
+export async function resolveRelationLabels(
+  supabase: ReturnType<typeof supabaseFromRequest>,
+  cfg: EntityConfig,
+  rows: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  if (!cfg.relationResolves?.length || rows.length === 0) return rows;
+  let out = rows;
+  for (const rr of cfg.relationResolves) {
+    if (!SAFE_IDENT.test(rr.targetTable) || !SAFE_IDENT.test(rr.labelField)) continue;
+    if (rr.secondaryField && !SAFE_IDENT.test(rr.secondaryField)) continue;
+    const ids = [...new Set(out.map((r) => r[rr.column]).filter((v): v is string => v != null).map(String))];
+    if (ids.length === 0) continue;
+    const sel = rr.secondaryField ? `id, ${rr.labelField}, ${rr.secondaryField}` : `id, ${rr.labelField}`;
+    const { data: td } = await supabase.from(rr.targetTable).select(sel).in("id", ids);
+    const map = new Map<string, Record<string, unknown>>();
+    (td ?? []).forEach((t) => { const o = t as Record<string, unknown>; map.set(String(o.id), o); });
+    out = out.map((r) => {
+      const id = r[rr.column];
+      if (id == null) return r;
+      const t = map.get(String(id));
+      if (!t) return r;
+      return {
+        ...r,
+        [rr.labelKey]: t[rr.labelField],
+        ...(rr.secondaryField ? { [rr.secondaryKey]: t[rr.secondaryField] } : {}),
+      };
+    });
+  }
+  return out;
+}
 
 /**
  * Helper: flatten Supabase nested join (returns array or object) → single value
@@ -258,16 +310,35 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
   const { data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", entity).maybeSingle();
   if (!mod) return null;
   const { data: flds } = await admin.from("erp_module_fields")
-    .select("column_name, is_searchable").eq("module_id", mod.id).eq("is_active", true);
+    .select("column_name, is_searchable, ui_field_type, relation_config").eq("module_id", mod.id).eq("is_active", true);
   const searchColumns = (flds ?? [])
     .filter((f) => f.is_searchable && f.column_name)
     .map((f) => f.column_name as string);
+
+  // ของกลาง: relation fields → แปลง FK id เป็นชื่อ ตอน GET (อ่านจาก Field Registry)
+  const relationResolves: RelationResolve[] = (flds ?? [])
+    .filter((f) => f.ui_field_type === "relation" && f.column_name && (f.relation_config as Record<string, unknown>)?.target_table)
+    .map((f) => {
+      const rc = f.relation_config as Record<string, unknown>;
+      const col = f.column_name as string;
+      const base = col.endsWith("_id") ? col.slice(0, -3) : col;
+      return {
+        column: col,
+        targetTable: String(rc.target_table),
+        labelField: String(rc.target_label_field ?? "name"),
+        secondaryField: rc.secondary_label_field ? String(rc.secondary_label_field) : null,
+        labelKey: `${base}_label`,
+        secondaryKey: `${base}_secondary`,
+      };
+    });
+
   return {
     table: mod.table_name as string,
     selectColumns: "*",
     searchColumns: searchColumns.length ? searchColumns : ["name"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true },
+    relationResolves,
   };
 }
 
@@ -383,7 +454,8 @@ export async function GET(
     if (cursor >= stopAt) break;
   }
 
-  const rows = cfg.postProcess ? allRows.map(cfg.postProcess) : allRows;
+  const processed = cfg.postProcess ? allRows.map(cfg.postProcess) : allRows;
+  const rows = await resolveRelationLabels(supabase, cfg, processed);
   return NextResponse.json({ data: rows, total: totalCount || rows.length, error: null });
 }
 

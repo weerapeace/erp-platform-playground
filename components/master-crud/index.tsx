@@ -43,7 +43,13 @@ function defaultRelationCellRender(key: string) {
   return (value: unknown, row?: Record<string, unknown>): React.ReactNode => {
     if (!row) return value ? <code className="text-xs text-slate-400">{String(value).slice(0, 8)}...</code> : <span className="text-slate-300">—</span>;
     const label = row[`${base}_label`] ?? row[`${base}_name`];
-    if (label) return <span className="text-sm text-slate-700">{String(label)}</span>;
+    const secondary = row[`${base}_secondary`];
+    if (label) return (
+      <span className="text-sm text-slate-700">
+        {String(label)}
+        {secondary != null && String(secondary) !== "" && <span className="ml-1 text-xs text-slate-400">· {String(secondary)}</span>}
+      </span>
+    );
     if (value) return <code className="text-xs text-slate-400" title="ยังไม่ได้ resolve label">{String(value).slice(0, 8)}...</code>;
     return <span className="text-slate-300">—</span>;
   };

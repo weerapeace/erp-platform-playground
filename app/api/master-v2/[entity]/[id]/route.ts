@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { resolveEntity } from "../route";
+import { resolveEntity, resolveRelationLabels } from "../route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,7 +32,8 @@ export async function GET(
     .single();
 
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
-  const row = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : data;
+  const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
+  const [row] = await resolveRelationLabels(supabase, cfg, [processed]);
   return NextResponse.json({ data: row, error: null });
 }
 
