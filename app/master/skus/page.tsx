@@ -7,7 +7,14 @@
  * Field config: /admin/schema-sync (เลือก module: SKUs)
  */
 
-import { MasterCRUDPage, type MasterCRUDConfig } from "@/components/master-crud";
+import dynamic from "next/dynamic";
+import type { MasterCRUDConfig } from "@/components/master-crud";
+
+// F20: client-only render — กัน Worker 1102 (SSR component หนัก)
+const MasterCRUDPage = dynamic(
+  () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
+  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+);
 
 const CONFIG: MasterCRUDConfig = {
   apiBase:     "/api/master-v2/",

@@ -5,16 +5,20 @@
  *
  * URL: /master/parent-skus
  *
- * ⭐ ใช้ Field Registry แบบ dynamic (Sprint 2):
- * - field list, labels, visibility, filter, sort, search → จาก /admin/schema-sync
- * - เพิ่มฟิลด์ใหม่ใน Supabase → กด Sync ใน /admin/schema-sync → user เห็นทันที (ไม่ต้อง deploy)
+ * F20: client-only render (ssr: false) — Worker ไม่ต้อง SSR component หนัก
+ * → กัน Error 1102 (Worker exceeded resource limits ตอน render)
+ * → Worker ส่ง HTML เปล่า + JS ไป render ที่ browser
  *
- * เหลือเฉพาะ:
- * - cellRenderers (custom formatting เช่น สี/icon)
- * - permissions
+ * ⭐ ใช้ Field Registry แบบ dynamic — field config จาก /admin/schema-sync
  */
 
-import { MasterCRUDPage, type MasterCRUDConfig } from "@/components/master-crud";
+import dynamic from "next/dynamic";
+import type { MasterCRUDConfig } from "@/components/master-crud";
+
+const MasterCRUDPage = dynamic(
+  () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
+  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+);
 
 const FAMILY_LABEL: Record<string, string> = {
   general: "🏷️ ทั่วไป",
@@ -23,6 +27,13 @@ const FAMILY_LABEL: Record<string, string> = {
   jewelry: "💎 จิวเวลรี",
   spare:   "🔧 อะไหล่",
 };
+
+function fmtPrice(v: unknown) {
+  const n = v as number | null;
+  return n != null && Number(n) > 0
+    ? <span className="text-sm tabular-nums font-medium text-slate-800">฿{Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+    : <span className="text-xs text-slate-300">—</span>;
+}
 
 const CONFIG: MasterCRUDConfig = {
   apiBase:     "/api/master-v2/",
@@ -33,14 +44,13 @@ const CONFIG: MasterCRUDConfig = {
   description: "Product Templates — จัดการ visible/filter/search/required ที่ /admin/schema-sync",
   icon:        "📦",
   activeField: "is_active",
-  serverMode:  true,   // F19: server-side pagination (1471 rows) — กัน Worker 1102
+  serverMode:  true,
   exportEntityType: "parent_skus_v2",
   permissions: {
     view:   "products.view",
     create: "products.create",
     edit:   "products.edit",
   },
-  // custom renderers — Field Registry กำหนด visibility, แต่ format การแสดงผลกำหนดที่นี่
   cellRenderers: {
     product_family: (v) => {
       const s = (v as string) ?? "general";
@@ -65,13 +75,6 @@ const CONFIG: MasterCRUDConfig = {
     fake_price:  fmtPrice,
   },
 };
-
-function fmtPrice(v: unknown) {
-  const n = v as number | null;
-  return n != null && Number(n) > 0
-    ? <span className="text-sm tabular-nums font-medium text-slate-800">฿{Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
-    : <span className="text-xs text-slate-300">—</span>;
-}
 
 export default function ParentSKUsV2Page() {
   return <MasterCRUDPage config={CONFIG} />;
