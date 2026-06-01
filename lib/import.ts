@@ -231,7 +231,25 @@ export const SUPPLIER_IMPORT_SCHEMA: ImportSchema = {
   ],
 };
 
+// Phase 2: Material Families import (entityType ต้องตรงกับ RPC_MAP ใน /api/admin/import)
+export const MATERIAL_FAMILY_IMPORT_SCHEMA: ImportSchema = {
+  entityType: "material-families",
+  label:      "กลุ่มวัตถุดิบ (Material Families)",
+  uniqueKey:  "family_code",
+  fields: [
+    { key: "family_code",       label: "รหัส Family",   type: "text", required: true, aliases: ["code","family","รหัส"] },
+    { key: "name_th",           label: "ชื่อ (ไทย)",     type: "text", required: true, aliases: ["name","ชื่อ","ชื่อไทย"] },
+    { key: "name_en",           label: "ชื่อ (อังกฤษ)",  type: "text", aliases: ["english name","ชื่ออังกฤษ"] },
+    { key: "material_category", label: "หมวดวัตถุดิบ",  type: "text", aliases: ["category","หมวด"] },
+    { key: "material_type",     label: "ชนิด",          type: "text", aliases: ["type","ประเภท"] },
+    { key: "grade",             label: "เกรด",          type: "text", aliases: ["grade"] },
+    { key: "default_uom",       label: "หน่วยเริ่มต้น",  type: "text", aliases: ["uom","unit","หน่วย"] },
+    { key: "note",              label: "หมายเหตุ",      type: "text", aliases: ["notes","remark"] },
+  ],
+};
+
 export const IMPORT_SCHEMAS: Record<string, ImportSchema> = {
   products:  PRODUCT_IMPORT_SCHEMA,
   suppliers: SUPPLIER_IMPORT_SCHEMA,
+  "material-families": MATERIAL_FAMILY_IMPORT_SCHEMA,
 };

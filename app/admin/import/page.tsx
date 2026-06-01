@@ -9,6 +9,7 @@ import { IMPORT_SCHEMAS } from "@/lib/import";
 const ENTITY_OPTIONS = [
   { v: "products",  label: "📦 สินค้า",      perm: "products.create" as const },
   { v: "suppliers", label: "🏢 ผู้จำหน่าย", perm: "suppliers.create" as const },
+  { v: "material-families", label: "🧵 กลุ่มวัตถุดิบ", perm: "products.create" as const },
 ];
 
 export default function AdminImportPage() {

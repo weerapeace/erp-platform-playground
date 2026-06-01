@@ -6,6 +6,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 const RPC_MAP: Record<string, string> = {
   products:  "erp_playground_products_import_batch",
   suppliers: "erp_playground_suppliers_import_batch",
+  "material-families": "erp_material_families_import_batch",  // Phase 2
 };
 
 type Body = {
