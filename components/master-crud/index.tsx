@@ -235,6 +235,11 @@ export type MasterCRUDConfig = {
    * Trade-off: ปิด client filter/saved-views (search + pagination ทำที่ server)
    */
   serverMode?: boolean;
+  /**
+   * กลุ่ม A: โชว์ทุก column ที่ลงทะเบียนไว้เป็น default (ไม่สนใจ is_visible)
+   * เหมาะกับหน้าที่ field ไม่เยอะ (skeleton/operation) — ผู้ใช้ยังซ่อนเองได้ทีหลังผ่าน Column Manager
+   */
+  defaultShowAllColumns?: boolean;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -555,9 +560,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // ---- Columns ----
   const columns: ColumnDef<Row>[] = useMemo(() => {
-    const tableFields = effectiveFields.filter(f => f.colSize !== undefined);
+    // กลุ่ม A: ถ้า defaultShowAllColumns → โชว์ทุก field (ใช้ width เป็น size สำรอง)
+    const showAll = config.defaultShowAllColumns === true;
+    const tableFields = effectiveFields.filter(f => showAll ? true : f.colSize !== undefined);
     const cols: ColumnDef<Row>[] = tableFields.map(f => ({
-      id: f.key, accessorKey: f.key, header: f.label, size: f.colSize,
+      id: f.key, accessorKey: f.key, header: f.label, size: f.colSize ?? f.width ?? 150,
       enableSorting: f.sortable !== false,
       meta: {
         filterable: f.filterable ?? false,

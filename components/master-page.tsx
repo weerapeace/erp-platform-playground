@@ -25,10 +25,13 @@ export type MasterPageProps = {
   activeField?: string;
   /** cell renderers เพิ่มเติม (badge ฯลฯ) */
   cellRenderers?: MasterCRUDConfig["cellRenderers"];
+  /** กลุ่ม A: โชว์ทุก column เป็น default (default true สำหรับหน้า skeleton) */
+  showAllColumns?: boolean;
 };
 
 export function MasterPage({
-  apiPath, moduleKey, title, icon, description, activeField = "is_active", cellRenderers,
+  apiPath, moduleKey, title, icon, description, activeField = "is_active",
+  cellRenderers, showAllColumns = true,
 }: MasterPageProps) {
   const config: MasterCRUDConfig = {
     apiBase: "/api/master-v2/",
@@ -42,6 +45,7 @@ export function MasterPage({
     pageLimit: 500,
     permissions: { view: "products.view", create: "products.create", edit: "products.edit" },
     cellRenderers,
+    defaultShowAllColumns: showAllColumns,
   };
   return <MasterCRUDPage config={config} />;
 }
