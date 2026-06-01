@@ -10,6 +10,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
+// อ่านสดเสมอ — Field Registry เป็น config ที่เปลี่ยน runtime (เพิ่ม module/field ใหม่)
+// ห้าม cache ไม่งั้น module ใหม่จะขึ้น "module not found"
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export type FormField = {
   id:                string;
   field_key:         string;

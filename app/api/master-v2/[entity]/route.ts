@@ -14,6 +14,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+// อ่าน/เขียนสดเสมอ — ข้อมูล master + module config เปลี่ยน runtime, ห้าม cache
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // ---- Entity config ----
 
 type EntityConfig = {
