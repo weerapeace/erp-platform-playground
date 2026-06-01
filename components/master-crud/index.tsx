@@ -245,6 +245,17 @@ export type MasterCRUDConfig = {
    * เหมาะกับหน้าที่ field ไม่เยอะ (skeleton/operation) — ผู้ใช้ยังซ่อนเองได้ทีหลังผ่าน Column Manager
    */
   defaultShowAllColumns?: boolean;
+  /**
+   * ตัวกรองตายตัว (baseFilter) — ใช้ทำ "มุมมองกรองไว้แล้ว" ของตารางเดียวกัน
+   * เช่น Customers = partners ที่ is_customer=true (ผู้ใช้ลบตัวกรองนี้ไม่ได้)
+   * รูปแบบเดียวกับ column filter ที่ส่งให้ API: { col: { type, value/min/max/selected } }
+   */
+  baseFilter?: Record<string, unknown>;
+  /**
+   * ค่าเริ่มต้นตอนกดสร้างใหม่ (ทับค่า default จาก Field Registry)
+   * เช่น สร้างจากหน้า Customers → ตั้ง is_customer=true ให้อัตโนมัติ
+   */
+  createDefaults?: Record<string, unknown>;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -374,13 +385,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     try {
       // F19: ลด default 500 → 200 (กัน Worker 1102) — ใช้ search หา row ที่เหลือ
       const limit = config.pageLimit ?? 200;
-      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true`);
+      const bf = config.baseFilter && Object.keys(config.baseFilter).length > 0
+        ? `&filters=${encodeURIComponent(JSON.stringify(config.baseFilter))}` : "";
+      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       setRows((json.data ?? []) as Row[]);
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode]);
+  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
@@ -400,15 +413,16 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     });
     if (params.search) qs.set("search", params.search);
     if (params.sortBy)  { qs.set("sort_by", params.sortBy); qs.set("sort_dir", params.sortDir ?? "asc"); }
-    // F27: ส่ง column filters → server (encode เป็น JSON)
-    if (params.filters && Object.keys(params.filters).length > 0) {
-      qs.set("filters", JSON.stringify(params.filters));
+    // F27: ส่ง column filters → server (encode เป็น JSON) + baseFilter ตายตัว (ทับไม่ได้)
+    const merged = { ...(params.filters ?? {}), ...(config.baseFilter ?? {}) };
+    if (Object.keys(merged).length > 0) {
+      qs.set("filters", JSON.stringify(merged));
     }
     const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
     return { rows: (json.data ?? []) as Row[], total: (json.total as number) ?? 0 };
-  }, [apiBase, config.apiPath]);
+  }, [apiBase, config.apiPath, config.baseFilter]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
   // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'
@@ -430,7 +444,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   };
 
   const openCreate = () => {
-    setEditingId(null); setForm(emptyForm); setFormErr(null); setDirty(false);
+    setEditingId(null); setForm({ ...emptyForm, ...(config.createDefaults ?? {}) }); setFormErr(null); setDirty(false);
     setDrawerMode("edit");   // F24: กดเพิ่ม → เข้าฟอร์มกรอกเลย (ไม่ใช่ view)
     setModalOpen(true);
   };
