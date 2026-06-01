@@ -137,8 +137,9 @@ export function SkuFormModal({
     );
   };
 
+  const dismiss = useBackdropDismiss(onClose);
   return createPortal(
-    <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4" {...useBackdropDismiss(onClose)}>
+    <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-800">{mode === "edit" ? "✎ แก้ไขสินค้า (SKU)" : "＋ เพิ่มสินค้าใหม่ (SKU)"}</h3>

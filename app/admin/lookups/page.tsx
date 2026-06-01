@@ -348,8 +348,9 @@ function NewTypeModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     } finally { setSaving(false); }
   };
 
+  const dismiss = useBackdropDismiss(onClose);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" {...useBackdropDismiss(onClose)}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-semibold text-slate-900 mb-1">＋ สร้าง Lookup Type ใหม่</h3>
         <p className="text-xs text-slate-500 mb-4">

@@ -57,9 +57,10 @@ export function RelationPeekModal({ moduleKey, recordId, onClose }: { moduleKey:
 
   const title = row ? String(row["name_th"] ?? row["name"] ?? row["code"] ?? "รายละเอียด") : "รายละเอียด";
   const cover = row ? (row["cover_image_r2_key"] ?? row["image_key"]) : null;
+  const dismiss = useBackdropDismiss(onClose);
 
   return createPortal(
-    <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" {...useBackdropDismiss(onClose)}>
+    <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">🔗 {title}</h3>

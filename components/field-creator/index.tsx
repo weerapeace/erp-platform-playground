@@ -138,8 +138,9 @@ export function FieldCreatorModal({
     } finally { setSaving(false); }
   };
 
+  const dismiss = useBackdropDismiss(onClose);
   return createPortal(
-    <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...useBackdropDismiss(onClose)}>
+    <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <div>
