@@ -296,6 +296,15 @@ export type MasterCRUDConfig = {
    * เช่น สร้างจากหน้า Customers → ตั้ง is_customer=true ให้อัตโนมัติ
    */
   createDefaults?: Record<string, unknown>;
+  /**
+   * bulk action เพิ่มเติม (เช่น "สร้างใบสั่งซื้อ" บนหน้า PR) — ของกลาง
+   * ระบบจะ refresh ตารางให้อัตโนมัติหลัง onClick เสร็จ
+   */
+  extraBulkActions?: Array<{
+    label: string;
+    onClick: (selected: Record<string, unknown>[]) => Promise<void> | void;
+    variant?: "default" | "danger";
+  }>;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -788,19 +797,28 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, [canEdit, activeField]);
 
   // ---- Bulk archive ----
-  const bulkActions: BulkAction<Row>[] = useMemo(() => canEdit ? [
-    {
-      label: "ปิดบัญชีที่เลือก",
-      onClick: async (selected: Row[]) => {
-        if (!confirm(`ปิด ${selected.length} ราย?`)) return;
-        for (const r of selected) {
-          await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
-        }
-        flash(`ปิด ${selected.length} ราย`);
-        await refreshData();
+  const bulkActions: BulkAction<Row>[] = useMemo(() => {
+    // bulk action เพิ่มเติมจาก config (เช่น สร้างใบสั่งซื้อ) — wrap ให้ refresh อัตโนมัติ
+    const extra: BulkAction<Row>[] = (config.extraBulkActions ?? []).map((a) => ({
+      label: a.label,
+      variant: a.variant,
+      onClick: async (selected: Row[]) => { await a.onClick(selected); await refreshData(); },
+    }));
+    const base: BulkAction<Row>[] = canEdit ? [
+      {
+        label: "ปิดบัญชีที่เลือก",
+        onClick: async (selected: Row[]) => {
+          if (!confirm(`ปิด ${selected.length} ราย?`)) return;
+          for (const r of selected) {
+            await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+          }
+          flash(`ปิด ${selected.length} ราย`);
+          await refreshData();
+        },
       },
-    },
-  ] : [], [canEdit, user?.name, apiBase, config.apiPath, refreshData]);
+    ] : [];
+    return [...extra, ...base];
+  }, [canEdit, user?.name, apiBase, config.apiPath, config.extraBulkActions, refreshData]);
 
   // ---- Sprint 12: Inline editing ----
   // เปิดเฉพาะ field ที่ admin tick is_inline_editable + user มีสิทธิ์ edit + ไม่ใช่ sensitive

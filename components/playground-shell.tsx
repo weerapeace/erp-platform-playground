@@ -60,6 +60,7 @@ const navGroups = [
     items: [
       { href: "/purchasing",         icon: "🛍️", labelTH: "ขอซื้อ (ช้อปปิ้ง) ⭐" },
       { href: "/m/purchase-requests-v2", icon: "📋", labelTH: "ใบขอซื้อ v2 (PR)" },
+      { href: "/m/purchase-orders-v2", icon: "🧾", labelTH: "ใบสั่งซื้อ v2 (PO) ⭐" },
       { href: "/m/product-groups",   icon: "🧺", labelTH: "Product Groups" },
       { href: "/m/product-variations", icon: "🎨", labelTH: "Product Variations" },
       { href: "/purchase-requests", icon: "📋", labelTH: "ใบขอซื้อ (PR) legacy" },
@@ -195,6 +196,7 @@ const readySections = [
   "/m/product-groups",
   "/m/product-variations",
   "/m/purchase-requests-v2",
+  "/m/purchase-orders-v2",
   "/admin/create-table",
   "/admin/schema-sync",
   "/dashboard",

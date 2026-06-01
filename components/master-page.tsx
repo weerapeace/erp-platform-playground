@@ -27,11 +27,13 @@ export type MasterPageProps = {
   cellRenderers?: MasterCRUDConfig["cellRenderers"];
   /** กลุ่ม A: โชว์ทุก column เป็น default (default true สำหรับหน้า skeleton) */
   showAllColumns?: boolean;
+  /** bulk action เพิ่มเติม (เช่น "สร้างใบสั่งซื้อ") */
+  extraBulkActions?: MasterCRUDConfig["extraBulkActions"];
 };
 
 export function MasterPage({
   apiPath, moduleKey, title, icon, description, activeField = "is_active",
-  cellRenderers, showAllColumns = true,
+  cellRenderers, showAllColumns = true, extraBulkActions,
 }: MasterPageProps) {
   const config: MasterCRUDConfig = {
     apiBase: "/api/master-v2/",
@@ -46,6 +48,7 @@ export function MasterPage({
     permissions: { view: "products.view", create: "products.create", edit: "products.edit" },
     cellRenderers,
     defaultShowAllColumns: showAllColumns,
+    extraBulkActions,
   };
   return <MasterCRUDPage config={config} />;
 }

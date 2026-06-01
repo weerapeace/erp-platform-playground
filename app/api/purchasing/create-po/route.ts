@@ -1,0 +1,132 @@
+/**
+ * POST /api/purchasing/create-po
+ * สร้างใบสั่งซื้อ (PO) จากใบขอซื้อ (PR) ที่เลือก
+ *
+ * body: { pr_ids: string[], actor?: string }
+ * - โหลด PR ที่ status='waiting' และยังไม่ถูกผูก PO
+ * - จัดกลุ่มตาม (ร้าน + สกุลเงิน) → สร้าง PO แยกใบละกลุ่ม
+ * - คัดลอกแต่ละ PR เป็นรายการใน PO + คิดยอดรวม + ออกเลขที่อัตโนมัติ
+ * - อัปเดต PR: status='rfq_created' + po_id
+ *
+ * หมายเหตุ: เขียนผ่าน service role (supabaseAdmin) — bypass RLS
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+type PR = {
+  id: string;
+  item_sku_id: string | null;
+  item_name: string | null;
+  qty: number | null;
+  uom: string | null;
+  seller_name: string | null;
+  price_est: number | null;
+  currency: string | null;
+  note: string | null;
+  order_date: string | null;
+  requester: string | null;
+  status: string | null;
+  po_id: string | null;
+};
+
+const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
+const pad = (n: number, w: number) => String(n).padStart(w, "0");
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  // ตรวจ login
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+
+  let body: { pr_ids?: unknown; actor?: string };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const prIds = Array.isArray(body.pr_ids) ? body.pr_ids.filter((x): x is string => typeof x === "string") : [];
+  if (prIds.length === 0) return NextResponse.json({ error: "ไม่ได้เลือกรายการ" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+
+  // โหลด PR ที่เลือก (เฉพาะที่ยังไม่ถูกแปลงเป็น PO)
+  const { data: prs, error: prErr } = await admin
+    .from("purchase_requests_v2")
+    .select("id, item_sku_id, item_name, qty, uom, seller_name, price_est, currency, note, order_date, requester, status, po_id")
+    .in("id", prIds);
+  if (prErr) return NextResponse.json({ error: prErr.message }, { status: 500 });
+
+  const usable = (prs ?? []).filter((p) => (p as PR).status === "waiting" && !(p as PR).po_id) as PR[];
+  if (usable.length === 0) return NextResponse.json({ error: "รายการที่เลือกถูกสั่งซื้อไปแล้ว หรือไม่อยู่ในสถานะรอ" }, { status: 400 });
+
+  // จัดกลุ่มตามร้าน + สกุลเงิน
+  const groups = new Map<string, PR[]>();
+  for (const p of usable) {
+    const key = `${p.seller_name ?? "ไม่ระบุร้าน"}|||${p.currency ?? "THB"}`;
+    const arr = groups.get(key) ?? [];
+    arr.push(p);
+    groups.set(key, arr);
+  }
+
+  // เลขที่ PO: PO-YYYYMMDD-#### (นับต่อจากจำนวนใบในวันนั้น)
+  const now = new Date();
+  const ymd = `${now.getFullYear()}${pad(now.getMonth() + 1, 2)}${pad(now.getDate(), 2)}`;
+  const { count: todayCount } = await admin
+    .from("purchase_orders_v2")
+    .select("id", { count: "exact", head: true })
+    .like("po_no", `PO-${ymd}-%`);
+  let seq = (todayCount ?? 0);
+
+  const actor = body.actor ?? user.email ?? "system";
+  const created: Array<{ po_no: string; seller_name: string; currency: string; grand_total: number; line_count: number }> = [];
+
+  for (const [key, items] of groups) {
+    const [seller, currency] = key.split("|||");
+    seq += 1;
+    const poNo = `PO-${ymd}-${pad(seq, 4)}`;
+    const grandTotal = items.reduce((a, p) => a + num(p.qty) * num(p.price_est), 0);
+    const orderDate = items.find((p) => p.order_date)?.order_date ?? now.toISOString().slice(0, 10);
+    const requester = items.find((p) => p.requester)?.requester ?? actor;
+
+    // header
+    const { data: po, error: poErr } = await admin
+      .from("purchase_orders_v2")
+      .insert({ po_no: poNo, seller_name: seller, currency, order_date: orderDate, status: "draft", grand_total: grandTotal, requester })
+      .select("id")
+      .single();
+    if (poErr || !po) return NextResponse.json({ error: "สร้าง PO ไม่สำเร็จ: " + (poErr?.message ?? "") }, { status: 500 });
+
+    // lines
+    const lines = items.map((p, i) => ({
+      po_id: po.id,
+      pr_id: p.id,
+      item_sku_id: p.item_sku_id,
+      item_name: p.item_name,
+      qty: num(p.qty),
+      uom: p.uom,
+      price_est: num(p.price_est),
+      line_total: num(p.qty) * num(p.price_est),
+      currency,
+      note: p.note,
+      sort_order: i,
+    }));
+    const { error: lineErr } = await admin.from("purchase_order_lines_v2").insert(lines);
+    if (lineErr) return NextResponse.json({ error: "สร้างรายการ PO ไม่สำเร็จ: " + lineErr.message }, { status: 500 });
+
+    // อัปเดต PR → rfq_created + ผูก po
+    const { error: updErr } = await admin
+      .from("purchase_requests_v2")
+      .update({ status: "rfq_created", po_id: po.id })
+      .in("id", items.map((p) => p.id));
+    if (updErr) return NextResponse.json({ error: "อัปเดตสถานะ PR ไม่สำเร็จ: " + updErr.message }, { status: 500 });
+
+    // audit (best-effort)
+    await admin.from("erp_audit_logs").insert({
+      actor_name: actor, action: "purchase.create_po", module: "purchase-orders-v2",
+      record_label: poNo, new_value: { seller, currency, grand_total: grandTotal, line_count: items.length },
+    }).then(() => {}, () => {});
+
+    created.push({ po_no: poNo, seller_name: seller, currency, grand_total: grandTotal, line_count: items.length });
+  }
+
+  return NextResponse.json({ ok: true, created, error: null });
+}
