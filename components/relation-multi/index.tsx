@@ -111,10 +111,11 @@ export function RelationOne2Many({ config, recordId }: { config: RelConfig; reco
 
   useEffect(() => {
     if (!recordId || !fk) return;
-    // ดึงแล้ว filter ฝั่ง client (เลี่ยง ilike บน uuid column)
-    apiFetch(`/api/master-v2/${moduleKey}?limit=500`).then((r) => r.json()).then((j) => {
-      setRows((j.data ?? j.rows ?? [])
-        .filter((row: Record<string, unknown>) => String(row[fk] ?? "") === recordId));
+    setLoaded(false);
+    // กรองที่ server ด้วย fk โดยตรง (uuid-eq) — รองรับตารางใหญ่ (เช่น skus 12,000+ แถว)
+    const flt = encodeURIComponent(JSON.stringify({ [fk]: { type: "text", value: recordId } }));
+    apiFetch(`/api/master-v2/${moduleKey}?limit=200&filters=${flt}`).then((r) => r.json()).then((j) => {
+      setRows((j.data ?? j.rows ?? []) as Record<string, unknown>[]);
       setLoaded(true);
     }).catch(() => setLoaded(true));
   }, [recordId, fk, moduleKey]);

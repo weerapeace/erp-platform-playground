@@ -17,6 +17,7 @@ import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/v
 import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
+import { RelationPeekModal } from "@/components/relation-peek";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
@@ -426,6 +427,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // F19: refresh trigger สำหรับ server mode (เพิ่มค่า → DataTable โหลดหน้าใหม่)
   const [serverRefresh, setServerRefresh] = useState(0);
+
+  // กดดู record ที่เชื่อม (relation) แบบ popup ซ้อน
+  const [peek, setPeek] = useState<{ moduleKey: string; id: string } | null>(null);
 
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
@@ -922,11 +926,24 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         : <span className="inline-flex items-center gap-1 text-sm text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิด</span>;
     }
     if (f.type === "relation") {
-      if (f.cellRender) return f.cellRender(v, form);
       const base = f.key.endsWith("_id") ? f.key.slice(0, -3) : f.key;
       const label = form[`${base}_label`] ?? form[`${base}_name`];
-      if (label) return <span className="text-sm text-slate-800">{String(label)}</span>;
-      return v ? <code className="text-xs text-slate-400">{String(v).slice(0, 8)}…</code> : <span className="text-slate-300">—</span>;
+      const content: React.ReactNode = f.cellRender ? f.cellRender(v, form)
+        : label ? <span className="text-sm text-slate-800">{String(label)}</span>
+        : v ? <code className="text-xs text-slate-400">{String(v).slice(0, 8)}…</code>
+        : <span className="text-slate-300">—</span>;
+      const tgt = (f.relationConfig as RelationConfig | undefined)?.target_module_key
+        ?? (f.relationConfig as RelationConfig | undefined)?.target_table;
+      // กดเพื่อเด้ง popup ดูรายละเอียด record ที่เชื่อม (เช่น กด Parent SKU)
+      if (v && tgt) {
+        return (
+          <button type="button" onClick={() => setPeek({ moduleKey: String(tgt), id: String(v) })}
+            className="text-left inline-flex items-center gap-1 text-blue-600 hover:underline">
+            {content}<span className="text-[10px] opacity-60">🔗</span>
+          </button>
+        );
+      }
+      return content;
     }
     if (v == null || v === "") return <span className="text-slate-300 text-sm">—</span>;
     if (f.type === "number") {
@@ -1218,6 +1235,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             void refreshRegistry();
           }}
         />
+      )}
+
+      {/* popup ดูรายละเอียด record ที่เชื่อม (relation) เช่น Parent SKU */}
+      {peek && (
+        <RelationPeekModal moduleKey={peek.moduleKey} recordId={peek.id} onClose={() => setPeek(null)} />
       )}
     </Wrap>
   );
