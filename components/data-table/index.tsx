@@ -215,6 +215,8 @@ export type ServerFetchParams = {
   search:   string;
   sortBy:   string | null;
   sortDir:  "asc" | "desc" | null;
+  /** F27: server-side column filters — { fieldKey: ColumnFilterValue } */
+  filters?: Record<string, ColumnFilterValue>;
 };
 
 export interface DataTableProps<T extends Record<string, unknown>> {
@@ -559,8 +561,18 @@ export function DataTable<T extends Record<string, unknown>>({
     return () => clearTimeout(t);
   }, [globalSearch, isServer]);
 
-  // reset to page 1 เมื่อ search เปลี่ยน
-  useEffect(() => { if (isServer) setSrvPage(0); }, [debouncedSearch, isServer]);
+  // F27: serialize filter values → stable dep + ส่งเฉพาะ filter ที่ active
+  const activeServerFilters = useMemo(() => {
+    const out: Record<string, ColumnFilterValue> = {};
+    for (const [k, v] of Object.entries(colFilterValues)) {
+      if (isColFilterActive(v)) out[k] = v;
+    }
+    return out;
+  }, [colFilterValues]);
+  const filtersKey = JSON.stringify(activeServerFilters);
+
+  // reset to page 1 เมื่อ search/filter เปลี่ยน
+  useEffect(() => { if (isServer) setSrvPage(0); }, [debouncedSearch, filtersKey, isServer]);
 
   // fetch จาก server
   useEffect(() => {
@@ -571,12 +583,14 @@ export function DataTable<T extends Record<string, unknown>>({
     serverFetch({
       page: srvPage + 1, pageSize: srvPageSize, search: debouncedSearch,
       sortBy: sort?.id ?? null, sortDir: sort ? (sort.desc ? "desc" : "asc") : null,
+      filters: activeServerFilters,
     })
       .then(r => { if (active) { setSrvRows(r.rows); setSrvTotal(r.total); } })
       .catch(() => { if (active) { setSrvRows([]); setSrvTotal(0); } })
       .finally(() => { if (active) setSrvLoading(false); });
     return () => { active = false; };
-  }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
 
   // ---- Saved Views (Supabase — owner-based, ข้ามเครื่อง) ----
   const [userViews, setUserViews] = useState<StoredView[]>([]);
@@ -696,7 +710,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
   // ---- Filterable fields (auto-build from column meta) ----
   const filterableFromColumns = useMemo<FilterableField[]>(() => {
-    if (isServer) return [];   // server mode — ปิด filter panel
+    // F27: server mode ก็ใช้ filter ได้ (ส่งไปกรองที่ server)
     return columns.reduce<FilterableField[]>((acc, col) => {
       if (!col.meta?.filterable) return acc;
       const colId = String(

@@ -363,6 +363,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       include_inactive: "true",
     });
     if (params.search) qs.set("search", params.search);
+    if (params.sortBy)  { qs.set("sort_by", params.sortBy); qs.set("sort_dir", params.sortDir ?? "asc"); }
+    // F27: ส่ง column filters → server (encode เป็น JSON)
+    if (params.filters && Object.keys(params.filters).length > 0) {
+      qs.set("filters", JSON.stringify(params.filters));
+    }
     const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);

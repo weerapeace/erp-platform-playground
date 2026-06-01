@@ -105,7 +105,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
                     purchase_uom:uoms!purchase_uom_id ( name )`,
     listColumns: `id, code, name_th, barcode, parent_sku_id, seller_partner_id,
                   uom_id, purchase_uom_id, list_price, standard_price, fake_price,
-                  is_active, sale_ok, purchase_ok, color,
+                  is_active, sale_ok, purchase_ok, color, cover_image_r2_key,
                   parent_skus_v2 ( code, name_th ),
                   partners_v2!seller_partner_id ( name_th, code ),
                   uom:uoms!uom_id ( name ),
@@ -204,6 +204,20 @@ export async function GET(
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const includeInactive = searchParams.get("include_inactive") === "true";
 
+  // F27: server-side sort + column filters
+  const sortBy  = searchParams.get("sort_by");
+  const sortDir = searchParams.get("sort_dir") === "desc" ? false : true;  // asc=true
+  const SAFE_COL = /^[a-z_][a-z0-9_]*$/i;
+  type ColFilter =
+    | { type: "text"; value: string }
+    | { type: "number"; min: string; max: string }
+    | { type: "select"; selected: string[] };
+  let colFilters: Record<string, ColFilter> = {};
+  try {
+    const raw = searchParams.get("filters");
+    if (raw) colFilters = JSON.parse(raw) as Record<string, ColFilter>;
+  } catch { /* ignore malformed */ }
+
   // F10a: ใช้ listColumns ถ้ามี (เล็กกว่า, กัน JSON truncate)
   // F12b: Supabase PostgREST hard-caps ที่ db.max_rows (default 1000)
   //       → loop fetch batch ละ 1000 จน reach limit หรือหมด
@@ -219,10 +233,14 @@ export async function GET(
   while (allRows.length < limit) {
     const batchEnd = Math.min(cursor + BATCH - 1, stopAt - 1);
 
+    // F27: sort — ใช้ sort_by ถ้า valid column ไม่งั้น updated_at desc
+    const orderCol = sortBy && SAFE_COL.test(sortBy) ? sortBy : "updated_at";
+    const orderAsc = sortBy ? sortDir : false;
+
     let q = supabase
       .from(cfg.table)
       .select(selectCols, { count: cursor === offset ? "exact" : undefined })
-      .order("updated_at", { ascending: false })
+      .order(orderCol, { ascending: orderAsc })
       .range(cursor, batchEnd);
 
     if (cfg.softDeleteColumn && !includeInactive) {
@@ -231,6 +249,18 @@ export async function GET(
     if (search && cfg.searchColumns.length > 0) {
       const orFilter = cfg.searchColumns.map((c) => `${c}.ilike.%${search}%`).join(",");
       q = q.or(orFilter);
+    }
+    // F27: column filters → Supabase query (เฉพาะ column จริงในตาราง)
+    for (const [col, f] of Object.entries(colFilters)) {
+      if (!SAFE_COL.test(col)) continue;   // กัน injection + ข้าม relation alias
+      if (f.type === "text" && f.value) {
+        q = q.ilike(col, `%${f.value}%`);
+      } else if (f.type === "number") {
+        if (f.min !== "" && f.min != null) q = q.gte(col, Number(f.min));
+        if (f.max !== "" && f.max != null) q = q.lte(col, Number(f.max));
+      } else if (f.type === "select" && Array.isArray(f.selected) && f.selected.length > 0) {
+        q = q.in(col, f.selected);
+      }
     }
 
     const { data, error, count } = await q;
