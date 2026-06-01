@@ -248,6 +248,29 @@ export const ENTITIES: Record<string, EntityConfig> = {
   },
 };
 
+/**
+ * C2: resolve entity config — ถ้าไม่อยู่ใน ENTITIES (hardcode) ให้หาจาก erp_modules
+ * → table ใหม่ที่สร้างจากเว็บใช้ API นี้ได้ทันทีโดยไม่ต้องแก้โค้ด
+ */
+export async function resolveEntity(entity: string): Promise<EntityConfig | null> {
+  if (ENTITIES[entity]) return ENTITIES[entity];
+  const admin = supabaseAdmin();
+  const { data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", entity).maybeSingle();
+  if (!mod) return null;
+  const { data: flds } = await admin.from("erp_module_fields")
+    .select("column_name, is_searchable").eq("module_id", mod.id).eq("is_active", true);
+  const searchColumns = (flds ?? [])
+    .filter((f) => f.is_searchable && f.column_name)
+    .map((f) => f.column_name as string);
+  return {
+    table: mod.table_name as string,
+    selectColumns: "*",
+    searchColumns: searchColumns.length ? searchColumns : ["name"],
+    softDeleteColumn: "is_active",
+    defaults: { is_active: true },
+  };
+}
+
 // ---- GET — list ----
 
 export async function GET(
@@ -255,7 +278,7 @@ export async function GET(
   { params }: { params: Promise<{ entity: string }> }
 ): Promise<NextResponse> {
   const { entity } = await params;
-  const cfg = ENTITIES[entity];
+  const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ data: [], error: "entity ไม่รองรับ" }, { status: 400 });
 
   const { searchParams } = new URL(request.url);
@@ -352,7 +375,7 @@ export async function POST(
   { params }: { params: Promise<{ entity: string }> }
 ): Promise<NextResponse> {
   const { entity } = await params;
-  const cfg = ENTITIES[entity];
+  const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
   // ตรวจ user login (authenticated role)

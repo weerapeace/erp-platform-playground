@@ -111,6 +111,7 @@ const navGroups = [
     items: [
       // Governance
       { href: "/master/logic",            icon: "📚", labelTH: "Logic Registry (ทะเบียนกฎ)" },
+      { href: "/admin/create-table",      icon: "➕", labelTH: "สร้างโมดูลใหม่" },
       // Schema + Field config (sprint 1+)
       { href: "/admin/schema-sync",       icon: "🗂️", labelTH: "Schema Sync + Field Registry" },
       { href: "/admin/lookups",           icon: "📚", labelTH: "Lookups (relation values)" },
@@ -173,6 +174,7 @@ const readySections = [
   "/master/defect-logs",
   "/master/rework-jobs",
   "/master/task-templates",
+  "/admin/create-table",
   "/admin/schema-sync",
   "/dashboard",
   "/purchase-requests",

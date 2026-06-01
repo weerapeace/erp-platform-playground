@@ -9,7 +9,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { ENTITIES } from "../route";
+import { resolveEntity } from "../route";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // ---- GET — single ----
 
@@ -18,7 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ entity: string; id: string }> }
 ): Promise<NextResponse> {
   const { entity, id } = await params;
-  const cfg = ENTITIES[entity];
+  const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ data: null, error: "entity ไม่รองรับ" }, { status: 400 });
 
   const supabase = supabaseFromRequest(request);
@@ -40,7 +43,7 @@ export async function PATCH(
   { params }: { params: Promise<{ entity: string; id: string }> }
 ): Promise<NextResponse> {
   const { entity, id } = await params;
-  const cfg = ENTITIES[entity];
+  const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
   // ตรวจ user login
@@ -85,7 +88,7 @@ export async function DELETE(
   { params }: { params: Promise<{ entity: string; id: string }> }
 ): Promise<NextResponse> {
   const { entity, id } = await params;
-  const cfg = ENTITIES[entity];
+  const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
   // ตรวจ user login
