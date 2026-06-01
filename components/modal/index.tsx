@@ -3,6 +3,23 @@
 import React, { useEffect, useCallback, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 
+/**
+ * useBackdropDismiss — ปิด popup เฉพาะเมื่อ "กดเริ่ม + ปล่อย" บน backdrop จริงๆ
+ * แก้บั๊ก: ลากเลือกข้อความในป๊อปอัปแล้วเผลอปล่อยเมาส์นอกกรอบ → ป๊อปอัปไม่ควรปิด
+ * วิธีใช้: <div {...useBackdropDismiss(onClose)}> ... content (currentTarget = backdrop) </div>
+ * (ของกลาง — ใช้กับทุก popup)
+ */
+export function useBackdropDismiss(onClose?: () => void) {
+  const downOnBackdrop = useRef(false);
+  return {
+    onMouseDown: (e: React.MouseEvent) => { downOnBackdrop.current = e.target === e.currentTarget; },
+    onClick: (e: React.MouseEvent) => {
+      if (onClose && downOnBackdrop.current && e.target === e.currentTarget) onClose();
+      downOnBackdrop.current = false;
+    },
+  };
+}
+
 // ---- Icons ----
 
 function IconX() {
@@ -176,6 +193,8 @@ export function ERPModal({
     return () => document.removeEventListener("keydown", handler);
   }, [open, handleClose]);
 
+  const backdropDismiss = useBackdropDismiss(closeOnBackdrop && !hasUnsavedChanges ? onClose : handleClose);
+
   if (!mounted || !open) return null;
 
   return createPortal(
@@ -183,7 +202,7 @@ export function ERPModal({
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 transition-opacity"
-        onClick={closeOnBackdrop && !hasUnsavedChanges ? onClose : handleClose}
+        {...backdropDismiss}
       />
 
       {/* Modal panel */}
@@ -269,12 +288,13 @@ export function ConfirmDialog({
 
   const canConfirm = !requireTyped || typedValue === requireTyped;
   const isDanger = variant === "danger";
+  const backdropDismiss = useBackdropDismiss(onClose);
 
   if (!mounted || !open) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50" {...backdropDismiss} />
       <div
         className="relative w-full max-w-md bg-white rounded-xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -402,6 +422,8 @@ export function Drawer({
     return () => document.removeEventListener("keydown", handler);
   }, [open, handleClose]);
 
+  const backdropDismiss = useBackdropDismiss(handleClose);
+
   if (!mounted || !open) return null;
 
   return createPortal(
@@ -409,7 +431,7 @@ export function Drawer({
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50"
-        onClick={handleClose}
+        {...backdropDismiss}
       />
 
       {/* Drawer panel (from right) — F22: resizable width */}
@@ -493,11 +515,13 @@ export function ApprovalDialog({
     if (!open) { setMode("choose"); setComment(""); setRejectReason(""); }
   }, [open]);
 
+  const backdropDismiss = useBackdropDismiss(onClose);
+
   if (!mounted || !open) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50" {...backdropDismiss} />
       <div className="relative w-full max-w-md bg-white rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="p-6">
           {mode === "choose" ? (

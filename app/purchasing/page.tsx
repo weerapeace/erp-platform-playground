@@ -12,6 +12,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
+import { useBackdropDismiss } from "@/components/modal";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
@@ -55,6 +56,8 @@ export default function PurchasingShopPage() {
   const [sel, setSel] = useState<Card | null>(null);
   const [vars, setVars] = useState<Variation[]>([]);
   const [varsLoading, setVarsLoading] = useState(false);
+  const pickerDismiss = useBackdropDismiss(() => setPickerOpen(false));
+  const groupDismiss = useBackdropDismiss(() => { setSel(null); setVars([]); });
 
   // sku-mode confirm popup
   const [confirmSku, setConfirmSku] = useState<Card | null>(null);
@@ -395,7 +398,7 @@ export default function PurchasingShopPage() {
 
       {/* Filter picker (เลือก field ที่จะใช้กรอง) */}
       {pickerOpen && (
-        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4" onClick={() => setPickerOpen(false)}>
+        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4" {...pickerDismiss}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-base font-semibold text-slate-800">เลือกตัวกรอง</h3>
@@ -434,7 +437,7 @@ export default function PurchasingShopPage() {
 
       {/* Group variation modal */}
       {sel && (
-        <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" onClick={() => { setSel(null); setVars([]); }}>
+        <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...groupDismiss}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-800">{sel.name}</h3>
@@ -478,8 +481,9 @@ function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () 
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const s = card.sku!;
+  const dismiss = useBackdropDismiss(onClose);
   return (
-    <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">เพิ่มลงใบขอซื้อ</h3>

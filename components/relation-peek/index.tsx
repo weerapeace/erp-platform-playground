@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { useBackdropDismiss } from "@/components/modal";
 
 type RF = { field_key: string; column_name: string | null; field_label: string; ui_field_type: string; is_visible: boolean; show_in_form: boolean; display_order: number };
 
@@ -58,7 +59,7 @@ export function RelationPeekModal({ moduleKey, recordId, onClose }: { moduleKey:
   const cover = row ? (row["cover_image_r2_key"] ?? row["image_key"]) : null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" {...useBackdropDismiss(onClose)}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">🔗 {title}</h3>

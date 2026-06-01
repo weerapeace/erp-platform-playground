@@ -11,6 +11,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { useBackdropDismiss } from "@/components/modal";
 
 const TYPES: { v: string; label: string; hint: string }[] = [
   { v: "text",     label: "ข้อความ (Text)",        hint: "ตัวอักษรสั้น" },
@@ -138,7 +139,7 @@ export function FieldCreatorModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...useBackdropDismiss(onClose)}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <div>
