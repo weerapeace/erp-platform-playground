@@ -12,6 +12,7 @@ import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { useBackdropDismiss } from "@/components/modal";
+import { validateFormula } from "@/lib/formula";
 
 const TYPES: { v: string; label: string; hint: string }[] = [
   { v: "text",     label: "ข้อความ (Text)",        hint: "ตัวอักษรสั้น" },
@@ -25,6 +26,7 @@ const TYPES: { v: string; label: string; hint: string }[] = [
   { v: "many2many", label: "เชื่อมหลายค่า (many2many)", hint: "เลือกได้หลายรายการ" },
   { v: "one2many", label: "รายการลูก (one2many)", hint: "ดูระเบียนที่ชี้กลับมา" },
   { v: "related",  label: "ดึงค่าจากตารางที่เชื่อม (related)", hint: "โชว์ค่าจาก table อื่น (อ่านอย่างเดียว)" },
+  { v: "computed", label: "ช่องคำนวณ (Computed)", hint: "คำนวณจากช่องอื่นด้วยสูตร เช่น qty × price" },
 ];
 
 const REL_TYPES = ["relation", "many2many", "one2many"];
@@ -32,6 +34,7 @@ const REL_TYPES = ["relation", "many2many", "one2many"];
 type TableOpt = { table_name: string; is_module: boolean };
 type RelFieldOpt = { key: string; column: string; label: string; targetTable: string; targetModuleKey: string };
 type TargetFieldOpt = { column: string; label: string };
+type NumFieldOpt = { column: string; label: string };
 
 export function FieldCreatorModal({
   moduleKey, moduleTitle, onClose, onCreated,
@@ -60,6 +63,12 @@ export function FieldCreatorModal({
   const [viaField, setViaField] = useState("");
   const [targetFields, setTargetFields] = useState<TargetFieldOpt[]>([]);
   const [relatedTargetField, setRelatedTargetField] = useState("");
+  // computed: สูตร + รูปแบบ + field ในโมดูลนี้ (สำหรับ insert เข้าสูตร)
+  const [formula, setFormula] = useState("");
+  const [computeFormat, setComputeFormat] = useState("number");
+  const [computeDecimals, setComputeDecimals] = useState(2);
+  const [computeSummary, setComputeSummary] = useState(false);
+  const [numFields, setNumFields] = useState<NumFieldOpt[]>([]);
 
   // auto-gen field_key จาก label (snake_case) จนกว่าจะแก้เอง
   useEffect(() => {
@@ -103,6 +112,18 @@ export function FieldCreatorModal({
     }).catch(() => {});
   }, [viaField, relFields]);
 
+  // computed: โหลด field ของโมดูลนี้มาเป็นปุ่มกดใส่สูตร (เน้น number — แต่โชว์ทุก field ที่มี column)
+  useEffect(() => {
+    if (uiType !== "computed") return;
+    apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then(r => r.json()).then(j => {
+      setNumFields((j.fields ?? [])
+        .filter((f: Record<string, unknown>) => f.column_name && (f.ui_field_type === "number" || f.data_type === "numeric" || f.data_type === "number" || f.ui_field_type === "currency"))
+        .map((f: Record<string, unknown>) => ({ column: String(f.column_name), label: String(f.field_label) })));
+    }).catch(() => {});
+  }, [uiType, moduleKey]);
+
+  const insertToken = (tok: string) => setFormula(prev => (prev && !prev.endsWith(" ") ? prev + " " : prev) + tok + " ");
+
   const submit = async () => {
     setErr(null);
     if (!label.trim() || !fieldKey.trim()) { setErr("กรอกชื่อ field และ label"); return; }
@@ -112,6 +133,10 @@ export function FieldCreatorModal({
     if (uiType === "one2many" && !targetFkColumn.trim()) { setErr("ระบุ column FK บน target ที่ชี้กลับมา"); return; }
     const vf = relFields.find(r => r.key === viaField);
     if (uiType === "related" && (!viaField || !relatedTargetField)) { setErr("เลือกความสัมพันธ์ + field ที่จะดึงมาโชว์"); return; }
+    if (uiType === "computed") {
+      const fErr = validateFormula(formula);
+      if (fErr) { setErr(fErr); return; }
+    }
     setSaving(true);
     try {
       const res = await apiFetch("/api/admin/schema/add-field", {
@@ -125,6 +150,11 @@ export function FieldCreatorModal({
           via_field:    uiType === "related" ? viaField : undefined,
           via_column:   uiType === "related" ? vf?.column : undefined,
           target_field: uiType === "related" ? relatedTargetField : undefined,
+          // computed
+          formula:          uiType === "computed" ? formula.trim() : undefined,
+          compute_format:   uiType === "computed" ? computeFormat : undefined,
+          compute_decimals: uiType === "computed" ? computeDecimals : undefined,
+          compute_summary:  uiType === "computed" ? computeSummary : undefined,
           options: uiType === "select" ? optionsText.split(",").map(s => s.trim()).filter(Boolean) : undefined,
           is_visible: isVisible, is_filterable: isFilterable, is_searchable: isSearchable,
         }),
@@ -145,7 +175,7 @@ export function FieldCreatorModal({
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-slate-800">＋ เพิ่ม Field ใหม่</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{moduleTitle} — จะสร้าง column จริงใน Supabase</p>
+            <p className="text-xs text-slate-500 mt-0.5">{moduleTitle} — {["computed", "related", "many2many", "one2many"].includes(uiType) ? "field เสมือน (ไม่สร้าง column จริง)" : "จะสร้าง column จริงใน Supabase"}</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
         </div>
@@ -231,10 +261,63 @@ export function FieldCreatorModal({
             </div>
           )}
 
+          {uiType === "computed" && (
+            <div className="space-y-3 p-3 bg-violet-50/60 border border-violet-100 rounded-lg">
+              <p className="text-[11px] text-violet-700">ช่องคำนวณอัตโนมัติ (อ่านอย่างเดียว ไม่สร้าง column จริง) — พิมพ์สูตรโดยอ้างชื่อ field</p>
+              <div>
+                <label className="text-xs font-medium text-slate-600">สูตร *</label>
+                <textarea value={formula} onChange={e => setFormula(e.target.value)} rows={2}
+                  placeholder="เช่น  qty * price_est"
+                  className="mt-1 w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                <p className="text-[11px] text-slate-400 mt-0.5">ใช้ได้: + − × (*) ÷ (/) วงเล็บ ( ) และ round() abs() min() max()</p>
+              </div>
+              {numFields.length > 0 && (
+                <div>
+                  <label className="text-[11px] text-slate-500">กดเพื่อใส่ช่องลงในสูตร:</label>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {numFields.map(nf => (
+                      <button key={nf.column} type="button" onClick={() => insertToken(nf.column)}
+                        className="px-2 py-0.5 text-[11px] font-mono bg-white border border-violet-200 rounded text-violet-700 hover:bg-violet-100">
+                        {nf.column}
+                      </button>
+                    ))}
+                    {["*", "/", "+", "-", "(", ")"].map(op => (
+                      <button key={op} type="button" onClick={() => insertToken(op)}
+                        className="px-2 py-0.5 text-[11px] font-mono bg-white border border-slate-200 rounded text-slate-600 hover:bg-slate-100">
+                        {op}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-medium text-slate-600">รูปแบบ</label>
+                  <select value={computeFormat} onChange={e => setComputeFormat(e.target.value)}
+                    className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-violet-500">
+                    <option value="number">ตัวเลข</option>
+                    <option value="currency">เงิน (มีคอมมา)</option>
+                    <option value="percent">เปอร์เซ็นต์ (%)</option>
+                  </select>
+                </div>
+                <div className="w-24">
+                  <label className="text-xs font-medium text-slate-600">ทศนิยม</label>
+                  <input type="number" min={0} max={6} value={computeDecimals} onChange={e => setComputeDecimals(Math.max(0, Math.min(6, Number(e.target.value))))}
+                    className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                </div>
+              </div>
+              <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                <input type="checkbox" checked={computeSummary} onChange={e => setComputeSummary(e.target.checked)} /> แสดงผลรวม (sum) ท้ายตาราง
+              </label>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-4 pt-1">
             <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isVisible} onChange={e => setIsVisible(e.target.checked)} /> โชว์ในตาราง</label>
-            <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isFilterable} onChange={e => setIsFilterable(e.target.checked)} /> กรองได้</label>
-            <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isSearchable} onChange={e => setIsSearchable(e.target.checked)} /> ค้นหาได้</label>
+            {uiType !== "computed" && uiType !== "related" && <>
+              <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isFilterable} onChange={e => setIsFilterable(e.target.checked)} /> กรองได้</label>
+              <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isSearchable} onChange={e => setIsSearchable(e.target.checked)} /> ค้นหาได้</label>
+            </>}
           </div>
 
           {err && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">⚠ {err}</div>}

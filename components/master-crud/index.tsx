@@ -23,6 +23,7 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
 import { RelationMany2Many, RelationOne2Many } from "@/components/relation-multi";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
+import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
 
@@ -68,6 +69,7 @@ function registryToFieldDef(
     : rf.ui_field_type === "textarea" || rf.ui_field_type === "json" ? "textarea"
     : rf.ui_field_type === "many2many" ? "many2many"
     : rf.ui_field_type === "one2many" ? "one2many"
+    : rf.ui_field_type === "computed" ? "computed"
     : "text";
 
   const opts = (rf.options as { options?: string[] })?.options;
@@ -75,10 +77,22 @@ function registryToFieldDef(
   const key = rf.column_name ?? rf.field_key;
   const customRender = cellRenderers?.[key];
 
+  // computed: อ่านสูตร/รูปแบบจาก relation_config (เก็บไว้ที่นั่นเพื่อเลี่ยง migrate DB)
+  const compCfg = rf.relation_config as { kind?: string; formula?: string; format?: ComputeFormat; decimals?: number; summary?: boolean } | undefined;
+  const isComputed = fieldType === "computed";
+  const compFormula  = isComputed ? compCfg?.formula : undefined;
+  const compFormat   = isComputed ? (compCfg?.format ?? "number") : undefined;
+  const compDecimals = isComputed ? (compCfg?.decimals ?? 2) : undefined;
+
   // default cellRender
   const effectiveCellRender: ((v: unknown, row?: Record<string, unknown>) => React.ReactNode) | undefined =
     customRender
-      ?? (fieldType === "relation"
+      ?? (isComputed
+          ? (_v: unknown, row?: Record<string, unknown>) => {
+              const n = computeField(compFormula, (row ?? {}) as Record<string, unknown>);
+              return <span className="text-sm tabular-nums text-slate-800">{formatComputed(n, compFormat, compDecimals)}</span>;
+            }
+          : fieldType === "relation"
           ? defaultRelationCellRender(key)
           : fieldType === "image"
             ? (v: unknown) => <ImageCell r2Key={v as string | null} size={40} />
@@ -117,6 +131,11 @@ function registryToFieldDef(
     inlineEditable:    rf.is_inline_editable,
     // Sprint 13
     conditionRules:    rf.condition_rules ?? null,
+    // computed field
+    formula:         compFormula,
+    computeFormat:   compFormat,
+    computeDecimals: compDecimals,
+    summarize:       isComputed ? !!compCfg?.summary : undefined,
   };
 }
 
@@ -151,7 +170,15 @@ export type FieldDef = {
   /** F11B: erp_module_fields.id — ใช้ตอน Studio บันทึก layout (group/order) */
   fieldId?:   string;
   label:      string;
-  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many";
+  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many" | "computed";
+  /** computed: สูตรคำนวณ เช่น "qty * price_est" (อ้างชื่อ field ในระเบียนเดียวกัน) */
+  formula?:   string;
+  /** computed: รูปแบบผลลัพธ์ */
+  computeFormat?: ComputeFormat;
+  /** computed: จำนวนทศนิยม */
+  computeDecimals?: number;
+  /** computed: แสดงผลรวม (sum) ท้ายคอลัมน์ในตาราง */
+  summarize?: boolean;
   required?:  boolean;
   options?:   string[];                   // สำหรับ select
   placeholder?: string;
@@ -678,6 +705,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         filterable: f.filterable ?? false,
         filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "boolean" ? "boolean" : f.type === "select" ? "select" : "text"),
         ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: o })) } : {}),
+        // computed + ตั้ง "แสดงผลรวมท้ายตาราง" → sum สูตรทุกแถวในหน้านี้
+        ...(f.type === "computed" && f.summarize
+          ? { summary: (rows: unknown[]) => formatComputed(
+              (rows as Record<string, unknown>[]).reduce((a, r) => a + (computeField(f.formula, r) ?? 0), 0),
+              f.computeFormat, f.computeDecimals) }
+          : f.type === "number" && f.summarize ? { summary: "sum" as const } : {}),
       },
       cell: f.cellRender
         ? ({ getValue, row }) => f.cellRender!(getValue(), row.original as Record<string, unknown>)
@@ -875,7 +908,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           {f.readonly && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
         </span>
         {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
-        {f.type === "image" ? (
+        {f.type === "computed" ? (
+          <div className="h-9 mt-0.5 flex items-center px-3 text-sm tabular-nums text-slate-700 bg-slate-50 border border-slate-200 rounded-md">
+            {formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals)}
+            <span className="ml-2 text-[10px] text-slate-400">∑ คำนวณอัตโนมัติ</span>
+          </div>
+        ) : f.type === "image" ? (
           <ImageInput
             value={(v as string) || null}
             onChange={(val) => updateForm({ [f.key]: val })}
@@ -953,6 +991,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (drawerMode === "view" && editingId && canEdit && f.inlineEditable && !f.readonly
         && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select")) {
       return <QuickEditCell field={f} value={v} onSave={(val) => quickSave(f.key, val)} />;
+    }
+    if (f.type === "computed") {
+      const n = computeField(f.formula, form);
+      return <span className="text-sm tabular-nums font-medium text-slate-800">{formatComputed(n, f.computeFormat, f.computeDecimals)}</span>;
     }
     if (f.type === "image") {
       return <ImageCell r2Key={(v as string) || null} size={160} />;

@@ -30,6 +30,11 @@ type Body = {
   via_field?: string;              // field_key ของ relation (FK) บน module นี้ที่จะเดินผ่าน
   via_column?: string;             // column FK จริงบนตารางนี้ (ปกติ = via_field)
   target_field?: string;           // column บน target ที่จะดึงมาโชว์
+  // computed: ช่องคำนวณอัตโนมัติ (virtual, read-only) — เก็บสูตรไว้ใน relation_config
+  formula?: string;                // เช่น "qty * price_est"
+  compute_format?: string;         // number | currency | percent
+  compute_decimals?: number;       // จำนวนทศนิยม
+  compute_summary?: boolean;       // แสดงผลรวมท้ายตาราง
   options?: string[];
   is_visible?: boolean;
   is_filterable?: boolean;
@@ -62,9 +67,14 @@ export async function POST(request: NextRequest) {
   if (modErr || !mod) return NextResponse.json({ error: "ไม่พบ module " + b.module_key }, { status: 404 });
   const table = b.table || (mod.table_name as string);
 
-  // related/m2m/o2m = virtual (ไม่มี column จริงบนตารางนี้)
-  const isVirtual = b.ui_type === "many2many" || b.ui_type === "one2many" || b.ui_type === "related";
+  // related/m2m/o2m/computed = virtual (ไม่มี column จริงบนตารางนี้)
+  const isComputed = b.ui_type === "computed";
+  const isVirtual = b.ui_type === "many2many" || b.ui_type === "one2many" || b.ui_type === "related" || isComputed;
   const isRelated = b.ui_type === "related";
+  // computed ต้องมีสูตร
+  if (isComputed && !b.formula?.trim()) {
+    return NextResponse.json({ error: "computed ต้องระบุสูตร (formula)" }, { status: 400 });
+  }
 
   // 1) เพิ่ม column จริง (ยกเว้น m2m/o2m ที่ไม่มี column บนตารางนี้)
   if (!isVirtual) {
@@ -104,6 +114,14 @@ export async function POST(request: NextRequest) {
       target_module_key: targetModuleKey,
       target_field: b.target_field,
     };
+  } else if (isComputed) {
+    relationConfig = {
+      kind: "computed",
+      formula: b.formula!.trim(),
+      format: ["number", "currency", "percent"].includes(b.compute_format ?? "") ? b.compute_format : "number",
+      decimals: typeof b.compute_decimals === "number" ? Math.max(0, Math.min(6, b.compute_decimals)) : 2,
+      summary: !!b.compute_summary,
+    };
   }
 
   // 3) ลงทะเบียนใน Field Registry (มี mod อยู่แล้วจากด้านบน)
@@ -122,10 +140,10 @@ export async function POST(request: NextRequest) {
     group_key: b.group_key || "core",
     is_visible: b.is_visible ?? true,
     is_required: false,
-    is_editable: !isRelated,                          // related = read-only
-    is_filterable: isRelated ? false : (b.is_filterable ?? false),  // ไม่มี column จริง → กรอง/เรียงไม่ได้
-    is_sortable: !isRelated,
-    is_searchable: isRelated ? false : (b.is_searchable ?? false),
+    is_editable: !isRelated && !isComputed,           // related/computed = read-only
+    is_filterable: (isRelated || isComputed) ? false : (b.is_filterable ?? false),  // ไม่มี column จริง → กรอง/เรียงไม่ได้
+    is_sortable: !isRelated && !isComputed,
+    is_searchable: (isRelated || isComputed) ? false : (b.is_searchable ?? false),
     width: 150,
     options: b.ui_type === "select" && b.options ? { options: b.options } : {},
     relation_config: relationConfig,

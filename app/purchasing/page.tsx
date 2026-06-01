@@ -374,7 +374,10 @@ export default function PurchasingShopPage() {
                 <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
                   <input type="number" value={l.qty} min={1} step="any" onChange={e => setCart(c => c.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))}
                     className="w-16 h-6 px-1 border border-slate-200 rounded" /> {l.uom}
-                  <span className="ml-auto">{l.price.toLocaleString()} {l.currency}</span>
+                  <span className="ml-auto text-right leading-tight">
+                    <span className="block text-sm font-semibold text-slate-700 tabular-nums">{(l.price * (Number(l.qty) || 0)).toLocaleString()} {l.currency}</span>
+                    <span className="block text-[10px] text-slate-400">@ {l.price.toLocaleString()} / {l.uom}</span>
+                  </span>
                 </div>
                 {l.note && <div className="text-[11px] text-amber-600 mt-0.5">📝 {l.note}</div>}
                 <div className="text-[11px] text-slate-400 mt-0.5">🏪 {l.seller}</div>
@@ -382,6 +385,21 @@ export default function PurchasingShopPage() {
             ))}
           </div>
           <div className="p-3 border-t border-slate-100 space-y-2">
+            {cart.length > 0 && (() => {
+              const totals: Record<string, number> = {};
+              for (const l of cart) totals[l.currency] = (totals[l.currency] ?? 0) + l.price * (Number(l.qty) || 0);
+              const multi = Object.keys(totals).length > 1;
+              return (
+                <div className="px-1 space-y-0.5">
+                  {Object.entries(totals).map(([cur, sum]) => (
+                    <div key={cur} className="flex justify-between items-baseline">
+                      <span className="text-sm text-slate-500">ยอดรวมทั้งหมด{multi ? ` (${cur})` : ""}</span>
+                      <span className="text-base font-bold text-blue-600 tabular-nums">{sum.toLocaleString()} {cur}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
             {done && <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">✅ สร้างใบขอซื้อ {done} แล้ว (แยกใบละ 1 สินค้า) — <a href="/m/purchase-requests-v2" className="underline">ดูใบขอซื้อ</a></div>}
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1">📅 วันที่สั่ง (ใช้กับทุกใบ)</label>
