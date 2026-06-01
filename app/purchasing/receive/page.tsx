@@ -2,27 +2,22 @@
 
 /**
  * หน้ารับสินค้าเข้า (Goods Receipt) — รับของตามใบสั่งซื้อ (PO) ราย "บรรทัดสินค้า"
- * 4 เคส: รับครบ / รับไม่ครบ(ตัดจบ) / รับไม่ครบ(รอของ) / รับครบแต่มีเสีย
+ * UX: กรอกแค่จำนวนรับ/เสีย — ถ้าบรรทัดไหนรับไม่ครบ ตอนบันทึกจะเด้ง popup
+ *     ให้เลือก "จบงาน (ปิดยอด)" หรือ "รอของ (รับบางส่วน)" แล้วตั้งสถานะตามนั้น
+ *     รับเกินจำนวนสั่งได้ (treat เป็นรับครบ)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
+import { useBackdropDismiss } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string };
-type Line = {
-  id: string; item_name: string; qty: number; uom: string; qty_received: number; price_est: number;
-};
-type Input = { recv: string; def: string; case_type: string };
+type Line = { id: string; item_name: string; qty: number; uom: string; qty_received: number };
+type Input = { recv: string; def: string };
+type PayloadLine = { po_line_id: string; qty_received: number; qty_defective: number; case_type: string };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
-
-const CASES = [
-  { v: "full",            label: "รับครบ" },
-  { v: "partial_wait",    label: "รับไม่ครบ (รอของ)" },
-  { v: "partial_close",   label: "รับไม่ครบ (ตัดจบ)" },
-  { v: "full_defective",  label: "รับครบ แต่มีเสีย/ผิด" },
-];
 
 export default function ReceiveGoodsPage() {
   const { user } = useAuth();
@@ -34,8 +29,9 @@ export default function ReceiveGoodsPage() {
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // popup ถามกรณีรับไม่ครบ — เก็บ payload ที่รอ + รายชื่อบรรทัดที่ไม่ครบ
+  const [shortDialog, setShortDialog] = useState<{ base: PayloadLine[]; shortIds: string[]; shortNames: string[] } | null>(null);
 
-  // โหลด PO ที่ยังรับได้ (ไม่ใช่ received/cancelled)
   useEffect(() => {
     apiFetch("/api/master-v2/purchase-orders-v2?limit=200").then((r) => r.json()).then((j) => {
       const list = ((j.data ?? []) as PO[]).filter((p) => p.status !== "received" && p.status !== "cancelled");
@@ -50,11 +46,10 @@ export default function ReceiveGoodsPage() {
     apiFetch(`/api/master-v2/purchase-order-lines-v2?limit=200&filters=${flt}`).then((r) => r.json()).then((j) => {
       const ls = (j.data ?? []) as Line[];
       setLines(ls);
-      // default input ต่อบรรทัด: รับ = คงเหลือ, เคส = รับครบ
       const init: Record<string, Input> = {};
       for (const l of ls) {
         const remaining = Math.max(0, num(l.qty) - num(l.qty_received));
-        init[l.id] = { recv: remaining > 0 ? String(remaining) : "0", def: "0", case_type: "full" };
+        init[l.id] = { recv: remaining > 0 ? String(remaining) : "0", def: "0" };
       }
       setInputs(init);
     }).catch((e) => setErr(String(e))).finally(() => setLoading(false));
@@ -62,16 +57,11 @@ export default function ReceiveGoodsPage() {
 
   const onPickPo = (id: string) => { setPoId(id); setDone(null); loadLines(id); };
   const setInput = (id: string, patch: Partial<Input>) => setInputs((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
-
   const selectedPo = useMemo(() => pos.find((p) => p.id === poId), [pos, poId]);
 
-  const submit = async () => {
-    setErr(null);
-    const payloadLines = lines
-      .map((l) => ({ po_line_id: l.id, qty_received: num(inputs[l.id]?.recv), qty_defective: num(inputs[l.id]?.def), case_type: inputs[l.id]?.case_type ?? "full" }))
-      .filter((x) => x.qty_received > 0 || x.qty_defective > 0);
-    if (payloadLines.length === 0) { setErr("กรอกจำนวนรับอย่างน้อย 1 รายการ"); return; }
-    setSaving(true);
+  // ยิง API จริง
+  const doSubmit = async (payloadLines: PayloadLine[]) => {
+    setSaving(true); setErr(null);
     try {
       const res = await apiFetch("/api/purchasing/receive", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -80,21 +70,53 @@ export default function ReceiveGoodsPage() {
       const j = await res.json();
       if (j.error) { setErr(j.error); return; }
       setDone(`✅ รับสินค้าสำเร็จ — เลขที่ ${j.gr_no} · สถานะ PO: ${j.po_status}`);
-      setPoId(""); setLines([]); setInputs({});
+      setPoId(""); setLines([]); setInputs({}); setShortDialog(null);
     } catch (e) { setErr(String(e)); }
     finally { setSaving(false); }
   };
+
+  // กดบันทึก — เช็คว่ามีบรรทัดรับไม่ครบไหม
+  const onSave = () => {
+    setErr(null);
+    const base: PayloadLine[] = [];
+    const shortIds: string[] = [];
+    const shortNames: string[] = [];
+    for (const l of lines) {
+      const recv = num(inputs[l.id]?.recv);
+      const def = num(inputs[l.id]?.def);
+      if (recv <= 0 && def <= 0) continue;  // ไม่รับบรรทัดนี้
+      const remaining = Math.max(0, num(l.qty) - num(l.qty_received));
+      const isShort = recv < remaining;     // รับไม่ครบ (รับเกิน/พอดี = ครบ)
+      base.push({ po_line_id: l.id, qty_received: recv, qty_defective: def, case_type: isShort ? "partial_wait" : "full" });
+      if (isShort) { shortIds.push(l.id); shortNames.push(l.item_name); }
+    }
+    if (base.length === 0) { setErr("กรอกจำนวนรับอย่างน้อย 1 รายการ"); return; }
+    if (shortIds.length > 0) {
+      setShortDialog({ base, shortIds, shortNames });  // เด้ง popup ให้เลือก
+    } else {
+      void doSubmit(base);  // รับครบทุกบรรทัด → บันทึกเลย
+    }
+  };
+
+  // เลือกในpopup: ใส่ case ให้บรรทัดที่ไม่ครบ แล้วบันทึก
+  const resolveShort = (caseType: "partial_close" | "partial_wait") => {
+    if (!shortDialog) return;
+    const ids = new Set(shortDialog.shortIds);
+    const payload = shortDialog.base.map((l) => ids.has(l.po_line_id) ? { ...l, case_type: caseType } : l);
+    void doSubmit(payload);
+  };
+
+  const dialogDismiss = useBackdropDismiss(() => setShortDialog(null));
 
   return (
     <PlaygroundShell>
       <div className="p-6 max-w-5xl mx-auto">
         <h1 className="text-xl font-bold text-slate-800">📥 รับสินค้าเข้า</h1>
-        <p className="text-sm text-slate-500 mt-0.5 mb-4">เลือกใบสั่งซื้อ → กรอกจำนวนที่รับจริงต่อสินค้า → บันทึก (สร้างใบรับ GR + อัปเดตสถานะ PO)</p>
+        <p className="text-sm text-slate-500 mt-0.5 mb-4">เลือกใบสั่งซื้อ → กรอกจำนวนที่รับจริงต่อสินค้า → บันทึก (รับเกินได้ · ถ้ารับไม่ครบจะถามว่าจบงานหรือรอของ)</p>
 
         {done && <div className="mb-4 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">{done} — <a href="/m/goods-receipts-v2" className="underline">ดูใบรับสินค้า</a></div>}
         {err && <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {err}</div>}
 
-        {/* เลือก PO */}
         <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4">
           <label className="text-xs font-medium text-slate-600">ใบสั่งซื้อ (PO)</label>
           <select value={poId} onChange={(e) => onPickPo(e.target.value)}
@@ -104,7 +126,6 @@ export default function ReceiveGoodsPage() {
           </select>
         </div>
 
-        {/* รายการสินค้าในใบ */}
         {loading ? (
           <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
         ) : poId && lines.length > 0 ? (
@@ -122,13 +143,13 @@ export default function ReceiveGoodsPage() {
                     <th className="text-right px-3 py-2 font-medium">คงเหลือ</th>
                     <th className="px-3 py-2 font-medium">รับครั้งนี้</th>
                     <th className="px-3 py-2 font-medium">เสีย/ผิด</th>
-                    <th className="px-3 py-2 font-medium">กรณี</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {lines.map((l) => {
                     const remaining = Math.max(0, num(l.qty) - num(l.qty_received));
-                    const inp = inputs[l.id] ?? { recv: "0", def: "0", case_type: "full" };
+                    const inp = inputs[l.id] ?? { recv: "0", def: "0" };
+                    const short = num(inp.recv) > 0 && num(inp.recv) < remaining;
                     return (
                       <tr key={l.id}>
                         <td className="px-4 py-2 text-slate-700">{l.item_name}</td>
@@ -137,17 +158,11 @@ export default function ReceiveGoodsPage() {
                         <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">{remaining.toLocaleString()}</td>
                         <td className="px-3 py-2">
                           <input type="number" step="any" min={0} value={inp.recv} onChange={(e) => setInput(l.id, { recv: e.target.value })}
-                            className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded" />
+                            className={`w-20 h-8 px-2 text-sm text-right border rounded ${short ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
                         </td>
                         <td className="px-3 py-2">
                           <input type="number" step="any" min={0} value={inp.def} onChange={(e) => setInput(l.id, { def: e.target.value })}
                             className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded" />
-                        </td>
-                        <td className="px-3 py-2">
-                          <select value={inp.case_type} onChange={(e) => setInput(l.id, { case_type: e.target.value })}
-                            className="h-8 px-2 text-sm border border-slate-200 rounded bg-white">
-                            {CASES.map((c) => <option key={c.v} value={c.v}>{c.label}</option>)}
-                          </select>
                         </td>
                       </tr>
                     );
@@ -156,7 +171,7 @@ export default function ReceiveGoodsPage() {
               </table>
             </div>
             <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
-              <button onClick={submit} disabled={saving}
+              <button onClick={onSave} disabled={saving}
                 className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
                 {saving ? "กำลังบันทึก…" : "บันทึกรับสินค้า →"}
               </button>
@@ -166,6 +181,35 @@ export default function ReceiveGoodsPage() {
           <div className="py-10 text-center text-slate-300 text-sm">— ใบนี้ไม่มีรายการสินค้า —</div>
         ) : null}
       </div>
+
+      {/* popup ถามกรณีรับไม่ครบ */}
+      {shortDialog && (
+        <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...dialogDismiss}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-800">มีสินค้ารับไม่ครบ {shortDialog.shortIds.length} รายการ</h3>
+              <p className="text-xs text-slate-500 mt-0.5">{shortDialog.shortNames.join(", ")}</p>
+            </div>
+            <div className="p-5 space-y-2">
+              <p className="text-sm text-slate-600 mb-2">ต้องการจัดการยอดที่ขาดอย่างไร?</p>
+              <button onClick={() => resolveShort("partial_close")} disabled={saving}
+                className="w-full text-left px-4 py-3 border border-slate-200 rounded-lg hover:bg-orange-50 hover:border-orange-300 disabled:opacity-40">
+                <div className="font-medium text-slate-800">🔴 จบงาน (ปิดยอดที่ขาด)</div>
+                <div className="text-xs text-slate-500 mt-0.5">ไม่รอของส่วนที่เหลือแล้ว — สถานะ &quot;ปิดยอด (ขาด)&quot;</div>
+              </button>
+              <button onClick={() => resolveShort("partial_wait")} disabled={saving}
+                className="w-full text-left px-4 py-3 border border-slate-200 rounded-lg hover:bg-amber-50 hover:border-amber-300 disabled:opacity-40">
+                <div className="font-medium text-slate-800">🟡 รอของ (รับเพิ่มภายหลัง)</div>
+                <div className="text-xs text-slate-500 mt-0.5">ส่วนที่เหลือยังค้างรับต่อ — สถานะ &quot;รับบางส่วน&quot;</div>
+              </button>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShortDialog(null)} disabled={saving}
+                className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
     </PlaygroundShell>
   );
 }
