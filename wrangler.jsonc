@@ -18,9 +18,10 @@
   "compatibility_date": "2026-05-31",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 
-  // F21: เพิ่ม CPU limit 30s → 5min (Workers Paid) — กัน 1102 'exceeded CPU time'
-  // OpenNext SSR + heavy page render บางที spike เกิน 30s default
-  "limits": { "cpu_ms": 300000 },
+  // F21: limits.cpu_ms ต้องใช้กับ Workers PAID เท่านั้น
+  // ⚠️ Worker นี้ยังอยู่ FREE plan (CPU 10ms/req) = สาเหตุจริงของ 1102!
+  // → เปิด config นี้คืนหลัง user ผูก Worker กับ Paid plan
+  // "limits": { "cpu_ms": 300000 },
 
   "assets": {
     "directory": ".open-next/assets",
