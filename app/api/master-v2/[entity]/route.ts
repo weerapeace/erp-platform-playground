@@ -43,6 +43,12 @@ type EntityConfig = {
    * โดยดึงเฉพาะ id ที่อยู่ในหน้านั้น (.in) → scale ได้แม้ตารางปลายทางใหญ่
    */
   relationResolves?: RelationResolve[];
+  /**
+   * คอลัมน์ที่ใช้เรียงลำดับเริ่มต้น (ตอนไม่มี sort_by)
+   * generic module จะตรวจอัตโนมัติว่ามี updated_at / created_at ไหม ไม่งั้น fallback 'id'
+   * → กัน query error เมื่อตารางไม่มี updated_at
+   */
+  orderColumn?: string;
 };
 
 type RelationResolve = {
@@ -315,6 +321,15 @@ export const ENTITIES: Record<string, EntityConfig> = {
 const _entityCache = new Map<string, { cfg: EntityConfig; at: number }>();
 const ENTITY_TTL = 20_000;
 
+/** เลือกคอลัมน์เรียงลำดับที่ "มีจริง" ในตาราง — กัน query error เมื่อไม่มี updated_at */
+async function pickOrderColumn(admin: ReturnType<typeof supabaseAdmin>, table: string): Promise<string> {
+  for (const col of ["updated_at", "created_at"]) {
+    const { error } = await admin.from(table).select(col).limit(1);
+    if (!error) return col;
+  }
+  return "id"; // ทุกตารางมี id เสมอ
+}
+
 export async function resolveEntity(entity: string): Promise<EntityConfig | null> {
   if (ENTITIES[entity]) return ENTITIES[entity];
   const cached = _entityCache.get(entity);
@@ -345,13 +360,16 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
       };
     });
 
+  const tableName = mod.table_name as string;
+  const orderColumn = await pickOrderColumn(admin, tableName);
   const cfg: EntityConfig = {
-    table: mod.table_name as string,
+    table: tableName,
     selectColumns: "*",
     searchColumns: searchColumns.length ? searchColumns : ["name"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true },
     relationResolves,
+    orderColumn,
   };
   _entityCache.set(entity, { cfg, at: Date.now() });
   return cfg;
@@ -405,8 +423,8 @@ export async function GET(
   while (allRows.length < limit) {
     const batchEnd = Math.min(cursor + BATCH - 1, stopAt - 1);
 
-    // F27: sort — ใช้ sort_by ถ้า valid column ไม่งั้น updated_at desc
-    const orderCol = sortBy && SAFE_COL.test(sortBy) ? sortBy : "updated_at";
+    // F27: sort — ใช้ sort_by ถ้า valid column ไม่งั้นใช้คอลัมน์ default ที่มีจริง (กัน error)
+    const orderCol = sortBy && SAFE_COL.test(sortBy) ? sortBy : (cfg.orderColumn ?? "updated_at");
     const orderAsc = sortBy ? sortDir : false;
 
     let q = supabase
