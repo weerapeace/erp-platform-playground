@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult } from "@/components/data-table";
-import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { Drawer, ConfirmDialog } from "@/components/modal";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
@@ -287,6 +287,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [dirty,       setDirty]       = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // F11: drawer mode — "view" (อ่านอย่างเดียว) | "edit" (ฟอร์ม)
+  const [drawerMode,  setDrawerMode]  = useState<"view" | "edit">("view");
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // archive
   const [archiveTarget, setArchiveTarget] = useState<Row | null>(null);
@@ -364,8 +367,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       })
       .catch(() => { /* keep partial — ดีกว่าค้าง */ });
   };
-  const tryClose = () => { if (dirty) setConfirmDiscard(true); else setModalOpen(false); };
+  // F11: เตือน unsaved เฉพาะโหมด edit ที่มีการแก้
+  const tryClose = () => { if (drawerMode === "edit" && dirty) setConfirmDiscard(true); else setModalOpen(false); };
   const discard  = () => { setConfirmDiscard(false); setModalOpen(false); setDirty(false); };
+  // F11: สลับเข้าโหมดแก้ไข
+  const switchToEdit = () => { setDrawerMode("edit"); setFormErr(null); setFieldErrors({}); };
 
   const save = async () => {
     // 1. รัน validation rules per field — Sprint 13: skip field ที่ condition ไม่ผ่าน
@@ -419,7 +425,23 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
-      setModalOpen(false); setDirty(false);
+      setDirty(false);
+      // F11: แก้ของเดิม → กลับไปโหมดดู (ไม่ปิด) | สร้างใหม่ → ปิด drawer
+      if (editingId) {
+        // update form จาก response → detail view โชว์ค่าใหม่ทันที
+        if (json.data) {
+          const full = json.data as Record<string, unknown>;
+          const f: Record<string, unknown> = {};
+          effectiveFields.forEach((fd) => {
+            const v = full[fd.key];
+            f[fd.key] = v == null ? (fd.type === "boolean" ? false : "") : v;
+          });
+          setForm(f);
+        }
+        setDrawerMode("view");
+      } else {
+        setModalOpen(false);
+      }
       await fetchList();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
@@ -681,6 +703,37 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     );
   };
 
+  // F11: render ค่าแบบอ่านอย่างเดียว (detail view)
+  const renderDetailValue = (f: FieldDef): React.ReactNode => {
+    const v = form[f.key];
+    if (f.type === "image") {
+      return <ImageCell r2Key={(v as string) || null} size={160} />;
+    }
+    if (f.type === "boolean") {
+      return v
+        ? <span className="inline-flex items-center gap-1 text-sm text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิด</span>
+        : <span className="inline-flex items-center gap-1 text-sm text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิด</span>;
+    }
+    if (f.type === "relation") {
+      if (f.cellRender) return f.cellRender(v, form);
+      const base = f.key.endsWith("_id") ? f.key.slice(0, -3) : f.key;
+      const label = form[`${base}_label`] ?? form[`${base}_name`];
+      if (label) return <span className="text-sm text-slate-800">{String(label)}</span>;
+      return v ? <code className="text-xs text-slate-400">{String(v).slice(0, 8)}…</code> : <span className="text-slate-300">—</span>;
+    }
+    if (v == null || v === "") return <span className="text-slate-300 text-sm">—</span>;
+    if (f.type === "number") {
+      const n = Number(v);
+      return <span className="text-sm tabular-nums text-slate-800">{isNaN(n) ? String(v) : n.toLocaleString("th-TH")}</span>;
+    }
+    return <span className="text-sm text-slate-800 whitespace-pre-wrap break-words">{String(v)}</span>;
+  };
+
+  // F11: header ของ detail view
+  const detailTitle = (form["name_th"] ?? form["name"] ?? form["sku_name"] ?? form["code"] ?? config.title) as string;
+  const detailCode  = (form["code"] ?? form["sku"] ?? "") as string;
+  const coverKey    = (form["cover_image_r2_key"] as string) || null;
+
   // F14: early return AFTER all hooks — กัน React error #310
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
@@ -728,27 +781,86 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm">✓ {toast}</div>}
       </div>
 
-      {/* Drawer */}
-      <ERPModal open={modalOpen} onClose={tryClose} size="lg"
-        title={editingId ? `แก้ ${config.title}` : `เพิ่ม ${config.title}ใหม่`}
+      {/* F11: Drawer (slide จากขวา) — สลับ view/edit */}
+      <Drawer
+        open={modalOpen}
+        onClose={tryClose}
+        size="lg"
+        hasUnsavedChanges={drawerMode === "edit" && dirty}
+        title={
+          drawerMode === "view"
+            ? (editingId ? `${config.title}` : `เพิ่ม ${config.title}`)
+            : (editingId ? `แก้ไข ${config.title}` : `เพิ่ม ${config.title}ใหม่`)
+        }
         footer={
-          <>
-            <button onClick={tryClose} disabled={saving}
-              className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-            <button onClick={save} disabled={saving}
-              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {saving ? "กำลังบันทึก..." : "บันทึก"}
-            </button>
-          </>
-        }>
-        <div className="space-y-4">
-          {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
-          <FormSections
-            fields={effectiveFields.filter(f => !f.hideInForm && evaluateCondition(f.conditionRules, form))}
-            renderField={renderField}
-          />
-        </div>
-      </ERPModal>
+          drawerMode === "view" ? (
+            <>
+              <button onClick={() => setModalOpen(false)}
+                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">ปิด</button>
+              {canEdit && (
+                <button onClick={switchToEdit}
+                  className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1.5">
+                  ✎ แก้ไข
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => { if (editingId) { setDrawerMode("view"); setDirty(false); } else tryClose(); }}
+                disabled={saving}
+                className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                {editingId ? "ยกเลิก" : "ปิด"}
+              </button>
+              <button onClick={save} disabled={saving}
+                className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                {saving ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+            </>
+          )
+        }
+      >
+        {drawerMode === "view" ? (
+          // ---- โหมดดูรายละเอียด ----
+          <div className="space-y-4">
+            {/* Header: รูป + ชื่อ + code */}
+            <div className="flex items-start gap-4 pb-4 border-b border-slate-100">
+              {coverKey && <ImageCell r2Key={coverKey} size={88} />}
+              <div className="min-w-0 flex-1">
+                {detailCode && (
+                  <code className="inline-block text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 mb-1">{detailCode}</code>
+                )}
+                <h2 className="text-lg font-semibold text-slate-900 break-words">{detailTitle}</h2>
+                <div className="mt-1">
+                  {form[activeField]
+                    ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
+                    : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
+                </div>
+              </div>
+            </div>
+
+            {detailLoading && <div className="text-xs text-slate-400">⏳ กำลังโหลดรายละเอียด...</div>}
+
+            <DetailSections
+              fields={effectiveFields.filter(f =>
+                !f.hideInForm
+                && f.key !== "cover_image_r2_key"
+                && evaluateCondition(f.conditionRules, form)
+              )}
+              renderValue={renderDetailValue}
+            />
+          </div>
+        ) : (
+          // ---- โหมดแก้ไข (ฟอร์ม) ----
+          <div className="space-y-4">
+            {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
+            <FormSections
+              fields={effectiveFields.filter(f => !f.hideInForm && evaluateCondition(f.conditionRules, form))}
+              renderField={renderField}
+            />
+          </div>
+        )}
+      </Drawer>
 
       <ConfirmDialog open={confirmDiscard} onClose={() => setConfirmDiscard(false)}
         title="ยังไม่บันทึก" message="ออกโดยไม่บันทึกหรือไม่?"
@@ -843,6 +955,55 @@ function FormSections({
                 {groupFields.map(renderField)}
               </div>
             )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// DetailSections — F11: read-only detail view (group by section)
+// ============================================================
+
+function DetailSections({
+  fields, renderValue,
+}: {
+  fields: FieldDef[];
+  renderValue: (f: FieldDef) => React.ReactNode;
+}) {
+  const grouped = useMemo(() => {
+    const map = new Map<string, FieldDef[]>();
+    for (const f of fields) {
+      const k = f.groupKey ?? "other";
+      const list = map.get(k) ?? [];
+      list.push(f);
+      map.set(k, list);
+    }
+    for (const [, list] of map) list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    return Array.from(map.entries()).sort(
+      ([a], [b]) => getGroupConfig(a).order - getGroupConfig(b).order
+    );
+  }, [fields]);
+
+  return (
+    <div className="space-y-4">
+      {grouped.map(([groupKey, groupFields]) => {
+        const cfg = getGroupConfig(groupKey);
+        return (
+          <div key={groupKey}>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              <span>{cfg.icon}</span>
+              <span>{cfg.label}</span>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+              {groupFields.map((f) => (
+                <div key={f.key} className={f.type === "textarea" || f.type === "image" ? "col-span-2" : ""}>
+                  <dt className="text-[11px] text-slate-400 mb-0.5">{f.label}</dt>
+                  <dd>{renderValue(f)}</dd>
+                </div>
+              ))}
+            </dl>
           </div>
         );
       })}
