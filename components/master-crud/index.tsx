@@ -667,7 +667,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const columns: ColumnDef<Row>[] = useMemo(() => {
     // กลุ่ม A: ถ้า defaultShowAllColumns → โชว์ทุก field (ใช้ width เป็น size สำรอง)
     const showAll = config.defaultShowAllColumns === true;
-    const tableFields = effectiveFields.filter(f => showAll ? true : f.colSize !== undefined);
+    // one2many/many2many = ลิสต์ความสัมพันธ์ → ไม่เหมาะเป็นคอลัมน์ตาราง (ดูเต็มในหน้า detail)
+    const tableFields = effectiveFields
+      .filter(f => f.type !== "one2many" && f.type !== "many2many")
+      .filter(f => showAll ? true : f.colSize !== undefined);
     const cols: ColumnDef<Row>[] = tableFields.map(f => ({
       id: f.key, accessorKey: f.key, header: f.label, size: f.colSize ?? f.width ?? 150,
       enableSorting: f.sortable !== false,
@@ -806,6 +809,20 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     }
   }, [effectiveFields, apiBase, config.apiPath, user?.name, isRest]);
 
+  // Quick edit ในหน้า detail (view mode) — บันทึกทันทีผ่าน onInlineEdit + อัปเดต form
+  const quickSave = useCallback(async (field: string, value: string): Promise<string | null> => {
+    if (!editingId) return "ยังไม่มีระเบียน";
+    const err = await onInlineEdit({ id: editingId } as Row, field, value);
+    if (!err) {
+      const def = effectiveFields.find((f) => f.key === field);
+      const coerced: unknown = def?.type === "boolean" ? (value === "true")
+        : def?.type === "number" ? (value === "" ? null : Number(value))
+        : (value === "" ? "" : value);
+      setForm((p) => ({ ...p, [field]: coerced }));
+    }
+    return err;
+  }, [editingId, onInlineEdit, effectiveFields]);
+
   // ---- Bulk edit fields ----
   const bulkEditFields: BulkEditField[] = useMemo(() => {
     if (!canEdit) return [];
@@ -932,6 +949,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // F11: render ค่าแบบอ่านอย่างเดียว (detail view)
   const renderDetailValue = (f: FieldDef): React.ReactNode => {
     const v = form[f.key];
+    // Quick edit: field ที่ตั้ง inline + แก้ได้ + ชนิดง่ายๆ → กดแก้ได้เลยในหน้า detail
+    if (drawerMode === "view" && editingId && canEdit && f.inlineEditable && !f.readonly
+        && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select")) {
+      return <QuickEditCell field={f} value={v} onSave={(val) => quickSave(f.key, val)} />;
+    }
     if (f.type === "image") {
       return <ImageCell r2Key={(v as string) || null} size={160} />;
     }
@@ -1263,6 +1285,66 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         <RelationPeekModal moduleKey={peek.moduleKey} recordId={peek.id} onClose={() => setPeek(null)} />
       )}
     </Wrap>
+  );
+}
+
+// ============================================================
+// QuickEditCell — แก้ค่าเร็วในหน้า detail (view mode) บันทึกทันที
+// ============================================================
+function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unknown; onSave: (v: string) => Promise<string | null> }) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const commit = async (newVal: string) => {
+    setSaving(true); setErr(null);
+    const e = await onSave(newVal);
+    setSaving(false);
+    if (e) { setErr(e); return; }
+    setEditing(false);
+  };
+
+  if (field.type === "boolean") {
+    return (
+      <button type="button" disabled={saving} onClick={() => commit(value ? "false" : "true")}
+        className="inline-flex items-center gap-1.5 text-sm group">
+        <span className={`w-1.5 h-1.5 rounded-full ${value ? "bg-emerald-500" : "bg-slate-300"}`} />
+        <span className={value ? "text-emerald-600" : "text-slate-400"}>{value ? "เปิด" : "ปิด"}</span>
+        <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100">✎ แตะเพื่อสลับ</span>
+        {err && <span className="text-[10px] text-red-500 ml-1">{err}</span>}
+      </button>
+    );
+  }
+
+  if (!editing) {
+    const display = value == null || value === "" ? "—" : String(value);
+    return (
+      <button type="button" onClick={() => { setVal(value == null ? "" : String(value)); setEditing(true); }}
+        className="text-left text-sm text-slate-800 hover:bg-blue-50/60 rounded px-1 -mx-1 inline-flex items-center gap-1 group max-w-full">
+        <span className="truncate">{display}</span>
+        <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 flex-shrink-0">✎</span>
+      </button>
+    );
+  }
+
+  const inputCls = "h-8 px-2 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
+  return (
+    <div className="flex items-center gap-1">
+      {field.type === "select" && field.options ? (
+        <select autoFocus value={val} disabled={saving} onChange={(e) => setVal(e.target.value)} onBlur={() => commit(val)} className={`${inputCls} bg-white`}>
+          <option value="">—</option>
+          {field.options.map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      ) : (
+        <input autoFocus type={field.type === "number" ? "number" : "text"} value={val} disabled={saving}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") commit(val); if (e.key === "Escape") setEditing(false); }}
+          onBlur={() => commit(val)} className={inputCls} />
+      )}
+      {saving && <span className="text-[10px] text-slate-400">…</span>}
+      {err && <span className="text-[10px] text-red-500">{err}</span>}
+    </div>
   );
 }
 
