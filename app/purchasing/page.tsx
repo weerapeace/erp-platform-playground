@@ -130,6 +130,22 @@ export default function PurchasingShopPage() {
             },
           } as Card;
         });
+        // จัดเรียงตามความใกล้เคียงกับคำค้น: ตรงเป๊ะ → ขึ้นต้น → มีอยู่ในโค้ด → มีอยู่ในชื่อ
+        if (q) {
+          const ql = q.trim().toLowerCase();
+          const score = (c: Card) => {
+            const code = (c.sub ?? "").toLowerCase();
+            const name = (c.name ?? "").toLowerCase();
+            if (code === ql) return 0;
+            if (name === ql) return 1;
+            if (code.startsWith(ql)) return 2;
+            if (name.startsWith(ql)) return 3;
+            if (code.includes(ql)) return 4;
+            if (name.includes(ql)) return 5;
+            return 6;
+          };
+          mapped.sort((a, b) => score(a) - score(b));
+        }
         setTotal(num(j.total) || num(j.count) || (pg * PAGE + mapped.length));
         setCards(mapped);
       } else {
