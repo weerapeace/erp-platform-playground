@@ -3,16 +3,27 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth";
+import { internalEmail } from "@/lib/internal-users";
 
 export default function LoginPage() {
   const { login, loginWithMagicLink, loginWithGoogle, loginError, user, ready } = useAuth();
   const router = useRouter();
 
-  const [mode,     setMode]     = useState<"magic" | "google" | "password">("magic");
+  const [mode,     setMode]     = useState<"magic" | "google" | "password" | "pin">("magic");
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
+  const [uname,    setUname]    = useState("");
+  const [pin,      setPin]      = useState("");
   const [loading,  setLoading]  = useState(false);
   const [magicSent, setMagicSent] = useState(false);
+
+  const submitPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    const ok = await login(internalEmail(uname), pin);
+    setLoading(false);
+    if (ok) router.push("/apps");
+  };
 
   // ถ้า login อยู่แล้ว → เด้งเข้า /apps
   useEffect(() => { if (ready && user) router.push("/apps"); }, [ready, user, router]);
@@ -123,13 +134,48 @@ export default function LoginPage() {
                     {loading ? "กำลังส่ง..." : "📧 ส่ง Magic Link เข้า Email"}
                   </button>
 
+                  <div className="flex items-center justify-center gap-3 text-xs">
+                    <button type="button" onClick={() => setMode("password")} className="text-slate-500 hover:text-slate-700">ใช้รหัสผ่านแทน</button>
+                    <span className="text-slate-300">·</span>
+                    <button type="button" onClick={() => setMode("pin")} className="text-orange-600 hover:underline font-medium">เข้าด้วยรหัสพนักงาน</button>
+                  </div>
+                </form>
+              )}
+
+              {/* ============= PIN FORM (ผู้ใช้ภายใน — username + PIN) ============= */}
+              {mode === "pin" && (
+                <form onSubmit={submitPin} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5">ชื่อผู้ใช้ (username)</label>
+                    <input
+                      type="text" value={uname}
+                      onChange={(e) => setUname(e.target.value)}
+                      required placeholder="เช่น somchai" autoComplete="username" autoCapitalize="none"
+                      className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5">PIN (6 หลัก)</label>
+                    <input
+                      type="password" inputMode="numeric" pattern="\d*" maxLength={6} value={pin}
+                      onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+                      required placeholder="••••••" autoComplete="current-password"
+                      className="w-full h-10 px-3 text-sm tracking-[0.4em] text-center border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    />
+                  </div>
+
+                  {loginError && (
+                    <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠️ {loginError}</div>
+                  )}
+
                   <button
-                    type="button"
-                    onClick={() => setMode("password")}
-                    className="w-full text-xs text-slate-500 hover:text-slate-700"
+                    type="submit" disabled={loading || !uname || pin.length < 6}
+                    className="w-full h-10 text-sm font-medium text-white bg-gradient-to-r from-orange-500 to-amber-500 rounded-lg hover:from-orange-600 hover:to-amber-600 disabled:opacity-50 transition-all"
                   >
-                    ใช้รหัสผ่านแทน
+                    {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
                   </button>
+
+                  <button type="button" onClick={() => setMode("magic")} className="w-full text-xs text-slate-500 hover:text-slate-700">← กลับไปหน้าหลัก</button>
                 </form>
               )}
 

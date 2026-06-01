@@ -18,6 +18,7 @@ import { useAuth, usePermission, AccessDenied, roleLabel, roleColor } from "@/co
 import { ERPModal } from "@/components/modal";
 import { DataTable } from "@/components/data-table";
 import { apiFetch } from "@/lib/api";
+import { internalEmail, isValidUsername, isValidPin } from "@/lib/internal-users";
 import type { AdminUser, AdminUsersResponse } from "@/app/api/admin/users/route";
 
 type Role = "admin" | "manager" | "staff" | "viewer";
@@ -57,6 +58,37 @@ export default function AdminUsersPage() {
   // edit drawer (row click) — เปลี่ยน role / toggle active
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+
+  // สร้างผู้ใช้ภายใน (username + PIN)
+  const [intOpen, setIntOpen] = useState(false);
+  const [intUser, setIntUser] = useState("");
+  const [intName, setIntName] = useState("");
+  const [intPin,  setIntPin]  = useState("");
+  const [intPin2, setIntPin2] = useState("");
+  const [intRole, setIntRole] = useState<Role>("staff");
+  const [intBusy, setIntBusy] = useState(false);
+  const [intErr,  setIntErr]  = useState<string | null>(null);
+
+  const submitInternal = async () => {
+    const u = intUser.trim().toLowerCase();
+    if (!isValidUsername(u)) { setIntErr("username: a-z, 0-9, _ ความยาว 3-32"); return; }
+    if (!isValidPin(intPin)) { setIntErr("PIN ต้องเป็นตัวเลข 6 หลัก"); return; }
+    if (intPin !== intPin2) { setIntErr("PIN สองช่องไม่ตรงกัน"); return; }
+    setIntBusy(true); setIntErr(null);
+    try {
+      const res = await apiFetch("/api/admin/users/create-internal", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: u, display_name: intName.trim() || undefined, pin: intPin, role: intRole, actor: me?.name }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setIntOpen(false);
+      setIntUser(""); setIntName(""); setIntPin(""); setIntPin2(""); setIntRole("staff");
+      setSavedAt(new Date().toLocaleTimeString("th-TH"));
+      await load();
+    } catch (err) { setIntErr(err instanceof Error ? err.message : "สร้างไม่สำเร็จ"); }
+    finally { setIntBusy(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -227,9 +259,13 @@ export default function AdminUsersPage() {
           </div>
           <div className="flex items-center gap-3">
             {savedAt && <span className="text-xs text-emerald-600">✓ บันทึกแล้วเมื่อ {savedAt}</span>}
+            <button onClick={() => setIntOpen(true)}
+              className="h-9 px-4 text-sm font-medium border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50">
+              ＋ ผู้ใช้ภายใน (PIN)
+            </button>
             <button onClick={() => setInviteOpen(true)}
               className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              ＋ เชิญผู้ใช้
+              ＋ เชิญผู้ใช้ (อีเมล)
             </button>
           </div>
         </div>
@@ -297,6 +333,60 @@ export default function AdminUsersPage() {
               {ROLES.map(r => <option key={r.v} value={r.v}>{roleLabel(r.v)} — {r.label}</option>)}
             </select>
             <span className="text-[10px] text-slate-400 mt-1 block">ปรับใหม่ได้ภายหลัง</span>
+          </label>
+        </div>
+      </ERPModal>
+
+      {/* Internal user (username + PIN) Modal */}
+      <ERPModal open={intOpen} onClose={() => !intBusy && setIntOpen(false)} title="สร้างผู้ใช้ภายใน (username + PIN)" size="md"
+        footer={
+          <>
+            <button onClick={() => setIntOpen(false)} disabled={intBusy}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button onClick={submitInternal} disabled={intBusy}
+              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {intBusy ? "กำลังสร้าง..." : "สร้างผู้ใช้"}
+            </button>
+          </>
+        }>
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">
+            สำหรับพนักงานที่ไม่มีอีเมล — เข้าระบบด้วย <strong>username + PIN</strong> (เมนู &quot;เข้าด้วยรหัสพนักงาน&quot; ที่หน้า login)
+          </p>
+          {intErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {intErr}</div>}
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">ชื่อผู้ใช้ (username) *</span>
+            <input value={intUser} onChange={e => setIntUser(e.target.value.toLowerCase())}
+              placeholder="เช่น somchai" autoFocus autoCapitalize="none"
+              className="w-full h-9 mt-0.5 px-3 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            {intUser && <span className="text-[10px] text-slate-400 mt-0.5 block">login id: {internalEmail(intUser)}</span>}
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">ชื่อแสดงผล</span>
+            <input value={intName} onChange={e => setIntName(e.target.value)} placeholder="(ไม่บังคับ)"
+              className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">PIN (6 หลัก) *</span>
+              <input type="password" inputMode="numeric" maxLength={6} value={intPin}
+                onChange={e => setIntPin(e.target.value.replace(/\D/g, ""))} placeholder="••••••"
+                className="w-full h-9 mt-0.5 px-3 text-sm text-center tracking-[0.3em] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">ยืนยัน PIN *</span>
+              <input type="password" inputMode="numeric" maxLength={6} value={intPin2}
+                onChange={e => setIntPin2(e.target.value.replace(/\D/g, ""))} placeholder="••••••"
+                className="w-full h-9 mt-0.5 px-3 text-sm text-center tracking-[0.3em] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </label>
+          </div>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">สิทธิ์</span>
+            <select value={intRole} onChange={e => setIntRole(e.target.value as Role)}
+              className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-md bg-white">
+              {ROLES.filter(r => r.v !== "admin").map(r => <option key={r.v} value={r.v}>{roleLabel(r.v)} — {r.label}</option>)}
+            </select>
+            <span className="text-[10px] text-amber-600 mt-1 block">ผู้ใช้ PIN กำหนดเป็น admin ไม่ได้ (ความปลอดภัย) · PIN รีเซ็ตได้โดยแอดมินเท่านั้น</span>
           </label>
         </div>
       </ERPModal>
