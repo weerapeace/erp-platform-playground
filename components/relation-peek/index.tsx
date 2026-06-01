@@ -60,9 +60,15 @@ export function RelationPeekModal({ moduleKey, recordId, onClose }: { moduleKey:
   return createPortal(
     <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">🔗 {title}</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <a href={`/m/${moduleKey}?open=${encodeURIComponent(recordId)}`}
+              className="h-7 px-2.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 inline-flex items-center">
+              เปิดหน้าเต็ม →
+            </a>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+          </div>
         </div>
         <div className="p-5 overflow-auto">
           {loading ? (
