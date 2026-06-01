@@ -843,6 +843,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           onRowClick={openEdit}
           serverFetch={config.serverMode ? serverFetch : undefined}
           serverRefreshKey={config.serverMode ? serverRefresh : undefined}
+          enableCards={!config.serverMode}
+          cardConfig={!config.serverMode ? {
+            image:    "cover_image_r2_key",
+            primary:  effectiveSearchKeys[0] ?? "name_th",
+            subtitle: "code",
+          } : undefined}
         />
 
         {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm">✓ {toast}</div>}
