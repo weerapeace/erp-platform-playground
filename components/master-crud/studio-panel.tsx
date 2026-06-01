@@ -1,14 +1,17 @@
 "use client";
 
 /**
- * StudioPanel — F11 Part B (Studio v1)
+ * StudioPanel — F11B + F23 (Studio v2)
  *
- * Drag-drop layout builder บนหน้าจริง (Odoo Studio style)
- * - ลากเรียง field ภายใน section
- * - ย้าย field ข้าม section (เปลี่ยน group_key)
- * - บันทึกลง Field Registry: display_order (PATCH bulk reorder) + group_key (POST bulk)
+ * Layout builder บนหน้าจริง (Odoo Studio style) — full-screen, 2 tab:
+ *   📊 ตาราง (List)  — toggle column show/hide + เรียงลำดับ + preview ตาราง
+ *   📝 ฟอร์ม (Form)  — toggle show_in_form + ลาก field ข้าม section + preview ฟอร์ม
  *
- * เปิดผ่านปุ่ม "⚙️ ออกแบบหน้า" บน MasterCRUDPage (เฉพาะ admin)
+ * บันทึกลง Field Registry:
+ *   - display_order  (PATCH bulk reorder)
+ *   - group_key      (POST bulk)
+ *   - is_visible     (POST bulk) — column show ในตาราง
+ *   - show_in_form   (POST bulk) — field show ในฟอร์ม
  */
 
 import { useState, useMemo, useCallback } from "react";
@@ -23,14 +26,15 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-// field ที่ Studio จัดการ — subset ของ FieldDef
 export type StudioField = {
-  fieldId?: string;
-  key:      string;
-  label:    string;
-  groupKey: string;
-  order:    number;
-  type:     string;
+  fieldId?:    string;
+  key:         string;
+  label:       string;
+  groupKey:    string;
+  order:       number;
+  type:        string;
+  isVisible?:  boolean;   // column show ในตาราง
+  showInForm?: boolean;   // field show ในฟอร์ม
 };
 
 const GROUP_META: Record<string, { label: string; icon: string; order: number }> = {
@@ -49,6 +53,8 @@ const GROUP_META: Record<string, { label: string; icon: string; order: number }>
 function gmeta(k: string) { return GROUP_META[k] ?? { label: k, icon: "📁", order: 99 }; }
 const ALL_GROUPS = Object.keys(GROUP_META);
 
+type Tab = "table" | "form";
+
 export function StudioPanel({
   fields, moduleLabel, onClose, onSaved,
 }: {
@@ -57,7 +63,7 @@ export function StudioPanel({
   onClose:     () => void;
   onSaved:     () => void;
 }) {
-  // working copy — แก้ใน state ก่อน save
+  const [tab, setTab] = useState<Tab>("table");
   const [items, setItems] = useState<StudioField[]>(() =>
     [...fields].sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
   );
@@ -70,94 +76,71 @@ export function StudioPanel({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  // group items → section
-  const grouped = useMemo(() => {
-    const map = new Map<string, StudioField[]>();
-    // เริ่มทุก group ที่ปรากฏ + group ว่างที่อาจ drop ลงได้
-    for (const it of items) {
-      const k = it.groupKey ?? "other";
-      const list = map.get(k) ?? [];
-      list.push(it);
-      map.set(k, list);
-    }
-    return Array.from(map.entries()).sort(([a], [b]) => gmeta(a).order - gmeta(b).order);
-  }, [items]);
-
-  // หา field จาก key
-  const findField = (key: string) => items.find((i) => i.key === key);
-
-  const onDragEnd = useCallback((e: DragEndEvent) => {
-    const { active, over } = e;
-    if (!over) return;
-    const activeKey = String(active.id);
-    const overId    = String(over.id);
-
-    setItems((prev) => {
-      const activeIdx = prev.findIndex((i) => i.key === activeKey);
-      if (activeIdx < 0) return prev;
-
-      // drop บน section header (id = "group:<key>") → ย้ายเข้า group นั้นต่อท้าย
-      if (overId.startsWith("group:")) {
-        const targetGroup = overId.slice(6);
-        const next = [...prev];
-        next[activeIdx] = { ...next[activeIdx], groupKey: targetGroup };
-        setDirty(true);
-        return next;
-      }
-
-      // drop บน field อื่น
-      const overIdx = prev.findIndex((i) => i.key === overId);
-      if (overIdx < 0) return prev;
-      const next = [...prev];
-      // ถ้าข้าม group → เปลี่ยน groupKey ของ active เป็นของ over
-      if (next[activeIdx].groupKey !== next[overIdx].groupKey) {
-        next[activeIdx] = { ...next[activeIdx], groupKey: next[overIdx].groupKey };
-      }
-      setDirty(true);
-      return arrayMove(next, activeIdx, overIdx);
-    });
-  }, []);
-
-  const moveToGroup = (key: string, group: string) => {
-    setItems((prev) => prev.map((i) => i.key === key ? { ...i, groupKey: group } : i));
+  // ---- helpers ----
+  const patchItem = (key: string, patch: Partial<StudioField>) => {
+    setItems((prev) => prev.map((i) => i.key === key ? { ...i, ...patch } : i));
     setDirty(true);
   };
 
+  const toggleVisible = (key: string) =>
+    setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, isVisible: !i.isVisible } : i); });
+  const toggleForm = (key: string) =>
+    setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, showInForm: !i.showInForm } : i); });
+
+  // ---- save ----
   const save = async () => {
     setSaving(true); setMsg(null);
     try {
-      // คำนวณ order ใหม่ตามลำดับใน items (global, step 10)
-      // + group ใหม่ของแต่ละ field
-      const withFieldId = items.filter((i) => i.fieldId);
+      const withId = items.filter((i) => i.fieldId);
 
-      // 1. reorder (display_order)
-      const reorder = withFieldId.map((i, idx) => ({ id: i.fieldId!, display_order: (idx + 1) * 10 }));
+      // 1. reorder (display_order — global, step 10)
+      const reorder = withId.map((i, idx) => ({ id: i.fieldId!, display_order: (idx + 1) * 10 }));
       const r1 = await apiFetch("/api/admin/field-registry-v2/bulk", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reorder }),
       });
-      const j1 = await r1.json();
-      if (j1.error) throw new Error(j1.error);
+      if ((await r1.json()).error) throw new Error("reorder failed");
 
-      // 2. group_key — group ทีละ value (bulk POST รับ patch เดียวต่อชุด ids)
+      // 2. group_key (ทีละ value)
       const byGroup = new Map<string, string[]>();
-      for (const i of withFieldId) {
-        const g = byGroup.get(i.groupKey) ?? [];
-        g.push(i.fieldId!);
-        byGroup.set(i.groupKey, g);
+      for (const i of withId) {
+        const g = byGroup.get(i.groupKey) ?? []; g.push(i.fieldId!); byGroup.set(i.groupKey, g);
       }
       for (const [group, ids] of byGroup) {
-        const r2 = await apiFetch("/api/admin/field-registry-v2/bulk", {
+        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids, patch: { group_key: group } }),
         });
-        const j2 = await r2.json();
-        if (j2.error) throw new Error(j2.error);
+        if ((await r.json()).error) throw new Error("group_key failed");
+      }
+
+      // 3. is_visible (column show) — แยก 2 กลุ่ม true/false
+      const visTrue  = withId.filter((i) => i.isVisible).map((i) => i.fieldId!);
+      const visFalse = withId.filter((i) => !i.isVisible).map((i) => i.fieldId!);
+      for (const [ids, val] of [[visTrue, true], [visFalse, false]] as [string[], boolean][]) {
+        if (ids.length === 0) continue;
+        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, patch: { is_visible: val } }),
+        });
+        if ((await r.json()).error) throw new Error("is_visible failed");
+      }
+
+      // 4. show_in_form (field ในฟอร์ม)
+      const formTrue  = withId.filter((i) => i.showInForm).map((i) => i.fieldId!);
+      const formFalse = withId.filter((i) => !i.showInForm).map((i) => i.fieldId!);
+      for (const [ids, val] of [[formTrue, true], [formFalse, false]] as [string[], boolean][]) {
+        if (ids.length === 0) continue;
+        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, patch: { show_in_form: val } }),
+        });
+        if ((await r.json()).error) throw new Error("show_in_form failed");
       }
 
       setMsg("✓ บันทึก layout สำเร็จ");
       setDirty(false);
-      setTimeout(() => { onSaved(); }, 600);
+      setTimeout(() => onSaved(), 600);
     } catch (e) {
       setMsg("❌ " + (e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"));
     } finally {
@@ -165,58 +148,95 @@ export function StudioPanel({
     }
   };
 
+  // ---- drag (form tab — group + reorder) ----
+  const onDragEnd = useCallback((e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over) return;
+    const activeKey = String(active.id), overId = String(over.id);
+    setItems((prev) => {
+      const ai = prev.findIndex((i) => i.key === activeKey);
+      if (ai < 0) return prev;
+      if (overId.startsWith("group:")) {
+        const g = overId.slice(6); const next = [...prev];
+        next[ai] = { ...next[ai], groupKey: g }; setDirty(true); return next;
+      }
+      const oi = prev.findIndex((i) => i.key === overId);
+      if (oi < 0) return prev;
+      const next = [...prev];
+      if (next[ai].groupKey !== next[oi].groupKey) next[ai] = { ...next[ai], groupKey: next[oi].groupKey };
+      setDirty(true);
+      return arrayMove(next, ai, oi);
+    });
+  }, []);
+
+  // ---- group สำหรับ form tab ----
+  const grouped = useMemo(() => {
+    const map = new Map<string, StudioField[]>();
+    for (const it of items) { const k = it.groupKey ?? "other"; const l = map.get(k) ?? []; l.push(it); map.set(k, l); }
+    return Array.from(map.entries()).sort(([a], [b]) => gmeta(a).order - gmeta(b).order);
+  }, [items]);
+
+  // preview data
+  const visibleCols = items.filter((i) => i.isVisible);
+  const formFields  = items.filter((i) => i.showInForm);
+
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-slate-50">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <span className="text-lg">🎨</span>
           <div>
             <h2 className="text-base font-semibold text-slate-900">ออกแบบหน้า — {moduleLabel}</h2>
-            <p className="text-xs text-slate-500">ลาก field เรียงลำดับ / ย้ายข้ามหมวด → กดบันทึก</p>
+            <p className="text-xs text-slate-500">เลือก field ที่โชว์ + เรียงลำดับ + ดู preview สด → กดบันทึก</p>
+          </div>
+          {/* Tabs */}
+          <div className="ml-4 flex bg-slate-100 rounded-lg p-0.5">
+            {([["table","📊 ตาราง"],["form","📝 ฟอร์ม"]] as [Tab,string][]).map(([t,l]) => (
+              <button key={t} onClick={() => setTab(t)}
+                className={`px-3 py-1.5 text-sm rounded-md transition-colors ${tab===t?"bg-white shadow-sm font-medium text-slate-900":"text-slate-500 hover:text-slate-700"}`}>
+                {l}
+              </button>
+            ))}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {msg && <span className={`text-sm ${msg.startsWith("✓") ? "text-emerald-600" : "text-red-600"}`}>{msg}</span>}
+          {msg && <span className={`text-sm ${msg.startsWith("✓")?"text-emerald-600":"text-red-600"}`}>{msg}</span>}
           <button onClick={onClose} disabled={saving}
-            className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            ปิด
-          </button>
+            className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">ปิด</button>
           <button onClick={save} disabled={saving || !dirty}
             className="h-9 px-4 text-sm font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50">
-            {saving ? "กำลังบันทึก..." : "💾 บันทึก layout"}
+            {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
           </button>
         </div>
       </header>
 
-      {/* Canvas */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="max-w-3xl mx-auto">
-          <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
-            <SortableContext items={items.map((i) => i.key)} strategy={verticalListSortingStrategy}>
-              <div className="space-y-4">
-                {grouped.map(([groupKey, groupFields]) => {
-                  const meta = gmeta(groupKey);
-                  return (
-                    <SectionDropZone key={groupKey} groupKey={groupKey} label={meta.label} icon={meta.icon} count={groupFields.length}>
-                      {groupFields.map((f) => (
-                        <StudioFieldCard
-                          key={f.key}
-                          field={f}
-                          onMoveGroup={(g) => moveToGroup(f.key, g)}
-                        />
-                      ))}
-                      {groupFields.length === 0 && (
-                        <div className="text-xs text-slate-300 py-3 text-center border-2 border-dashed border-slate-200 rounded-lg">
-                          ลาก field มาวางที่นี่
-                        </div>
-                      )}
-                    </SectionDropZone>
-                  );
-                })}
-              </div>
-            </SortableContext>
-          </DndContext>
+      {/* Body: ซ้าย = editor / ขวา = preview */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* ---- LEFT: editor ---- */}
+        <div className="w-1/2 overflow-y-auto border-r border-slate-200 p-5">
+          {tab === "table" ? (
+            <TableEditor
+              items={items} sensors={sensors}
+              onReorder={(a,b)=>{ setItems((p)=>arrayMove(p,a,b)); setDirty(true); }}
+              onToggleVisible={toggleVisible}
+            />
+          ) : (
+            <FormEditor
+              grouped={grouped} sensors={sensors} onDragEnd={onDragEnd}
+              items={items} onToggleForm={toggleForm} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
+            />
+          )}
+        </div>
+
+        {/* ---- RIGHT: live preview ---- */}
+        <div className="w-1/2 overflow-y-auto bg-white p-5">
+          <div className="text-xs font-semibold text-slate-400 uppercase mb-3">👁 Preview สด</div>
+          {tab === "table" ? (
+            <TablePreview cols={visibleCols} />
+          ) : (
+            <FormPreview grouped={grouped.map(([g,fs])=>[g,fs.filter(f=>f.showInForm)] as [string,StudioField[]]).filter(([,fs])=>fs.length>0)} />
+          )}
         </div>
       </div>
     </div>
@@ -224,82 +244,167 @@ export function StudioPanel({
 }
 
 // ============================================================
-// SectionDropZone — section header + ที่วาง field
+// TABLE TAB — toggle visible + reorder (sortable list)
 // ============================================================
 
-function SectionDropZone({
-  groupKey, label, icon, count, children,
+function TableEditor({
+  items, sensors, onReorder, onToggleVisible,
 }: {
-  groupKey: string;
-  label:    string;
-  icon:     string;
-  count:    number;
-  children: React.ReactNode;
+  items: StudioField[];
+  sensors: ReturnType<typeof useSensors>;
+  onReorder: (from: number, to: number) => void;
+  onToggleVisible: (key: string) => void;
 }) {
-  // ทำ header เป็น droppable ผ่าน useSortable (id = group:<key>)
-  const { setNodeRef, isOver } = useSortable({ id: `group:${groupKey}` });
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div
-        ref={setNodeRef}
-        className={`px-4 py-2.5 flex items-center gap-2 border-b border-slate-100 transition-colors ${
-          isOver ? "bg-orange-50" : "bg-slate-50"
-        }`}
-      >
-        <span>{icon}</span>
-        <span className="text-sm font-semibold text-slate-700">{label}</span>
-        <span className="text-xs text-slate-400">({count})</span>
-      </div>
-      <div className="p-3 space-y-1.5">
-        {children}
-      </div>
+    <div>
+      <p className="text-xs text-slate-500 mb-3">ติ๊ก = โชว์ใน column ตาราง • ลาก ⋮⋮ เรียงลำดับ column</p>
+      <DndContext sensors={sensors} collisionDetection={closestCorners}
+        onDragEnd={(e: DragEndEvent)=>{ const {active,over}=e; if(!over||active.id===over.id)return;
+          const a=items.findIndex(i=>i.key===active.id), b=items.findIndex(i=>i.key===over.id);
+          if(a>=0&&b>=0) onReorder(a,b); }}>
+        <SortableContext items={items.map(i=>i.key)} strategy={verticalListSortingStrategy}>
+          <div className="space-y-1">
+            {items.map((f)=>(
+              <ColRow key={f.key} field={f} onToggle={()=>onToggleVisible(f.key)} />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+}
+
+function ColRow({ field, onToggle }: { field: StudioField; onToggle: ()=>void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
+  const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
+  return (
+    <div ref={setNodeRef} style={style}
+      className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${field.isVisible?"border-emerald-200 bg-emerald-50/40":"border-slate-200 bg-white"} ${isDragging?"shadow-lg":""}`}>
+      <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-slate-400 select-none px-1">⋮⋮</span>
+      <input type="checkbox" checked={!!field.isVisible} onChange={onToggle} className="rounded accent-emerald-500" />
+      <span className="flex-1 text-sm text-slate-700 truncate">{field.label}
+        <code className="ml-1.5 text-[10px] text-slate-400">{field.key}</code></span>
+      <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded">{field.type}</span>
+    </div>
+  );
+}
+
+function TablePreview({ cols }: { cols: StudioField[] }) {
+  if (cols.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก column — ติ๊กด้านซ้าย</div>;
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>{cols.map(c=>(
+            <th key={c.key} className="px-3 py-2 text-left font-medium text-slate-600 whitespace-nowrap">{c.label}</th>
+          ))}</tr>
+        </thead>
+        <tbody>
+          {[1,2,3].map(r=>(
+            <tr key={r} className="border-b border-slate-100">
+              {cols.map(c=>(
+                <td key={c.key} className="px-3 py-2 text-slate-400 whitespace-nowrap">
+                  {c.type==="boolean"?"✓":c.type==="number"?"123":c.type==="image"?"🖼":"ตัวอย่าง"}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
 // ============================================================
-// StudioFieldCard — field ที่ลากได้ + dropdown ย้ายหมวด
+// FORM TAB — toggle show_in_form + drag ข้าม section
 // ============================================================
 
-function StudioFieldCard({
-  field, onMoveGroup,
+function FormEditor({
+  grouped, sensors, onDragEnd, onToggleForm, onMoveGroup,
 }: {
-  field:       StudioField;
-  onMoveGroup: (group: string) => void;
+  grouped: [string, StudioField[]][];
+  sensors: ReturnType<typeof useSensors>;
+  onDragEnd: (e: DragEndEvent)=>void;
+  items: StudioField[];
+  onToggleForm: (key: string)=>void;
+  onMoveGroup: (key: string, group: string)=>void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
-  const style: React.CSSProperties = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity:   isDragging ? 0.4 : 1,
-  };
-
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
-        isDragging ? "border-orange-300 bg-orange-50 shadow-lg" : "border-slate-200 bg-white hover:border-slate-300"
-      }`}
-    >
-      {/* drag handle */}
-      <span {...attributes} {...listeners}
-        className="cursor-grab active:cursor-grabbing text-slate-400 select-none px-1">⋮⋮</span>
-      <span className="flex-1 text-sm text-slate-700 truncate">
-        {field.label}
-        <code className="ml-1.5 text-[10px] text-slate-400">{field.key}</code>
-      </span>
-      <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded">{field.type}</span>
-      {/* ย้ายหมวด dropdown (สำหรับมือถือ / ไม่อยากลาก) */}
-      <select
-        value={field.groupKey}
-        onChange={(e) => onMoveGroup(e.target.value)}
-        className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white"
-        title="ย้ายไปหมวด"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {ALL_GROUPS.map((g) => <option key={g} value={g}>{gmeta(g).label}</option>)}
+    <div>
+      <p className="text-xs text-slate-500 mb-3">ติ๊ก = โชว์ในฟอร์ม • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
+      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+        <SortableContext items={grouped.flatMap(([,fs])=>fs.map(f=>f.key))} strategy={verticalListSortingStrategy}>
+          <div className="space-y-3">
+            {grouped.map(([gk, fs])=>{
+              const m = gmeta(gk);
+              return (
+                <FormSectionZone key={gk} groupKey={gk} label={m.label} icon={m.icon} count={fs.length}>
+                  {fs.map(f=>(
+                    <FormFieldRow key={f.key} field={f} onToggle={()=>onToggleForm(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)} />
+                  ))}
+                </FormSectionZone>
+              );
+            })}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+}
+
+function FormSectionZone({ groupKey, label, icon, count, children }: { groupKey: string; label: string; icon: string; count: number; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useSortable({ id: `group:${groupKey}` });
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div ref={setNodeRef} className={`px-3 py-2 flex items-center gap-2 border-b border-slate-100 ${isOver?"bg-orange-50":"bg-slate-50"}`}>
+        <span>{icon}</span><span className="text-sm font-semibold text-slate-700">{label}</span>
+        <span className="text-xs text-slate-400">({count})</span>
+      </div>
+      <div className="p-2 space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function FormFieldRow({ field, onToggle, onMoveGroup }: { field: StudioField; onToggle: ()=>void; onMoveGroup: (g:string)=>void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
+  const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
+  return (
+    <div ref={setNodeRef} style={style}
+      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${field.showInForm?"border-blue-200 bg-blue-50/40":"border-slate-200 bg-white"} ${isDragging?"shadow-lg":""}`}>
+      <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-slate-400 select-none px-1">⋮⋮</span>
+      <input type="checkbox" checked={!!field.showInForm} onChange={onToggle} className="rounded accent-blue-500" />
+      <span className="flex-1 text-sm text-slate-700 truncate">{field.label}
+        <code className="ml-1.5 text-[10px] text-slate-400">{field.key}</code></span>
+      <select value={field.groupKey} onChange={(e)=>onMoveGroup(e.target.value)} onClick={(e)=>e.stopPropagation()}
+        className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white" title="ย้ายหมวด">
+        {ALL_GROUPS.map(g=><option key={g} value={g}>{gmeta(g).label}</option>)}
       </select>
+    </div>
+  );
+}
+
+function FormPreview({ grouped }: { grouped: [string, StudioField[]][] }) {
+  if (grouped.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
+  return (
+    <div className="space-y-4 max-w-md">
+      {grouped.map(([gk, fs])=>{
+        const m = gmeta(gk);
+        return (
+          <div key={gk} className="border border-slate-200 rounded-lg overflow-hidden">
+            <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5">
+              <span>{m.icon}</span>{m.label}
+            </div>
+            <div className="p-3 grid grid-cols-2 gap-3">
+              {fs.map(f=>(
+                <div key={f.key} className="space-y-0.5">
+                  <div className="text-[11px] text-slate-500">{f.label}</div>
+                  <div className="h-8 rounded border border-slate-200 bg-slate-50" />
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -85,6 +85,9 @@ function registryToFieldDef(
     placeholder: rf.placeholder ?? undefined,
     helpText:    rf.help_text ?? undefined,
     colSize:     rf.is_visible ? rf.width : undefined,
+    isVisible:   rf.is_visible,          // F23: Studio column toggle
+    width:       rf.width,
+    showInForm:  rf.show_in_form,         // F23: Studio form toggle
     // Sprint 9: เปลี่ยน is_editable=false → readonly (แสดงแต่ disable) ไม่ใช่ซ่อน
     hideInForm:  !rf.show_in_form,
     readonly:    !rf.is_editable,
@@ -144,6 +147,12 @@ export type FieldDef = {
   helpText?:  string;
   /** ขนาดในตาราง (ไม่ระบุ = ซ่อนจาก table) */
   colSize?:   number;
+  /** F23: แสดงใน list table (Studio toggle) */
+  isVisible?: boolean;
+  /** F23: ความกว้าง column (px) */
+  width?:     number;
+  /** F23: แสดงใน form drawer (Studio toggle) */
+  showInForm?: boolean;
   /** ซ่อนใน form drawer */
   hideInForm?: boolean;
   /** Sprint 9: แสดงใน form แต่แก้ไม่ได้ (disabled) */
@@ -934,12 +943,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           fields={effectiveFields
             .filter((f) => f.fieldId)
             .map<StudioField>((f) => ({
-              fieldId:  f.fieldId,
-              key:      f.key,
-              label:    f.label,
-              groupKey: f.groupKey ?? "other",
-              order:    f.order ?? 999,
-              type:     f.type,
+              fieldId:    f.fieldId,
+              key:        f.key,
+              label:      f.label,
+              groupKey:   f.groupKey ?? "other",
+              order:      f.order ?? 999,
+              type:       f.type,
+              isVisible:  f.isVisible ?? false,   // F23: column toggle
+              showInForm: f.showInForm ?? false,  // F23: form toggle
             }))}
           onClose={() => setStudioOpen(false)}
           onSaved={() => {
