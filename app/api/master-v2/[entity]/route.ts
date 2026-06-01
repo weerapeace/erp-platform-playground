@@ -333,8 +333,22 @@ export async function GET(
       q = q.eq(cfg.softDeleteColumn, true);
     }
     if (search && cfg.searchColumns.length > 0) {
-      const orFilter = cfg.searchColumns.map((c) => `${c}.ilike.%${search}%`).join(",");
-      q = q.or(orFilter);
+      // ค้นหาแบบหลายคำ: ตัด search เป็น token แล้ว AND ทุก token (OR ข้าม column)
+      // เช่น "ซิป 234" → ต้องมีทั้ง "ซิป" และ "234" อยู่ใน column ใดก็ได้ (ไม่ต้องติดกัน)
+      // sanitize: ตัด , ( ) * ที่ทำให้ PostgREST or() syntax พัง
+      const tokens = search
+        .split(/\s+/)
+        .map((t) => t.replace(/[,()*]/g, "").trim())
+        .filter(Boolean)
+        .slice(0, 6);   // กัน query ยาวเกิน
+      if (tokens.length === 0) {
+        // search มีแต่ตัวอักษรพิเศษ → fallback หาแบบทั้งก้อน
+        q = q.or(cfg.searchColumns.map((c) => `${c}.ilike.%${search}%`).join(","));
+      } else {
+        for (const tok of tokens) {
+          q = q.or(cfg.searchColumns.map((c) => `${c}.ilike.%${tok}%`).join(","));
+        }
+      }
     }
     // F27: column filters → Supabase query (เฉพาะ column จริงในตาราง)
     for (const [col, f] of Object.entries(colFilters)) {
