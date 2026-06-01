@@ -40,9 +40,9 @@ export default function PurchasingShopPage() {
 
   const openGroup = async (g: Group) => {
     setSel(g);
-    const filters = encodeURIComponent(JSON.stringify({ group_id: { type: "text", value: g.id } }));
-    const j = await apiFetch(`/api/master-v2/product-variations?limit=200&filters=${filters}`).then(r => r.json());
-    setVars(j.data ?? []);
+    // ดึงทั้งหมดแล้ว filter ฝั่ง client (เลี่ยง ilike บน uuid column)
+    const j = await apiFetch(`/api/master-v2/product-variations?limit=500`).then(r => r.json());
+    setVars((j.data ?? []).filter((v: Variation & { group_id?: string }) => v.group_id === g.id));
   };
 
   const addToCart = (g: Group, v: Variation, qty: number) => {
