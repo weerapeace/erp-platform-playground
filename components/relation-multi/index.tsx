@@ -15,6 +15,10 @@ type RelConfig = {
   target_module_key?: string;
   target_label_field?: string;
   target_fk_column?: string;
+  // one2many: แสดงผลแบบครบ (รูป + ชื่อ + ข้อมูลย่อย) — ถ้าไม่ระบุ จะโชว์แค่ label
+  list_image_field?: string;          // column ที่เป็น R2 key รูป
+  list_title_field?: string;          // column ชื่อหลัก (default = target_label_field)
+  list_sub_fields?: string[];         // columns ข้อมูลย่อย แสดงต่อท้าย คั่นด้วย ·
 };
 
 type Opt = { id: string; label: string };
@@ -89,11 +93,20 @@ export function RelationMany2Many({ config, recordId, editable }: { config: RelC
 }
 
 // ---- one2many (read-only) ----
+const r2img = (k: unknown) => (k ? `/api/r2-image?key=${encodeURIComponent(String(k))}` : null);
+const fmtVal = (v: unknown) => {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return v.toLocaleString();
+  return String(v);
+};
+
 export function RelationOne2Many({ config, recordId }: { config: RelConfig; recordId?: string | null }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const fk = config.target_fk_column ?? "";
-  const labelField = config.target_label_field ?? "name";
-  const [rows, setRows] = useState<Opt[]>([]);
+  const titleField = config.list_title_field ?? config.target_label_field ?? "name";
+  const imageField = config.list_image_field;
+  const subFields  = config.list_sub_fields ?? [];
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -101,21 +114,50 @@ export function RelationOne2Many({ config, recordId }: { config: RelConfig; reco
     // ดึงแล้ว filter ฝั่ง client (เลี่ยง ilike บน uuid column)
     apiFetch(`/api/master-v2/${moduleKey}?limit=500`).then((r) => r.json()).then((j) => {
       setRows((j.data ?? j.rows ?? [])
-        .filter((row: Record<string, unknown>) => String(row[fk] ?? "") === recordId)
-        .map((row: Record<string, unknown>) => ({ id: String(row.id), label: String(row[labelField] ?? row.name ?? row.id) })));
+        .filter((row: Record<string, unknown>) => String(row[fk] ?? "") === recordId));
       setLoaded(true);
     }).catch(() => setLoaded(true));
-  }, [recordId, fk, moduleKey, labelField]);
+  }, [recordId, fk, moduleKey]);
 
   if (!recordId) return <div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>;
   if (!loaded) return <div className="text-xs text-slate-400">กำลังโหลด…</div>;
   if (rows.length === 0) return <div className="text-xs text-slate-300">— ไม่มีรายการ —</div>;
 
+  const rich = !!(imageField || subFields.length > 0);
+
+  if (!rich) {
+    return (
+      <ul className="space-y-1">
+        {rows.map((r) => (
+          <li key={String(r.id)} className="text-sm text-slate-700 px-2 py-1 bg-slate-50 rounded border border-slate-100">
+            {String(r[titleField] ?? r.name ?? r.id)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
   return (
-    <ul className="space-y-1">
-      {rows.map((r) => (
-        <li key={r.id} className="text-sm text-slate-700 px-2 py-1 bg-slate-50 rounded border border-slate-100">{r.label}</li>
-      ))}
+    <ul className="space-y-1.5">
+      {rows.map((r) => {
+        const sub = subFields.map((f) => fmtVal(r[f])).filter(Boolean).join(" · ");
+        const imgKey = imageField ? r[imageField] : null;
+        return (
+          <li key={String(r.id)} className="flex items-center gap-2.5 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100">
+            {imageField && (
+              <div className="w-9 h-9 rounded bg-white border border-slate-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                {r2img(imgKey)
+                  ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(imgKey)!} alt="" className="w-full h-full object-cover" />
+                  : <span className="text-slate-300 text-sm">📦</span>}
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-slate-700 truncate">{String(r[titleField] ?? r.name ?? r.id)}</div>
+              {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }
