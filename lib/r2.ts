@@ -14,6 +14,42 @@ function cleanEnv(v: string | undefined): string {
   return (v ?? "").replace(/^﻿/, "").trim();
 }
 
+// ============================================================
+// F20: R2 Native Binding — เข้าถึง R2 ตรงๆ ไม่ผ่าน AWS SDK
+// → bundle เล็กลงหลาย MB → ไม่ชน Worker 1102
+// binding ชื่อ R2_IMAGES ตั้งใน wrangler.jsonc
+// ============================================================
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// minimal R2 bucket type (จาก @cloudflare/workers-types — ไม่ import เพื่อเลี่ยง dep)
+type R2ObjectBodyLike = {
+  body: ReadableStream;
+  httpMetadata?: { contentType?: string };
+  size: number;
+} | null;
+type R2BucketLike = {
+  get(key: string): Promise<R2ObjectBodyLike>;
+  put(key: string, value: ArrayBuffer | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  delete(key: string): Promise<void>;
+};
+
+/**
+ * ดึง R2 binding จาก Cloudflare context (runtime เท่านั้น)
+ * คืน null ถ้าไม่มี (เช่น local dev ที่ไม่มี binding) → fallback AWS SDK
+ */
+export async function getR2Binding(): Promise<R2BucketLike | null> {
+  try {
+    // dynamic import เพื่อไม่ให้ build fail ตอนไม่มี opennext
+    const mod: any = await import(/* webpackIgnore: true */ ("@opennextjs/cloudflare" as string));
+    const ctx = mod.getCloudflareContext ? mod.getCloudflareContext() : null;
+    const binding = ctx?.env?.R2_IMAGES;
+    return binding ?? null;
+  } catch {
+    return null;
+  }
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 // F13: default bucket = ตามที่ admin app เดิมใช้ (รูป Odoo migrate มาที่นี่)
 //      override ได้ผ่าน R2_BUCKET secret ถ้า bucket เปลี่ยน
 export const R2_BUCKET     = cleanEnv(process.env.R2_BUCKET) || "odoo-product-images";

@@ -19,7 +19,15 @@ import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-r
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput, ImageCell } from "@/components/image-input";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
-import { StudioPanel, type StudioField } from "@/components/master-crud/studio-panel";
+import dynamic from "next/dynamic";
+import type { StudioField } from "@/components/master-crud/studio-panel";
+
+// F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
+// → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
+const StudioPanel = dynamic(
+  () => import("@/components/master-crud/studio-panel").then((m) => m.StudioPanel),
+  { ssr: false },
+);
 
 // ---- Helper: map FormField (Registry) → FieldDef (MasterCRUDPage internal) ----
 

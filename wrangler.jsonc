@@ -31,5 +31,11 @@
   "vars": {
     "NEXT_PUBLIC_SUPABASE_URL": "https://cyivhkecxeoonlowcvaz.supabase.co",
     "R2_BUCKET":                 "odoo-product-images"
-  }
+  },
+
+  // F20: R2 native binding — เข้าถึง R2 ตรงๆ ไม่ต้องใช้ AWS SDK
+  // → bundle เล็กลงหลาย MB → ไม่ชน Worker 1102 อีก + เร็วขึ้น
+  "r2_buckets": [
+    { "binding": "R2_IMAGES", "bucket_name": "odoo-product-images" }
+  ]
 }

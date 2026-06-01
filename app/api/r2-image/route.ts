@@ -1,70 +1,77 @@
 /**
- * R2 Image Proxy — F15
+ * R2 Image Proxy — F15 + F20
  *
  * GET /api/r2-image?key=<r2_key>
  *
- * Fetch รูปจาก R2 (server-side) แล้ว stream กลับ → กัน CORS + ใช้ Edge cache
+ * F20: ใช้ R2 native binding (env.R2_IMAGES.get) ตรงๆ — ไม่ผ่าน AWS SDK
+ * → bundle เล็กลงหลาย MB → ไม่ชน Worker 1102 + ไม่ต้อง sign URL
+ * fallback: ถ้าไม่มี binding (local dev) → AWS SDK signed URL
  *
- * ใช้แทน /api/master-v2/r2-signed-url สำหรับการแสดงรูปใน <img>
- * (signed URL ยังใช้ได้สำหรับกรณีอื่น เช่น download)
- *
- * Headers ที่ส่งกลับ:
- *   Content-Type      = ตามรูปที่ R2 ตอบ (image/jpeg, image/webp, ฯลฯ)
+ * Headers:
+ *   Content-Type      = จาก R2 object metadata
  *   Cache-Control     = public, max-age=3600 (browser cache 1 ชม.)
  *   CDN-Cache-Control = public, max-age=86400 (Cloudflare edge cache 1 วัน)
  */
 
 import { NextRequest } from "next/server";
-import { r2GetSignedUrl } from "@/lib/r2";
+import { getR2Binding, r2GetSignedUrl } from "@/lib/r2";
 
 // SAFE: key อนุญาตเฉพาะ a-z0-9_-/. (กัน path traversal)
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 
-export async function GET(request: NextRequest): Promise<Response> {
-  // F17: ไม่ต้อง auth — Cloudflare Access protects URL (email allow-list)
-  // image proxy = read-only public ตามมาตรฐาน CDN
-  // ทำให้ <img src=...> ใช้งานได้ (browser ไม่ส่ง Authorization header)
+const CACHE_HEADERS = {
+  "Cache-Control":     "public, max-age=3600, stale-while-revalidate=86400",
+  "CDN-Cache-Control": "public, max-age=86400",
+};
 
+export async function GET(request: NextRequest): Promise<Response> {
+  // F17: ไม่ต้อง auth — Cloudflare Access protects URL (image proxy = read-only CDN)
   const key = new URL(request.url).searchParams.get("key");
   if (!key || !SAFE_KEY.test(key)) {
     return new Response(JSON.stringify({ error: "invalid key" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
+      status: 400, headers: { "Content-Type": "application/json" },
     });
   }
 
   try {
-    // generate signed URL (short TTL — เราจะ fetch ทันที)
-    const signedUrl = await r2GetSignedUrl(key, 60);
-
-    // fetch จาก R2 server-side (ไม่ติด CORS เพราะ Worker → R2 = server-to-server)
-    const r2Res = await fetch(signedUrl);
-    if (!r2Res.ok) {
-      return new Response(JSON.stringify({
-        error:  "ไม่พบรูป",
-        status: r2Res.status,
-        key,
-      }), {
-        status:  r2Res.status,
-        headers: { "Content-Type": "application/json" },
+    // ---- F20: R2 native binding (เร็ว, ไม่มี AWS SDK) ----
+    const bucket = await getR2Binding();
+    if (bucket) {
+      const obj = await bucket.get(key);
+      if (!obj) {
+        return new Response(JSON.stringify({ error: "ไม่พบรูป", key }), {
+          status: 404, headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(obj.body, {
+        status: 200,
+        headers: {
+          "Content-Type":   obj.httpMetadata?.contentType ?? "image/jpeg",
+          "Content-Length": String(obj.size),
+          ...CACHE_HEADERS,
+        },
       });
     }
 
-    // stream กลับให้ browser พร้อม cache headers
-    const contentType = r2Res.headers.get("content-type") ?? "image/jpeg";
+    // ---- Fallback: AWS SDK signed URL (local dev ที่ไม่มี binding) ----
+    const signedUrl = await r2GetSignedUrl(key, 60);
+    const r2Res = await fetch(signedUrl);
+    if (!r2Res.ok) {
+      return new Response(JSON.stringify({ error: "ไม่พบรูป", status: r2Res.status, key }), {
+        status: r2Res.status, headers: { "Content-Type": "application/json" },
+      });
+    }
     return new Response(r2Res.body, {
       status: 200,
       headers: {
-        "Content-Type":      contentType,
-        "Cache-Control":     "public, max-age=3600, stale-while-revalidate=86400",
-        "CDN-Cache-Control": "public, max-age=86400",
-        "Content-Length":    r2Res.headers.get("content-length") ?? "",
+        "Content-Type":   r2Res.headers.get("content-type") ?? "image/jpeg",
+        "Content-Length": r2Res.headers.get("content-length") ?? "",
+        ...CACHE_HEADERS,
       },
     });
   } catch (e) {
     return new Response(JSON.stringify({ error: String((e as Error).message ?? e) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+      status: 500, headers: { "Content-Type": "application/json" },
     });
   }
 }
