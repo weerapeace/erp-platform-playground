@@ -15,10 +15,11 @@ import { useAuth, usePermission, AccessDenied, type Permission } from "@/compone
 import { apiFetch } from "@/lib/api";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
 import type { ColumnDef } from "@tanstack/react-table";
-import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-registry-v2/route";
+import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { FieldCreatorModal } from "@/components/field-creator";
+import { LayoutEditorModal } from "@/components/layout-editor";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
@@ -262,6 +263,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ถ้ามี moduleKey — load fields config จาก Field Registry
   // ไม่งั้นใช้ config.fields ที่ส่งมา (static legacy)
   const [registryFields, setRegistryFields] = useState<FormField[] | null>(null);
+  const [registryLayout, setRegistryLayout] = useState<FormLayout>(null);  // กลุ่ม B
   const [registryLoading, setRegistryLoading] = useState(!!config.moduleKey);
 
   useEffect(() => {
@@ -271,7 +273,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .then((r) => r.json() as Promise<FieldRegistryV2Response>)
       .then((res) => {
         if (res.error) console.error("Field Registry load error:", res.error);
-        else setRegistryFields(res.fields);
+        else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); }
       })
       .catch((e) => console.error("Field Registry load failed:", e))
       .finally(() => setRegistryLoading(false));
@@ -284,7 +286,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     try {
       const r = await apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`);
       const res = (await r.json()) as FieldRegistryV2Response;
-      if (!res.error) setRegistryFields(res.fields);
+      if (!res.error) { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); }
     } finally {
       setRegistryLoading(false);
     }
@@ -360,6 +362,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
+  const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
 
   // ---- Fetch (client mode) ----
   const fetchList = useCallback(async () => {
@@ -611,6 +614,16 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       })),
   [effectiveFields]);
 
+  // กลุ่ม B: section (group) ที่มีอยู่จริง สำหรับ Layout Editor
+  const sectionsForLayout = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const f of effectiveFields) {
+      const k = f.groupKey ?? "other";
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return Array.from(m.entries()).map(([key, count]) => ({ key, label: getGroupConfig(key).label, count }));
+  }, [effectiveFields]);
+
   // ---- Views ----
   // ⚠️ DataTableView field คือ "filter" (ไม่ใช่ "predicate")
   const views: DataTableView[] = useMemo(() => [
@@ -861,6 +874,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 🎨 ออกแบบหน้า
               </button>
             )}
+            {/* กลุ่ม B: จัด Layout (Tab/Section/columns) */}
+            {config.moduleKey && canEdit && (
+              <button onClick={() => setLayoutEditorOpen(true)}
+                title="จัด Tab / Section / จำนวนคอลัมน์ของฟอร์ม"
+                className="h-9 px-3 text-sm font-medium border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-50 inline-flex items-center gap-1.5">
+                🗂️ Layout
+              </button>
+            )}
             {/* กลุ่ม C: เพิ่ม field ใหม่ (สร้าง column ใน Supabase) */}
             {config.moduleKey && canEdit && (
               <button onClick={() => setFieldCreatorOpen(true)}
@@ -1005,8 +1026,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 )}
                 {tabFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={tabFields} renderValue={renderDetailValue} />
-                    : <FormSections fields={tabFields} renderField={renderField} />
+                    ? <DetailSections fields={tabFields} renderValue={renderDetailValue} layout={registryLayout} />
+                    : <FormSections fields={tabFields} renderField={renderField} layout={registryLayout} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
                 )}
@@ -1032,6 +1053,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           moduleTitle={config.title}
           onClose={() => setFieldCreatorOpen(false)}
           onCreated={() => { void refreshRegistry(); refreshData(); }}
+        />
+      )}
+
+      {/* กลุ่ม B: Layout Editor — Tab/Section/columns */}
+      {layoutEditorOpen && config.moduleKey && (
+        <LayoutEditorModal
+          moduleKey={config.moduleKey}
+          moduleTitle={config.title}
+          layout={registryLayout}
+          sections={sectionsForLayout}
+          onClose={() => setLayoutEditorOpen(false)}
+          onSaved={() => { void refreshRegistry(); }}
         />
       )}
 
@@ -1067,44 +1100,107 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 // FormSections — Sprint 7: group fields by groupKey + collapsible
 // ============================================================
 
+// กลุ่ม B: คลาส grid ต่อจำนวน column (static string → Tailwind ไม่ purge)
+const COLS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
+
+/** จัด field เป็น Map<group_key, FieldDef[]> (sort ตาม order) */
+function groupByKey(fields: FieldDef[]): Map<string, FieldDef[]> {
+  const map = new Map<string, FieldDef[]>();
+  for (const f of fields) {
+    const k = f.groupKey ?? "other";
+    const list = map.get(k) ?? [];
+    list.push(f);
+    map.set(k, list);
+  }
+  for (const [, list] of map) list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  return map;
+}
+
+/** กลุ่ม B: render ตาม layout (Tab → Section → columns) ใช้ทั้ง form + detail */
+function LayoutTabs({
+  layout, byGroup, renderGrid,
+}: {
+  layout: NonNullable<FormLayout>;
+  byGroup: Map<string, FieldDef[]>;
+  renderGrid: (fields: FieldDef[], columns: number) => React.ReactNode;
+}) {
+  const tabs = layout.tabs ?? [];
+  const [active, setActive] = useState<string>(tabs[0]?.key ?? "");
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.some((t) => t.key === active)) setActive(tabs[0].key);
+  }, [tabs, active]);
+
+  const assigned = new Set<string>();
+  tabs.forEach((t) => t.sections.forEach((s) => assigned.add(s.key)));
+  const leftover: FieldDef[] = [];
+  byGroup.forEach((fs, g) => { if (!assigned.has(g)) leftover.push(...fs); });
+
+  const cur = tabs.find((t) => t.key === active) ?? tabs[0];
+  if (!cur) return null;
+
+  return (
+    <div>
+      {tabs.length > 1 && (
+        <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
+          {tabs.map((t) => (
+            <button key={t.key} type="button" onClick={() => setActive(t.key)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
+                t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}>
+              {t.icon && <span>{t.icon}</span>}<span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="pt-3 space-y-4">
+        {cur.sections.map((sec) => {
+          const fs = byGroup.get(sec.key) ?? [];
+          if (fs.length === 0) return null;
+          return (
+            <div key={sec.key}>
+              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{sec.label}</h4>
+              {renderGrid(fs, sec.columns || 2)}
+            </div>
+          );
+        })}
+        {active === tabs[0]?.key && leftover.length > 0 && (
+          <div>
+            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">อื่นๆ</h4>
+            {renderGrid(leftover, 2)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FormSections({
-  fields, renderField,
+  fields, renderField, layout,
 }: {
   fields: FieldDef[];
   renderField: (f: FieldDef) => React.ReactNode;
+  layout?: FormLayout;
 }) {
-  // group fields by groupKey, sort each group by order
-  const grouped = useMemo(() => {
-    const map = new Map<string, FieldDef[]>();
-    for (const f of fields) {
-      const k = f.groupKey ?? "other";
-      const list = map.get(k) ?? [];
-      list.push(f);
-      map.set(k, list);
-    }
-    // sort fields within each group by order
-    for (const [, list] of map) {
-      list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-    }
-    // sort groups by GROUP_CONFIG.order
-    return Array.from(map.entries()).sort(
-      ([a], [b]) => getGroupConfig(a).order - getGroupConfig(b).order
-    );
-  }, [fields]);
-
-  // F24: tabs แทน accordion — active tab = section แรก
+  // hooks ทั้งหมดเรียกก่อน return เสมอ (Rules of Hooks)
+  const byGroup = useMemo(() => groupByKey(fields), [fields]);
+  const grouped = useMemo(() =>
+    Array.from(byGroup.entries()).sort(([a], [b]) => getGroupConfig(a).order - getGroupConfig(b).order),
+  [byGroup]);
   const [activeTab, setActiveTab] = useState<string>(grouped[0]?.[0] ?? "");
-  // ถ้า grouped เปลี่ยน (condition field) แล้ว tab หาย → reset ไป tab แรก
   useEffect(() => {
-    if (grouped.length > 0 && !grouped.some(([k]) => k === activeTab)) {
-      setActiveTab(grouped[0][0]);
-    }
+    if (grouped.length > 0 && !grouped.some(([k]) => k === activeTab)) setActiveTab(grouped[0][0]);
   }, [grouped, activeTab]);
 
-  // section เดียว → ไม่ต้องโชว์ tab bar
+  // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
+  if (layout?.tabs?.length) {
+    return <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={(fs, cols) => (
+      <div className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-3`}>{fs.map(renderField)}</div>
+    )} />;
+  }
+
+  // fallback (เดิม): group_key = tab, grid 2 คอลัมน์
   const single = grouped.length <= 1;
   const current = grouped.find(([k]) => k === activeTab) ?? grouped[0];
-
   return (
     <div>
       {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
@@ -1159,47 +1255,45 @@ function SectionTabBar({
 // ============================================================
 
 function DetailSections({
-  fields, renderValue,
+  fields, renderValue, layout,
 }: {
   fields: FieldDef[];
   renderValue: (f: FieldDef) => React.ReactNode;
+  layout?: FormLayout;
 }) {
-  const grouped = useMemo(() => {
-    const map = new Map<string, FieldDef[]>();
-    for (const f of fields) {
-      const k = f.groupKey ?? "other";
-      const list = map.get(k) ?? [];
-      list.push(f);
-      map.set(k, list);
-    }
-    for (const [, list] of map) list.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-    return Array.from(map.entries()).sort(
-      ([a], [b]) => getGroupConfig(a).order - getGroupConfig(b).order
-    );
-  }, [fields]);
-
-  // F24: tabs (เหมือน form)
+  const byGroup = useMemo(() => groupByKey(fields), [fields]);
+  const grouped = useMemo(() =>
+    Array.from(byGroup.entries()).sort(([a], [b]) => getGroupConfig(a).order - getGroupConfig(b).order),
+  [byGroup]);
   const [activeTab, setActiveTab] = useState<string>(grouped[0]?.[0] ?? "");
   useEffect(() => {
     if (grouped.length > 0 && !grouped.some(([k]) => k === activeTab)) setActiveTab(grouped[0][0]);
   }, [grouped, activeTab]);
 
+  // dl grid ตามจำนวน column
+  const renderDl = (fs: FieldDef[], cols: number) => (
+    <dl className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-x-4 gap-y-3`}>
+      {fs.map((f) => (
+        <div key={f.key} className={(f.type === "textarea" || f.type === "image") && cols > 1 ? "col-span-2" : ""}>
+          <dt className="text-[11px] text-slate-400 mb-0.5">{f.label}</dt>
+          <dd>{renderValue(f)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+
+  // กลุ่ม B: layout mode
+  if (layout?.tabs?.length) {
+    return <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={renderDl} />;
+  }
+
+  // fallback (เดิม)
   const single = grouped.length <= 1;
   const current = grouped.find(([k]) => k === activeTab) ?? grouped[0];
-
   return (
     <div>
       {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
-      {current && (
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 pt-4">
-          {current[1].map((f) => (
-            <div key={f.key} className={f.type === "textarea" || f.type === "image" ? "col-span-2" : ""}>
-              <dt className="text-[11px] text-slate-400 mb-0.5">{f.label}</dt>
-              <dd>{renderValue(f)}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
+      {current && <div className="pt-4">{renderDl(current[1], 2)}</div>}
     </div>
   );
 }

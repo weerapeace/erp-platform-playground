@@ -49,9 +49,15 @@ export type FormField = {
   condition_rules:      Record<string, unknown>;
 };
 
+// กลุ่ม B: layout ฟอร์ม (Tab -> Section -> columns) เก็บใน erp_modules.config.layout
+export type FormLayoutSection = { key: string; label: string; columns: number };
+export type FormLayoutTab = { key: string; label: string; icon?: string; sections: FormLayoutSection[] };
+export type FormLayout = { tabs: FormLayoutTab[] } | null;
+
 export type FieldRegistryV2Response = {
   module_key: string;
   fields:     FormField[];
+  layout:     FormLayout;
   error:      string | null;
 };
 
@@ -60,7 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
   const moduleKey = searchParams.get("module");
   if (!moduleKey) {
     return NextResponse.json(
-      { module_key: "", fields: [], error: "missing ?module=" },
+      { module_key: "", fields: [], layout: null, error: "missing ?module=" },
       { status: 400 }
     );
   }
@@ -69,16 +75,17 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
 
   const { data: mod } = await supabase
     .from("erp_modules")
-    .select("id")
+    .select("id, config")
     .eq("module_key", moduleKey)
     .maybeSingle();
 
   if (!mod) {
     return NextResponse.json(
-      { module_key: moduleKey, fields: [], error: `module not found: ${moduleKey}` },
+      { module_key: moduleKey, fields: [], layout: null, error: `module not found: ${moduleKey}` },
       { status: 404 }
     );
   }
+  const layout: FormLayout = ((mod.config as { layout?: FormLayout })?.layout) ?? null;
 
   const { data, error } = await supabase
     .from("erp_module_fields")
@@ -89,7 +96,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
 
   if (error) {
     return NextResponse.json(
-      { module_key: moduleKey, fields: [], error: error.message },
+      { module_key: moduleKey, fields: [], layout: null, error: error.message },
       { status: 500 }
     );
   }
@@ -97,6 +104,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
   return NextResponse.json({
     module_key: moduleKey,
     fields: (data ?? []) as FormField[],
+    layout,
     error: null,
   });
 }
