@@ -66,29 +66,35 @@ export async function resolveRelationLabels(
   rows: Record<string, unknown>[],
 ): Promise<Record<string, unknown>[]> {
   if (!cfg.relationResolves?.length || rows.length === 0) return rows;
-  let out = rows;
-  for (const rr of cfg.relationResolves) {
-    if (!SAFE_IDENT.test(rr.targetTable) || !SAFE_IDENT.test(rr.labelField)) continue;
-    if (rr.secondaryField && !SAFE_IDENT.test(rr.secondaryField)) continue;
-    const ids = [...new Set(out.map((r) => r[rr.column]).filter((v): v is string => v != null).map(String))];
-    if (ids.length === 0) continue;
+  const valid = cfg.relationResolves.filter(
+    (rr) => SAFE_IDENT.test(rr.targetTable) && SAFE_IDENT.test(rr.labelField) && (!rr.secondaryField || SAFE_IDENT.test(rr.secondaryField)),
+  );
+  if (valid.length === 0) return rows;
+
+  // ดึง label ของทุก relation พร้อมกัน (parallel) — ลด wall-clock เมื่อมีหลาย relation
+  const maps = await Promise.all(valid.map(async (rr) => {
+    const ids = [...new Set(rows.map((r) => r[rr.column]).filter((v): v is string => v != null).map(String))];
+    if (ids.length === 0) return { rr, map: null as Map<string, Record<string, unknown>> | null };
     const sel = rr.secondaryField ? `id, ${rr.labelField}, ${rr.secondaryField}` : `id, ${rr.labelField}`;
     const { data: td } = await supabase.from(rr.targetTable).select(sel).in("id", ids);
     const map = new Map<string, Record<string, unknown>>();
     (td ?? []).forEach((t) => { const o = t as Record<string, unknown>; map.set(String(o.id), o); });
-    out = out.map((r) => {
+    return { rr, map };
+  }));
+
+  // เติม label ในรอบเดียว (one pass)
+  return rows.map((r) => {
+    let o = r;
+    for (const { rr, map } of maps) {
+      if (!map) continue;
       const id = r[rr.column];
-      if (id == null) return r;
+      if (id == null) continue;
       const t = map.get(String(id));
-      if (!t) return r;
-      return {
-        ...r,
-        [rr.labelKey]: t[rr.labelField],
-        ...(rr.secondaryField ? { [rr.secondaryKey]: t[rr.secondaryField] } : {}),
-      };
-    });
-  }
-  return out;
+      if (!t) continue;
+      o = { ...o, [rr.labelKey]: t[rr.labelField], ...(rr.secondaryField ? { [rr.secondaryKey]: t[rr.secondaryField] } : {}) };
+    }
+    return o;
+  });
 }
 
 /**
@@ -304,8 +310,15 @@ export const ENTITIES: Record<string, EntityConfig> = {
  * C2: resolve entity config — ถ้าไม่อยู่ใน ENTITIES (hardcode) ให้หาจาก erp_modules
  * → table ใหม่ที่สร้างจากเว็บใช้ API นี้ได้ทันทีโดยไม่ต้องแก้โค้ด
  */
+// cache config ของ generic module ต่อ instance (ลดการยิง DB 2 ครั้ง/คำขอ → กิน CPU/เวลาน้อยลง = กัน 1102)
+// TTL สั้น 20s — ถ้า admin เพิ่ม/แก้ field ใหม่ จะเห็นภายใน 20 วิ
+const _entityCache = new Map<string, { cfg: EntityConfig; at: number }>();
+const ENTITY_TTL = 20_000;
+
 export async function resolveEntity(entity: string): Promise<EntityConfig | null> {
   if (ENTITIES[entity]) return ENTITIES[entity];
+  const cached = _entityCache.get(entity);
+  if (cached && Date.now() - cached.at < ENTITY_TTL) return cached.cfg;
   const admin = supabaseAdmin();
   const { data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", entity).maybeSingle();
   if (!mod) return null;
@@ -332,7 +345,7 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
       };
     });
 
-  return {
+  const cfg: EntityConfig = {
     table: mod.table_name as string,
     selectColumns: "*",
     searchColumns: searchColumns.length ? searchColumns : ["name"],
@@ -340,6 +353,8 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
     defaults: { is_active: true },
     relationResolves,
   };
+  _entityCache.set(entity, { cfg, at: Date.now() });
+  return cfg;
 }
 
 // ---- GET — list ----
