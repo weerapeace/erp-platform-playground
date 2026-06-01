@@ -1733,6 +1733,28 @@ function ColumnFilterPanel({
   }, [data, filterableFields]);
 
   const getOpts = (f: FilterableField) => f.options ?? (autoDistinct[f.key] ?? []).map(v => ({ value: v, label: v }));
+
+  // field เชื่อมตาราง (เช่น brand_id) → ทำเป็น dropdown เลือก "ชื่อ" แทนช่องพิมพ์ id
+  // ดึงคู่ id→label จาก data ที่มี sibling เช่น brand_id ↔ brand_label
+  const relLabelKey = (key: string) => (key.endsWith("_id") ? key.slice(0, -3) + "_label" : null);
+  const relOptsByField = useMemo(() => {
+    const out: Record<string, { value: string; label: string }[]> = {};
+    if (data.length === 0) return out;
+    const first = data[0] as Record<string, unknown>;
+    filterableFields.forEach(f => {
+      const lk = relLabelKey(f.key);
+      if (!lk || !(lk in first)) return;
+      const seen = new Map<string, string>();
+      for (const r of data as Record<string, unknown>[]) {
+        const id = r[f.key];
+        if (id == null || id === "") continue;
+        if (!seen.has(String(id))) seen.set(String(id), String(r[lk] ?? id));
+      }
+      if (seen.size > 0) out[f.key] = [...seen].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+    });
+    return out;
+  }, [filterableFields, data]);
+
   const hasAnyActive = filterableFields.some(f => isColFilterActive(colFilterValues[f.key]));
 
   return (
@@ -1794,6 +1816,11 @@ function ColumnFilterPanel({
       <div className="flex flex-wrap gap-3">
         {filterableFields.map(field => {
           const fv = colFilterValues[field.key];
+          // field เชื่อมตาราง → dropdown เลือกชื่อ (PickUP) แทนช่องพิมพ์ id
+          const relOpts = relOptsByField[field.key];
+          if (relOpts) {
+            return <SelectFilterCard key={field.key} field={field} opts={relOpts} selected={fv?.type === "select" ? fv.selected : []} onChange={sel => onSetFilter(field.key, { type: "select", selected: sel })} />;
+          }
           if (field.type === "text") {
             const val = fv?.type === "text" ? fv.value : "";
             return (

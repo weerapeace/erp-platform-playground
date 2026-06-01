@@ -130,7 +130,7 @@ export default function PurchasingShopPage() {
             },
           } as Card;
         });
-        setTotal(num(j.count) || (pg * PAGE + mapped.length));
+        setTotal(num(j.total) || num(j.count) || (pg * PAGE + mapped.length));
         setCards(mapped);
       } else {
         const j = await apiFetch("/api/master-v2/product-groups?limit=500").then(r => r.json());
