@@ -169,6 +169,56 @@ function getGroupConfig(key: string) {
   return GROUP_CONFIG[key] ?? { label: key, icon: "📁", defaultOpen: false, order: 99 };
 }
 
+// ---- Status summary cards (ของกลาง) ----
+// แปลงค่าสถานะ (technical) → ชื่อไทย + สี — ครอบคลุมสถานะที่พบบ่อยในหลายโมดูล
+// ค่าที่ไม่รู้จัก → ใช้ค่าดิบ + สี neutral
+const STATUS_META: Record<string, { label: string; ring: string; bg: string; text: string; dot: string }> = {
+  draft:       { label: "ร่าง",          ring: "ring-slate-300",   bg: "bg-slate-50",   text: "text-slate-600",   dot: "bg-slate-400" },
+  waiting:     { label: "รอสั่งซื้อ",     ring: "ring-amber-300",   bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500" },
+  pending:     { label: "รอดำเนินการ",   ring: "ring-amber-300",   bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500" },
+  submitted:   { label: "ส่งแล้ว",        ring: "ring-sky-300",     bg: "bg-sky-50",     text: "text-sky-700",     dot: "bg-sky-500" },
+  rfq_created: { label: "สั่งซื้อแล้ว",   ring: "ring-blue-300",    bg: "bg-blue-50",    text: "text-blue-700",    dot: "bg-blue-500" },
+  confirmed:   { label: "ยืนยันแล้ว",    ring: "ring-blue-300",    bg: "bg-blue-50",    text: "text-blue-700",    dot: "bg-blue-500" },
+  approved:    { label: "อนุมัติแล้ว",   ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
+  received:    { label: "รับของแล้ว",    ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
+  done:        { label: "เสร็จสิ้น",      ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
+  completed:   { label: "เสร็จสิ้น",      ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
+  rejected:    { label: "ปฏิเสธ",         ring: "ring-red-300",     bg: "bg-red-50",     text: "text-red-700",     dot: "bg-red-500" },
+  cancelled:   { label: "ยกเลิก",         ring: "ring-red-300",     bg: "bg-red-50",     text: "text-red-700",     dot: "bg-red-500" },
+};
+const statusMeta = (v: string) => STATUS_META[v] ?? { label: v, ring: "ring-slate-300", bg: "bg-slate-50", text: "text-slate-600", dot: "bg-slate-400" };
+
+function StatusCards({
+  options, counts, total, active, onPick,
+}: {
+  options: string[];
+  counts: Record<string, number>;
+  total: number;
+  active: string | null;
+  onPick: (v: string | null) => void;
+}) {
+  const card = (key: string | null, label: string, count: number, m?: ReturnType<typeof statusMeta>) => {
+    const on = active === key;
+    return (
+      <button key={key ?? "__all__"} type="button" onClick={() => onPick(on ? null : key)}
+        className={`flex items-center gap-2.5 px-3.5 py-2 rounded-xl border bg-white transition-all
+          ${on ? `ring-2 ${m?.ring ?? "ring-blue-400"} border-transparent` : "border-slate-200 hover:border-slate-300"}`}>
+        {m ? <span className={`w-2 h-2 rounded-full ${m.dot}`} /> : <span className="w-2 h-2 rounded-full bg-slate-300" />}
+        <div className="text-left leading-tight">
+          <div className={`text-lg font-semibold tabular-nums ${m?.text ?? "text-slate-700"}`}>{count.toLocaleString()}</div>
+          <div className="text-[11px] text-slate-500">{label}</div>
+        </div>
+      </button>
+    );
+  };
+  return (
+    <div className="flex flex-wrap gap-2 mb-3">
+      {card(null, "ทั้งหมด", total)}
+      {options.map((o) => card(o, statusMeta(o).label, counts[o] ?? 0, statusMeta(o)))}
+    </div>
+  );
+}
+
 // ---- Field types ----
 
 export type FieldDef = {
@@ -472,6 +522,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // กดดู record ที่เชื่อม (relation) แบบ popup ซ้อน
   const [peek, setPeek] = useState<{ moduleKey: string; id: string } | null>(null);
+
+  // การ์ดสรุปสถานะ (ของกลาง) — กรองตาราง client-side ตามสถานะที่กด
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
@@ -914,6 +967,26 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, [apiBase, config.apiPath, user?.name, refreshData]);
 
   // ---- Render form field ----
+  // ---- Status summary cards (ของกลาง) ----
+  // หา field สถานะ (select ที่ชื่อ 'status') + นับจำนวนจาก rows ที่โหลด (client mode)
+  const statusField = useMemo(
+    () => effectiveFields.find((f) => f.key === "status" && f.type === "select" && (f.options?.length ?? 0) > 0),
+    [effectiveFields],
+  );
+  const showStatusCards = !config.serverMode && !!statusField;
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    if (!statusField) return c;
+    for (const r of rows) { const v = String(r[statusField.key] ?? ""); if (v) c[v] = (c[v] ?? 0) + 1; }
+    return c;
+  }, [rows, statusField]);
+  const displayRows = useMemo(
+    () => (showStatusCards && statusFilter && statusField)
+      ? rows.filter((r) => String(r[statusField.key] ?? "") === statusFilter)
+      : rows,
+    [rows, showStatusCards, statusFilter, statusField],
+  );
+
   const renderField = (f: FieldDef) => {
     const v = form[f.key];
     const errs = fieldErrors[f.key];
@@ -1122,9 +1195,19 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
+        {showStatusCards && statusField && !loading && (
+          <StatusCards
+            options={statusField.options ?? []}
+            counts={statusCounts}
+            total={rows.length}
+            active={statusFilter}
+            onPick={setStatusFilter}
+          />
+        )}
+
         <DataTable
           tableId={config.tableId}
-          data={rows}
+          data={displayRows}
           columns={columns}
           loading={loading || registryLoading}
           searchableKeys={effectiveSearchKeys as (keyof Row)[]}
