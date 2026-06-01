@@ -20,8 +20,12 @@ const TYPES: { v: string; label: string; hint: string }[] = [
   { v: "boolean",  label: "ใช่/ไม่ใช่ (Boolean)",   hint: "" },
   { v: "select",   label: "ตัวเลือก (Select)",      hint: "กำหนดตัวเลือกเอง" },
   { v: "image",    label: "รูปภาพ (Image)",         hint: "เก็บใน R2" },
-  { v: "relation", label: "เชื่อมตาราง (many2one)", hint: "ลิงก์ไปอีก table" },
+  { v: "relation", label: "เชื่อมตาราง 1 ค่า (many2one)", hint: "ลิงก์ไปอีก table" },
+  { v: "many2many", label: "เชื่อมหลายค่า (many2many)", hint: "เลือกได้หลายรายการ" },
+  { v: "one2many", label: "รายการลูก (one2many)", hint: "ดูระเบียนที่ชี้กลับมา" },
 ];
+
+const REL_TYPES = ["relation", "many2many", "one2many"];
 
 type TableOpt = { table_name: string; is_module: boolean };
 
@@ -40,6 +44,7 @@ export function FieldCreatorModal({
   const [optionsText, setOptionsText] = useState("");
   const [targetTable, setTargetTable] = useState("");
   const [targetLabelField, setTargetLabelField] = useState("name");
+  const [targetFkColumn, setTargetFkColumn] = useState("");
   const [isVisible, setIsVisible]       = useState(true);
   const [isFilterable, setIsFilterable] = useState(false);
   const [isSearchable, setIsSearchable] = useState(false);
@@ -55,9 +60,9 @@ export function FieldCreatorModal({
     setFieldKey(k);
   }, [label, keyEdited]);
 
-  // โหลดรายชื่อ table เมื่อเลือก relation
+  // โหลดรายชื่อ table เมื่อเลือกชนิด relation (m2o/m2m/o2m)
   useEffect(() => {
-    if (uiType !== "relation" || tables.length > 0) return;
+    if (!REL_TYPES.includes(uiType) || tables.length > 0) return;
     apiFetch("/api/admin/schema/tables").then(r => r.json()).then(j => {
       if (!j.error) setTables(j.tables ?? []);
     }).catch(() => {});
@@ -67,15 +72,18 @@ export function FieldCreatorModal({
     setErr(null);
     if (!label.trim() || !fieldKey.trim()) { setErr("กรอกชื่อ field และ label"); return; }
     if (!/^[a-z][a-z0-9_]{0,62}$/.test(fieldKey)) { setErr("ชื่อ field: a-z, 0-9, _ เริ่มด้วยตัวอักษร"); return; }
-    if (uiType === "relation" && !targetTable) { setErr("เลือก table ปลายทาง"); return; }
+    const isRel = REL_TYPES.includes(uiType);
+    if (isRel && !targetTable) { setErr("เลือก table ปลายทาง"); return; }
+    if (uiType === "one2many" && !targetFkColumn.trim()) { setErr("ระบุ column FK บน target ที่ชี้กลับมา"); return; }
     setSaving(true);
     try {
       const res = await apiFetch("/api/admin/schema/add-field", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           module_key: moduleKey, field_key: fieldKey, label: label.trim(), ui_type: uiType,
-          target_table: uiType === "relation" ? targetTable : undefined,
-          target_label_field: uiType === "relation" ? targetLabelField : undefined,
+          target_table: isRel ? targetTable : undefined,
+          target_label_field: isRel ? targetLabelField : undefined,
+          target_fk_column: uiType === "one2many" ? targetFkColumn.trim() : undefined,
           options: uiType === "select" ? optionsText.split(",").map(s => s.trim()).filter(Boolean) : undefined,
           is_visible: isVisible, is_filterable: isFilterable, is_searchable: isSearchable,
         }),
@@ -128,7 +136,7 @@ export function FieldCreatorModal({
             </div>
           )}
 
-          {uiType === "relation" && (
+          {REL_TYPES.includes(uiType) && (
             <div className="space-y-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
               <div>
                 <label className="text-xs font-medium text-slate-600">เชื่อมไป table ไหน *</label>
@@ -144,6 +152,17 @@ export function FieldCreatorModal({
                 <input value={targetLabelField} onChange={e => setTargetLabelField(e.target.value)} placeholder="name"
                   className="mt-1 w-full h-9 px-3 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
               </div>
+              {uiType === "one2many" && (
+                <div>
+                  <label className="text-xs font-medium text-slate-600">column FK บน target ที่ชี้กลับมา *</label>
+                  <input value={targetFkColumn} onChange={e => setTargetFkColumn(e.target.value)} placeholder="เช่น order_id"
+                    className="mt-1 w-full h-9 px-3 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                  <p className="text-[11px] text-slate-400 mt-0.5">column ใน target ที่เก็บ id ของระเบียนนี้ (ปลายของ many2one)</p>
+                </div>
+              )}
+              {uiType === "many2many" && (
+                <p className="text-[11px] text-emerald-700">จะสร้างตารางเชื่อม (junction) ให้อัตโนมัติ + เลือกได้หลายค่า</p>
+              )}
             </div>
           )}
 

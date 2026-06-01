@@ -22,9 +22,10 @@ type Body = {
   table?: string;        // optional — ถ้าไม่ส่ง จะหาเองจาก module_key
   field_key: string;
   label: string;
-  ui_type: string;                 // text|textarea|number|date|boolean|select|relation|image
+  ui_type: string;                 // text|textarea|number|date|boolean|select|relation|image|many2many|one2many
   target_table?: string;
   target_label_field?: string;
+  target_fk_column?: string;       // สำหรับ one2many — column บน target ที่ชี้กลับมา
   options?: string[];
   is_visible?: boolean;
   is_filterable?: boolean;
@@ -57,29 +58,36 @@ export async function POST(request: NextRequest) {
   if (modErr || !mod) return NextResponse.json({ error: "ไม่พบ module " + b.module_key }, { status: 404 });
   const table = b.table || (mod.table_name as string);
 
-  // 1) เพิ่ม column จริง (DDL ผ่าน SECURITY DEFINER + allowlist)
-  const colRes = await admin.rpc("erp_admin_add_column", {
-    p_table: table, p_column: b.field_key, p_type: b.ui_type,
-  });
-  if (colRes.error) return NextResponse.json({ error: "เพิ่ม column ไม่สำเร็จ: " + colRes.error.message }, { status: 500 });
+  const isVirtual = b.ui_type === "many2many" || b.ui_type === "one2many";  // ไม่มี column จริงบน src
 
-  // 2) ถ้า relation → เพิ่ม FK + เตรียม relation_config
-  let relationConfig: Record<string, unknown> = {};
-  if (b.ui_type === "relation" && b.target_table) {
-    const fkRes = await admin.rpc("erp_admin_add_fk", {
-      p_table: table, p_column: b.field_key, p_target: b.target_table,
+  // 1) เพิ่ม column จริง (ยกเว้น m2m/o2m ที่ไม่มี column บนตารางนี้)
+  if (!isVirtual) {
+    const colRes = await admin.rpc("erp_admin_add_column", {
+      p_table: table, p_column: b.field_key, p_type: b.ui_type,
     });
+    if (colRes.error) return NextResponse.json({ error: "เพิ่ม column ไม่สำเร็จ: " + colRes.error.message }, { status: 500 });
+  }
+
+  // 2) relation config ตามชนิด
+  let relationConfig: Record<string, unknown> = {};
+  const labelField = b.target_label_field || "name";
+  const { data: tgtMod } = b.target_table
+    ? await admin.from("erp_modules").select("module_key").eq("table_name", b.target_table).maybeSingle()
+    : { data: null };
+  const targetModuleKey = tgtMod?.module_key ?? b.target_table;
+
+  if (b.ui_type === "relation" && b.target_table) {
+    const fkRes = await admin.rpc("erp_admin_add_fk", { p_table: table, p_column: b.field_key, p_target: b.target_table });
     if (fkRes.error) return NextResponse.json({ error: "เพิ่ม FK ไม่สำเร็จ: " + fkRes.error.message }, { status: 500 });
-    // หา module_key ของ target (ถ้าเป็น module → picker ดึง option ได้)
-    const { data: tgtMod } = await admin.from("erp_modules").select("module_key").eq("table_name", b.target_table).maybeSingle();
-    const labelField = b.target_label_field || "name";
-    relationConfig = {
-      allow_create: false,
-      target_table: b.target_table,
-      target_module_key: tgtMod?.module_key ?? b.target_table,
-      target_label_field: labelField,
-      target_search_fields: [labelField],
-    };
+    relationConfig = { allow_create: false, target_table: b.target_table, target_module_key: targetModuleKey, target_label_field: labelField, target_search_fields: [labelField] };
+  } else if (b.ui_type === "many2many" && b.target_table) {
+    const r = await admin.rpc("erp_admin_create_m2m", { p_src_table: table, p_field_key: b.field_key, p_target_table: b.target_table });
+    if (r.error) return NextResponse.json({ error: "สร้าง many2many ไม่สำเร็จ: " + r.error.message }, { status: 500 });
+    const junction = (r.data as { junction?: string })?.junction;
+    relationConfig = { kind: "many2many", junction_table: junction, target_table: b.target_table, target_module_key: targetModuleKey, target_label_field: labelField };
+  } else if (b.ui_type === "one2many" && b.target_table) {
+    if (!b.target_fk_column) return NextResponse.json({ error: "one2many ต้องระบุ column FK บน target" }, { status: 400 });
+    relationConfig = { kind: "one2many", target_table: b.target_table, target_module_key: targetModuleKey, target_fk_column: b.target_fk_column, target_label_field: labelField };
   }
 
   // 3) ลงทะเบียนใน Field Registry (มี mod อยู่แล้วจากด้านบน)
@@ -90,7 +98,7 @@ export async function POST(request: NextRequest) {
   const { error: insErr } = await admin.from("erp_module_fields").insert({
     module_id: mod.id,
     field_key: b.field_key,
-    column_name: b.field_key,
+    column_name: isVirtual ? null : b.field_key,   // m2m/o2m ไม่มี column จริง
     field_label: b.label,
     ui_field_type: b.ui_type,
     data_type: "text",

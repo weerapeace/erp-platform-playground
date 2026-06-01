@@ -20,6 +20,7 @@ import { RelationPicker, type RelationConfig } from "@/components/relation-picke
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
+import { RelationMany2Many, RelationOne2Many } from "@/components/relation-multi";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
@@ -58,6 +59,8 @@ function registryToFieldDef(
     : rf.ui_field_type === "image" ? "image"
     : rf.ui_field_type === "select" ? "select"
     : rf.ui_field_type === "textarea" || rf.ui_field_type === "json" ? "textarea"
+    : rf.ui_field_type === "many2many" ? "many2many"
+    : rf.ui_field_type === "one2many" ? "one2many"
     : "text";
 
   const opts = (rf.options as { options?: string[] })?.options;
@@ -141,7 +144,7 @@ export type FieldDef = {
   /** F11B: erp_module_fields.id — ใช้ตอน Studio บันทึก layout (group/order) */
   fieldId?:   string;
   label:      string;
-  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image";
+  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many";
   required?:  boolean;
   options?:   string[];                   // สำหรับ select
   placeholder?: string;
@@ -416,7 +419,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const emptyForm = useMemo(() => {
     const e: Record<string, unknown> = {};
     effectiveFields.forEach(f => {
-      e[f.key] = resolveDefault(f.type, f.defaultValue, f.defaultExpression, user?.email ?? null);
+      const dtype = (f.type === "many2many" || f.type === "one2many") ? "text" : f.type;
+      e[f.key] = resolveDefault(dtype, f.defaultValue, f.defaultExpression, user?.email ?? null);
     });
     return e;
   }, [effectiveFields, user?.email]);
@@ -714,7 +718,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .map((f) => ({
         key: f.key,
         label: f.label,
-        type: f.type === "textarea" ? "text" : (f.type as "text" | "number" | "select" | "boolean"),
+        type: (["number", "select", "boolean"].includes(f.type) ? f.type : "text") as "text" | "number" | "select" | "boolean",
         options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: o })) : undefined,
       }));
   }, [canEdit, effectiveFields]);
@@ -779,6 +783,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               hasError={hasErr}
             />
           </div>
+        ) : f.type === "many2many" ? (
+          <div className="mt-0.5">
+            <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={!disabled} />
+          </div>
+        ) : f.type === "one2many" ? (
+          <div className="mt-0.5">
+            <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} />
+          </div>
         ) : f.type === "select" ? (
           <select value={(v as string) || ""} disabled={disabled}
             onChange={e => updateForm({ [f.key]: e.target.value })}
@@ -826,6 +838,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const v = form[f.key];
     if (f.type === "image") {
       return <ImageCell r2Key={(v as string) || null} size={160} />;
+    }
+    if (f.type === "many2many") {
+      return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={false} />;
+    }
+    if (f.type === "one2many") {
+      return <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} />;
     }
     if (f.type === "boolean") {
       return v
