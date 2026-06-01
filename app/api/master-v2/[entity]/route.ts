@@ -136,6 +136,29 @@ export const ENTITIES: Record<string, EntityConfig> = {
     softDeleteColumn: "is_active",
     defaults: { logic_status: "approved", impl_status: "not_started", is_active: true },
   },
+  // Phase 2: Material/UoM foundation (ของกลางสำหรับ BOM)
+  "material-slots": {
+    table: "material_slots",
+    selectColumns: `*`,
+    searchColumns: ["slot_code", "name_th", "name_en"],
+    softDeleteColumn: "is_active",
+    defaults: { resolve_method: "manual_select", sort_order: 100, is_active: true },
+  },
+  "material-families": {
+    table: "material_families",
+    selectColumns: `*`,
+    searchColumns: ["family_code", "name_th", "name_en", "material_type"],
+    softDeleteColumn: "is_active",
+    defaults: { is_active: true },
+  },
+  "uom-conversions": {
+    table: "uom_conversions",
+    selectColumns: `*`,
+    searchColumns: ["from_uom", "to_uom"],
+    softDeleteColumn: "is_active",
+    defaults: { factor: 1, is_active: true },
+  },
+  // หมายเหตุ: entity "uoms" มีอยู่แล้วด้านบน (บรรทัด ~161)
   brands: {
     table: "brands",
     selectColumns: `*, parent_brand:brands!parent_brand_id ( name )`,
