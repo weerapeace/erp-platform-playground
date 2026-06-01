@@ -99,8 +99,6 @@ export default function SalesOrdersPage() {
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
-
   // ---- Open detail ----
   const openDetail = async (id: string) => {
     setDetailOpen(true); setDetailLoading(true); setDetail(null);
@@ -241,6 +239,9 @@ export default function SalesOrdersPage() {
       cell: ({ getValue }) => <span className="text-xs text-slate-500">{getValue() as number}</span>,
     },
   ], []);
+
+  // F14 fix: early return หลัง hooks ทั้งหมด (กัน React #310)
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   const isDraft = detail?.status === "draft";
 

@@ -315,7 +315,14 @@ export default function PurchasingShopPage() {
             {cart.map((l, i) => (
               <div key={i} className="border border-slate-200 rounded-lg p-2">
                 <div className="flex justify-between gap-2">
-                  <div className="text-sm text-slate-700 flex-1 line-clamp-2">{l.label}</div>
+                  <div className="flex gap-2 flex-1 min-w-0">
+                    <div className="w-9 h-9 rounded bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {img(l.image)
+                        ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(l.image)!} alt="" className="w-full h-full object-cover" />
+                        : <span className="text-slate-300 text-sm">📦</span>}
+                    </div>
+                    <div className="text-sm text-slate-700 flex-1 min-w-0 line-clamp-2">{l.label}</div>
+                  </div>
                   <button onClick={() => setCart(c => c.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 text-xs">✕</button>
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">

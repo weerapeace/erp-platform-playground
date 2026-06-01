@@ -84,8 +84,6 @@ export default function PurchaseOrdersPage() {
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
-
   const openDetail = async (id: string) => {
     setDetailOpen(true); setDetailLoading(true); setDetail(null);
     try {
@@ -207,6 +205,9 @@ export default function PurchaseOrdersPage() {
     { id: "line_count", accessorKey: "line_count", header: "รายการ", size: 80,
       cell: ({ getValue }) => <span className="text-xs text-slate-500">{getValue() as number}</span> },
   ], []);
+
+  // F14 fix: early return ต้องอยู่ "หลัง" hooks ทั้งหมด (กัน React #310 = hooks order)
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>

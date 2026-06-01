@@ -231,6 +231,9 @@ export default function InventoryPage() {
     return { totalValue, outOfStock };
   }, [balances]);
 
+  // F14 fix: early return หลัง hooks ทั้งหมด (กัน React #310)
+  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
+
   return (
     <PlaygroundShell>
       <div className="max-w-7xl mx-auto px-6 py-6">

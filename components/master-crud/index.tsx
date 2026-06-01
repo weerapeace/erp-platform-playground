@@ -349,7 +349,24 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   );
   // cache: key = "<target_module_key>.<target_field>" → { [target_id]: value }
   const relatedMapsRef = useRef<Record<string, Record<string, unknown>>>({});
-  const [relatedVer, setRelatedVer] = useState(0);  // bump เมื่อ map โหลดเสร็จ → re-render
+
+  // โหลด map ของ target ที่ยังไม่มี (await ได้) — เรียกก่อน enrich เพื่อกันกระพริบ (ไม่ refetch ซ้ำ)
+  const ensureRelatedMaps = useCallback(async () => {
+    for (const f of relatedFields) {
+      const rc = (f.relation_config ?? {}) as Record<string, unknown>;
+      const tmk = String(rc.target_module_key ?? rc.target_table ?? "");
+      const tf  = String(rc.target_field ?? "");
+      if (!tmk || !tf) continue;
+      const ck = `${tmk}.${tf}`;
+      if (relatedMapsRef.current[ck]) continue;
+      try {
+        const j = await apiFetch(`${apiBase}${tmk}?limit=1000&include_inactive=true`).then((r) => r.json());
+        const m: Record<string, unknown> = {};
+        (j.data ?? []).forEach((row: Record<string, unknown>) => { m[String(row.id)] = row[tf]; });
+        relatedMapsRef.current[ck] = m;
+      } catch { /* related จะว่างไว้ */ }
+    }
+  }, [relatedFields, apiBase]);
 
   // เติมค่า related ลงใน row (ใช้ทั้ง list + detail) จาก map ที่โหลดไว้
   const enrichRelated = useCallback((list: Row[]): Row[] => {
@@ -366,7 +383,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       }
       return o;
     });
-  }, [relatedFields, relatedVer]);
+  }, [relatedFields]);
 
   const [rows,    setRows]    = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
@@ -416,10 +433,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
+      await ensureRelatedMaps();
       setRows(enrichRelated((json.data ?? []) as Row[]));
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, enrichRelated]);
+  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, enrichRelated, ensureRelatedMaps]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
@@ -428,33 +446,6 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (config.serverMode) setServerRefresh((n) => n + 1);
     else await fetchList();
   }, [config.serverMode, fetchList]);
-
-  // ข้อ 2: โหลด map ของ target แต่ละตัว (ครั้งเดียวต่อ target_module_key.target_field)
-  // แล้ว refresh เพื่อเติมค่า related ลงในแถวที่โหลดไปก่อนหน้า
-  useEffect(() => {
-    if (relatedFields.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      let changed = false;
-      for (const f of relatedFields) {
-        const rc = (f.relation_config ?? {}) as Record<string, unknown>;
-        const tmk = String(rc.target_module_key ?? rc.target_table ?? "");
-        const tf  = String(rc.target_field ?? "");
-        if (!tmk || !tf) continue;
-        const ck = `${tmk}.${tf}`;
-        if (relatedMapsRef.current[ck]) continue;
-        try {
-          const j = await apiFetch(`${apiBase}${tmk}?limit=1000&include_inactive=true`).then((r) => r.json());
-          const m: Record<string, unknown> = {};
-          (j.data ?? []).forEach((row: Record<string, unknown>) => { m[String(row.id)] = row[tf]; });
-          relatedMapsRef.current[ck] = m; changed = true;
-        } catch { /* ignore — related จะว่างไว้ */ }
-      }
-      if (changed && !cancelled) { setRelatedVer((v) => v + 1); void refreshData(); }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [relatedFields, apiBase]);
 
   // ---- Server fetch (server mode — ดึงทีละหน้า) ----
   const serverFetch = useCallback(async (params: ServerFetchParams): Promise<{ rows: Row[]; total: number }> => {
@@ -474,8 +465,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
+    await ensureRelatedMaps();
     return { rows: enrichRelated((json.data ?? []) as Row[]), total: (json.total as number) ?? 0 };
-  }, [apiBase, config.apiPath, config.baseFilter, enrichRelated]);
+  }, [apiBase, config.apiPath, config.baseFilter, enrichRelated, ensureRelatedMaps]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
   // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'
