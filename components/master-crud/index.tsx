@@ -1270,6 +1270,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               type:       f.type,
               isVisible:  f.isVisible ?? false,   // F23: column toggle
               showInForm: f.showInForm ?? false,  // F23: form toggle
+              inlineEditable: f.inlineEditable ?? false,  // ⚡ quick edit toggle
             }))}
           onClose={() => setStudioOpen(false)}
           onSaved={() => {

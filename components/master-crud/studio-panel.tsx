@@ -35,6 +35,7 @@ export type StudioField = {
   type:        string;
   isVisible?:  boolean;   // column show ในตาราง
   showInForm?: boolean;   // field show ในฟอร์ม
+  inlineEditable?: boolean; // แก้ไขเร็ว (quick edit) ในหน้า detail
 };
 
 const GROUP_META: Record<string, { label: string; icon: string; order: number }> = {
@@ -86,6 +87,8 @@ export function StudioPanel({
     setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, isVisible: !i.isVisible } : i); });
   const toggleForm = (key: string) =>
     setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, showInForm: !i.showInForm } : i); });
+  const toggleInline = (key: string) =>
+    setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, inlineEditable: !i.inlineEditable } : i); });
 
   // ---- save ----
   const save = async () => {
@@ -136,6 +139,18 @@ export function StudioPanel({
           body: JSON.stringify({ ids, patch: { show_in_form: val } }),
         });
         if ((await r.json()).error) throw new Error("show_in_form failed");
+      }
+
+      // 5. is_inline_editable (แก้ไขเร็วในหน้า detail)
+      const inlineTrue  = withId.filter((i) => i.inlineEditable).map((i) => i.fieldId!);
+      const inlineFalse = withId.filter((i) => !i.inlineEditable).map((i) => i.fieldId!);
+      for (const [ids, val] of [[inlineTrue, true], [inlineFalse, false]] as [string[], boolean][]) {
+        if (ids.length === 0) continue;
+        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, patch: { is_inline_editable: val } }),
+        });
+        if ((await r.json()).error) throw new Error("is_inline_editable failed");
       }
 
       setMsg("✓ บันทึก layout สำเร็จ");
@@ -224,7 +239,7 @@ export function StudioPanel({
           ) : (
             <FormEditor
               grouped={grouped} sensors={sensors} onDragEnd={onDragEnd}
-              items={items} onToggleForm={toggleForm} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
+              items={items} onToggleForm={toggleForm} onToggleInline={toggleInline} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
             />
           )}
         </div>
@@ -320,18 +335,19 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  grouped, sensors, onDragEnd, onToggleForm, onMoveGroup,
+  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onMoveGroup,
 }: {
   grouped: [string, StudioField[]][];
   sensors: ReturnType<typeof useSensors>;
   onDragEnd: (e: DragEndEvent)=>void;
   items: StudioField[];
   onToggleForm: (key: string)=>void;
+  onToggleInline: (key: string)=>void;
   onMoveGroup: (key: string, group: string)=>void;
 }) {
   return (
     <div>
-      <p className="text-xs text-slate-500 mb-3">ติ๊ก = โชว์ในฟอร์ม • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
+      <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว (กดแก้ในหน้า detail) • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
         <SortableContext items={grouped.flatMap(([,fs])=>fs.map(f=>f.key))} strategy={verticalListSortingStrategy}>
           <div className="space-y-3">
@@ -340,7 +356,7 @@ function FormEditor({
               return (
                 <FormSectionZone key={gk} groupKey={gk} label={m.label} icon={m.icon} count={fs.length}>
                   {fs.map(f=>(
-                    <FormFieldRow key={f.key} field={f} onToggle={()=>onToggleForm(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)} />
+                    <FormFieldRow key={f.key} field={f} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)} />
                   ))}
                 </FormSectionZone>
               );
@@ -365,16 +381,23 @@ function FormSectionZone({ groupKey, label, icon, count, children }: { groupKey:
   );
 }
 
-function FormFieldRow({ field, onToggle, onMoveGroup }: { field: StudioField; onToggle: ()=>void; onMoveGroup: (g:string)=>void }) {
+function FormFieldRow({ field, onToggle, onToggleInline, onMoveGroup }: { field: StudioField; onToggle: ()=>void; onToggleInline: ()=>void; onMoveGroup: (g:string)=>void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
+  // ชนิดที่ quick-edit ได้ (text/number/boolean/select)
+  const inlineable = ["text","number","boolean","select"].includes(field.type);
   return (
     <div ref={setNodeRef} style={style}
       className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${field.showInForm?"border-blue-200 bg-blue-50/40":"border-slate-200 bg-white"} ${isDragging?"shadow-lg":""}`}>
       <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-slate-400 select-none px-1">⋮⋮</span>
-      <input type="checkbox" checked={!!field.showInForm} onChange={onToggle} className="rounded accent-blue-500" />
+      <input type="checkbox" checked={!!field.showInForm} onChange={onToggle} className="rounded accent-blue-500" title="โชว์ในฟอร์ม" />
       <span className="flex-1 text-sm text-slate-700 truncate">{field.label}
         <code className="ml-1.5 text-[10px] text-slate-400">{field.key}</code></span>
+      {inlineable && (
+        <button type="button" onClick={(e)=>{ e.stopPropagation(); onToggleInline(); }}
+          title="แก้ไขเร็ว (กดแก้ในหน้า detail ได้เลย)"
+          className={`text-xs px-1.5 py-0.5 rounded border ${field.inlineEditable?"bg-amber-100 border-amber-300 text-amber-700":"bg-white border-slate-200 text-slate-400"}`}>⚡</button>
+      )}
       <select value={field.groupKey} onChange={(e)=>onMoveGroup(e.target.value)} onClick={(e)=>e.stopPropagation()}
         className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white" title="ย้ายหมวด">
         {ALL_GROUPS.map(g=><option key={g} value={g}>{gmeta(g).label}</option>)}

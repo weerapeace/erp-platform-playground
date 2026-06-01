@@ -16,7 +16,7 @@ import { SkuFormModal } from "@/components/sku-form-modal";
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
 type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null };
-type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; note: string };
+type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string };
 type Source = "sku" | "group";
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
@@ -181,12 +181,12 @@ export default function PurchasingShopPage() {
   const onCardClick = (c: Card) => { if (source === "sku") setConfirmSku(c); else void openGroup(c); };
 
   const addVariation = (c: Card, v: Variation, qty: number) => {
-    setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, note: "" }]);
+    setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, skuId: null, note: "" }]);
     setSel(null); setVars([]);
   };
   const addSku = (c: Card, qty: number, note: string) => {
     const s = c.sku!;
-    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, note }]);
+    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note }]);
     setConfirmSku(null);
   };
 
@@ -201,16 +201,15 @@ export default function PurchasingShopPage() {
       for (let i = 0; i < cart.length; i++) {
         const l = cart[i];
         const prNo = `PR-${stamp}-${base}-${i + 1}`;
+        // 1 ใบ = 1 สินค้า → เก็บข้อมูลสินค้าตรงๆ บนใบ (ไม่ใช้ pr_lines)
         const hr = await apiFetch("/api/master-v2/purchase-requests-v2", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          pr_no: prNo, requester: user?.name ?? "", status: "waiting", order_date: orderDate, actor: user?.name,
+          pr_no: prNo, requester: user?.name ?? "", status: "waiting", order_date: orderDate,
+          item_sku_id: l.skuId, item_name: l.label, qty: l.qty, uom: l.uom,
+          seller_name: l.seller, price_est: l.price, currency: l.currency, image_key: l.image,
+          note: l.note || null, actor: user?.name,
         }) });
         const prId = (await hr.json()).data?.id;
-        if (!prId) continue;
-        await apiFetch("/api/master-v2/pr-lines", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          pr_id: prId, variation_id: l.variationId, sku_ref: l.skuRef, item_name: l.label, qty: l.qty, uom: l.uom,
-          seller_name: l.seller, price_est: l.price, currency: l.currency, image_key: l.image, note: l.note || null, status: "waiting", actor: user?.name,
-        }) });
-        count++;
+        if (prId) count++;
       }
       setDone(`${count} ใบ`); setCart([]);
     } catch (e) { alert(String((e as Error).message ?? e)); }
