@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult } from "@/components/data-table";
+import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams } from "@/components/data-table";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -206,8 +206,14 @@ export type MasterCRUDConfig = {
   apiBase?: string;
   /** field ที่เป็น soft-delete (default 'active' for RPC, 'is_active' for v2) */
   activeField?: string;
-  /** จำนวน row ที่ดึงตอนโหลด (default 2000) — อนาคตจะเปลี่ยนเป็น server pagination */
+  /** จำนวน row ที่ดึงตอนโหลด (client mode, default 200) */
   pageLimit?: number;
+  /**
+   * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
+   * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
+   * Trade-off: ปิด client filter/saved-views (search + pagination ทำที่ server)
+   */
+  serverMode?: boolean;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -298,8 +304,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [toast, setToast] = useState<string | null>(null);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
-  // ---- Fetch ----
+  // F19: refresh trigger สำหรับ server mode (เพิ่มค่า → DataTable โหลดหน้าใหม่)
+  const [serverRefresh, setServerRefresh] = useState(0);
+
+  // ---- Fetch (client mode) ----
   const fetchList = useCallback(async () => {
+    if (config.serverMode) { setLoading(false); return; }  // server mode ไม่โหลดทั้งก้อน
     setLoading(true); setError(null);
     try {
       // F19: ลด default 500 → 200 (กัน Worker 1102) — ใช้ search หา row ที่เหลือ
@@ -310,9 +320,30 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       setRows((json.data ?? []) as Row[]);
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [config.apiPath, apiBase, config.pageLimit]);
+  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
+
+  // F19: refresh ที่ทำงานทั้ง 2 mode — client โหลดใหม่ / server bump key
+  const refreshData = useCallback(async () => {
+    if (config.serverMode) setServerRefresh((n) => n + 1);
+    else await fetchList();
+  }, [config.serverMode, fetchList]);
+
+  // ---- Server fetch (server mode — ดึงทีละหน้า) ----
+  const serverFetch = useCallback(async (params: ServerFetchParams): Promise<{ rows: Row[]; total: number }> => {
+    const offset = (params.page - 1) * params.pageSize;
+    const qs = new URLSearchParams({
+      limit:  String(params.pageSize),
+      offset: String(offset),
+      include_inactive: "true",
+    });
+    if (params.search) qs.set("search", params.search);
+    const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    return { rows: (json.data ?? []) as Row[], total: (json.total as number) ?? 0 };
+  }, [apiBase, config.apiPath]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
   // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'
@@ -440,7 +471,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       } else {
         setModalOpen(false);
       }
-      await fetchList();
+      await refreshData();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
@@ -451,7 +482,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       flash("ปิดบัญชีแล้ว");
-      await fetchList();
+      await refreshData();
     } catch (err) { setError(err instanceof Error ? err.message : "ปิดไม่สำเร็จ"); }
     finally { setArchiveTarget(null); }
   };
@@ -464,7 +495,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       flash("เปิดใช้งานแล้ว");
-      await fetchList();
+      await refreshData();
     } catch (err) { setError(err instanceof Error ? err.message : "เปิดไม่สำเร็จ"); }
   };
 
@@ -535,10 +566,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
         }
         flash(`ปิด ${selected.length} ราย`);
-        await fetchList();
+        await refreshData();
       },
     },
-  ] : [], [canEdit, user?.name, apiBase, config.apiPath, fetchList]);
+  ] : [], [canEdit, user?.name, apiBase, config.apiPath, refreshData]);
 
   // ---- Sprint 12: Inline editing ----
   // เปิดเฉพาะ field ที่ admin tick is_inline_editable + user มีสิทธิ์ edit + ไม่ใช่ sensitive
@@ -614,10 +645,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         success++;
       } catch { failed++; }
     }
-    await fetchList();
+    await refreshData();
     flash(`แก้ ${success} ราย${failed > 0 ? ` (พลาด ${failed})` : ""}`);
     return { success, failed };
-  }, [apiBase, config.apiPath, user?.name, fetchList]);
+  }, [apiBase, config.apiPath, user?.name, refreshData]);
 
   // ---- Render form field ----
   const renderField = (f: FieldDef) => {
@@ -772,8 +803,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           exportFilename={config.apiPath}
           exportEntityType={config.exportEntityType}
           canCheck={(p) => can(p as Parameters<typeof can>[0])}
-          pageSize={20}
+          pageSize={config.serverMode ? 50 : 20}
           onRowClick={openEdit}
+          serverFetch={config.serverMode ? serverFetch : undefined}
+          serverRefreshKey={config.serverMode ? serverRefresh : undefined}
         />
 
         {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm">✓ {toast}</div>}

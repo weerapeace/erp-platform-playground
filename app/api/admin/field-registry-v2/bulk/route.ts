@@ -77,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return Object.keys(changes).length > 0
         ? { module_field_id: id, actor_email: user.email, action: "bulk_update", changes }
         : null;
-    }).filter(Boolean);
+    }).filter((r): r is NonNullable<typeof r> => r !== null);
     if (auditRows.length > 0) {
       admin.from("erp_field_registry_audit").insert(auditRows).then(() => {}, () => {});
     }

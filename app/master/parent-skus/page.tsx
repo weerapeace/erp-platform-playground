@@ -33,6 +33,7 @@ const CONFIG: MasterCRUDConfig = {
   description: "Product Templates — จัดการ visible/filter/search/required ที่ /admin/schema-sync",
   icon:        "📦",
   activeField: "is_active",
+  serverMode:  true,   // F19: server-side pagination (1471 rows) — กัน Worker 1102
   exportEntityType: "parent_skus_v2",
   permissions: {
     view:   "products.view",

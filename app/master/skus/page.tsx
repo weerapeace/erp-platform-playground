@@ -18,6 +18,7 @@ const CONFIG: MasterCRUDConfig = {
   description: "Product Variants — 12,609 records (จัดการ field ที่ /admin/schema-sync)",
   icon:        "🏷️",
   activeField: "is_active",
+  serverMode:  true,   // F19: server-side pagination (12,609 rows) — กัน Worker 1102
   exportEntityType: "skus_v2",
   permissions: {
     view:   "products.view",
