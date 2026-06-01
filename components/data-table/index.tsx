@@ -1372,7 +1372,8 @@ export function DataTable<T extends Record<string, unknown>>({
             <div className="py-16"><EmptyState message={emptyMessage} /></div>
           ) : (
             <CardsView<T>
-              rows={filteredData}
+              // F28: card ใช้ rows ที่ paginate แล้ว (เหมือน table) — ไม่ render ทั้ง 1,471
+              rows={isServer ? filteredData : table.getRowModel().rows.map(r => r.original as T)}
               columns={columns}
               config={cardCfg}
               onRowClick={isRowClickable ? handleRowClick : undefined}

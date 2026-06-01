@@ -199,8 +199,9 @@ export async function GET(
 
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
-  // F19: ลด default 500 → 200 (กัน Worker 1102) + ตัด JOIN 7→2 ช่วยอีกทาง
-  const limit  = Math.min(1000, Math.max(1, parseInt(searchParams.get("limit") ?? "200", 10)));
+  // F19: default 200 (server mode) — client mode ส่ง limit=2000 (เห็นครบ)
+  // F28: cap 1000→2000 (parent-skus 1,471 client mode ต้องเห็นครบ)
+  const limit  = Math.min(2000, Math.max(1, parseInt(searchParams.get("limit") ?? "200", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const includeInactive = searchParams.get("include_inactive") === "true";
 
