@@ -534,6 +534,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         effectiveFields.forEach((field) => {
           const v = full[field.key];
           f[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
+          // เก็บชื่อ (label) ของ relation ไว้โชว์ใน detail (ไม่ใช่รหัส)
+          if (field.type === "relation" && field.key.endsWith("_id")) {
+            const base = field.key.slice(0, -3);
+            for (const suf of ["_label", "_name"]) {
+              const lk = base + suf;
+              if (lk in full) f[lk] = full[lk];
+            }
+          }
         });
         setForm(f);
       })
