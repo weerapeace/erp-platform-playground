@@ -302,10 +302,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const fetchList = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      // F16: ลด default 2000 → 500 (กัน Worker 1102 resource limit)
-      // 500 row + JOIN labels ≈ 400KB JSON + 1 Supabase batch — Worker stable
-      // ถ้า dataset > 500 → ใช้ search box หา หรือทำ pagination ต่อใน F17
-      const limit = config.pageLimit ?? 500;
+      // F19: ลด default 500 → 200 (กัน Worker 1102) — ใช้ search หา row ที่เหลือ
+      const limit = config.pageLimit ?? 200;
       const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
