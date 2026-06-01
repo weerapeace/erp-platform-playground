@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 
 interface ImageInputProps {
@@ -140,6 +141,9 @@ export function ImageInput({
  */
 export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefined; size?: number }) {
   const [visible, setVisible] = useState(false);
+  // F22: hover preview — hover thumbnail → รูปใหญ่เด้งลอยตามเมาส์
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -165,16 +169,40 @@ export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefin
     return <div ref={ref} className="rounded bg-slate-100 animate-pulse" style={{ width: size, height: size }} />;
   }
 
+  const src = `/api/r2-image?key=${encodeURIComponent(r2Key)}`;
+  // วาง preview ฝั่งที่ไม่ตกขอบจอ (default ขวาของ cursor, ถ้าชิดขวาจอ → ซ้าย)
+  const PREVIEW = 320;
+  const flipLeft = typeof window !== "undefined" && pos.x + 24 + PREVIEW > window.innerWidth;
+  const px = flipLeft ? pos.x - PREVIEW - 24 : pos.x + 24;
+  const py = Math.max(8, Math.min(pos.y - PREVIEW / 2, (typeof window !== "undefined" ? window.innerHeight : 800) - PREVIEW - 8));
+
   return (
-    <div ref={ref} className="inline-block">
+    <div
+      ref={ref}
+      className="inline-block cursor-zoom-in"
+      onMouseEnter={(e) => { setHover(true); setPos({ x: e.clientX, y: e.clientY }); }}
+      onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => setHover(false)}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={`/api/r2-image?key=${encodeURIComponent(r2Key)}`}
+        src={src}
         alt=""
         loading="lazy"
         className="rounded object-cover border border-slate-200 bg-white"
         style={{ width: size, height: size }}
       />
+      {/* F22: floating zoom preview (fixed → ลอยเหนือทุกอย่าง) */}
+      {hover && createPortal(
+        <div
+          className="fixed z-[100] pointer-events-none rounded-lg shadow-2xl border-2 border-white bg-white overflow-hidden"
+          style={{ left: px, top: py, width: PREVIEW, height: PREVIEW }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="" className="w-full h-full object-contain bg-slate-50" />
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

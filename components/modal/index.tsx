@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useCallback, useState } from "react";
+import React, { useEffect, useCallback, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 
 // ---- Icons ----
@@ -354,7 +354,36 @@ export function Drawer({
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  useEffect(() => { setMounted(true); }, []);
+  // F22: resizable width — ลากขอบซ้าย, จำค่าใน localStorage
+  const defaultW = size === "sm" ? 360 : size === "lg" ? 560 : 440;
+  const [width, setWidth] = useState(defaultW);
+  const resizing = useRef(false);
+
+  useEffect(() => {
+    setMounted(true);
+    try {
+      const saved = localStorage.getItem("erp-drawer-width");
+      if (saved) setWidth(Math.max(320, Math.min(Number(saved), 1200)));
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      setWidth(Math.max(320, Math.min(window.innerWidth - e.clientX, window.innerWidth - 40)));
+    };
+    const onUp = () => {
+      if (!resizing.current) return;
+      resizing.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      try { localStorage.setItem("erp-drawer-width", String(width)); } catch { /* ignore */ }
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+  }, [open, width]);
 
   const handleClose = useCallback(() => {
     if (hasUnsavedChanges) {
@@ -383,8 +412,21 @@ export function Drawer({
         onClick={handleClose}
       />
 
-      {/* Drawer panel (from right) */}
-      <div className="relative ml-auto flex flex-col bg-white shadow-2xl h-full w-full" style={{ maxWidth: DRAWER_SIZE[size]?.replace("max-w-", "") === "sm" ? "320px" : DRAWER_SIZE[size]?.replace("max-w-", "") === "md" ? "384px" : "512px" }}>
+      {/* Drawer panel (from right) — F22: resizable width */}
+      <div className="relative ml-auto flex flex-col bg-white shadow-2xl h-full" style={{ width, maxWidth: "100vw" }}>
+        {/* F22: resize handle (ขอบซ้าย) */}
+        <div
+          onMouseDown={(e) => {
+            e.preventDefault();
+            resizing.current = true;
+            document.body.style.userSelect = "none";
+            document.body.style.cursor = "ew-resize";
+          }}
+          className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize bg-transparent hover:bg-orange-300 active:bg-orange-400 transition-colors z-10 group"
+          title="ลากเพื่อปรับความกว้าง"
+        >
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full bg-slate-300 group-hover:bg-orange-400" />
+        </div>
         {/* Unsaved changes guard */}
         <UnsavedChangesDialog
           open={showUnsavedWarning}
