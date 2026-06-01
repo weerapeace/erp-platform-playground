@@ -47,6 +47,12 @@ function defaultRelationCellRender(key: string) {
   };
 }
 
+// ข้อ 3: passthrough wrapper ระดับโมดูล (identity คงที่) — ใช้เมื่ออยู่ใต้ layout ร่วม
+// เพื่อไม่ให้ subtree (ตาราง) remount ทุก render
+function ShellPassthrough({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+
 function registryToFieldDef(
   rf: FormField,
   cellRenderers?: Record<string, (v: unknown, row?: Record<string, unknown>) => React.ReactNode>,
@@ -937,10 +943,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // F14: early return AFTER all hooks — กัน React error #310
   // ข้อ 3: ถ้าอยู่ใต้ layout ร่วม (มี shell แล้ว) → ไม่เรนเดอร์ shell ซ้อน (sidebar นิ่ง ไม่เด้ง)
+  // ⚠ ต้องใช้ component ที่ "identity คงที่" (ShellPassthrough ระดับโมดูล) ไม่ใช่ arrow inline
+  //   ไม่งั้น React เห็น type ใหม่ทุก render → remount ทั้ง subtree (ตาราง reload + search หาย)
   const insideShell = useShellPresent();
-  const Wrap = insideShell
-    ? ({ children }: { children: React.ReactNode }) => <>{children}</>
-    : PlaygroundShell;
+  const Wrap = insideShell ? ShellPassthrough : PlaygroundShell;
 
   if (!canView) return <Wrap><AccessDenied /></Wrap>;
 
