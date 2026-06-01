@@ -8,7 +8,6 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useSearchParams } from "next/navigation";
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { Drawer, ConfirmDialog } from "@/components/modal";
@@ -549,16 +548,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .catch(() => { /* keep partial — ดีกว่าค้าง */ });
   };
   // เปิด record อัตโนมัติจาก ?open=<id> (เช่นกด "เปิดหน้าเต็ม" จาก popup relation)
-  const searchParams = useSearchParams();
-  const openParam = searchParams?.get("open") ?? null;
+  // อ่านจาก window.location เพื่อเลี่ยง useSearchParams ที่ต้องมี Suspense (พังตอน prerender)
   const autoOpenedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!openParam || !canView || autoOpenedRef.current === openParam) return;
+    if (!canView || typeof window === "undefined") return;
+    const openParam = new URLSearchParams(window.location.search).get("open");
+    if (!openParam || autoOpenedRef.current === openParam) return;
     autoOpenedRef.current = openParam;
     setDrawerMode("view");
     openEdit({ id: openParam } as Row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openParam, canView]);
+  }, [canView]);
 
   // F11: เตือน unsaved เฉพาะโหมด edit ที่มีการแก้
   const tryClose = () => { if (drawerMode === "edit" && dirty) setConfirmDiscard(true); else setModalOpen(false); };
