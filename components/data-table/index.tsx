@@ -594,20 +594,25 @@ export function DataTable<T extends Record<string, unknown>>({
   useEffect(() => { if (isServer) setSrvPage(0); }, [debouncedSearch, filtersKey, isServer]);
 
   // fetch จาก server
+  // F-flicker: debounce 120ms — ตอนโหลดครั้งแรก deps หลายตัว (saved-view, layout, search)
+  // ทยอยเปลี่ยนติดๆ กัน ทำให้ยิง fetch 4 รอบ = ตารางกระพริบ → รวบให้เหลือรอบเดียว
   useEffect(() => {
     if (!isServer || !serverFetch) return;
     let active = true;
     setSrvLoading(true);
     const sort = sorting[0];
-    serverFetch({
-      page: srvPage + 1, pageSize: srvPageSize, search: debouncedSearch,
-      sortBy: sort?.id ?? null, sortDir: sort ? (sort.desc ? "desc" : "asc") : null,
-      filters: activeServerFilters,
-    })
-      .then(r => { if (active) { setSrvRows(r.rows); setSrvTotal(r.total); } })
-      .catch(() => { if (active) { setSrvRows([]); setSrvTotal(0); } })
-      .finally(() => { if (active) setSrvLoading(false); });
-    return () => { active = false; };
+    const t = setTimeout(() => {
+      if (!active) return;
+      serverFetch({
+        page: srvPage + 1, pageSize: srvPageSize, search: debouncedSearch,
+        sortBy: sort?.id ?? null, sortDir: sort ? (sort.desc ? "desc" : "asc") : null,
+        filters: activeServerFilters,
+      })
+        .then(r => { if (active) { setSrvRows(r.rows); setSrvTotal(r.total); } })
+        .catch(() => { if (active) { setSrvRows([]); setSrvTotal(0); } })
+        .finally(() => { if (active) setSrvLoading(false); });
+    }, 120);
+    return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
 
