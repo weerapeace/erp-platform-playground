@@ -18,6 +18,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
+import { FieldCreatorModal } from "@/components/field-creator";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
@@ -358,6 +359,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
+  const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
 
   // ---- Fetch (client mode) ----
   const fetchList = useCallback(async () => {
@@ -859,6 +861,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 🎨 ออกแบบหน้า
               </button>
             )}
+            {/* กลุ่ม C: เพิ่ม field ใหม่ (สร้าง column ใน Supabase) */}
+            {config.moduleKey && canEdit && (
+              <button onClick={() => setFieldCreatorOpen(true)}
+                title="เพิ่ม field ใหม่ + สร้าง column จริงใน Supabase"
+                className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1.5">
+                ＋ เพิ่ม Field
+              </button>
+            )}
             {canCreate && (
               <button onClick={openCreate}
                 className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
@@ -1014,6 +1024,16 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         title="ปิดบัญชี" message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}
         confirmText="ปิดบัญชี" cancelText="ยกเลิก" variant="danger"
         onConfirm={() => { if (archiveTarget) archive(archiveTarget); }} />
+
+      {/* กลุ่ม C: Field Creator — เพิ่ม column จริงใน Supabase */}
+      {fieldCreatorOpen && config.moduleKey && (
+        <FieldCreatorModal
+          moduleKey={config.moduleKey}
+          moduleTitle={config.title}
+          onClose={() => setFieldCreatorOpen(false)}
+          onCreated={() => { void refreshRegistry(); refreshData(); }}
+        />
+      )}
 
       {/* F11B: Studio v1 — drag-drop layout builder (full-screen) */}
       {studioOpen && (
