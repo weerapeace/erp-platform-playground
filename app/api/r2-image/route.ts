@@ -1,11 +1,10 @@
 /**
- * R2 Image Proxy — F15 + F20
+ * R2 Image Proxy — F15 + F21
  *
  * GET /api/r2-image?key=<r2_key>
  *
- * F20: ใช้ R2 native binding (env.R2_IMAGES.get) ตรงๆ — ไม่ผ่าน AWS SDK
- * → bundle เล็กลงหลาย MB → ไม่ชน Worker 1102 + ไม่ต้อง sign URL
- * fallback: ถ้าไม่มี binding (local dev) → AWS SDK signed URL
+ * F21: ใช้ R2 native binding (env.R2_IMAGES.get) ตรงๆ — ไม่มี AWS SDK
+ * → bundle เล็ก → ไม่ชน Worker 1102 + ไม่ต้อง sign URL
  *
  * Headers:
  *   Content-Type      = จาก R2 object metadata
@@ -14,9 +13,8 @@
  */
 
 import { NextRequest } from "next/server";
-import { getR2Binding, r2GetSignedUrl } from "@/lib/r2";
+import { r2GetObject } from "@/lib/r2";
 
-// SAFE: key อนุญาตเฉพาะ a-z0-9_-/. (กัน path traversal)
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 
 const CACHE_HEADERS = {
@@ -34,38 +32,17 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   try {
-    // ---- F20: R2 native binding (เร็ว, ไม่มี AWS SDK) ----
-    const bucket = await getR2Binding();
-    if (bucket) {
-      const obj = await bucket.get(key);
-      if (!obj) {
-        return new Response(JSON.stringify({ error: "ไม่พบรูป", key }), {
-          status: 404, headers: { "Content-Type": "application/json" },
-        });
-      }
-      return new Response(obj.body, {
-        status: 200,
-        headers: {
-          "Content-Type":   obj.httpMetadata?.contentType ?? "image/jpeg",
-          "Content-Length": String(obj.size),
-          ...CACHE_HEADERS,
-        },
+    const obj = await r2GetObject(key);
+    if (!obj) {
+      return new Response(JSON.stringify({ error: "ไม่พบรูป", key }), {
+        status: 404, headers: { "Content-Type": "application/json" },
       });
     }
-
-    // ---- Fallback: AWS SDK signed URL (local dev ที่ไม่มี binding) ----
-    const signedUrl = await r2GetSignedUrl(key, 60);
-    const r2Res = await fetch(signedUrl);
-    if (!r2Res.ok) {
-      return new Response(JSON.stringify({ error: "ไม่พบรูป", status: r2Res.status, key }), {
-        status: r2Res.status, headers: { "Content-Type": "application/json" },
-      });
-    }
-    return new Response(r2Res.body, {
+    return new Response(obj.body, {
       status: 200,
       headers: {
-        "Content-Type":   r2Res.headers.get("content-type") ?? "image/jpeg",
-        "Content-Length": r2Res.headers.get("content-length") ?? "",
+        "Content-Type":   obj.httpMetadata?.contentType ?? "image/jpeg",
+        "Content-Length": String(obj.size),
         ...CACHE_HEADERS,
       },
     });

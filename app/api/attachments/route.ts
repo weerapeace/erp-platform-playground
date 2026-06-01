@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { r2PutObject, isR2Configured, R2_PUBLIC_URL } from "@/lib/r2";
+import { r2PutObject, isR2Configured } from "@/lib/r2";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 // ---- Types ----
@@ -43,9 +43,9 @@ export async function GET(request: NextRequest) {
 // upload ไป R2 → บันทึก metadata ใน Supabase → คืน attachment row
 
 export async function POST(request: NextRequest) {
-  if (!isR2Configured()) {
+  if (!(await isR2Configured())) {
     return NextResponse.json(
-      { error: "ยังไม่ได้ตั้งค่า Cloudflare R2 — ต้องใส่ R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_PUBLIC_URL ใน .env.local" },
+      { error: "ยังไม่ได้ตั้งค่า Cloudflare R2 (binding R2_IMAGES ไม่พร้อม)" },
       { status: 503 }
     );
   }
@@ -79,7 +79,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "อัปโหลดไป R2 ไม่สำเร็จ: " + (err instanceof Error ? err.message : "") }, { status: 500 });
   }
 
-  const publicUrl = `${R2_PUBLIC_URL}/${path}`;
+  // F21: ใช้ proxy /api/r2-image แทน public URL (private bucket, ไม่มี R2_PUBLIC_URL)
+  const publicUrl = `/api/r2-image?key=${encodeURIComponent(path)}`;
 
   // บันทึก metadata
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_attachments_add", {

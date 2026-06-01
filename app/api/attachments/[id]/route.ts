@@ -26,7 +26,7 @@ export async function DELETE(
 
   if (!filePath) {
     warning = "ไม่พบ file_path ใน DB (อาจเป็น record เก่าก่อนใช้ R2)";
-  } else if (!isR2Configured()) {
+  } else if (!(await isR2Configured())) {
     warning = "ลบ DB แล้วแต่ R2 ยังไม่ได้ตั้งค่า — ไฟล์อาจคงค้างบน R2";
   } else {
     try {

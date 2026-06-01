@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { r2PutObject, getR2Binding } from "@/lib/r2";
+import { r2PutObject } from "@/lib/r2";
 
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_SIZE = 5 * 1024 * 1024;  // 5 MB
@@ -43,14 +43,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const key = `${folder}/${user.id}/${Date.now()}-${Math.floor(Math.random() * 100000)}.${ext}`;
 
   try {
-    const ab = await file.arrayBuffer();
-    // F20: ใช้ R2 native binding ถ้ามี (ไม่ผ่าน AWS SDK) | fallback AWS SDK
-    const bucket = await getR2Binding();
-    if (bucket) {
-      await bucket.put(key, ab, { httpMetadata: { contentType: file.type } });
-    } else {
-      await r2PutObject(key, Buffer.from(ab), file.type);
-    }
+    // F21: R2 binding ล้วน (ไม่มี AWS SDK)
+    await r2PutObject(key, await file.arrayBuffer(), file.type);
     return NextResponse.json({
       r2_key:       key,
       content_type: file.type,
