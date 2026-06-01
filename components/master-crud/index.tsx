@@ -388,7 +388,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   };
 
   const openCreate = () => {
-    setEditingId(null); setForm(emptyForm); setFormErr(null); setDirty(false); setModalOpen(true);
+    setEditingId(null); setForm(emptyForm); setFormErr(null); setDirty(false);
+    setDrawerMode("edit");   // F24: กดเพิ่ม → เข้าฟอร์มกรอกเลย (ไม่ใช่ view)
+    setModalOpen(true);
   };
   // F10a: open edit drawer — fetch full row จาก /[id] เพื่อได้ทุก field
   // (sync wrapper เพื่อให้ rowActions/onRowClick type ตรง — fetch ผ่าน .then ภายใน)
@@ -999,59 +1001,62 @@ function FormSections({
     );
   }, [fields]);
 
-  // expand state per group
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
-    const init: Record<string, boolean> = {};
-    for (const [key] of grouped) init[key] = getGroupConfig(key).defaultOpen;
-    return init;
-  });
+  // F24: tabs แทน accordion — active tab = section แรก
+  const [activeTab, setActiveTab] = useState<string>(grouped[0]?.[0] ?? "");
+  // ถ้า grouped เปลี่ยน (condition field) แล้ว tab หาย → reset ไป tab แรก
+  useEffect(() => {
+    if (grouped.length > 0 && !grouped.some(([k]) => k === activeTab)) {
+      setActiveTab(grouped[0][0]);
+    }
+  }, [grouped, activeTab]);
 
-  const allExpanded = grouped.every(([k]) => expanded[k] ?? getGroupConfig(k).defaultOpen);
+  // section เดียว → ไม่ต้องโชว์ tab bar
+  const single = grouped.length <= 1;
+  const current = grouped.find(([k]) => k === activeTab) ?? grouped[0];
 
   return (
-    <div className="space-y-3">
-      {/* Expand/collapse all */}
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() => {
-            const next: Record<string, boolean> = {};
-            for (const [k] of grouped) next[k] = !allExpanded;
-            setExpanded(next);
-          }}
-          className="text-xs text-slate-500 hover:text-orange-600 hover:underline"
-        >
-          {allExpanded ? "▼ ยุบทั้งหมด" : "▶ ขยายทั้งหมด"}
-        </button>
-      </div>
+    <div>
+      {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
+      {current && (
+        <div className="grid grid-cols-2 gap-3 pt-3">
+          {current[1].map(renderField)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// SectionTabBar — F24: tabs แนวนอน (ขีดเส้นล่าง) ใช้ทั้ง form + detail
+// ============================================================
+
+function SectionTabBar({
+  grouped, active, onSelect,
+}: {
+  grouped: [string, FieldDef[]][];
+  active: string;
+  onSelect: (k: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto -mb-px">
       {grouped.map(([groupKey, groupFields]) => {
         const cfg = getGroupConfig(groupKey);
-        const isOpen = expanded[groupKey] ?? cfg.defaultOpen;
+        const isActive = groupKey === active;
         return (
-          <div key={groupKey} className="border border-slate-200 rounded-lg overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setExpanded((p) => ({ ...p, [groupKey]: !isOpen }))}
-              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 transition-colors border-b border-slate-100"
-            >
-              <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                <span>{cfg.icon}</span>
-                {cfg.label}
-                <span className="text-xs text-slate-400 font-normal">({groupFields.length})</span>
-              </span>
-              <svg
-                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                className={`text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
-            </button>
-            {isOpen && (
-              <div className="px-3 py-3 grid grid-cols-2 gap-3">
-                {groupFields.map(renderField)}
-              </div>
-            )}
-          </div>
+          <button
+            key={groupKey}
+            type="button"
+            onClick={() => onSelect(groupKey)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
+              isActive
+                ? "border-orange-500 text-orange-600 font-medium"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            <span>{cfg.icon}</span>
+            <span>{cfg.label}</span>
+            <span className={`text-[10px] ${isActive ? "text-orange-400" : "text-slate-400"}`}>{groupFields.length}</span>
+          </button>
         );
       })}
     </div>
@@ -1082,27 +1087,28 @@ function DetailSections({
     );
   }, [fields]);
 
+  // F24: tabs (เหมือน form)
+  const [activeTab, setActiveTab] = useState<string>(grouped[0]?.[0] ?? "");
+  useEffect(() => {
+    if (grouped.length > 0 && !grouped.some(([k]) => k === activeTab)) setActiveTab(grouped[0][0]);
+  }, [grouped, activeTab]);
+
+  const single = grouped.length <= 1;
+  const current = grouped.find(([k]) => k === activeTab) ?? grouped[0];
+
   return (
-    <div className="space-y-4">
-      {grouped.map(([groupKey, groupFields]) => {
-        const cfg = getGroupConfig(groupKey);
-        return (
-          <div key={groupKey}>
-            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-              <span>{cfg.icon}</span>
-              <span>{cfg.label}</span>
+    <div>
+      {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
+      {current && (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 pt-4">
+          {current[1].map((f) => (
+            <div key={f.key} className={f.type === "textarea" || f.type === "image" ? "col-span-2" : ""}>
+              <dt className="text-[11px] text-slate-400 mb-0.5">{f.label}</dt>
+              <dd>{renderValue(f)}</dd>
             </div>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
-              {groupFields.map((f) => (
-                <div key={f.key} className={f.type === "textarea" || f.type === "image" ? "col-span-2" : ""}>
-                  <dt className="text-[11px] text-slate-400 mb-0.5">{f.label}</dt>
-                  <dd>{renderValue(f)}</dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        );
-      })}
+          ))}
+        </dl>
+      )}
     </div>
   );
 }
