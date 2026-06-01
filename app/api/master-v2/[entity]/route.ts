@@ -86,7 +86,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
                   brand_id, collection_id, category_id, parcel_size_id,
                   special_description_id, size_description_id, platform_category_id,
                   cover_image_r2_key, is_active,
-                  brands ( name ), collections ( name )`,
+                  brands ( name ), collections ( name ), product_categories ( name )`,
     searchColumns: ["code", "name_th", "name_en", "sku_name"],
     softDeleteColumn: "is_active",
     defaults: { product_family: "general", is_active: true, attribute_values: {} },
