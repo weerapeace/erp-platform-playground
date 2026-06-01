@@ -1008,11 +1008,11 @@ export function DataTable<T extends Record<string, unknown>>({
   const isInternalCol = (id: string) => id === "__select__" || id === "__actions__";
 
   // ---- Inline edit save ----
-  const saveInlineEdit = async (row: T) => {
+  const saveInlineEdit = async (row: T, override?: string) => {
     if (!editCell || !onInlineEdit) { setEditCell(null); return; }
     setEditSaving(true);
     try {
-      await onInlineEdit(row, editCell.colId, editValue);
+      await onInlineEdit(row, editCell.colId, override ?? editValue);
     } finally {
       setEditSaving(false);
       setEditCell(null);
@@ -1518,6 +1518,24 @@ export function DataTable<T extends Record<string, unknown>>({
                           {cell.column.columnDef.meta?.type === "image" ? (
                             <ImageThumbnail url={cell.getValue() as string | null} />
                           ) : isEditing ? (
+                            // field แบบ select → แก้เป็น dropdown (ไม่ใช่ช่องพิมพ์)
+                            cell.column.columnDef.meta?.filterType === "select" && cell.column.columnDef.meta?.filterOptions ? (
+                              <select
+                                autoFocus
+                                value={editValue}
+                                disabled={editSaving}
+                                onClick={e => e.stopPropagation()}
+                                onChange={e => { setEditValue(e.target.value); saveInlineEdit(row.original, e.target.value); }}
+                                onBlur={() => setEditCell(null)}
+                                onKeyDown={e => { if (e.key === "Escape") setEditCell(null); }}
+                                className="w-full h-7 px-1.5 -my-1 text-sm border border-blue-400 rounded bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                <option value="">—</option>
+                                {cell.column.columnDef.meta.filterOptions.map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                              </select>
+                            ) : (
                             <input
                               autoFocus
                               value={editValue}
@@ -1531,6 +1549,7 @@ export function DataTable<T extends Record<string, unknown>>({
                               }}
                               className="w-full h-7 px-1.5 -my-1 text-sm border border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
+                            )
                           ) : (
                             flexRender(cell.column.columnDef.cell, cell.getContext())
                           )}
