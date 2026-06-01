@@ -128,6 +128,14 @@ export const ENTITIES: Record<string, EntityConfig> = {
     softDeleteColumn: "is_active",
     defaults: { is_active: true, is_company: true, country: "TH", tax_branch: "00000" },
   },
+  // LR3: Logic Registry — ทะเบียนกฎธุรกิจ (จาก LOGIC_MEMORY_SIMPLE.md, 146 rules)
+  logic: {
+    table: "erp_logic_registry",
+    selectColumns: `*`,
+    searchColumns: ["logic_id", "short_name", "plain_language", "related_modules"],
+    softDeleteColumn: "is_active",
+    defaults: { logic_status: "approved", impl_status: "not_started", is_active: true },
+  },
   brands: {
     table: "brands",
     selectColumns: `*, parent_brand:brands!parent_brand_id ( name )`,

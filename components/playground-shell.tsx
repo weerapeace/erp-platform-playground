@@ -50,6 +50,8 @@ const navGroups = [
     phase: 3,
     label: "⚙️ Settings",
     items: [
+      // Governance
+      { href: "/master/logic",            icon: "📚", labelTH: "Logic Registry (ทะเบียนกฎ)" },
       // Schema + Field config (sprint 1+)
       { href: "/admin/schema-sync",       icon: "🗂️", labelTH: "Schema Sync + Field Registry" },
       { href: "/admin/lookups",           icon: "📚", labelTH: "Lookups (relation values)" },
@@ -82,6 +84,7 @@ const readySections = [
   "/master/parent-skus",
   "/master/skus",
   "/master/partners",
+  "/master/logic",
   "/admin/schema-sync",
   "/dashboard",
   "/purchase-requests",
