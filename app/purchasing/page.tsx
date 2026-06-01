@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { SkuFormModal } from "@/components/sku-form-modal";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
@@ -57,6 +58,8 @@ export default function PurchasingShopPage() {
 
   // sku-mode confirm popup
   const [confirmSku, setConfirmSku] = useState<Card | null>(null);
+  // ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) แบบ popup
+  const [skuForm, setSkuForm] = useState<{ mode: "create" | "edit"; id?: string } | null>(null);
 
   // cart + save
   const [cart, setCart] = useState<Line[]>([]);
@@ -263,6 +266,10 @@ export default function PurchasingShopPage() {
           <div className="flex items-center justify-between mb-4 gap-3">
             <h1 className="text-xl font-semibold text-slate-800">เลือกสินค้าที่ต้องการขอซื้อ</h1>
             <div className="flex items-center gap-3 flex-shrink-0">
+              {source === "sku" && (
+                <button onClick={() => setSkuForm({ mode: "create" })}
+                  className="h-8 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">＋ เพิ่มสินค้า</button>
+              )}
               {/* cols control */}
               <div className="hidden md:flex items-center gap-1 text-slate-400">
                 <span className="text-xs">ขนาด</span>
@@ -373,7 +380,15 @@ export default function PurchasingShopPage() {
 
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
-        <ConfirmSku card={confirmSku} onClose={() => setConfirmSku(null)} onAdd={(qty, note) => addSku(confirmSku, qty, note)} />
+        <ConfirmSku card={confirmSku} onClose={() => setConfirmSku(null)}
+          onAdd={(qty, note) => addSku(confirmSku, qty, note)}
+          onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
+      )}
+
+      {/* ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) */}
+      {skuForm && (
+        <SkuFormModal mode={skuForm.mode} skuId={skuForm.id} onClose={() => setSkuForm(null)}
+          onSaved={() => { setSkuForm(null); setConfirmSku(null); setOffset(0); void fetchCards(0, false); }} />
       )}
 
       {/* Group variation modal */}
@@ -418,7 +433,7 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, onClose, onAdd }: { card: Card; onClose: () => void; onAdd: (qty: number, note: string) => void }) {
+function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () => void; onAdd: (qty: number, note: string) => void; onEdit: () => void }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const s = card.sku!;
@@ -427,7 +442,10 @@ function ConfirmSku({ card, onClose, onAdd }: { card: Card; onClose: () => void;
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">เพิ่มลงใบขอซื้อ</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+          <div className="flex items-center gap-2">
+            <button onClick={onEdit} className="h-7 px-2.5 text-xs border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">✎ แก้ไขสินค้า</button>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+          </div>
         </div>
         <div className="p-4">
           <div className="flex gap-3">
