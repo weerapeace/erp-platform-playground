@@ -27,7 +27,7 @@ import {
 
 // ---- Filter type (defined early — used in module augmentation) ----
 
-export type FilterFieldType = "text" | "number" | "select";
+export type FilterFieldType = "text" | "number" | "select" | "boolean";
 
 // ---- TanStack Table ColumnMeta augmentation ----
 
@@ -164,7 +164,8 @@ export type FilterFieldOption = {
 export type ColumnFilterValue =
   | { type: "text";   value: string }
   | { type: "number"; min: string; max: string }
-  | { type: "select"; selected: string[] };
+  | { type: "select"; selected: string[] }
+  | { type: "boolean"; value: "true" | "false" };
 
 export type FilterOperator =
   | "contains" | "not_contains" | "equals" | "not_equals"
@@ -336,7 +337,7 @@ type StoredView = {
 
 function uiTypeToFilterType(uiType: string): FilterFieldType {
   if (uiType === "currency" || uiType === "number") return "number";
-  if (uiType === "boolean") return "select";
+  if (uiType === "boolean") return "boolean";
   return "text";
 }
 
@@ -373,9 +374,10 @@ function inferFilterType(key: string, data: Record<string, unknown>[]): FilterFi
 
 function isColFilterActive(val: ColumnFilterValue | undefined): boolean {
   if (!val) return false;
-  if (val.type === "text")   return val.value.length > 0;
-  if (val.type === "number") return val.min !== "" || val.max !== "";
-  if (val.type === "select") return val.selected.length > 0;
+  if (val.type === "text")    return val.value.length > 0;
+  if (val.type === "number")  return val.min !== "" || val.max !== "";
+  if (val.type === "select")  return val.selected.length > 0;
+  if (val.type === "boolean") return val.value === "true" || val.value === "false";
   return false;
 }
 
@@ -821,6 +823,7 @@ export function DataTable<T extends Record<string, unknown>>({
           return true;
         }
         if (fv.type === "select") return fv.selected.length === 0 || fv.selected.includes(String(rawVal ?? ""));
+        if (fv.type === "boolean") return Boolean(rawVal) === (fv.value === "true");
         return true;
       }));
     }
@@ -1338,13 +1341,15 @@ export function DataTable<T extends Record<string, unknown>>({
               const opts = f.options ?? [];
               label = `${f.label}: ${fv.selected.map(v => opts.find(o => o.value === v)?.label ?? v).join(", ")}`;
             }
+            if (fv?.type === "boolean") label = `${f.label}: ${fv.value === "true" ? "ใช่" : "ไม่ใช่"}`;
             return (
               <span key={f.key} className="inline-flex items-center gap-1 bg-white border border-blue-200 text-blue-700 text-xs px-2 py-1 rounded-full">
                 {label}
                 <button onClick={() => {
-                  if (fv?.type === "text")   setColFilter(f.key, { type: "text",   value: "" });
-                  if (fv?.type === "number") setColFilter(f.key, { type: "number", min: "", max: "" });
-                  if (fv?.type === "select") setColFilter(f.key, { type: "select", selected: [] });
+                  if (fv?.type === "text")    setColFilter(f.key, { type: "text",   value: "" });
+                  if (fv?.type === "number")  setColFilter(f.key, { type: "number", min: "", max: "" });
+                  if (fv?.type === "select")  setColFilter(f.key, { type: "select", selected: [] });
+                  if (fv?.type === "boolean") setColFilter(f.key, { type: "text",   value: "" });
                 }} className="text-blue-400 hover:text-red-500 ml-0.5"><IconX /></button>
               </span>
             );
@@ -1815,6 +1820,34 @@ function ColumnFilterPanel({
                   </div>
                 </div>
                 {(min || max) && <button onClick={() => onSetFilter(field.key, { type: "number", min: "", max: "" })} className="mt-2 text-xs text-red-500 hover:text-red-700">ล้าง</button>}
+              </div>
+            );
+          }
+          if (field.type === "boolean") {
+            const cur = fv?.type === "boolean" ? fv.value : "";
+            const choose = (v: "" | "true" | "false") => {
+              if (v === "") onSetFilter(field.key, { type: "text", value: "" }); // ล้าง
+              else onSetFilter(field.key, { type: "boolean", value: v });
+            };
+            return (
+              <div key={field.key} className="bg-white border border-slate-200 rounded-lg p-3 min-w-[160px] shadow-sm">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{field.label}</p>
+                <div className="flex gap-1">
+                  {([
+                    { v: "", label: "ทั้งหมด" },
+                    { v: "true", label: "✓ ใช่" },
+                    { v: "false", label: "✗ ไม่ใช่" },
+                  ] as const).map(opt => (
+                    <button key={opt.v} type="button" onClick={() => choose(opt.v)}
+                      className={`flex-1 h-7 px-2 text-xs rounded-md border transition-colors ${
+                        cur === opt.v
+                          ? "bg-blue-600 border-blue-600 text-white font-medium"
+                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             );
           }

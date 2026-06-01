@@ -561,7 +561,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       enableSorting: f.sortable !== false,
       meta: {
         filterable: f.filterable ?? false,
-        filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "select" ? "select" : "text"),
+        filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "boolean" ? "boolean" : f.type === "select" ? "select" : "text"),
         ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: o })) } : {}),
       },
       cell: f.cellRender

@@ -211,7 +211,8 @@ export async function GET(
   type ColFilter =
     | { type: "text"; value: string }
     | { type: "number"; min: string; max: string }
-    | { type: "select"; selected: string[] };
+    | { type: "select"; selected: string[] }
+    | { type: "boolean"; value: "true" | "false" };
   let colFilters: Record<string, ColFilter> = {};
   try {
     const raw = searchParams.get("filters");
@@ -260,6 +261,8 @@ export async function GET(
         if (f.max !== "" && f.max != null) q = q.lte(col, Number(f.max));
       } else if (f.type === "select" && Array.isArray(f.selected) && f.selected.length > 0) {
         q = q.in(col, f.selected);
+      } else if (f.type === "boolean" && (f.value === "true" || f.value === "false")) {
+        q = q.eq(col, f.value === "true");
       }
     }
 
