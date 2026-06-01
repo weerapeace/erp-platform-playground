@@ -982,6 +982,38 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           const coreFields = visibleFields.filter(f => (f.groupKey ?? "other") === "core");
           const tabFields  = visibleFields.filter(f => (f.groupKey ?? "other") !== "core");
 
+          // กลุ่ม B (ตัวเลือก 3): ถ้าหน้านี้จัด Layout ไว้ → รูปบนสุด + Layout คุมทุก field (รวม core)
+          const hasLayout = !!registryLayout?.tabs?.length;
+          if (hasLayout) {
+            const imageField = effectiveFields.find(f => f.key === "cover_image_r2_key");
+            return (
+              <div className="space-y-4">
+                {/* รูปบนสุด เต็มกว้าง (เฉพาะหน้าที่มีรูป) */}
+                {(coverKey || (drawerMode === "edit" && imageField)) && (
+                  <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center" style={{ maxHeight: 260 }}>
+                    {coverKey
+                      ? <ImageGallery r2Key={coverKey} />
+                      : imageField ? renderField(imageField) : null}
+                  </div>
+                )}
+                {/* code + status */}
+                <div className="flex items-center gap-3">
+                  {detailCode && <code className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600">{detailCode}</code>}
+                  {form[activeField]
+                    ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
+                    : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
+                </div>
+                {drawerMode === "edit" && formErr && (
+                  <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                )}
+                {/* Layout คุมทุก field (รวม core) */}
+                {drawerMode === "view"
+                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} />
+                  : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />}
+              </div>
+            );
+          }
+
           return (
             <div className="flex flex-col md:flex-row gap-5">
               {/* ซ้าย: รูป + core */}
