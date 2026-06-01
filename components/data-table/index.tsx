@@ -1500,6 +1500,8 @@ export function DataTable<T extends Record<string, unknown>>({
                       const isEditing = editCell?.rowId === row.id && editCell?.colId === cell.column.id;
                       return (
                         <td key={cell.id}
+                          // กลุ่ม C UX: ช่องที่แก้ได้ "กินคลิกเดียว" ไว้ → ไม่เปิด drawer (ดับเบิลคลิกถึงแก้)
+                          onClick={editable ? (e) => e.stopPropagation() : undefined}
                           onDoubleClick={editable ? (e) => {
                             e.stopPropagation();
                             setEditCell({ rowId: row.id, colId: cell.column.id });
