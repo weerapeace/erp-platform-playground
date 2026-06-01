@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
-import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams } from "@/components/data-table";
+import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -270,6 +270,29 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .catch((e) => console.error("Field Registry load failed:", e))
       .finally(() => setRegistryLoading(false));
   }, [config.moduleKey]);
+
+  // F30: โหลดทะเบียน field ใหม่ (ใช้ซ้ำ — Studio save + toggle filterable)
+  const refreshRegistry = useCallback(async () => {
+    if (!config.moduleKey) return;
+    setRegistryLoading(true);
+    try {
+      const r = await apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`);
+      const res = (await r.json()) as FieldRegistryV2Response;
+      if (!res.error) setRegistryFields(res.fields);
+    } finally {
+      setRegistryLoading(false);
+    }
+  }, [config.moduleKey]);
+
+  // F30: toggle is_filterable เข้าทะเบียนกลาง (กระทบทุกคน) — จากปุ่ม "เลือก field กรอง"
+  const handleSetFilterable = useCallback(async (fieldId: string, value: boolean) => {
+    const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [fieldId], patch: { is_filterable: value } }),
+    });
+    if ((await r.json()).error) throw new Error("set filterable failed");
+    await refreshRegistry();
+  }, [refreshRegistry]);
 
   // คำนวณ effective fields — Registry มาก่อน, fallback ไป static config.fields
   // Sprint 8: filter sensitive fields ที่ user ไม่มี permission
@@ -566,6 +589,19 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveFields, activeField]);
 
+  // F30: ตัวเลือก field สำหรับปุ่ม "เลือก field กรอง"
+  // จำกัดเฉพาะ field ที่เป็น column ในตาราง (colSize) — เพราะการ์ดกรองสร้างจาก column ที่โชว์
+  const filterFieldOptions: FilterFieldOption[] = useMemo(() =>
+    effectiveFields
+      .filter(f => f.fieldId && f.colSize !== undefined)
+      .map(f => ({
+        fieldId:      f.fieldId!,
+        key:          f.key,
+        label:        f.label,
+        isFilterable: f.filterable ?? false,
+      })),
+  [effectiveFields]);
+
   // ---- Views ----
   // ⚠️ DataTableView field คือ "filter" (ไม่ใช่ "predicate")
   const views: DataTableView[] = useMemo(() => [
@@ -854,6 +890,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             primary:  effectiveSearchKeys[0] ?? "name_th",
             subtitle: "code",
           } : undefined}
+          filterFieldOptions={config.moduleKey ? filterFieldOptions : undefined}
+          onSetFilterable={config.moduleKey && canEdit ? handleSetFilterable : undefined}
         />
 
         {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm">✓ {toast}</div>}
@@ -990,13 +1028,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           onSaved={() => {
             setStudioOpen(false);
             // reload field registry → layout ใหม่มีผลทันที
-            if (config.moduleKey) {
-              setRegistryLoading(true);
-              apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`)
-                .then((r) => r.json() as Promise<FieldRegistryV2Response>)
-                .then((res) => { if (!res.error) setRegistryFields(res.fields); })
-                .finally(() => setRegistryLoading(false));
-            }
+            void refreshRegistry();
           }}
         />
       )}

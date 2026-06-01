@@ -153,6 +153,14 @@ export type FilterableField = {
   options?: { label: string; value: string }[];
 };
 
+/** F30: ตัวเลือก field สำหรับปุ่ม "เลือก field กรอง" (registry-backed) */
+export type FilterFieldOption = {
+  fieldId: string;       // erp_module_fields.id — ใช้ตอน save is_filterable
+  key: string;
+  label: string;
+  isFilterable: boolean; // สถานะปัจจุบันใน registry
+};
+
 export type ColumnFilterValue =
   | { type: "text";   value: string }
   | { type: "number"; min: string; max: string }
@@ -276,6 +284,13 @@ export interface DataTableProps<T extends Record<string, unknown>> {
   cardConfig?: CardConfig;
   /** view เริ่มต้น */
   defaultViewMode?: "table" | "cards";
+  /** F30: รายการ field ทั้งหมดที่เลือกกรองได้ (สำหรับปุ่ม "เลือก field กรอง") */
+  filterFieldOptions?: FilterFieldOption[];
+  /**
+   * F30: บันทึก is_filterable เข้าทะเบียน field กลาง (กระทบทุกคน)
+   * undefined = ไม่มีสิทธิ์/ไม่รองรับ → ซ่อนปุ่มเลือก field
+   */
+  onSetFilterable?: (fieldId: string, value: boolean) => Promise<void> | void;
 }
 
 // ---- Pinned column style (เฉพาะ pin ซ้าย) ----
@@ -401,6 +416,8 @@ export function DataTable<T extends Record<string, unknown>>({
   enableCards,
   cardConfig,
   defaultViewMode = "table",
+  filterFieldOptions,
+  onSetFilterable,
 }: DataTableProps<T>) {
 
   const isServer = !!serverFetch;
@@ -1109,8 +1126,8 @@ export function DataTable<T extends Record<string, unknown>>({
         </div>
         <div className="flex-1" />
 
-        {/* Filter */}
-        {filterableFromColumns.length > 0 && (
+        {/* Filter — F30: โผล่แม้ยังไม่มี field กรอง ถ้ามีปุ่มเลือก field (onSetFilterable) */}
+        {(filterableFromColumns.length > 0 || (!!onSetFilterable && (filterFieldOptions?.length ?? 0) > 0)) && (
           <button onClick={() => setShowFilterPanel(!showFilterPanel)}
             className={`flex items-center gap-1.5 h-8 px-3 text-sm border rounded-md transition-colors ${
               showFilterPanel || activeFilterCount > 0
@@ -1294,7 +1311,7 @@ export function DataTable<T extends Record<string, unknown>>({
       </div>
 
       {/* Filter Panel */}
-      {showFilterPanel && filterableFromColumns.length > 0 && (
+      {showFilterPanel && (filterableFromColumns.length > 0 || (!!onSetFilterable && (filterFieldOptions?.length ?? 0) > 0)) && (
         <ColumnFilterPanel
           filterableFields={filterableFromColumns}
           colFilterValues={colFilterValues}
@@ -1303,6 +1320,8 @@ export function DataTable<T extends Record<string, unknown>>({
           onClear={clearColFilters}
           onClose={() => setShowFilterPanel(false)}
           resultCount={filteredData.length}
+          filterFieldOptions={filterFieldOptions}
+          onSetFilterable={onSetFilterable}
         />
       )}
 
@@ -1659,6 +1678,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
 function ColumnFilterPanel({
   filterableFields, colFilterValues, data, onSetFilter, onClear, onClose, resultCount,
+  filterFieldOptions, onSetFilterable,
 }: {
   filterableFields: FilterableField[];
   colFilterValues: Record<string, ColumnFilterValue>;
@@ -1667,7 +1687,29 @@ function ColumnFilterPanel({
   onClear: () => void;
   onClose: () => void;
   resultCount: number;
+  filterFieldOptions?: FilterFieldOption[];
+  onSetFilterable?: (fieldId: string, value: boolean) => Promise<void> | void;
 }) {
+  // F30: popover เลือก field กรอง (บันทึกเข้าทะเบียนกลาง)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const canPick = !!onSetFilterable && (filterFieldOptions?.length ?? 0) > 0;
+
+  const pickerList = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    const list = filterFieldOptions ?? [];
+    if (!q) return list;
+    return list.filter(o => o.label.toLowerCase().includes(q) || o.key.toLowerCase().includes(q));
+  }, [filterFieldOptions, pickerQuery]);
+
+  const toggleFilterable = async (opt: FilterFieldOption) => {
+    if (!onSetFilterable) return;
+    setSavingId(opt.fieldId);
+    try { await onSetFilterable(opt.fieldId, !opt.isFilterable); }
+    finally { setSavingId(null); }
+  };
+
   const autoDistinct = useMemo(() => {
     const result: Record<string, string[]> = {};
     filterableFields.forEach(f => {
@@ -1690,9 +1732,53 @@ function ColumnFilterPanel({
         </div>
         <div className="flex items-center gap-3">
           {hasAnyActive && <button onClick={onClear} className="text-xs text-red-500 hover:text-red-700">ล้างทั้งหมด</button>}
+          {/* F30: ปุ่มเลือก field กรอง (บันทึกเข้าทะเบียนกลาง — กระทบทุกคน) */}
+          {canPick && (
+            <div className="relative">
+              <button onClick={() => setPickerOpen(o => !o)}
+                className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors ${
+                  pickerOpen ? "bg-blue-100 border-blue-300 text-blue-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                }`}>
+                <span className="text-sm leading-none">+</span> เลือก field กรอง
+              </button>
+              {pickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setPickerOpen(false)} />
+                  <div className="absolute right-0 mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
+                    <div className="p-2 border-b border-slate-100">
+                      <p className="text-[11px] text-slate-400 mb-1.5 px-0.5">ติ๊กเพื่อเพิ่ม/ลบ field ที่กรองได้ (มีผลกับทุกคน)</p>
+                      <input type="text" value={pickerQuery} onChange={e => setPickerQuery(e.target.value)}
+                        placeholder="ค้นหา field..." autoFocus
+                        className="w-full h-7 px-2 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                    </div>
+                    <div className="max-h-72 overflow-y-auto py-1">
+                      {pickerList.length === 0 ? (
+                        <p className="px-3 py-4 text-xs text-slate-400 text-center">ไม่พบ field</p>
+                      ) : pickerList.map(opt => (
+                        <button key={opt.fieldId} onClick={() => toggleFilterable(opt)} disabled={savingId === opt.fieldId}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50 disabled:opacity-50">
+                          <span className={`flex items-center justify-center w-4 h-4 rounded border ${
+                            opt.isFilterable ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 bg-white"
+                          }`}>{opt.isFilterable && <span className="text-[10px] leading-none">✓</span>}</span>
+                          <span className="text-xs text-slate-700 flex-1 truncate">{opt.label}</span>
+                          {savingId === opt.fieldId && <span className="text-[10px] text-slate-400">กำลังบันทึก…</span>}
+                          <span className="text-[10px] text-slate-300 font-mono">{opt.key}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><IconX /></button>
         </div>
       </div>
+      {filterableFields.length === 0 ? (
+        <div className="text-xs text-slate-500 bg-white border border-dashed border-slate-200 rounded-lg px-4 py-5 text-center">
+          ยังไม่ได้เลือก field สำหรับกรอง — กดปุ่ม <span className="font-medium text-blue-600">+ เลือก field กรอง</span> ด้านบนเพื่อเพิ่ม
+        </div>
+      ) : (
       <div className="flex flex-wrap gap-3">
         {filterableFields.map(field => {
           const fv = colFilterValues[field.key];
@@ -1738,6 +1824,7 @@ function ColumnFilterPanel({
           return null;
         })}
       </div>
+      )}
     </div>
   );
 }
