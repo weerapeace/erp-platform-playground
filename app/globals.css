@@ -8,6 +8,13 @@
   box-sizing: border-box;
 }
 
+/* F25: ซ่อน scrollbar (ยังเลื่อน/swipe ได้) — ใช้กับ tabs ที่ล้น */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
 body {
   font-family: 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;

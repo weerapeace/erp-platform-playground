@@ -17,7 +17,7 @@ import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/v
 import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
-import { ImageInput, ImageCell } from "@/components/image-input";
+import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
@@ -887,46 +887,67 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           )
         }
       >
-        {drawerMode === "view" ? (
-          // ---- โหมดดูรายละเอียด ----
-          <div className="space-y-4">
-            {/* Header: รูป + ชื่อ + code */}
-            <div className="flex items-start gap-4 pb-4 border-b border-slate-100">
-              {coverKey && <ImageCell r2Key={coverKey} size={88} />}
-              <div className="min-w-0 flex-1">
-                {detailCode && (
-                  <code className="inline-block text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 mb-1">{detailCode}</code>
-                )}
-                <h2 className="text-lg font-semibold text-slate-900 break-words">{detailTitle}</h2>
-                <div className="mt-1">
-                  {form[activeField]
-                    ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
-                    : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
+        {/* F25: layout 2 คอลัมน์ — ซ้าย=รูป+core, ขวา=tabs (responsive: แคบ→ซ้อนบนล่าง) */}
+        {(() => {
+          const visibleFields = effectiveFields.filter(f =>
+            !f.hideInForm && f.key !== "cover_image_r2_key" && evaluateCondition(f.conditionRules, form)
+          );
+          const coreFields = visibleFields.filter(f => (f.groupKey ?? "other") === "core");
+          const tabFields  = visibleFields.filter(f => (f.groupKey ?? "other") !== "core");
+
+          return (
+            <div className="flex flex-col md:flex-row gap-5">
+              {/* ซ้าย: รูป + core */}
+              <div className="md:w-72 md:flex-shrink-0 space-y-4">
+                {/* รูปใหญ่ */}
+                <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
+                  {coverKey
+                    ? <ImageGallery r2Key={coverKey} />
+                    : drawerMode === "edit"
+                      ? renderField(effectiveFields.find(f => f.key === "cover_image_r2_key") ?? coreFields[0])
+                      : <div className="text-slate-300 text-sm">ไม่มีรูป</div>}
+                </div>
+
+                {/* code + status */}
+                <div>
+                  {detailCode && <code className="inline-block text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 mb-1">{detailCode}</code>}
+                  <div>
+                    {form[activeField]
+                      ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
+                      : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
+                  </div>
+                </div>
+
+                {/* core fields (Code/Name) — โชว์ตลอด ไม่อยู่ใน tab */}
+                <div className="space-y-3 pt-3 border-t border-slate-100">
+                  {drawerMode === "view"
+                    ? coreFields.map((f) => (
+                        <div key={f.key}>
+                          <div className="text-[11px] text-slate-400 mb-0.5">{f.label}</div>
+                          <div>{renderDetailValue(f)}</div>
+                        </div>
+                      ))
+                    : coreFields.map((f) => <div key={f.key}>{renderField(f)}</div>)}
                 </div>
               </div>
+
+              {/* ขวา: tabs (หมวดที่เหลือ) */}
+              <div className="flex-1 min-w-0">
+                {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">⏳ กำลังโหลด...</div>}
+                {drawerMode === "edit" && formErr && (
+                  <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
+                )}
+                {tabFields.length > 0 ? (
+                  drawerMode === "view"
+                    ? <DetailSections fields={tabFields} renderValue={renderDetailValue} />
+                    : <FormSections fields={tabFields} renderField={renderField} />
+                ) : (
+                  <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
+                )}
+              </div>
             </div>
-
-            {detailLoading && <div className="text-xs text-slate-400">⏳ กำลังโหลดรายละเอียด...</div>}
-
-            <DetailSections
-              fields={effectiveFields.filter(f =>
-                !f.hideInForm
-                && f.key !== "cover_image_r2_key"
-                && evaluateCondition(f.conditionRules, form)
-              )}
-              renderValue={renderDetailValue}
-            />
-          </div>
-        ) : (
-          // ---- โหมดแก้ไข (ฟอร์ม) ----
-          <div className="space-y-4">
-            {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
-            <FormSections
-              fields={effectiveFields.filter(f => !f.hideInForm && evaluateCondition(f.conditionRules, form))}
-              renderField={renderField}
-            />
-          </div>
-        )}
+          );
+        })()}
       </Drawer>
 
       <ConfirmDialog open={confirmDiscard} onClose={() => setConfirmDiscard(false)}
@@ -1038,7 +1059,7 @@ function SectionTabBar({
   onSelect: (k: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto -mb-px">
+    <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
       {grouped.map(([groupKey, groupFields]) => {
         const cfg = getGroupConfig(groupKey);
         const isActive = groupKey === active;

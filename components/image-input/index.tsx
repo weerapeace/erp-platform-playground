@@ -133,6 +133,34 @@ export function ImageInput({
 // ============================================================
 
 /**
+ * F25: ImageGallery — รูปใหญ่ใน detail drawer (รองรับหลายรูป เผื่ออนาคต)
+ * ตอนนี้รับ r2Key เดียว → โชว์เต็มกรอบ + คลิกเปิดเต็มจอ
+ */
+export function ImageGallery({ r2Key }: { r2Key: string }) {
+  const [full, setFull] = useState(false);
+  const src = `/api/r2-image?key=${encodeURIComponent(r2Key)}`;
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt=""
+        className="w-full h-full object-contain cursor-zoom-in"
+        onClick={() => setFull(true)}
+      />
+      {full && createPortal(
+        <div className="fixed inset-0 z-[110] bg-black/80 flex items-center justify-center p-8 cursor-zoom-out"
+          onClick={() => setFull(false)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="" className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" />
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+/**
  * F15: ImageCell ใช้ /api/r2-image?key=X (Worker proxy)
  * - ไม่ติด CORS เพราะ same-origin
  * - ไม่ต้องสร้าง signed URL ผ่าน fetch แยก (เร็วขึ้น 1 round trip)
