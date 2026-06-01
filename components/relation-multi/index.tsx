@@ -7,6 +7,7 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
+import { RelationPeekModal } from "@/components/relation-peek";
 
 type RelConfig = {
   kind?: string;
@@ -108,6 +109,7 @@ export function RelationOne2Many({ config, recordId }: { config: RelConfig; reco
   const subFields  = config.list_sub_fields ?? [];
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [peekId, setPeekId] = useState<string | null>(null);  // กดรายการลูก → เปิดดู record นั้น
 
   useEffect(() => {
     if (!recordId || !fk) return;
@@ -126,39 +128,52 @@ export function RelationOne2Many({ config, recordId }: { config: RelConfig; reco
 
   const rich = !!(imageField || subFields.length > 0);
 
-  if (!rich) {
-    return (
-      <ul className="space-y-1">
-        {rows.map((r) => (
-          <li key={String(r.id)} className="text-sm text-slate-700 px-2 py-1 bg-slate-50 rounded border border-slate-100">
-            {String(r[titleField] ?? r.name ?? r.id)}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-
-  return (
+  const list = !rich ? (
+    <ul className="space-y-1">
+      {rows.map((r) => (
+        <li key={String(r.id)}>
+          <button type="button" onClick={() => setPeekId(String(r.id))}
+            className="w-full text-left text-sm text-slate-700 px-2 py-1 bg-slate-50 rounded border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40 inline-flex items-center gap-1">
+            <span className="flex-1 truncate">{String(r[titleField] ?? r.name ?? r.id)}</span>
+            <span className="text-[10px] opacity-50">🔗</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  ) : (
     <ul className="space-y-1.5">
       {rows.map((r) => {
         const sub = subFields.map((f) => fmtVal(r[f])).filter(Boolean).join(" · ");
         const imgKey = imageField ? r[imageField] : null;
         return (
-          <li key={String(r.id)} className="flex items-center gap-2.5 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100">
-            {imageField && (
-              <div className="w-9 h-9 rounded bg-white border border-slate-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                {r2img(imgKey)
-                  ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(imgKey)!} alt="" className="w-full h-full object-cover" />
-                  : <span className="text-slate-300 text-sm">📦</span>}
+          <li key={String(r.id)}>
+            <button type="button" onClick={() => setPeekId(String(r.id))}
+              className="w-full text-left flex items-center gap-2.5 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40">
+              {imageField && (
+                <div className="w-9 h-9 rounded bg-white border border-slate-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {r2img(imgKey)
+                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(imgKey)!} alt="" className="w-full h-full object-cover" />
+                    : <span className="text-slate-300 text-sm">📦</span>}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-slate-700 truncate">{String(r[titleField] ?? r.name ?? r.id)}</div>
+                {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
               </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-slate-700 truncate">{String(r[titleField] ?? r.name ?? r.id)}</div>
-              {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
-            </div>
+              <span className="text-[10px] opacity-50">🔗</span>
+            </button>
           </li>
         );
       })}
     </ul>
+  );
+
+  return (
+    <>
+      {list}
+      {peekId && moduleKey && (
+        <RelationPeekModal moduleKey={moduleKey} recordId={peekId} onClose={() => setPeekId(null)} />
+      )}
+    </>
   );
 }
