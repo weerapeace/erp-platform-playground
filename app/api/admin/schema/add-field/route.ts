@@ -22,10 +22,14 @@ type Body = {
   table?: string;        // optional — ถ้าไม่ส่ง จะหาเองจาก module_key
   field_key: string;
   label: string;
-  ui_type: string;                 // text|textarea|number|date|boolean|select|relation|image|many2many|one2many
+  ui_type: string;                 // text|textarea|number|date|boolean|select|relation|image|many2many|one2many|related
   target_table?: string;
   target_label_field?: string;
   target_fk_column?: string;       // สำหรับ one2many — column บน target ที่ชี้กลับมา
+  // related: ดึงค่าจากตารางที่เชื่อม มาโชว์ (read-only, ไม่มี column จริง)
+  via_field?: string;              // field_key ของ relation (FK) บน module นี้ที่จะเดินผ่าน
+  via_column?: string;             // column FK จริงบนตารางนี้ (ปกติ = via_field)
+  target_field?: string;           // column บน target ที่จะดึงมาโชว์
   options?: string[];
   is_visible?: boolean;
   is_filterable?: boolean;
@@ -58,7 +62,9 @@ export async function POST(request: NextRequest) {
   if (modErr || !mod) return NextResponse.json({ error: "ไม่พบ module " + b.module_key }, { status: 404 });
   const table = b.table || (mod.table_name as string);
 
-  const isVirtual = b.ui_type === "many2many" || b.ui_type === "one2many";  // ไม่มี column จริงบน src
+  // related/m2m/o2m = virtual (ไม่มี column จริงบนตารางนี้)
+  const isVirtual = b.ui_type === "many2many" || b.ui_type === "one2many" || b.ui_type === "related";
+  const isRelated = b.ui_type === "related";
 
   // 1) เพิ่ม column จริง (ยกเว้น m2m/o2m ที่ไม่มี column บนตารางนี้)
   if (!isVirtual) {
@@ -88,6 +94,16 @@ export async function POST(request: NextRequest) {
   } else if (b.ui_type === "one2many" && b.target_table) {
     if (!b.target_fk_column) return NextResponse.json({ error: "one2many ต้องระบุ column FK บน target" }, { status: 400 });
     relationConfig = { kind: "one2many", target_table: b.target_table, target_module_key: targetModuleKey, target_fk_column: b.target_fk_column, target_label_field: labelField };
+  } else if (isRelated) {
+    if (!b.via_field || !b.target_field) return NextResponse.json({ error: "related ต้องระบุ via_field + target_field" }, { status: 400 });
+    relationConfig = {
+      kind: "related",
+      via_field: b.via_field,
+      via_column: b.via_column || b.via_field,
+      target_table: b.target_table,
+      target_module_key: targetModuleKey,
+      target_field: b.target_field,
+    };
   }
 
   // 3) ลงทะเบียนใน Field Registry (มี mod อยู่แล้วจากด้านบน)
@@ -106,10 +122,10 @@ export async function POST(request: NextRequest) {
     group_key: b.group_key || "core",
     is_visible: b.is_visible ?? true,
     is_required: false,
-    is_editable: true,
-    is_filterable: b.is_filterable ?? false,
-    is_sortable: true,
-    is_searchable: b.is_searchable ?? false,
+    is_editable: !isRelated,                          // related = read-only
+    is_filterable: isRelated ? false : (b.is_filterable ?? false),  // ไม่มี column จริง → กรอง/เรียงไม่ได้
+    is_sortable: !isRelated,
+    is_searchable: isRelated ? false : (b.is_searchable ?? false),
     width: 150,
     options: b.ui_type === "select" && b.options ? { options: b.options } : {},
     relation_config: relationConfig,

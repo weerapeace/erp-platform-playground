@@ -7,7 +7,7 @@
  * แต่ละหน้าแค่ pass config object → ได้หน้าครบ list + create + edit + soft delete + bulk + export + audit
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { Drawer, ConfirmDialog } from "@/components/modal";
@@ -342,6 +342,32 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     return config.searchKeys ?? ["name", "code"];
   }, [registryFields, config.searchKeys]);
 
+  // ข้อ 2: related fields — field ที่ดึงค่าจากตารางที่เชื่อมมาโชว์ (read-only, ไม่มี column จริง)
+  const relatedFields = useMemo(
+    () => (registryFields ?? []).filter((f) => f.ui_field_type === "related"),
+    [registryFields],
+  );
+  // cache: key = "<target_module_key>.<target_field>" → { [target_id]: value }
+  const relatedMapsRef = useRef<Record<string, Record<string, unknown>>>({});
+  const [relatedVer, setRelatedVer] = useState(0);  // bump เมื่อ map โหลดเสร็จ → re-render
+
+  // เติมค่า related ลงใน row (ใช้ทั้ง list + detail) จาก map ที่โหลดไว้
+  const enrichRelated = useCallback((list: Row[]): Row[] => {
+    if (relatedFields.length === 0) return list;
+    return list.map((r) => {
+      const o: Row = { ...r };
+      for (const f of relatedFields) {
+        const rc = (f.relation_config ?? {}) as Record<string, unknown>;
+        const viaCol = String(rc.via_column ?? rc.via_field ?? "");
+        const ck = `${rc.target_module_key ?? rc.target_table}.${rc.target_field}`;
+        const m = relatedMapsRef.current[ck];
+        const id = r[viaCol];
+        o[f.field_key] = m && id != null ? (m[String(id)] ?? null) : (r[f.field_key] ?? null);
+      }
+      return o;
+    });
+  }, [relatedFields, relatedVer]);
+
   const [rows,    setRows]    = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
@@ -390,10 +416,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      setRows((json.data ?? []) as Row[]);
+      setRows(enrichRelated((json.data ?? []) as Row[]));
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter]);
+  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, enrichRelated]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
@@ -402,6 +428,33 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (config.serverMode) setServerRefresh((n) => n + 1);
     else await fetchList();
   }, [config.serverMode, fetchList]);
+
+  // ข้อ 2: โหลด map ของ target แต่ละตัว (ครั้งเดียวต่อ target_module_key.target_field)
+  // แล้ว refresh เพื่อเติมค่า related ลงในแถวที่โหลดไปก่อนหน้า
+  useEffect(() => {
+    if (relatedFields.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      let changed = false;
+      for (const f of relatedFields) {
+        const rc = (f.relation_config ?? {}) as Record<string, unknown>;
+        const tmk = String(rc.target_module_key ?? rc.target_table ?? "");
+        const tf  = String(rc.target_field ?? "");
+        if (!tmk || !tf) continue;
+        const ck = `${tmk}.${tf}`;
+        if (relatedMapsRef.current[ck]) continue;
+        try {
+          const j = await apiFetch(`${apiBase}${tmk}?limit=1000&include_inactive=true`).then((r) => r.json());
+          const m: Record<string, unknown> = {};
+          (j.data ?? []).forEach((row: Record<string, unknown>) => { m[String(row.id)] = row[tf]; });
+          relatedMapsRef.current[ck] = m; changed = true;
+        } catch { /* ignore — related จะว่างไว้ */ }
+      }
+      if (changed && !cancelled) { setRelatedVer((v) => v + 1); void refreshData(); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relatedFields, apiBase]);
 
   // ---- Server fetch (server mode — ดึงทีละหน้า) ----
   const serverFetch = useCallback(async (params: ServerFetchParams): Promise<{ rows: Row[]; total: number }> => {
@@ -421,8 +474,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
-    return { rows: (json.data ?? []) as Row[], total: (json.total as number) ?? 0 };
-  }, [apiBase, config.apiPath, config.baseFilter]);
+    return { rows: enrichRelated((json.data ?? []) as Row[]), total: (json.total as number) ?? 0 };
+  }, [apiBase, config.apiPath, config.baseFilter, enrichRelated]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
   // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'
@@ -468,7 +521,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .then((res) => res.json())
       .then((json) => {
         if (json.error || !json.data) return;
-        const full = json.data as Record<string, unknown>;
+        // ข้อ 2: เติมค่า related ลง full row ก่อน (full row ไม่มี column related)
+        const [full] = enrichRelated([json.data as Row]);
         const f: Record<string, unknown> = {};
         effectiveFields.forEach((field) => {
           const v = full[field.key];

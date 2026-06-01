@@ -23,11 +23,14 @@ const TYPES: { v: string; label: string; hint: string }[] = [
   { v: "relation", label: "เชื่อมตาราง 1 ค่า (many2one)", hint: "ลิงก์ไปอีก table" },
   { v: "many2many", label: "เชื่อมหลายค่า (many2many)", hint: "เลือกได้หลายรายการ" },
   { v: "one2many", label: "รายการลูก (one2many)", hint: "ดูระเบียนที่ชี้กลับมา" },
+  { v: "related",  label: "ดึงค่าจากตารางที่เชื่อม (related)", hint: "โชว์ค่าจาก table อื่น (อ่านอย่างเดียว)" },
 ];
 
 const REL_TYPES = ["relation", "many2many", "one2many"];
 
 type TableOpt = { table_name: string; is_module: boolean };
+type RelFieldOpt = { key: string; column: string; label: string; targetTable: string; targetModuleKey: string };
+type TargetFieldOpt = { column: string; label: string };
 
 export function FieldCreatorModal({
   moduleKey, moduleTitle, onClose, onCreated,
@@ -51,6 +54,11 @@ export function FieldCreatorModal({
   const [tables, setTables] = useState<TableOpt[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // related: เลือกผ่านความสัมพันธ์ที่มีอยู่ + field ปลายทางที่จะดึงมาโชว์
+  const [relFields, setRelFields] = useState<RelFieldOpt[]>([]);
+  const [viaField, setViaField] = useState("");
+  const [targetFields, setTargetFields] = useState<TargetFieldOpt[]>([]);
+  const [relatedTargetField, setRelatedTargetField] = useState("");
 
   // auto-gen field_key จาก label (snake_case) จนกว่าจะแก้เอง
   useEffect(() => {
@@ -68,6 +76,32 @@ export function FieldCreatorModal({
     }).catch(() => {});
   }, [uiType, tables.length]);
 
+  // related: โหลด field ความสัมพันธ์ (many2one) ที่มีอยู่ใน module นี้
+  useEffect(() => {
+    if (uiType !== "related") return;
+    apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then(r => r.json()).then(j => {
+      const rels: RelFieldOpt[] = (j.fields ?? [])
+        .filter((f: Record<string, unknown>) => f.ui_field_type === "relation" && (f.relation_config as Record<string, unknown>)?.target_module_key)
+        .map((f: Record<string, unknown>) => {
+          const rc = f.relation_config as Record<string, unknown>;
+          return { key: String(f.field_key), column: String(f.column_name ?? f.field_key), label: String(f.field_label),
+            targetTable: String(rc.target_table ?? ""), targetModuleKey: String(rc.target_module_key ?? "") };
+        });
+      setRelFields(rels);
+    }).catch(() => {});
+  }, [uiType, moduleKey]);
+
+  // related: เมื่อเลือกความสัมพันธ์แล้ว โหลด field ของตารางปลายทางให้เลือกว่าจะดึงอันไหนมาโชว์
+  useEffect(() => {
+    const vf = relFields.find(r => r.key === viaField);
+    if (!vf) { setTargetFields([]); return; }
+    apiFetch(`/api/admin/field-registry-v2?module=${vf.targetModuleKey}`).then(r => r.json()).then(j => {
+      setTargetFields((j.fields ?? [])
+        .filter((f: Record<string, unknown>) => f.column_name)
+        .map((f: Record<string, unknown>) => ({ column: String(f.column_name), label: String(f.field_label) })));
+    }).catch(() => {});
+  }, [viaField, relFields]);
+
   const submit = async () => {
     setErr(null);
     if (!label.trim() || !fieldKey.trim()) { setErr("กรอกชื่อ field และ label"); return; }
@@ -75,15 +109,21 @@ export function FieldCreatorModal({
     const isRel = REL_TYPES.includes(uiType);
     if (isRel && !targetTable) { setErr("เลือก table ปลายทาง"); return; }
     if (uiType === "one2many" && !targetFkColumn.trim()) { setErr("ระบุ column FK บน target ที่ชี้กลับมา"); return; }
+    const vf = relFields.find(r => r.key === viaField);
+    if (uiType === "related" && (!viaField || !relatedTargetField)) { setErr("เลือกความสัมพันธ์ + field ที่จะดึงมาโชว์"); return; }
     setSaving(true);
     try {
       const res = await apiFetch("/api/admin/schema/add-field", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           module_key: moduleKey, field_key: fieldKey, label: label.trim(), ui_type: uiType,
-          target_table: isRel ? targetTable : undefined,
+          target_table: uiType === "related" ? vf?.targetTable : (isRel ? targetTable : undefined),
           target_label_field: isRel ? targetLabelField : undefined,
           target_fk_column: uiType === "one2many" ? targetFkColumn.trim() : undefined,
+          // related
+          via_field:    uiType === "related" ? viaField : undefined,
+          via_column:   uiType === "related" ? vf?.column : undefined,
+          target_field: uiType === "related" ? relatedTargetField : undefined,
           options: uiType === "select" ? optionsText.split(",").map(s => s.trim()).filter(Boolean) : undefined,
           is_visible: isVisible, is_filterable: isFilterable, is_searchable: isSearchable,
         }),
@@ -163,6 +203,29 @@ export function FieldCreatorModal({
               {uiType === "many2many" && (
                 <p className="text-[11px] text-emerald-700">จะสร้างตารางเชื่อม (junction) ให้อัตโนมัติ + เลือกได้หลายค่า</p>
               )}
+            </div>
+          )}
+
+          {uiType === "related" && (
+            <div className="space-y-3 p-3 bg-sky-50/60 border border-sky-100 rounded-lg">
+              <p className="text-[11px] text-sky-700">ดึงค่าจากตารางอื่นมาโชว์ (อ่านอย่างเดียว) ผ่านความสัมพันธ์ที่มีอยู่แล้วใน module นี้</p>
+              <div>
+                <label className="text-xs font-medium text-slate-600">ผ่านความสัมพันธ์ *</label>
+                <select value={viaField} onChange={e => { setViaField(e.target.value); setRelatedTargetField(""); }}
+                  className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-sky-500">
+                  <option value="">— เลือกความสัมพันธ์ —</option>
+                  {relFields.map(r => <option key={r.key} value={r.key}>{r.label} → {r.targetTable}</option>)}
+                </select>
+                {relFields.length === 0 && <p className="text-[11px] text-amber-600 mt-0.5">module นี้ยังไม่มี field ความสัมพันธ์ (many2one) — สร้างก่อนถึงจะดึง related ได้</p>}
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600">เอา field ไหนมาโชว์ *</label>
+                <select value={relatedTargetField} onChange={e => setRelatedTargetField(e.target.value)} disabled={!viaField}
+                  className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-sky-500">
+                  <option value="">— เลือก field ปลายทาง —</option>
+                  {targetFields.map(t => <option key={t.column} value={t.column}>{t.label} ({t.column})</option>)}
+                </select>
+              </div>
             </div>
           )}
 
