@@ -179,6 +179,8 @@ const STATUS_META: Record<string, { label: string; ring: string; bg: string; tex
   submitted:   { label: "ส่งแล้ว",        ring: "ring-sky-300",     bg: "bg-sky-50",     text: "text-sky-700",     dot: "bg-sky-500" },
   rfq_created: { label: "สั่งซื้อแล้ว",   ring: "ring-blue-300",    bg: "bg-blue-50",    text: "text-blue-700",    dot: "bg-blue-500" },
   confirmed:   { label: "ยืนยันแล้ว",    ring: "ring-blue-300",    bg: "bg-blue-50",    text: "text-blue-700",    dot: "bg-blue-500" },
+  partial:     { label: "รับบางส่วน",     ring: "ring-amber-300",   bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500" },
+  short_closed:{ label: "ปิดยอด (ขาด)",  ring: "ring-orange-300",  bg: "bg-orange-50",  text: "text-orange-700",  dot: "bg-orange-500" },
   approved:    { label: "อนุมัติแล้ว",   ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
   received:    { label: "รับของแล้ว",    ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
   done:        { label: "เสร็จสิ้น",      ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
