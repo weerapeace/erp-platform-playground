@@ -349,10 +349,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   );
   // cache: key = "<target_module_key>.<target_field>" → { [target_id]: value }
   const relatedMapsRef = useRef<Record<string, Record<string, unknown>>>({});
+  // เก็บ relatedFields ใน ref → ให้ ensureRelatedMaps/enrichRelated มี identity คงที่
+  // (ไม่งั้น serverFetch/fetchList จะเปลี่ยน identity ตอน registry โหลด → DataTable refetch ซ้ำ = กระพริบ)
+  const relatedFieldsRef = useRef(relatedFields);
+  relatedFieldsRef.current = relatedFields;
 
   // โหลด map ของ target ที่ยังไม่มี (await ได้) — เรียกก่อน enrich เพื่อกันกระพริบ (ไม่ refetch ซ้ำ)
   const ensureRelatedMaps = useCallback(async () => {
-    for (const f of relatedFields) {
+    for (const f of relatedFieldsRef.current) {
       const rc = (f.relation_config ?? {}) as Record<string, unknown>;
       const tmk = String(rc.target_module_key ?? rc.target_table ?? "");
       const tf  = String(rc.target_field ?? "");
@@ -366,14 +370,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         relatedMapsRef.current[ck] = m;
       } catch { /* related จะว่างไว้ */ }
     }
-  }, [relatedFields, apiBase]);
+  }, [apiBase]);
 
   // เติมค่า related ลงใน row (ใช้ทั้ง list + detail) จาก map ที่โหลดไว้
   const enrichRelated = useCallback((list: Row[]): Row[] => {
-    if (relatedFields.length === 0) return list;
+    const rfs = relatedFieldsRef.current;
+    if (rfs.length === 0) return list;
     return list.map((r) => {
       const o: Row = { ...r };
-      for (const f of relatedFields) {
+      for (const f of rfs) {
         const rc = (f.relation_config ?? {}) as Record<string, unknown>;
         const viaCol = String(rc.via_column ?? rc.via_field ?? "");
         const ck = `${rc.target_module_key ?? rc.target_table}.${rc.target_field}`;
@@ -383,7 +388,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       }
       return o;
     });
-  }, [relatedFields]);
+  }, []);
 
   const [rows,    setRows]    = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
