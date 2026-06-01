@@ -340,7 +340,12 @@ export async function GET(
     for (const [col, f] of Object.entries(colFilters)) {
       if (!SAFE_COL.test(col)) continue;   // กัน injection + ข้าม relation alias
       if (f.type === "text" && f.value) {
-        q = q.ilike(col, `%${f.value}%`);
+        // ถ้าค่าเป็น uuid → ใช้ eq (relation/_id) ไม่งั้น ilike กับ uuid column จะ error/ไม่ match
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(f.value)) {
+          q = q.eq(col, f.value);
+        } else {
+          q = q.ilike(col, `%${f.value}%`);
+        }
       } else if (f.type === "number") {
         if (f.min !== "" && f.min != null) q = q.gte(col, Number(f.min));
         if (f.max !== "" && f.max != null) q = q.lte(col, Number(f.max));
