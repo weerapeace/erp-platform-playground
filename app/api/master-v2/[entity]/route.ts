@@ -217,7 +217,7 @@ export const ENTITIES: Record<string, EntityConfig> = {
                     purchase_uom:uoms!purchase_uom_id ( name )`,
     listColumns: `id, code, name_th, barcode, parent_sku_id, seller_partner_id,
                   uom_id, purchase_uom_id, list_price, standard_price, fake_price,
-                  is_active, sale_ok, purchase_ok, color, cover_image_r2_key,
+                  is_active, sale_ok, purchase_ok, color, cover_image_r2_key, product_group,
                   parent_skus_v2 ( code, name_th ),
                   partners_v2!seller_partner_id ( name_th, code ),
                   uom:uoms!uom_id ( name ),

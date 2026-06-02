@@ -182,8 +182,8 @@ export default function PurchasingShopPage() {
   const openGroup = async (c: Card) => {
     setSel(c); setVars([]); setVarsLoading(true);
     try {
-      // ตัวเลือกของกลุ่ม = SKU ที่อยู่ในกลุ่มนี้โดยตรง (product_group_id) — ไม่ใช้ตาราง product_variations แล้ว
-      const f = encodeURIComponent(JSON.stringify({ product_group_id: { type: "text", value: c.id } }));
+      // ตัวเลือกของกลุ่ม = SKU ที่อยู่ในกลุ่มนี้โดยตรง (คอลัมน์ product_group) — ไม่ใช้ตาราง product_variations แล้ว
+      const f = encodeURIComponent(JSON.stringify({ product_group: { type: "text", value: c.id } }));
       const j = await apiFetch(`/api/master-v2/skus?limit=200&filters=${f}`).then(r => r.json());
       setVars((j.data ?? []).map((s: Record<string, unknown>) => {
         const sid = String(s.seller_partner_id ?? "");
