@@ -86,7 +86,7 @@ function parseCsv(text: string): ParsedFile {
 // ---- Excel parser ----
 async function parseExcel(file: File): Promise<ParsedFile> {
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  const XLSX: any = await import(/* webpackIgnore: true */ ("xlsx" as string));
+  const XLSX: any = await import("xlsx");
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const sheetName = wb.SheetNames[0];

@@ -104,14 +104,8 @@ function buildCsv(rows: Record<string, unknown>[], cols: ExportColumn[]): Blob {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 async function loadXlsx(): Promise<any> {
-  try {
-    // webpackIgnore ทำให้ build ผ่านแม้ยังไม่ติดตั้ง xlsx
-    return await import(/* webpackIgnore: true */ ("xlsx" as string));
-  } catch (err) {
-    throw new Error(
-      "ต้องติดตั้ง xlsx package ก่อน export Excel: pnpm add xlsx (หรือใช้ export CSV ก่อน)",
-    );
-  }
+  // bundle xlsx เป็น async chunk (โหลดในเบราว์เซอร์ตอนกด export) — xlsx อยู่ใน dependencies แล้ว
+  return await import("xlsx");
 }
 
 async function buildExcel(
