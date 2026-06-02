@@ -1143,6 +1143,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               required={f.required}
               disabled={disabled}
               hasError={hasErr}
+              siblingValues={form}
             />
           </div>
         ) : f.type === "many2many" ? (

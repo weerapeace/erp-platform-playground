@@ -96,7 +96,7 @@ export function RecordFormModal({
       return (
         <div>
           <label className="text-xs font-medium text-slate-600">{fd.field_label}{fd.is_required && " *"}</label>
-          <div className="mt-0.5"><RelationPicker value={(v as string) || null} onChange={(id) => set(fd.field_key, id)} config={fd.relation_config} /></div>
+          <div className="mt-0.5"><RelationPicker value={(v as string) || null} onChange={(id) => set(fd.field_key, id)} config={fd.relation_config} siblingValues={form} /></div>
         </div>
       );
     }

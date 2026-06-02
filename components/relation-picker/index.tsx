@@ -16,28 +16,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { buildRelationFilter, type RelationConfig } from "@/lib/relation";
 import type { PickerOption } from "@/app/api/admin/picker/route";
 
 // lazy เพื่อตัด circular import (RecordFormModal ใช้ RelationPicker ข้างใน)
 const RecordFormModal = dynamic(() => import("@/components/record-form-modal").then((m) => m.RecordFormModal), { ssr: false });
 
-export type RelationConfig = {
-  target_module_key?:     string;
-  target_table:           string;
-  target_label_field:     string;
-  target_search_fields?:  string[];
-  secondary_label_field?: string;
-  /** F6: ถ้า true และ target_module_key อยู่ใน v2 ENTITIES — แสดงปุ่ม "+ สร้างใหม่" ใน picker */
-  allow_create?:          boolean;
-  /**
-   * F9: ถ้าระบุ lookup_type → ดึงจาก erp_lookups (generic lookup) แทน table จริง
-   * เช่น 'product_category' / 'parcel_size' / 'uom'
-   * ตอนนั้น target_table จะถูก ignore — quick create จะ POST /api/lookups
-   */
-  lookup_type?:           string;
-  /** กรองตายตัวตามคอลัมน์ของ target_table (เช่น { column:"shop_country", value:"จีน" }) */
-  filter?:                { column: string; value: string };
-};
+// re-export type กลางเพื่อ back-compat (โค้ดเดิม import จาก @/components/relation-picker ได้เหมือนเดิม)
+export type { RelationConfig } from "@/lib/relation";
 
 interface RelationPickerProps {
   value:    string | null;
@@ -47,10 +33,16 @@ interface RelationPickerProps {
   disabled?:    boolean;
   required?:    boolean;
   hasError?:    boolean;
+  /**
+   * R3: ค่าปัจจุบันของ field อื่นในฟอร์มเดียวกัน — ใช้กับ dependent dropdown
+   * เช่น { warehouse_id: "uuid" } เพื่อกรอง location ตาม warehouse ที่เลือก
+   */
+  siblingValues?: Record<string, unknown>;
 }
 
 export function RelationPicker({
   value, onChange, config, placeholder = "— เลือก —", disabled, required, hasError,
+  siblingValues = {},
 }: RelationPickerProps) {
   const [open,    setOpen]    = useState(false);
   const [search,  setSearch]  = useState("");
@@ -60,9 +52,17 @@ export function RelationPicker({
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef     = useRef<HTMLInputElement>(null);
 
+  // ---- R3: dependent dropdown — คำนวณ filter ที่มีผลจริง (รวม static + dependent) ----
+  const effectiveFilter = buildRelationFilter(config, siblingValues);
+  const isBlocked = effectiveFilter != null && "blocked" in effectiveFilter;
+  const activeFilter = effectiveFilter && !("blocked" in effectiveFilter) ? effectiveFilter : null;
+  // key สำหรับ track ว่าพ่อเปลี่ยน → clear ลูก + reload
+  const parentKey = config.depends_on ? String(siblingValues[config.depends_on.parent_field] ?? "") : "";
+
   // ---- load options ----
   // F9: ถ้า config.lookup_type → ใช้ /api/lookups (generic) | ไม่งั้น /api/admin/picker (table จริง)
   const loadOptions = useCallback(async (query: string, includeCurrent: string | null) => {
+    if (isBlocked) { setOptions([]); return; }   // พ่อยังไม่เลือก → ไม่ต้องโหลด
     setLoading(true);
     try {
       let opts: PickerOption[] = [];
@@ -88,7 +88,8 @@ export function RelationPicker({
         if (query) params.set("search", query);
         if (config.target_search_fields?.length) params.set("search_in", config.target_search_fields.join(","));
         if (config.secondary_label_field)        params.set("secondary", config.secondary_label_field);
-        if (config.filter?.column)               { params.set("filter_col", config.filter.column); params.set("filter_val", config.filter.value); }
+        // R3: ใช้ activeFilter (dependent มาก่อน static) แทน config.filter ตรงๆ
+        if (activeFilter)                         { params.set("filter_col", activeFilter.column); params.set("filter_val", activeFilter.value); }
         if (includeCurrent)                       params.set("include_ids", includeCurrent);
         const res = await apiFetch(`/api/admin/picker?${params}`);
         const json = await res.json();
@@ -98,7 +99,20 @@ export function RelationPicker({
     } finally {
       setLoading(false);
     }
-  }, [config]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config, isBlocked, activeFilter?.column, activeFilter?.value]);
+
+  // ---- R3: พ่อเปลี่ยน → เคลียร์ค่าลูกที่อาจไม่เข้าพวกอีกต่อไป ----
+  const prevParentRef = useRef(parentKey);
+  useEffect(() => {
+    if (!config.depends_on) return;
+    if (prevParentRef.current !== parentKey) {
+      prevParentRef.current = parentKey;
+      // พ่อเปลี่ยนจริง (ไม่ใช่ render แรก) + ลูกมีค่าอยู่ → เคลียร์
+      if (value) { onChange(null); setCurrent(null); }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentKey]);
 
   // ---- resolve current value to label (initial + when value changes) ----
   useEffect(() => {
@@ -192,15 +206,21 @@ export function RelationPicker({
     }
   };
 
+  // R3: ถ้า dependent + พ่อยังไม่เลือก → ปิดการใช้งาน + บอกให้เลือกพ่อก่อน
+  const blockedDisabled = disabled || isBlocked;
+  const blockedHint = isBlocked && config.depends_on
+    ? `เลือก ${config.depends_on.parent_field.replace(/_id$/, "")} ก่อน`
+    : null;
+
   return (
     <div ref={containerRef} className="relative">
       <button
         type="button"
-        disabled={disabled}
+        disabled={blockedDisabled}
         onClick={() => { setOpen((o) => !o); setTimeout(() => inputRef.current?.focus(), 50); }}
         className={`w-full h-9 px-3 text-sm text-left border rounded-md flex items-center justify-between gap-2 transition-colors ${
           hasError ? "border-red-300" : "border-slate-200 hover:border-slate-300"
-        } ${disabled ? "bg-slate-50 cursor-not-allowed" : "bg-white"}`}
+        } ${blockedDisabled ? "bg-slate-50 cursor-not-allowed" : "bg-white"}`}
       >
         {current ? (
           <span className="truncate">
@@ -209,6 +229,8 @@ export function RelationPicker({
               <span className="ml-1.5 text-xs text-slate-400">{current.secondary}</span>
             )}
           </span>
+        ) : blockedHint ? (
+          <span className="text-slate-400 italic">{blockedHint}</span>
         ) : (
           <span className="text-slate-400">{placeholder}{required && " *"}</span>
         )}
