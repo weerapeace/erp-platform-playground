@@ -6,6 +6,7 @@ import { ERPModal } from "@/components/modal";
 import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ImageThumbnail } from "@/components/image-manager";
+import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import {
   useReactTable,
   getCoreRowModel,
@@ -194,8 +195,9 @@ export type BulkAction<T> = {
 export type BulkEditField = {
   key:      string;
   label:    string;
-  type:     "text" | "number" | "select" | "boolean";
+  type:     "text" | "number" | "select" | "boolean" | "relation";
   options?: { value: string; label: string }[];
+  relationConfig?: RelationConfig;  // สำหรับ type "relation" — ใช้ RelationPicker
 };
 
 export type BulkEditResult = { success: number; failed: number };
@@ -2010,7 +2012,10 @@ function BulkEditAllModal({
       for (const f of fields) {
         if (!selected.has(f.key)) continue;
         const raw = vals[f.key] ?? "";
-        changes[f.key] = f.type === "boolean" ? raw === "true" : f.type === "number" ? (raw === "" ? null : Number(raw)) : raw;
+        changes[f.key] = f.type === "boolean" ? raw === "true"
+          : f.type === "number" ? (raw === "" ? null : Number(raw))
+          : f.type === "relation" ? (raw || null)
+          : raw;
       }
       const r = await onApply(changes);
       setResult(r.affected);
@@ -2049,6 +2054,8 @@ function BulkEditAllModal({
                     <select value={vals[f.key] ?? "false"} onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded bg-white"><option value="true">ใช่</option><option value="false">ไม่ใช่</option></select>
                   ) : f.type === "select" && f.options ? (
                     <select value={vals[f.key] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded bg-white"><option value="">—</option>{f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+                  ) : f.type === "relation" && f.relationConfig ? (
+                    <div className="flex-1"><RelationPicker value={vals[f.key] || null} config={f.relationConfig} onChange={(rid) => setVals((v) => ({ ...v, [f.key]: rid ?? "" }))} /></div>
                   ) : (
                     <input type={f.type === "number" ? "number" : "text"} value={vals[f.key] ?? ""} onChange={(e) => setVals((v) => ({ ...v, [f.key]: e.target.value }))} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded" />
                   )
@@ -2128,7 +2135,9 @@ function BulkEditGrid<T extends Record<string, unknown>>({
         selCols.forEach(f => {
           const raw = cells[id]?.[f.key] ?? "";
           changes[f.key] = f.type === "boolean" ? raw === "true"
-            : f.type === "number" ? Number(raw) : raw;
+            : f.type === "number" ? (raw === "" ? null : Number(raw))
+            : f.type === "relation" ? (raw || null)
+            : raw;
         });
         return { row: r, changes };
       });
@@ -2203,6 +2212,9 @@ function BulkEditGrid<T extends Record<string, unknown>>({
                             <option value="">⚡ เติมทั้งหมด...</option>
                             {f.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                           </select>
+                        ) : f.type === "relation" && f.relationConfig ? (
+                          <div className="font-normal"><RelationPicker value={null} config={f.relationConfig}
+                            placeholder="⚡ เติมทั้งหมด..." onChange={(id) => fillColumn(f.key, id ?? "")} /></div>
                         ) : (
                           <div className="flex gap-1">
                             <input value={fillVals[f.key] ?? ""} onChange={e => setFillVals(v => ({ ...v, [f.key]: e.target.value }))}
@@ -2235,6 +2247,9 @@ function BulkEditGrid<T extends Record<string, unknown>>({
                                 <option value="">—</option>
                                 {f.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                               </select>
+                            ) : f.type === "relation" && f.relationConfig ? (
+                              <RelationPicker value={cells[id]?.[f.key] || null} config={f.relationConfig}
+                                onChange={(rid) => setCell(id, f.key, rid ?? "")} />
                             ) : (
                               <input type={f.type === "number" ? "number" : "text"} value={cells[id]?.[f.key] ?? ""}
                                 onChange={e => setCell(id, f.key, e.target.value)}

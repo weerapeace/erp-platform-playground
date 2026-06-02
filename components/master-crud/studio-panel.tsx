@@ -402,6 +402,8 @@ function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGro
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
   // ชนิดที่ quick-edit ได้ (text/number/boolean/select)
   const inlineable = ["text","number","boolean","select"].includes(field.type);
+  // ชนิดที่ bulk-edit ได้ (รวม relation ด้วย — เลือกค่าเดียวให้ทุกแถว)
+  const bulkable = inlineable || field.type === "relation";
   return (
     <div ref={setNodeRef} style={style}
       className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${field.showInForm?"border-blue-200 bg-blue-50/40":"border-slate-200 bg-white"} ${isDragging?"shadow-lg":""}`}>
@@ -414,7 +416,7 @@ function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGro
           title="แก้ไขเร็ว (กดแก้ในหน้า detail ได้เลย)"
           className={`text-xs px-1.5 py-0.5 rounded border ${field.inlineEditable?"bg-amber-100 border-amber-300 text-amber-700":"bg-white border-slate-200 text-slate-400"}`}>⚡</button>
       )}
-      {inlineable && (
+      {bulkable && (
         <button type="button" onClick={(e)=>{ e.stopPropagation(); onToggleBulk(); }}
           title="แก้แบบ bulk (หลายรายการพร้อมกัน)"
           className={`text-xs px-1.5 py-0.5 rounded border ${field.bulkEditable?"bg-violet-100 border-violet-300 text-violet-700":"bg-white border-slate-200 text-slate-400"}`}>∑</button>

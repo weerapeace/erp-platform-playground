@@ -942,12 +942,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const bulkEditFields: BulkEditField[] = useMemo(() => {
     if (!canEdit) return [];
     return effectiveFields
-      .filter((f) => f.bulkEditable === true && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select"))
+      .filter((f) => f.bulkEditable === true && ["text", "number", "boolean", "select", "relation"].includes(f.type) && (f.type !== "relation" || !!f.relationConfig))
       .map((f) => ({
         key: f.key,
         label: f.label,
-        type: (["number", "select", "boolean"].includes(f.type) ? f.type : "text") as "text" | "number" | "select" | "boolean",
+        type: (["number", "select", "boolean", "relation"].includes(f.type) ? f.type : "text") as BulkEditField["type"],
         options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: o })) : undefined,
+        relationConfig: f.type === "relation" ? f.relationConfig : undefined,
       }));
   }, [canEdit, effectiveFields]);
 
