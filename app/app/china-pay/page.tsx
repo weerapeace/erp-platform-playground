@@ -19,6 +19,15 @@ const SUPPLIER_CFG: RelationConfig = {
   filter: { column: "shop_country", value: "จีน" },   // โชว์เฉพาะร้านจีน
 } as RelationConfig;
 
+// บริษัทสำหรับบิล CTW — เฉพาะที่ติ๊ก "ซื้อบิล" (buy_bill = true)
+const CTW_PARTNER_CFG: RelationConfig = {
+  target_table: "partners_v2", target_module_key: "partners-v2",
+  target_label_field: "name_th", target_search_fields: ["name_th", "name_en"], allow_create: false,
+  filter: { column: "buy_bill", value: "true" },
+} as RelationConfig;
+
+const VAT_RATE = 0.07;   // ภาษี 7%
+
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const fmt = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 4 });
 const today = () => new Date().toISOString().slice(0, 10);
@@ -795,6 +804,7 @@ function CtwList() {
 
 function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const [supplierId, setSupplierId] = useState<string | null>(null);
   const [company, setCompany] = useState("");
   const [docNo, setDocNo] = useState("");
   const [docDate, setDocDate] = useState(today());
@@ -804,8 +814,24 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
   const [files, setFiles] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
+  // เลือกบริษัท → ดึงชื่อ + เลขบัญชีจาก Partners
+  useEffect(() => {
+    if (!supplierId) return;
+    apiFetch(`/api/master-v2/partners/${supplierId}`).then(r => r.json()).then(j => {
+      const p = j.data ?? {};
+      setCompany(String(p.name_th ?? p.display_name ?? ""));
+      setAccount(String(p.account_number ?? ""));
+    }).catch(() => {});
+  }, [supplierId]);
+
+  // ยอดสุทธิ = ยอดก่อนภาษี + 7% (เติมอัตโนมัติ แก้ทับได้)
+  useEffect(() => {
+    const b = num(beforeTax);
+    setNet(b > 0 ? String(+(b * (1 + VAT_RATE)).toFixed(2)) : "");
+  }, [beforeTax]);
+
   const save = async () => {
-    if (!company.trim()) { toast.error("กรอกชื่อบริษัท"); return; }
+    if (!supplierId || !company.trim()) { toast.error("เลือกบริษัทก่อน"); return; }
     setSaving(true);
     try {
       const res = await apiFetch("/api/master-v2/ctw-bills", {
@@ -826,9 +852,8 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
   return (
     <div className="space-y-4">
       <Card>
-        <Label>ชื่อบริษัท</Label>
-        <input value={company} onChange={e => setCompany(e.target.value)} placeholder="เช่น ไอ.เอส.จี"
-          className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" />
+        <Label>ชื่อบริษัท (เลือกจากที่ติ๊ก “ซื้อบิล”)</Label>
+        <RelationPicker value={supplierId} onChange={(id) => setSupplierId(id)} config={CTW_PARTNER_CFG} />
         <div className="grid grid-cols-2 gap-3 mt-3">
           <div><Label>เลขที่เอกสาร</Label>
             <input value={docNo} onChange={e => setDocNo(e.target.value)} placeholder="เช่น IV260410015"
@@ -842,10 +867,10 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
       <Card>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>ยอดรวมก่อนภาษี</Label><Num value={beforeTax} onChange={setBeforeTax} /></div>
-          <div><Label>ยอดเงินสุทธิ</Label><Num value={net} onChange={setNet} /></div>
+          <div><Label>ยอดเงินสุทธิ (+7%)</Label><Num value={net} onChange={setNet} /></div>
         </div>
-        <div className="mt-3"><Label>เลขที่บัญชี</Label>
-          <input value={account} onChange={e => setAccount(e.target.value)}
+        <div className="mt-3"><Label>เลขที่บัญชี (ดึงจาก Partners)</Label>
+          <input value={account} onChange={e => setAccount(e.target.value)} placeholder="เลือกบริษัทแล้วเติมให้อัตโนมัติ"
             className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
       </Card>
 
