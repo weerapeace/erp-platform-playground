@@ -7,7 +7,7 @@
  * Filter ฝั่งซ้ายไม่ hardcode — ติ๊กเลือก field กรองเองจากทะเบียน field (skus-v2)
  * เลือก → ตะกร้า → สร้างใบขอซื้อ (PR + lines). currency: ร้าน CN → YUAN
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -79,6 +79,15 @@ export default function PurchasingShopPage() {
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
   }, []);
   const changeCols = (n: number) => { setCols(n); if (typeof window !== "undefined") localStorage.setItem(COLS_KEY, String(n)); };
+
+  // ติดตามคำค้นรอบก่อน — ใช้แยกว่า "พิมพ์ค้นหา" (หน่วง) กับ "สลับ/กรอง" (ทันที)
+  const prevQ = useRef(q);
+  // สลับโหมด SKU ↔ Product Group: เคลียร์การ์ดเก่า + ล้างคำค้น + โชว์ "กำลังโหลด" ทันที (ไม่เห็นของเก่าค้าง)
+  const switchSource = (s: Source) => {
+    if (s === source) return;
+    prevQ.current = "";   // กันไม่ให้การล้างคำค้นไปกระตุ้น debounce → สลับโหมดดึงทันที
+    setSource(s); setCards([]); setTotal(0); setQ(""); setPage(0); setLoading(true);
+  };
 
   // โหลด partner country (สำหรับ currency rule) + filterable fields ของ SKU
   useEffect(() => {
@@ -163,12 +172,18 @@ export default function PurchasingShopPage() {
     } finally { setLoading(false); }
   }, [source, q, builtFilters, partnerCountry]);
 
-  // refetch + reset ไปหน้าแรก เมื่อ source/filter/q เปลี่ยน (debounce สำหรับ q)
+  // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
+  // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
   useEffect(() => {
+    const qChanged = prevQ.current !== q;
+    prevQ.current = q;
     setPage(0);
-    const t = setTimeout(() => { void fetchCards(0); }, 300);
-    return () => clearTimeout(t);
-  }, [fetchCards]);
+    if (qChanged) {
+      const t = setTimeout(() => { void fetchCards(0); }, 300);
+      return () => clearTimeout(t);
+    }
+    void fetchCards(0);
+  }, [fetchCards, q]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE));
   const goToPage = (pg: number) => {
@@ -256,8 +271,8 @@ export default function PurchasingShopPage() {
           <h2 className="font-semibold text-slate-800 mb-3">🛒 ขอซื้อ</h2>
           {/* source toggle */}
           <div className="flex rounded-lg border border-slate-200 overflow-hidden mb-3 text-xs">
-            <button onClick={() => setSource("sku")} className={`flex-1 py-1.5 ${source === "sku" ? "bg-blue-600 text-white" : "text-slate-600"}`}>SKU จริง</button>
-            <button onClick={() => setSource("group")} className={`flex-1 py-1.5 ${source === "group" ? "bg-blue-600 text-white" : "text-slate-600"}`}>Product Group</button>
+            <button onClick={() => switchSource("sku")} className={`flex-1 py-1.5 transition-colors ${source === "sku" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>SKU จริง</button>
+            <button onClick={() => switchSource("group")} className={`flex-1 py-1.5 transition-colors ${source === "group" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>Product Group</button>
           </div>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาสินค้า..."
             className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md mb-3" />
@@ -307,7 +322,7 @@ export default function PurchasingShopPage() {
             )}
           </div>
 
-          <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          <div className={`grid gap-4 transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {cards.map(c => (
               <button key={c.id} onClick={() => onCardClick(c)}
                 className="text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-md transition-all">
