@@ -54,15 +54,25 @@ function rateTier(amt: number): string {
   if (amt <= 5000) return "R1"; if (amt <= 99999) return "R2"; if (amt <= 399999) return "R3"; return "R4";
 }
 
-type Tab = "bill" | "pending" | "all" | "rate";
+type Tab = "dashboard" | "bill" | "pending" | "all" | "rate" | "ctw";
 
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
 };
 
+const MENU: { k: Tab; icon: string; label: string }[] = [
+  { k: "dashboard", icon: "📊", label: "Dashboard" },
+  { k: "bill", icon: "💴", label: "ลงบิลจีน" },
+  { k: "pending", icon: "⏳", label: "รอโอน" },
+  { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
+  { k: "rate", icon: "💱", label: "เรท" },
+  { k: "ctw", icon: "📑", label: "บิลจาก CTW" },
+];
+
 export default function ChinaPayApp() {
   const { user, ready } = useAuth();
-  const [tab, setTab] = useState<Tab>("bill");
+  const [tab, setTab] = useState<Tab>("dashboard");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (!ready) return <Center>กำลังโหลด…</Center>;
   if (!user) return (
@@ -72,44 +82,129 @@ export default function ChinaPayApp() {
     </Center>
   );
 
+  const current = MENU.find(m => m.k === tab);
+  const go = (k: Tab) => { setTab(k); setMenuOpen(false); };
+
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 bg-gradient-to-r from-rose-600 to-orange-500 text-white px-4 py-3 flex items-center justify-between">
-          <div className="font-semibold text-lg">💸 โอนเงินจีน</div>
+        <header className="sticky top-0 z-20 bg-gradient-to-r from-rose-600 to-orange-500 text-white px-3 py-3 flex items-center gap-2">
+          <button onClick={() => setMenuOpen(true)} aria-label="เมนู"
+            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/15 text-xl">☰</button>
+          <div className="font-semibold text-base flex-1 truncate">{current ? `${current.icon} ${current.label}` : "💸 โอนเงินจีน"}</div>
           <div className="text-xs opacity-90">{user.name}</div>
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-4 pb-24">
+        <main className="flex-1 overflow-y-auto p-4 pb-8">
+          {tab === "dashboard" && <Dashboard onGo={go} />}
           {tab === "bill" && <BillForm />}
           {tab === "pending" && <PendingList />}
           {tab === "all" && <AllList />}
           {tab === "rate" && <RateTab />}
+          {tab === "ctw" && <CtwList />}
         </main>
-
-        {/* Bottom nav */}
-        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 grid grid-cols-4 z-20">
-          {([
-            { k: "bill", icon: "💴", label: "ลงบิล" },
-            { k: "pending", icon: "⏳", label: "รอโอน" },
-            { k: "all", icon: "📋", label: "ทั้งหมด" },
-            { k: "rate", icon: "💱", label: "เรท" },
-          ] as { k: Tab; icon: string; label: string }[]).map((t) => (
-            <button key={t.k} onClick={() => setTab(t.k)}
-              className={`py-2.5 flex flex-col items-center gap-0.5 text-xs ${tab === t.k ? "text-rose-600 font-semibold" : "text-slate-400"}`}>
-              <span className="text-xl">{t.icon}</span>{t.label}
-            </button>
-          ))}
-        </nav>
       </div>
+
+      {/* เมนูทั้งหมด (เด้งจากปุ่ม ☰) */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-[120] bg-black/40" onClick={() => setMenuOpen(false)}>
+          <div className="absolute left-0 top-0 h-full w-72 max-w-[80%] bg-white shadow-xl flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="bg-gradient-to-r from-rose-600 to-orange-500 text-white px-4 py-4">
+              <div className="font-semibold text-lg">💸 โอนเงินจีน</div>
+              <div className="text-xs opacity-90 mt-0.5">{user.name}</div>
+            </div>
+            <div className="flex-1 overflow-y-auto py-2">
+              {MENU.map(m => (
+                <button key={m.k} onClick={() => go(m.k)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-left ${tab === m.k ? "bg-rose-50 text-rose-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
+                  <span className="text-xl w-7 text-center">{m.icon}</span>{m.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function Center({ children }: { children: React.ReactNode }) {
   return <div className="min-h-screen flex flex-col items-center justify-center text-center p-6">{children}</div>;
+}
+
+// ---------------- Dashboard ----------------
+function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
+  const [pending, setPending] = useState<Record<string, unknown>[]>([]);
+  const [doneMonth, setDoneMonth] = useState<{ count: number; thb: number }>({ count: 0, thb: 0 });
+  const [rate, setRate] = useState<Record<string, unknown> | null>(null);
+  const [ctwCount, setCtwCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const ym = today().slice(0, 7); // YYYY-MM
+    const fPending = encodeURIComponent(JSON.stringify({ status: { type: "text", value: "รอโอน" } }));
+    const fDone = encodeURIComponent(JSON.stringify({ status: { type: "text", value: "โอนแล้ว" } }));
+    Promise.all([
+      apiFetch(`/api/master-v2/china-bills?limit=200&filters=${fPending}`).then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch(`/api/master-v2/china-bills?limit=500&filters=${fDone}`).then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch(`/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch(`/api/master-v2/ctw-bills?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
+    ]).then(([p, d, rt, c]) => {
+      setPending(p.data ?? []);
+      const doneRows = (d.data ?? []).filter((r: Record<string, unknown>) => String(r.transfer_date ?? "").slice(0, 7) === ym);
+      setDoneMonth({
+        count: doneRows.length,
+        thb: doneRows.reduce((a: number, r: Record<string, unknown>) => a + (num(r.amount_rmb) + num(r.fee_rmb)) * num(r.rate), 0),
+      });
+      setRate((rt.data ?? [])[0] ?? null);
+      setCtwCount((c.data ?? []).length);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const pendingRmb = pending.reduce((a, r) => a + num(r.amount_rmb) + num(r.fee_rmb), 0);
+  const r1 = num(rate?.rate);
+
+  if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
+
+  return (
+    <div className="space-y-4">
+      {/* บิลรอโอน */}
+      <button onClick={() => onGo("pending")} className="block w-full text-left rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 text-white p-4 shadow-sm active:scale-[0.99] transition-transform">
+        <div className="text-sm opacity-90">บิลจีนรอโอน</div>
+        <div className="flex items-end justify-between mt-1">
+          <div className="text-3xl font-bold">{pending.length} <span className="text-base font-normal opacity-90">บิล</span></div>
+          <div className="text-xl font-semibold">¥{fmt(pendingRmb)}</div>
+        </div>
+      </button>
+
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard label="โอนแล้วเดือนนี้" main={`${doneMonth.count} บิล`} sub={`฿${fmt(doneMonth.thb)}`} onClick={() => onGo("all")} />
+        <StatCard label="เรทล่าสุด (R1)" main={r1 ? fmt(r1) : "—"} sub={r1 ? `R4 ${fmt(+(r1 - RATE_OFFSET.r4).toFixed(4))}` : "ยังไม่ตั้ง"} onClick={() => onGo("rate")} />
+      </div>
+
+      <StatCard label="บิลจาก CTW" main={`${ctwCount} บิล`} sub="ดูรายการ" onClick={() => onGo("ctw")} wide />
+
+      {/* ปุ่มลัด */}
+      <div className="grid grid-cols-2 gap-3 pt-1">
+        <button onClick={() => onGo("bill")} className="h-12 bg-rose-600 text-white rounded-xl font-semibold">+ ลงบิลจีน</button>
+        <button onClick={() => onGo("ctw")} className="h-12 border border-slate-300 text-slate-700 rounded-xl font-semibold">+ บิล CTW</button>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, main, sub, onClick, wide }: { label: string; main: string; sub?: string; onClick?: () => void; wide?: boolean }) {
+  return (
+    <button onClick={onClick} className={`text-left bg-white rounded-xl border border-slate-200 p-3 active:scale-[0.99] transition-transform ${wide ? "w-full flex items-center justify-between" : ""}`}>
+      <div>
+        <div className="text-xs text-slate-400">{label}</div>
+        <div className="text-xl font-bold text-slate-800 mt-0.5">{main}</div>
+      </div>
+      {sub && <div className={`text-xs text-slate-500 ${wide ? "" : "mt-0.5"}`}>{sub}</div>}
+    </button>
+  );
 }
 
 // ---------------- ลงบิล ----------------
@@ -649,6 +744,186 @@ function RateTab() {
           confirmText="ลบ" tone="rose"
           onCancel={() => setDelRow(null)} onConfirm={() => doDelete(String(delRow.id))}
         />
+      )}
+    </div>
+  );
+}
+
+// ---------------- บิลจาก CTW ----------------
+function CtwList() {
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<"list" | "form">("list");
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    apiFetch("/api/master-v2/ctw-bills?limit=200&sort_by=doc_date&sort_dir=desc")
+      .then(r => r.json()).then(j => setRows(j.data ?? [])).catch(() => setRows([])).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  if (mode === "form") return <CtwForm onCancel={() => setMode("list")} onSaved={() => { setMode("list"); load(); }} />;
+
+  return (
+    <div className="space-y-3">
+      <button onClick={() => setMode("form")} className="w-full h-12 bg-rose-600 text-white rounded-xl font-semibold active:scale-[0.99] transition-transform">+ เพิ่มบิล CTW</button>
+      {loading ? (
+        <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-center text-slate-300 py-10">— ยังไม่มีบิล CTW —</div>
+      ) : (
+        rows.map((r) => (
+          <Card key={String(r.id)}>
+            <button onClick={() => setDetail(r)} className="w-full text-left flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="font-medium text-slate-800 truncate">{String(r.company_name ?? "—")}</div>
+                <div className="text-xs text-slate-400">เลขที่ {String(r.doc_number ?? "—")} · {String(r.doc_date ?? "—")}</div>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <div className="font-semibold text-slate-800">฿{fmt(num(r.net_amount))}</div>
+                <div className="text-[11px] text-slate-400">ก่อนภาษี ฿{fmt(num(r.amount_before_tax))}</div>
+              </div>
+            </button>
+          </Card>
+        ))
+      )}
+      {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
+    </div>
+  );
+}
+
+function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [company, setCompany] = useState("");
+  const [docNo, setDocNo] = useState("");
+  const [docDate, setDocDate] = useState(today());
+  const [beforeTax, setBeforeTax] = useState("");
+  const [net, setNet] = useState("");
+  const [account, setAccount] = useState("");
+  const [files, setFiles] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!company.trim()) { toast.error("กรอกชื่อบริษัท"); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/master-v2/ctw-bills", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_name: company, doc_number: docNo || null, doc_date: docDate || null,
+          amount_before_tax: num(beforeTax) || null, net_amount: num(net) || null,
+          account_number: account || null, attachments: files, actor: "china-app",
+        }),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      toast.success("บันทึกบิล CTW แล้ว"); onSaved();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Label>ชื่อบริษัท</Label>
+        <input value={company} onChange={e => setCompany(e.target.value)} placeholder="เช่น ไอ.เอส.จี"
+          className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" />
+        <div className="grid grid-cols-2 gap-3 mt-3">
+          <div><Label>เลขที่เอกสาร</Label>
+            <input value={docNo} onChange={e => setDocNo(e.target.value)} placeholder="เช่น IV260410015"
+              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+          <div><Label>วันที่เอกสาร</Label>
+            <input type="date" value={docDate} onChange={e => setDocDate(e.target.value)}
+              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+        </div>
+      </Card>
+
+      <Card>
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label>ยอดรวมก่อนภาษี</Label><Num value={beforeTax} onChange={setBeforeTax} /></div>
+          <div><Label>ยอดเงินสุทธิ</Label><Num value={net} onChange={setNet} /></div>
+        </div>
+        <div className="mt-3"><Label>เลขที่บัญชี</Label>
+          <input value={account} onChange={e => setAccount(e.target.value)}
+            className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+      </Card>
+
+      <Card>
+        <FileMultiInput label="📎 ไฟล์แนบ (PDF บิล ฯลฯ)" value={files} onChange={setFiles} folder="ctw-bills" />
+      </Card>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button onClick={onCancel} disabled={saving} className="h-12 border border-slate-200 text-slate-700 rounded-xl font-medium">ยกเลิก</button>
+        <button onClick={save} disabled={saving} className="h-12 bg-rose-600 text-white rounded-xl font-semibold disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกบิล"}</button>
+      </div>
+    </div>
+  );
+}
+
+function CtwDetail({ bill, onClose, onDeleted }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void }) {
+  const toast = useToast();
+  const [del, setDel] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  const atts = Array.isArray(bill.attachments) ? (bill.attachments as unknown[]).map(String) : [];
+  const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
+
+  const doDelete = async () => {
+    setBusy(true); setDel(false);
+    try {
+      const res = await apiFetch(`/api/master-v2/ctw-bills/${String(bill.id)}?hard=1`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (j.error) { toast.error(j.error); return; }
+      toast.success("ลบบิลแล้ว"); onDeleted(String(bill.id));
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+          <div className="font-semibold text-slate-800">บิลจาก CTW</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <div className="font-medium text-slate-800 text-lg">{String(bill.company_name ?? "—")}</div>
+            <div className="text-sm text-slate-400">เลขที่เอกสาร {String(bill.doc_number ?? "—")}</div>
+          </div>
+          <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
+            <Row label="วันที่เอกสาร" v={bill.doc_date} />
+            <Row label="เลขที่บัญชี" v={bill.account_number} />
+          </div>
+          <div className="rounded-lg bg-rose-50 border border-rose-100 p-3 text-sm space-y-1">
+            <Row label="ยอดรวมก่อนภาษี" v={"฿" + fmt(num(bill.amount_before_tax))} />
+            <div className="flex justify-between border-t border-rose-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดเงินสุทธิ</span><span className="font-bold text-rose-600">฿{fmt(num(bill.net_amount))}</span></div>
+          </div>
+          {atts.length > 0 && (
+            <div>
+              <Label>ไฟล์แนบ ({atts.length})</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {atts.map((k) => (
+                  <a key={k} href={r2Url(k)} target="_blank" rel="noreferrer" className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
+                    {isPdf(k) ? (
+                      <div className="flex flex-col items-center justify-center h-24 text-slate-600"><span className="text-3xl">📄</span><span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span></div>
+                    ) : (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
+                    )}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          <button onClick={() => setDel(true)} disabled={busy}
+            className="w-full h-11 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50">🗑 ลบบิลนี้</button>
+        </div>
+      </div>
+      {del && (
+        <ConfirmPopup title="ลบบิล CTW นี้?" message={`${String(bill.company_name ?? "")} · เลขที่ ${String(bill.doc_number ?? "—")}`}
+          confirmText="ลบ" tone="rose" onCancel={() => setDel(false)} onConfirm={doDelete} />
       )}
     </div>
   );
