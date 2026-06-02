@@ -30,7 +30,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-const MODULES = [
+// fallback ถ้าโหลดจากทะเบียนไม่ได้
+const FALLBACK_MODULES = [
   { key: "parent-skus-v2", label: "Parent SKUs (v2)" },
   { key: "skus-v2",        label: "SKUs (v2)" },
   { key: "partners-v2",    label: "Partners (v2)" },
@@ -74,6 +75,13 @@ function groupMeta(key: string) {
 
 export function SchemaSyncClient() {
   const [moduleKey, setModuleKey] = useState("parent-skus-v2");
+  // โหลดรายชื่อโมดูลทั้งหมดจากทะเบียน (ไม่ hardcode) — fallback ถ้าโหลดไม่ได้
+  const [modules, setModules] = useState<{ key: string; label: string }[]>(FALLBACK_MODULES);
+  useEffect(() => {
+    apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
+      if (Array.isArray(j.data) && j.data.length) setModules(j.data as { key: string; label: string }[]);
+    }).catch(() => {});
+  }, []);
   const [data,      setData]      = useState<SchemaSyncResponse | null>(null);
   const [loading,   setLoading]   = useState(true);
   const [syncing,   setSyncing]   = useState(false);
@@ -313,7 +321,7 @@ export function SchemaSyncClient() {
                 onChange={(e) => setModuleKey(e.target.value)}
                 className="h-9 px-2 text-sm border border-slate-300 rounded-md bg-white"
               >
-                {MODULES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                {modules.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
               </select>
 
               <input

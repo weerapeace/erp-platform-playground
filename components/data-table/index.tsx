@@ -1688,7 +1688,8 @@ export function DataTable<T extends Record<string, unknown>>({
           rows={selectedRows}
           rowLabel={bulkRowLabel ?? ((r) => {
             const rec = r as Record<string, unknown>;
-            return String(rec.name ?? rec.sku ?? rec.id ?? "");
+            // ของกลาง: หาชื่อที่อ่านง่ายก่อน (name_th/name/code/sku/label) แล้วค่อย fallback id
+            return String(rec.name_th ?? rec.name ?? rec.code ?? rec.sku ?? rec.label ?? rec.title ?? rec.id ?? "");
           })}
           onClose={() => setBulkEditOpen(false)}
           onApply={async (edits) => {

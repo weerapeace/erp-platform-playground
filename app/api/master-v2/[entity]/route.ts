@@ -121,8 +121,9 @@ export async function resolveRelationLabels(
   if (valid.length === 0) return rows;
 
   // ดึง label ของทุก relation พร้อมกัน (parallel) — ลด wall-clock เมื่อมีหลาย relation
+  // เก็บเฉพาะ id ของแถวที่ "ยังไม่มี label" (เคารพ postProcess ที่ resolve ไว้แล้ว เช่น parent/partner/uom)
   const maps = await Promise.all(valid.map(async (rr) => {
-    const ids = [...new Set(rows.map((r) => r[rr.column]).filter((v): v is string => v != null).map(String))];
+    const ids = [...new Set(rows.filter((r) => r[rr.column] != null && r[rr.labelKey] == null).map((r) => String(r[rr.column])))];
     if (ids.length === 0) return { rr, map: null as Map<string, Record<string, unknown>> | null };
     const sel = rr.secondaryField ? `id, ${rr.labelField}, ${rr.secondaryField}` : `id, ${rr.labelField}`;
     const { data: td } = await supabase.from(rr.targetTable).select(sel).in("id", ids);
@@ -373,21 +374,10 @@ async function pickOrderColumn(admin: ReturnType<typeof supabaseAdmin>, table: s
   return "id"; // ทุกตารางมี id เสมอ
 }
 
-export async function resolveEntity(entity: string): Promise<EntityConfig | null> {
-  if (ENTITIES[entity]) return ENTITIES[entity];
-  const cached = _entityCache.get(entity);
-  if (cached && Date.now() - cached.at < ENTITY_TTL) return cached.cfg;
-  const admin = supabaseAdmin();
-  const { data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", entity).maybeSingle();
-  if (!mod) return null;
-  const { data: flds } = await admin.from("erp_module_fields")
-    .select("column_name, is_searchable, ui_field_type, relation_config").eq("module_id", mod.id).eq("is_active", true);
-  const searchColumns = (flds ?? [])
-    .filter((f) => f.is_searchable && f.column_name)
-    .map((f) => f.column_name as string);
-
-  // ของกลาง: relation fields → แปลง FK id เป็นชื่อ ตอน GET (อ่านจาก Field Registry)
-  const relationResolves: RelationResolve[] = (flds ?? [])
+// อ่าน relation fields ของ "โมดูล" จากทะเบียน → RelationResolve[] (ของกลาง ใช้ได้ทั้ง hardcode + generic)
+type FieldRow = { column_name: string | null; ui_field_type: string; relation_config: unknown };
+function buildRelationResolves(flds: FieldRow[]): RelationResolve[] {
+  return flds
     .filter((f) => f.ui_field_type === "relation" && f.column_name && (f.relation_config as Record<string, unknown>)?.target_table)
     .map((f) => {
       const rc = f.relation_config as Record<string, unknown>;
@@ -402,7 +392,37 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
         secondaryKey: `${base}_secondary`,
       };
     });
+}
 
+export async function resolveEntity(entity: string): Promise<EntityConfig | null> {
+  const cached = _entityCache.get(entity);
+  if (cached && Date.now() - cached.at < ENTITY_TTL) return cached.cfg;
+  const admin = supabaseAdmin();
+
+  // ---- hardcode entity: augment ด้วย relationResolves จากทะเบียน (universal) ----
+  if (ENTITIES[entity]) {
+    const base = ENTITIES[entity];
+    const { data: mod } = await admin.from("erp_modules").select("id").eq("table_name", base.table).maybeSingle();
+    let relationResolves: RelationResolve[] = [];
+    if (mod) {
+      const { data: flds } = await admin.from("erp_module_fields")
+        .select("column_name, ui_field_type, relation_config").eq("module_id", mod.id).eq("is_active", true);
+      relationResolves = buildRelationResolves((flds ?? []) as FieldRow[]);
+    }
+    const cfg: EntityConfig = { ...base, relationResolves };
+    _entityCache.set(entity, { cfg, at: Date.now() });
+    return cfg;
+  }
+
+  // ---- generic entity: สร้าง config จาก erp_modules ----
+  const { data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", entity).maybeSingle();
+  if (!mod) return null;
+  const { data: flds } = await admin.from("erp_module_fields")
+    .select("column_name, is_searchable, ui_field_type, relation_config").eq("module_id", mod.id).eq("is_active", true);
+  const searchColumns = (flds ?? [])
+    .filter((f) => f.is_searchable && f.column_name)
+    .map((f) => f.column_name as string);
+  const relationResolves = buildRelationResolves((flds ?? []) as FieldRow[]);
   const tableName = mod.table_name as string;
   const orderColumn = await pickOrderColumn(admin, tableName);
   const cfg: EntityConfig = {
