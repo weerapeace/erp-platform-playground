@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>China-Pay · ตัวอย่างดีไซน์ใหม่</title>
+<style>
+  :root{
+    --o1:#fb923c; --o2:#f97316; --o3:#ea580c;
+    --ink:#1f2937; --muted:#9ca3af; --line:#f1f5f9; --bg:#f4f5f7;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;font-family:"Noto Sans Thai","Sarabun",-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink)}
+  .wrap{max-width:430px;margin:0 auto;min-height:100vh;background:#fff;position:relative;padding-bottom:84px;overflow:hidden}
+
+  /* header */
+  .hdr{position:relative;background:linear-gradient(120deg,var(--o1),var(--o3));color:#fff;padding:18px 18px 26px;border-radius:0 0 26px 26px;overflow:hidden}
+  .hdr::after{content:"";position:absolute;right:-30px;top:-40px;width:160px;height:160px;background:rgba(255,255,255,.12);border-radius:50%}
+  .hdr::before{content:"";position:absolute;right:40px;top:30px;width:90px;height:90px;background:rgba(255,255,255,.10);border-radius:50%}
+  .hdr-row{display:flex;align-items:center;gap:12px;position:relative;z-index:1}
+  .iconbtn{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;font-size:20px}
+  .title{font-weight:700;font-size:20px;flex:1}
+  .user{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.18);padding:5px 10px 5px 5px;border-radius:30px;font-size:13px}
+  .ava{width:26px;height:26px;border-radius:50%;background:#fff;color:var(--o3);display:flex;align-items:center;justify-content:center;font-weight:700}
+
+  /* stepper */
+  .steps{display:flex;justify-content:space-between;padding:18px 22px 6px;margin-top:-14px}
+  .step{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;position:relative}
+  .step .dot{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;background:#e5e7eb;color:#9ca3af;transition:.4s;z-index:1}
+  .step.active .dot{background:linear-gradient(135deg,var(--o1),var(--o3));color:#fff;box-shadow:0 6px 14px rgba(249,115,22,.45);transform:scale(1.06)}
+  .step .lbl{font-size:11px;color:var(--muted)}
+  .step.active .lbl{color:var(--o3);font-weight:600}
+  .step:not(:last-child)::after{content:"";position:absolute;top:17px;left:60%;right:-40%;height:3px;border-radius:2px;background:#e5e7eb}
+  .step.done::after{background:linear-gradient(90deg,var(--o1),var(--o2))}
+
+  /* cards */
+  .card{background:#fff;border:1px solid #f0f1f3;border-radius:18px;padding:16px;margin:12px 16px;box-shadow:0 8px 24px rgba(17,24,39,.05);animation:rise .5s both}
+  .lbl-s{font-size:12px;color:#6b7280;font-weight:600;margin-bottom:6px;display:block}
+  .field{position:relative;margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  .inp{width:100%;height:50px;border:1.5px solid #eef0f2;border-radius:14px;padding:0 14px 0 42px;font-size:16px;color:var(--ink);background:#fff;transition:.2s;font-family:inherit}
+  .inp::placeholder{color:#cbd5e1}
+  .inp:focus{outline:none;border-color:var(--o2);box-shadow:0 0 0 4px rgba(249,115,22,.12)}
+  .fic{position:absolute;left:13px;top:38px;font-size:16px;opacity:.5}
+  .grid2{display:flex;gap:12px}
+  .grid2>div{flex:1}
+  .recalc{float:right;font-size:11px;color:var(--o3);font-weight:600}
+  .recalc span{display:inline-block;animation:spin 2.4s linear infinite}
+
+  /* total highlight */
+  .total{margin:12px 16px;background:linear-gradient(120deg,#fff4ec,#ffe9d8);border:1px solid #ffd9bd;border-radius:18px;padding:16px 18px;display:flex;justify-content:space-between;align-items:center;animation:rise .5s .05s both}
+  .total b{font-size:26px;color:var(--o3);font-weight:800}
+  .hint{text-align:center;color:#b9bfc7;font-size:11px;margin:2px 16px 0}
+
+  /* upload */
+  .drop{border:2px dashed #f0c9a8;border-radius:16px;padding:24px;text-align:center;color:#b07a4e;background:#fffaf5}
+  .drop .u{font-size:30px;display:block;margin-bottom:6px;animation:bob 2.2s ease-in-out infinite}
+
+  /* button */
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 32px);margin:16px;height:56px;border:none;border-radius:18px;background:linear-gradient(120deg,var(--o1),var(--o3));color:#fff;font-size:17px;font-weight:700;box-shadow:0 12px 24px rgba(249,115,22,.35);transition:.15s;font-family:inherit}
+  .btn:active{transform:scale(.98)}
+  .btn .arr{transition:.25s}
+  .btn:hover .arr{transform:translateX(4px)}
+  .btn.ghost{background:#fff;color:var(--o3);border:1.5px solid #fdba74;box-shadow:none}
+
+  /* success */
+  .ok{text-align:center;padding:8px 0 4px}
+  .okc{width:96px;height:96px;margin:6px auto 10px;border-radius:50%;background:linear-gradient(135deg,var(--o1),var(--o3));display:flex;align-items:center;justify-content:center;box-shadow:0 14px 30px rgba(249,115,22,.4);animation:pop .5s cubic-bezier(.17,.89,.32,1.49) both}
+  .okc svg{width:48px;height:48px}
+  .okc path{stroke:#fff;stroke-width:5;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:40;stroke-dashoffset:40;animation:draw .5s .35s forwards}
+  .ok h3{margin:6px 0 2px;font-size:20px}
+  .ok p{color:var(--muted);font-size:13px;margin:0 0 12px}
+  .recap{background:#fafbfc;border:1px solid #f0f1f3;border-radius:14px;padding:12px 14px;text-align:left;font-size:14px}
+  .recap .r{display:flex;justify-content:space-between;padding:5px 0}
+  .recap .r span{color:#6b7280}.recap .r b{color:var(--ink)}
+  .confetti{position:absolute;top:0;left:0;right:0;height:200px;pointer-events:none;overflow:hidden}
+  .confetti i{position:absolute;width:8px;height:8px;border-radius:2px;opacity:.9;animation:fall 1.4s ease-in forwards}
+
+  /* bottom nav */
+  .nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#fff;border-top:1px solid #eef0f2;display:grid;grid-template-columns:repeat(5,1fr);padding:6px 0 8px;box-shadow:0 -6px 20px rgba(17,24,39,.05)}
+  .nav button{background:none;border:none;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:#b6bcc6;font-family:inherit}
+  .nav .ic{font-size:20px}
+  .nav .on{color:var(--o3);font-weight:700}
+  .nav .on .pill{background:linear-gradient(120deg,var(--o1),var(--o3));color:#fff;border-radius:14px;padding:5px 12px;box-shadow:0 6px 14px rgba(249,115,22,.4);margin-bottom:1px}
+
+  /* loading chips showcase */
+  .chips{margin:20px 16px 8px}
+  .chips h4{font-size:13px;color:#6b7280;margin:0 0 10px}
+  .chiprow{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px}
+  .chip{flex:0 0 120px;background:#fff;border:1px solid #f0f1f3;border-radius:16px;padding:14px 10px;text-align:center;box-shadow:0 6px 16px rgba(17,24,39,.05)}
+  .chip .ci{font-size:26px;display:block;margin-bottom:6px}
+  .chip small{font-size:11px;color:#6b7280;display:block;margin-bottom:8px}
+  .spin{animation:spin 1s linear infinite;display:inline-block}
+  .dots i{width:6px;height:6px;border-radius:50%;background:var(--o2);display:inline-block;margin:0 2px;animation:blink 1s infinite}
+  .dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+  .bar{height:6px;border-radius:6px;background:#f0e3d8;overflow:hidden}
+  .bar i{display:block;height:100%;width:40%;border-radius:6px;background:linear-gradient(90deg,var(--o1),var(--o3));animation:load 1.6s ease-in-out infinite}
+  .pulse{animation:pulse 1.2s ease-in-out infinite}
+
+  .switch{display:flex;gap:8px;justify-content:center;margin:14px}
+  .switch button{border:none;border-radius:30px;padding:9px 16px;font-size:13px;font-weight:600;font-family:inherit;background:#fff;border:1px solid #fdba74;color:var(--o3)}
+  .switch button.sel{background:linear-gradient(120deg,var(--o1),var(--o3));color:#fff;border-color:transparent}
+  .banner{background:#fff7ed;color:#9a3412;text-align:center;font-size:12px;padding:8px;border-bottom:1px solid #fed7aa}
+
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  @keyframes pop{from{opacity:0;transform:scale(.3)}to{opacity:1;transform:scale(1)}}
+  @keyframes draw{to{stroke-dashoffset:0}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+  @keyframes blink{0%,100%{opacity:.25;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}
+  @keyframes load{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+  @keyframes fall{to{transform:translateY(220px) rotate(320deg);opacity:0}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner">🎨 ตัวอย่างดีไซน์ใหม่ (mockup) — ยังไม่ใช่ของจริง · กดปุ่มด้านล่างสลับหน้าได้</div>
+
+  <div class="hdr">
+    <div class="hdr-row">
+      <div class="iconbtn">‹</div>
+      <div class="title">🧧 ลงบิลจีน</div>
+      <div class="user"><span class="ava">G</span>Gogo ▾</div>
+    </div>
+  </div>
+
+  <div class="steps">
+    <div class="step active"><div class="dot">1</div><div class="lbl">กรอกข้อมูล</div></div>
+    <div class="step"><div class="dot">2</div><div class="lbl">ตรวจสอบ</div></div>
+    <div class="step"><div class="dot">3</div><div class="lbl">ชำระเงิน</div></div>
+    <div class="step"><div class="dot">4</div><div class="lbl">เสร็จสิ้น</div></div>
+  </div>
+
+  <!-- FORM SCREEN -->
+  <div id="form">
+    <div class="card">
+      <div class="field">
+        <span class="lbl-s">ร้านค้า (จีน)</span>
+        <span class="fic">🏪</span>
+        <input class="inp" placeholder="— เลือกร้าน —" readonly />
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <span class="lbl-s">ยอดรวม (¥)</span>
+          <span class="fic">💴</span>
+          <input class="inp" placeholder="0.00" />
+        </div>
+        <div class="field">
+          <span class="lbl-s">ค่าโอน (¥) <span class="recalc"><span>🔄</span> คำนวณ</span></span>
+          <span class="fic">🧮</span>
+          <input class="inp" placeholder="0.00" />
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl-s">วันที่โอน (กำหนดการ)</span>
+        <span class="fic">📅</span>
+        <input class="inp" value="06/02/2026" />
+      </div>
+    </div>
+
+    <div class="total"><span style="font-weight:600;color:#7c4a2d">ยอดโอนรวม</span><b>¥0.00</b></div>
+    <div class="hint">* เรท/ยอดเงินบาทจะคำนวณตาม “โอนเข้าจีน”</div>
+
+    <div class="card">
+      <span class="lbl-s">อัปโหลดสลิป (ใบรับ/บิล, สลิป WeChat ฯลฯ)</span>
+      <div class="drop"><span class="u">☁️⬆️</span>แตะเพื่ออัปโหลด<br><small style="color:#cbb29c">รองรับ JPG, PNG, PDF ไม่เกิน 10MB</small></div>
+    </div>
+
+    <button class="btn">บันทึกบิล <span class="arr">›</span></button>
+  </div>
+
+  <!-- SUCCESS SCREEN -->
+  <div id="success" style="display:none">
+    <div class="card ok" style="position:relative">
+      <div class="confetti" id="cf"></div>
+      <div class="okc"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></div>
+      <h3>บันทึกบิลสำเร็จ!</h3>
+      <p>รายการของคุณถูกบันทึกเรียบร้อยแล้ว</p>
+      <div class="recap">
+        <div class="r"><span>ร้านค้า (จีน)</span><b>Taobao</b></div>
+        <div class="r"><span>ยอดโอนรวม</span><b>¥1,230.00</b></div>
+        <div class="r"><span>วันที่โอน</span><b>06/02/2026</b></div>
+        <div class="r"><span>เลขที่รายการ</span><b>BILL-202602060001</b></div>
+      </div>
+    </div>
+    <button class="btn">ดูรายการบิล</button>
+    <button class="btn ghost" style="margin-top:-6px">บันทึกบิลต่อ</button>
+  </div>
+
+  <!-- LOADING SHOWCASE -->
+  <div class="chips">
+    <h4>แอนิเมชันระหว่างประมวลผล</h4>
+    <div class="chiprow">
+      <div class="chip"><span class="ci">📝</span><small>กำลังบันทึก</small><span class="dots"><i></i><i></i><i></i></span></div>
+      <div class="chip"><span class="ci">☁️</span><small>กำลังอัปโหลด 80%</small><div class="bar"><i></i></div></div>
+      <div class="chip"><span class="ci spin">🔄</span><small>กำลังคำนวณเรท</small><span class="dots"><i></i><i></i><i></i></span></div>
+      <div class="chip"><span class="ci pulse">🔐</span><small>กำลังดำเนินการ</small><span class="dots"><i></i><i></i><i></i></span></div>
+      <div class="chip"><span class="ci">✅</span><small>สำเร็จ</small><div class="bar"><i style="width:100%;animation:none"></i></div></div>
+    </div>
+  </div>
+
+  <div class="switch">
+    <button class="sel" onclick="show('form',this)">หน้ากรอกบิล</button>
+    <button onclick="show('success',this)">หน้าสำเร็จ ✨</button>
+  </div>
+
+  <div class="nav">
+    <button><span class="ic">🟦</span>Dashboard</button>
+    <button class="on"><span class="ic pill">🧾</span>ลงบิลจีน</button>
+    <button><span class="ic">💱</span>โอนเข้าจีน</button>
+    <button><span class="ic">📋</span>บิลทั้งหมด</button>
+    <button><span class="ic">⋯</span>เพิ่มเติม</button>
+  </div>
+</div>
+
+<script>
+  function show(id, btn){
+    document.getElementById('form').style.display = id==='form'?'block':'none';
+    document.getElementById('success').style.display = id==='success'?'block':'none';
+    document.querySelectorAll('.switch button').forEach(b=>b.classList.remove('sel'));
+    btn.classList.add('sel');
+    if(id==='success') confetti();
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function confetti(){
+    var cf=document.getElementById('cf'); if(!cf) return; cf.innerHTML='';
+    var cols=['#fb923c','#f97316','#fdba74','#fbbf24','#fca5a5'];
+    for(var i=0;i<24;i++){
+      var s=document.createElement('i');
+      s.style.left=(10+Math.random()*80)+'%';
+      s.style.background=cols[i%cols.length];
+      s.style.animationDelay=(Math.random()*.3)+'s';
+      s.style.transform='translateY(-10px)';
+      cf.appendChild(s);
+    }
+  }
+</script>
+</body>
+</html>
