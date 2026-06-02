@@ -59,9 +59,6 @@ function rateFor(amt: number, r1: number): number {
   if (amt <= 399999) return +(r1 - RATE_OFFSET.r3).toFixed(4);
   return +(r1 - RATE_OFFSET.r4).toFixed(4);
 }
-function rateTier(amt: number): string {
-  if (amt <= 5000) return "R1"; if (amt <= 99999) return "R2"; if (amt <= 399999) return "R3"; return "R4";
-}
 
 type Tab = "dashboard" | "bill" | "pending" | "all" | "rate" | "ctw" | "transfer";
 
@@ -72,7 +69,6 @@ const STATUS_STYLE: Record<string, string> = {
 const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "dashboard", icon: "📊", label: "Dashboard" },
   { k: "bill", icon: "💴", label: "ลงบิลจีน" },
-  { k: "pending", icon: "⏳", label: "รอโอน" },
   { k: "transfer", icon: "💰", label: "โอนเข้าจีน" },
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
   { k: "rate", icon: "💱", label: "เรท" },
@@ -110,7 +106,6 @@ export default function ChinaPayApp() {
         <main className="flex-1 overflow-y-auto p-4 pb-8">
           {tab === "dashboard" && <Dashboard onGo={go} />}
           {tab === "bill" && <BillForm />}
-          {tab === "pending" && <PendingList />}
           {tab === "all" && <AllList />}
           {tab === "rate" && <RateTab />}
           {tab === "ctw" && <CtwList />}
@@ -182,7 +177,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
   return (
     <div className="space-y-4">
       {/* บิลรอโอน */}
-      <button onClick={() => onGo("pending")} className="block w-full text-left rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 text-white p-4 shadow-sm active:scale-[0.99] transition-transform">
+      <button onClick={() => onGo("all")} className="block w-full text-left rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 text-white p-4 shadow-sm active:scale-[0.99] transition-transform">
         <div className="text-sm opacity-90">บิลจีนรอโอน</div>
         <div className="flex items-end justify-between mt-1">
           <div className="text-3xl font-bold">{pending.length} <span className="text-base font-normal opacity-90">บิล</span></div>
@@ -218,35 +213,23 @@ function StatCard({ label, main, sub, onClick, wide }: { label: string; main: st
   );
 }
 
-// ---------------- ลงบิล ----------------
+// ---------------- ลงบิล (ไม่ใส่เรท — เรทมาตอนโอน) ----------------
 function BillForm() {
   const toast = useToast();
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [amount, setAmount] = useState("");
   const [fee, setFee] = useState("");
-  const [rate, setRate] = useState("");
-  const [r1, setR1] = useState(0);              // เรทฐาน R1 ของวัน
   const [transferDate, setTransferDate] = useState(today());
   const [files, setFiles] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [feeInfo, setFeeInfo] = useState(false);
-  const [rateInfo, setRateInfo] = useState(false);
-  const [ratePopup, setRatePopup] = useState(false);
 
-  // ดึง R1 ล่าสุด
-  const loadR1 = useCallback(() => {
-    apiFetch("/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc")
-      .then(r => r.json()).then(j => { const r0 = (j.data ?? [])[0]; setR1(num(r0?.rate)); }).catch(() => {});
-  }, []);
-  useEffect(() => { loadR1(); }, [loadR1]);
-
-  // auto: ค่าโอน + เรท ตามยอด (แก้มือทับได้)
+  // ค่าโอนอัตโนมัติตามยอด (แก้มือทับได้)
   useEffect(() => {
     const a = num(amount);
     setFee(a > 0 ? String(feeFor(a)) : "");
-    setRate(a > 0 && r1 ? String(rateFor(a, r1)) : (r1 ? String(r1) : ""));
-  }, [amount, r1]);
+  }, [amount]);
 
   // ดึงข้อมูลร้านเมื่อเลือก
   useEffect(() => {
@@ -255,7 +238,6 @@ function BillForm() {
   }, [supplierId]);
 
   const totalRmb = num(amount) + num(fee);
-  const thb = totalRmb * num(rate);
 
   const save = async () => {
     if (!supplierId) { toast.error("เลือกร้านค้าก่อน"); return; }
@@ -266,7 +248,7 @@ function BillForm() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           supplier_id: supplierId, amount_rmb: num(amount), fee_rmb: num(fee),
-          rate: num(rate) || null, transfer_date: transferDate || null,
+          transfer_date: transferDate || null,
           attachments: files, status: "รอโอน", actor: "china-app",
         }),
       });
@@ -313,32 +295,15 @@ function BillForm() {
             {FEE_TABLE.map(t => <div key={t.label} className="flex justify-between"><span className="text-slate-500">{t.label}</span><span className="text-slate-700">{t.fee} หยวน</span></div>)}
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3 mt-3">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-medium text-slate-500">เรท {amount && r1 ? <span className="text-slate-400">(ชั้น {rateTier(num(amount))})</span> : null}</span>
-              <span className="flex gap-2">
-                <button type="button" onClick={() => setRateInfo(v => !v)} className="text-[11px] text-blue-500">ⓘ</button>
-                <button type="button" onClick={() => setRatePopup(true)} className="text-[11px] text-rose-600 font-medium">ตั้งเรท</button>
-              </span>
-            </div>
-            <Num value={rate} onChange={setRate} />
-          </div>
-          <div><Label>วันที่โอน</Label>
-            <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
-              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
-        </div>
-        {rateInfo && (
-          <div className="mt-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs">
-            <div className="font-semibold text-slate-700 mb-1">เรตตามชั้นยอด {r1 ? `(R1 = ${fmt(r1)})` : "(ยังไม่ตั้ง R1)"}</div>
-            {RATE_TABLE.map(t => <div key={t.tier} className="flex justify-between"><span className="text-slate-500">{t.tier} · {t.label}</span><span className="text-slate-700">{r1 ? fmt(+(r1 - t.off).toFixed(4)) : "—"}</span></div>)}
-          </div>
-        )}
-        {/* สรุปยอด */}
+        <div className="mt-3"><Label>วันที่โอน (กำหนดการ)</Label>
+          <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
+            className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+        {/* สรุปยอด ¥ (เรทมาตอนโอน) */}
         <div className="mt-3 rounded-lg bg-rose-50 border border-rose-100 p-3 flex justify-between items-center">
-          <div className="text-sm text-slate-600">ยอดโอนรวม <b className="text-slate-800">¥{fmt(totalRmb)}</b></div>
-          <div className="text-right"><div className="text-[11px] text-slate-400">เป็นเงินบาท</div><div className="text-lg font-bold text-rose-600">฿{fmt(thb)}</div></div>
+          <div className="text-sm text-slate-600">ยอดโอนรวม</div>
+          <div className="text-lg font-bold text-rose-600">¥{fmt(totalRmb)}</div>
         </div>
+        <div className="mt-1 text-[11px] text-slate-400 text-center">* เรท/ยอดเงินบาทจะคำนวณตอน “โอนเข้าจีน”</div>
       </Card>
 
       <Card>
@@ -349,69 +314,31 @@ function BillForm() {
         className="w-full h-12 bg-rose-600 text-white rounded-xl font-semibold text-base disabled:opacity-50 active:scale-[0.99] transition-transform">
         {saving ? "กำลังบันทึก…" : "บันทึกบิล"}
       </button>
-
-      {ratePopup && (
-        <RatePopup current={r1} onClose={() => setRatePopup(false)} onSaved={(v) => { setR1(v); setRatePopup(false); }} />
-      )}
     </div>
   );
 }
 
-// popup ตั้งเรท R1 ของวัน (โชว์ R1-R4 ที่คำนวณ)
-function RatePopup({ current, onClose, onSaved }: { current: number; onClose: () => void; onSaved: (r1: number) => void }) {
-  const toast = useToast();
-  const [val, setVal] = useState(current ? String(current) : "");
-  const [saving, setSaving] = useState(false);
-  const r1 = num(val);
-  const save = async () => {
-    if (r1 <= 0) { toast.error("กรอกเรท R1"); return; }
-    setSaving(true);
-    try {
-      const res = await apiFetch("/api/master-v2/daily-rates", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rate_date: today(), rate: r1, actor: "china-app" }),
-      });
-      const j = await res.json();
-      if (j.error) { toast.error(j.error); return; }
-      toast.success("ตั้งเรทแล้ว"); onSaved(r1);
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
-    finally { setSaving(false); }
-  };
-  return (
-    <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center p-3" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-        <div className="text-lg font-semibold text-slate-800 mb-1">ตั้งเรทของวันนี้</div>
-        <div className="text-xs text-slate-400 mb-3">{today()} · กรอกแค่ R1 — R2-R4 คำนวณให้</div>
-        <Label>เรท R1 (1 – 5,000 ¥)</Label>
-        <Num value={val} onChange={setVal} placeholder="เช่น 4.97" />
-        <div className="mt-3 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs space-y-1">
-          {RATE_TABLE.map(t => <div key={t.tier} className="flex justify-between"><span className="text-slate-500">{t.tier} · {t.label}</span><span className="font-medium text-slate-700">{r1 ? fmt(+(r1 - t.off).toFixed(4)) : "—"}</span></div>)}
-        </div>
-        <div className="mt-4 flex gap-2">
-          <button onClick={onClose} disabled={saving} className="flex-1 h-11 border border-slate-200 rounded-lg text-slate-700">ยกเลิก</button>
-          <button onClick={save} disabled={saving} className="flex-1 h-11 bg-rose-600 text-white rounded-lg font-medium disabled:opacity-50">{saving ? "…" : "บันทึกเรท"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------- บิลรอโอน ----------------
-function PendingList() {
+// ---------------- บิลจีนทั้งหมด (รวมหน้ารอโอนเดิม) ----------------
+const ALL_FILTERS = ["รอโอน", "โอนแล้ว", "ยกเลิก", "ทั้งหมด"] as const;
+function AllList() {
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string>("รอโอน");   // default = รอโอน
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [confirm, setConfirm] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
-    const flt = encodeURIComponent(JSON.stringify({ status: { type: "text", value: "รอโอน" } }));
-    apiFetch(`/api/master-v2/china-bills?limit=100&filters=${flt}&sort_by=bill_date&sort_dir=desc`)
-      .then(r => r.json()).then(j => setRows(j.data ?? [])).catch(() => setRows([])).finally(() => setLoading(false));
-  }, []);
+    let url = "/api/master-v2/china-bills?limit=200&sort_by=bill_date&sort_dir=desc";
+    if (filter !== "ทั้งหมด") {
+      const flt = encodeURIComponent(JSON.stringify({ status: { type: "text", value: filter } }));
+      url += `&filters=${flt}`;
+    }
+    apiFetch(url).then(r => r.json()).then(j => setRows(j.data ?? [])).catch(() => setRows([])).finally(() => setLoading(false));
+  }, [filter]);
   useEffect(() => { load(); }, [load]);
 
   const total = useMemo(() => rows.reduce((a, r) => a + (num(r.amount_rmb) + num(r.fee_rmb)), 0), [rows]);
@@ -425,81 +352,13 @@ function PendingList() {
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      toast.success("ทำเครื่องหมายโอนแล้ว");
-      setRows(p => p.filter(r => String(r.id) !== id));
+      toast.success("ทำเครื่องหมายโอนแล้ว"); load();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(null); }
   };
 
   const onPrinted = (id: string, at: string) =>
     setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
-
-  if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
-  if (rows.length === 0) return <div className="text-center text-slate-300 py-10">— ไม่มีบิลรอโอน —</div>;
-
-  return (
-    <div className="space-y-3">
-      <div className="rounded-xl bg-white border border-slate-200 p-3 flex justify-between items-center">
-        <span className="text-sm text-slate-500">รอโอน {rows.length} บิล</span>
-        <span className="font-bold text-rose-600">¥{fmt(total)}</span>
-      </div>
-      {rows.map((r) => (
-        <Card key={String(r.id)}>
-          <button onClick={() => setDetail(r)} className="w-full text-left flex justify-between items-start gap-2">
-            <div className="min-w-0">
-              <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
-              <div className="text-xs text-slate-400">วันที่โอน {String(r.transfer_date ?? "—")}</div>
-              {r.printed_at ? <PrintedBadge /> : null}
-            </div>
-            <div className="text-right flex-shrink-0">
-              <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
-              <div className="text-xs text-rose-600">฿{fmt((num(r.amount_rmb) + num(r.fee_rmb)) * num(r.rate))}</div>
-            </div>
-          </button>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <button onClick={() => setReport(r)}
-              className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์</button>
-            <button onClick={() => setConfirm(r)} disabled={busy === String(r.id)}
-              className="h-10 border border-emerald-300 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 disabled:opacity-50">
-              {busy === String(r.id) ? "…" : "✓ โอนแล้ว"}
-            </button>
-          </div>
-        </Card>
-      ))}
-      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} />}
-      {confirm && (
-        <ConfirmPopup
-          title="ยืนยันว่าโอนแล้ว?"
-          message={`${String(confirm.supplier_label ?? confirm.supplier_id ?? "บิลนี้")} · ¥${fmt(num(confirm.amount_rmb) + num(confirm.fee_rmb))}`}
-          confirmText="ยืนยัน โอนแล้ว" tone="emerald"
-          onCancel={() => setConfirm(null)} onConfirm={() => markDone(String(confirm.id))}
-        />
-      )}
-      {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
-    </div>
-  );
-}
-
-// ---------------- รายการทั้งหมด ----------------
-const ALL_FILTERS = ["ทั้งหมด", "รอโอน", "โอนแล้ว", "ยกเลิก"] as const;
-function AllList() {
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<string>("ทั้งหมด");
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
-
-  const onPrinted = (id: string, at: string) =>
-    setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
-
-  useEffect(() => {
-    setLoading(true);
-    let url = "/api/master-v2/china-bills?limit=200&sort_by=bill_date&sort_dir=desc";
-    if (filter !== "ทั้งหมด") {
-      const flt = encodeURIComponent(JSON.stringify({ status: { type: "text", value: filter } }));
-      url += `&filters=${flt}`;
-    }
-    apiFetch(url).then(r => r.json()).then(j => setRows(j.data ?? [])).catch(() => setRows([])).finally(() => setLoading(false));
-  }, [filter]);
 
   return (
     <div className="space-y-3">
@@ -513,15 +372,24 @@ function AllList() {
         ))}
       </div>
 
+      {/* สรุปยอด */}
+      {!loading && rows.length > 0 && (
+        <div className="rounded-xl bg-white border border-slate-200 p-3 flex justify-between items-center">
+          <span className="text-sm text-slate-500">{filter} {rows.length} บิล</span>
+          <span className="font-bold text-rose-600">¥{fmt(total)}</span>
+        </div>
+      )}
+
       {loading ? (
         <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
       ) : rows.length === 0 ? (
         <div className="text-center text-slate-300 py-10">— ไม่มีรายการ —</div>
       ) : (
         rows.map((r) => {
-          const st = String(r.status ?? "—");
+          const id = String(r.id), st = String(r.status ?? "—"), rate = num(r.rate);
+          const isPending = st === "รอโอน";
           return (
-            <Card key={String(r.id)}>
+            <Card key={id}>
               <button onClick={() => setDetail(r)} className="w-full text-left flex justify-between items-start gap-2">
                 <div className="min-w-0">
                   <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
@@ -530,22 +398,45 @@ function AllList() {
                 </div>
                 <div className="text-right flex-shrink-0">
                   <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
+                  {rate > 0 && <div className="text-xs text-rose-600">฿{fmt((num(r.amount_rmb) + num(r.fee_rmb)) * rate)}</div>}
                   <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[st] ?? "bg-slate-100 text-slate-500"}`}>{st}</span>
                 </div>
               </button>
+              {isPending && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button onClick={() => setReport(r)}
+                    className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์</button>
+                  <button onClick={() => setConfirm(r)} disabled={busy === id}
+                    className="h-10 border border-emerald-300 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 disabled:opacity-50">
+                    {busy === id ? "…" : "✓ โอนแล้ว"}
+                  </button>
+                </div>
+              )}
             </Card>
           );
         })
       )}
-      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} />}
+      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} />}
+      {confirm && (
+        <ConfirmPopup
+          title="ยืนยันว่าโอนแล้ว?"
+          message={`${String(confirm.supplier_label ?? confirm.supplier_id ?? "บิลนี้")} · ¥${fmt(num(confirm.amount_rmb) + num(confirm.fee_rmb))}`}
+          confirmText="ยืนยัน โอนแล้ว" tone="emerald"
+          onCancel={() => setConfirm(null)} onConfirm={() => markDone(String(confirm.id))}
+        />
+      )}
+      {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
     </div>
   );
 }
 
-// ---------------- รายละเอียดบิล (ดูอย่างเดียว) ----------------
-function BillDetail({ bill, onClose, onPrinted }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void }) {
+// ---------------- รายละเอียดบิล ----------------
+function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void; onChanged?: () => void }) {
+  const toast = useToast();
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState(false);
+  const [askCancel, setAskCancel] = useState(false);
+  const [busy, setBusy] = useState(false);
   const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
   useEffect(() => {
     if (!supplierId) return;
@@ -561,6 +452,22 @@ function BillDetail({ bill, onClose, onPrinted }: { bill: Record<string, unknown
   const legacy = [bill.bill_image, bill.wechat_image].filter(Boolean).map(String);
   const allFiles = [...atts, ...legacy.filter((k) => !atts.includes(k))];
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
+  const canPrint = rate > 0;                       // พิมพ์ได้เมื่อมีเรทแล้ว
+  const canCancel = st !== "ยกเลิก" && st !== "โอนแล้ว";
+
+  const cancelBill = async () => {
+    setBusy(true); setAskCancel(false);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-bills/${String(bill.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "ยกเลิก", actor: "china-app" }),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      toast.success("ยกเลิกบิลแล้ว"); onChanged?.(); onClose();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
@@ -593,7 +500,11 @@ function BillDetail({ bill, onClose, onPrinted }: { bill: Record<string, unknown
             <Row label="ค่าโอน (¥)" v={fmt(fee)} />
             <div className="flex justify-between border-t border-rose-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดโอนรวม</span><span className="font-semibold text-slate-800">¥{fmt(totalRmb)}</span></div>
             <Row label="เรท" v={rate ? fmt(rate) : "—"} />
-            <div className="flex justify-between"><span className="text-slate-500">เป็นเงินบาท</span><span className="font-bold text-rose-600">฿{fmt(thb)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">เป็นเงินบาท</span>
+              {canPrint
+                ? <span className="font-bold text-rose-600">฿{fmt(thb)}</span>
+                : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
+            </div>
           </div>
 
           {/* วันที่ */}
@@ -603,11 +514,12 @@ function BillDetail({ bill, onClose, onPrinted }: { bill: Record<string, unknown
             {bill.printed_at ? <Row label="พิมพ์เมื่อ" v={String(bill.printed_at).slice(0, 16).replace("T", " ")} /> : null}
           </div>
 
-          {/* ปุ่มพิมพ์/ใบสรุป */}
-          <button onClick={() => setReport(true)}
-            className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+          {/* ปุ่มพิมพ์/ใบสรุป — พิมพ์ได้เมื่อมีเรทแล้ว */}
+          <button onClick={() => canPrint && setReport(true)} disabled={!canPrint}
+            className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
             🖨️ พิมพ์ / ใบสรุป
           </button>
+          {!canPrint && <div className="-mt-2 text-[11px] text-amber-600 text-center">* ใส่เรทก่อนถึงพิมพ์ได้ (เรทจะมาตอนตัดโอนเข้าจีน)</div>}
 
           {/* แนบไฟล์ */}
           {allFiles.length > 0 && (
@@ -631,9 +543,21 @@ function BillDetail({ bill, onClose, onPrinted }: { bill: Record<string, unknown
               </div>
             </div>
           )}
+
+          {/* ยกเลิกบิล */}
+          {canCancel && (
+            <button onClick={() => setAskCancel(true)} disabled={busy}
+              className="w-full h-11 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50">
+              ✕ ยกเลิกบิลนี้
+            </button>
+          )}
         </div>
       </div>
       {report && <ReportPopup bill={{ ...bill, _sup: sup }} onClose={() => setReport(false)} onPrinted={onPrinted} />}
+      {askCancel && (
+        <ConfirmPopup title="ยกเลิกบิลนี้?" message={`${String(bill.supplier_label ?? bill.supplier_id ?? "บิลนี้")} · ¥${fmt(totalRmb)}`}
+          confirmText="ยกเลิกบิล" tone="rose" onCancel={() => setAskCancel(false)} onConfirm={cancelBill} />
+      )}
     </div>
   );
 }
@@ -957,14 +881,14 @@ function CtwDetail({ bill, onClose, onDeleted }: { bill: Record<string, unknown>
 }
 
 // ---------------- โอนเข้าบัญชีจีน ----------------
-const billThb = (r: Record<string, unknown>) => (num(r.amount_rmb) + num(r.fee_rmb)) * num(r.rate);
-
 function TransferPage() {
   const toast = useToast();
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [amount, setAmount] = useState("");
   const [rate, setRate] = useState("");
+  const [transferDate, setTransferDate] = useState(today());
+  const [rateInfo, setRateInfo] = useState(false);
   const [slip, setSlip] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -983,8 +907,7 @@ function TransferPage() {
       apiFetch(`/api/master-v2/china-bills?limit=200&filters=${fPending}&sort_by=bill_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch(`/api/master-v2/china-transfers?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch(`/api/master-v2/ctw-bills?limit=500&sort_by=doc_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
-      apiFetch(`/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
-    ]).then(([p, t, c, rt]) => {
+    ]).then(([p, t, c]) => {
       setPending(p.data ?? []);
       const tr = t.data ?? [];
       setBalance({
@@ -992,40 +915,58 @@ function TransferPage() {
         rmb: tr.reduce((a: number, r: Record<string, unknown>) => a + num(r.leftover_rmb), 0),
       });
       setCtw((c.data ?? []).filter((r: Record<string, unknown>) => !r.cleared_at));
-      const r1 = num((rt.data ?? [])[0]?.rate);
-      setRate(prev => prev || (r1 ? String(r1) : ""));
     }).finally(() => setLoading(false));
   }, []);
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // โหลดเรท R1 ตาม "วันที่โอน" (ถ้าไม่มีเรทวันนั้น → ว่าง = รอเรทเงิน)
+  useEffect(() => {
+    if (!transferDate) { setRate(""); return; }
+    apiFetch("/api/master-v2/daily-rates?limit=90&sort_by=rate_date&sort_dir=desc")
+      .then(r => r.json()).then(j => {
+        const row = (j.data ?? []).find((x: Record<string, unknown>) => String(x.rate_date) === transferDate);
+        setRate(row ? String(num(row.rate)) : "");
+      }).catch(() => {});
+  }, [transferDate]);
+
+  const r1 = num(rate);
+  const hasRate = r1 > 0;
+  // ยอดบาทต่อบิล = ¥ × เรทตามชั้นยอดของบิลนั้น
+  const billThbR = useCallback((r: Record<string, unknown>) => (num(r.amount_rmb) + num(r.fee_rmb)) * rateFor(num(r.amount_rmb), r1), [r1]);
+
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const selectedSum = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + billThb(r), 0), [pending, sel]);
+  const selectedSum = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + billThbR(r), 0), [pending, sel, billThbR]);
   const transferred = num(amount);
   const leftover = transferred - selectedSum;            // ส่วนต่างที่จะเข้าบัญชีจีน
-  const leftoverRmb = num(rate) ? leftover / num(rate) : 0;
+  const leftoverRmb = hasRate ? leftover / r1 : 0;
 
   const save = async () => {
     if (sel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
     if (transferred <= 0) { toast.error("กรอกจำนวนเงินที่โอนจริง"); return; }
+    if (!hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
     setSaving(true);
     try {
       const ids = [...sel];
       const res = await apiFetch("/api/master-v2/china-transfers", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transfer_date: today(), bill_ids: ids, bills_total_thb: +selectedSum.toFixed(2),
-          amount_transferred_thb: transferred, rate: num(rate) || null,
+          transfer_date: transferDate || today(), bill_ids: ids, bills_total_thb: +selectedSum.toFixed(2),
+          amount_transferred_thb: transferred, rate: r1,
           leftover_thb: +leftover.toFixed(2), leftover_rmb: +leftoverRmb.toFixed(2),
           attachments: slip, note: note || null, actor: "china-app",
         }),
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      // ตัดบิลที่เลือก → โอนแล้ว
-      await Promise.all(ids.map(id => apiFetch(`/api/master-v2/china-bills/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "โอนแล้ว", actor: "china-app" }),
-      })));
+      // ตัดบิลที่เลือก → โอนแล้ว + ประทับเรท (ตามชั้นยอด) + วันที่โอน
+      await Promise.all(ids.map(id => {
+        const b = pending.find(p => String(p.id) === id);
+        const br = rateFor(num(b?.amount_rmb), r1);
+        return apiFetch(`/api/master-v2/china-bills/${id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "โอนแล้ว", rate: br, transfer_date: transferDate || today(), actor: "china-app" }),
+        });
+      }));
       toast.success("บันทึกการโอน + ตัดบิลแล้ว");
       setSel(new Set()); setAmount(""); setSlip([]); setNote("");
       loadAll();
@@ -1081,7 +1022,7 @@ function TransferPage() {
                     <span className="block font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
                     <span className="block text-xs text-slate-400">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))} · {String(r.transfer_date ?? "—")}</span>
                   </span>
-                  <span className="font-semibold text-slate-800 flex-shrink-0">฿{fmt(billThb(r))}</span>
+                  <span className="font-semibold text-slate-800 flex-shrink-0">{hasRate ? `฿${fmt(billThbR(r))}` : <span className="text-amber-600 text-xs">รอเรทเงิน</span>}</span>
                 </button>
               );
             })}
@@ -1090,7 +1031,7 @@ function TransferPage() {
         {sel.size > 0 && (
           <div className="mt-3 flex justify-between items-center rounded-lg bg-slate-50 border border-slate-100 p-3">
             <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดบิลรวม</span>
-            <span className="font-bold text-slate-800">฿{fmt(selectedSum)}</span>
+            <span className="font-bold text-slate-800">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span>
           </div>
         )}
       </Card>
@@ -1098,15 +1039,33 @@ function TransferPage() {
       <Card>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>จำนวนเงินที่โอนจริง (฿)</Label><Num value={amount} onChange={setAmount} /></div>
-          <div><Label>เรทวันนี้ (R1)</Label><Num value={rate} onChange={setRate} placeholder="เช่น 5.08" /></div>
+          <div><Label>วันที่โอน</Label>
+            <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
+              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         </div>
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-medium text-slate-500">เรท R1 (ตามวันที่โอน)</span>
+            <button type="button" onClick={() => setRateInfo(v => !v)} className="text-[11px] text-blue-500">ⓘ R1–R4</button>
+          </div>
+          <Num value={rate} onChange={setRate} placeholder="เช่น 5.08" />
+          {!hasRate && <div className="mt-1 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — ใส่เอง หรือไปตั้งในแท็บ “เรท”</div>}
+        </div>
+        {rateInfo && hasRate && (
+          <div className="mt-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs space-y-1">
+            <div className="font-semibold text-slate-700 mb-1">เรตตามชั้นยอด (R1 = {fmt(r1)})</div>
+            {RATE_TABLE.map(t => <div key={t.tier} className="flex justify-between"><span className="text-slate-500">{t.tier} · {t.label}</span><span className="font-medium text-slate-700">{fmt(+(r1 - t.off).toFixed(4))}</span></div>)}
+          </div>
+        )}
         {/* สรุปส่วนต่าง */}
         <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
-          <div className="flex justify-between"><span className="text-slate-500">ยอดบิลที่ตัด</span><span className="text-slate-700">฿{fmt(selectedSum)}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">ยอดบิลที่ตัด</span><span className="text-slate-700">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span></div>
           <div className="flex justify-between"><span className="text-slate-500">โอนจริง</span><span className="text-slate-700">฿{fmt(transferred)}</span></div>
           <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1">
             <span className="text-slate-600 font-medium">เข้าบัญชีจีน (ส่วนต่าง)</span>
-            <span className={`font-bold ${leftover < 0 ? "text-rose-600" : "text-emerald-700"}`}>฿{fmt(leftover)}{num(rate) ? <span className="text-slate-400 font-normal"> ≈ ¥{fmt(leftoverRmb)}</span> : null}</span>
+            {hasRate
+              ? <span className={`font-bold ${leftover < 0 ? "text-rose-600" : "text-emerald-700"}`}>฿{fmt(leftover)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(leftoverRmb)}</span></span>
+              : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
           </div>
         </div>
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน" value={slip} onChange={setSlip} folder="china-transfers" /></div>
