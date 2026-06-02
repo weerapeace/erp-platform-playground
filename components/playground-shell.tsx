@@ -166,7 +166,23 @@ export type MenuRow = {
   icon: string | null; label: string; href: string;
   show_in_sidebar: boolean; show_in_launcher: boolean;
   permission_key: string | null; is_active: boolean;
+  app_keys?: string[];   // โมดูลใหญ่ (App) ที่เมนูนี้สังกัด — many-to-many
 };
+
+// โมดูลใหญ่ (App) — tabs บนสุด
+export type AppGroup = { id?: string; key: string; label: string; icon: string | null; sort_order: number; permission_key: string | null; is_active: boolean };
+
+// map section (default nav) → app key — สำหรับ "นำเข้าเมนูเริ่มต้น"
+function sectionToApp(label: string): string {
+  if (label === "หน้าหลัก") return "home";
+  if (label.includes("Master Data")) return "master";
+  if (label === "Operations") return "purchasing";
+  if (label.includes("Inventory")) return "inventory";
+  if (label.includes("BOM") || label.includes("Production") || label.includes("QC")) return "production";
+  if (label.includes("Sales/Purchase")) return "sales";
+  if (label.includes("Settings")) return "settings";
+  return "home";
+}
 
 // แปลง navGroups (default) → แถวสำหรับ "นำเข้าเมนูเริ่มต้น" ลงทะเบียน
 export const DEFAULT_MENU_ITEMS: MenuRow[] = navGroups.flatMap((g, gi) =>
@@ -181,6 +197,7 @@ export const DEFAULT_MENU_ITEMS: MenuRow[] = navGroups.flatMap((g, gi) =>
     show_in_launcher: g.phase !== 3,   // Settings ไม่ขึ้น launcher โดย default
     permission_key: null,
     is_active: true,
+    app_keys: [sectionToApp(g.label)],
   })),
 );
 
@@ -290,22 +307,40 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
+  const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
+  const [activeApp, setActiveAppState] = useState<string | null>(null);
+  const setActiveApp = (k: string | null) => {
+    setActiveAppState(k);
+    try { if (k) localStorage.setItem("erp-active-app", k); else localStorage.removeItem("erp-active-app"); } catch { /* ignore */ }
+  };
 
-  // โหลดทะเบียนเมนูจาก DB — ถ้าว่าง/พลาด ใช้ default ในโค้ด
+  // โหลดทะเบียนเมนู + โมดูลใหญ่ (App) จาก DB — ถ้าว่าง/พลาด ใช้ default ในโค้ด
   useEffect(() => {
     let alive = true;
     apiFetch("/api/menu").then((r) => r.json()).then((j) => {
       if (alive && Array.isArray(j.data)) setMenuRows(j.data as MenuRow[]);
     }).catch(() => { if (alive) setMenuRows([]); });
+    apiFetch("/api/menu/apps").then((r) => r.json()).then((j) => {
+      if (!alive || !Array.isArray(j.data)) return;
+      const apps = (j.data as AppGroup[]).filter((a) => a.is_active);
+      setAppGroups(apps);
+      try {
+        const saved = localStorage.getItem("erp-active-app");
+        setActiveAppState(saved && apps.some((a) => a.key === saved) ? saved : (apps[0]?.key ?? null));
+      } catch { setActiveAppState(apps[0]?.key ?? null); }
+    }).catch(() => { if (alive) setAppGroups([]); });
     return () => { alive = false; };
   }, []);
 
   // กลุ่มเมนูที่จะแสดง: จากทะเบียน (ถ้ามี) ไม่งั้น default — แล้วกรองตามสิทธิ์ + show_in_sidebar
   const navGroupsToShow = (() => {
     const fromRegistry = menuRows && menuRows.length > 0;
-    const groups = fromRegistry
-      ? groupMenuRows(menuRows!.filter((r) => r.is_active && r.show_in_sidebar))
-      : DEFAULT_GROUPS;
+    let rows = fromRegistry ? menuRows!.filter((r) => r.is_active && r.show_in_sidebar) : null;
+    // กรองตามโมดูลใหญ่ (App) ที่เลือก — ถ้ามี App + เลือกอยู่
+    if (rows && activeApp && appGroups.length > 0) {
+      rows = rows.filter((r) => (r.app_keys ?? []).includes(activeApp));
+    }
+    const groups = rows ? groupMenuRows(rows) : DEFAULT_GROUPS;
     return groups
       .map((g) => ({
         label: g.label,
@@ -452,8 +487,28 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Content */}
-      <main id="main-content" className="flex-1 overflow-y-auto pt-12 md:pt-0" tabIndex={-1}>
-        <ShellPresentContext.Provider value={true}>{children}</ShellPresentContext.Provider>
+      <main id="main-content" className="flex-1 overflow-y-auto pt-12 md:pt-0 flex flex-col" tabIndex={-1}>
+        {/* โมดูลใหญ่ (App) tabs — ข้างบนสุด (โชว์เมื่อมีทะเบียนเมนูแล้ว) */}
+        {appGroups.length > 0 && menuRows && menuRows.length > 0 && (
+          <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-3 flex items-center gap-1 overflow-x-auto">
+            {appGroups
+              .filter((a) => !a.permission_key || can(a.permission_key as Parameters<typeof can>[0]))
+              .map((a) => (
+                <button key={a.key} onClick={() => setActiveApp(a.key)}
+                  className={`flex items-center gap-1.5 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors ${
+                    activeApp === a.key
+                      ? "border-blue-600 text-blue-700 font-medium"
+                      : "border-transparent text-slate-500 hover:text-slate-800"
+                  }`}>
+                  <span>{a.icon ?? "📦"}</span><span>{a.label}</span>
+                </button>
+              ))}
+            <a href="/apps" className="ml-auto px-3 py-2.5 text-xs text-slate-400 hover:text-slate-700 whitespace-nowrap">⊞ ทุก App</a>
+          </div>
+        )}
+        <div className="flex-1">
+          <ShellPresentContext.Provider value={true}>{children}</ShellPresentContext.Provider>
+        </div>
       </main>
     </div>
   );
