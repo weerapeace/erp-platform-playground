@@ -63,7 +63,7 @@ function rateTier(amt: number): string {
   if (amt <= 5000) return "R1"; if (amt <= 99999) return "R2"; if (amt <= 399999) return "R3"; return "R4";
 }
 
-type Tab = "dashboard" | "bill" | "pending" | "all" | "rate" | "ctw";
+type Tab = "dashboard" | "bill" | "pending" | "all" | "rate" | "ctw" | "transfer";
 
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
@@ -73,6 +73,7 @@ const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "dashboard", icon: "📊", label: "Dashboard" },
   { k: "bill", icon: "💴", label: "ลงบิลจีน" },
   { k: "pending", icon: "⏳", label: "รอโอน" },
+  { k: "transfer", icon: "💰", label: "โอนเข้าจีน" },
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
   { k: "rate", icon: "💱", label: "เรท" },
   { k: "ctw", icon: "📑", label: "บิลจาก CTW" },
@@ -113,6 +114,7 @@ export default function ChinaPayApp() {
           {tab === "all" && <AllList />}
           {tab === "rate" && <RateTab />}
           {tab === "ctw" && <CtwList />}
+          {tab === "transfer" && <TransferPage />}
         </main>
       </div>
 
@@ -950,6 +952,206 @@ function CtwDetail({ bill, onClose, onDeleted }: { bill: Record<string, unknown>
         <ConfirmPopup title="ลบบิล CTW นี้?" message={`${String(bill.company_name ?? "")} · เลขที่ ${String(bill.doc_number ?? "—")}`}
           confirmText="ลบ" tone="rose" onCancel={() => setDel(false)} onConfirm={doDelete} />
       )}
+    </div>
+  );
+}
+
+// ---------------- โอนเข้าบัญชีจีน ----------------
+const billThb = (r: Record<string, unknown>) => (num(r.amount_rmb) + num(r.fee_rmb)) * num(r.rate);
+
+function TransferPage() {
+  const toast = useToast();
+  const [pending, setPending] = useState<Record<string, unknown>[]>([]);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [amount, setAmount] = useState("");
+  const [rate, setRate] = useState("");
+  const [slip, setSlip] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [balance, setBalance] = useState<{ thb: number; rmb: number }>({ thb: 0, rmb: 0 });
+  const [loading, setLoading] = useState(true);
+
+  // CTW ที่ยังไม่ตัด
+  const [ctw, setCtw] = useState<Record<string, unknown>[]>([]);
+  const [ctwSel, setCtwSel] = useState<Set<string>>(new Set());
+  const [ctwBusy, setCtwBusy] = useState(false);
+
+  const loadAll = useCallback(() => {
+    setLoading(true);
+    const fPending = encodeURIComponent(JSON.stringify({ status: { type: "text", value: "รอโอน" } }));
+    Promise.all([
+      apiFetch(`/api/master-v2/china-bills?limit=200&filters=${fPending}&sort_by=bill_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch(`/api/master-v2/china-transfers?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch(`/api/master-v2/ctw-bills?limit=500&sort_by=doc_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch(`/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
+    ]).then(([p, t, c, rt]) => {
+      setPending(p.data ?? []);
+      const tr = t.data ?? [];
+      setBalance({
+        thb: tr.reduce((a: number, r: Record<string, unknown>) => a + num(r.leftover_thb), 0),
+        rmb: tr.reduce((a: number, r: Record<string, unknown>) => a + num(r.leftover_rmb), 0),
+      });
+      setCtw((c.data ?? []).filter((r: Record<string, unknown>) => !r.cleared_at));
+      const r1 = num((rt.data ?? [])[0]?.rate);
+      setRate(prev => prev || (r1 ? String(r1) : ""));
+    }).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const selectedSum = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + billThb(r), 0), [pending, sel]);
+  const transferred = num(amount);
+  const leftover = transferred - selectedSum;            // ส่วนต่างที่จะเข้าบัญชีจีน
+  const leftoverRmb = num(rate) ? leftover / num(rate) : 0;
+
+  const save = async () => {
+    if (sel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
+    if (transferred <= 0) { toast.error("กรอกจำนวนเงินที่โอนจริง"); return; }
+    setSaving(true);
+    try {
+      const ids = [...sel];
+      const res = await apiFetch("/api/master-v2/china-transfers", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transfer_date: today(), bill_ids: ids, bills_total_thb: +selectedSum.toFixed(2),
+          amount_transferred_thb: transferred, rate: num(rate) || null,
+          leftover_thb: +leftover.toFixed(2), leftover_rmb: +leftoverRmb.toFixed(2),
+          attachments: slip, note: note || null, actor: "china-app",
+        }),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      // ตัดบิลที่เลือก → โอนแล้ว
+      await Promise.all(ids.map(id => apiFetch(`/api/master-v2/china-bills/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "โอนแล้ว", actor: "china-app" }),
+      })));
+      toast.success("บันทึกการโอน + ตัดบิลแล้ว");
+      setSel(new Set()); setAmount(""); setSlip([]); setNote("");
+      loadAll();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  // ตัด/เคลียร์ บิล CTW
+  const ctwToggle = (id: string) => setCtwSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const ctwTotal = useMemo(() => ctw.reduce((a, r) => a + num(r.net_amount), 0), [ctw]);
+  const clearCtw = async () => {
+    if (ctwSel.size === 0) { toast.error("เลือกบิล CTW ที่จะตัดก่อน"); return; }
+    setCtwBusy(true);
+    try {
+      const ids = [...ctwSel];
+      await Promise.all(ids.map(id => apiFetch(`/api/master-v2/ctw-bills/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cleared_at: new Date().toISOString(), actor: "china-app" }),
+      })));
+      toast.success(`ตัดบิล CTW ${ids.length} ใบแล้ว`);
+      setCtw(p => p.filter(r => !ctwSel.has(String(r.id)))); setCtwSel(new Set());
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setCtwBusy(false); }
+  };
+
+  if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
+
+  return (
+    <div className="space-y-4">
+      {/* ยอดคงเหลือบัญชีจีน */}
+      <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 shadow-sm">
+        <div className="text-sm opacity-90">💰 ยอดคงเหลือในบัญชีจีน</div>
+        <div className="flex items-end justify-between mt-1">
+          <div className="text-3xl font-bold">฿{fmt(balance.thb)}</div>
+          <div className="text-lg font-semibold opacity-95">≈ ¥{fmt(balance.rmb)}</div>
+        </div>
+      </div>
+
+      {/* ทำรายการโอน */}
+      <Card>
+        <div className="font-semibold text-slate-800 mb-2">เลือกบิลที่จะตัด (รอโอน)</div>
+        {pending.length === 0 ? (
+          <div className="text-center text-slate-300 py-6 text-sm">— ไม่มีบิลรอโอน —</div>
+        ) : (
+          <div className="space-y-2">
+            {pending.map((r) => {
+              const id = String(r.id), on = sel.has(id);
+              return (
+                <button key={id} onClick={() => toggle(id)}
+                  className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left ${on ? "border-emerald-400 bg-emerald-50" : "border-slate-200"}`}>
+                  <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
+                    <span className="block text-xs text-slate-400">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))} · {String(r.transfer_date ?? "—")}</span>
+                  </span>
+                  <span className="font-semibold text-slate-800 flex-shrink-0">฿{fmt(billThb(r))}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {sel.size > 0 && (
+          <div className="mt-3 flex justify-between items-center rounded-lg bg-slate-50 border border-slate-100 p-3">
+            <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดบิลรวม</span>
+            <span className="font-bold text-slate-800">฿{fmt(selectedSum)}</span>
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <div className="grid grid-cols-2 gap-3">
+          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label><Num value={amount} onChange={setAmount} /></div>
+          <div><Label>เรทวันนี้ (R1)</Label><Num value={rate} onChange={setRate} placeholder="เช่น 5.08" /></div>
+        </div>
+        {/* สรุปส่วนต่าง */}
+        <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
+          <div className="flex justify-between"><span className="text-slate-500">ยอดบิลที่ตัด</span><span className="text-slate-700">฿{fmt(selectedSum)}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">โอนจริง</span><span className="text-slate-700">฿{fmt(transferred)}</span></div>
+          <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1">
+            <span className="text-slate-600 font-medium">เข้าบัญชีจีน (ส่วนต่าง)</span>
+            <span className={`font-bold ${leftover < 0 ? "text-rose-600" : "text-emerald-700"}`}>฿{fmt(leftover)}{num(rate) ? <span className="text-slate-400 font-normal"> ≈ ¥{fmt(leftoverRmb)}</span> : null}</span>
+          </div>
+        </div>
+        <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน" value={slip} onChange={setSlip} folder="china-transfers" /></div>
+        <button onClick={save} disabled={saving}
+          className="mt-3 w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">
+          {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
+        </button>
+      </Card>
+
+      {/* บิล CTW ที่ยังไม่ตัด */}
+      <Card>
+        <div className="flex justify-between items-center mb-2">
+          <div className="font-semibold text-slate-800">บิล CTW ที่ยังไม่ตัด</div>
+          <div className="text-right">
+            <div className="text-xs text-slate-400">{ctw.length} บิล</div>
+            <div className="font-bold text-rose-600">฿{fmt(ctwTotal)}</div>
+          </div>
+        </div>
+        {ctw.length === 0 ? (
+          <div className="text-center text-slate-300 py-4 text-sm">— ตัดครบแล้ว —</div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {ctw.map((r) => {
+                const id = String(r.id), on = ctwSel.has(id);
+                return (
+                  <button key={id} onClick={() => ctwToggle(id)}
+                    className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left ${on ? "border-rose-400 bg-rose-50" : "border-slate-200"}`}>
+                    <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-rose-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-800 truncate">{String(r.company_name ?? "—")}</span>
+                      <span className="block text-xs text-slate-400">เลขที่ {String(r.doc_number ?? "—")} · {String(r.doc_date ?? "—")}</span>
+                    </span>
+                    <span className="font-semibold text-slate-800 flex-shrink-0">฿{fmt(num(r.net_amount))}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={clearCtw} disabled={ctwBusy || ctwSel.size === 0}
+              className="mt-3 w-full h-11 border border-rose-300 text-rose-700 rounded-lg text-sm font-medium hover:bg-rose-50 disabled:opacity-50">
+              {ctwBusy ? "…" : `✓ ตัดเป็นเคลียร์แล้ว (${ctwSel.size})`}
+            </button>
+          </>
+        )}
+      </Card>
     </div>
   );
 }
