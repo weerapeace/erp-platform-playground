@@ -813,8 +813,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // ---- Columns ----
   const columns: ColumnDef<Row>[] = useMemo(() => {
-    // กลุ่ม A: ถ้า defaultShowAllColumns → โชว์ทุก field (ใช้ width เป็น size สำรอง)
-    const showAll = config.defaultShowAllColumns === true;
+    // default ทุกตาราง = โชว์ทุกคอลัมน์ (owner ต้องการเห็นครบ) — หน้าไหนอยากจำกัดให้ตั้ง defaultShowAllColumns:false
+    const showAll = config.defaultShowAllColumns !== false;
     // one2many/many2many = ลิสต์ความสัมพันธ์ → ไม่เหมาะเป็นคอลัมน์ตาราง (ดูเต็มในหน้า detail)
     const tableFields = effectiveFields
       .filter(f => f.type !== "one2many" && f.type !== "many2many")
