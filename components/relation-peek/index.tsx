@@ -1,52 +1,109 @@
 "use client";
 
 /**
- * RelationPeekModal — popup ดูรายละเอียดของ record ที่เชื่อม (read-only)
- * ใช้ตอนกดที่ค่า relation ในหน้า detail เช่น กด "Parent SKU" ในหน้า SKU → เด้งดู parent
- * registry-driven: โหลด field + ค่า แล้วแสดงเป็น label/value (ไม่ให้แก้)
+ * RelationPeekModal — popup ดู/แก้ไขรายละเอียดของ record ที่เชื่อม (ของกลาง)
+ * ใช้ตอนกดที่ค่า relation หรือกดรายการในการ์ด "ข้อมูลที่เกี่ยวข้อง (360)"
+ * registry-driven: โหลด field + ค่า → โชว์เป็น view; กด "✎ แก้ไข" → แก้ได้ทุก field แล้วบันทึก (PATCH)
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/components/auth";
 import { useBackdropDismiss } from "@/components/modal";
+import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
+import { ImageInput } from "@/components/image-input";
 
-type RF = { field_key: string; column_name: string | null; field_label: string; ui_field_type: string; is_visible: boolean; show_in_form: boolean; display_order: number };
+type RF = {
+  field_key: string; column_name: string | null; field_label: string; ui_field_type: string;
+  is_visible: boolean; show_in_form: boolean; is_editable: boolean; is_required: boolean;
+  options: { options?: string[] } | null; relation_config: RelationConfig | null; display_order: number;
+};
 
 const img = (k: unknown) => (k ? `/api/r2-image?key=${encodeURIComponent(String(k))}` : null);
 
-export function RelationPeekModal({ moduleKey, recordId, onClose }: { moduleKey: string; recordId: string; onClose: () => void }) {
+export function RelationPeekModal({
+  moduleKey, recordId, onClose, startInEdit, onChanged,
+}: {
+  moduleKey: string;
+  recordId: string;
+  onClose: () => void;
+  startInEdit?: boolean;          // เปิดมาในโหมดแก้ไขเลย (กดปุ่ม ✎ จากการ์ด)
+  onChanged?: () => void;         // เรียกหลังบันทึกสำเร็จ → ให้ตัวเรียกรีเฟรชรายการ
+}) {
+  const { user } = useAuth();
   const [fields, setFields] = useState<RF[]>([]);
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<Record<string, unknown>>({});
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      setLoading(true);
-      try {
-        const [reg, rec] = await Promise.all([
-          apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json()),
-          apiFetch(`/api/master-v2/${moduleKey}/${recordId}`).then((r) => r.json()),
-        ]);
-        if (!alive) return;
-        setFields((reg.fields ?? []).filter((f: RF) => (f.is_visible || f.show_in_form) && !["one2many", "many2many"].includes(f.ui_field_type)));
-        setRow((rec.data ?? null) as Record<string, unknown> | null);
-      } catch { /* ignore */ }
-      finally { if (alive) setLoading(false); }
-    })();
-    return () => { alive = false; };
+  const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
+
+  const load = useCallback(async () => {
+    setLoading(true); setErr(null);
+    try {
+      const [reg, rec] = await Promise.all([
+        apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json()),
+        apiFetch(`/api/master-v2/${moduleKey}/${recordId}`).then((r) => r.json()),
+      ]);
+      setFields((reg.fields ?? []).filter((f: RF) => (f.is_visible || f.show_in_form) && !["one2many", "many2many"].includes(f.ui_field_type)));
+      setRow((rec.data ?? null) as Record<string, unknown> | null);
+    } catch { /* ignore */ }
+    finally { setLoading(false); }
   }, [moduleKey, recordId]);
 
+  useEffect(() => { void load(); }, [load]);
+
+  // field ที่แก้ไขได้ (เคารพทะเบียน field) — ตัด one2many/many2many/related/computed/id
+  const editableFields = fields.filter(
+    (f) => f.is_editable && f.show_in_form && !["one2many", "many2many", "related", "computed"].includes(f.ui_field_type) && f.field_key !== "id",
+  );
+
+  const enterEdit = () => {
+    if (!row) return;
+    const f: Record<string, unknown> = {};
+    editableFields.forEach((fd) => {
+      const v = row[fd.field_key];
+      f[fd.field_key] = v == null ? (fd.ui_field_type === "boolean" ? false : "") : v;
+    });
+    setForm(f); setErr(null); setEditing(true);
+  };
+
+  // เข้าโหมดแก้ไขทันทีถ้าสั่งมา (หลังโหลด row เสร็จ)
+  useEffect(() => {
+    if (startInEdit && !loading && row && !editing) enterEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startInEdit, loading, row]);
+
+  const save = async () => {
+    setSaving(true); setErr(null);
+    try {
+      const body: Record<string, unknown> = { actor: user?.name };
+      editableFields.forEach((fd) => { body[fd.field_key] = form[fd.field_key]; });
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/${recordId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (j.error) { setErr(j.error); return; }
+      setEditing(false);
+      await load();          // ดึงค่าใหม่ + label มาแสดง
+      onChanged?.();         // ให้รายการต้นทางรีเฟรช
+    } catch (e) { setErr(String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  // ---- view value ----
   const val = (f: RF): React.ReactNode => {
     if (!row) return "—";
     if (f.ui_field_type === "image") {
       const k = row[f.field_key];
       return img(k) ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(k)!} alt="" className="w-20 h-20 rounded object-cover border border-slate-100" /> : <span className="text-slate-300">—</span>;
     }
-    // relation → โชว์ *_label ถ้ามี
     if (f.ui_field_type === "relation") {
-      const lk = f.field_key.endsWith("_id") ? f.field_key.slice(0, -3) + "_label" : null;
-      const lbl = lk ? row[lk] : null;
+      const lk = f.field_key.endsWith("_id") ? f.field_key.slice(0, -3) + "_label" : f.field_key + "_label";
+      const lbl = row[lk];
       return <span>{String(lbl ?? row[f.field_key] ?? "—")}</span>;
     }
     if (f.ui_field_type === "boolean") return row[f.field_key] ? "ใช่" : "ไม่ใช่";
@@ -55,28 +112,73 @@ export function RelationPeekModal({ moduleKey, recordId, onClose }: { moduleKey:
     return <span>{typeof v === "number" ? v.toLocaleString() : String(v)}</span>;
   };
 
+  // ---- edit input ----
+  const editField = (fd: RF) => {
+    const v = form[fd.field_key];
+    if (fd.ui_field_type === "boolean") {
+      return <label className="flex items-center gap-2 text-sm text-slate-700 h-9"><input type="checkbox" checked={!!v} onChange={(e) => set(fd.field_key, e.target.checked)} /> {fd.field_label}</label>;
+    }
+    if (fd.ui_field_type === "relation" && fd.relation_config?.target_table) {
+      return (
+        <div>
+          <label className="text-[11px] font-medium text-slate-500">{fd.field_label}{fd.is_required && " *"}</label>
+          <div className="mt-0.5"><RelationPicker value={(v as string) || null} onChange={(id) => set(fd.field_key, id)} config={fd.relation_config} /></div>
+        </div>
+      );
+    }
+    if (fd.ui_field_type === "image") {
+      return <div><label className="text-[11px] font-medium text-slate-500">{fd.field_label}</label><div className="mt-0.5"><ImageInput value={(v as string) || null} onChange={(k) => set(fd.field_key, k)} folder={moduleKey} /></div></div>;
+    }
+    if (fd.ui_field_type === "select" && fd.options?.options?.length) {
+      return (
+        <div>
+          <label className="text-[11px] font-medium text-slate-500">{fd.field_label}{fd.is_required && " *"}</label>
+          <select value={(v as string) ?? ""} onChange={(e) => set(fd.field_key, e.target.value)} className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+            <option value="">—</option>{fd.options.options.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+      );
+    }
+    const isNum = fd.ui_field_type === "number" || fd.ui_field_type === "currency";
+    return (
+      <div>
+        <label className="text-[11px] font-medium text-slate-500">{fd.field_label}{fd.is_required && " *"}</label>
+        <input type={isNum ? "number" : "text"} value={(v as string | number) ?? ""} step={isNum ? "any" : undefined}
+          onChange={(e) => set(fd.field_key, isNum ? (e.target.value === "" ? null : Number(e.target.value)) : e.target.value)}
+          className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+      </div>
+    );
+  };
+
   const title = row ? String(row["name_th"] ?? row["name"] ?? row["code"] ?? "รายละเอียด") : "รายละเอียด";
   const cover = row ? (row["cover_image_r2_key"] ?? row["image_key"]) : null;
-  const dismiss = useBackdropDismiss(onClose);
+  // ปิดด้วย backdrop ได้เฉพาะตอน "ดู" — โหมดแก้ไขกันปิดพลาด
+  const dismiss = useBackdropDismiss(editing ? () => {} : onClose);
 
   return createPortal(
     <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
-          <h3 className="text-base font-semibold text-slate-800 line-clamp-1">🔗 {title}</h3>
+          <h3 className="text-base font-semibold text-slate-800 line-clamp-1">{editing ? "✎ " : "🔗 "}{title}</h3>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <a href={`/m/${moduleKey}?open=${encodeURIComponent(recordId)}`}
-              className="h-7 px-2.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 inline-flex items-center">
-              เปิดหน้าเต็ม →
-            </a>
+            {!editing && !loading && row && editableFields.length > 0 && (
+              <button onClick={enterEdit} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
+            )}
+            {!editing && (
+              <a href={`/m/${moduleKey}?open=${encodeURIComponent(recordId)}`}
+                className="h-7 px-2.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 inline-flex items-center">เปิดหน้าเต็ม →</a>
+            )}
             <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
           </div>
         </div>
-        <div className="p-5 overflow-auto">
+
+        <div className="p-5 overflow-auto flex-1">
           {loading ? (
             <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
           ) : !row ? (
             <div className="py-10 text-center text-slate-300 text-sm">— ไม่พบข้อมูล —</div>
+          ) : editing ? (
+            <div className="grid grid-cols-2 gap-3">{editableFields.map((f) => <div key={f.field_key}>{editField(f)}</div>)}</div>
           ) : (
             <div className="flex gap-4">
               {img(cover) && (
@@ -95,7 +197,15 @@ export function RelationPeekModal({ moduleKey, recordId, onClose }: { moduleKey:
               </dl>
             </div>
           )}
+          {err && <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">⚠ {err}</div>}
         </div>
+
+        {editing && (
+          <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+            <button onClick={() => { setEditing(false); setErr(null); }} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+          </div>
+        )}
       </div>
     </div>,
     document.body,

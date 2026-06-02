@@ -546,6 +546,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
 
+  // ตัวกรองจากลิงก์ (?flt=<json>) — เปิดหน้าแบบกรองไว้ล่วงหน้า เช่นจากปุ่ม "จัดการกลุ่ม"
+  // ต่างจาก baseFilter ตรงที่ "ล้างได้" (ผู้ใช้กดล้างเพื่อดู/เพิ่มสมาชิกนอกกลุ่มได้)
+  const [urlFilter, setUrlFilter] = useState<Record<string, unknown>>({});
+
   // ---- Fetch (client mode) ----
   const fetchList = useCallback(async () => {
     if (config.serverMode) { setLoading(false); return; }  // server mode ไม่โหลดทั้งก้อน
@@ -553,8 +557,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     try {
       // F19: ลด default 500 → 200 (กัน Worker 1102) — ใช้ search หา row ที่เหลือ
       const limit = config.pageLimit ?? 200;
-      const bf = config.baseFilter && Object.keys(config.baseFilter).length > 0
-        ? `&filters=${encodeURIComponent(JSON.stringify(config.baseFilter))}` : "";
+      const mergedBf = { ...urlFilter, ...(config.baseFilter ?? {}) };
+      const bf = Object.keys(mergedBf).length > 0
+        ? `&filters=${encodeURIComponent(JSON.stringify(mergedBf))}` : "";
       const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -562,7 +567,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       setRows(enrichRelated((json.data ?? []) as Row[]));
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, enrichRelated, ensureRelatedMaps]);
+  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
@@ -582,8 +587,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     });
     if (params.search) qs.set("search", params.search);
     if (params.sortBy)  { qs.set("sort_by", params.sortBy); qs.set("sort_dir", params.sortDir ?? "asc"); }
-    // F27: ส่ง column filters → server (encode เป็น JSON) + baseFilter ตายตัว (ทับไม่ได้)
-    const merged = { ...(params.filters ?? {}), ...(config.baseFilter ?? {}) };
+    // F27: ส่ง column filters → server (encode เป็น JSON) + urlFilter (จากลิงก์) + baseFilter ตายตัว (ทับไม่ได้)
+    const merged = { ...(params.filters ?? {}), ...urlFilter, ...(config.baseFilter ?? {}) };
     if (Object.keys(merged).length > 0) {
       qs.set("filters", JSON.stringify(merged));
     }
@@ -592,7 +597,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (json.error) throw new Error(json.error);
     await ensureRelatedMaps();
     return { rows: enrichRelated((json.data ?? []) as Row[]), total: (json.total as number) ?? 0 };
-  }, [apiBase, config.apiPath, config.baseFilter, enrichRelated, ensureRelatedMaps]);
+  }, [apiBase, config.apiPath, config.baseFilter, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
   // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'
@@ -669,6 +674,31 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     openEdit({ id: openParam } as Row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canView]);
+
+  // อ่านตัวกรองจากลิงก์ ?flt=<json> ครั้งเดียวตอนเข้า → กรองไว้ล่วงหน้า (ล้างได้)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const flt = new URLSearchParams(window.location.search).get("flt");
+    if (!flt) return;
+    try {
+      const parsed = JSON.parse(flt);
+      if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) setUrlFilter(parsed as Record<string, unknown>);
+    } catch { /* ignore */ }
+  }, []);
+  // เมื่อ urlFilter เปลี่ยน (ตั้ง/ล้าง) → ดึงข้อมูลใหม่ (server mode bump key / client refetch)
+  const urlFilterKey = JSON.stringify(urlFilter);
+  useEffect(() => {
+    if (urlFilterKey !== "{}") void refreshData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlFilterKey]);
+  const clearUrlFilter = () => {
+    setUrlFilter({});
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href); u.searchParams.delete("flt");
+      window.history.replaceState({}, "", u.toString());
+    }
+    void refreshData();
+  };
 
   // F11: เตือน unsaved เฉพาะโหมด edit ที่มีการแก้
   const tryClose = () => { if (drawerMode === "edit" && dirty) setConfirmDiscard(true); else setModalOpen(false); };
@@ -1237,6 +1267,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             active={statusFilter}
             onPick={setStatusFilter}
           />
+        )}
+
+        {Object.keys(urlFilter).length > 0 && (
+          <div className="mb-2 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+            🔎 กำลังแสดงเฉพาะรายการที่กรองจากลิงก์ที่เปิดมา
+            <button onClick={clearUrlFilter} className="ml-auto text-xs font-medium px-2 py-1 rounded bg-white border border-amber-300 hover:bg-amber-100">✕ ล้างตัวกรอง (ดูทั้งหมด)</button>
+          </div>
         )}
 
         <DataTable

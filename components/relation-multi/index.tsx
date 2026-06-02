@@ -109,9 +109,9 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
   const subFields  = config.list_sub_fields ?? [];
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [peekId, setPeekId] = useState<string | null>(null);  // กดรายการลูก → เปิดดู record นั้น
+  const [peek, setPeek] = useState<{ id: string; edit: boolean } | null>(null);  // กดรายการลูก → ดู/แก้ record นั้น
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!recordId || !fk) return;
     setLoaded(false);
     // กรองที่ server ด้วย fk โดยตรง (uuid-eq) — รองรับตารางใหญ่ (เช่น skus 12,000+ แถว)
@@ -121,6 +121,8 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
       setLoaded(true);
     }).catch(() => setLoaded(true));
   }, [recordId, fk, moduleKey]);
+
+  useEffect(() => { load(); }, [load]);
 
   // หัวข้อ + จำนวน (สำหรับ 360 view)
   const header = title ? (
@@ -139,12 +141,12 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
   const list = !rich ? (
     <ul className="space-y-1">
       {rows.map((r) => (
-        <li key={String(r.id)}>
-          <button type="button" onClick={() => setPeekId(String(r.id))}
-            className="w-full text-left text-sm text-slate-700 px-2 py-1 bg-slate-50 rounded border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40 inline-flex items-center gap-1">
+        <li key={String(r.id)} className="group flex items-center gap-1 px-2 py-1 bg-slate-50 rounded border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40">
+          <button type="button" onClick={() => setPeek({ id: String(r.id), edit: false })} className="flex-1 min-w-0 text-left text-sm text-slate-700 inline-flex items-center gap-1">
             <span className="flex-1 truncate">{String(r[titleField] ?? r.name ?? r.id)}</span>
-            <span className="text-[10px] opacity-50">🔗</span>
           </button>
+          <button type="button" onClick={() => setPeek({ id: String(r.id), edit: true })} title="แก้ไข"
+            className="flex-shrink-0 w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
         </li>
       ))}
     </ul>
@@ -154,9 +156,8 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
         const sub = subFields.map((f) => fmtVal(r[f])).filter(Boolean).join(" · ");
         const imgKey = imageField ? r[imageField] : null;
         return (
-          <li key={String(r.id)}>
-            <button type="button" onClick={() => setPeekId(String(r.id))}
-              className="w-full text-left flex items-center gap-2.5 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40">
+          <li key={String(r.id)} className="group flex items-center gap-2.5 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40">
+            <button type="button" onClick={() => setPeek({ id: String(r.id), edit: false })} className="flex-1 min-w-0 text-left flex items-center gap-2.5">
               {imageField && (
                 <div className="w-9 h-9 rounded bg-white border border-slate-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
                   {r2img(imgKey)
@@ -168,8 +169,9 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
                 <div className="text-sm text-slate-700 truncate">{String(r[titleField] ?? r.name ?? r.id)}</div>
                 {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
               </div>
-              <span className="text-[10px] opacity-50">🔗</span>
             </button>
+            <button type="button" onClick={() => setPeek({ id: String(r.id), edit: true })} title="แก้ไข"
+              className="flex-shrink-0 w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
           </li>
         );
       })}
@@ -180,8 +182,9 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
     <>
       {header}
       {list}
-      {peekId && moduleKey && (
-        <RelationPeekModal moduleKey={moduleKey} recordId={peekId} onClose={() => setPeekId(null)} />
+      {peek && moduleKey && (
+        <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit}
+          onChanged={load} onClose={() => setPeek(null)} />
       )}
     </>
   );

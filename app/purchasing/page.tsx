@@ -56,6 +56,7 @@ export default function PurchasingShopPage() {
   const [sel, setSel] = useState<Card | null>(null);
   const [vars, setVars] = useState<Variation[]>([]);
   const [varsLoading, setVarsLoading] = useState(false);
+  const [varQ, setVarQ] = useState("");   // ค้นหา SKU ใน popup กลุ่ม
   const pickerDismiss = useBackdropDismiss(() => setPickerOpen(false));
   const groupDismiss = useBackdropDismiss(() => { setSel(null); setVars([]); });
 
@@ -195,7 +196,7 @@ export default function PurchasingShopPage() {
 
   // group mode: เปิด variation modal
   const openGroup = async (c: Card) => {
-    setSel(c); setVars([]); setVarsLoading(true);
+    setSel(c); setVars([]); setVarQ(""); setVarsLoading(true);
     try {
       // ตัวเลือกของกลุ่ม = SKU ที่อยู่ในกลุ่มนี้โดยตรง (คอลัมน์ product_group) — ไม่ใช้ตาราง product_variations แล้ว
       const f = encodeURIComponent(JSON.stringify({ product_group: { type: "text", value: c.id } }));
@@ -478,34 +479,49 @@ export default function PurchasingShopPage() {
           onSaved={() => { setSkuForm(null); setConfirmSku(null); setPage(0); void fetchCards(0); }} />
       )}
 
-      {/* Group variation modal */}
-      {sel && (
-        <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...groupDismiss}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-auto" onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800">{sel.name}</h3>
-              <button onClick={() => { setSel(null); setVars([]); }} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
-            </div>
-            <div className="p-4 space-y-2">
-              <p className="text-xs text-slate-500 mb-1">เลือกตัวเลือก (variation):</p>
-              {varsLoading && <div className="text-sm text-slate-400 py-6 text-center">กำลังโหลด…</div>}
-              {!varsLoading && vars.length === 0 && <div className="text-sm text-slate-300 py-6 text-center">— ยังไม่มี SKU ในกลุ่มนี้ —</div>}
-              {vars.map(v => (
-                <div key={v.key} className="flex items-center gap-3 border border-slate-200 rounded-lg p-2.5">
-                  {img(v.image) && /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(v.image)!} alt="" className="w-10 h-10 rounded object-cover border border-slate-100" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-slate-700 line-clamp-1">{v.label}</div>
-                    <div className="text-xs text-slate-400 line-clamp-1">
-                      {v.color && `สี ${v.color} · `}🏪 {v.seller} ({v.country}) · {v.price.toLocaleString()} {v.currency}/{v.uom}
-                    </div>
-                  </div>
-                  <AddBtn onAdd={(qty) => addVariation(sel, v, qty)} />
+      {/* Group variation modal — ดึง SKU ของกลุ่มมาเลือก + ค้นหา + จัดการกลุ่ม */}
+      {sel && (() => {
+        const ql = varQ.trim().toLowerCase();
+        const shown = ql ? vars.filter(v => v.label.toLowerCase().includes(ql) || (v.skuRef ?? "").toLowerCase().includes(ql)) : vars;
+        const fltUrl = `/m/skus-v2?flt=${encodeURIComponent(JSON.stringify({ product_group: { type: "text", value: sel.id } }))}`;
+        return (
+          <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...groupDismiss}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
+                <h3 className="text-lg font-semibold text-slate-800 line-clamp-1">{sel.name}</h3>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <a href={fltUrl} target="_blank" rel="noopener noreferrer"
+                    className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center"
+                    title="เปิดหน้า SKU กรองเฉพาะกลุ่มนี้ (จัดสมาชิก/เพิ่ม SKU เข้ากลุ่ม)">⚙ จัดการกลุ่ม</a>
+                  <button onClick={() => { setSel(null); setVars([]); }} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
                 </div>
-              ))}
+              </div>
+              {/* ค้นหา SKU ในกลุ่ม */}
+              <div className="px-4 pt-3">
+                <input value={varQ} onChange={e => setVarQ(e.target.value)} placeholder="ค้นหา SKU ในกลุ่มนี้ (ชื่อ/รหัส)..."
+                  className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+              </div>
+              <div className="p-4 space-y-2 overflow-auto flex-1">
+                {varsLoading && <div className="text-sm text-slate-400 py-6 text-center">กำลังโหลด…</div>}
+                {!varsLoading && vars.length === 0 && <div className="text-sm text-slate-300 py-6 text-center">— ยังไม่มี SKU ในกลุ่มนี้ —</div>}
+                {!varsLoading && vars.length > 0 && shown.length === 0 && <div className="text-sm text-slate-300 py-6 text-center">— ไม่พบ SKU ที่ตรงกับ &quot;{varQ}&quot; —</div>}
+                {shown.map(v => (
+                  <div key={v.key} className="flex items-center gap-3 border border-slate-200 rounded-lg p-2.5">
+                    {img(v.image) && /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(v.image)!} alt="" className="w-10 h-10 rounded object-cover border border-slate-100" />}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-slate-700 line-clamp-1">{v.label}</div>
+                      <div className="text-xs text-slate-400 line-clamp-1">
+                        {v.skuRef && `${v.skuRef} · `}{v.color && `สี ${v.color} · `}🏪 {v.seller} ({v.country}) · {v.price.toLocaleString()} {v.currency}/{v.uom}
+                      </div>
+                    </div>
+                    <AddBtn onAdd={(qty) => addVariation(sel, v, qty)} />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
     </PlaygroundShell>
   );
