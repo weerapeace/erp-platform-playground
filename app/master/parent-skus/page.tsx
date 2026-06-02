@@ -44,9 +44,9 @@ const CONFIG: MasterCRUDConfig = {
   description: "Product Templates — จัดการ visible/filter/search/required ที่ /admin/schema-sync",
   icon:        "📦",
   activeField: "is_active",
-  // F26: client mode (1,471 rows) → filter/saved-views/card view ใช้ได้
-  // โหลด 2000 แถวรวด — Worker render ไหว (client-only page, ไม่ SSR)
-  pageLimit:   2000,
+  // server mode — โหลดทีละหน้า (smooth + กัน 1102) เหมือนหน้า SKU; card view เปิดได้ใน server mode แล้ว
+  serverMode:  true,
+  pageLimit:   200,
   exportEntityType: "parent_skus_v2",
   permissions: {
     view:   "products.view",

@@ -1248,12 +1248,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           onRowClick={openEdit}
           serverFetch={config.serverMode ? serverFetch : undefined}
           serverRefreshKey={config.serverMode ? serverRefresh : undefined}
-          enableCards={!config.serverMode}
-          cardConfig={!config.serverMode ? {
+          enableCards={true}
+          cardConfig={{
             image:    "cover_image_r2_key",
             primary:  effectiveSearchKeys[0] ?? "name_th",
             subtitle: "code",
-          } : undefined}
+          }}
           filterFieldOptions={config.moduleKey ? filterFieldOptions : undefined}
           onSetFilterable={config.moduleKey && canEdit ? handleSetFilterable : undefined}
         />
