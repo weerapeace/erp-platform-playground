@@ -302,7 +302,14 @@ const readySections = [
 
 export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { can } = useAuth();
+  const { can, user, ready } = useAuth();
+  const router = useRouter();
+  // ยังไม่ได้ login → เด้งไปหน้าเข้าสู่ระบบ (ของกลาง — ทุกหน้าในเชลล์)
+  useEffect(() => {
+    if (ready && !user && pathname !== "/login") {
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    }
+  }, [ready, user, pathname, router]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -376,6 +383,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // ระหว่างเด้งไป /login (ยังไม่ login) — ไม่ต้องโชว์เชลล์
+  if (ready && !user) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">กำลังไปหน้าเข้าสู่ระบบ…</div>;
+  }
 
   return (
     <div className="flex min-h-screen bg-slate-50">
