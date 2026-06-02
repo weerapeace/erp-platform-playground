@@ -150,6 +150,8 @@ export async function POST(request: NextRequest) {
     display_order: nextOrder,
     show_in_form: true,
     is_inline_editable: false,
+    // ของกลาง: field ใหม่ชนิดปกติ → เปิด bulk edit อัตโนมัติ (virtual/image ไม่เปิด) — ปิดเองได้ที่ Studio
+    is_bulk_editable: ["text", "number", "boolean", "select", "relation", "currency", "date", "textarea"].includes(b.ui_type),
   });
   if (insErr) return NextResponse.json({ error: "ลงทะเบียน field ไม่สำเร็จ: " + insErr.message }, { status: 500 });
 
