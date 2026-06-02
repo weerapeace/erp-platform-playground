@@ -60,7 +60,7 @@ function rateFor(amt: number, r1: number): number {
   return +(r1 - RATE_OFFSET.r4).toFixed(4);
 }
 
-type Tab = "dashboard" | "bill" | "pending" | "all" | "rate" | "ctw" | "transfer";
+type Tab = "dashboard" | "bill" | "transfer" | "all" | "rate" | "ctw" | "menusettings";
 
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
@@ -74,11 +74,31 @@ const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "rate", icon: "💱", label: "เรท" },
   { k: "ctw", icon: "📑", label: "บิลจาก CTW" },
 ];
+const ALL_TAB_KEYS = MENU.map(m => m.k);
+
+// บทบาทที่ตั้งสิทธิ์เมนูได้ (admin เห็นทุกเมนูเสมอ)
+const ROLE_OPTS: { key: string; label: string }[] = [
+  { key: "manager", label: "ผู้จัดการ" },
+  { key: "ops", label: "ฝ่ายปฏิบัติการ" },
+  { key: "staff", label: "พนักงาน" },
+  { key: "editor", label: "ผู้แก้ไข" },
+  { key: "viewer", label: "ดูอย่างเดียว" },
+  { key: "marketplace", label: "มาร์เก็ตเพลส" },
+];
 
 export default function ChinaPayApp() {
   const { user, ready } = useAuth();
   const [tab, setTab] = useState<Tab>("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuCfg, setMenuCfg] = useState<Record<string, string[]>>({});
+
+  // โหลดสิทธิ์เมนูตาม role
+  useEffect(() => {
+    apiFetch("/api/master-v2/china-app-settings?limit=5").then(r => r.json()).then(j => {
+      const row = (j.data ?? []).find((x: Record<string, unknown>) => x.skey === "menu_roles");
+      if (row && row.sval && typeof row.sval === "object") setMenuCfg(row.sval as Record<string, string[]>);
+    }).catch(() => {});
+  }, []);
 
   if (!ready) return <Center>กำลังโหลด…</Center>;
   if (!user) return (
@@ -88,8 +108,19 @@ export default function ChinaPayApp() {
     </Center>
   );
 
-  const current = MENU.find(m => m.k === tab);
+  const isAdmin = user.role === "admin";
+  const allowed = isAdmin ? ALL_TAB_KEYS : (menuCfg[user.role] ?? ALL_TAB_KEYS);
+  const navMenu: { k: Tab; icon: string; label: string }[] = MENU.filter(m => allowed.includes(m.k));
+  if (isAdmin) navMenu.push({ k: "menusettings", icon: "⚙️", label: "ตั้งค่าเมนู" });
+
+  const renderTab: Tab = navMenu.some(m => m.k === tab) ? tab : (navMenu[0]?.k ?? "dashboard");
+  const current = navMenu.find(m => m.k === renderTab);
   const go = (k: Tab) => { setTab(k); setMenuOpen(false); };
+
+  // แถบล่าง: โชว์ไม่เกิน 4 + ปุ่ม "⋯ เพิ่มเติม" ถ้ามีมากกว่า
+  const bottomItems = navMenu.slice(0, 4);
+  const hasMore = navMenu.length > bottomItems.length;
+  const cols = bottomItems.length + (hasMore ? 1 : 0);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -103,14 +134,34 @@ export default function ChinaPayApp() {
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-4 pb-8">
-          {tab === "dashboard" && <Dashboard onGo={go} />}
-          {tab === "bill" && <BillForm />}
-          {tab === "all" && <AllList />}
-          {tab === "rate" && <RateTab />}
-          {tab === "ctw" && <CtwList />}
-          {tab === "transfer" && <TransferPage />}
+        <main className="flex-1 overflow-y-auto p-4 pb-24">
+          {renderTab === "dashboard" && <Dashboard onGo={go} />}
+          {renderTab === "bill" && <BillForm />}
+          {renderTab === "all" && <AllList />}
+          {renderTab === "rate" && <RateTab />}
+          {renderTab === "ctw" && <CtwList />}
+          {renderTab === "transfer" && <TransferPage />}
+          {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
         </main>
+
+        {/* แถบเมนูล่าง */}
+        {cols > 0 && (
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 grid z-20"
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
+            {bottomItems.map(m => (
+              <button key={m.k} onClick={() => go(m.k)}
+                className={`py-2 flex flex-col items-center gap-0.5 text-[11px] ${renderTab === m.k ? "text-rose-600 font-semibold" : "text-slate-400"}`}>
+                <span className="text-lg leading-none">{m.icon}</span>{m.label}
+              </button>
+            ))}
+            {hasMore && (
+              <button onClick={() => setMenuOpen(true)}
+                className="py-2 flex flex-col items-center gap-0.5 text-[11px] text-slate-400">
+                <span className="text-lg leading-none">⋯</span>เพิ่มเติม
+              </button>
+            )}
+          </nav>
+        )}
       </div>
 
       {/* เมนูทั้งหมด (เด้งจากปุ่ม ☰) */}
@@ -122,9 +173,9 @@ export default function ChinaPayApp() {
               <div className="text-xs opacity-90 mt-0.5">{user.name}</div>
             </div>
             <div className="flex-1 overflow-y-auto py-2">
-              {MENU.map(m => (
+              {navMenu.map(m => (
                 <button key={m.k} onClick={() => go(m.k)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-left ${tab === m.k ? "bg-rose-50 text-rose-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-left ${renderTab === m.k ? "bg-rose-50 text-rose-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
                   <span className="text-xl w-7 text-center">{m.icon}</span>{m.label}
                 </button>
               ))}
@@ -132,6 +183,68 @@ export default function ChinaPayApp() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------- ตั้งค่าเมนูตาม role (เฉพาะแอดมิน) ----------------
+function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => void }) {
+  const toast = useToast();
+  const [local, setLocal] = useState<Record<string, string[]>>({});
+  const [rowId, setRowId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch("/api/master-v2/china-app-settings?limit=5").then(r => r.json()).then(j => {
+      const row = (j.data ?? []).find((x: Record<string, unknown>) => x.skey === "menu_roles");
+      if (row) { setRowId(String(row.id)); if (row.sval && typeof row.sval === "object") setLocal(row.sval as Record<string, string[]>); }
+    }).catch(() => {});
+  }, []);
+
+  const isOn = (role: string, k: string) => (local[role] ?? ALL_TAB_KEYS).includes(k);
+  const toggle = (role: string, k: string) => setLocal(prev => {
+    const cur = prev[role] ?? ALL_TAB_KEYS;
+    const next = cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k];
+    return { ...prev, [role]: next };
+  });
+  const save = async () => {
+    if (!rowId) { toast.error("ยังโหลดไม่เสร็จ ลองใหม่"); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-app-settings/${rowId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sval: local, actor: "china-app" }),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      toast.success("บันทึกสิทธิ์เมนูแล้ว"); onSaved(local);
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="text-sm text-slate-500">เลือกว่าแต่ละบทบาทเห็นเมนูไหนได้บ้าง — แอดมินเห็นทุกเมนูเสมอ</div>
+      {ROLE_OPTS.map(role => (
+        <Card key={role.key}>
+          <div className="font-semibold text-slate-800 mb-2">{role.label} <span className="text-xs text-slate-400">({role.key})</span></div>
+          <div className="grid grid-cols-2 gap-2">
+            {MENU.map(m => {
+              const on = isOn(role.key, m.k);
+              return (
+                <button key={m.k} onClick={() => toggle(role.key, m.k)}
+                  className={`flex items-center gap-1.5 p-2 rounded-lg border text-sm ${on ? "border-emerald-400 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-400"}`}>
+                  <span>{on ? "✓" : "○"}</span><span className="truncate">{m.icon} {m.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      ))}
+      <button onClick={save} disabled={saving}
+        className="w-full h-12 bg-rose-600 text-white rounded-xl font-semibold disabled:opacity-50">
+        {saving ? "กำลังบันทึก…" : "บันทึกสิทธิ์เมนู"}
+      </button>
     </div>
   );
 }
@@ -895,9 +1008,10 @@ function TransferPage() {
   const [balance, setBalance] = useState<{ thb: number; rmb: number }>({ thb: 0, rmb: 0 });
   const [loading, setLoading] = useState(true);
 
-  // CTW ที่ยังไม่ตัด
+  // CTW ที่ยังไม่ตัด (รองรับตัดบางส่วน)
   const [ctw, setCtw] = useState<Record<string, unknown>[]>([]);
   const [ctwSel, setCtwSel] = useState<Set<string>>(new Set());
+  const [ctwPay, setCtwPay] = useState<Record<string, string>>({});
   const [ctwBusy, setCtwBusy] = useState(false);
 
   const loadAll = useCallback(() => {
@@ -974,20 +1088,32 @@ function TransferPage() {
     finally { setSaving(false); }
   };
 
-  // ตัด/เคลียร์ บิล CTW
-  const ctwToggle = (id: string) => setCtwSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const ctwTotal = useMemo(() => ctw.reduce((a, r) => a + num(r.net_amount), 0), [ctw]);
+  // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
+  const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
+  const ctwToggle = (id: string, remain: number) => setCtwSel(s => {
+    const n = new Set(s);
+    if (n.has(id)) { n.delete(id); setCtwPay(p => { const q = { ...p }; delete q[id]; return q; }); }
+    else { n.add(id); setCtwPay(p => ({ ...p, [id]: String(remain) })); }   // เติมยอดคงเหลือให้ แก้เป็นบางส่วนได้
+    return n;
+  });
+  const ctwTotal = useMemo(() => ctw.reduce((a, r) => a + ctwRemain(r), 0), [ctw]);
   const clearCtw = async () => {
     if (ctwSel.size === 0) { toast.error("เลือกบิล CTW ที่จะตัดก่อน"); return; }
     setCtwBusy(true);
     try {
       const ids = [...ctwSel];
-      await Promise.all(ids.map(id => apiFetch(`/api/master-v2/ctw-bills/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cleared_at: new Date().toISOString(), actor: "china-app" }),
-      })));
-      toast.success(`ตัดบิล CTW ${ids.length} ใบแล้ว`);
-      setCtw(p => p.filter(r => !ctwSel.has(String(r.id)))); setCtwSel(new Set());
+      await Promise.all(ids.map(id => {
+        const r = ctw.find(x => String(x.id) === id);
+        const net = num(r?.net_amount), already = num(r?.cleared_amount);
+        const pay = Math.max(0, num(ctwPay[id]));
+        const newCleared = Math.min(net, already + pay);
+        return apiFetch(`/api/master-v2/ctw-bills/${id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cleared_amount: newCleared, cleared_at: newCleared >= net ? new Date().toISOString() : null, actor: "china-app" }),
+        });
+      }));
+      toast.success(`ตัดบิล CTW ${ids.length} รายการแล้ว`);
+      setCtwSel(new Set()); setCtwPay({}); loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setCtwBusy(false); }
   };
@@ -1075,13 +1201,13 @@ function TransferPage() {
         </button>
       </Card>
 
-      {/* บิล CTW ที่ยังไม่ตัด */}
+      {/* บิล CTW ที่ยังไม่ตัด — ยอดคงเหลือสีส้ม + ตัดบางส่วนได้ */}
       <Card>
         <div className="flex justify-between items-center mb-2">
           <div className="font-semibold text-slate-800">บิล CTW ที่ยังไม่ตัด</div>
           <div className="text-right">
-            <div className="text-xs text-slate-400">{ctw.length} บิล</div>
-            <div className="font-bold text-rose-600">฿{fmt(ctwTotal)}</div>
+            <div className="text-[11px] text-slate-400">ยอดคงเหลือยังไม่ตัด ({ctw.length} บิล)</div>
+            <div className="font-bold text-orange-500 text-xl">฿{fmt(ctwTotal)}</div>
           </div>
         </div>
         {ctw.length === 0 ? (
@@ -1090,23 +1216,35 @@ function TransferPage() {
           <>
             <div className="space-y-2">
               {ctw.map((r) => {
-                const id = String(r.id), on = ctwSel.has(id);
+                const id = String(r.id), on = ctwSel.has(id), remain = ctwRemain(r), paid = num(r.cleared_amount);
                 return (
-                  <button key={id} onClick={() => ctwToggle(id)}
-                    className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left ${on ? "border-rose-400 bg-rose-50" : "border-slate-200"}`}>
-                    <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-rose-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-slate-800 truncate">{String(r.company_name ?? "—")}</span>
-                      <span className="block text-xs text-slate-400">เลขที่ {String(r.doc_number ?? "—")} · {String(r.doc_date ?? "—")}</span>
-                    </span>
-                    <span className="font-semibold text-slate-800 flex-shrink-0">฿{fmt(num(r.net_amount))}</span>
-                  </button>
+                  <div key={id} className={`rounded-lg border ${on ? "border-rose-400 bg-rose-50" : "border-slate-200"}`}>
+                    <button onClick={() => ctwToggle(id, remain)} className="w-full flex items-center gap-3 p-2.5 text-left">
+                      <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-rose-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-medium text-slate-800 truncate">{String(r.company_name ?? "—")}</span>
+                        <span className="block text-xs text-slate-400">เลขที่ {String(r.doc_number ?? "—")} · {String(r.doc_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ฿${fmt(paid)}` : ""}</span>
+                      </span>
+                      <span className="text-right flex-shrink-0">
+                        <span className="block font-semibold text-slate-800">฿{fmt(remain)}</span>
+                        {paid > 0 && <span className="block text-[10px] text-slate-400">เต็ม ฿{fmt(num(r.net_amount))}</span>}
+                      </span>
+                    </button>
+                    {on && (
+                      <div className="px-2.5 pb-2.5 flex items-center gap-2">
+                        <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้</span>
+                        <input type="number" inputMode="decimal" step="any" value={ctwPay[id] ?? ""}
+                          onChange={e => setCtwPay(p => ({ ...p, [id]: e.target.value }))}
+                          className="flex-1 h-9 px-2 text-base text-right border border-rose-300 rounded-lg" />
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
             <button onClick={clearCtw} disabled={ctwBusy || ctwSel.size === 0}
               className="mt-3 w-full h-11 border border-rose-300 text-rose-700 rounded-lg text-sm font-medium hover:bg-rose-50 disabled:opacity-50">
-              {ctwBusy ? "…" : `✓ ตัดเป็นเคลียร์แล้ว (${ctwSel.size})`}
+              {ctwBusy ? "…" : `✓ บันทึกการตัด (${ctwSel.size})`}
             </button>
           </>
         )}
