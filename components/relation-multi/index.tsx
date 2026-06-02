@@ -101,7 +101,7 @@ const fmtVal = (v: unknown) => {
   return String(v);
 };
 
-export function RelationOne2Many({ config, recordId }: { config: RelConfig; recordId?: string | null }) {
+export function RelationOne2Many({ config, recordId, title }: { config: RelConfig; recordId?: string | null; title?: string }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const fk = config.target_fk_column ?? "";
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
@@ -122,9 +122,17 @@ export function RelationOne2Many({ config, recordId }: { config: RelConfig; reco
     }).catch(() => setLoaded(true));
   }, [recordId, fk, moduleKey]);
 
-  if (!recordId) return <div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>;
-  if (!loaded) return <div className="text-xs text-slate-400">กำลังโหลด…</div>;
-  if (rows.length === 0) return <div className="text-xs text-slate-300">— ไม่มีรายการ —</div>;
+  // หัวข้อ + จำนวน (สำหรับ 360 view)
+  const header = title ? (
+    <div className="flex items-center gap-1.5 mb-1.5">
+      <span className="text-sm font-medium text-slate-700">{title}</span>
+      {loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{rows.length}{rows.length >= 200 ? "+" : ""}</span>}
+    </div>
+  ) : null;
+
+  if (!recordId) return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div></>;
+  if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div></>;
+  if (rows.length === 0) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div></>;
 
   const rich = !!(imageField || subFields.length > 0);
 
@@ -170,6 +178,7 @@ export function RelationOne2Many({ config, recordId }: { config: RelConfig; reco
 
   return (
     <>
+      {header}
       {list}
       {peekId && moduleKey && (
         <RelationPeekModal moduleKey={moduleKey} recordId={peekId} onClose={() => setPeekId(null)} />

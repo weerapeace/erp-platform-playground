@@ -1420,19 +1420,20 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           if (rels.length === 0) return null;
           return (
             <div className="mt-6 pt-4 border-t border-slate-100 space-y-4">
-              <div className="text-sm font-semibold text-slate-700">🔗 รายการที่เชื่อมมา</div>
-              {rels.map((rr) => (
-                <div key={`${rr.source_module_key}|${rr.fk_column}`}>
-                  <div className="text-xs text-slate-500 mb-1">{rr.source_label}</div>
-                  <RelationOne2Many recordId={editingId} config={{
-                    target_module_key: rr.source_module_key,
-                    target_fk_column: rr.fk_column,
-                    list_title_field: rr.label_field,
-                    list_image_field: rr.image_field ?? undefined,
-                    list_sub_fields: rr.sub_fields,
-                  }} />
-                </div>
-              ))}
+              <div className="text-sm font-semibold text-slate-700">🧩 ข้อมูลที่เกี่ยวข้อง (360)</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {rels.map((rr) => (
+                  <div key={`${rr.source_module_key}|${rr.fk_column}`} className="border border-slate-150 rounded-lg p-3 bg-slate-50/40">
+                    <RelationOne2Many recordId={editingId} title={rr.source_label} config={{
+                      target_module_key: rr.source_module_key,
+                      target_fk_column: rr.fk_column,
+                      list_title_field: rr.label_field,
+                      list_image_field: rr.image_field ?? undefined,
+                      list_sub_fields: rr.sub_fields,
+                    }} />
+                  </div>
+                ))}
+              </div>
             </div>
           );
         })()}

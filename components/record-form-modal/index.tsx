@@ -28,12 +28,13 @@ type RF = {
 };
 
 export function RecordFormModal({
-  moduleKey, title, presetLabelField, presetValue, onClose, onSaved,
+  moduleKey, title, presetLabelField, presetValue, preset, onClose, onSaved,
 }: {
   moduleKey: string;
   title?: string;
   presetLabelField?: string;
   presetValue?: string;
+  preset?: Record<string, unknown>;   // เติมค่าตายตัว เช่น FK (group_id) — ส่งเสมอแม้ไม่ได้โชว์เป็น field
   onClose: () => void;
   onSaved: (id: string, label: string) => void;
 }) {
@@ -59,6 +60,7 @@ export function RecordFormModal({
       const f: Record<string, unknown> = {};
       ff.forEach((fd) => { f[fd.field_key] = fd.ui_field_type === "boolean" ? false : ""; });
       if (presetLabelField && presetValue) f[presetLabelField] = presetValue;  // เติมค่าจากคำที่พิมพ์ค้นหา
+      if (preset) Object.assign(f, preset);
       setForm(f);
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setLoading(false); }
@@ -71,6 +73,7 @@ export function RecordFormModal({
     try {
       const body: Record<string, unknown> = { actor: user?.name };
       fields.forEach((fd) => { body[fd.field_key] = form[fd.field_key]; });
+      if (preset) Object.assign(body, preset);   // FK ตายตัว (เช่น group_id) ต้องถูกส่งเสมอ
       const res = await apiFetch(`/api/master-v2/${moduleKey}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });

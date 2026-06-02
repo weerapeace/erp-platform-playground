@@ -12,6 +12,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
+import { RecordFormModal } from "@/components/record-form-modal";
 import { useBackdropDismiss } from "@/components/modal";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
@@ -56,6 +57,7 @@ export default function PurchasingShopPage() {
   const [sel, setSel] = useState<Card | null>(null);
   const [vars, setVars] = useState<Variation[]>([]);
   const [varsLoading, setVarsLoading] = useState(false);
+  const [createVar, setCreateVar] = useState(false);   // ฟอร์มสร้าง variation ใหม่
   const pickerDismiss = useBackdropDismiss(() => setPickerOpen(false));
   const groupDismiss = useBackdropDismiss(() => { setSel(null); setVars([]); });
 
@@ -477,9 +479,27 @@ export default function PurchasingShopPage() {
                   <AddBtn onAdd={(qty) => addVariation(sel, v, qty)} />
                 </div>
               ))}
+              {!varsLoading && (
+                <button onClick={() => setCreateVar(true)}
+                  className="w-full mt-1 h-9 text-sm font-medium border border-dashed border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">
+                  ＋ สร้างตัวเลือกใหม่ (variation)
+                </button>
+              )}
             </div>
           </div>
         </div>
+      )}
+
+      {/* ฟอร์มสร้าง variation ใหม่ (ของกลาง) — เติม group_id อัตโนมัติ */}
+      {createVar && sel && (
+        <RecordFormModal
+          moduleKey="product-variations"
+          title={`ตัวเลือกของ ${sel.name}`}
+          presetLabelField="variation_label"
+          preset={{ group_id: sel.id }}
+          onClose={() => setCreateVar(false)}
+          onSaved={() => { setCreateVar(false); void openGroup(sel); }}
+        />
       )}
     </PlaygroundShell>
   );
