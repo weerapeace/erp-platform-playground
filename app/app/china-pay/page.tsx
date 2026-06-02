@@ -28,7 +28,7 @@ const CTW_PARTNER_CFG: RelationConfig = {
 
 const VAT_RATE = 0.07;   // ภาษี 7%
 
-const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
+const num = (v: unknown) => { const n = Number(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
 const fmt = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 4 });
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -1165,7 +1165,7 @@ function TransferPage() {
 
       <Card>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label><Num value={amount} onChange={setAmount} /></div>
+          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label><Money value={amount} onChange={setAmount} /></div>
           <div><Label>วันที่โอน</Label>
             <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
               className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
@@ -1243,8 +1243,7 @@ function TransferPage() {
                     {on && (
                       <div className="px-2.5 pb-2.5 flex items-center gap-2">
                         <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้</span>
-                        <input type="number" inputMode="decimal" step="any" value={ctwPay[id] ?? ""}
-                          onChange={e => setCtwPay(p => ({ ...p, [id]: e.target.value }))}
+                        <Money value={ctwPay[id] ?? ""} onChange={(v) => setCtwPay(p => ({ ...p, [id]: v }))}
                           className="flex-1 h-9 px-2 text-base text-right border border-rose-300 rounded-lg" />
                       </div>
                     )}
@@ -1486,6 +1485,25 @@ function Label({ children }: { children: React.ReactNode }) {
 function Num({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   return <input type="number" inputMode="decimal" step="any" value={value} placeholder={placeholder}
     onChange={e => onChange(e.target.value)} className="w-full h-11 px-3 text-base text-right border border-slate-200 rounded-lg" />;
+}
+// ช่องจำนวนเงิน — โชว์ลูกน้ำคั่นหลักพัน (เก็บค่าจริงไม่มีลูกน้ำ)
+function Money({ value, onChange, placeholder, className }: { value: string; onChange: (v: string) => void; placeholder?: string; className?: string }) {
+  const display = (() => {
+    const s = String(value ?? "");
+    if (s === "" || !/[0-9]/.test(s)) return s;
+    const [i, ...d] = s.split(".");
+    const intf = (i || "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return d.length ? `${intf}.${d.join("")}` : (s.endsWith(".") ? `${intf}.` : intf);
+  })();
+  const handle = (raw: string) => {
+    let cleaned = raw.replace(/,/g, "").replace(/[^0-9.]/g, "");
+    const p = cleaned.split(".");
+    if (p.length > 2) cleaned = p[0] + "." + p.slice(1).join("");
+    onChange(cleaned);
+  };
+  return <input type="text" inputMode="decimal" value={display} placeholder={placeholder}
+    onChange={e => handle(e.target.value)}
+    className={className ?? "w-full h-11 px-3 text-base text-right border border-slate-200 rounded-lg"} />;
 }
 function Row({ label, v }: { label: string; v: unknown }) {
   if (v == null || v === "") return null;
