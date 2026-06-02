@@ -5,7 +5,7 @@
  * เปิดผ่าน /app/china-pay · เห็นแค่โมดูลนี้ ไม่มี sidebar/โมดูลอื่น
  * reuse data layer กลาง: /api/master-v2/china-bills + RelationPicker + FileInput + toast
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -297,6 +297,8 @@ function PendingList() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [confirm, setConfirm] = useState<Record<string, unknown> | null>(null);
+  const [report, setReport] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -309,7 +311,7 @@ function PendingList() {
   const total = useMemo(() => rows.reduce((a, r) => a + (num(r.amount_rmb) + num(r.fee_rmb)), 0), [rows]);
 
   const markDone = async (id: string) => {
-    setBusy(id);
+    setBusy(id); setConfirm(null);
     try {
       const res = await apiFetch(`/api/master-v2/china-bills/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -322,6 +324,9 @@ function PendingList() {
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(null); }
   };
+
+  const onPrinted = (id: string, at: string) =>
+    setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
   if (rows.length === 0) return <div className="text-center text-slate-300 py-10">— ไม่มีบิลรอโอน —</div>;
@@ -338,19 +343,33 @@ function PendingList() {
             <div className="min-w-0">
               <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
               <div className="text-xs text-slate-400">วันที่โอน {String(r.transfer_date ?? "—")}</div>
+              {r.printed_at ? <PrintedBadge /> : null}
             </div>
             <div className="text-right flex-shrink-0">
               <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
               <div className="text-xs text-rose-600">฿{fmt((num(r.amount_rmb) + num(r.fee_rmb)) * num(r.rate))}</div>
             </div>
           </button>
-          <button onClick={() => markDone(String(r.id))} disabled={busy === String(r.id)}
-            className="mt-3 w-full h-10 border border-emerald-300 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 disabled:opacity-50">
-            {busy === String(r.id) ? "…" : "✓ ทำเครื่องหมายว่าโอนแล้ว"}
-          </button>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button onClick={() => setReport(r)}
+              className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์</button>
+            <button onClick={() => setConfirm(r)} disabled={busy === String(r.id)}
+              className="h-10 border border-emerald-300 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 disabled:opacity-50">
+              {busy === String(r.id) ? "…" : "✓ โอนแล้ว"}
+            </button>
+          </div>
         </Card>
       ))}
-      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} />}
+      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} />}
+      {confirm && (
+        <ConfirmPopup
+          title="ยืนยันว่าโอนแล้ว?"
+          message={`${String(confirm.supplier_label ?? confirm.supplier_id ?? "บิลนี้")} · ¥${fmt(num(confirm.amount_rmb) + num(confirm.fee_rmb))}`}
+          confirmText="ยืนยัน โอนแล้ว" tone="emerald"
+          onCancel={() => setConfirm(null)} onConfirm={() => markDone(String(confirm.id))}
+        />
+      )}
+      {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
     </div>
   );
 }
@@ -362,6 +381,9 @@ function AllList() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("ทั้งหมด");
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+
+  const onPrinted = (id: string, at: string) =>
+    setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
 
   useEffect(() => {
     setLoading(true);
@@ -398,6 +420,7 @@ function AllList() {
                 <div className="min-w-0">
                   <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
                   <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")}</div>
+                  {r.printed_at ? <PrintedBadge /> : null}
                 </div>
                 <div className="text-right flex-shrink-0">
                   <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
@@ -408,14 +431,15 @@ function AllList() {
           );
         })
       )}
-      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} />}
+      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} />}
     </div>
   );
 }
 
 // ---------------- รายละเอียดบิล (ดูอย่างเดียว) ----------------
-function BillDetail({ bill, onClose }: { bill: Record<string, unknown>; onClose: () => void }) {
+function BillDetail({ bill, onClose, onPrinted }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void }) {
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
+  const [report, setReport] = useState(false);
   const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
   useEffect(() => {
     if (!supplierId) return;
@@ -470,7 +494,14 @@ function BillDetail({ bill, onClose }: { bill: Record<string, unknown>; onClose:
           <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
             <Row label="วันที่โอน" v={bill.transfer_date} />
             <Row label="วันที่ลงบิล" v={bill.bill_date} />
+            {bill.printed_at ? <Row label="พิมพ์เมื่อ" v={String(bill.printed_at).slice(0, 16).replace("T", " ")} /> : null}
           </div>
+
+          {/* ปุ่มพิมพ์/ใบสรุป */}
+          <button onClick={() => setReport(true)}
+            className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
+            🖨️ พิมพ์ / ใบสรุป
+          </button>
 
           {/* แนบไฟล์ */}
           {allFiles.length > 0 && (
@@ -496,6 +527,7 @@ function BillDetail({ bill, onClose }: { bill: Record<string, unknown>; onClose:
           )}
         </div>
       </div>
+      {report && <ReportPopup bill={{ ...bill, _sup: sup }} onClose={() => setReport(false)} onPrinted={onPrinted} />}
     </div>
   );
 }
@@ -553,6 +585,181 @@ function RateTab() {
             <span className="text-slate-700">R1 <b>{fmt(num(r.rate))}</b> <span className="text-slate-400">· R4 {fmt(+(num(r.rate) - RATE_OFFSET.r4).toFixed(4))}</span></span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------- ป้าย "พิมพ์แล้ว" ----------------
+function PrintedBadge() {
+  return <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">🖨️ พิมพ์แล้ว</span>;
+}
+
+// ---------------- Popup ยืนยัน (ของกลางเล็กๆ) ----------------
+function ConfirmPopup({ title, message, confirmText = "ยืนยัน", tone = "rose", onCancel, onConfirm }: {
+  title: string; message?: string; confirmText?: string; tone?: "rose" | "emerald"; onCancel: () => void; onConfirm: () => void;
+}) {
+  const btn = tone === "emerald" ? "bg-emerald-600" : "bg-rose-600";
+  return (
+    <div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
+        <div className="text-lg font-semibold text-slate-800">{title}</div>
+        {message && <div className="mt-1 text-sm text-slate-500">{message}</div>}
+        <div className="mt-5 flex gap-2">
+          <button onClick={onCancel} className="flex-1 h-11 border border-slate-200 rounded-lg text-slate-700">ยกเลิก</button>
+          <button onClick={onConfirm} className={`flex-1 h-11 ${btn} text-white rounded-lg font-medium`}>{confirmText}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- ใบสรุป (report) → บันทึกรูป / ส่ง LINE ----------------
+function ReportPopup({ bill, onClose, onPrinted }: {
+  bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void;
+}) {
+  const toast = useToast();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [sup, setSup] = useState<Record<string, unknown> | null>((bill._sup as Record<string, unknown>) ?? null);
+  const [busy, setBusy] = useState(false);
+
+  const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
+  useEffect(() => {
+    if (sup || !supplierId) return;
+    apiFetch(`/api/master-v2/partners/${supplierId}`).then(r => r.json()).then(j => setSup(j.data ?? null)).catch(() => {});
+  }, [supplierId, sup]);
+
+  const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
+  const thb = totalRmb * rate;
+  const supName = String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—");
+
+  // วาดใบสรุปลง canvas
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    type Line = { l: string; r: string; bold?: boolean; color?: string; big?: boolean; sep?: boolean };
+    const lines: Line[] = [
+      { l: "ร้านค้า", r: supName, bold: true },
+      ...(sup?.name_en ? [{ l: "", r: String(sup.name_en) } as Line] : []),
+      { l: "ธนาคาร", r: sup?.bank_name_brief ? String(sup.bank_name_brief) : "—" },
+      { l: "เลขบัญชี", r: sup?.account_number ? String(sup.account_number) : "—" },
+      { l: "ชื่อบัญชี", r: sup?.bank_account_name ? String(sup.bank_account_name) : "—" },
+      { l: "", r: "", sep: true },
+      { l: "ยอด (¥)", r: fmt(amount) },
+      { l: "ค่าโอน (¥)", r: fmt(fee) },
+      { l: "ยอดโอนรวม", r: "¥" + fmt(totalRmb), bold: true },
+      { l: "เรท", r: rate ? fmt(rate) : "—" },
+      { l: "เป็นเงินบาท", r: "฿" + fmt(thb), bold: true, color: "#e11d48", big: true },
+      { l: "", r: "", sep: true },
+      { l: "วันที่โอน", r: String(bill.transfer_date ?? "—") },
+      { l: "วันที่ลงบิล", r: String(bill.bill_date ?? "—") },
+      { l: "สถานะ", r: String(bill.status ?? "—") },
+    ];
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const W = 680, headerH = 104, rowH = 48, padX = 40, padTop = 28, padBottom = 36;
+    const H = headerH + padTop + lines.length * rowH + padBottom;
+    cv.width = W * DPR; cv.height = H * DPR;
+    cv.style.width = "100%"; cv.style.height = "auto";
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    ctx.scale(DPR, DPR);
+    const FONT = "'Noto Sans Thai', 'Sarabun', -apple-system, 'Segoe UI', sans-serif";
+
+    // พื้นหลัง
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+    // header gradient
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    grad.addColorStop(0, "#e11d48"); grad.addColorStop(1, "#f97316");
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, headerH);
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.font = `bold 30px ${FONT}`; ctx.fillText("💸 ใบสรุปการโอนเงินจีน", padX, 44);
+    ctx.font = `16px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillText(`พิมพ์เมื่อ ${new Date().toLocaleString("th-TH")}`, padX, 78);
+
+    // body
+    let y = headerH + padTop + rowH / 2;
+    for (const ln of lines) {
+      if (ln.sep) {
+        ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(padX, y); ctx.lineTo(W - padX, y); ctx.stroke();
+        y += rowH; continue;
+      }
+      ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `18px ${FONT}`;
+      if (ln.l) ctx.fillText(ln.l, padX, y);
+      ctx.textAlign = "right";
+      ctx.fillStyle = ln.color ?? "#1e293b";
+      ctx.font = `${ln.bold ? "bold " : ""}${ln.big ? 26 : 19}px ${FONT}`;
+      ctx.fillText(ln.r, W - padX, y);
+      y += rowH;
+    }
+  }, [sup, supName, amount, fee, totalRmb, rate, thb, bill]);
+
+  const filename = `china-bill-${supName}-${String(bill.transfer_date ?? today())}.png`.replace(/[\\/:*?"<>|]/g, "_");
+
+  const markPrinted = async () => {
+    const at = new Date().toISOString();
+    try {
+      await apiFetch(`/api/master-v2/china-bills/${String(bill.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ printed_at: at, actor: "china-app" }),
+      });
+      onPrinted?.(String(bill.id), at);
+    } catch { /* best-effort */ }
+  };
+
+  const getBlob = (): Promise<Blob | null> =>
+    new Promise((resolve) => { const cv = canvasRef.current; if (!cv) return resolve(null); cv.toBlob(resolve, "image/png"); });
+
+  const saveImage = async () => {
+    setBusy(true);
+    try {
+      const blob = await getBlob(); if (!blob) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success("บันทึกรูปแล้ว"); await markPrinted();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const shareImage = async () => {
+    setBusy(true);
+    try {
+      const blob = await getBlob(); if (!blob) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      const file = new File([blob], filename, { type: "image/png" });
+      const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: "ใบสรุปการโอนเงินจีน", text: `${supName} · ฿${fmt(thb)}` });
+        await markPrinted();
+      } else {
+        toast.error("อุปกรณ์นี้แชร์รูปไม่ได้ — ใช้ปุ่มบันทึกรูปแทน"); await saveImage();
+      }
+    } catch (e) {
+      // ผู้ใช้กดยกเลิกแชร์ ไม่ต้องแจ้ง error
+      if ((e as Error).name !== "AbortError") toast.error(String((e as Error).message ?? e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[210] bg-black/50 flex items-end sm:items-center justify-center p-3" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-sm max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+          <div className="font-semibold text-slate-800">ใบสรุป</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+        </div>
+        <div className="p-4">
+          <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+            <canvas ref={canvasRef} className="block w-full" />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <button onClick={saveImage} disabled={busy}
+              className="h-12 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
+            <button onClick={shareImage} disabled={busy}
+              className="h-12 bg-rose-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์ / ส่ง LINE</button>
+          </div>
+          <div className="mt-2 text-center text-[11px] text-slate-400">เมื่อบันทึก/แชร์ ระบบจะทำเครื่องหมาย “พิมพ์แล้ว” ให้</div>
+        </div>
       </div>
     </div>
   );
