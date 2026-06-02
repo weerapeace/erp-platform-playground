@@ -986,6 +986,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [sup, setSup] = useState<Record<string, unknown> | null>((bill._sup as Record<string, unknown>) ?? null);
   const [busy, setBusy] = useState(false);
+  const [printedLabel] = useState(() => new Date().toLocaleString("th-TH"));
 
   const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
   useEffect(() => {
@@ -995,6 +996,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
 
   const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
   const thb = totalRmb * rate;
+  const st = String(bill.status ?? "—");
   const supName = String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—");
 
   // วาดใบสรุปลง canvas
@@ -1039,7 +1041,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
     ctx.font = `bold 34px ${FONT}`; ctx.fillText("💸 ใบสรุปการโอนเงินจีน", padX, 50);
     ctx.font = `18px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.fillText(`พิมพ์เมื่อ ${new Date().toLocaleString("th-TH")}`, padX, 90);
+    ctx.fillText(`พิมพ์เมื่อ ${printedLabel}`, padX, 90);
 
     // วาดค่าแบบย่อฟอนต์อัตโนมัติให้พอดี (กันข้อความยาวล้นขอบ)
     const drawValueFit = (text: string, baseSize: number, bold: boolean, color: string, yy: number, leftBound: number) => {
@@ -1066,7 +1068,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       drawValueFit(ln.r, ln.big ? BIG_SIZE : VAL_SIZE, !!ln.bold, ln.color ?? "#1e293b", y, padX + labelW + 16);
       y += rowH;
     }
-  }, [sup, supName, amount, fee, totalRmb, rate, thb, bill]);
+  }, [sup, supName, amount, fee, totalRmb, rate, thb, bill, printedLabel]);
 
   const filename = `china-bill-${supName}-${String(bill.transfer_date ?? today())}.png`.replace(/[\\/:*?"<>|]/g, "_");
 
@@ -1123,9 +1125,35 @@ function ReportPopup({ bill, onClose, onPrinted }: {
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
         </div>
         <div className="p-4">
+          {/* พรีวิว (HTML — responsive ไม่ถูกตัดบนมือถือ) */}
           <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-            <canvas ref={canvasRef} className="block w-full" />
+            <div className="bg-gradient-to-r from-rose-600 to-orange-500 text-white px-4 py-3">
+              <div className="font-bold text-base">💸 ใบสรุปการโอนเงินจีน</div>
+              <div className="text-[11px] opacity-90 mt-0.5">พิมพ์เมื่อ {printedLabel}</div>
+            </div>
+            <div className="p-4 text-sm space-y-2">
+              <SlipRow l="ร้านค้า" r={supName} bold />
+              {sup?.name_en ? <SlipRow l="" r={String(sup.name_en)} /> : null}
+              <SlipRow l="ธนาคาร" r={sup?.bank_name_brief} />
+              <SlipRow l="เลขบัญชี" r={sup?.account_number} />
+              <SlipRow l="ชื่อบัญชี" r={sup?.bank_account_name} />
+              <div className="border-t border-slate-100 my-1" />
+              <SlipRow l="ยอด (¥)" r={fmt(amount)} />
+              <SlipRow l="ค่าโอน (¥)" r={fmt(fee)} />
+              <SlipRow l="ยอดโอนรวม" r={"¥" + fmt(totalRmb)} bold />
+              <SlipRow l="เรท" r={rate ? fmt(rate) : "—"} />
+              <div className="flex justify-between items-center gap-3">
+                <span className="text-slate-500 flex-shrink-0">เป็นเงินบาท</span>
+                <span className="text-2xl font-bold text-rose-600 text-right break-all">฿{fmt(thb)}</span>
+              </div>
+              <div className="border-t border-slate-100 my-1" />
+              <SlipRow l="วันที่โอน" r={bill.transfer_date} />
+              <SlipRow l="วันที่ลงบิล" r={bill.bill_date} />
+              <SlipRow l="สถานะ" r={st} />
+            </div>
           </div>
+          {/* canvas ซ่อน — ใช้สร้างรูปตอนบันทึก/แชร์เท่านั้น */}
+          <canvas ref={canvasRef} className="hidden" />
           <div className="mt-4 grid grid-cols-2 gap-2">
             <button onClick={saveImage} disabled={busy}
               className="h-12 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
@@ -1153,4 +1181,13 @@ function Num({ value, onChange, placeholder }: { value: string; onChange: (v: st
 function Row({ label, v }: { label: string; v: unknown }) {
   if (v == null || v === "") return null;
   return <div className="flex justify-between"><span className="text-slate-400">{label}</span><span className="text-slate-700">{String(v)}</span></div>;
+}
+function SlipRow({ l, r, bold }: { l: string; r: unknown; bold?: boolean }) {
+  if (r == null || r === "") return null;
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-slate-500 flex-shrink-0">{l}</span>
+      <span className={`text-right break-all ${bold ? "font-bold text-slate-900" : "text-slate-800"}`}>{String(r)}</span>
+    </div>
+  );
 }

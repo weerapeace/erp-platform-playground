@@ -1,13 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth";
 import { internalEmail } from "@/lib/internal-users";
 
-export default function LoginPage() {
+// รับเฉพาะ path ภายในเว็บ (กัน redirect ออกนอกเว็บ)
+function safeNext(raw: string | null): string {
+  return raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : "/apps";
+}
+
+function LoginInner() {
   const { login, loginWithMagicLink, loginWithGoogle, loginError, user, ready } = useAuth();
   const router = useRouter();
+  const params = useSearchParams();
+  const nextPath = safeNext(params.get("next"));
 
   const [mode,     setMode]     = useState<"magic" | "google" | "password" | "pin">("magic");
   const [email,    setEmail]    = useState("");
@@ -22,15 +29,16 @@ export default function LoginPage() {
     setLoading(true);
     const ok = await login(internalEmail(uname), pin);
     setLoading(false);
-    if (ok) router.push("/apps");
+    if (ok) router.push(nextPath);
   };
 
-  // ถ้า login อยู่แล้ว → เด้งเข้า /apps
-  useEffect(() => { if (ready && user) router.push("/apps"); }, [ready, user, router]);
+  // ถ้า login อยู่แล้ว → เด้งกลับหน้าที่มา (next) ถ้าไม่มีก็ /apps
+  useEffect(() => { if (ready && user) router.replace(nextPath); }, [ready, user, router, nextPath]);
 
   const submitMagicLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    if (typeof window !== "undefined") sessionStorage.setItem("login_next", nextPath);
     const ok = await loginWithMagicLink(email.trim());
     setLoading(false);
     if (ok) setMagicSent(true);
@@ -41,11 +49,12 @@ export default function LoginPage() {
     setLoading(true);
     const ok = await login(email.trim(), password);
     setLoading(false);
-    if (ok) router.push("/apps");
+    if (ok) router.push(nextPath);
   };
 
   const handleGoogle = async () => {
     setLoading(true);
+    if (typeof window !== "undefined") sessionStorage.setItem("login_next", nextPath);
     await loginWithGoogle();
     // redirect ทำโดย Supabase — ไม่ต้อง setLoading(false)
   };
@@ -234,4 +243,8 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+
+export default function LoginPage() {
+  return <Suspense fallback={null}><LoginInner /></Suspense>;
 }

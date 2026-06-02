@@ -12,6 +12,14 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth";
 
+// หน้าที่จะไปต่อหลัง login: จาก sessionStorage (ตั้งไว้ตอนกดลิงก์/Google) → /apps
+function resolveNext(): string {
+  if (typeof window === "undefined") return "/apps";
+  const n = sessionStorage.getItem("login_next");
+  sessionStorage.removeItem("login_next");
+  return n && n.startsWith("/") && !n.startsWith("//") ? n : "/apps";
+}
+
 export default function AuthCallbackPage() {
   const { user, ready } = useAuth();
   const router = useRouter();
@@ -20,7 +28,7 @@ export default function AuthCallbackPage() {
     if (!ready) return;
     // รอ 1 tick ให้ Supabase JS process URL params
     const t = setTimeout(() => {
-      if (user) router.replace("/apps");
+      if (user) router.replace(resolveNext());
       else router.replace("/login?error=callback");
     }, 1500);
     return () => clearTimeout(t);
