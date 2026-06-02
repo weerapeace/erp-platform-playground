@@ -14,8 +14,12 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import type { PickerOption } from "@/app/api/admin/picker/route";
+
+// lazy เพื่อตัด circular import (RecordFormModal ใช้ RelationPicker ข้างใน)
+const RecordFormModal = dynamic(() => import("@/components/record-form-modal").then((m) => m.RecordFormModal), { ssr: false });
 
 export type RelationConfig = {
   target_module_key?:     string;
@@ -150,9 +154,10 @@ export function RelationPicker({
   // ---- F6: Quick create ----
   const [creating, setCreating] = useState(false);
   const [createErr, setCreateErr] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState<string | null>(null);  // เปิดฟอร์มเต็ม (popup)
 
-  // F9: lookup_type → /api/lookups, ไม่งั้น → /api/master-v2/<entity>
-  const canCreate = !!config.allow_create && (!!config.lookup_type || !!config.target_module_key);
+  // สร้างใหม่ได้เมื่อ relation ชี้ไป module/lookup จริง — เป็นของกลาง (ไม่ต้องตั้ง allow_create)
+  const canCreate = !!config.lookup_type || !!config.target_module_key;
 
   const quickCreate = async (name: string) => {
     if (!canCreate || !name.trim()) return;
@@ -268,7 +273,11 @@ export function RelationPicker({
                   <div className="border-t border-slate-100">
                     <button
                       type="button"
-                      onClick={() => quickCreate(search)}
+                      onClick={() => {
+                        // module จริง → เปิดฟอร์มเต็ม (popup) | lookup → สร้างเร็ว (แค่ชื่อ)
+                        if (config.target_module_key) { setOpen(false); setShowCreate(search.trim()); }
+                        else void quickCreate(search);
+                      }}
                       disabled={creating}
                       className="w-full px-3 py-2.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-2"
                     >
@@ -286,6 +295,18 @@ export function RelationPicker({
             )}
           </div>
         </div>
+      )}
+
+      {/* ฟอร์มสร้างใหม่เต็ม (popup) — เมื่อ relation ชี้ไป module จริง */}
+      {showCreate !== null && config.target_module_key && (
+        <RecordFormModal
+          moduleKey={config.target_module_key}
+          title={`สร้าง ${config.target_label_field ?? "รายการ"}`}
+          presetLabelField={config.target_label_field}
+          presetValue={showCreate}
+          onClose={() => setShowCreate(null)}
+          onSaved={(id, label) => { setShowCreate(null); select({ id, label }); }}
+        />
       )}
     </div>
   );
