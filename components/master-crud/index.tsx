@@ -649,9 +649,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         effectiveFields.forEach((field) => {
           const v = full[field.key];
           f[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
-          // เก็บชื่อ (label) ของ relation ไว้โชว์ใน detail (ไม่ใช่รหัส)
-          if (field.type === "relation" && field.key.endsWith("_id")) {
-            const base = field.key.slice(0, -3);
+          // เก็บชื่อ (label) ของ relation ไว้โชว์ใน detail (ไม่ใช่รหัส) — รองรับคอลัมน์ที่ไม่ลงท้าย _id ด้วย (เช่น product_group)
+          if (field.type === "relation") {
+            const base = field.key.endsWith("_id") ? field.key.slice(0, -3) : field.key;
             for (const suf of ["_label", "_name"]) {
               const lk = base + suf;
               if (lk in full) f[lk] = full[lk];
@@ -771,6 +771,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           effectiveFields.forEach((fd) => {
             const v = full[fd.key];
             f[fd.key] = v == null ? (fd.type === "boolean" ? false : "") : v;
+            // เก็บชื่อ relation มาโชว์หลังบันทึก (รองรับคอลัมน์ที่ไม่ลงท้าย _id)
+            if (fd.type === "relation") {
+              const base = fd.key.endsWith("_id") ? fd.key.slice(0, -3) : fd.key;
+              for (const suf of ["_label", "_name"]) { const lk = base + suf; if (lk in full) f[lk] = full[lk]; }
+            }
           });
           setForm(f);
         }

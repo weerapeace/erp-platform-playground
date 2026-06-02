@@ -78,7 +78,9 @@ export async function PATCH(
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const row = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : data;
+  const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
+  // คืนชื่อ relation (label) ด้วย → หน้า detail โชว์ชื่อทันทีหลังบันทึก (ไม่ใช่รหัส)
+  const [row] = await resolveRelationLabels(supabaseFromRequest(request), cfg, [processed]);
   return NextResponse.json({ data: row, error: null });
 }
 

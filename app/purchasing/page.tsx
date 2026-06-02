@@ -12,6 +12,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
+import { RecordFormModal } from "@/components/record-form-modal";
 import { useBackdropDismiss } from "@/components/modal";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
@@ -57,6 +58,13 @@ export default function PurchasingShopPage() {
   const [vars, setVars] = useState<Variation[]>([]);
   const [varsLoading, setVarsLoading] = useState(false);
   const [varQ, setVarQ] = useState("");   // ค้นหา SKU ใน popup กลุ่ม
+  // จัดสมาชิกกลุ่มในป๊อปอัพ
+  const [addMode, setAddMode] = useState(false);          // เปิดแผงค้นหา SKU เพื่อผูกเข้ากลุ่ม
+  const [addQ, setAddQ] = useState("");
+  const [addResults, setAddResults] = useState<{ id: string; label: string; code: string | null }[]>([]);
+  const [addLoading, setAddLoading] = useState(false);
+  const [addBusy, setAddBusy] = useState<string | null>(null);  // id ที่กำลังผูก
+  const [createSku, setCreateSku] = useState(false);      // ฟอร์มสร้าง SKU ใหม่ในกลุ่ม
   const pickerDismiss = useBackdropDismiss(() => setPickerOpen(false));
   const groupDismiss = useBackdropDismiss(() => { setSel(null); setVars([]); });
 
@@ -194,28 +202,65 @@ export default function PurchasingShopPage() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   };
 
+  // โหลดรายการ SKU ในกลุ่ม (คอลัมน์ product_group) — ใช้ทั้งตอนเปิด popup และตอนผูกสมาชิกเพิ่ม
+  const loadGroupVars = async (groupId: string) => {
+    const f = encodeURIComponent(JSON.stringify({ product_group: { type: "text", value: groupId } }));
+    const j = await apiFetch(`/api/master-v2/skus?limit=200&filters=${f}`).then(r => r.json());
+    setVars((j.data ?? []).map((s: Record<string, unknown>) => {
+      const sid = String(s.seller_partner_id ?? "");
+      const country = partnerCountry[sid] ?? "TH";
+      return {
+        key: String(s.id), label: String(s.name_th || s.code || ""), color: (s.color as string) ?? null,
+        seller: String(s.seller_partner_label ?? "—"), country,
+        price: num(s.list_price) || num(s.standard_price), currency: country === "CN" ? "YUAN" : "THB",
+        uom: String(s.uom_label ?? "ชิ้น"), image: (s.cover_image_r2_key as string) ?? null,
+        variationId: null, skuRef: (s.code as string) ?? null, skuId: String(s.id),
+      } as Variation;
+    }));
+  };
+
   // group mode: เปิด variation modal
   const openGroup = async (c: Card) => {
     setSel(c); setVars([]); setVarQ(""); setVarsLoading(true);
-    try {
-      // ตัวเลือกของกลุ่ม = SKU ที่อยู่ในกลุ่มนี้โดยตรง (คอลัมน์ product_group) — ไม่ใช้ตาราง product_variations แล้ว
-      const f = encodeURIComponent(JSON.stringify({ product_group: { type: "text", value: c.id } }));
-      const j = await apiFetch(`/api/master-v2/skus?limit=200&filters=${f}`).then(r => r.json());
-      setVars((j.data ?? []).map((s: Record<string, unknown>) => {
-        const sid = String(s.seller_partner_id ?? "");
-        const country = partnerCountry[sid] ?? "TH";
-        return {
-          key: String(s.id), label: String(s.name_th || s.code || ""), color: (s.color as string) ?? null,
-          seller: String(s.seller_partner_label ?? "—"), country,
-          price: num(s.list_price) || num(s.standard_price), currency: country === "CN" ? "YUAN" : "THB",
-          uom: String(s.uom_label ?? "ชิ้น"), image: (s.cover_image_r2_key as string) ?? null,
-          variationId: null, skuRef: (s.code as string) ?? null, skuId: String(s.id),
-        } as Variation;
-      }));
-    } finally { setVarsLoading(false); }
+    setAddMode(false); setAddQ(""); setAddResults([]);
+    try { await loadGroupVars(c.id); } finally { setVarsLoading(false); }
   };
 
   const onCardClick = (c: Card) => { if (source === "sku") setConfirmSku(c); else void openGroup(c); };
+
+  // ค้นหา SKU ทั้งคลังเพื่อผูกเข้ากลุ่ม (debounce) — แสดงเฉพาะตัวที่ยังไม่อยู่ในกลุ่มนี้
+  useEffect(() => {
+    if (!addMode) return;
+    const q = addQ.trim();
+    if (q.length < 1) { setAddResults([]); return; }
+    setAddLoading(true);
+    const t = setTimeout(() => {
+      apiFetch(`/api/master-v2/skus?limit=20&search=${encodeURIComponent(q)}`).then(r => r.json()).then(j => {
+        const inGroup = new Set(vars.map(v => v.skuId));
+        setAddResults(((j.data ?? []) as Record<string, unknown>[])
+          .filter(s => !inGroup.has(String(s.id)))
+          .map(s => ({ id: String(s.id), label: String(s.name_th || s.code || ""), code: (s.code as string) ?? null })));
+      }).catch(() => setAddResults([])).finally(() => setAddLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [addQ, addMode, vars]);
+
+  // ผูก SKU เข้ากลุ่มนี้ (PATCH product_group) → รีโหลดรายการกลุ่ม
+  const assignToGroup = async (skuId: string) => {
+    if (!sel) return;
+    setAddBusy(skuId);
+    try {
+      const res = await apiFetch(`/api/master-v2/skus/${skuId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ product_group: sel.id, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) { alert("ผูกเข้ากลุ่มไม่สำเร็จ: " + j.error); return; }
+      setAddResults(p => p.filter(r => r.id !== skuId));   // เอาออกจากผลค้นหา
+      await loadGroupVars(sel.id);                          // โหลดรายการกลุ่มใหม่ (คงแผงค้นหาไว้)
+    } catch (e) { alert(String((e as Error).message ?? e)); }
+    finally { setAddBusy(null); }
+  };
 
   const addVariation = (c: Card, v: Variation, qty: number) => {
     setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, skuId: v.skuId, note: "" }]);
@@ -518,10 +563,59 @@ export default function PurchasingShopPage() {
                   </div>
                 ))}
               </div>
+
+              {/* แผงค้นหา SKU เพื่อผูกเข้ากลุ่ม (จัดสมาชิก) */}
+              {addMode && (
+                <div className="px-4 pb-2 border-t border-slate-100 pt-3 bg-slate-50/60">
+                  <input value={addQ} onChange={e => setAddQ(e.target.value)} autoFocus
+                    placeholder="ค้นหา SKU ทั้งคลังเพื่อเพิ่มเข้ากลุ่ม (ชื่อ/รหัส)..."
+                    className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                  <div className="mt-2 max-h-44 overflow-auto space-y-1">
+                    {addLoading && <div className="text-xs text-slate-400 py-3 text-center">กำลังค้นหา…</div>}
+                    {!addLoading && addQ.trim() && addResults.length === 0 && <div className="text-xs text-slate-300 py-3 text-center">— ไม่พบ SKU (ที่ยังไม่อยู่ในกลุ่ม) —</div>}
+                    {addResults.map(r => (
+                      <div key={r.id} className="flex items-center gap-2 px-2 py-1.5 bg-white border border-slate-200 rounded-lg">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-slate-700 truncate">{r.label}</div>
+                          {r.code && <div className="text-[11px] font-mono text-slate-400">{r.code}</div>}
+                        </div>
+                        <button onClick={() => assignToGroup(r.id)} disabled={addBusy === r.id}
+                          className="h-7 px-2.5 text-xs font-medium bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50">
+                          {addBusy === r.id ? "..." : "+ เข้ากลุ่ม"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ปุ่มจัดสมาชิก */}
+              <div className="px-4 py-3 border-t border-slate-100 flex gap-2">
+                <button onClick={() => { setAddMode(m => !m); setAddQ(""); setAddResults([]); }}
+                  className={`flex-1 h-9 text-sm font-medium rounded-lg border ${addMode ? "bg-slate-100 border-slate-300 text-slate-700" : "border-emerald-300 text-emerald-700 hover:bg-emerald-50"}`}>
+                  {addMode ? "ปิดการค้นหา" : "＋ เพิ่ม SKU เข้ากลุ่ม"}
+                </button>
+                <button onClick={() => setCreateSku(true)}
+                  className="flex-1 h-9 text-sm font-medium rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">
+                  ＋ สร้าง SKU ใหม่
+                </button>
+              </div>
             </div>
           </div>
         );
       })()}
+
+      {/* ฟอร์มสร้าง SKU ใหม่ในกลุ่ม (ของกลาง) — เติม product_group อัตโนมัติ */}
+      {createSku && sel && (
+        <RecordFormModal
+          moduleKey="skus-v2"
+          title={`SKU ใหม่ในกลุ่ม ${sel.name}`}
+          presetLabelField="name_th"
+          preset={{ product_group: sel.id }}
+          onClose={() => setCreateSku(false)}
+          onSaved={() => { setCreateSku(false); void loadGroupVars(sel.id); }}
+        />
+      )}
 
     </PlaygroundShell>
   );
