@@ -515,8 +515,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [drawerMode,  setDrawerMode]  = useState<"view" | "edit">("view");
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // archive
+  // archive (soft) — เก็บไว้เผื่อ flow อื่น
   const [archiveTarget, setArchiveTarget] = useState<Row | null>(null);
+  // delete dialog (ลบชั่วคราว / ลบถาวร)
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null);
+  const [deleteMode, setDeleteMode] = useState<"soft" | "hard">("soft");
+  const [deleteText, setDeleteText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   // toast
   const [toast, setToast] = useState<string | null>(null);
@@ -791,16 +796,25 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     finally { setSaving(false); }
   };
 
-  const archive = async (r: Row) => {
+  const rowLabel = (r: Row) => String(r.name_th ?? r.name ?? r.code ?? r.sku ?? r.label ?? r.title ?? r.id);
+
+  // ลบชั่วคราว (soft) / ลบถาวร (hard) — จากกล่อง deleteTarget
+  const doDelete = async () => {
+    if (!deleteTarget) return;
+    if (deleteMode === "hard" && deleteText.trim() !== "ลบ") { setError('พิมพ์คำว่า "ลบ" เพื่อยืนยันการลบถาวร'); return; }
+    setDeleting(true); setError(null);
     try {
-      const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+      const url = `${apiBase}${config.apiPath}/${deleteTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}${deleteMode === "hard" ? "&hard=1" : ""}`;
+      const res = await apiFetch(url, { method: "DELETE" });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash("ปิดบัญชีแล้ว");
+      flash(deleteMode === "hard" ? "ลบถาวรแล้ว" : "ลบแล้ว (กู้คืนได้)");
+      setDeleteTarget(null); setDeleteMode("soft"); setDeleteText("");
       await refreshData();
-    } catch (err) { setError(err instanceof Error ? err.message : "ปิดไม่สำเร็จ"); }
-    finally { setArchiveTarget(null); }
+    } catch (err) { setError(err instanceof Error ? err.message : "ลบไม่สำเร็จ"); }
+    finally { setDeleting(false); }
   };
+  const openDelete = (r: Row) => { setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); };
   const restore = async (r: Row) => {
     try {
       const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
@@ -896,10 +910,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const rowActions: RowAction<Row>[] = useMemo(() => {
     const acts: RowAction<Row>[] = [{ label: "ดู / แก้", icon: "✎", onClick: openEdit }];
     if (canEdit) {
-      acts.push({
-        label: "เปิด/ปิด", icon: "⏻",
-        onClick: (r: Row) => r[activeField] ? setArchiveTarget(r) : restore(r),
-      });
+      acts.push({ label: "กู้คืน", icon: "↩", onClick: restore, show: (r: Row) => !r[activeField] });
+      acts.push({ label: "ลบ", icon: "🗑", onClick: openDelete, variant: "danger" });
     }
     return acts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -915,13 +927,33 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     }));
     const base: BulkAction<Row>[] = canEdit ? [
       {
-        label: "ปิดบัญชีที่เลือก",
+        label: "🗑 ลบที่เลือก (ชั่วคราว)",
         onClick: async (selected: Row[]) => {
-          if (!confirm(`ปิด ${selected.length} ราย?`)) return;
+          if (!confirm(`ลบชั่วคราว ${selected.length} ราย? (ซ่อนไว้ กู้คืนได้)`)) return;
           for (const r of selected) {
             await apiFetch(`${apiBase}${config.apiPath}/${r.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
           }
-          flash(`ปิด ${selected.length} ราย`);
+          flash(`ลบชั่วคราว ${selected.length} ราย`);
+          await refreshData();
+        },
+      },
+      {
+        label: "🔴 ลบถาวรที่เลือก",
+        variant: "danger",
+        onClick: async (selected: Row[]) => {
+          const ans = window.prompt(`⚠ ลบถาวร ${selected.length} ราย — ลบจริงออกจากระบบ กู้คืนไม่ได้!\n\nพิมพ์ "ลบ" เพื่อยืนยัน:`);
+          if (ans == null) return;
+          if (ans.trim() !== "ลบ") { setError('ยกเลิก: ต้องพิมพ์ "ลบ" ให้ตรงเพื่อยืนยันลบถาวร'); return; }
+          let ok = 0; const fails: string[] = [];
+          for (const r of selected) {
+            try {
+              const res = await apiFetch(`${apiBase}${config.apiPath}/${r.id}?hard=1&actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+              const j = await res.json();
+              if (j.error) fails.push(j.error); else ok++;
+            } catch (e) { fails.push(String((e as Error).message ?? e)); }
+          }
+          flash(`ลบถาวร ${ok} ราย${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
+          if (fails.length) setError(`ลบถาวรไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
           await refreshData();
         },
       },
@@ -1516,7 +1548,46 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       <ConfirmDialog open={archiveTarget !== null} onClose={() => setArchiveTarget(null)}
         title="ปิดบัญชี" message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}
         confirmText="ปิดบัญชี" cancelText="ยกเลิก" variant="danger"
-        onConfirm={() => { if (archiveTarget) archive(archiveTarget); }} />
+        onConfirm={() => { if (archiveTarget) { void apiFetch(`${apiBase}${config.apiPath}/${archiveTarget.id}?actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" }).then(() => refreshData()); setArchiveTarget(null); } }} />
+
+      {/* กล่องลบ — เลือกลบชั่วคราว / ลบถาวร (ของกลาง) */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[150] bg-black/40 flex items-center justify-center p-4" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-800">ลบรายการ</h3>
+              <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{rowLabel(deleteTarget)}</p>
+            </div>
+            <div className="p-5 space-y-2">
+              <label className={`flex gap-3 items-start p-3 rounded-lg border cursor-pointer ${deleteMode === "soft" ? "border-amber-300 bg-amber-50" : "border-slate-200 hover:bg-slate-50"}`}>
+                <input type="radio" name="delmode" checked={deleteMode === "soft"} onChange={() => { setDeleteMode("soft"); setDeleteText(""); }} className="mt-0.5" />
+                <div><div className="text-sm font-medium text-slate-800">🟡 ลบชั่วคราว (แนะนำ)</div>
+                  <div className="text-xs text-slate-500 mt-0.5">ซ่อนจากตาราง แต่ข้อมูลยังอยู่ — กู้คืนได้ภายหลัง</div></div>
+              </label>
+              <label className={`flex gap-3 items-start p-3 rounded-lg border cursor-pointer ${deleteMode === "hard" ? "border-red-300 bg-red-50" : "border-slate-200 hover:bg-slate-50"}`}>
+                <input type="radio" name="delmode" checked={deleteMode === "hard"} onChange={() => setDeleteMode("hard")} className="mt-0.5" />
+                <div><div className="text-sm font-medium text-red-700">🔴 ลบถาวร (กู้คืนไม่ได้)</div>
+                  <div className="text-xs text-slate-500 mt-0.5">ลบจริงออกจากฐานข้อมูล Supabase — ไม่สามารถกู้คืน</div></div>
+              </label>
+              {deleteMode === "hard" && (
+                <div className="pt-1">
+                  <label className="text-xs text-slate-600">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code> เพื่อยืนยัน</label>
+                  <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus placeholder="ลบ"
+                    className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-red-400" />
+                </div>
+              )}
+              {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">⚠ {error}</div>}
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+              <button onClick={() => setDeleteTarget(null)} disabled={deleting} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={doDelete} disabled={deleting || (deleteMode === "hard" && deleteText.trim() !== "ลบ")}
+                className={`h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50 ${deleteMode === "hard" ? "bg-red-600 hover:bg-red-700" : "bg-amber-500 hover:bg-amber-600"}`}>
+                {deleting ? "กำลังลบ..." : deleteMode === "hard" ? "ลบถาวร" : "ลบชั่วคราว"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* กลุ่ม C: Field Creator — เพิ่ม column จริงใน Supabase */}
       {fieldCreatorOpen && config.moduleKey && (

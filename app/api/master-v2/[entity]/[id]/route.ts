@@ -98,13 +98,33 @@ export async function DELETE(
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
+  const hard = new URL(request.url).searchParams.get("hard") === "1";
+  const admin = supabaseAdmin();
+
+  if (hard) {
+    // ลบถาวร — ลบจริงออกจาก Supabase
+    const { error } = await admin.from(cfg.table).delete().eq("id", id);
+    if (error) return NextResponse.json({ error: friendlyDeleteError(error.message) }, { status: 409 });
+    await admin.from("erp_audit_logs").insert({
+      actor_name: user.email ?? "system", action: "delete_permanent", module: entity, record_label: id,
+    }).then(() => {}, () => {});
+    return NextResponse.json({ data: { deleted: true }, error: null });
+  }
+
+  // ลบชั่วคราว — soft delete (ซ่อน กู้คืนได้)
   const col = cfg.softDeleteColumn ?? "is_active";
-
-  const { error } = await supabaseAdmin()
-    .from(cfg.table)
-    .update({ [col]: false })
-    .eq("id", id);
-
+  const { error } = await admin.from(cfg.table).update({ [col]: false }).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await admin.from("erp_audit_logs").insert({
+    actor_name: user.email ?? "system", action: "archive", module: entity, record_label: id,
+  }).then(() => {}, () => {});
   return NextResponse.json({ data: { archived: true }, error: null });
+}
+
+// แปลง error ลบจาก DB ให้เป็นภาษาคน (เคส FK / มีเอกสารอื่นอ้างถึง)
+function friendlyDeleteError(msg: string): string {
+  if (/foreign key|violates foreign key|still referenced|23503/i.test(msg)) {
+    return "ลบถาวรไม่ได้ เพราะมีข้อมูลอื่นอ้างถึงรายการนี้อยู่ (เช่น ถูกใช้ในเอกสาร) — แนะนำให้ใช้ 'ลบชั่วคราว' แทน";
+  }
+  return msg;
 }

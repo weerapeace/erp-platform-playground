@@ -183,6 +183,8 @@ export type RowAction<T> = {
   icon?: React.ReactNode;
   onClick: (row: T) => void;
   variant?: "default" | "danger";
+  /** แสดงปุ่มนี้เฉพาะแถวที่เงื่อนไขเป็นจริง (ไม่ระบุ = แสดงทุกแถว) */
+  show?: (row: T) => boolean;
 };
 
 export type BulkAction<T> = {
@@ -1666,7 +1668,7 @@ export function DataTable<T extends Record<string, unknown>>({
             className="fixed z-50 min-w-[150px] bg-white border border-slate-200 rounded-lg shadow-lg py-1"
             style={{ top: rowMenu.y + 4, left: Math.max(8, rowMenu.x - 150) }}
           >
-            {rowActions.map((action, i) => (
+            {rowActions.filter((action) => !action.show || action.show(rowMenu.row)).map((action, i) => (
               <button
                 key={i}
                 onClick={() => { action.onClick(rowMenu.row); setRowMenu(null); }}
