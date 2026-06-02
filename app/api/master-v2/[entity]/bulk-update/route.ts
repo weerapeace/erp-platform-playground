@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { resolveEntity, applyListFilters, type ColFilter } from "../route";
+import { resolveEntity, applyListFilters, friendlyDbError, type ColFilter } from "../route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,7 +76,7 @@ export async function POST(
       for (let i = 0; i < g.ids.length; i += 500) {
         const chunk = g.ids.slice(i, i + 500);
         const { error } = await admin2.from(cfg.table).update(g.changes).in("id", chunk);
-        if (error) return NextResponse.json({ error: `แก้ไขไม่สำเร็จ: ${error.message}`, affected: affected2 }, { status: 500 });
+        if (error) return NextResponse.json({ error: friendlyDbError(error.message), affected: affected2 }, { status: 400 });
         affected2 += chunk.length;
       }
     }
@@ -120,7 +120,7 @@ export async function POST(
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
     const { error } = await admin.from(cfg.table).update(changes).in("id", chunk);
-    if (error) return NextResponse.json({ error: `แก้ไขไม่สำเร็จ: ${error.message}`, affected }, { status: 500 });
+    if (error) return NextResponse.json({ error: friendlyDbError(error.message), affected }, { status: 400 });
     affected += chunk.length;
   }
 

@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { resolveEntity } from "../route";
+import { resolveEntity, friendlyDbError } from "../route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -89,11 +89,11 @@ export async function POST(
     const uniqueKey = body.uniqueKey && SAFE.test(body.uniqueKey) ? body.uniqueKey : null;
     if (mode === "upsert" && uniqueKey) {
       const { data, error } = await admin.from(cfg.table).upsert(payload, { onConflict: uniqueKey }).select("id");
-      if (error) { payload.forEach((_, j) => failed.push({ row: j + 1, error: error.message })); }
+      if (error) { const m = friendlyDbError(error.message); payload.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
       else updated = data?.length ?? payload.length;
     } else {
       const { data, error } = await admin.from(cfg.table).insert(payload).select("id");
-      if (error) { payload.forEach((_, j) => failed.push({ row: j + 1, error: error.message })); }
+      if (error) { const m = friendlyDbError(error.message); payload.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
       else created = data?.length ?? payload.length;
     }
   }

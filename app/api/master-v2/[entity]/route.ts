@@ -62,6 +62,21 @@ type RelationResolve = {
 
 const SAFE_IDENT = /^[a-z_][a-z0-9_]*$/i;
 
+/** แปลง error จากฐานข้อมูลให้เป็นภาษาคน (ของกลาง — ใช้ทั้ง update/delete/import) */
+export function friendlyDbError(msg: string): string {
+  if (/partners_v2_at_least_one_role/i.test(msg))
+    return "คู่ค้าต้องเป็น 'ลูกค้า' หรือ 'ผู้จำหน่าย' อย่างน้อย 1 อย่าง — ปิดทั้งสองพร้อมกันไม่ได้";
+  if (/foreign key|violates foreign key|still referenced|23503/i.test(msg))
+    return "ทำรายการไม่ได้ เพราะมีข้อมูลอื่นอ้างถึงรายการนี้อยู่ (เช่น ถูกใช้ในเอกสาร)";
+  if (/duplicate key|unique constraint|23505/i.test(msg))
+    return "ข้อมูลซ้ำ — มีค่าที่ต้องไม่ซ้ำกันอยู่แล้วในระบบ";
+  if (/not-null|null value in column|23502/i.test(msg))
+    return "มีช่องที่จำเป็นถูกเว้นว่าง — กรุณากรอกให้ครบ";
+  if (/check constraint/i.test(msg))
+    return "ค่าที่กรอกไม่ผ่านเงื่อนไขของระบบ (ละเมิดกฎข้อมูล) — กรุณาตรวจสอบค่าอีกครั้ง";
+  return msg;
+}
+
 export type ColFilter =
   | { type: "text"; value: string }
   | { type: "number"; min: string; max: string }

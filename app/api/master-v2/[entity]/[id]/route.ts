@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { resolveEntity, resolveRelationLabels } from "../route";
+import { resolveEntity, resolveRelationLabels, friendlyDbError } from "../route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -77,7 +77,7 @@ export async function PATCH(
     .select(cfg.selectColumns)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
   // คืนชื่อ relation (label) ด้วย → หน้า detail โชว์ชื่อทันทีหลังบันทึก (ไม่ใช่รหัส)
   const [row] = await resolveRelationLabels(supabaseFromRequest(request), cfg, [processed]);
@@ -104,7 +104,7 @@ export async function DELETE(
   if (hard) {
     // ลบถาวร — ลบจริงออกจาก Supabase
     const { error } = await admin.from(cfg.table).delete().eq("id", id);
-    if (error) return NextResponse.json({ error: friendlyDeleteError(error.message) }, { status: 409 });
+    if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 409 });
     await admin.from("erp_audit_logs").insert({
       actor_name: user.email ?? "system", action: "delete_permanent", module: entity, record_label: id,
     }).then(() => {}, () => {});
@@ -121,10 +121,3 @@ export async function DELETE(
   return NextResponse.json({ data: { archived: true }, error: null });
 }
 
-// แปลง error ลบจาก DB ให้เป็นภาษาคน (เคส FK / มีเอกสารอื่นอ้างถึง)
-function friendlyDeleteError(msg: string): string {
-  if (/foreign key|violates foreign key|still referenced|23503/i.test(msg)) {
-    return "ลบถาวรไม่ได้ เพราะมีข้อมูลอื่นอ้างถึงรายการนี้อยู่ (เช่น ถูกใช้ในเอกสาร) — แนะนำให้ใช้ 'ลบชั่วคราว' แทน";
-  }
-  return msg;
-}
