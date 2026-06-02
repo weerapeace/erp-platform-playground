@@ -22,6 +22,8 @@ import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
 import { RelationMany2Many, RelationOne2Many } from "@/components/relation-multi";
+import { ImportWizard } from "@/components/import-wizard";
+import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import dynamic from "next/dynamic";
@@ -545,6 +547,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [studioOpen, setStudioOpen] = useState(false);
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
 
   // ตัวกรองจากลิงก์ (?flt=<json>) — เปิดหน้าแบบกรองไว้ล่วงหน้า เช่นจากปุ่ม "จัดการกลุ่ม"
   // ต่างจาก baseFilter ตรงที่ "ล้างได้" (ผู้ใช้กดล้างเพื่อดู/เพิ่มสมาชิกนอกกลุ่มได้)
@@ -1256,6 +1259,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 ＋ เพิ่ม Field
               </button>
             )}
+            {config.moduleKey && canCreate && registryFields && registryFields.length > 0 && (
+              <button onClick={() => setImportOpen(true)}
+                title="นำเข้าข้อมูลจาก CSV / Excel"
+                className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5">
+                📥 นำเข้า
+              </button>
+            )}
             {canCreate && (
               <button onClick={openCreate}
                 className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
@@ -1264,6 +1274,21 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             )}
           </div>
         </div>
+
+        {/* นำเข้าข้อมูล (ของกลาง) — schema สร้างจากทะเบียน field, commit ผ่าน endpoint กลาง */}
+        {importOpen && config.moduleKey && registryFields && (
+          <div className="fixed inset-0 z-[150] bg-black/40 flex items-center justify-center p-4" onClick={() => setImportOpen(false)}>
+            <div className="w-full max-w-3xl max-h-[92vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+              <ImportWizard
+                schema={buildImportSchemaFromRegistry(config.moduleKey, config.title, registryFields as Parameters<typeof buildImportSchemaFromRegistry>[2])}
+                commitUrl={`${apiBase}${config.apiPath}/import`}
+                actor={user?.name}
+                onClose={() => setImportOpen(false)}
+                onDone={() => { void refreshData(); }}
+              />
+            </div>
+          </div>
+        )}
 
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 

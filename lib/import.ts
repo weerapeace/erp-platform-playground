@@ -253,3 +253,44 @@ export const IMPORT_SCHEMAS: Record<string, ImportSchema> = {
   suppliers: SUPPLIER_IMPORT_SCHEMA,
   "material-families": MATERIAL_FAMILY_IMPORT_SCHEMA,
 };
+
+// ---- สร้าง ImportSchema อัตโนมัติจากทะเบียน field (ของกลาง — ใช้ได้ทุกโมดูล) ----
+// field จาก /api/admin/field-registry-v2 (โครงหลวม ๆ — อ่านเฉพาะที่ใช้)
+type RegistryFieldLite = {
+  field_key: string;
+  column_name?: string | null;
+  field_label?: string | null;
+  ui_field_type?: string | null;
+  is_editable?: boolean;
+  show_in_form?: boolean;
+  is_required?: boolean;
+  options?: { options?: string[] } | null;
+};
+
+/** แปลงทะเบียน field → ImportSchema (relation รับเป็น "ชื่อ" แล้วให้ server หา id ให้) */
+export function buildImportSchemaFromRegistry(
+  moduleKey: string, label: string, fields: RegistryFieldLite[],
+): ImportSchema {
+  const SKIP = new Set(["one2many", "many2many", "related", "computed", "image"]);
+  const importFields: ImportField[] = (fields ?? [])
+    .filter((f) => f.show_in_form !== false && f.is_editable !== false
+      && !SKIP.has(String(f.ui_field_type ?? "text")) && f.field_key !== "id")
+    .map((f) => {
+      const t = String(f.ui_field_type ?? "text");
+      const type: FieldType = t === "number" || t === "currency" ? "number"
+        : t === "boolean" ? "boolean"
+        : t === "select" ? "select"
+        : "text";   // relation/date/text → text (relation จับคู่ด้วยชื่อ)
+      const key = String(f.column_name ?? f.field_key);
+      const lbl = String(f.field_label ?? f.field_key);
+      return {
+        key, label: lbl, type, required: !!f.is_required,
+        aliases: [lbl, f.field_key, key],
+        ...(type === "select" && f.options?.options?.length ? { options: f.options.options } : {}),
+      } as ImportField;
+    });
+  // uniqueKey: เดาจากคอลัมน์ที่มักไม่ซ้ำ
+  const keys = new Set(importFields.map((f) => f.key));
+  const uniqueKey = ["code", "sku", "barcode", "family_code", "pr_no", "po_no"].find((k) => keys.has(k));
+  return { entityType: moduleKey, label, uniqueKey, fields: importFields };
+}

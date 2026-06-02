@@ -24,13 +24,15 @@ export type ImportWizardProps = {
   /** หลัง commit สำเร็จ — refresh list */
   onDone?: () => void;
   actor?:  string;
+  /** endpoint ที่ใช้ commit — default /api/admin/import (legacy). ของกลาง: /api/master-v2/<entity>/import */
+  commitUrl?: string;
 };
 
 // ============================================================
 // ImportWizard — 4 step
 // ============================================================
 
-export function ImportWizard({ schema, onClose, onDone, actor }: ImportWizardProps) {
+export function ImportWizard({ schema, onClose, onDone, actor, commitUrl }: ImportWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [file,      setFile]      = useState<File | null>(null);
   const [parsed,    setParsed]    = useState<ParsedFile | null>(null);
@@ -73,11 +75,12 @@ export function ImportWizard({ schema, onClose, onDone, actor }: ImportWizardPro
     if (!validation || validation.errors.length > 0) { setError("แก้ error ก่อน import"); return; }
     setCommitting(true); setError(null);
     try {
-      const res = await apiFetch("/api/admin/import", {
+      const res = await apiFetch(commitUrl ?? "/api/admin/import", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          entity: schema.entityType,
-          rows:   validation.mappedRows,
+          entity:    schema.entityType,
+          uniqueKey: schema.uniqueKey,
+          rows:      validation.mappedRows,
           mode,
           actor,
         }),
