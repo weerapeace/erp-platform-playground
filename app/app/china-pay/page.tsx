@@ -124,17 +124,25 @@ export default function ChinaPayApp() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm">
+      <style>{`@keyframes cpRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}.cp-anim{animation:cpRise .42s ease both}@keyframes cpSpin{to{transform:rotate(360deg)}}.cp-spin{display:inline-block;animation:cpSpin 1.1s linear infinite}`}</style>
+      <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm relative">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 bg-gradient-to-r from-rose-600 to-orange-500 text-white px-3 py-3 flex items-center gap-2">
-          <button onClick={() => setMenuOpen(true)} aria-label="เมนู"
-            className="w-9 h-9 flex items-center justify-center rounded-lg hover:bg-white/15 text-xl">☰</button>
-          <div className="font-semibold text-base flex-1 truncate">{current ? `${current.icon} ${current.label}` : "💸 โอนเงินจีน"}</div>
-          <div className="text-xs opacity-90">{user.name}</div>
+        <header className="sticky top-0 z-20 bg-gradient-to-br from-orange-400 to-orange-600 text-white px-4 pt-3 pb-5 rounded-b-3xl shadow-lg shadow-orange-500/20 overflow-hidden">
+          <div className="pointer-events-none absolute -right-8 -top-10 w-40 h-40 bg-white/10 rounded-full" />
+          <div className="pointer-events-none absolute right-10 top-6 w-20 h-20 bg-white/10 rounded-full" />
+          <div className="relative flex items-center gap-3">
+            <button onClick={() => setMenuOpen(true)} aria-label="เมนู"
+              className="w-10 h-10 flex items-center justify-center rounded-2xl bg-white/20 hover:bg-white/30 text-xl active:scale-95 transition">☰</button>
+            <div className="font-bold text-lg flex-1 truncate">{current ? `${current.icon} ${current.label}` : "💸 โอนเงินจีน"}</div>
+            <div className="flex items-center gap-2 bg-white/20 rounded-full pl-1 pr-3 py-1 text-xs">
+              <span className="w-6 h-6 rounded-full bg-white text-orange-600 flex items-center justify-center font-bold">{(user.name || "?").slice(0, 1).toUpperCase()}</span>
+              <span className="truncate max-w-[90px]">{user.name}</span>
+            </div>
+          </div>
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto p-4 pb-24">
+        <main key={renderTab} className="cp-anim flex-1 overflow-y-auto p-4 pb-28">
           {renderTab === "dashboard" && <Dashboard onGo={go} />}
           {renderTab === "bill" && <BillForm />}
           {renderTab === "all" && <AllList />}
@@ -146,18 +154,21 @@ export default function ChinaPayApp() {
 
         {/* แถบเมนูล่าง */}
         {cols > 0 && (
-          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 grid z-20"
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 grid z-20 px-1 pt-1.5 pb-2 shadow-[0_-6px_20px_rgba(0,0,0,0.06)]"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
-            {bottomItems.map(m => (
-              <button key={m.k} onClick={() => go(m.k)}
-                className={`py-2 flex flex-col items-center gap-0.5 text-[11px] ${renderTab === m.k ? "text-rose-600 font-semibold" : "text-slate-400"}`}>
-                <span className="text-lg leading-none">{m.icon}</span>{m.label}
-              </button>
-            ))}
+            {bottomItems.map(m => {
+              const on = renderTab === m.k;
+              return (
+                <button key={m.k} onClick={() => go(m.k)}
+                  className={`py-1 flex flex-col items-center gap-0.5 text-[10px] transition ${on ? "text-orange-600 font-semibold" : "text-slate-400"}`}>
+                  <span className={`text-lg leading-none px-3 py-1 rounded-2xl transition ${on ? "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-md shadow-orange-500/40" : ""}`}>{m.icon}</span>{m.label}
+                </button>
+              );
+            })}
             {hasMore && (
               <button onClick={() => setMenuOpen(true)}
-                className="py-2 flex flex-col items-center gap-0.5 text-[11px] text-slate-400">
-                <span className="text-lg leading-none">⋯</span>เพิ่มเติม
+                className="py-1 flex flex-col items-center gap-0.5 text-[10px] text-slate-400">
+                <span className="text-lg leading-none px-3 py-1">⋯</span>เพิ่มเติม
               </button>
             )}
           </nav>
@@ -168,14 +179,14 @@ export default function ChinaPayApp() {
       {menuOpen && (
         <div className="fixed inset-0 z-[120] bg-black/40" onClick={() => setMenuOpen(false)}>
           <div className="absolute left-0 top-0 h-full w-72 max-w-[80%] bg-white shadow-xl flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="bg-gradient-to-r from-rose-600 to-orange-500 text-white px-4 py-4">
+            <div className="bg-gradient-to-br from-orange-400 to-orange-600 text-white px-4 py-4">
               <div className="font-semibold text-lg">💸 โอนเงินจีน</div>
               <div className="text-xs opacity-90 mt-0.5">{user.name}</div>
             </div>
             <div className="flex-1 overflow-y-auto py-2">
               {navMenu.map(m => (
                 <button key={m.k} onClick={() => go(m.k)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-left ${renderTab === m.k ? "bg-rose-50 text-rose-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-left ${renderTab === m.k ? "bg-orange-50 text-orange-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
                   <span className="text-xl w-7 text-center">{m.icon}</span>{m.label}
                 </button>
               ))}
@@ -242,7 +253,7 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
         </Card>
       ))}
       <button onClick={save} disabled={saving}
-        className="w-full h-12 bg-rose-600 text-white rounded-xl font-semibold disabled:opacity-50">
+        className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold disabled:opacity-50">
         {saving ? "กำลังบันทึก…" : "บันทึกสิทธิ์เมนู"}
       </button>
     </div>
@@ -290,7 +301,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
   return (
     <div className="space-y-4">
       {/* บิลรอโอน */}
-      <button onClick={() => onGo("all")} className="block w-full text-left rounded-2xl bg-gradient-to-br from-rose-500 to-orange-500 text-white p-4 shadow-sm active:scale-[0.99] transition-transform">
+      <button onClick={() => onGo("all")} className="block w-full text-left rounded-2xl bg-gradient-to-br from-orange-500 to-orange-500 text-white p-4 shadow-sm active:scale-[0.99] transition-transform">
         <div className="text-sm opacity-90">บิลจีนรอโอน</div>
         <div className="flex items-end justify-between mt-1">
           <div className="text-3xl font-bold">{pending.length} <span className="text-base font-normal opacity-90">บิล</span></div>
@@ -307,7 +318,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
 
       {/* ปุ่มลัด */}
       <div className="grid grid-cols-2 gap-3 pt-1">
-        <button onClick={() => onGo("bill")} className="h-12 bg-rose-600 text-white rounded-xl font-semibold">+ ลงบิลจีน</button>
+        <button onClick={() => onGo("bill")} className="h-12 bg-orange-600 text-white rounded-xl font-semibold">+ ลงบิลจีน</button>
         <button onClick={() => onGo("ctw")} className="h-12 border border-slate-300 text-slate-700 rounded-xl font-semibold">+ บิล CTW</button>
       </div>
     </div>
@@ -412,9 +423,9 @@ function BillForm() {
           <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
             className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         {/* สรุปยอด ¥ (เรทมาตอนโอน) */}
-        <div className="mt-3 rounded-lg bg-rose-50 border border-rose-100 p-3 flex justify-between items-center">
+        <div className="mt-3 rounded-lg bg-orange-50 border border-orange-100 p-3 flex justify-between items-center">
           <div className="text-sm text-slate-600">ยอดโอนรวม</div>
-          <div className="text-lg font-bold text-rose-600">¥{fmt(totalRmb)}</div>
+          <div className="text-lg font-bold text-orange-600">¥{fmt(totalRmb)}</div>
         </div>
         <div className="mt-1 text-[11px] text-slate-400 text-center">* เรท/ยอดเงินบาทจะคำนวณตอน “โอนเข้าจีน”</div>
       </Card>
@@ -424,7 +435,7 @@ function BillForm() {
       </Card>
 
       <button onClick={save} disabled={saving}
-        className="w-full h-12 bg-rose-600 text-white rounded-xl font-semibold text-base disabled:opacity-50 active:scale-[0.99] transition-transform">
+        className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold text-base disabled:opacity-50 active:scale-[0.99] transition-transform">
         {saving ? "กำลังบันทึก…" : "บันทึกบิล"}
       </button>
     </div>
@@ -479,7 +490,7 @@ function AllList() {
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
         {ALL_FILTERS.map((f) => (
           <button key={f} onClick={() => setFilter(f)}
-            className={`flex-shrink-0 h-8 px-3 rounded-full text-sm border ${filter === f ? "bg-rose-600 text-white border-rose-600 font-medium" : "bg-white text-slate-500 border-slate-200"}`}>
+            className={`flex-shrink-0 h-8 px-3 rounded-full text-sm border ${filter === f ? "bg-orange-600 text-white border-orange-600 font-medium" : "bg-white text-slate-500 border-slate-200"}`}>
             {f}
           </button>
         ))}
@@ -489,7 +500,7 @@ function AllList() {
       {!loading && rows.length > 0 && (
         <div className="rounded-xl bg-white border border-slate-200 p-3 flex justify-between items-center">
           <span className="text-sm text-slate-500">{filter} {rows.length} บิล</span>
-          <span className="font-bold text-rose-600">¥{fmt(total)}</span>
+          <span className="font-bold text-orange-600">¥{fmt(total)}</span>
         </div>
       )}
 
@@ -511,7 +522,7 @@ function AllList() {
                 </div>
                 <div className="text-right flex-shrink-0">
                   <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
-                  {rate > 0 && <div className="text-xs text-rose-600">฿{fmt((num(r.amount_rmb) + num(r.fee_rmb)) * rate)}</div>}
+                  {rate > 0 && <div className="text-xs text-orange-600">฿{fmt((num(r.amount_rmb) + num(r.fee_rmb)) * rate)}</div>}
                   <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[st] ?? "bg-slate-100 text-slate-500"}`}>{st}</span>
                 </div>
               </button>
@@ -608,14 +619,14 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
           </div>
 
           {/* ยอดเงิน */}
-          <div className="rounded-lg bg-rose-50 border border-rose-100 p-3 text-sm space-y-1">
+          <div className="rounded-lg bg-orange-50 border border-orange-100 p-3 text-sm space-y-1">
             <Row label="ยอด (¥)" v={fmt(amount)} />
             <Row label="ค่าโอน (¥)" v={fmt(fee)} />
-            <div className="flex justify-between border-t border-rose-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดโอนรวม</span><span className="font-semibold text-slate-800">¥{fmt(totalRmb)}</span></div>
+            <div className="flex justify-between border-t border-orange-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดโอนรวม</span><span className="font-semibold text-slate-800">¥{fmt(totalRmb)}</span></div>
             <Row label="เรท" v={rate ? fmt(rate) : "—"} />
             <div className="flex justify-between"><span className="text-slate-500">เป็นเงินบาท</span>
               {canPrint
-                ? <span className="font-bold text-rose-600">฿{fmt(thb)}</span>
+                ? <span className="font-bold text-orange-600">฿{fmt(thb)}</span>
                 : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
             </div>
           </div>
@@ -750,7 +761,7 @@ function RateTab() {
             {RATE_TABLE.map(t => <div key={t.tier} className="flex justify-between"><span className="text-slate-500">{t.tier} · {t.label}</span><span className="font-medium text-slate-700">{fmt(+(num(rate) - t.off).toFixed(4))}</span></div>)}
           </div>
         )}
-        <button onClick={save} disabled={saving} className="mt-3 w-full h-11 bg-rose-600 text-white rounded-lg font-medium disabled:opacity-50">
+        <button onClick={save} disabled={saving} className="mt-3 w-full h-11 bg-orange-600 text-white rounded-lg font-medium disabled:opacity-50">
           {saving ? "กำลังบันทึก…" : "บันทึกเรท"}
         </button>
       </Card>
@@ -766,7 +777,7 @@ function RateTab() {
                   <span className="text-slate-400 text-xs">R1</span>
                   <input type="number" inputMode="decimal" step="any" value={editVal} autoFocus
                     onChange={e => setEditVal(e.target.value)}
-                    className="w-24 h-9 px-2 text-base text-right border border-rose-300 rounded-lg" />
+                    className="w-24 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
                   <button onClick={() => saveEdit(id)} disabled={busy}
                     className="w-9 h-9 rounded-lg bg-emerald-600 text-white disabled:opacity-50">✓</button>
                   <button onClick={() => setEditId(null)} disabled={busy}
@@ -815,7 +826,7 @@ function CtwList() {
 
   return (
     <div className="space-y-3">
-      <button onClick={() => setMode("form")} className="w-full h-12 bg-rose-600 text-white rounded-xl font-semibold active:scale-[0.99] transition-transform">+ เพิ่มบิล CTW</button>
+      <button onClick={() => setMode("form")} className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold active:scale-[0.99] transition-transform">+ เพิ่มบิล CTW</button>
       {loading ? (
         <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
       ) : rows.length === 0 ? (
@@ -919,7 +930,7 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
 
       <div className="grid grid-cols-2 gap-3">
         <button onClick={onCancel} disabled={saving} className="h-12 border border-slate-200 text-slate-700 rounded-xl font-medium">ยกเลิก</button>
-        <button onClick={save} disabled={saving} className="h-12 bg-rose-600 text-white rounded-xl font-semibold disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกบิล"}</button>
+        <button onClick={save} disabled={saving} className="h-12 bg-orange-600 text-white rounded-xl font-semibold disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกบิล"}</button>
       </div>
     </div>
   );
@@ -960,9 +971,9 @@ function CtwDetail({ bill, onClose, onDeleted }: { bill: Record<string, unknown>
             <Row label="วันที่เอกสาร" v={bill.doc_date} />
             <Row label="เลขที่บัญชี" v={bill.account_number} />
           </div>
-          <div className="rounded-lg bg-rose-50 border border-rose-100 p-3 text-sm space-y-1">
+          <div className="rounded-lg bg-orange-50 border border-orange-100 p-3 text-sm space-y-1">
             <Row label="ยอดรวมก่อนภาษี" v={"฿" + fmt(num(bill.amount_before_tax))} />
-            <div className="flex justify-between border-t border-rose-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดเงินสุทธิ</span><span className="font-bold text-rose-600">฿{fmt(num(bill.net_amount))}</span></div>
+            <div className="flex justify-between border-t border-orange-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดเงินสุทธิ</span><span className="font-bold text-orange-600">฿{fmt(num(bill.net_amount))}</span></div>
           </div>
           {atts.length > 0 && (
             <div>
@@ -1200,7 +1211,7 @@ function TransferPage() {
           <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1">
             <span className="text-slate-600 font-medium">เข้าบัญชีจีน (ส่วนต่าง)</span>
             {hasRate
-              ? <span className={`font-bold ${leftover < 0 ? "text-rose-600" : "text-emerald-700"}`}>฿{fmt(leftover)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(leftoverRmb)}</span></span>
+              ? <span className={`font-bold ${leftover < 0 ? "text-orange-600" : "text-emerald-700"}`}>฿{fmt(leftover)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(leftoverRmb)}</span></span>
               : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
           </div>
         </div>
@@ -1228,9 +1239,9 @@ function TransferPage() {
               {ctw.map((r) => {
                 const id = String(r.id), on = ctwSel.has(id), remain = ctwRemain(r), paid = num(r.cleared_amount);
                 return (
-                  <div key={id} className={`rounded-lg border ${on ? "border-rose-400 bg-rose-50" : "border-slate-200"}`}>
+                  <div key={id} className={`rounded-lg border ${on ? "border-orange-400 bg-orange-50" : "border-slate-200"}`}>
                     <button onClick={() => ctwToggle(id, remain)} className="w-full flex items-center gap-3 p-2.5 text-left">
-                      <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-rose-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
+                      <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-orange-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block font-medium text-slate-800 truncate">{String(r.company_name ?? "—")}</span>
                         <span className="block text-xs text-slate-400">เลขที่ {String(r.doc_number ?? "—")} · {String(r.doc_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ฿${fmt(paid)}` : ""}</span>
@@ -1244,7 +1255,7 @@ function TransferPage() {
                       <div className="px-2.5 pb-2.5 flex items-center gap-2">
                         <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้</span>
                         <Money value={ctwPay[id] ?? ""} onChange={(v) => setCtwPay(p => ({ ...p, [id]: v }))}
-                          className="flex-1 h-9 px-2 text-base text-right border border-rose-300 rounded-lg" />
+                          className="flex-1 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
                       </div>
                     )}
                   </div>
@@ -1252,7 +1263,7 @@ function TransferPage() {
               })}
             </div>
             <button onClick={clearCtw} disabled={ctwBusy || ctwSel.size === 0}
-              className="mt-3 w-full h-11 border border-rose-300 text-rose-700 rounded-lg text-sm font-medium hover:bg-rose-50 disabled:opacity-50">
+              className="mt-3 w-full h-11 border border-orange-300 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-50 disabled:opacity-50">
               {ctwBusy ? "…" : `✓ บันทึกการตัด (${ctwSel.size})`}
             </button>
           </>
@@ -1271,7 +1282,7 @@ function PrintedBadge() {
 function ConfirmPopup({ title, message, confirmText = "ยืนยัน", tone = "rose", onCancel, onConfirm }: {
   title: string; message?: string; confirmText?: string; tone?: "rose" | "emerald"; onCancel: () => void; onConfirm: () => void;
 }) {
-  const btn = tone === "emerald" ? "bg-emerald-600" : "bg-rose-600";
+  const btn = tone === "emerald" ? "bg-emerald-600" : "bg-orange-600";
   return (
     <div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
@@ -1435,7 +1446,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
         <div className="p-4">
           {/* พรีวิว (HTML — responsive ไม่ถูกตัดบนมือถือ) */}
           <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-            <div className="bg-gradient-to-r from-rose-600 to-orange-500 text-white px-4 py-3">
+            <div className="bg-gradient-to-r from-orange-600 to-orange-500 text-white px-4 py-3">
               <div className="font-bold text-base">💸 ใบสรุปการโอนเงินจีน</div>
               <div className="text-[11px] opacity-90 mt-0.5">พิมพ์เมื่อ {printedLabel}</div>
             </div>
@@ -1452,7 +1463,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
               <SlipRow l="เรท" r={rate ? fmt(rate) : "—"} />
               <div className="flex justify-between items-center gap-3">
                 <span className="text-slate-500 flex-shrink-0">เป็นเงินบาท</span>
-                <span className="text-2xl font-bold text-rose-600 text-right break-all">฿{fmt(thb)}</span>
+                <span className="text-2xl font-bold text-orange-600 text-right break-all">฿{fmt(thb)}</span>
               </div>
               <div className="border-t border-slate-100 my-1" />
               <SlipRow l="วันที่โอน" r={bill.transfer_date} />
@@ -1466,7 +1477,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
             <button onClick={saveImage} disabled={busy}
               className="h-12 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
             <button onClick={shareImage} disabled={busy}
-              className="h-12 bg-rose-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์ / ส่ง LINE</button>
+              className="h-12 bg-orange-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์ / ส่ง LINE</button>
           </div>
           <div className="mt-2 text-center text-[11px] text-slate-400">เมื่อบันทึก/แชร์ ระบบจะทำเครื่องหมาย “พิมพ์แล้ว” ให้</div>
         </div>
@@ -1477,7 +1488,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
 
 // ---------------- ชิ้นเล็ก ----------------
 function Card({ children }: { children: React.ReactNode }) {
-  return <div className="bg-white rounded-xl border border-slate-200 p-4">{children}</div>;
+  return <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm shadow-slate-200/60">{children}</div>;
 }
 function Label({ children }: { children: React.ReactNode }) {
   return <div className="text-xs font-medium text-slate-500 mb-1">{children}</div>;
