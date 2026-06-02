@@ -11,7 +11,7 @@ import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
-import { FileInput } from "@/components/file-input";
+import { FileMultiInput } from "@/components/file-multi-input";
 
 const SUPPLIER_CFG: RelationConfig = {
   target_table: "partners_v2", target_module_key: "partners-v2",
@@ -122,8 +122,7 @@ function BillForm() {
   const [rate, setRate] = useState("");
   const [r1, setR1] = useState(0);              // เรทฐาน R1 ของวัน
   const [transferDate, setTransferDate] = useState(today());
-  const [wechat, setWechat] = useState<string | null>(null);
-  const [bill, setBill] = useState<string | null>(null);
+  const [files, setFiles] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [feeInfo, setFeeInfo] = useState(false);
   const [rateInfo, setRateInfo] = useState(false);
@@ -162,7 +161,7 @@ function BillForm() {
         body: JSON.stringify({
           supplier_id: supplierId, amount_rmb: num(amount), fee_rmb: num(fee),
           rate: num(rate) || null, transfer_date: transferDate || null,
-          wechat_image: wechat, bill_image: bill, status: "รอโอน", actor: "china-app",
+          attachments: files, status: "รอโอน", actor: "china-app",
         }),
       });
       const j = await res.json();
@@ -170,7 +169,7 @@ function BillForm() {
       toast.success("บันทึกบิลแล้ว");
       // reset
       setSupplierId(null); setSup(null); setAmount(""); setFee(""); setTransferDate(today());
-      setWechat(null); setBill(null);
+      setFiles([]);
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -237,10 +236,7 @@ function BillForm() {
       </Card>
 
       <Card>
-        <div className="grid grid-cols-2 gap-3">
-          <FileInput label="📄 ใบรับ/บิล" value={bill} onChange={setBill} folder="china-bills" />
-          <FileInput label="💬 WeChat" value={wechat} onChange={setWechat} folder="china-bills" />
-        </div>
+        <FileMultiInput label="📎 ไฟล์แนบ (ใบรับ/บิล, สลิป WeChat ฯลฯ)" value={files} onChange={setFiles} folder="china-bills" />
       </Card>
 
       <button onClick={save} disabled={saving}
@@ -429,8 +425,12 @@ function BillDetail({ bill, onClose }: { bill: Record<string, unknown>; onClose:
   const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
   const thb = totalRmb * rate;
   const st = String(bill.status ?? "—");
-  const imgUrl = (key: unknown) => key ? `/api/r2-image?key=${encodeURIComponent(String(key))}` : null;
-  const billImg = imgUrl(bill.bill_image), wechatImg = imgUrl(bill.wechat_image);
+  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  // ไฟล์แนบใหม่ (array) + รวมไฟล์เก่า bill_image/wechat_image ของบิลเดิม
+  const atts = Array.isArray(bill.attachments) ? (bill.attachments as unknown[]).map(String) : [];
+  const legacy = [bill.bill_image, bill.wechat_image].filter(Boolean).map(String);
+  const allFiles = [...atts, ...legacy.filter((k) => !atts.includes(k))];
+  const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
 
   return (
     <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
@@ -473,12 +473,24 @@ function BillDetail({ bill, onClose }: { bill: Record<string, unknown>; onClose:
           </div>
 
           {/* แนบไฟล์ */}
-          {(billImg || wechatImg) && (
+          {allFiles.length > 0 && (
             <div>
-              <Label>ไฟล์แนบ</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {billImg && <a href={billImg} target="_blank" rel="noreferrer" className="h-10 leading-10 text-center border border-slate-200 rounded-lg text-sm text-blue-600">📄 เปิดบิล</a>}
-                {wechatImg && <a href={wechatImg} target="_blank" rel="noreferrer" className="h-10 leading-10 text-center border border-slate-200 rounded-lg text-sm text-blue-600">💬 เปิด WeChat</a>}
+              <Label>ไฟล์แนบ ({allFiles.length})</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {allFiles.map((k) => (
+                  <a key={k} href={r2Url(k)} target="_blank" rel="noreferrer"
+                    className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
+                    {isPdf(k) ? (
+                      <div className="flex flex-col items-center justify-center h-24 text-slate-600">
+                        <span className="text-3xl">📄</span>
+                        <span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span>
+                      </div>
+                    ) : (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
+                    )}
+                  </a>
+                ))}
               </div>
             </div>
           )}
