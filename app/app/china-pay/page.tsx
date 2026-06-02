@@ -124,8 +124,20 @@ export default function ChinaPayApp() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <style>{`@keyframes cpRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}.cp-anim{animation:cpRise .42s ease both}@keyframes cpSpin{to{transform:rotate(360deg)}}.cp-spin{display:inline-block;animation:cpSpin 1.1s linear infinite}`}</style>
-      <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm relative">
+      <style>{`
+        @keyframes cpRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+        .cp-anim{animation:cpRise .42s ease both}
+        @keyframes cpSpin{to{transform:rotate(360deg)}}
+        .cp-spin{display:inline-block;animation:cpSpin 1.1s linear infinite}
+        @keyframes cpFloat{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(18px,-22px) scale(1.08)}66%{transform:translate(-16px,12px) scale(.95)}}
+        .cp-bg{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+        .cp-bg i{position:absolute;border-radius:50%;filter:blur(34px);opacity:.45;animation:cpFloat 14s ease-in-out infinite}
+        .cp-bg .b1{width:200px;height:200px;background:#fdba74;top:18%;left:-50px;animation-delay:0s}
+        .cp-bg .b2{width:240px;height:240px;background:#fed7aa;top:45%;right:-70px;animation-delay:-4s}
+        .cp-bg .b3{width:180px;height:180px;background:#fcd34d;bottom:8%;left:30%;animation-delay:-8s;opacity:.3}
+      `}</style>
+      <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm relative overflow-hidden">
+        <div className="cp-bg" aria-hidden><i className="b1"></i><i className="b2"></i><i className="b3"></i></div>
         {/* Top bar */}
         <header className="sticky top-0 z-20 bg-gradient-to-br from-orange-400 to-orange-600 text-white px-4 pt-3 pb-5 rounded-b-3xl shadow-lg shadow-orange-500/20 overflow-hidden">
           <div className="pointer-events-none absolute -right-8 -top-10 w-40 h-40 bg-white/10 rounded-full" />
@@ -142,7 +154,7 @@ export default function ChinaPayApp() {
         </header>
 
         {/* Content */}
-        <main key={renderTab} className="cp-anim flex-1 overflow-y-auto p-4 pb-28">
+        <main key={renderTab} className="cp-anim relative z-10 flex-1 overflow-y-auto p-4 pb-28">
           {renderTab === "dashboard" && <Dashboard onGo={go} />}
           {renderTab === "bill" && <BillForm />}
           {renderTab === "all" && <AllList />}
@@ -1167,9 +1179,17 @@ function TransferPage() {
           </div>
         )}
         {sel.size > 0 && (
-          <div className="mt-3 flex justify-between items-center rounded-lg bg-slate-50 border border-slate-100 p-3">
-            <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดบิลรวม</span>
-            <span className="font-bold text-slate-800">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span>
+          <div className="mt-3 rounded-xl bg-emerald-50 border border-emerald-100 p-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดบิลรวม</span>
+              <span className="font-bold text-slate-800">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span>
+            </div>
+            {hasRate && selectedSum > 0 && (
+              <button onClick={() => setAmount(String(+(num(amount) + selectedSum).toFixed(2)))}
+                className="mt-2 w-full h-9 rounded-lg bg-white border border-emerald-300 text-emerald-700 text-sm font-medium hover:bg-emerald-100 active:scale-[.99] transition">
+                ＋ ใช้ยอดนี้ → จำนวนเงินที่โอนจริง
+              </button>
+            )}
           </div>
         )}
       </Card>
@@ -1262,8 +1282,17 @@ function TransferPage() {
                 );
               })}
             </div>
+            {ctwSel.size > 0 && (() => {
+              const paySum = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);
+              return paySum > 0 ? (
+                <button onClick={() => setAmount(String(+(num(amount) + paySum).toFixed(2)))}
+                  className="mt-3 w-full h-10 rounded-lg bg-white border border-orange-300 text-orange-700 text-sm font-medium hover:bg-orange-50 active:scale-[.99] transition">
+                  ＋ ใช้ยอดนี้ (฿{fmt(paySum)}) → จำนวนเงินที่โอนจริง
+                </button>
+              ) : null;
+            })()}
             <button onClick={clearCtw} disabled={ctwBusy || ctwSel.size === 0}
-              className="mt-3 w-full h-11 border border-orange-300 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-50 disabled:opacity-50">
+              className="mt-2 w-full h-11 border border-orange-300 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-50 disabled:opacity-50">
               {ctwBusy ? "…" : `✓ บันทึกการตัด (${ctwSel.size})`}
             </button>
           </>
