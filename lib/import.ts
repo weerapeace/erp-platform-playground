@@ -254,6 +254,24 @@ export const IMPORT_SCHEMAS: Record<string, ImportSchema> = {
   "material-families": MATERIAL_FAMILY_IMPORT_SCHEMA,
 };
 
+// ---- Template CSV (ของกลาง) — หัวคอลัมน์ = ชื่อ field (+ * ถ้าจำเป็น) ----
+export function buildTemplateCsv(schema: ImportSchema): string {
+  const esc = (s: string) => /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const headers = schema.fields.map((f) => esc(f.label + (f.required ? " *" : "")));
+  // BOM (เปิดใน Excel ภาษาไทยไม่เพี้ยน) + แถวหัว + 1 แถวว่างให้กรอก
+  return "﻿" + headers.join(",") + "\r\n" + schema.fields.map(() => "").join(",") + "\r\n";
+}
+
+/** ป้ายชนิด field (ภาษาคน) + คำอธิบาย tooltip */
+export function fieldTypeHint(f: ImportField): { label: string; tip: string } {
+  switch (f.type) {
+    case "number":  return { label: "ตัวเลข", tip: "กรอกตัวเลขเท่านั้น (เช่น 100, 25.5)" };
+    case "boolean": return { label: "ใช่/ไม่ใช่", tip: "พิมพ์ true/false, 1/0, ใช่/ไม่, yes/no" };
+    case "select":  return { label: "ตัวเลือก", tip: f.options?.length ? `เลือกค่า: ${f.options.join(" / ")}` : "เลือกจากค่าที่กำหนด" };
+    default:        return { label: "ข้อความ", tip: "กรอกข้อความ (ถ้าเป็นช่องเชื่อมโยง ให้พิมพ์ชื่อ ระบบจะจับคู่ให้)" };
+  }
+}
+
 // ---- สร้าง ImportSchema อัตโนมัติจากทะเบียน field (ของกลาง — ใช้ได้ทุกโมดูล) ----
 // field จาก /api/admin/field-registry-v2 (โครงหลวม ๆ — อ่านเฉพาะที่ใช้)
 type RegistryFieldLite = {

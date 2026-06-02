@@ -24,6 +24,7 @@ import { LayoutEditorModal } from "@/components/layout-editor";
 import { RelationMany2Many, RelationOne2Many } from "@/components/relation-multi";
 import { ImportWizard } from "@/components/import-wizard";
 import { buildImportSchemaFromRegistry } from "@/lib/import";
+import { useToast } from "@/components/toast";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
 import dynamic from "next/dynamic";
@@ -523,9 +524,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [deleteText, setDeleteText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
-  // toast
-  const [toast, setToast] = useState<string | null>(null);
-  const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
+  // toast กลาง (ของกลาง) — flash = สำเร็จ, fail = ผิดพลาด
+  const notify = useToast();
+  const flash = (m: string) => notify.success(m);
+  const fail = (m: string) => notify.error(m);
 
   // F19: refresh trigger สำหรับ server mode (เพิ่มค่า → DataTable โหลดหน้าใหม่)
   const [serverRefresh, setServerRefresh] = useState(0);
@@ -793,7 +795,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         setModalOpen(false);
       }
       await refreshData();
-    } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
+    } catch (err) { const m = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"; setFormErr(m); fail(m); }
     finally { setSaving(false); }
   };
 
@@ -812,7 +814,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       flash(deleteMode === "hard" ? "ลบถาวรแล้ว" : "ลบแล้ว (กู้คืนได้)");
       setDeleteTarget(null); setDeleteMode("soft"); setDeleteText("");
       await refreshData();
-    } catch (err) { setError(err instanceof Error ? err.message : "ลบไม่สำเร็จ"); }
+    } catch (err) { const m = err instanceof Error ? err.message : "ลบไม่สำเร็จ"; setError(m); fail(m); }
     finally { setDeleting(false); }
   };
   const openDelete = (r: Row) => { setDeleteTarget(r); setDeleteMode("soft"); setDeleteText(""); setError(null); };
@@ -954,7 +956,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             } catch (e) { fails.push(String((e as Error).message ?? e)); }
           }
           flash(`ลบถาวร ${ok} ราย${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
-          if (fails.length) setError(`ลบถาวรไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
+          if (fails.length) fail(`ลบถาวรไม่สำเร็จ ${fails.length} ราย: ${fails[0]}`);
           await refreshData();
         },
       },
@@ -1050,13 +1052,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         body: JSON.stringify({ edits: edits.map((e) => ({ id: e.row.id, changes: e.changes })), actor: user?.name }),
       });
       const json = await res.json();
-      if (json.error) { setError(json.error); return { success: 0, failed: total }; }
+      if (json.error) { setError(json.error); fail(json.error); return { success: 0, failed: total }; }
       const success = (json.affected as number) ?? total;
       await refreshData();
       flash(`แก้ ${success} ราย`);
       return { success, failed: total - success };
     } catch (e) {
-      setError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      const m = e instanceof Error ? e.message : "บันทึกไม่สำเร็จ";
+      setError(m); fail(m);
       return { success: 0, failed: total };
     }
   }, [apiBase, config.apiPath, user?.name, refreshData]);
@@ -1377,7 +1380,6 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           onSetFilterable={config.moduleKey && canEdit ? handleSetFilterable : undefined}
         />
 
-        {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm">✓ {toast}</div>}
       </div>
 
       {/* F11: Drawer (slide จากขวา) — สลับ view/edit */}

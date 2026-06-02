@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useMemo } from "react";
 import {
-  parseImportFile, autoMapHeaders, validateRows,
+  parseImportFile, autoMapHeaders, validateRows, buildTemplateCsv, fieldTypeHint,
   type ImportSchema, type ParsedFile, type ValidationError,
 } from "@/lib/import";
 import { apiFetch } from "@/lib/api";
@@ -56,6 +56,17 @@ export function ImportWizard({ schema, onClose, onDone, actor, commitUrl }: Impo
       setStep(2);
     } catch (err) { setError(err instanceof Error ? err.message : "อ่านไฟล์ไม่สำเร็จ"); }
     finally { setParsing(false); }
+  };
+
+  // ---- ดาวน์โหลด template (หัวคอลัมน์ตาม schema) ----
+  const downloadTemplate = () => {
+    const csv = buildTemplateCsv(schema);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `template-${schema.entityType}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // ---- Step 3 validate ----
@@ -159,21 +170,30 @@ export function ImportWizard({ schema, onClose, onDone, actor, commitUrl }: Impo
             <div className="text-4xl mb-3 opacity-40">📥</div>
             <p className="text-sm font-medium text-slate-700 mb-1">ลากไฟล์มาวาง หรือคลิกเพื่อเลือก</p>
             <p className="text-xs text-slate-400 mb-4">รองรับ CSV, Excel (.xlsx, .xls)</p>
-            <label className="inline-block h-9 px-4 bg-blue-600 text-white rounded-lg text-sm font-medium cursor-pointer hover:bg-blue-700">
-              {parsing ? "กำลังอ่าน..." : "เลือกไฟล์"}
-              <input type="file" accept=".csv,.xlsx,.xls" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
-            </label>
-            <details className="mt-6 text-left max-w-md mx-auto">
-              <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-700">📋 ดูคอลัมน์ที่รองรับ</summary>
-              <div className="mt-2 p-3 bg-slate-50 rounded-lg text-xs space-y-1">
-                {schema.fields.map(f => (
-                  <div key={f.key} className="flex gap-2">
-                    <code className="font-mono text-slate-700 min-w-[100px]">{f.key}</code>
-                    <span className="text-slate-500">{f.label}</span>
-                    {f.required && <span className="text-red-500">*</span>}
-                  </div>
-                ))}
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <label className="inline-block h-9 px-4 leading-9 bg-blue-600 text-white rounded-lg text-sm font-medium cursor-pointer hover:bg-blue-700">
+                {parsing ? "กำลังอ่าน..." : "เลือกไฟล์"}
+                <input type="file" accept=".csv,.xlsx,.xls" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              </label>
+              <button type="button" onClick={downloadTemplate}
+                className="h-9 px-4 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50">
+                ⬇ ดาวน์โหลด Template
+              </button>
+            </div>
+            <details className="mt-6 text-left max-w-lg mx-auto" open>
+              <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-700">📋 ดูคอลัมน์ที่รองรับ (<span className="text-red-500">*</span> = จำเป็น)</summary>
+              <div className="mt-2 p-3 bg-slate-50 rounded-lg text-xs space-y-1.5">
+                {schema.fields.map(f => {
+                  const hint = fieldTypeHint(f);
+                  return (
+                    <div key={f.key} className="flex items-center gap-2" title={hint.tip}>
+                      <span className="text-slate-700 min-w-[140px]">{f.label}{f.required && <span className="text-red-500 ml-0.5">*</span>}</span>
+                      <code className="font-mono text-[10px] text-slate-400">{f.key}</code>
+                      <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500 cursor-help">{hint.label}</span>
+                    </div>
+                  );
+                })}
               </div>
             </details>
           </div>
