@@ -83,7 +83,7 @@ export function RelationPicker({
         const params = new URLSearchParams({
           table: config.target_table,
           label: config.target_label_field,
-          limit: "20",
+          limit: "100",                 // โชว์ได้มากขึ้น (เดิม 20 → เห็นไม่ครบ) ที่เหลือใช้ค้นหา
         });
         if (query) params.set("search", query);
         if (config.target_search_fields?.length) params.set("search_in", config.target_search_fields.join(","));
