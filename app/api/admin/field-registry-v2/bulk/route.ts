@@ -22,6 +22,7 @@ const ALLOWED_BULK_FIELDS = [
   "group_key", "ui_field_type", "sensitive_permission",
   // Sprint 12
   "is_inline_editable",
+  "is_bulk_editable",
 ];
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

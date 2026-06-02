@@ -36,6 +36,7 @@ export type StudioField = {
   isVisible?:  boolean;   // column show ในตาราง
   showInForm?: boolean;   // field show ในฟอร์ม
   inlineEditable?: boolean; // แก้ไขเร็ว (quick edit) ในหน้า detail
+  bulkEditable?: boolean;   // แก้แบบ bulk (หลายรายการ) ได้
 };
 
 const GROUP_META: Record<string, { label: string; icon: string; order: number }> = {
@@ -89,6 +90,8 @@ export function StudioPanel({
     setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, showInForm: !i.showInForm } : i); });
   const toggleInline = (key: string) =>
     setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, inlineEditable: !i.inlineEditable } : i); });
+  const toggleBulk = (key: string) =>
+    setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, bulkEditable: !i.bulkEditable } : i); });
 
   // ---- save ----
   const save = async () => {
@@ -151,6 +154,18 @@ export function StudioPanel({
           body: JSON.stringify({ ids, patch: { is_inline_editable: val } }),
         });
         if ((await r.json()).error) throw new Error("is_inline_editable failed");
+      }
+
+      // 6. is_bulk_editable (แก้หลายรายการพร้อมกัน)
+      const bulkTrue  = withId.filter((i) => i.bulkEditable).map((i) => i.fieldId!);
+      const bulkFalse = withId.filter((i) => !i.bulkEditable).map((i) => i.fieldId!);
+      for (const [ids, val] of [[bulkTrue, true], [bulkFalse, false]] as [string[], boolean][]) {
+        if (ids.length === 0) continue;
+        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids, patch: { is_bulk_editable: val } }),
+        });
+        if ((await r.json()).error) throw new Error("is_bulk_editable failed");
       }
 
       setMsg("✓ บันทึก layout สำเร็จ");
@@ -239,7 +254,7 @@ export function StudioPanel({
           ) : (
             <FormEditor
               grouped={grouped} sensors={sensors} onDragEnd={onDragEnd}
-              items={items} onToggleForm={toggleForm} onToggleInline={toggleInline} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
+              items={items} onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
             />
           )}
         </div>
@@ -343,11 +358,12 @@ function FormEditor({
   items: StudioField[];
   onToggleForm: (key: string)=>void;
   onToggleInline: (key: string)=>void;
+  onToggleBulk: (key: string)=>void;
   onMoveGroup: (key: string, group: string)=>void;
 }) {
   return (
     <div>
-      <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว (กดแก้ในหน้า detail) • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
+      <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว (ในหน้า detail) • ∑ = แก้แบบ bulk (หลายรายการ) • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
         <SortableContext items={grouped.flatMap(([,fs])=>fs.map(f=>f.key))} strategy={verticalListSortingStrategy}>
           <div className="space-y-3">
@@ -356,7 +372,7 @@ function FormEditor({
               return (
                 <FormSectionZone key={gk} groupKey={gk} label={m.label} icon={m.icon} count={fs.length}>
                   {fs.map(f=>(
-                    <FormFieldRow key={f.key} field={f} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)} />
+                    <FormFieldRow key={f.key} field={f} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)} />
                   ))}
                 </FormSectionZone>
               );
@@ -381,7 +397,7 @@ function FormSectionZone({ groupKey, label, icon, count, children }: { groupKey:
   );
 }
 
-function FormFieldRow({ field, onToggle, onToggleInline, onMoveGroup }: { field: StudioField; onToggle: ()=>void; onToggleInline: ()=>void; onMoveGroup: (g:string)=>void }) {
+function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGroup }: { field: StudioField; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
   // ชนิดที่ quick-edit ได้ (text/number/boolean/select)
@@ -397,6 +413,11 @@ function FormFieldRow({ field, onToggle, onToggleInline, onMoveGroup }: { field:
         <button type="button" onClick={(e)=>{ e.stopPropagation(); onToggleInline(); }}
           title="แก้ไขเร็ว (กดแก้ในหน้า detail ได้เลย)"
           className={`text-xs px-1.5 py-0.5 rounded border ${field.inlineEditable?"bg-amber-100 border-amber-300 text-amber-700":"bg-white border-slate-200 text-slate-400"}`}>⚡</button>
+      )}
+      {inlineable && (
+        <button type="button" onClick={(e)=>{ e.stopPropagation(); onToggleBulk(); }}
+          title="แก้แบบ bulk (หลายรายการพร้อมกัน)"
+          className={`text-xs px-1.5 py-0.5 rounded border ${field.bulkEditable?"bg-violet-100 border-violet-300 text-violet-700":"bg-white border-slate-200 text-slate-400"}`}>∑</button>
       )}
       <select value={field.groupKey} onChange={(e)=>onMoveGroup(e.target.value)} onClick={(e)=>e.stopPropagation()}
         className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white" title="ย้ายหมวด">
