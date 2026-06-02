@@ -450,7 +450,10 @@ export function DataTable<T extends Record<string, unknown>>({
 
   // ---- View mode (table / cards) ----
   const showCardToggle = !!enableCards || !!cardConfig;
-  const [viewMode, setViewMode] = useState<"table" | "cards">(defaultViewMode);
+  // มือถือ (จอ < 768px) + มีการ์ด → เริ่มต้นเป็น "การ์ด" อัตโนมัติ (ไม่ต้องเลื่อนตารางซ้าย-ขวา)
+  const [viewMode, setViewMode] = useState<"table" | "cards">(() =>
+    (showCardToggle && typeof window !== "undefined" && window.innerWidth < 768) ? "cards" : defaultViewMode
+  );
 
   // ---- Admin default layout (Tier 3I) ----
   // โหลด default จาก server ถ้า user ยังไม่มี state ใน localStorage
