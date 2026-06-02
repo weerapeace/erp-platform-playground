@@ -41,7 +41,14 @@ export async function POST(request: NextRequest) {
     is_sortable: true, is_searchable: true, width: 220, display_order: 10, show_in_form: true,
   });
 
-  // 4) audit (best-effort)
+  // 4) เพิ่มรายการเมนู — โผล่ในหน้า "จัดการเมนู" แต่ "ซ่อน" จาก sidebar/launcher จนกว่าจะเปิดเอง
+  await admin.from("erp_menu_items").insert({
+    section: "โมดูลที่สร้างเอง", section_order: 90, sort_order: 100,
+    icon: b.icon ?? "🧩", label: b.label, href: `/m/${b.table}`,
+    show_in_sidebar: false, show_in_launcher: false, is_active: true, app_keys: [],
+  }).then(() => {}, () => {});   // best-effort — ถ้าซ้ำ/พลาด ไม่ให้ล้มการสร้างโมดูล
+
+  // 5) audit (best-effort)
   await admin.from("erp_audit_logs").insert({
     actor_name: "system", action: "schema.create_table", module: b.table, record_label: b.table,
   }).then(() => {}, () => {});
