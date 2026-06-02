@@ -1040,21 +1040,24 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const onBulkEdit = useCallback(async (
     edits: { row: Row; changes: Record<string, unknown> }[]
   ): Promise<BulkEditResult> => {
-    let success = 0, failed = 0;
-    for (const e of edits) {
-      try {
-        const res = await apiFetch(`${apiBase}${config.apiPath}/${e.row.id}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...e.changes, actor: user?.name }),
-        });
-        const json = await res.json();
-        if (json.error) { failed++; continue; }
-        success++;
-      } catch { failed++; }
+    const total = edits.length;
+    if (total === 0) { flash("ไม่มีรายการที่เปลี่ยน"); return { success: 0, failed: 0 }; }
+    try {
+      // ยิงครั้งเดียว — server จัดกลุ่มแถวที่ค่าเหมือนกันแล้ว UPDATE ทีละกลุ่ม (เร็วกว่ายิงทีละแถวมาก)
+      const res = await apiFetch(`${apiBase}${config.apiPath}/bulk-update`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edits: edits.map((e) => ({ id: e.row.id, changes: e.changes })), actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) { setError(json.error); return { success: 0, failed: total }; }
+      const success = (json.affected as number) ?? total;
+      await refreshData();
+      flash(`แก้ ${success} ราย`);
+      return { success, failed: total - success };
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+      return { success: 0, failed: total };
     }
-    await refreshData();
-    flash(`แก้ ${success} ราย${failed > 0 ? ` (พลาด ${failed})` : ""}`);
-    return { success, failed };
   }, [apiBase, config.apiPath, user?.name, refreshData]);
 
   // แก้ "ทั้งหมดที่ตรงตัวกรอง" (server mode) — ยิง bulk-update ฝั่ง server

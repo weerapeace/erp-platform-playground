@@ -39,6 +39,7 @@ export async function POST(
 
   let body: {
     changes?: Record<string, unknown>;
+    edits?: { id: string; changes: Record<string, unknown> }[];   // โหมด batch ราย id (ค่าต่างกันได้)
     search?: string;
     filters?: Record<string, ColFilter>;
     base_filter?: Record<string, ColFilter>;
@@ -46,6 +47,45 @@ export async function POST(
     actor?: string;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  const sanitize = (obj: Record<string, unknown>) => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj ?? {})) if (SAFE.test(k) && !BLOCKED_KEYS.has(k)) out[k] = v;
+    return out;
+  };
+
+  // ---- โหมด batch ราย id: รับ edits[] (แต่ละแถวมีค่าของตัวเอง) → จัดกลุ่มแถวที่ค่าเหมือนกัน → UPDATE ทีละกลุ่ม ----
+  if (Array.isArray(body.edits)) {
+    const edits = body.edits;
+    if (edits.length === 0) return NextResponse.json({ ok: true, affected: 0, error: null });
+    if (edits.length > MAX_ROWS) return NextResponse.json({ error: `แก้ครั้งละไม่เกิน ${MAX_ROWS.toLocaleString()} แถว` }, { status: 400 });
+    const admin2 = supabaseAdmin();
+    // group: serialized changes → ids
+    const groups = new Map<string, { changes: Record<string, unknown>; ids: string[] }>();
+    for (const e of edits) {
+      if (!e?.id) continue;
+      const c = sanitize(e.changes ?? {});
+      if (Object.keys(c).length === 0) continue;
+      const key = JSON.stringify(c);
+      const g = groups.get(key) ?? { changes: c, ids: [] };
+      g.ids.push(String(e.id));
+      groups.set(key, g);
+    }
+    let affected2 = 0;
+    for (const g of groups.values()) {
+      for (let i = 0; i < g.ids.length; i += 500) {
+        const chunk = g.ids.slice(i, i + 500);
+        const { error } = await admin2.from(cfg.table).update(g.changes).in("id", chunk);
+        if (error) return NextResponse.json({ error: `แก้ไขไม่สำเร็จ: ${error.message}`, affected: affected2 }, { status: 500 });
+        affected2 += chunk.length;
+      }
+    }
+    await admin2.from("erp_audit_logs").insert({
+      actor_name: body.actor ?? user.email ?? "system", action: "master.bulk_update", module: entity,
+      record_label: `${affected2} rows`, new_value: { groups: groups.size, affected: affected2 },
+    }).then(() => {}, () => {});
+    return NextResponse.json({ ok: true, affected: affected2, error: null });
+  }
 
   // sanitize changes
   const changes: Record<string, unknown> = {};

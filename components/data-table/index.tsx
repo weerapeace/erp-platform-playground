@@ -2134,18 +2134,25 @@ function BulkEditGrid<T extends Record<string, unknown>>({
   const apply = async () => {
     setApplying(true);
     try {
+      // ส่งเฉพาะแถวที่ "เปลี่ยนจริง" และเฉพาะ field ที่ค่าต่างจากเดิม → เร็วขึ้นมาก
       const edits = rows.map(r => {
         const id = rowId(r);
+        const orig = r as Record<string, unknown>;
         const changes: Record<string, unknown> = {};
         selCols.forEach(f => {
           const raw = cells[id]?.[f.key] ?? "";
-          changes[f.key] = f.type === "boolean" ? raw === "true"
+          const next = f.type === "boolean" ? raw === "true"
             : f.type === "number" ? (raw === "" ? null : Number(raw))
             : f.type === "relation" ? (raw || null)
             : raw;
+          // เทียบกับค่าเดิม — ข้ามถ้าไม่เปลี่ยน
+          const prev = f.type === "boolean" ? !!orig[f.key]
+            : f.type === "number" ? (orig[f.key] == null || orig[f.key] === "" ? null : Number(orig[f.key]))
+            : (orig[f.key] ?? (f.type === "relation" ? null : ""));
+          if (next !== prev) changes[f.key] = next;
         });
         return { row: r, changes };
-      });
+      }).filter(e => Object.keys(e.changes).length > 0);
       setResult(await onApply(edits));
     } finally { setApplying(false); }
   };
