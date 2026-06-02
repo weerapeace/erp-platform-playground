@@ -967,16 +967,19 @@ export function DataTable<T extends Record<string, unknown>>({
     const cols = mode === "visible"
       ? table.getVisibleLeafColumns().filter(c => c.id !== "__select__" && c.id !== "__actions__")
       : table.getAllLeafColumns().filter(c => c.id !== "__select__" && c.id !== "__actions__");
-    return cols.map(c => {
+    const mapped = cols.map(c => {
       const reg = fieldRegistry.find(f => f.field_key === c.id);
       const meta = c.columnDef.meta as { permission?: string } | undefined;
       return {
         key: c.id,
         header: reg?.field_label
           ?? (typeof c.columnDef.header === "string" ? (c.columnDef.header as string) : c.id),
-        permission: meta?.permission,
+        permission: meta?.permission as string | undefined,
       };
     });
+    // ใส่คอลัมน์ ID ไว้บนสุดเสมอ → Export ออกไปแก้แล้วนำเข้ากลับ (อัปเดตด้วย ID) ได้
+    if (!mapped.some(m => m.key === "id")) mapped.unshift({ key: "id", header: "ID", permission: undefined });
+    return mapped;
   };
   const handleExportMode = async (format: "csv" | "excel", mode: "visible" | "selected" | "filtered_all") => {
     try {

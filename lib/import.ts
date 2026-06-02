@@ -307,6 +307,8 @@ export function buildImportSchemaFromRegistry(
         ...(type === "select" && f.options?.options?.length ? { options: f.options.options } : {}),
       } as ImportField;
     });
+  // id — คอลัมน์สำหรับ "อัปเดตของเดิม" (เว้นว่าง = เพิ่มใหม่) วางไว้บนสุด
+  importFields.unshift({ key: "id", label: "ID (เว้นว่างถ้าเพิ่มใหม่)", type: "text", aliases: ["id"] });
   // uniqueKey: เดาจากคอลัมน์ที่มักไม่ซ้ำ
   const keys = new Set(importFields.map((f) => f.key));
   const uniqueKey = ["code", "sku", "barcode", "family_code", "pr_no", "po_no"].find((k) => keys.has(k));

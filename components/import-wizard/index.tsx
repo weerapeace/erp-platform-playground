@@ -37,7 +37,7 @@ export function ImportWizard({ schema, onClose, onDone, actor, commitUrl }: Impo
   const [file,      setFile]      = useState<File | null>(null);
   const [parsed,    setParsed]    = useState<ParsedFile | null>(null);
   const [mapping,   setMapping]   = useState<Record<string, string>>({});
-  const [mode,      setMode]      = useState<"create" | "upsert">("create");
+  const [mode,      setMode]      = useState<"create" | "upsert" | "update">("create");
   const [parsing,   setParsing]   = useState(false);
   const [committing,setCommitting]= useState(false);
   const [result,    setResult]    = useState<ImportResult | null>(null);
@@ -246,10 +246,12 @@ export function ImportWizard({ schema, onClose, onDone, actor, commitUrl }: Impo
               </table>
             </div>
 
-            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
-              💡 <strong>Mode:</strong>
-              <label className="ml-3 mr-3"><input type="radio" name="mode" checked={mode==="create"} onChange={() => setMode("create")} className="mr-1" /> Create (ใหม่เท่านั้น, fail ถ้า {schema.uniqueKey} ซ้ำ)</label>
-              <label><input type="radio" name="mode" checked={mode==="upsert"} onChange={() => setMode("upsert")} className="mr-1" /> Upsert (อัปเดตถ้า {schema.uniqueKey} ซ้ำ)</label>
+            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1.5">
+              <div className="font-medium">💡 โหมดนำเข้า:</div>
+              <label className="flex items-start gap-2"><input type="radio" name="mode" checked={mode==="create"} onChange={() => setMode("create")} className="mt-0.5" />
+                <span><b>เพิ่มใหม่</b> — สร้างเรคคอร์ดใหม่ทั้งหมด (เว้นคอลัมน์ ID ว่างไว้)</span></label>
+              <label className="flex items-start gap-2"><input type="radio" name="mode" checked={mode==="update"} onChange={() => setMode("update")} className="mt-0.5" />
+                <span><b>อัปเดตของเดิม (ตาม ID)</b> — Export ออกมาแก้ใน Excel แล้วนำเข้ากลับ · แถวที่มี ID = อัปเดต, แถวที่เว้น ID = เพิ่มใหม่</span></label>
             </div>
           </div>
         )}

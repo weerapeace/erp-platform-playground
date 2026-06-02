@@ -19,7 +19,7 @@ export const revalidate = 0;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SAFE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
-type Body = { rows?: unknown; mode?: "create" | "upsert"; uniqueKey?: string; actor?: string };
+type Body = { rows?: unknown; mode?: "create" | "upsert" | "update"; uniqueKey?: string; actor?: string };
 type Failed = { row: number; code?: string; sku?: string; error: string };
 
 export async function POST(
@@ -36,7 +36,7 @@ export async function POST(
   let body: Body;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const rows = Array.isArray(body.rows) ? (body.rows as Record<string, unknown>[]) : [];
-  const mode = body.mode === "upsert" ? "upsert" : "create";
+  const mode = body.mode === "upsert" ? "upsert" : body.mode === "update" ? "update" : "create";
   if (rows.length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลนำเข้า" }, { status: 400 });
   if (rows.length > 500) return NextResponse.json({ error: "นำเข้าครั้งละไม่เกิน 500 แถว — แบ่งไฟล์/แบ่ง batch" }, { status: 400 });
 
@@ -66,11 +66,14 @@ export async function POST(
     (td ?? []).forEach((t) => { const o = t as Record<string, unknown>; relMap[rf.col].set(String(o[rf.labelField]).toLowerCase(), String(o.id)); });
   }
 
-  // ---- เตรียมแถว: แปลง relation + เติม defaults ----
+  // ---- เตรียมแถว: แปลง relation (ยังไม่เติม defaults — จะเติมตามโหมด) ----
   const failed: Failed[] = [];
-  const payload: Record<string, unknown>[] = [];
+  const resolved: Record<string, unknown>[] = [];   // แถวที่ผ่าน + แปลง relation แล้ว
   rows.forEach((r, i) => {
     const out: Record<string, unknown> = { ...r };
+    // id ว่าง/ไม่ใช่ uuid → ตัดทิ้ง (ให้ DB สร้างเอง / ไม่ใช้ match)
+    if (out.id == null || out.id === "" || !UUID_RE.test(String(out.id))) delete out.id;
+    else out.id = String(out.id);
     let err: string | null = null;
     for (const rf of relFields) {
       const v = r[rf.col];
@@ -81,11 +84,28 @@ export async function POST(
       out[rf.col] = id;
     }
     if (err) { failed.push({ row: i + 1, code: String(r.code ?? r.sku ?? ""), error: err }); return; }
-    payload.push({ ...(cfg.defaults ?? {}), ...out });
+    resolved.push(out);
   });
 
   let created = 0, updated = 0;
-  if (payload.length > 0) {
+  const withDefaults = (r: Record<string, unknown>) => ({ ...(cfg.defaults ?? {}), ...r });
+
+  if (mode === "update") {
+    // อัปเดตของเดิมด้วย id (id = PK → upsert onConflict id ชัวร์, ไม่เติม defaults ทับ)
+    const withId = resolved.filter((r) => r.id);
+    const withoutId = resolved.filter((r) => !r.id);
+    if (withId.length > 0) {
+      const { data, error } = await admin.from(cfg.table).upsert(withId, { onConflict: "id" }).select("id");
+      if (error) { const m = friendlyDbError(error.message); withId.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
+      else updated = data?.length ?? withId.length;
+    }
+    if (withoutId.length > 0) {   // แถวที่ไม่มี id → ถือว่าเพิ่มใหม่
+      const { data, error } = await admin.from(cfg.table).insert(withoutId.map(withDefaults)).select("id");
+      if (error) { const m = friendlyDbError(error.message); withoutId.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
+      else created = data?.length ?? withoutId.length;
+    }
+  } else if (resolved.length > 0) {
+    const payload = resolved.map(withDefaults);
     const uniqueKey = body.uniqueKey && SAFE.test(body.uniqueKey) ? body.uniqueKey : null;
     if (mode === "upsert" && uniqueKey) {
       const { data, error } = await admin.from(cfg.table).upsert(payload, { onConflict: uniqueKey }).select("id");
