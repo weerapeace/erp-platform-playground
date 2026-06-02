@@ -12,7 +12,6 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
-import { RecordFormModal } from "@/components/record-form-modal";
 import { useBackdropDismiss } from "@/components/modal";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
@@ -57,7 +56,6 @@ export default function PurchasingShopPage() {
   const [sel, setSel] = useState<Card | null>(null);
   const [vars, setVars] = useState<Variation[]>([]);
   const [varsLoading, setVarsLoading] = useState(false);
-  const [createVar, setCreateVar] = useState(false);   // ฟอร์มสร้าง variation ใหม่
   const pickerDismiss = useBackdropDismiss(() => setPickerOpen(false));
   const groupDismiss = useBackdropDismiss(() => { setSel(null); setVars([]); });
 
@@ -476,7 +474,7 @@ export default function PurchasingShopPage() {
             <div className="p-4 space-y-2">
               <p className="text-xs text-slate-500 mb-1">เลือกตัวเลือก (variation):</p>
               {varsLoading && <div className="text-sm text-slate-400 py-6 text-center">กำลังโหลด…</div>}
-              {!varsLoading && vars.length === 0 && <div className="text-sm text-slate-300 py-6 text-center">— ยังไม่มีตัวเลือก —</div>}
+              {!varsLoading && vars.length === 0 && <div className="text-sm text-slate-300 py-6 text-center">— ยังไม่มี SKU ในกลุ่มนี้ —</div>}
               {vars.map(v => (
                 <div key={v.key} className="flex items-center gap-3 border border-slate-200 rounded-lg p-2.5">
                   {img(v.image) && /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(v.image)!} alt="" className="w-10 h-10 rounded object-cover border border-slate-100" />}
@@ -489,28 +487,11 @@ export default function PurchasingShopPage() {
                   <AddBtn onAdd={(qty) => addVariation(sel, v, qty)} />
                 </div>
               ))}
-              {!varsLoading && (
-                <button onClick={() => setCreateVar(true)}
-                  className="w-full mt-1 h-9 text-sm font-medium border border-dashed border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">
-                  ＋ สร้าง SKU ใหม่ในกลุ่มนี้
-                </button>
-              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* ฟอร์มสร้าง SKU ใหม่ในกลุ่ม (ของกลาง) — เติม product_group_id อัตโนมัติ */}
-      {createVar && sel && (
-        <RecordFormModal
-          moduleKey="skus-v2"
-          title={`SKU ใหม่ในกลุ่ม ${sel.name}`}
-          presetLabelField="name_th"
-          preset={{ product_group_id: sel.id }}
-          onClose={() => setCreateVar(false)}
-          onSaved={() => { setCreateVar(false); void openGroup(sel); }}
-        />
-      )}
     </PlaygroundShell>
   );
 }
