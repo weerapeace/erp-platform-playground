@@ -17,7 +17,7 @@ import { useBackdropDismiss } from "@/components/modal";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
-type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null };
+type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null };
 type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string };
 type Source = "sku" | "group";
 
@@ -184,16 +184,18 @@ export default function PurchasingShopPage() {
   const openGroup = async (c: Card) => {
     setSel(c); setVars([]); setVarsLoading(true);
     try {
-      const f = encodeURIComponent(JSON.stringify({ group_id: { type: "text", value: c.id } }));
-      const j = await apiFetch(`/api/master-v2/product-variations?limit=200&filters=${f}`).then(r => r.json());
-      setVars((j.data ?? []).map((v: Record<string, unknown>) => {
-        const country = String(v.seller_country ?? "TH");
+      // ตัวเลือกของกลุ่ม = SKU ที่อยู่ในกลุ่มนี้โดยตรง (product_group_id) — ไม่ใช้ตาราง product_variations แล้ว
+      const f = encodeURIComponent(JSON.stringify({ product_group_id: { type: "text", value: c.id } }));
+      const j = await apiFetch(`/api/master-v2/skus?limit=200&filters=${f}`).then(r => r.json());
+      setVars((j.data ?? []).map((s: Record<string, unknown>) => {
+        const sid = String(s.seller_partner_id ?? "");
+        const country = partnerCountry[sid] ?? "TH";
         return {
-          key: String(v.id), label: String(v.variation_label ?? ""), color: (v.color as string) ?? null,
-          seller: String(v.seller_name ?? "—"), country,
-          price: num(v.price_est), currency: country === "CN" ? "YUAN" : String(v.currency ?? "THB"),
-          uom: String(v.uom ?? "ชิ้น"), image: (v.image_key as string) ?? null,
-          variationId: String(v.id), skuRef: (v.code as string) ?? null,
+          key: String(s.id), label: String(s.name_th || s.code || ""), color: (s.color as string) ?? null,
+          seller: String(s.seller_partner_label ?? "—"), country,
+          price: num(s.list_price) || num(s.standard_price), currency: country === "CN" ? "YUAN" : "THB",
+          uom: String(s.uom_label ?? "ชิ้น"), image: (s.cover_image_r2_key as string) ?? null,
+          variationId: null, skuRef: (s.code as string) ?? null, skuId: String(s.id),
         } as Variation;
       }));
     } finally { setVarsLoading(false); }
@@ -202,7 +204,7 @@ export default function PurchasingShopPage() {
   const onCardClick = (c: Card) => { if (source === "sku") setConfirmSku(c); else void openGroup(c); };
 
   const addVariation = (c: Card, v: Variation, qty: number) => {
-    setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, skuId: null, note: "" }]);
+    setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, skuId: v.skuId, note: "" }]);
     setSel(null); setVars([]);
   };
   const addSku = (c: Card, qty: number, note: string) => {
@@ -301,20 +303,10 @@ export default function PurchasingShopPage() {
         <main className="flex-1 overflow-auto p-5">
           <div className="flex items-center justify-between mb-4 gap-3">
             <h1 className="text-xl font-semibold text-slate-800">เลือกสินค้าที่ต้องการขอซื้อ</h1>
-            <div className="flex items-center gap-3 flex-shrink-0">
-              {source === "sku" && (
-                <button onClick={() => setSkuForm({ mode: "create" })}
-                  className="h-8 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">＋ เพิ่มสินค้า</button>
-              )}
-              {/* cols control */}
-              <div className="hidden md:flex items-center gap-1 text-slate-400">
-                <span className="text-xs">ขนาด</span>
-                {[2, 3, 4, 5, 6].map(n => (
-                  <button key={n} onClick={() => changeCols(n)} className={`w-6 h-6 text-xs rounded ${cols === n ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{n}</button>
-                ))}
-              </div>
-              <span className="text-sm text-slate-400">{total.toLocaleString()} รายการ</span>
-            </div>
+            {source === "sku" && (
+              <button onClick={() => setSkuForm({ mode: "create" })}
+                className="h-8 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
+            )}
           </div>
 
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
@@ -344,13 +336,31 @@ export default function PurchasingShopPage() {
           </div>
 
           {loading && <div className="text-center text-slate-400 py-6 text-sm">กำลังโหลด…</div>}
-          {source === "sku" && !loading && total > PAGE && (
-            <div className="flex items-center justify-center gap-3 py-6">
-              <button onClick={() => goToPage(page - 1)} disabled={page <= 0}
-                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">← ก่อนหน้า</button>
-              <span className="text-sm text-slate-500">หน้า {page + 1} / {totalPages}</span>
-              <button onClick={() => goToPage(page + 1)} disabled={page >= totalPages - 1}
-                className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">ถัดไป →</button>
+
+          {/* แถบล่าง: เลื่อนหน้า (ตัวหลัก) + ตัวปรับขนาดการ์ด */}
+          {!loading && cards.length > 0 && (
+            <div className="flex items-center justify-center gap-6 py-6 flex-wrap">
+              {/* เลื่อนหน้า — ตัวควบคุมหลัก (เฉพาะ SKU ที่แบ่งหน้าฝั่ง server) */}
+              {source === "sku" && total > PAGE && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => goToPage(page - 1)} disabled={page <= 0}
+                    className="h-10 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">◀ หน้าก่อน</button>
+                  <span className="text-sm font-semibold text-slate-700 px-2">หน้า {page + 1} / {totalPages}</span>
+                  <button onClick={() => goToPage(page + 1)} disabled={page >= totalPages - 1}
+                    className="h-10 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">หน้าถัดไป ▶</button>
+                </div>
+              )}
+              {/* จำนวน + ขนาดการ์ด/แถว (ตัวเลือกรอง) */}
+              <div className="flex items-center gap-3 text-slate-400">
+                <span className="text-sm">{total.toLocaleString()} รายการ</span>
+                <label className="flex items-center gap-1.5 text-xs">
+                  <span>การ์ด/แถว</span>
+                  <select value={cols} onChange={e => changeCols(Number(e.target.value))}
+                    className="h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600">
+                    {[2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              </div>
             </div>
           )}
         </main>
@@ -482,7 +492,7 @@ export default function PurchasingShopPage() {
               {!varsLoading && (
                 <button onClick={() => setCreateVar(true)}
                   className="w-full mt-1 h-9 text-sm font-medium border border-dashed border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">
-                  ＋ สร้างตัวเลือกใหม่ (variation)
+                  ＋ สร้าง SKU ใหม่ในกลุ่มนี้
                 </button>
               )}
             </div>
@@ -490,13 +500,13 @@ export default function PurchasingShopPage() {
         </div>
       )}
 
-      {/* ฟอร์มสร้าง variation ใหม่ (ของกลาง) — เติม group_id อัตโนมัติ */}
+      {/* ฟอร์มสร้าง SKU ใหม่ในกลุ่ม (ของกลาง) — เติม product_group_id อัตโนมัติ */}
       {createVar && sel && (
         <RecordFormModal
-          moduleKey="product-variations"
-          title={`ตัวเลือกของ ${sel.name}`}
-          presetLabelField="variation_label"
-          preset={{ group_id: sel.id }}
+          moduleKey="skus-v2"
+          title={`SKU ใหม่ในกลุ่ม ${sel.name}`}
+          presetLabelField="name_th"
+          preset={{ product_group_id: sel.id }}
           onClose={() => setCreateVar(false)}
           onSaved={() => { setCreateVar(false); void openGroup(sel); }}
         />
