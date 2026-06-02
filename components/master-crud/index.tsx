@@ -1321,7 +1321,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           </div>
         )}
 
-        {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
+        {error && (
+          <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
+            <span className="flex-1">⚠ {/(not valid JSON|Unexpected token|Failed to fetch|<!DOCTYPE)/i.test(error) ? "โหลดข้อมูลไม่สำเร็จ (เซิร์ฟเวอร์อาจทำงานหนักชั่วคราว) — กดลองใหม่" : error}</span>
+            <button onClick={() => { setError(null); void refreshData(); }} className="flex-shrink-0 h-7 px-3 text-xs font-medium border border-red-300 rounded bg-white hover:bg-red-100">🔄 ลองใหม่</button>
+          </div>
+        )}
 
         {showStatusCards && statusField && !loading && (
           <StatusCards

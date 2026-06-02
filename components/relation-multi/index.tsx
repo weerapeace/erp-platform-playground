@@ -107,28 +107,39 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
   const imageField = config.list_image_field;
   const subFields  = config.list_sub_fields ?? [];
+  const PAGE = 20;   // โหลดทีละ 20 (ลดภาระ worker) แล้วกด "ดูเพิ่ม"
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [total, setTotal] = useState(0);
   const [loaded, setLoaded] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [peek, setPeek] = useState<{ id: string; edit: boolean } | null>(null);  // กดรายการลูก → ดู/แก้ record นั้น
+
+  // ดึงทีละหน้า (filter fk ที่ server)
+  const fetchPage = useCallback(async (offset: number) => {
+    const flt = encodeURIComponent(JSON.stringify({ [fk]: { type: "text", value: recordId } }));
+    const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=${PAGE}&offset=${offset}&filters=${flt}`).then((r) => r.json());
+    return { data: (j.data ?? j.rows ?? []) as Record<string, unknown>[], total: Number(j.total ?? 0) };
+  }, [moduleKey, fk, recordId]);
 
   const load = useCallback(() => {
     if (!recordId || !fk) return;
     setLoaded(false);
-    // กรองที่ server ด้วย fk โดยตรง (uuid-eq) — รองรับตารางใหญ่ (เช่น skus 12,000+ แถว)
-    const flt = encodeURIComponent(JSON.stringify({ [fk]: { type: "text", value: recordId } }));
-    apiFetch(`/api/master-v2/${moduleKey}?limit=200&filters=${flt}`).then((r) => r.json()).then((j) => {
-      setRows((j.data ?? j.rows ?? []) as Record<string, unknown>[]);
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }, [recordId, fk, moduleKey]);
+    fetchPage(0).then(({ data, total }) => { setRows(data); setTotal(total); setLoaded(true); }).catch(() => setLoaded(true));
+  }, [recordId, fk, fetchPage]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try { const { data } = await fetchPage(rows.length); setRows((p) => [...p, ...data]); }
+    catch { /* ignore */ } finally { setLoadingMore(false); }
+  };
 
   // หัวข้อ + จำนวน (สำหรับ 360 view)
   const header = title ? (
     <div className="flex items-center gap-1.5 mb-1.5">
       <span className="text-sm font-medium text-slate-700">{title}</span>
-      {loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{rows.length}{rows.length >= 200 ? "+" : ""}</span>}
+      {loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
     </div>
   ) : null;
 
@@ -182,6 +193,12 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
     <>
       {header}
       {list}
+      {rows.length < total && (
+        <button type="button" onClick={loadMore} disabled={loadingMore}
+          className="mt-1.5 w-full h-8 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+          {loadingMore ? "กำลังโหลด…" : `ดูเพิ่ม (เหลืออีก ${total - rows.length})`}
+        </button>
+      )}
       {peek && moduleKey && (
         <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit}
           onChanged={load} onClose={() => setPeek(null)} />
