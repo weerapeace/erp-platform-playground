@@ -54,7 +54,11 @@ function rateTier(amt: number): string {
   if (amt <= 5000) return "R1"; if (amt <= 99999) return "R2"; if (amt <= 399999) return "R3"; return "R4";
 }
 
-type Tab = "bill" | "pending" | "rate";
+type Tab = "bill" | "pending" | "all" | "rate";
+
+const STATUS_STYLE: Record<string, string> = {
+  "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
+};
 
 export default function ChinaPayApp() {
   const { user, ready } = useAuth();
@@ -81,14 +85,16 @@ export default function ChinaPayApp() {
         <main className="flex-1 overflow-y-auto p-4 pb-24">
           {tab === "bill" && <BillForm />}
           {tab === "pending" && <PendingList />}
+          {tab === "all" && <AllList />}
           {tab === "rate" && <RateTab />}
         </main>
 
         {/* Bottom nav */}
-        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 grid grid-cols-3 z-20">
+        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 grid grid-cols-4 z-20">
           {([
             { k: "bill", icon: "💴", label: "ลงบิล" },
             { k: "pending", icon: "⏳", label: "รอโอน" },
+            { k: "all", icon: "📋", label: "ทั้งหมด" },
             { k: "rate", icon: "💱", label: "เรท" },
           ] as { k: Tab; icon: string; label: string }[]).map((t) => (
             <button key={t.k} onClick={() => setTab(t.k)}
@@ -294,6 +300,7 @@ function PendingList() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -331,7 +338,7 @@ function PendingList() {
       </div>
       {rows.map((r) => (
         <Card key={String(r.id)}>
-          <div className="flex justify-between items-start gap-2">
+          <button onClick={() => setDetail(r)} className="w-full text-left flex justify-between items-start gap-2">
             <div className="min-w-0">
               <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
               <div className="text-xs text-slate-400">วันที่โอน {String(r.transfer_date ?? "—")}</div>
@@ -340,13 +347,143 @@ function PendingList() {
               <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
               <div className="text-xs text-rose-600">฿{fmt((num(r.amount_rmb) + num(r.fee_rmb)) * num(r.rate))}</div>
             </div>
-          </div>
+          </button>
           <button onClick={() => markDone(String(r.id))} disabled={busy === String(r.id)}
             className="mt-3 w-full h-10 border border-emerald-300 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 disabled:opacity-50">
             {busy === String(r.id) ? "…" : "✓ ทำเครื่องหมายว่าโอนแล้ว"}
           </button>
         </Card>
       ))}
+      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} />}
+    </div>
+  );
+}
+
+// ---------------- รายการทั้งหมด ----------------
+const ALL_FILTERS = ["ทั้งหมด", "รอโอน", "โอนแล้ว", "ยกเลิก"] as const;
+function AllList() {
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>("ทั้งหมด");
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    let url = "/api/master-v2/china-bills?limit=200&sort_by=bill_date&sort_dir=desc";
+    if (filter !== "ทั้งหมด") {
+      const flt = encodeURIComponent(JSON.stringify({ status: { type: "text", value: filter } }));
+      url += `&filters=${flt}`;
+    }
+    apiFetch(url).then(r => r.json()).then(j => setRows(j.data ?? [])).catch(() => setRows([])).finally(() => setLoading(false));
+  }, [filter]);
+
+  return (
+    <div className="space-y-3">
+      {/* ตัวกรองสถานะ */}
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {ALL_FILTERS.map((f) => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={`flex-shrink-0 h-8 px-3 rounded-full text-sm border ${filter === f ? "bg-rose-600 text-white border-rose-600 font-medium" : "bg-white text-slate-500 border-slate-200"}`}>
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-center text-slate-300 py-10">— ไม่มีรายการ —</div>
+      ) : (
+        rows.map((r) => {
+          const st = String(r.status ?? "—");
+          return (
+            <Card key={String(r.id)}>
+              <button onClick={() => setDetail(r)} className="w-full text-left flex justify-between items-start gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
+                  <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")}</div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
+                  <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[st] ?? "bg-slate-100 text-slate-500"}`}>{st}</span>
+                </div>
+              </button>
+            </Card>
+          );
+        })
+      )}
+      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} />}
+    </div>
+  );
+}
+
+// ---------------- รายละเอียดบิล (ดูอย่างเดียว) ----------------
+function BillDetail({ bill, onClose }: { bill: Record<string, unknown>; onClose: () => void }) {
+  const [sup, setSup] = useState<Record<string, unknown> | null>(null);
+  const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
+  useEffect(() => {
+    if (!supplierId) return;
+    apiFetch(`/api/master-v2/partners/${supplierId}`).then(r => r.json()).then(j => setSup(j.data ?? null)).catch(() => setSup(null));
+  }, [supplierId]);
+
+  const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
+  const thb = totalRmb * rate;
+  const st = String(bill.status ?? "—");
+  const imgUrl = (key: unknown) => key ? `/api/r2-image?key=${encodeURIComponent(String(key))}` : null;
+  const billImg = imgUrl(bill.bill_image), wechatImg = imgUrl(bill.wechat_image);
+
+  return (
+    <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        {/* header */}
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+          <div className="font-semibold text-slate-800">รายละเอียดบิล</div>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_STYLE[st] ?? "bg-slate-100 text-slate-500"}`}>{st}</span>
+            <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* ร้านค้า + ธนาคาร */}
+          <div>
+            <div className="font-medium text-slate-800">{String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—")}</div>
+            {!!sup?.name_en && <div className="text-sm text-slate-500">{String(sup.name_en)}</div>}
+            <div className="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
+              <Row label="ธนาคาร" v={sup?.bank_name_brief} />
+              <Row label="เลขบัญชี" v={sup?.account_number} />
+              <Row label="ชื่อบัญชี" v={sup?.bank_account_name} />
+              <Row label="โทร" v={sup?.phone} />
+            </div>
+          </div>
+
+          {/* ยอดเงิน */}
+          <div className="rounded-lg bg-rose-50 border border-rose-100 p-3 text-sm space-y-1">
+            <Row label="ยอด (¥)" v={fmt(amount)} />
+            <Row label="ค่าโอน (¥)" v={fmt(fee)} />
+            <div className="flex justify-between border-t border-rose-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดโอนรวม</span><span className="font-semibold text-slate-800">¥{fmt(totalRmb)}</span></div>
+            <Row label="เรท" v={rate ? fmt(rate) : "—"} />
+            <div className="flex justify-between"><span className="text-slate-500">เป็นเงินบาท</span><span className="font-bold text-rose-600">฿{fmt(thb)}</span></div>
+          </div>
+
+          {/* วันที่ */}
+          <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
+            <Row label="วันที่โอน" v={bill.transfer_date} />
+            <Row label="วันที่ลงบิล" v={bill.bill_date} />
+          </div>
+
+          {/* แนบไฟล์ */}
+          {(billImg || wechatImg) && (
+            <div>
+              <Label>ไฟล์แนบ</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {billImg && <a href={billImg} target="_blank" rel="noreferrer" className="h-10 leading-10 text-center border border-slate-200 rounded-lg text-sm text-blue-600">📄 เปิดบิล</a>}
+                {wechatImg && <a href={wechatImg} target="_blank" rel="noreferrer" className="h-10 leading-10 text-center border border-slate-200 rounded-lg text-sm text-blue-600">💬 เปิด WeChat</a>}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
