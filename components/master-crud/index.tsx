@@ -553,6 +553,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
+  const [toolsOpen, setToolsOpen] = useState(false);     // เมนู "ปรับแต่ง" (ยุบปุ่ม admin)
 
   // ตัวกรองจากลิงก์ (?flt=<json>) — เปิดหน้าแบบกรองไว้ล่วงหน้า เช่นจากปุ่ม "จัดการกลุ่ม"
   // ต่างจาก baseFilter ตรงที่ "ล้างได้" (ผู้ใช้กดล้างเพื่อดู/เพิ่มสมาชิกนอกกลุ่มได้)
@@ -1262,48 +1263,43 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   return (
     <Wrap>
       <div className="max-w-7xl mx-auto px-6 py-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
+        <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+          <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-slate-800">
               {config.icon && <span className="mr-2">{config.icon}</span>}{config.title}
             </h1>
             {config.description && <p className="text-sm text-slate-500 mt-0.5">{config.description}</p>}
           </div>
-          <div className="flex items-center gap-2">
-            {/* F11B: Studio button — เฉพาะหน้าที่ใช้ Field Registry + admin */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* เมนู "ปรับแต่ง" — ยุบปุ่ม admin (ออกแบบหน้า / Layout / เพิ่ม Field) ให้สะอาด */}
             {config.moduleKey && canEdit && (
-              <button onClick={() => setStudioOpen(true)}
-                title="ลากจัด layout ฟอร์ม + บันทึกลง Field Registry"
-                className="h-9 px-3 text-sm font-medium border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-50 inline-flex items-center gap-1.5">
-                🎨 ออกแบบหน้า
-              </button>
-            )}
-            {/* กลุ่ม B: จัด Layout (Tab/Section/columns) */}
-            {config.moduleKey && canEdit && (
-              <button onClick={() => setLayoutEditorOpen(true)}
-                title="จัด Tab / Section / จำนวนคอลัมน์ของฟอร์ม"
-                className="h-9 px-3 text-sm font-medium border border-orange-300 text-orange-700 rounded-lg hover:bg-orange-50 inline-flex items-center gap-1.5">
-                🗂️ Layout
-              </button>
-            )}
-            {/* กลุ่ม C: เพิ่ม field ใหม่ (สร้าง column ใน Supabase) */}
-            {config.moduleKey && canEdit && (
-              <button onClick={() => setFieldCreatorOpen(true)}
-                title="เพิ่ม field ใหม่ + สร้าง column จริงใน Supabase"
-                className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1.5">
-                ＋ เพิ่ม Field
-              </button>
+              <div className="relative">
+                <button onClick={() => setToolsOpen((o) => !o)}
+                  className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
+                  ⚙ ปรับแต่ง <span className="text-slate-400">▾</span>
+                </button>
+                {toolsOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setToolsOpen(false)} />
+                    <div className="absolute right-0 z-40 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+                      <button onClick={() => { setToolsOpen(false); setStudioOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">🎨 ออกแบบหน้า</button>
+                      <button onClick={() => { setToolsOpen(false); setLayoutEditorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">🗂️ จัด Layout (Tab/Section)</button>
+                      <button onClick={() => { setToolsOpen(false); setFieldCreatorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">＋ เพิ่ม Field ใหม่</button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
             {config.moduleKey && canCreate && registryFields && registryFields.length > 0 && (
               <button onClick={() => setImportOpen(true)}
                 title="นำเข้าข้อมูลจาก CSV / Excel"
-                className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5">
+                className="h-9 px-3 text-sm font-medium border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap">
                 📥 นำเข้า
               </button>
             )}
             {canCreate && (
               <button onClick={openCreate}
-                className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">
                 ＋ เพิ่ม{config.title}
               </button>
             )}
