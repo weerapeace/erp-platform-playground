@@ -66,9 +66,9 @@ export async function POST(
     (td ?? []).forEach((t) => { const o = t as Record<string, unknown>; relMap[rf.col].set(String(o[rf.labelField]).toLowerCase(), String(o.id)); });
   }
 
-  // ---- เตรียมแถว: แปลง relation (ยังไม่เติม defaults — จะเติมตามโหมด) ----
+  // ---- เตรียมแถว: แปลง relation + คงเลขแถวจริงไว้ (สำหรับรายงาน) ----
   const failed: Failed[] = [];
-  const resolved: Record<string, unknown>[] = [];   // แถวที่ผ่าน + แปลง relation แล้ว
+  const resolved: { row: number; data: Record<string, unknown> }[] = [];   // แถวที่ผ่าน relation แล้ว
   rows.forEach((r, i) => {
     const out: Record<string, unknown> = { ...r };
     // id ว่าง/ไม่ใช่ uuid → ตัดทิ้ง (ให้ DB สร้างเอง / ไม่ใช้ match)
@@ -84,38 +84,50 @@ export async function POST(
       out[rf.col] = id;
     }
     if (err) { failed.push({ row: i + 1, code: String(r.code ?? r.sku ?? ""), error: err }); return; }
-    resolved.push(out);
+    // เติมชื่อไทยอัตโนมัติถ้าว่าง (partners) — ใช้ Display/อังกฤษ/รหัสแทน เพื่อให้ผ่าน NOT NULL
+    if (cfg.table === "partners_v2") {
+      const txt = (k: string) => { const v = out[k]; return v == null ? "" : String(v).trim(); };
+      if (!txt("name_th")) { const alt = txt("display_name") || txt("name_en") || txt("code"); if (alt) out.name_th = alt; }
+    }
+    resolved.push({ row: i + 1, data: out });
   });
 
   let created = 0, updated = 0;
   const withDefaults = (r: Record<string, unknown>) => ({ ...(cfg.defaults ?? {}), ...r });
+  const PERROW_CAP = 200;
+
+  // เขียนลง DB แบบ batch; ถ้าก้อนพัง → ลองทีละแถว เพื่อให้แถวดีเข้าได้ + รายงานเฉพาะแถวที่พังจริง
+  const writeRows = async (items: { row: number; data: Record<string, unknown> }[], upsertKey: string | null): Promise<number> => {
+    if (items.length === 0) return 0;
+    const run = (arr: Record<string, unknown>[]) => upsertKey
+      ? admin.from(cfg.table).upsert(arr, { onConflict: upsertKey }).select("id")
+      : admin.from(cfg.table).insert(arr).select("id");
+    const { data, error } = await run(items.map((it) => it.data));
+    if (!error) return data?.length ?? items.length;
+    if (items.length > PERROW_CAP) {   // ใหญ่เกิน → ไม่ไล่ทีละแถว (กัน subrequest เกิน)
+      const m = friendlyDbError(error.message);
+      items.forEach((it) => failed.push({ row: it.row, error: m }));
+      return 0;
+    }
+    let ok = 0;
+    for (const it of items) {
+      const r = await run([it.data]);
+      if (r.error) failed.push({ row: it.row, error: friendlyDbError(r.error.message) });
+      else ok++;
+    }
+    return ok;
+  };
 
   if (mode === "update") {
-    // อัปเดตของเดิมด้วย id (id = PK → upsert onConflict id ชัวร์, ไม่เติม defaults ทับ)
-    const withId = resolved.filter((r) => r.id);
-    const withoutId = resolved.filter((r) => !r.id);
-    if (withId.length > 0) {
-      const { data, error } = await admin.from(cfg.table).upsert(withId, { onConflict: "id" }).select("id");
-      if (error) { const m = friendlyDbError(error.message); withId.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
-      else updated = data?.length ?? withId.length;
-    }
-    if (withoutId.length > 0) {   // แถวที่ไม่มี id → ถือว่าเพิ่มใหม่
-      const { data, error } = await admin.from(cfg.table).insert(withoutId.map(withDefaults)).select("id");
-      if (error) { const m = friendlyDbError(error.message); withoutId.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
-      else created = data?.length ?? withoutId.length;
-    }
+    const withId = resolved.filter((x) => x.data.id);
+    const withoutId = resolved.filter((x) => !x.data.id).map((x) => ({ row: x.row, data: withDefaults(x.data) }));
+    updated += await writeRows(withId, "id");
+    created += await writeRows(withoutId, null);
   } else if (resolved.length > 0) {
-    const payload = resolved.map(withDefaults);
+    const items = resolved.map((x) => ({ row: x.row, data: withDefaults(x.data) }));
     const uniqueKey = body.uniqueKey && SAFE.test(body.uniqueKey) ? body.uniqueKey : null;
-    if (mode === "upsert" && uniqueKey) {
-      const { data, error } = await admin.from(cfg.table).upsert(payload, { onConflict: uniqueKey }).select("id");
-      if (error) { const m = friendlyDbError(error.message); payload.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
-      else updated = data?.length ?? payload.length;
-    } else {
-      const { data, error } = await admin.from(cfg.table).insert(payload).select("id");
-      if (error) { const m = friendlyDbError(error.message); payload.forEach((_, j) => failed.push({ row: j + 1, error: m })); }
-      else created = data?.length ?? payload.length;
-    }
+    if (mode === "upsert" && uniqueKey) updated += await writeRows(items, uniqueKey);
+    else created += await writeRows(items, null);
   }
 
   // audit (best-effort)
