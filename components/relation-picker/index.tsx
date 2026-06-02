@@ -218,21 +218,31 @@ export function RelationPicker({
       </button>
 
       {open && (
-        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-80 overflow-hidden flex flex-col">
-          {/* search */}
-          <div className="p-2 border-b border-slate-100">
-            <input
-              ref={inputRef}
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="ค้นหา..."
-              className="w-full h-8 px-2 text-sm border border-slate-200 rounded outline-none focus:border-orange-400"
-            />
-          </div>
+        <>
+          {/* backdrop — มือถือเปิดเป็น popup เต็มจอ */}
+          <div className="fixed inset-0 z-40 bg-black/40 sm:hidden" onClick={() => setOpen(false)} />
+          <div className="z-50 bg-white flex flex-col overflow-hidden
+                          fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-2xl shadow-2xl
+                          sm:absolute sm:inset-x-0 sm:bottom-auto sm:top-full sm:mt-1 sm:max-h-80 sm:rounded-lg sm:border sm:border-slate-200 sm:shadow-lg">
+            {/* หัว (เฉพาะมือถือ) */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sm:hidden">
+              <span className="font-semibold text-slate-800">เลือกรายการ</span>
+              <button type="button" onClick={() => setOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
+            </div>
+            {/* search */}
+            <div className="p-2 border-b border-slate-100">
+              <input
+                ref={inputRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="ค้นหา..."
+                className="w-full h-10 sm:h-8 px-3 sm:px-2 text-base sm:text-sm border border-slate-200 rounded-lg sm:rounded outline-none focus:border-orange-400"
+              />
+            </div>
 
-          {/* options */}
-          <div className="overflow-y-auto flex-1 max-h-64">
+            {/* options */}
+            <div className="overflow-y-auto flex-1 sm:max-h-64">
             {loading ? (
               <div className="px-3 py-4 text-xs text-slate-400 text-center">กำลังโหลด...</div>
             ) : (
@@ -296,8 +306,9 @@ export function RelationPicker({
                 )}
               </>
             )}
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* ฟอร์มสร้างใหม่เต็ม (popup) — เมื่อ relation ชี้ไป module จริง */}
