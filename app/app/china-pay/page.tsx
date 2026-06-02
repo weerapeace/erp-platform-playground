@@ -995,13 +995,14 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       { l: "สถานะ", r: String(bill.status ?? "—") },
     ];
     const DPR = Math.min(window.devicePixelRatio || 1, 2);
-    const W = 680, headerH = 104, rowH = 48, padX = 40, padTop = 28, padBottom = 36;
+    const W = 680, headerH = 120, rowH = 56, padX = 40, padTop = 30, padBottom = 40;
     const H = headerH + padTop + lines.length * rowH + padBottom;
     cv.width = W * DPR; cv.height = H * DPR;
     cv.style.width = "100%"; cv.style.height = "auto";
     const ctx = cv.getContext("2d"); if (!ctx) return;
     ctx.scale(DPR, DPR);
     const FONT = "'Noto Sans Thai', 'Sarabun', -apple-system, 'Segoe UI', sans-serif";
+    const LABEL_SIZE = 20, VAL_SIZE = 23, BIG_SIZE = 32;
 
     // พื้นหลัง
     ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
@@ -1011,9 +1012,18 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     ctx.fillStyle = grad; ctx.fillRect(0, 0, W, headerH);
     ctx.fillStyle = "#ffffff";
     ctx.textBaseline = "middle"; ctx.textAlign = "left";
-    ctx.font = `bold 30px ${FONT}`; ctx.fillText("💸 ใบสรุปการโอนเงินจีน", padX, 44);
-    ctx.font = `16px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.fillText(`พิมพ์เมื่อ ${new Date().toLocaleString("th-TH")}`, padX, 78);
+    ctx.font = `bold 34px ${FONT}`; ctx.fillText("💸 ใบสรุปการโอนเงินจีน", padX, 50);
+    ctx.font = `18px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillText(`พิมพ์เมื่อ ${new Date().toLocaleString("th-TH")}`, padX, 90);
+
+    // วาดค่าแบบย่อฟอนต์อัตโนมัติให้พอดี (กันข้อความยาวล้นขอบ)
+    const drawValueFit = (text: string, baseSize: number, bold: boolean, color: string, yy: number, leftBound: number) => {
+      const maxW = (W - padX) - leftBound;
+      let size = baseSize;
+      ctx.fillStyle = color; ctx.textAlign = "right";
+      do { ctx.font = `${bold ? "bold " : ""}${size}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; size -= 1; } while (size > 11);
+      ctx.fillText(text, W - padX, yy);
+    };
 
     // body
     let y = headerH + padTop + rowH / 2;
@@ -1023,12 +1033,12 @@ function ReportPopup({ bill, onClose, onPrinted }: {
         ctx.beginPath(); ctx.moveTo(padX, y); ctx.lineTo(W - padX, y); ctx.stroke();
         y += rowH; continue;
       }
-      ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `18px ${FONT}`;
+      // label
+      ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `${LABEL_SIZE}px ${FONT}`;
+      const labelW = ln.l ? ctx.measureText(ln.l).width : 0;
       if (ln.l) ctx.fillText(ln.l, padX, y);
-      ctx.textAlign = "right";
-      ctx.fillStyle = ln.color ?? "#1e293b";
-      ctx.font = `${ln.bold ? "bold " : ""}${ln.big ? 26 : 19}px ${FONT}`;
-      ctx.fillText(ln.r, W - padX, y);
+      // value (ย่อให้พอดี โดยเว้นพื้นที่ label + ช่องว่าง 16)
+      drawValueFit(ln.r, ln.big ? BIG_SIZE : VAL_SIZE, !!ln.bold, ln.color ?? "#1e293b", y, padX + labelW + 16);
       y += rowH;
     }
   }, [sup, supName, amount, fee, totalRmb, rate, thb, bill]);
