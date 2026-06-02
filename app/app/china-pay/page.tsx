@@ -1117,7 +1117,7 @@ function TransferPage() {
   const ctwToggle = (id: string, remain: number) => setCtwSel(s => {
     const n = new Set(s);
     if (n.has(id)) { n.delete(id); setCtwPay(p => { const q = { ...p }; delete q[id]; return q; }); }
-    else { n.add(id); setCtwPay(p => ({ ...p, [id]: String(remain) })); }   // เติมยอดคงเหลือให้ แก้เป็นบางส่วนได้
+    else { n.add(id); setCtwPay(p => ({ ...p, [id]: String(num(amount) > 0 ? num(amount) : remain) })); }   // default = จำนวนเงินที่โอนจริง (ถ้าว่าง → ยอดคงเหลือ)
     return n;
   });
   const ctwTotal = useMemo(() => ctw.reduce((a, r) => a + ctwRemain(r), 0), [ctw]);
