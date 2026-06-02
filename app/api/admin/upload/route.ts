@@ -12,8 +12,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { r2PutObject } from "@/lib/r2";
 
-const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-const MAX_SIZE = 5 * 1024 * 1024;  // 5 MB
+const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"]);
+const MAX_SIZE = 10 * 1024 * 1024;  // 10 MB (รองรับ PDF บิล/ใบรับ)
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // auth check

@@ -37,7 +37,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { po_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown };
+  let body: { po_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown; receipt_doc_r2_key?: string; bill_doc_r2_key?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const poId = body.po_id;
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // 1) หัว GR
   const { data: gr, error: grErr } = await admin
     .from("goods_receipts_v2")
-    .insert({ gr_no: grNo, po_id: poId, po_no: po.po_no, seller_name: po.seller_name, receive_date: receiveDate, receiver: body.receiver ?? actor, note: body.note ?? null, status: "done" })
+    .insert({ gr_no: grNo, po_id: poId, po_no: po.po_no, seller_name: po.seller_name, receive_date: receiveDate, receiver: body.receiver ?? actor, note: body.note ?? null, status: "done", receipt_doc_r2_key: body.receipt_doc_r2_key ?? null, bill_doc_r2_key: body.bill_doc_r2_key ?? null })
     .select("id").single();
   if (grErr || !gr) return NextResponse.json({ error: "สร้างใบรับไม่สำเร็จ: " + (grErr?.message ?? "") }, { status: 500 });
 
