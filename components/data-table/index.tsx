@@ -2156,8 +2156,16 @@ function BulkEditGrid<T extends Record<string, unknown>>({
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">เสร็จสิ้น</button>
       ) : (
         <>
+          {needsTyped && selCols.length > 0 && (
+            <div className="flex items-center gap-2 mr-auto">
+              <span className="text-xs text-red-700">⚠️ {count} รายการ — พิมพ์ <b className="font-mono">CONFIRM</b>:</span>
+              <input value={typed} onChange={e => setTyped(e.target.value)} placeholder="CONFIRM" autoFocus
+                className="h-9 w-28 px-2 text-sm font-mono border border-red-300 rounded focus:outline-none focus:ring-1 focus:ring-red-500" />
+            </div>
+          )}
           <button onClick={onClose} disabled={applying} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
           <button onClick={apply} disabled={applying || !canApply}
+            title={selCols.length === 0 ? "เลือกข้อมูลที่จะแก้ก่อน" : (needsTyped && typed !== "CONFIRM" ? 'พิมพ์ CONFIRM เพื่อยืนยัน' : "")}
             className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
             {applying ? "กำลังบันทึก..." : `บันทึก ${count} รายการ`}
           </button>
@@ -2299,13 +2307,6 @@ function BulkEditGrid<T extends Record<string, unknown>>({
             </div>
           )}
 
-          {needsTyped && selCols.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-xs text-red-700 mb-1.5">⚠️ กระทบ {count} รายการ (เกิน 20) — พิมพ์ <b className="font-mono">CONFIRM</b> เพื่อยืนยัน</p>
-              <input value={typed} onChange={e => setTyped(e.target.value)} placeholder="CONFIRM"
-                className="w-full h-8 px-2 text-sm font-mono border border-red-200 rounded focus:outline-none focus:ring-1 focus:ring-red-500" />
-            </div>
-          )}
         </div>
       )}
     </ERPModal>
