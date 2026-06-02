@@ -84,10 +84,15 @@ export async function POST(
       out[rf.col] = id;
     }
     if (err) { failed.push({ row: i + 1, code: String(r.code ?? r.sku ?? ""), error: err }); return; }
-    // เติมชื่อไทยอัตโนมัติถ้าว่าง (partners) — ใช้ Display/อังกฤษ/รหัสแทน เพื่อให้ผ่าน NOT NULL
+    // เติมชื่อไทยอัตโนมัติถ้าว่าง (partners) — ใช้ Display/อังกฤษ/รหัสแทน เพื่อผ่าน NOT NULL
     if (cfg.table === "partners_v2") {
       const txt = (k: string) => { const v = out[k]; return v == null ? "" : String(v).trim(); };
       if (!txt("name_th")) { const alt = txt("display_name") || txt("name_en") || txt("code"); if (alt) out.name_th = alt; }
+    }
+    // ตัด null/ค่าว่างทิ้ง → ปล่อยให้ค่า default ของ DB ทำงาน (กัน null ทับ NOT NULL เช่น tags/booleans)
+    for (const k of Object.keys(out)) {
+      const v = out[k];
+      if (v === null || v === undefined || (typeof v === "string" && v.trim() === "")) delete out[k];
     }
     resolved.push({ row: i + 1, data: out });
   });
