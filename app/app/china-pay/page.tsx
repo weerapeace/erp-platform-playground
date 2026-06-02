@@ -1045,14 +1045,17 @@ function TransferPage() {
 
   const r1 = num(rate);
   const hasRate = r1 > 0;
-  // ยอดบาทต่อบิล = ¥ × เรทตามชั้นยอดของบิลนั้น
-  const billThbR = useCallback((r: Record<string, unknown>) => (num(r.amount_rmb) + num(r.fee_rmb)) * rateFor(num(r.amount_rmb), r1), [r1]);
+  const transferred = num(amount);
+  // เรทที่ใช้จริง = เลือกชั้น R1–R4 ตาม "ยอดที่โอนจริง" (ไม่ใช่ตามยอดต่อบิล)
+  const effRate = hasRate ? rateFor(transferred, r1) : 0;
+  // ยอดบาทต่อบิล = ¥ × เรทที่ใช้จริง
+  const billThbR = useCallback((r: Record<string, unknown>) => (num(r.amount_rmb) + num(r.fee_rmb)) * effRate, [effRate]);
 
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectedSum = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + billThbR(r), 0), [pending, sel, billThbR]);
-  const transferred = num(amount);
   const leftover = transferred - selectedSum;            // ส่วนต่างที่จะเข้าบัญชีจีน
-  const leftoverRmb = hasRate ? leftover / r1 : 0;
+  const leftoverRmb = effRate ? leftover / effRate : 0;
+  const activeTier = transferred <= 5000 ? "R1" : transferred <= 99999 ? "R2" : transferred <= 399999 ? "R3" : "R4";
 
   const save = async () => {
     if (sel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
@@ -1065,20 +1068,18 @@ function TransferPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transfer_date: transferDate || today(), bill_ids: ids, bills_total_thb: +selectedSum.toFixed(2),
-          amount_transferred_thb: transferred, rate: r1,
+          amount_transferred_thb: transferred, rate: effRate,
           leftover_thb: +leftover.toFixed(2), leftover_rmb: +leftoverRmb.toFixed(2),
           attachments: slip, note: note || null, actor: "china-app",
         }),
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      // ตัดบิลที่เลือก → โอนแล้ว + ประทับเรท (ตามชั้นยอด) + วันที่โอน
+      // ตัดบิลที่เลือก → โอนแล้ว + ประทับเรทที่ใช้จริง (ตามยอดที่โอน) + วันที่โอน
       await Promise.all(ids.map(id => {
-        const b = pending.find(p => String(p.id) === id);
-        const br = rateFor(num(b?.amount_rmb), r1);
         return apiFetch(`/api/master-v2/china-bills/${id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "โอนแล้ว", rate: br, transfer_date: transferDate || today(), actor: "china-app" }),
+          body: JSON.stringify({ status: "โอนแล้ว", rate: effRate, transfer_date: transferDate || today(), actor: "china-app" }),
         });
       }));
       toast.success("บันทึกการโอน + ตัดบิลแล้ว");
@@ -1179,12 +1180,21 @@ function TransferPage() {
         </div>
         {rateInfo && hasRate && (
           <div className="mt-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs space-y-1">
-            <div className="font-semibold text-slate-700 mb-1">เรตตามชั้นยอด (R1 = {fmt(r1)})</div>
-            {RATE_TABLE.map(t => <div key={t.tier} className="flex justify-between"><span className="text-slate-500">{t.tier} · {t.label}</span><span className="font-medium text-slate-700">{fmt(+(r1 - t.off).toFixed(4))}</span></div>)}
+            <div className="font-semibold text-slate-700 mb-1">เรตตามชั้นยอด (R1 = {fmt(r1)}) — เลือกตามยอดที่โอน</div>
+            {RATE_TABLE.map(t => {
+              const on = transferred > 0 && t.tier === activeTier;
+              return <div key={t.tier} className={`flex justify-between px-1.5 py-0.5 rounded ${on ? "bg-blue-200/70 font-semibold text-blue-900" : ""}`}>
+                <span className={on ? "" : "text-slate-500"}>{t.tier} · {t.label}{on ? " ✓" : ""}</span>
+                <span className={on ? "" : "font-medium text-slate-700"}>{fmt(+(r1 - t.off).toFixed(4))}</span>
+              </div>;
+            })}
           </div>
         )}
         {/* สรุปส่วนต่าง */}
         <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
+          {hasRate && transferred > 0 && (
+            <div className="flex justify-between"><span className="text-slate-500">เรทที่ใช้ (ชั้น {activeTier})</span><span className="font-semibold text-emerald-700">{fmt(effRate)}</span></div>
+          )}
           <div className="flex justify-between"><span className="text-slate-500">ยอดบิลที่ตัด</span><span className="text-slate-700">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span></div>
           <div className="flex justify-between"><span className="text-slate-500">โอนจริง</span><span className="text-slate-700">฿{fmt(transferred)}</span></div>
           <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1">
