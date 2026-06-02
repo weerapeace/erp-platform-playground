@@ -1021,6 +1021,7 @@ function TransferPage() {
   const toast = useToast();
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
   const [amount, setAmount] = useState("");
   const [rate, setRate] = useState("");
   const [transferDate, setTransferDate] = useState(today());
@@ -1071,12 +1072,19 @@ function TransferPage() {
   const transferred = num(amount);
   // เรทที่ใช้จริง = เลือกชั้น R1–R4 ตาม "ยอดที่โอนจริง" (ไม่ใช่ตามยอดต่อบิล)
   const effRate = hasRate ? rateFor(transferred, r1) : 0;
-  // ยอดบาทต่อบิล = ¥ × เรทที่ใช้จริง
-  const billThbR = useCallback((r: Record<string, unknown>) => (num(r.amount_rmb) + num(r.fee_rmb)) * effRate, [effRate]);
+  // ยอดต่อบิล (¥) — รวม+ค่าโอน, หักที่โอนแล้วสะสม = คงเหลือ
+  const billTotalRmb = (r: Record<string, unknown>) => num(r.amount_rmb) + num(r.fee_rmb);
+  const billRemainRmb = (r: Record<string, unknown>) => Math.max(0, billTotalRmb(r) - num(r.paid_rmb));
 
-  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const selectedSum = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + billThbR(r), 0), [pending, sel, billThbR]);
-  const selectedRmb = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + num(r.amount_rmb) + num(r.fee_rmb), 0), [pending, sel]);
+  const toggle = (id: string, remainRmb: number) => setSel(s => {
+    const n = new Set(s);
+    if (n.has(id)) { n.delete(id); setPay(p => { const q = { ...p }; delete q[id]; return q; }); }
+    else { n.add(id); setPay(p => ({ ...p, [id]: String(remainRmb) })); }   // default = ยอดคงเหลือของบิล (¥) แก้ตัดบางส่วนได้
+    return n;
+  });
+  // ยอด ¥ ที่จะตัดรอบนี้ (จากช่องต่อบิล) + แปลงเป็นบาท
+  const selectedRmb = useMemo(() => [...sel].reduce((a, id) => a + num(pay[id]), 0), [sel, pay]);
+  const selectedSum = selectedRmb * effRate;
   const leftover = transferred - selectedSum;            // ส่วนต่างที่จะเข้าบัญชีจีน
   const leftoverRmb = effRate ? leftover / effRate : 0;
   const activeTier = transferred <= 5000 ? "R1" : transferred <= 99999 ? "R2" : transferred <= 399999 ? "R3" : "R4";
@@ -1099,15 +1107,19 @@ function TransferPage() {
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      // ตัดบิลที่เลือก → โอนแล้ว + ประทับเรทที่ใช้จริง (ตามยอดที่โอน) + วันที่โอน
+      // ตัดบิล: สะสมยอดที่โอน (¥) ต่อบิล → ครบ = โอนแล้ว, ไม่ครบ = ยังรอโอน (เหลือบางส่วน)
       await Promise.all(ids.map(id => {
+        const b = pending.find(p => String(p.id) === id);
+        const total = num(b?.amount_rmb) + num(b?.fee_rmb);
+        const newPaid = +(num(b?.paid_rmb) + num(pay[id])).toFixed(2);
+        const done = newPaid >= total - 0.001;
         return apiFetch(`/api/master-v2/china-bills/${id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "โอนแล้ว", rate: effRate, transfer_date: transferDate || today(), actor: "china-app" }),
+          body: JSON.stringify({ paid_rmb: newPaid, status: done ? "โอนแล้ว" : "รอโอน", rate: effRate, transfer_date: transferDate || today(), actor: "china-app" }),
         });
       }));
       toast.success("บันทึกการโอน + ตัดบิลแล้ว");
-      setSel(new Set()); setAmount(""); setSlip([]); setNote("");
+      setSel(new Set()); setPay({}); setAmount(""); setSlip([]); setNote("");
       loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
@@ -1165,16 +1177,29 @@ function TransferPage() {
           <div className="space-y-2">
             {pending.map((r) => {
               const id = String(r.id), on = sel.has(id);
+              const remain = billRemainRmb(r), paid = num(r.paid_rmb);
+              const remainThb = remain * effRate;
               return (
-                <button key={id} onClick={() => toggle(id)}
-                  className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left ${on ? "border-emerald-400 bg-emerald-50" : "border-slate-200"}`}>
-                  <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
-                    <span className="block text-xs text-slate-400">{hasRate ? `฿${fmt(billThbR(r))}` : "รอเรท"} · {String(r.transfer_date ?? "—")}</span>
-                  </span>
-                  <span className="font-bold text-slate-800 flex-shrink-0">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</span>
-                </button>
+                <div key={id} className={`rounded-lg border ${on ? "border-emerald-400 bg-emerald-50" : "border-slate-200"}`}>
+                  <button onClick={() => toggle(id, remain)} className="w-full flex items-center gap-3 p-2.5 text-left">
+                    <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
+                      <span className="block text-xs text-slate-400">{hasRate ? `฿${fmt(remainThb)}` : "รอเรท"} · {String(r.transfer_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ¥${fmt(paid)}` : ""}</span>
+                    </span>
+                    <span className="text-right flex-shrink-0">
+                      <span className="block font-bold text-slate-800">¥{fmt(remain)}</span>
+                      {paid > 0 && <span className="block text-[10px] text-slate-400">เต็ม ¥{fmt(billTotalRmb(r))}</span>}
+                    </span>
+                  </button>
+                  {on && (
+                    <div className="px-2.5 pb-2.5 flex items-center gap-2">
+                      <span className="text-xs text-slate-500 flex-shrink-0">จำนวนที่โอน (¥)</span>
+                      <Money value={pay[id] ?? ""} onChange={(v) => setPay(p => ({ ...p, [id]: v }))}
+                        className="flex-1 h-9 px-2 text-base text-right border border-emerald-300 rounded-lg" />
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -1182,7 +1207,7 @@ function TransferPage() {
         {sel.size > 0 && (
           <div className="mt-3 rounded-xl bg-emerald-50 border border-emerald-100 p-3">
             <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดบิลรวม</span>
+              <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดที่ตัดรอบนี้</span>
               <span className="text-right">
                 <span className="font-bold text-slate-800">¥{fmt(selectedRmb)}</span>
                 {hasRate && <span className="block text-[11px] text-slate-400">≈ ฿{fmt(selectedSum)}</span>}
