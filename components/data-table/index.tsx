@@ -2091,6 +2091,8 @@ function BulkEditGrid<T extends Record<string, unknown>>({
 
   // เลือกคอลัมน์ที่จะแก้
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pickOpen, setPickOpen] = useState(false);   // dropdown เลือก field
+  const [pickFilter, setPickFilter] = useState("");
   // ค่าต่อ cell: rowId → fieldKey → string ("true"/"false" สำหรับ boolean)
   const [cells, setCells] = useState<Record<string, Record<string, string>>>(() => {
     const c: Record<string, Record<string, string>> = {};
@@ -2173,19 +2175,48 @@ function BulkEditGrid<T extends Record<string, unknown>>({
         </div>
       ) : (
         <div className="space-y-3">
-          {/* เลือกคอลัมน์ที่จะแก้ */}
+          {/* เลือกคอลัมน์ที่จะแก้ — dropdown ติ๊ก + ค้นหา */}
           <div>
-            <p className="text-xs font-medium text-slate-600 mb-1.5">ติ๊กข้อมูลที่จะแก้ (เลือกได้หลายช่อง):</p>
-            <div className="flex flex-wrap gap-1.5">
-              {fields.map(f => (
-                <button key={f.key} onClick={() => toggle(f.key)}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                    selected.has(f.key) ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                  }`}>
-                  {selected.has(f.key) ? "✓ " : ""}{f.label}
-                </button>
-              ))}
+            <p className="text-xs font-medium text-slate-600 mb-1.5">เลือกข้อมูลที่จะแก้ (เลือกได้หลายช่อง):</p>
+            <div className="relative w-full md:w-96">
+              <button type="button" onClick={() => setPickOpen((o) => !o)}
+                className="w-full h-9 px-3 text-sm text-left border border-slate-200 rounded-md bg-white flex items-center justify-between gap-2">
+                <span className={selected.size > 0 ? "text-slate-700" : "text-slate-400"}>
+                  {selected.size > 0 ? `เลือกแล้ว ${selected.size} ช่อง` : "เลือกข้อมูลที่จะแก้..."}
+                </span>
+                <span className="text-slate-400">▾</span>
+              </button>
+              {pickOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setPickOpen(false)} />
+                  <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-hidden flex flex-col">
+                    <div className="p-2 border-b border-slate-100">
+                      <input autoFocus value={pickFilter} onChange={(e) => setPickFilter(e.target.value)} placeholder="ค้นหา field..."
+                        className="w-full h-8 px-2 text-sm border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                    </div>
+                    <div className="overflow-y-auto">
+                      {fields.filter((f) => { const q = pickFilter.trim().toLowerCase(); return !q || f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q); }).map((f) => (
+                        <label key={f.key} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 cursor-pointer">
+                          <input type="checkbox" checked={selected.has(f.key)} onChange={() => toggle(f.key)} className="rounded border-slate-300 text-blue-600" />
+                          <span className="truncate text-slate-700">{f.label}</span>
+                          <code className="ml-auto text-[10px] text-slate-400 flex-shrink-0">{f.key}</code>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
+            {/* ที่เลือกแล้ว (chips) */}
+            {selected.size > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {fields.filter((f) => selected.has(f.key)).map((f) => (
+                  <span key={f.key} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    {f.label}<button type="button" onClick={() => toggle(f.key)} className="hover:text-blue-900">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           {selCols.length === 0 ? (
