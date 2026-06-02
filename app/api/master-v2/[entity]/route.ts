@@ -551,10 +551,11 @@ export async function POST(
   const { actor: _actor, ...fields } = body;
   void _actor;
 
-  // merge with defaults; drop undefined
+  // merge with defaults; ตัดค่าว่าง (undefined/null/"") ออก → ให้ DB ใช้ default ของคอลัมน์
+  // (กันเคส NOT NULL DEFAULT เช่น tags text[] ที่ส่ง null ไปทับ default แล้วพัง)
   const payload: Record<string, unknown> = { ...cfg.defaults };
   for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined) payload[k] = v;
+    if (v !== undefined && v !== null && v !== "") payload[k] = v;
   }
 
   // ใช้ supabaseAdmin (service-role bypass RLS) — sprint 8 จะใส่ erp_can() check
@@ -564,7 +565,7 @@ export async function POST(
     .select(cfg.selectColumns)
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   const row = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : data;
   return NextResponse.json({ data: row, error: null });
 }
