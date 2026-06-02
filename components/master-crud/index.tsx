@@ -529,6 +529,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // การ์ดสรุปสถานะ (ของกลาง) — กรองตาราง client-side ตามสถานะที่กด
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
+  // reverse one2many อัตโนมัติ (ของกลาง) — relation จากโมดูลอื่นที่ชี้กลับมาหาโมดูลนี้
+  type ReverseRel = { source_module_key: string; source_label: string; fk_column: string; label_field: string; sub_fields: string[]; image_field: string | null };
+  const [reverseRels, setReverseRels] = useState<ReverseRel[]>([]);
+  useEffect(() => {
+    if (!config.moduleKey) { setReverseRels([]); return; }
+    let alive = true;
+    apiFetch(`/api/admin/reverse-relations?module=${config.moduleKey}`).then((r) => r.json()).then((j) => {
+      if (alive && Array.isArray(j.data)) setReverseRels(j.data as ReverseRel[]);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [config.moduleKey]);
+
   // F11B: Studio v1 (drag-drop layout builder)
   const [studioOpen, setStudioOpen] = useState(false);
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
@@ -1391,6 +1403,36 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
                 )}
               </div>
+            </div>
+          );
+        })()}
+
+        {/* reverse one2many อัตโนมัติ — รายการจากโมดูลอื่นที่ชี้กลับมาหาระเบียนนี้ (ของกลาง) */}
+        {drawerMode === "view" && editingId && (() => {
+          // ตัดอันที่ตั้งเป็น one2many field ไว้แล้วในโมดูลนี้ (กันซ้ำ เช่น Parent SKU → SKUs)
+          const explicit = new Set(
+            effectiveFields.filter((f) => f.type === "one2many").map((f) => {
+              const rc = (f.relationConfig ?? {}) as Record<string, unknown>;
+              return `${rc.target_module_key ?? rc.target_table}|${rc.target_fk_column}`;
+            }),
+          );
+          const rels = reverseRels.filter((rr) => !explicit.has(`${rr.source_module_key}|${rr.fk_column}`));
+          if (rels.length === 0) return null;
+          return (
+            <div className="mt-6 pt-4 border-t border-slate-100 space-y-4">
+              <div className="text-sm font-semibold text-slate-700">🔗 รายการที่เชื่อมมา</div>
+              {rels.map((rr) => (
+                <div key={`${rr.source_module_key}|${rr.fk_column}`}>
+                  <div className="text-xs text-slate-500 mb-1">{rr.source_label}</div>
+                  <RelationOne2Many recordId={editingId} config={{
+                    target_module_key: rr.source_module_key,
+                    target_fk_column: rr.fk_column,
+                    list_title_field: rr.label_field,
+                    list_image_field: rr.image_field ?? undefined,
+                    list_sub_fields: rr.sub_fields,
+                  }} />
+                </div>
+              ))}
             </div>
           );
         })()}
