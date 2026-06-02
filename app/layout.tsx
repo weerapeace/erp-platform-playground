@@ -24,6 +24,8 @@ export const metadata: Metadata = {
     index:  false,                  // playground — ไม่ index
     follow: false,
   },
+  // PWA — เปิดเต็มจอเมื่อ "Add to Home Screen" บน iOS/Android
+  appleWebApp: { capable: true, title: "โอนเงินจีน", statusBarStyle: "default" },
   // icon.tsx จัดการ favicon เอง — ไม่ต้องระบุ icons
 };
 
