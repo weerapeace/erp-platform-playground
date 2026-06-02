@@ -68,7 +68,7 @@ export function FieldCreatorModal({
   const [fieldKey, setFieldKey] = useState("");
   const [keyEdited, setKeyEdited] = useState(false);
   const [uiType, setUiType]     = useState("text");
-  const [optionsText, setOptionsText] = useState("");
+  const [options, setOptions] = useState<string[]>([""]);   // ตัวเลือก Select — เพิ่มทีละรายการ
   const [targetTable, setTargetTable] = useState("");
   const [targetLabelField, setTargetLabelField] = useState("name");
   const [targetFkColumn, setTargetFkColumn] = useState("");
@@ -190,7 +190,7 @@ export function FieldCreatorModal({
           compute_format:   uiType === "computed" ? computeFormat : undefined,
           compute_decimals: uiType === "computed" ? computeDecimals : undefined,
           compute_summary:  uiType === "computed" ? computeSummary : undefined,
-          options: uiType === "select" ? optionsText.split(",").map(s => s.trim()).filter(Boolean) : undefined,
+          options: uiType === "select" ? options.map(s => s.trim()).filter(Boolean) : undefined,
           is_visible: isVisible, is_filterable: isFilterable, is_searchable: isSearchable,
         }),
       });
@@ -237,9 +237,26 @@ export function FieldCreatorModal({
 
           {uiType === "select" && (
             <div>
-              <label className="text-xs font-medium text-slate-600">ตัวเลือก (คั่นด้วย ,)</label>
-              <input value={optionsText} onChange={e => setOptionsText(e.target.value)} placeholder="แดง, เขียว, น้ำเงิน"
-                className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+              <label className="text-xs font-medium text-slate-600">ตัวเลือก</label>
+              <div className="mt-1 space-y-1.5">
+                {options.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 w-5 text-right">{i + 1}.</span>
+                    <input value={opt} autoFocus={i === options.length - 1 && options.length > 1}
+                      onChange={e => setOptions(p => p.map((o, j) => j === i ? e.target.value : o))}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); setOptions(p => [...p, ""]); } }}
+                      placeholder={`ตัวเลือกที่ ${i + 1}`}
+                      className="flex-1 h-9 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                    <button type="button" onClick={() => setOptions(p => p.length > 1 ? p.filter((_, j) => j !== i) : [""])}
+                      className="w-8 h-8 flex-shrink-0 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md" title="ลบ">✕</button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setOptions(p => [...p, ""])}
+                className="mt-2 h-8 px-3 text-xs font-medium border border-dashed border-emerald-300 text-emerald-700 rounded-md hover:bg-emerald-50">
+                ＋ เพิ่มตัวเลือก
+              </button>
+              <p className="mt-1 text-[11px] text-slate-400">กด Enter เพื่อเพิ่มแถวถัดไปได้</p>
             </div>
           )}
 
