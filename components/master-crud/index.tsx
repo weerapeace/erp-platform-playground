@@ -732,9 +732,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       //   REST mode (v2): proper types (number → number, boolean → boolean)
       //   RPC mode (legacy): everything → string (for jsonb cast)
       const serialized: Record<string, unknown> = {};
+      // field เสมือน (ไม่มีคอลัมน์จริงในตาราง) — ห้ามส่งไป insert/update ไม่งั้น PostgREST error
+      const VIRTUAL_TYPES = new Set(["computed", "one2many", "many2many"]);
       effectiveFields.forEach((f) => {
-        // skip read-only fields (no key in form)
         if (f.hideInForm) return;
+        if (f.readonly) return;            // read-only / related (เช่น seller_country_rel) = ค่าที่ดึงมาโชว์ ไม่ใช่คอลัมน์ที่แก้ได้
+        if (VIRTUAL_TYPES.has(f.type)) return;
         const v = form[f.key];
         if (f.type === "number") {
           if (v === "" || v == null) serialized[f.key] = null;
