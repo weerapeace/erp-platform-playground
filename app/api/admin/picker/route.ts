@@ -33,6 +33,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const searchIn  = searchParams.get("search_in")?.split(",").filter(Boolean);
   const includeIds = searchParams.get("include_ids")?.split(",").filter(Boolean);
   const limit     = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10)));
+  // กรองตายตัวตามคอลัมน์ (เช่น shop_country=จีน) — โชว์เฉพาะที่ตรง
+  const filterCol = searchParams.get("filter_col") ?? "";
+  const filterVal = searchParams.get("filter_val");
+  const hasFilter = !!filterCol && filterVal != null && SAFE_FIELD.test(filterCol);
 
   if (!SAFE_TABLE.test(table) || !SAFE_FIELD.test(label) || (secondary && !SAFE_FIELD.test(secondary))) {
     return NextResponse.json({ data: [], error: "invalid table/field name" }, { status: 400 });
@@ -47,6 +51,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   selectCols.push("is_active");
 
   let query = supabase.from(table).select(selectCols.join(", ")).limit(limit);
+  if (hasFilter) query = query.eq(filterCol, filterVal);
 
   // search filter
   if (search) {
@@ -63,9 +68,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // retry without is_active if column doesn't exist
   if (error && error.message.includes("is_active")) {
-    const fallback = await supabase.from(table)
+    let fb = supabase.from(table)
       .select(selectCols.filter((c) => c !== "is_active").join(", "))
       .limit(limit);
+    if (hasFilter) fb = fb.eq(filterCol, filterVal);
+    if (search) {
+      const fields = (searchIn && searchIn.length > 0 ? searchIn : [label]).filter((f) => SAFE_FIELD.test(f));
+      if (fields.length > 0) fb = fb.or(fields.map((f) => `${f}.ilike.%${search}%`).join(","));
+    }
+    const fallback = await fb;
     data = fallback.data;
     error = fallback.error;
   }

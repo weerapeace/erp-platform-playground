@@ -16,6 +16,7 @@ import { FileInput } from "@/components/file-input";
 const SUPPLIER_CFG: RelationConfig = {
   target_table: "partners_v2", target_module_key: "partners-v2",
   target_label_field: "name_th", target_search_fields: ["name_th", "name_en"], allow_create: false,
+  filter: { column: "shop_country", value: "จีน" },   // โชว์เฉพาะร้านจีน
 } as RelationConfig;
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };

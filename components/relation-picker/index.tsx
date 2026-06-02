@@ -35,6 +35,8 @@ export type RelationConfig = {
    * ตอนนั้น target_table จะถูก ignore — quick create จะ POST /api/lookups
    */
   lookup_type?:           string;
+  /** กรองตายตัวตามคอลัมน์ของ target_table (เช่น { column:"shop_country", value:"จีน" }) */
+  filter?:                { column: string; value: string };
 };
 
 interface RelationPickerProps {
@@ -86,6 +88,7 @@ export function RelationPicker({
         if (query) params.set("search", query);
         if (config.target_search_fields?.length) params.set("search_in", config.target_search_fields.join(","));
         if (config.secondary_label_field)        params.set("secondary", config.secondary_label_field);
+        if (config.filter?.column)               { params.set("filter_col", config.filter.column); params.set("filter_val", config.filter.value); }
         if (includeCurrent)                       params.set("include_ids", includeCurrent);
         const res = await apiFetch(`/api/admin/picker?${params}`);
         const json = await res.json();
