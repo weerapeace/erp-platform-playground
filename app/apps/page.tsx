@@ -14,6 +14,15 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel, roleColor } from "@/components/auth";
+import { apiFetch } from "@/lib/api";
+import type { MenuRow } from "@/components/playground-shell";
+
+// สีไล่เฉดสำหรับ tile ที่มาจากทะเบียนเมนู (วนสี)
+const TILE_COLORS = [
+  "from-orange-500 to-amber-500", "from-violet-500 to-purple-500", "from-emerald-500 to-teal-500",
+  "from-blue-500 to-blue-600", "from-rose-500 to-rose-600", "from-cyan-500 to-cyan-600",
+  "from-indigo-500 to-indigo-600", "from-pink-500 to-pink-600", "from-teal-500 to-teal-600", "from-fuchsia-500 to-fuchsia-600",
+];
 
 // ============================================================
 // App registry — รายการโมดูลที่จะแสดงในหน้า launcher
@@ -197,10 +206,30 @@ const CATEGORY_LABEL: Record<string, string> = {
 // ============================================================
 
 export default function AppLauncherPage() {
-  const { user, ready, logout } = useAuth();
+  const { user, ready, logout, can } = useAuth();
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
+
+  // โหลดทะเบียนเมนู → สร้าง tile จาก item ที่ตั้ง "โชว์ใน Launcher" (+ มีสิทธิ์); ไม่มี → ใช้ APPS default
+  useEffect(() => {
+    let alive = true;
+    apiFetch("/api/menu").then((r) => r.json()).then((j) => {
+      if (alive && Array.isArray(j.data)) setMenuRows(j.data as MenuRow[]);
+    }).catch(() => { if (alive) setMenuRows([]); });
+    return () => { alive = false; };
+  }, []);
+
+  const appList: AppEntry[] = useMemo(() => {
+    if (!menuRows || menuRows.length === 0) return APPS;  // fallback
+    return menuRows
+      .filter((r) => r.is_active && r.show_in_launcher && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0])))
+      .map((r, i) => ({
+        key: r.href, icon: r.icon ?? "📄", name: r.label, subtitle: r.section,
+        href: r.href, category: r.section, color: TILE_COLORS[i % TILE_COLORS.length], status: "live" as AppStatus,
+      }));
+  }, [menuRows, can]);
 
   // greeting ตามเวลา
   const greeting = useMemo(() => {
@@ -213,25 +242,25 @@ export default function AppLauncherPage() {
   // filter apps by query
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return APPS;
-    return APPS.filter((a) =>
+    if (!q) return appList;
+    return appList.filter((a) =>
       a.name.toLowerCase().includes(q) ||
       a.subtitle.toLowerCase().includes(q) ||
       a.key.includes(q)
     );
-  }, [query]);
+  }, [query, appList]);
 
-  // group by category, preserve order
+  // group by category — เรียงตาม CATEGORY_ORDER ถ้ารู้จัก ไม่งั้นตามลำดับที่เจอ (รองรับ section จากทะเบียน)
   const grouped = useMemo(() => {
     const map = new Map<string, AppEntry[]>();
+    const order: string[] = [];
     for (const a of filtered) {
-      const list = map.get(a.category) ?? [];
-      list.push(a);
-      map.set(a.category, list);
+      if (!map.has(a.category)) { map.set(a.category, []); order.push(a.category); }
+      map.get(a.category)!.push(a);
     }
-    return CATEGORY_ORDER
-      .filter((c) => map.has(c))
-      .map((c) => ({ category: c, apps: map.get(c)! }));
+    const known = CATEGORY_ORDER.filter((c) => map.has(c));
+    const unknown = order.filter((c) => !CATEGORY_ORDER.includes(c));
+    return [...known, ...unknown].map((c) => ({ category: c, apps: map.get(c)! }));
   }, [filtered]);
 
   // Esc ปิด user menu

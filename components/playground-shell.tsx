@@ -18,9 +18,11 @@ import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
+import { apiFetch } from "@/lib/api";
 
 // Sidebar structure ใหม่ — รวมตามการใช้งานจริง (ไม่ใช่ phase dev)
-const navGroups = [
+// = "เมนู default" (fallback) ถ้าทะเบียนเมนูใน DB ว่าง/โหลดไม่ได้
+export const navGroups = [
   {
     phase: 0,
     label: "หน้าหลัก",
@@ -140,6 +142,7 @@ const navGroups = [
       // Permissions
       { href: "/admin/users",             icon: "👥", labelTH: "ผู้ใช้ระบบ" },
       { href: "/admin/roles-permissions", icon: "🔐", labelTH: "Roles & Permissions" },
+      { href: "/admin/menu",              icon: "🧭", labelTH: "จัดการเมนู" },
       // Business rules
       { href: "/admin/workflows",         icon: "⚙️", labelTH: "Workflow" },
       { href: "/admin/approval-rules",    icon: "✋", labelTH: "กฎการอนุมัติ" },
@@ -156,6 +159,52 @@ const navGroups = [
   // F21: ลบ section "🧪 Playground (Dev)" — ย้าย demo ไป app/_demos (ไม่ build)
   // เพื่อลด worker bundle → cold start เร็วขึ้น → กัน 1102 (Free plan CPU 10ms)
 ];
+
+// แถวเมนูจากทะเบียน (DB) — ของกลาง
+export type MenuRow = {
+  id?: string; section: string; section_order: number; sort_order: number;
+  icon: string | null; label: string; href: string;
+  show_in_sidebar: boolean; show_in_launcher: boolean;
+  permission_key: string | null; is_active: boolean;
+};
+
+// แปลง navGroups (default) → แถวสำหรับ "นำเข้าเมนูเริ่มต้น" ลงทะเบียน
+export const DEFAULT_MENU_ITEMS: MenuRow[] = navGroups.flatMap((g, gi) =>
+  g.items.map((it, ii) => ({
+    section: g.label,
+    section_order: (gi + 1) * 10,
+    sort_order: (ii + 1) * 10,
+    icon: it.icon,
+    label: it.labelTH,
+    href: it.href,
+    show_in_sidebar: true,
+    show_in_launcher: g.phase !== 3,   // Settings ไม่ขึ้น launcher โดย default
+    permission_key: null,
+    is_active: true,
+  })),
+);
+
+// จัด MenuRow[] (จากทะเบียน) → กลุ่มสำหรับ render sidebar (เรียงตาม section_order/sort_order)
+function groupMenuRows(rows: MenuRow[]): { label: string; items: { href: string; icon: string; labelTH: string; permission?: string | null }[] }[] {
+  const bySection = new Map<string, { order: number; items: MenuRow[] }>();
+  for (const r of rows) {
+    const g = bySection.get(r.section) ?? { order: r.section_order, items: [] };
+    g.items.push(r); bySection.set(r.section, g);
+  }
+  return [...bySection.entries()]
+    .sort((a, b) => a[1].order - b[1].order)
+    .map(([label, g]) => ({
+      label,
+      items: g.items.sort((a, b) => a.sort_order - b.sort_order)
+        .map((r) => ({ href: r.href, icon: r.icon ?? "•", labelTH: r.label, permission: r.permission_key })),
+    }));
+}
+
+// default groups (fallback) → รูปแบบเดียวกับ groupMenuRows
+const DEFAULT_GROUPS = navGroups.map((g) => ({
+  label: g.label,
+  items: g.items.map((it) => ({ href: it.href, icon: it.icon, labelTH: it.labelTH, permission: null as string | null })),
+}));
 
 const readySections = [
   "/apps",
@@ -210,6 +259,7 @@ const readySections = [
   "/inventory",
   "/admin/users",
   "/admin/roles-permissions",
+  "/admin/menu",
   "/admin/customers",
   "/admin/suppliers",
   "/admin/employees",
@@ -235,9 +285,34 @@ const readySections = [
 
 export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { can } = useAuth();
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
+
+  // โหลดทะเบียนเมนูจาก DB — ถ้าว่าง/พลาด ใช้ default ในโค้ด
+  useEffect(() => {
+    let alive = true;
+    apiFetch("/api/menu").then((r) => r.json()).then((j) => {
+      if (alive && Array.isArray(j.data)) setMenuRows(j.data as MenuRow[]);
+    }).catch(() => { if (alive) setMenuRows([]); });
+    return () => { alive = false; };
+  }, []);
+
+  // กลุ่มเมนูที่จะแสดง: จากทะเบียน (ถ้ามี) ไม่งั้น default — แล้วกรองตามสิทธิ์ + show_in_sidebar
+  const navGroupsToShow = (() => {
+    const fromRegistry = menuRows && menuRows.length > 0;
+    const groups = fromRegistry
+      ? groupMenuRows(menuRows!.filter((r) => r.is_active && r.show_in_sidebar))
+      : DEFAULT_GROUPS;
+    return groups
+      .map((g) => ({
+        label: g.label,
+        items: g.items.filter((it) => !it.permission || can(it.permission as Parameters<typeof can>[0])),
+      }))
+      .filter((g) => g.items.length > 0);
+  })();
 
   // ปิด mobile nav อัตโนมัติเมื่อเปลี่ยนหน้า
   useEffect(() => { setMobileNavOpen(false); }, [pathname]);
@@ -339,11 +414,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
-          {navGroups.map((group) => (
-            <div key={group.phase}>
+          {navGroupsToShow.map((group) => (
+            <div key={group.label}>
               <div className="px-2 mb-1 flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                  Phase {group.phase}
+                  {group.label}
                 </span>
               </div>
               <div className="space-y-0.5">
