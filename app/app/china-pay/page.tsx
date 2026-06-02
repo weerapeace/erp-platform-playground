@@ -431,7 +431,7 @@ function BillForm() {
             {FEE_TABLE.map(t => <div key={t.label} className="flex justify-between"><span className="text-slate-500">{t.label}</span><span className="text-slate-700">{t.fee} หยวน</span></div>)}
           </div>
         )}
-        <div className="mt-3"><Label>วันที่โอน (กำหนดการ)</Label>
+        <div className="mt-3"><Label>วันที่วางบิล</Label>
           <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
             className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         {/* สรุปยอด ¥ (เรทมาตอนโอน) */}
@@ -1076,6 +1076,7 @@ function TransferPage() {
 
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectedSum = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + billThbR(r), 0), [pending, sel, billThbR]);
+  const selectedRmb = useMemo(() => pending.filter(r => sel.has(String(r.id))).reduce((a, r) => a + num(r.amount_rmb) + num(r.fee_rmb), 0), [pending, sel]);
   const leftover = transferred - selectedSum;            // ส่วนต่างที่จะเข้าบัญชีจีน
   const leftoverRmb = effRate ? leftover / effRate : 0;
   const activeTier = transferred <= 5000 ? "R1" : transferred <= 99999 ? "R2" : transferred <= 399999 ? "R3" : "R4";
@@ -1170,9 +1171,9 @@ function TransferPage() {
                   <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
-                    <span className="block text-xs text-slate-400">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))} · {String(r.transfer_date ?? "—")}</span>
+                    <span className="block text-xs text-slate-400">{hasRate ? `฿${fmt(billThbR(r))}` : "รอเรท"} · {String(r.transfer_date ?? "—")}</span>
                   </span>
-                  <span className="font-semibold text-slate-800 flex-shrink-0">{hasRate ? `฿${fmt(billThbR(r))}` : <span className="text-amber-600 text-xs">รอเรทเงิน</span>}</span>
+                  <span className="font-bold text-slate-800 flex-shrink-0">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</span>
                 </button>
               );
             })}
@@ -1182,12 +1183,15 @@ function TransferPage() {
           <div className="mt-3 rounded-xl bg-emerald-50 border border-emerald-100 p-3">
             <div className="flex justify-between items-center">
               <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดบิลรวม</span>
-              <span className="font-bold text-slate-800">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span>
+              <span className="text-right">
+                <span className="font-bold text-slate-800">¥{fmt(selectedRmb)}</span>
+                {hasRate && <span className="block text-[11px] text-slate-400">≈ ฿{fmt(selectedSum)}</span>}
+              </span>
             </div>
             {hasRate && selectedSum > 0 && (
-              <button onClick={() => setAmount(String(+(num(amount) + selectedSum).toFixed(2)))}
+              <button onClick={() => setAmount(String(+Math.max(0, selectedSum - balance.thb).toFixed(2)))}
                 className="mt-2 w-full h-9 rounded-lg bg-white border border-emerald-300 text-emerald-700 text-sm font-medium hover:bg-emerald-100 active:scale-[.99] transition">
-                ＋ ใช้ยอดนี้ → จำนวนเงินที่โอนจริง
+                ใช้ยอดคงเหลือบัญชีจีน (฿{fmt(balance.thb)}) → เหลือที่ต้องโอน
               </button>
             )}
           </div>
