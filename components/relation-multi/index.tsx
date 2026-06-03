@@ -101,12 +101,84 @@ const fmtVal = (v: unknown) => {
   return String(v);
 };
 
-export function RelationOne2Many({ config, recordId, title }: { config: RelConfig; recordId?: string | null; title?: string }) {
+// ---- ตัวเลือกคอลัมน์ตารางลูก (บันทึกกลาง) ----
+function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, onClose }: {
+  allFields: { key: string; label: string }[];
+  titleField: string;
+  imageField?: string;
+  current: string[];
+  onSave: (next: string[]) => void;
+  onClose: () => void;
+}) {
+  const hidden = new Set(["id", titleField, imageField].filter(Boolean) as string[]);
+  const valid = (k: string) => allFields.some((f) => f.key === k);
+  const [selected, setSelected] = useState<string[]>(current.filter(valid));
+  const labelOf = (k: string) => allFields.find((f) => f.key === k)?.label ?? k;
+  const available = allFields.filter((f) => !hidden.has(f.key) && !selected.includes(f.key));
+
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= selected.length) return;
+    const next = [...selected]; [next[i], next[j]] = [next[j], next[i]]; setSelected(next);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden flex flex-col max-h-[80vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">⚙ เลือกคอลัมน์ตารางลูก</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+        </div>
+        <div className="px-4 py-2 text-[11px] text-slate-400 border-b border-slate-100">
+          คอลัมน์หลัก: <b className="text-slate-600">{labelOf(titleField)}</b> (แสดงเสมอ) — เลือกคอลัมน์เพิ่มด้านล่าง
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-1.5">แสดงอยู่ ({selected.length}) — เรียงลำดับได้</div>
+            {selected.length === 0 && <div className="text-xs text-slate-300 italic">— ยังไม่เลือกคอลัมน์เพิ่ม —</div>}
+            <ul className="space-y-1">
+              {selected.map((k, i) => (
+                <li key={k} className="flex items-center gap-1 px-2 py-1.5 bg-blue-50/60 border border-blue-100 rounded-md text-sm">
+                  <span className="flex-1 truncate text-slate-700">{labelOf(k)}</span>
+                  <button onClick={() => move(i, -1)} disabled={i === 0} title="ขึ้น" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▲</button>
+                  <button onClick={() => move(i, 1)} disabled={i === selected.length - 1} title="ลง" className="w-6 h-6 rounded text-slate-400 hover:text-blue-600 disabled:opacity-30">▼</button>
+                  <button onClick={() => setSelected(selected.filter((x) => x !== k))} title="เอาออก" className="w-6 h-6 rounded text-slate-400 hover:text-red-500">✕</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <div className="text-xs font-medium text-slate-500 mb-1.5">เพิ่มคอลัมน์ ({available.length})</div>
+            <div className="flex flex-wrap gap-1.5">
+              {available.map((f) => (
+                <button key={f.key} onClick={() => setSelected([...selected, f.key])}
+                  className="px-2 py-1 text-xs rounded-full border border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
+                  + {f.label}
+                </button>
+              ))}
+              {available.length === 0 && <span className="text-xs text-slate-300 italic">— เลือกครบทุกคอลัมน์แล้ว —</span>}
+            </div>
+          </div>
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
+          <button onClick={() => onSave(selected)} className="h-8 px-4 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">บันทึก (ทุกคนเห็น)</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function RelationOne2Many({ config, recordId, title, fieldId, configurable }: { config: RelConfig; recordId?: string | null; title?: string; fieldId?: string; configurable?: boolean }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const fk = config.target_fk_column ?? "";
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
   const imageField = config.list_image_field;
-  const subFields  = config.list_sub_fields ?? [];
+  // คอลัมน์ที่โชว์ (list_sub_fields) — เก็บเป็น state เพื่อให้ปุ่ม "เลือกคอลัมน์" อัปเดตทันทีไม่ต้อง refresh
+  const [subFields, setSubFields] = useState<string[]>(config.list_sub_fields ?? []);
+  useEffect(() => { setSubFields(config.list_sub_fields ?? []); }, [config.list_sub_fields]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const canConfig = !!configurable && !!fieldId;
   const PAGE = 20;   // โหลดทีละ 20 (ลดภาระ worker) แล้วกด "ดูเพิ่ม"
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [total, setTotal] = useState(0);
@@ -129,18 +201,37 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
 
   useEffect(() => { load(); }, [load]);
 
-  // ดึง label หัวคอลัมน์จากทะเบียน field ของโมดูลลูก (ของกลาง)
+  // ดึง label หัวคอลัมน์ + รายการ field ทั้งหมดจากทะเบียน field ของโมดูลลูก (ของกลาง)
   const [labels, setLabels] = useState<Record<string, string>>({});
+  const [allFields, setAllFields] = useState<{ key: string; label: string }[]>([]);
   useEffect(() => {
     if (!moduleKey) return;
     apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json())
       .then((j) => {
         const m: Record<string, string> = {};
-        (j.fields ?? []).forEach((f: Record<string, unknown>) => { const k = String(f.column_name ?? f.field_key); m[k] = String(f.field_label ?? k); });
-        setLabels(m);
+        const list: { key: string; label: string }[] = [];
+        (j.fields ?? []).forEach((f: Record<string, unknown>) => {
+          const k = String(f.column_name ?? f.field_key);
+          const lbl = String(f.field_label ?? k);
+          m[k] = lbl; list.push({ key: k, label: lbl });
+        });
+        setLabels(m); setAllFields(list);
       }).catch(() => {});
   }, [moduleKey]);
   const labelOf = (k: string) => labels[k] ?? k;
+
+  // บันทึกคอลัมน์ที่เลือก → ทะเบียน field กลาง (ทุกคนเห็นเหมือนกัน)
+  const saveColumns = async (next: string[]) => {
+    if (!fieldId) return;
+    setSubFields(next);                 // อัปเดตจอทันที
+    setPickerOpen(false);
+    try {
+      await apiFetch(`/api/admin/field-registry-v2/${fieldId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relation_config: { ...config, list_sub_fields: next } }),
+      });
+    } catch { /* เงียบไว้ — จอแสดงค่าใหม่แล้ว */ }
+  };
 
   const loadMore = async () => {
     setLoadingMore(true);
@@ -148,17 +239,31 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
     catch { /* ignore */ } finally { setLoadingMore(false); }
   };
 
+  // ปุ่มตั้งค่าคอลัมน์ (เฉพาะคนมีสิทธิ์ + เป็น field จริง)
+  const gearBtn = canConfig ? (
+    <button type="button" onClick={() => setPickerOpen(true)} title="เลือกคอลัมน์ที่จะแสดง"
+      className="flex-shrink-0 w-6 h-6 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 inline-flex items-center justify-center text-xs">⚙</button>
+  ) : null;
+  const pickerModal = pickerOpen ? (
+    <O2MColumnPicker allFields={allFields} titleField={titleField} imageField={imageField}
+      current={subFields} onSave={saveColumns} onClose={() => setPickerOpen(false)} />
+  ) : null;
+
   // หัวข้อ + จำนวน (สำหรับ 360 view)
   const header = title ? (
     <div className="flex items-center gap-1.5 mb-1.5">
       <span className="text-sm font-medium text-slate-700">{title}</span>
       {loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
+      <div className="flex-1" />
+      {gearBtn}
     </div>
+  ) : gearBtn ? (
+    <div className="flex justify-end mb-1">{gearBtn}</div>
   ) : null;
 
-  if (!recordId) return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div></>;
-  if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div></>;
-  if (rows.length === 0) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div></>;
+  if (!recordId) return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>{pickerModal}</>;
+  if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div>{pickerModal}</>;
+  if (rows.length === 0) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}</>;
 
   const rich = !!(imageField || subFields.length > 0);
 
@@ -244,6 +349,7 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
         <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit}
           onChanged={load} onClose={() => setPeek(null)} />
       )}
+      {pickerModal}
     </>
   );
 }

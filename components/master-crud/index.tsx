@@ -1173,7 +1173,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           </div>
         ) : f.type === "one2many" ? (
           <div className="mt-0.5">
-            <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} />
+            <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} fieldId={f.fieldId} configurable={canEdit} />
           </div>
         ) : f.type === "select" ? (
           <select value={(v as string) || ""} disabled={disabled}
@@ -1238,7 +1238,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={false} />;
     }
     if (f.type === "one2many") {
-      return <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} />;
+      return <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} fieldId={f.fieldId} configurable={canEdit} />;
     }
     if (f.type === "boolean") {
       return v
