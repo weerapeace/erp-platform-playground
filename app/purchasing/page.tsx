@@ -97,6 +97,14 @@ export default function PurchasingShopPage() {
       .catch(() => {});
   }, []);
 
+  // เรตหยวน→บาท ล่าสุด (ใช้โชว์ราคาบาทประมาณ คู่กับ ¥)
+  const [cnyRate, setCnyRate] = useState(0);
+  useEffect(() => {
+    apiFetch("/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc").then(r => r.json())
+      .then(j => { const rt = num((j.data ?? [])[0]?.rate); if (rt > 0) setCnyRate(rt); })
+      .catch(() => {});
+  }, []);
+
   // โหลด preference (จำนวนคอลัมน์ + filter ที่เคยเลือก)
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -528,6 +536,9 @@ export default function PurchasingShopPage() {
                         {c.sub && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{c.sub}</div>}
                         <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">🏪 {c.sku.seller}</div>
                         <div className="text-sm font-semibold text-blue-600 mt-1">{c.sku.price.toLocaleString()} {c.sku.currency}<span className="text-xs font-normal text-slate-400"> / {c.sku.uom}</span></div>
+                        {c.sku.currency === "YUAN" && cnyRate > 0 && (
+                          <div className="text-[11px] text-slate-400">≈ ฿{Math.round(c.sku.price * cnyRate).toLocaleString()}</div>
+                        )}
                       </>
                     ) : (
                       <div className="text-xs text-slate-400 line-clamp-1">{c.sub || "—"}</div>
@@ -592,6 +603,7 @@ export default function PurchasingShopPage() {
                     className="w-16 h-6 px-1 border border-slate-200 rounded" /> {l.uom}
                   <span className="ml-auto text-right leading-tight">
                     <span className="block text-sm font-semibold text-slate-700 tabular-nums">{(l.price * (Number(l.qty) || 0)).toLocaleString()} {l.currency}</span>
+                    {l.currency === "YUAN" && cnyRate > 0 && <span className="block text-[10px] text-slate-400">≈ ฿{Math.round(l.price * (Number(l.qty) || 0) * cnyRate).toLocaleString()}</span>}
                     <span className="block text-[10px] text-slate-400">@ {l.price.toLocaleString()} / {l.uom}</span>
                   </span>
                 </div>
@@ -610,7 +622,10 @@ export default function PurchasingShopPage() {
                   {Object.entries(totals).map(([cur, sum]) => (
                     <div key={cur} className="flex justify-between items-baseline">
                       <span className="text-sm text-slate-500">ยอดรวมทั้งหมด{multi ? ` (${cur})` : ""}</span>
-                      <span className="text-base font-bold text-blue-600 tabular-nums">{sum.toLocaleString()} {cur}</span>
+                      <span className="text-right">
+                        <span className="block text-base font-bold text-blue-600 tabular-nums">{sum.toLocaleString()} {cur}</span>
+                        {cur === "YUAN" && cnyRate > 0 && <span className="block text-[11px] text-slate-400">≈ ฿{Math.round(sum * cnyRate).toLocaleString()}</span>}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -650,7 +665,7 @@ export default function PurchasingShopPage() {
 
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
-        <ConfirmSku card={confirmSku} onClose={() => setConfirmSku(null)}
+        <ConfirmSku card={confirmSku} rate={cnyRate} onClose={() => setConfirmSku(null)}
           onAdd={(qty, note) => addSku(confirmSku, qty, note)}
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
       )}
@@ -768,7 +783,7 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () => void; onAdd: (qty: number, note: string) => void; onEdit: () => void }) {
+function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string) => void; onEdit: () => void }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const s = card.sku!;
@@ -792,6 +807,7 @@ function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () 
           <div className="text-xs text-slate-400 mt-0.5">{s.code}</div>
           <div className="text-xs text-slate-500 mt-0.5">🏪 {s.seller}</div>
           <div className="text-sm font-semibold text-blue-600 mt-1">{s.price.toLocaleString()} {s.currency} / {s.uom}</div>
+          {s.currency === "YUAN" && rate > 0 && <div className="text-xs text-slate-400">≈ ฿{Math.round(s.price * rate).toLocaleString()} / {s.uom}</div>}
         </div>
       </div>
       <div className="mt-4 space-y-3">
