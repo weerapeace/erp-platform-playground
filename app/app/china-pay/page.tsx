@@ -699,7 +699,8 @@ function AllList({ canDelete }: { canDelete: boolean }) {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());          // เลือกหลายบิล
-  const [attachOpen, setAttachOpen] = useState(false);             // popup เลือกบิลเพื่อแนบสลิป
+  const [attachOpen, setAttachOpen] = useState(false);             // popup เลือกบิลเพื่อแนบสลิป (แมนนวล)
+  const [wizardOpen, setWizardOpen] = useState(false);             // wizard AI จับคู่สลิป
   const [sendingCombined, setSendingCombined] = useState(false);
 
   const load = useCallback(() => {
@@ -734,9 +735,13 @@ function AllList({ canDelete }: { canDelete: boolean }) {
 
   return (
     <div className="space-y-3">
-      {/* ปุ่มแนบสลิป (เลือกบิล) */}
-      <button onClick={() => setAttachOpen(true)}
-        className="w-full h-11 bg-emerald-600 text-white rounded-xl font-semibold shadow-sm active:scale-[0.99] transition">📎 แนบสลิปจ่ายร้าน (เลือกบิล)</button>
+      {/* ปุ่มแนบสลิป: AI จับคู่ (หลัก) + เลือกบิลเอง */}
+      <div className="grid grid-cols-2 gap-2">
+        <button onClick={() => setWizardOpen(true)}
+          className="h-11 bg-emerald-600 text-white rounded-xl font-semibold shadow-sm active:scale-[0.99] transition text-sm">🤖 แนบสลิป (AI จับคู่)</button>
+        <button onClick={() => setAttachOpen(true)}
+          className="h-11 border border-emerald-600 text-emerald-700 rounded-xl font-semibold active:scale-[0.99] transition text-sm">📎 เลือกบิลเอง</button>
+      </div>
 
       {/* ตัวกรองสถานะ */}
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
@@ -802,6 +807,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
       )}
       {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} canDelete={canDelete} />}
       {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
+      {wizardOpen && <SlipWizard openBills={openBills} onClose={() => setWizardOpen(false)} onDone={() => { setWizardOpen(false); load(); }} />}
 
       {/* popup เลือกบิลเพื่อแนบสลิป (แมนนวล) */}
       {attachOpen && (
@@ -832,6 +838,147 @@ function AllList({ canDelete }: { canDelete: boolean }) {
         </div></Portal>
       )}
     </div>
+  );
+}
+
+// ---------------- เฟส C: Wizard อัปโหลดสลิปหลายใบ → AI จับคู่บิล → ตรวจ/แก้ → ยืนยัน ----------------
+type WizRow = { key: string; ex: { amount: number | null; account: string; name: string }; billId: string; amount: number; conf: "high" | "low" | "none" };
+function SlipWizard({ openBills, onClose, onDone }: { openBills: Record<string, unknown>[]; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [pmap, setPmap] = useState<Record<string, Record<string, unknown>>>({});
+  const [stage, setStage] = useState<"upload" | "review">("upload");
+  const [working, setWorking] = useState(false);
+  const [rows, setRows] = useState<WizRow[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+
+  useEffect(() => {
+    apiFetch("/api/master-v2/partners?limit=500").then(r => r.json())
+      .then(j => { const m: Record<string, Record<string, unknown>> = {}; (j.data ?? []).forEach((p: Record<string, unknown>) => { m[String(p.id)] = p; }); setPmap(m); })
+      .catch(() => {});
+  }, []);
+
+  const billLabel = (b: Record<string, unknown>) => String(b.supplier_label ?? (pmap[String(b.supplier_id)]?.name_th) ?? b.supplier_id ?? "—");
+  const remainOf = (b: Record<string, unknown>) => Math.max(0, billTotalRmb(b) - slipSumRmb(b));
+
+  // จับคู่สลิป → บิล โดยให้คะแนน (เลขบัญชี > ชื่อ > ยอด)
+  const matchBill = (ex: { amount: number | null; account: string; name: string }): { billId: string; conf: "high" | "low" | "none" } => {
+    let best = ""; let bestScore = 0;
+    for (const b of openBills) {
+      const p = pmap[String(b.supplier_id)] ?? {};
+      let score = 0;
+      const acc = String(p.account_number ?? "").replace(/[^0-9]/g, "");
+      if (ex.account && acc && ex.account.length >= 4) { const a = ex.account.slice(-6), c = acc.slice(-6); if (acc.includes(ex.account) || ex.account.includes(acc) || a === c) score += 3; }
+      const nm = `${String(p.bank_account_name ?? "")} ${String(p.name_th ?? "")} ${String(p.name_en ?? "")}`.toLowerCase();
+      if (ex.name && nm && nm.includes(ex.name.toLowerCase())) score += 2;
+      const rem = remainOf(b);
+      if (ex.amount != null && rem > 0) { if (Math.abs(ex.amount - rem) <= 1) score += 2; else if (ex.amount <= rem + 1) score += 1; }
+      if (score > bestScore) { bestScore = score; best = String(b.id); }
+    }
+    return { billId: best, conf: bestScore >= 3 ? "high" : bestScore > 0 ? "low" : "none" };
+  };
+
+  const onPick = async (files: FileList) => {
+    setWorking(true);
+    try {
+      const next: WizRow[] = [];
+      for (const f of Array.from(files)) {
+        const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-slips");
+        const up = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then(r => r.json()).catch(() => ({}));
+        if (!up.r2_key) { if (up.error) toast.error(up.error); continue; }
+        const ex = await apiFetch("/api/china-pay/ocr-slip-extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: up.r2_key }) }).then(r => r.json()).catch(() => ({ amount: null, account: "", name: "" }));
+        const exObj = { amount: ex.amount ?? null, account: String(ex.account ?? ""), name: String(ex.name ?? "") };
+        const m = matchBill(exObj);
+        const matched = openBills.find(b => String(b.id) === m.billId);
+        const amount = exObj.amount != null ? exObj.amount : (matched ? remainOf(matched) : 0);
+        next.push({ key: up.r2_key, ex: exObj, billId: m.billId, amount, conf: m.conf });
+      }
+      if (next.length === 0) { toast.error("อ่านสลิปไม่ได้ ลองใหม่หรือเลือกบิลเอง"); return; }
+      setRows(next); setStage("review");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setWorking(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
+  const setRow = (i: number, patch: Partial<WizRow>) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+
+  const confirmAll = async () => {
+    const valid = rows.filter(r => r.billId && r.amount > 0);
+    if (!valid.length) { toast.error("ยังไม่มีรายการที่จับคู่บิล"); return; }
+    setWorking(true);
+    try {
+      // รวมสลิปตามบิล แล้ว PATCH ทีละบิล (ต่อท้ายสลิปเดิม)
+      const byBill: Record<string, { key: string; amount_rmb: number; at: string }[]> = {};
+      const now = new Date().toISOString();
+      for (const r of valid) { (byBill[r.billId] = byBill[r.billId] || []).push({ key: r.key, amount_rmb: +r.amount.toFixed(2), at: now }); }
+      let okCount = 0;
+      for (const [billId, newSlips] of Object.entries(byBill)) {
+        const b = openBills.find(x => String(x.id) === billId);
+        const existing = b ? billSlips(b) : [];
+        const res = await apiFetch(`/api/master-v2/china-bills/${billId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slips: [...existing, ...newSlips], actor: "china-app" }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!j.error) okCount += newSlips.length;
+      }
+      toast.success(`บันทึกสลิป ${okCount} ใบเข้าบิลแล้ว`);
+      onDone();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setWorking(false); }
+  };
+
+  return (
+    <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !working && onClose()}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+          <div className="font-semibold text-slate-800">🤖 แนบสลิป + AI จับคู่บิล</div>
+          <button onClick={() => !working && onClose()} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+        </div>
+        <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-3">
+          {stage === "upload" ? (
+            <>
+              <div className="text-sm text-slate-500">อัปโหลดสลิปได้หลายใบพร้อมกัน ระบบจะอ่านยอด/เลขบัญชี/ชื่อผู้รับ แล้วเดาว่าเป็นของบิลไหน — ตรวจ/แก้ก่อนยืนยันได้</div>
+              <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif" className="hidden"
+                onChange={(e) => { const fs = e.target.files; if (fs && fs.length) onPick(fs); }} />
+              <button onClick={() => fileRef.current?.click()} disabled={working}
+                className="w-full h-24 flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-emerald-300 text-emerald-700 disabled:opacity-50">
+                <span className="text-3xl">{working ? "⏳" : "📎"}</span>
+                <span className="text-sm font-medium">{working ? "กำลังอ่านสลิปด้วย AI…" : "เลือกสลิป (หลายใบได้)"}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-xs text-slate-500">ตรวจการจับคู่ — แตะเปลี่ยนบิล/แก้ยอดได้ แล้วกดยืนยัน</div>
+              {rows.map((r, i) => (
+                <div key={r.key} className="rounded-lg border border-slate-200 p-2.5 flex gap-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={r2Url(r.key)} alt="" className="w-14 h-14 rounded object-cover flex-shrink-0 border border-slate-200" />
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="text-[11px] text-slate-400">
+                      AI อ่าน: ยอด {r.ex.amount != null ? `¥${fmt(r.ex.amount)}` : "—"} · บัญชี {r.ex.account || "—"} · {r.ex.name || "—"}
+                      <span className={`ml-1 px-1.5 rounded ${r.conf === "high" ? "bg-emerald-100 text-emerald-700" : r.conf === "low" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-400"}`}>{r.conf === "high" ? "มั่นใจ" : r.conf === "low" ? "ไม่แน่ใจ" : "ไม่เจอ"}</span>
+                    </div>
+                    <select value={r.billId} onChange={(e) => setRow(i, { billId: e.target.value })}
+                      className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                      <option value="">— เลือกบิล —</option>
+                      {openBills.map(b => <option key={String(b.id)} value={String(b.id)}>{billLabel(b)} · ค้าง ¥{fmt(remainOf(b))}</option>)}
+                    </select>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-slate-500 flex-shrink-0">ยอดสลิป (¥)</span>
+                      <div className="flex-1"><Num value={r.amount ? String(r.amount) : ""} onChange={(v) => setRow(i, { amount: num(v) })} /></div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button onClick={() => { setStage("upload"); setRows([]); }} disabled={working} className="h-11 border border-slate-200 text-slate-600 rounded-lg text-sm disabled:opacity-50">+ เพิ่มสลิปอีก</button>
+                <button onClick={confirmAll} disabled={working} className="h-11 bg-emerald-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">{working ? "กำลังบันทึก…" : "✓ ยืนยันทั้งหมด"}</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div></Portal>
   );
 }
 
