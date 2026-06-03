@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
 import { RecordFormModal } from "@/components/record-form-modal";
 import { useBackdropDismiss } from "@/components/modal";
+import { useToast } from "@/components/toast";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
@@ -35,16 +36,19 @@ const num = (v: unknown) => Number(v ?? 0) || 0;
 const PAGE = 48;
 const COLS_KEY = "pr_shop_cols";
 const FILT_KEY = "pr_shop_filter_keys";
+const CART_KEY = "pr_shop_cart";
 
 export default function PurchasingShopPage() {
   const { user } = useAuth();
   const canView = usePermission("products.view");
+  const toast = useToast();
   const [source, setSource] = useState<Source>("sku");
 
   // grid
   const [cards, setCards] = useState<Card[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);   // ข้อ 2: error state
   const [page, setPage] = useState(0);   // หน้า (0-based)
   const [q, setQ] = useState("");
   const [cols, setCols] = useState(4);
@@ -99,7 +103,14 @@ export default function PurchasingShopPage() {
     if (typeof window === "undefined") return;
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 6) setCols(c);
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
+    // ข้อ 4: กู้ตะกร้าที่ค้างไว้ (กันหายเมื่อรีเฟรช)
+    try { const c2 = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]"); if (Array.isArray(c2) && c2.length) setCart(c2 as Line[]); } catch { /* ignore */ }
   }, []);
+  // ข้อ 4: จำตะกร้าทุกครั้งที่เปลี่ยน
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* ignore */ }
+  }, [cart]);
   const changeCols = (n: number) => { setCols(n); if (typeof window !== "undefined") localStorage.setItem(COLS_KEY, String(n)); };
 
   // ติดตามคำค้นรอบก่อน — ใช้แยกว่า "พิมพ์ค้นหา" (หน่วง) กับ "สลับ/กรอง" (ทันที)
@@ -177,7 +188,7 @@ export default function PurchasingShopPage() {
   }, [mapSku]);
 
   const fetchCards = useCallback(async (pg: number) => {
-    setLoading(true);
+    setLoading(true); setError(null);
     try {
       if (source === "sku") {
         const fp = Object.keys(builtFilters).length ? `&filters=${encodeURIComponent(JSON.stringify(builtFilters))}` : "";
@@ -223,6 +234,9 @@ export default function PurchasingShopPage() {
         setTotal(mapped.length);
         setCards(mapped);
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "โหลดสินค้าไม่สำเร็จ");
+      setCards([]); setTotal(0);
     } finally { setLoading(false); }
   }, [source, q, builtFilters, mapSku, fetchSkusByIds]);
 
@@ -318,10 +332,11 @@ export default function PurchasingShopPage() {
         body: JSON.stringify({ product_group: sel.id, actor: user?.name }),
       });
       const j = await res.json();
-      if (j.error) { alert("ผูกเข้ากลุ่มไม่สำเร็จ: " + j.error); return; }
+      if (j.error) { toast.error("ผูกเข้ากลุ่มไม่สำเร็จ: " + j.error); return; }
       setAddResults(p => p.filter(r => r.id !== skuId));   // เอาออกจากผลค้นหา
       await loadGroupVars(sel.id);                          // โหลดรายการกลุ่มใหม่ (คงแผงค้นหาไว้)
-    } catch (e) { alert(String((e as Error).message ?? e)); }
+      toast.success("เพิ่มเข้ากลุ่มแล้ว");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setAddBusy(null); }
   };
 
@@ -339,33 +354,23 @@ export default function PurchasingShopPage() {
     if (cart.length === 0) return;
     setSaving(true);
     try {
-      // Logic: 1 สินค้า = 1 ใบขอซื้อ (แยกใบ) + วันที่สั่งเดียวกันทุกใบ
-      // เลขใบขอซื้อ: ขอจากระบบเลขกลาง (atomic กันเลขซ้ำ) ทีเดียวตามจำนวนใบ
-      const nrRes = await apiFetch("/api/purchasing/next-number", {
+      // ข้อ 1: สร้างใบขอซื้อครบในครั้งเดียวผ่าน endpoint กลาง (audit + สิทธิ์ + เลขกลาง + atomic)
+      const res = await apiFetch("/api/purchasing/create-pr", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "pr", count: cart.length }),
+        body: JSON.stringify({
+          order_date: orderDate, actor: user?.name,
+          items: cart.map(l => ({
+            sku_id: l.skuId, item_name: l.label, qty: l.qty, uom: l.uom,
+            seller_name: l.seller, price_est: l.price, currency: l.currency,
+            image_key: l.image, note: l.note || null,
+          })),
+        }),
       });
-      const nrJson = await nrRes.json();
-      if (nrJson.error || !Array.isArray(nrJson.numbers) || nrJson.numbers.length < cart.length) {
-        throw new Error(nrJson.error || "ออกเลขใบขอซื้อไม่สำเร็จ");
-      }
-      const numbers: string[] = nrJson.numbers;
-      let count = 0;
-      for (let i = 0; i < cart.length; i++) {
-        const l = cart[i];
-        const prNo = numbers[i];
-        // 1 ใบ = 1 สินค้า → เก็บข้อมูลสินค้าตรงๆ บนใบ (ไม่ใช้ pr_lines)
-        const hr = await apiFetch("/api/master-v2/purchase-requests-v2", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-          pr_no: prNo, requester: user?.name ?? "", status: "waiting", order_date: orderDate,
-          item_sku_id: l.skuId, item_name: l.label, qty: l.qty, uom: l.uom,
-          seller_name: l.seller, price_est: l.price, currency: l.currency, image_key: l.image,
-          note: l.note || null, actor: user?.name,
-        }) });
-        const prId = (await hr.json()).data?.id;
-        if (prId) count++;
-      }
-      setDone(`${count} ใบ`); setCart([]);
-    } catch (e) { alert(String((e as Error).message ?? e)); }
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      setDone(`${j.created} ใบ`); setCart([]);
+      toast.success(`สร้างใบขอซื้อ ${j.created} ใบแล้ว`);
+    } catch (e) { toast.error("สร้างใบขอซื้อไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
 
@@ -450,6 +455,14 @@ export default function PurchasingShopPage() {
             )}
           </div>
 
+          {/* ข้อ 2: error state + ปุ่มลองใหม่ */}
+          {error && !loading && (
+            <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between gap-3">
+              <span>⚠ โหลดสินค้าไม่สำเร็จ: {error}</span>
+              <button onClick={() => void fetchCards(page)} className="h-8 px-3 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 flex-shrink-0">ลองใหม่</button>
+            </div>
+          )}
+
           <div className={`grid gap-4 transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {cards.map(c => (
               <div key={c.id} className="relative group">
@@ -483,7 +496,7 @@ export default function PurchasingShopPage() {
                 </button>
               </div>
             ))}
-            {!loading && cards.length === 0 && <div className="col-span-full text-center text-slate-300 py-16">ไม่พบสินค้า</div>}
+            {!loading && !error && cards.length === 0 && <div className="col-span-full text-center text-slate-300 py-16">ไม่พบสินค้า</div>}
           </div>
 
           {loading && <div className="text-center text-slate-400 py-6 text-sm">กำลังโหลด…</div>}

@@ -1,0 +1,78 @@
+/**
+ * POST /api/purchasing/create-pr
+ * สร้างใบขอซื้อ (PR v2) จากตะกร้าช้อปปิ้ง — ครบในครั้งเดียว (แทนการยิงทีละใบจากหน้าจอ)
+ *
+ * body: { items: Item[], order_date?, actor? }   // 1 item = 1 ใบขอซื้อ (status 'waiting')
+ *
+ * ดีกว่าเดิม: เช็คสิทธิ์ pr.create + ออกเลขกลาง (กันซ้ำ) + insert รวดเดียว (ไม่ได้ใบครึ่ง ๆ) + บันทึก audit
+ * เขียนผ่าน service role (supabaseAdmin)
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAuditMany } from "@/lib/audit";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+type Item = {
+  sku_id?: string | null; item_name?: string; qty?: number; uom?: string | null;
+  seller_name?: string | null; price_est?: number; currency?: string | null;
+  image_key?: string | null; note?: string | null;
+};
+
+const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
+
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+
+  let body: { items?: unknown; order_date?: string; actor?: string };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  const items = Array.isArray(body.items) ? (body.items as Item[]) : [];
+  if (items.length === 0) return NextResponse.json({ error: "ไม่มีรายการในตะกร้า" }, { status: 400 });
+  if (items.length > 200) return NextResponse.json({ error: "เกิน 200 รายการต่อครั้ง" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+
+  // ---- ตรวจสิทธิ์ pr.create (admin override + role_permissions) ----
+  const { data: prof } = await admin.from("user_profiles").select("role, active").eq("id", user.id).maybeSingle();
+  const role = prof?.active ? (prof.role as string | null) : null;
+  let allowed = role === "admin";
+  if (!allowed && role) {
+    const { data: perm } = await admin.from("erp_role_permissions").select("permission_key")
+      .eq("role_key", role).eq("permission_key", "pr.create").maybeSingle();
+    allowed = !!perm;
+  }
+  if (!allowed) return NextResponse.json({ error: "คุณไม่มีสิทธิ์สร้างใบขอซื้อ (pr.create)" }, { status: 403 });
+
+  const actor = body.actor ?? user.email ?? "system";
+  const orderDate = typeof body.order_date === "string" && body.order_date ? body.order_date : new Date().toISOString().slice(0, 10);
+
+  // ---- ออกเลขกลางทีละใบ (atomic) แล้ว insert รวดเดียว ----
+  const rows: Record<string, unknown>[] = [];
+  for (const it of items) {
+    const { data: prNo, error: numErr } = await admin.rpc("erp_next_number", { p_key: "pr" });
+    if (numErr || !prNo) return NextResponse.json({ error: "ออกเลขใบขอซื้อไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
+    rows.push({
+      pr_no: prNo, requester: actor, status: "waiting", order_date: orderDate,
+      item_sku_id: it.sku_id ?? null, item_name: it.item_name ?? null,
+      qty: num(it.qty), uom: it.uom ?? null,
+      seller_name: it.seller_name ?? null, price_est: num(it.price_est), currency: it.currency ?? "THB",
+      image_key: it.image_key ?? null, note: it.note ?? null,
+    });
+  }
+
+  const { data: inserted, error: insErr } = await admin
+    .from("purchase_requests_v2").insert(rows).select("id, pr_no, item_name");
+  if (insErr) return NextResponse.json({ error: "สร้างใบขอซื้อไม่สำเร็จ: " + insErr.message }, { status: 500 });
+
+  // ---- audit: 1 แถวต่อ 1 ใบ ----
+  await writeAuditMany(admin, (inserted ?? []).map((r) => ({
+    action: "create", entityType: "purchase_requests_v2", entityId: r.id as string,
+    actorId: user.id, actorName: actor, metadata: { pr_no: r.pr_no, item_name: r.item_name },
+  })));
+
+  return NextResponse.json({ ok: true, created: (inserted ?? []).length, pr_nos: (inserted ?? []).map((r) => r.pr_no), error: null });
+}
