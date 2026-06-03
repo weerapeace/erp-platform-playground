@@ -1152,15 +1152,31 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const selectedRmb = useMemo(() => [...sel].reduce((a, id) => a + num(pay[id]), 0), [sel, pay]);
   // หักยอดคงเหลือบัญชีจีน (ถ้าเปิดสวิตช์) → เหลือ ¥ ที่ต้องโอนจริง
   const netRmb = Math.max(0, selectedRmb - (useBalance ? balance.rmb : 0));
-  // เรท — เปิดสวิตช์: คิดชั้นจาก "เหลือที่ต้องโอน" / ปิด: คิดจากที่กรอกเอง
-  const effRate = hasRate ? (useBalance ? rateFor(netRmb * r1, r1) : rateFor(num(amount), r1)) : 0;
+  // เรท/ชั้น — เปิดสวิตช์: คิดชั้นจาก "เหลือที่ต้องโอน" / ปิด: คิดจากยอดรวมบิล
+  const tierBasis = useBalance ? netRmb * r1 : selectedRmb * r1;
+  const effRate = hasRate ? rateFor(tierBasis, r1) : 0;
   const selectedSum = selectedRmb * effRate;          // ยอดบิลที่เลือก (฿)
   const netThb = netRmb * effRate;                    // เหลือที่ต้องโอนจริง (฿) เมื่อหักยอดคงเหลือ
-  // เปิดสวิตช์ → คำนวณจาก netThb (เหลือที่ต้องโอน) / ปิด → ใช้ที่กรอกเอง
-  const transferred = useBalance ? netThb : num(amount);
-  const leftover = transferred - selectedSum;          // ส่วนต่างที่จะเข้าบัญชีจีน (ติดลบ = ใช้ยอดคงเหลือ)
+  const balanceUsedRmb = useBalance ? balance.rmb : 0;       // ¥ ที่ดึงจากยอดคงเหลือมาช่วย
+  const balanceUsedThb = balanceUsedRmb * effRate;          // แปลงเป็นบาท (สำหรับโชว์)
+  // โอนจริง = กรอกเองเสมอ; ขั้นต่ำ = เปิดสวิตช์→netThb / ปิด→ยอดรวม
+  const transferred = num(amount);
+  const minTransfer = useBalance ? netThb : selectedSum;
+  const belowMin = hasRate && selectedSum > 0 && transferred < minTransfer - 0.001;
+  // ส่วนต่างที่บันทึกลงบัญชี (ledger) = โอนจริง − ยอดบิล (ติดลบ = ดึงยอดคงเหลือออก) — ห้ามแก้สูตรนี้
+  const leftover = transferred - selectedSum;
   const leftoverRmb = effRate ? leftover / effRate : 0;
-  const activeTier = transferred <= 5000 ? "R1" : transferred <= 99999 ? "R2" : transferred <= 399999 ? "R3" : "R4";
+  // เข้าบัญชีจีน (โชว์) = โอนจริง + ยอดคงเหลือที่ใช้ − ยอดบิล → ส่วนเกินที่เข้าจริง (ห้ามติดลบ)
+  const chinaIn = Math.max(0, transferred + balanceUsedThb - selectedSum);
+  const chinaInRmb = effRate ? chinaIn / effRate : 0;
+  const activeTier = tierBasis <= 5000 ? "R1" : tierBasis <= 99999 ? "R2" : tierBasis <= 399999 ? "R3" : "R4";
+
+  // เติม "จำนวนเงินที่โอนจริง" ให้เป็นขั้นต่ำอัตโนมัติเมื่อช่องยังว่าง (แก้ขึ้นได้)
+  useEffect(() => {
+    if (!hasRate || selectedSum <= 0 || useBalance) return;
+    setAmount(a => (num(a) <= 0 ? String(+selectedSum.toFixed(4)) : a));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSum, hasRate, useBalance]);
 
   // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
@@ -1176,6 +1192,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const save = async () => {
     if (sel.size === 0 && ctwSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
     if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
+    if (sel.size > 0 && belowMin) { toast.error(`จำนวนเงินที่โอนจริงต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
     setSaving(true);
     try {
       const chinaIds = [...sel], ctwIds = [...ctwSel];
@@ -1298,7 +1315,17 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                 <label className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-white border border-emerald-300 px-3 py-2 cursor-pointer">
                   <span className="text-sm text-emerald-700 font-medium">ใช้ยอดคงเหลือบัญชีจีน (¥{fmt(balance.rmb)})</span>
                   <span className="relative inline-flex flex-shrink-0">
-                    <input type="checkbox" checked={useBalance} onChange={e => setUseBalance(e.target.checked)} className="sr-only peer" />
+                    <input type="checkbox" checked={useBalance} onChange={e => {
+                      const on = e.target.checked;
+                      setUseBalance(on);
+                      // เติมขั้นต่ำใหม่ให้ช่อง "จำนวนเงินที่โอนจริง" ตามสถานะสวิตช์ (แก้ขึ้นได้)
+                      if (hasRate && selectedSum > 0) {
+                        const nRmb = Math.max(0, selectedRmb - (on ? balance.rmb : 0));
+                        const eff = rateFor(nRmb * r1, r1);
+                        const min = on ? nRmb * eff : selectedRmb * eff;
+                        setAmount(String(+min.toFixed(4)));
+                      }
+                    }} className="sr-only peer" />
                     <span className="w-10 h-6 bg-slate-200 rounded-full peer-checked:bg-emerald-500 transition" />
                     <span className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow transition peer-checked:translate-x-4" />
                   </span>
@@ -1321,9 +1348,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       <Card>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>จำนวนเงินที่โอนจริง (฿)</Label>
-            {useBalance
-              ? <div className="w-full h-11 px-3 flex items-center justify-end text-base font-semibold text-emerald-700 border border-emerald-200 rounded-lg bg-emerald-50">฿{fmt(netThb)}</div>
-              : <Money value={amount} onChange={setAmount} />}
+            <Money value={amount} onChange={setAmount} />
+            {belowMin && (
+              <div className="mt-1 text-[11px] text-red-500">
+                * ต้องไม่น้อยกว่า{useBalance ? "เหลือที่ต้องโอน" : "ยอดรวม"} ฿{fmt(minTransfer)}
+              </div>
+            )}
           </div>
           <div><Label>วันที่โอน</Label>
             <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
@@ -1355,11 +1385,15 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             <div className="flex justify-between"><span className="text-slate-500">เรทที่ใช้ (ชั้น {activeTier})</span><span className="font-semibold text-emerald-700">{fmt(effRate)}</span></div>
           )}
           <div className="flex justify-between"><span className="text-slate-500">ยอดบิลที่ตัด</span><span className="text-slate-700">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span></div>
+          {useBalance && hasRate && balanceUsedRmb > 0 && (
+            <div className="flex justify-between"><span className="text-slate-500">ใช้ยอดคงเหลือบัญชีจีน</span>
+              <span className="text-orange-600">−฿{fmt(balanceUsedThb)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(balanceUsedRmb)}</span></span></div>
+          )}
           <div className="flex justify-between"><span className="text-slate-500">โอนจริง</span><span className="text-slate-700">฿{fmt(transferred)}</span></div>
           <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1">
             <span className="text-slate-600 font-medium">เข้าบัญชีจีน (ส่วนต่าง)</span>
             {hasRate
-              ? <span className={`font-bold ${leftover < 0 ? "text-orange-600" : "text-emerald-700"}`}>฿{fmt(leftover)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(leftoverRmb)}</span></span>
+              ? <span className="font-bold text-emerald-700">฿{fmt(chinaIn)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(chinaInRmb)}</span></span>
               : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
           </div>
         </div>
