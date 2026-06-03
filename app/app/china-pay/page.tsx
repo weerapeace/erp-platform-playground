@@ -6,6 +6,7 @@
  * reuse data layer กลาง: /api/master-v2/china-bills + RelationPicker + FileInput + toast
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -25,6 +26,18 @@ const CTW_PARTNER_CFG: RelationConfig = {
   target_label_field: "name_th", target_search_fields: ["name_th", "name_en"], allow_create: false,
   filter: { column: "buy_bill", value: "true" },
 } as RelationConfig;
+
+// ---------------- Portal (ของกลาง) — แปะ popup ที่ body ให้ลอยกลางจอเสมอ (พ้น transform ของหน้า) ----------------
+function Portal({ children }: { children: React.ReactNode }) {
+  const [el] = useState<HTMLDivElement | null>(() => (typeof document !== "undefined" ? document.createElement("div") : null));
+  useEffect(() => {
+    if (!el) return;
+    document.body.appendChild(el);
+    return () => { try { document.body.removeChild(el); } catch { /* noop */ } };
+  }, [el]);
+  if (!el) return null;
+  return createPortal(children, el);
+}
 
 // ---------------- Animation "บันทึกสำเร็จ" (ของกลางใน china-pay) ----------------
 type CelebrateFn = (msg?: string, opts?: { confetti?: boolean }) => void;
@@ -657,7 +670,7 @@ function BillForm() {
 
       {/* popup หลังบันทึก: พิมพ์ / ส่งไลน์ */}
       {savedBill && !report && (
-        <div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={() => setSavedBill(null)}>
+        <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={() => setSavedBill(null)}>
           <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
             <div className="text-3xl mb-1">✅</div>
             <div className="text-lg font-semibold text-slate-800">บันทึกบิลแล้ว</div>
@@ -669,7 +682,7 @@ function BillForm() {
               <button onClick={() => setSavedBill(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
       {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={() => {}} />}
     </div>
@@ -996,6 +1009,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
   };
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* header */}
@@ -1087,6 +1101,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
           confirmText="ยกเลิกบิล" tone="rose" onCancel={() => setAskCancel(false)} onConfirm={cancelBill} />
       )}
     </div>
+    </Portal>
   );
 }
 
@@ -1376,6 +1391,7 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<strin
   };
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
@@ -1424,6 +1440,7 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<strin
           confirmText="ลบ" tone="rose" onCancel={() => setDel(false)} onConfirm={doDelete} />
       )}
     </div>
+    </Portal>
   );
 }
 
@@ -1496,14 +1513,14 @@ function TransferList() {
         const id = String(r.id);
         return (
           <Card key={id}>
-            <div className="flex justify-between items-start gap-2">
+            <button onClick={() => setReceipt(t)} className="w-full flex justify-between items-start gap-2 text-left">
               <div className="min-w-0">
                 <div className="font-semibold text-slate-800">{String(r.transfer_no ?? "—")}</div>
                 <div className="text-xs text-slate-400">{String(r.transfer_date ?? "—")}{r.ref_no ? ` · ${String(r.ref_no)}` : ""}</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">บิลจีน {cn} · CTW {cw}</div>
               </div>
               <div className="font-bold text-emerald-700 flex-shrink-0">฿{fmt(num(r.amount_transferred_thb))}</div>
-            </div>
+            </button>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button onClick={() => setReceipt(t)} className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์/ใบสรุป</button>
               <button onClick={async () => { setSendingId(id); await pushTransferLine(t, toast); setSendingId(""); }} disabled={sendingId === id}
@@ -2144,7 +2161,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
       {/* popup หลังโอนสำเร็จ: พิมพ์รายการ / ส่งไลน์ */}
       {savedTransfer && !txReport && (
-        <div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={() => setSavedTransfer(null)}>
+        <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={() => setSavedTransfer(null)}>
           <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
             <div className="text-3xl mb-1">✅</div>
             <div className="text-lg font-semibold text-slate-800">โอนสำเร็จ</div>
@@ -2155,7 +2172,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               <button onClick={() => setSavedTransfer(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
       {txReport && <TransferReceiptPopup t={txReport} onClose={() => setTxReport(null)} />}
     </div>
@@ -2244,6 +2261,7 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
   };
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
@@ -2301,6 +2319,7 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 
@@ -2508,6 +2527,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
   };
 
   return (
+    <Portal>
     <div className="fixed inset-0 z-[210] bg-black/50 flex items-end sm:items-center justify-center p-3" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-sm max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
@@ -2556,6 +2576,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 
