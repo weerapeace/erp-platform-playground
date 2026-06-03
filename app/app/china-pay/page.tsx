@@ -1076,14 +1076,14 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
 
           <TransferHistory bill={bill} kind="china" onChanged={() => onChanged?.()} />
 
-          {/* ปุ่มพิมพ์/ใบสรุป + ส่งไลน์ */}
-          <button onClick={() => canPrint && setReport(true)} disabled={!canPrint}
-            className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
+          {/* ปุ่มพิมพ์/ใบสรุป + ส่งไลน์ (ส่งได้แม้ยังไม่มีเรท) */}
+          <button onClick={() => setReport(true)}
+            className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
             🖨️ พิมพ์ / ใบสรุป
           </button>
-          {!canPrint && <div className="-mt-2 text-[11px] text-amber-600 text-center">* ใส่เรทก่อนถึงพิมพ์ได้ (เรทจะมาตอนตัดโอนเข้าจีน)</div>}
+          {!canPrint && <div className="-mt-2 text-[11px] text-slate-400 text-center">* ยังไม่มีเรท — ใบสรุปจะแสดง “รอเรทเงิน” (เรทจะมาตอนตัดโอนเข้าจีน)</div>}
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => canPrint ? setReport(true) : toast.error("ใส่เรทก่อนถึงส่งรูปได้")}
+            <button onClick={() => setReport(true)}
               className="h-11 bg-[#06C755] text-white rounded-lg text-sm font-medium">📩 ส่งไลน์ (รูป)</button>
             <button onClick={sendLine} disabled={sendingLine}
               className="h-11 border border-[#06C755] text-[#06C755] rounded-lg text-sm font-medium disabled:opacity-50">{sendingLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
@@ -1128,10 +1128,10 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
           confirmText="ยกเลิกบิล" tone="rose" onCancel={() => setAskCancel(false)} onConfirm={cancelBill} />
       )}
       {lightbox && (
-        <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+        <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setLightbox(null); }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={lightbox} alt="" className="max-w-full max-h-full object-contain" />
-          <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
+          <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
         </div></Portal>
       )}
     </div>
