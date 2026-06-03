@@ -19,14 +19,15 @@ type SkuInfo = { code: string | null; seller: string; country: string; price: nu
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
 type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null };
 type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string };
-type Source = "sku" | "group";
+type Source = "sku" | "group" | "favorite" | "frequent";
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
 type FilterField = { key: string; column: string; label: string; type: string };
 type ColFilter =
   | { type: "text"; value: string }
   | { type: "number"; min: string; max: string }
-  | { type: "boolean"; value: "true" | "false" };
+  | { type: "boolean"; value: "true" | "false" }
+  | { type: "select"; selected: string[] };   // dropdown เลือกค่าจริง (เช่น สี)
 
 const img = (k: string | null | undefined) => (k ? `/api/r2-image?key=${encodeURIComponent(k)}` : null);
 const num = (v: unknown) => Number(v ?? 0) || 0;
@@ -81,6 +82,17 @@ export default function PurchasingShopPage() {
   // วันที่สั่ง — ใส่ครั้งเดียวตอนกดสร้าง ใช้กับทุกใบ (default = วันนี้)
   const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
 
+  // ⭐ favorite (รายการโปรด) — แบบรวมทั้งบริษัท
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const favoritesRef = useRef(favorites);
+  useEffect(() => { favoritesRef.current = favorites; }, [favorites]);
+  // โหลดรายการโปรดครั้งแรก
+  useEffect(() => {
+    apiFetch("/api/purchasing/favorites").then(r => r.json())
+      .then(j => { if (Array.isArray(j.ids)) setFavorites(new Set(j.ids as string[])); })
+      .catch(() => {});
+  }, []);
+
   // โหลด preference (จำนวนคอลัมน์ + filter ที่เคยเลือก)
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -126,11 +138,38 @@ export default function PurchasingShopPage() {
       if (v.type === "boolean" && (v.value === "true" || v.value === "false")) out[fd.column] = v;
       else if (v.type === "number" && (v.min || v.max)) out[fd.column] = v;
       else if (v.type === "text" && v.value) out[fd.column] = v;
+      else if (v.type === "select" && v.selected.length > 0) out[fd.column] = v;
     }
     return out;
   }, [activeKeys, filterValues, filterFields]);
 
   // ดึงการ์ดแบบทีละหน้า (แทนที่ทั้งหน้า ไม่ใช่ต่อท้าย)
+  // แปลง 1 record SKU → Card (ใช้ซ้ำทุกโหมด)
+  const mapSku = useCallback((s: Record<string, unknown>): Card => {
+    const sid = String(s.seller_partner_id ?? "");
+    const country = partnerCountry[sid] ?? "TH";
+    return {
+      id: String(s.id), name: String(s.name_th || s.code || ""), sub: (s.code as string) ?? null,
+      image_key: (s.cover_image_r2_key as string) ?? null,
+      sku: {
+        code: (s.code as string) ?? null, seller: String(s.seller_partner_label ?? "—"), country,
+        price: num(s.list_price) || num(s.standard_price), currency: country === "CN" ? "YUAN" : "THB",
+        uom: String(s.uom_label ?? "ชิ้น"),
+      },
+    };
+  }, [partnerCountry]);
+
+  // ดึง SKU ตามรายการ id (ใช้กับโหมด favorite/frequent) — คงลำดับ id เดิม
+  const fetchSkusByIds = useCallback(async (ids: string[]): Promise<Card[]> => {
+    if (ids.length === 0) return [];
+    const f = encodeURIComponent(JSON.stringify({ id: { type: "select", selected: ids } }));
+    const j = await apiFetch(`/api/master-v2/skus?limit=500&filters=${f}`).then(r => r.json());
+    const mapped: Card[] = (j.data ?? []).map(mapSku);
+    const order = new Map(ids.map((id, i) => [id, i]));
+    mapped.sort((a, b) => (order.get(a.id) ?? 9999) - (order.get(b.id) ?? 9999));
+    return mapped;
+  }, [mapSku]);
+
   const fetchCards = useCallback(async (pg: number) => {
     setLoading(true);
     try {
@@ -138,19 +177,7 @@ export default function PurchasingShopPage() {
         const fp = Object.keys(builtFilters).length ? `&filters=${encodeURIComponent(JSON.stringify(builtFilters))}` : "";
         const sp = q ? `&search=${encodeURIComponent(q)}` : "";
         const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${fp}`).then(r => r.json());
-        const mapped: Card[] = (j.data ?? []).map((s: Record<string, unknown>) => {
-          const sid = String(s.seller_partner_id ?? "");
-          const country = partnerCountry[sid] ?? "TH";
-          return {
-            id: String(s.id), name: String(s.name_th || s.code || ""), sub: (s.code as string) ?? null,
-            image_key: (s.cover_image_r2_key as string) ?? null,
-            sku: {
-              code: (s.code as string) ?? null, seller: String(s.seller_partner_label ?? "—"), country,
-              price: num(s.list_price) || num(s.standard_price), currency: country === "CN" ? "YUAN" : "THB",
-              uom: String(s.uom_label ?? "ชิ้น"),
-            },
-          } as Card;
-        });
+        const mapped: Card[] = (j.data ?? []).map(mapSku);
         // จัดเรียงตามความใกล้เคียงกับคำค้น: ตรงเป๊ะ → ขึ้นต้น → มีอยู่ในโค้ด → มีอยู่ในชื่อ
         if (q) {
           const ql = q.trim().toLowerCase();
@@ -169,7 +196,7 @@ export default function PurchasingShopPage() {
         }
         setTotal(num(j.total) || num(j.count) || (pg * PAGE + mapped.length));
         setCards(mapped);
-      } else {
+      } else if (source === "group") {
         const j = await apiFetch("/api/master-v2/product-groups?limit=500").then(r => r.json());
         const mapped: Card[] = (j.data ?? []).map((g: Record<string, unknown>) => ({
           id: String(g.id), name: String(g.name ?? ""), sub: (g.brand as string) ?? null,
@@ -177,9 +204,21 @@ export default function PurchasingShopPage() {
         }));
         setTotal(mapped.length);
         setCards(mapped);
+      } else {
+        // favorite | frequent — โหลดรายการ id แล้วดึง SKU (กรองด้วยคำค้นฝั่ง client)
+        let ids: string[] = [];
+        if (source === "favorite") ids = [...favoritesRef.current];
+        else ids = (await apiFetch("/api/purchasing/frequent").then(r => r.json()).catch(() => ({ ids: [] }))).ids ?? [];
+        let mapped = await fetchSkusByIds(ids);
+        if (q) {
+          const ql = q.trim().toLowerCase();
+          mapped = mapped.filter(c => (c.name ?? "").toLowerCase().includes(ql) || (c.sub ?? "").toLowerCase().includes(ql));
+        }
+        setTotal(mapped.length);
+        setCards(mapped);
       }
     } finally { setLoading(false); }
-  }, [source, q, builtFilters, partnerCountry]);
+  }, [source, q, builtFilters, mapSku, fetchSkusByIds]);
 
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
   // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
@@ -200,6 +239,23 @@ export default function PurchasingShopPage() {
     setPage(clamped);
     void fetchCards(clamped);
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  };
+
+  // ⭐ กดดาว/เอาดาวออก (optimistic + บันทึกทันที)
+  const toggleFavorite = async (skuId: string) => {
+    const willOn = !favoritesRef.current.has(skuId);
+    setFavorites(prev => { const n = new Set(prev); if (willOn) n.add(skuId); else n.delete(skuId); return n; });
+    try {
+      const res = await apiFetch("/api/purchasing/favorites", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku_id: skuId, on: willOn }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      if (source === "favorite") void fetchCards(0);   // โหมดโปรด: อัปเดตการ์ดทันที
+    } catch {
+      setFavorites(prev => { const n = new Set(prev); if (willOn) n.delete(skuId); else n.add(skuId); return n; });  // revert
+    }
   };
 
   // โหลดรายการ SKU ในกลุ่ม (คอลัมน์ product_group) — ใช้ทั้งตอนเปิด popup และตอนผูกสมาชิกเพิ่ม
@@ -226,7 +282,8 @@ export default function PurchasingShopPage() {
     try { await loadGroupVars(c.id); } finally { setVarsLoading(false); }
   };
 
-  const onCardClick = (c: Card) => { if (source === "sku") setConfirmSku(c); else void openGroup(c); };
+  // การ์ดที่มี c.sku = SKU จริง (โหมด sku/favorite/frequent) → popup ยืนยัน; ไม่มี = กลุ่มสินค้า → drill-in
+  const onCardClick = (c: Card) => { if (c.sku) setConfirmSku(c); else void openGroup(c); };
 
   // ค้นหา SKU ทั้งคลังเพื่อผูกเข้ากลุ่ม (debounce) — แสดงเฉพาะตัวที่ยังไม่อยู่ในกลุ่มนี้
   useEffect(() => {
@@ -323,10 +380,15 @@ export default function PurchasingShopPage() {
         {/* Filter sidebar */}
         <aside className="w-60 flex-shrink-0 border-r border-slate-200 p-4 overflow-auto">
           <h2 className="font-semibold text-slate-800 mb-3">🛒 ขอซื้อ</h2>
-          {/* source toggle */}
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden mb-3 text-xs">
-            <button onClick={() => switchSource("sku")} className={`flex-1 py-1.5 transition-colors ${source === "sku" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>SKU จริง</button>
-            <button onClick={() => switchSource("group")} className={`flex-1 py-1.5 transition-colors ${source === "group" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>Product Group</button>
+          {/* source toggle (โหมดแสดงสินค้า) */}
+          <div className="grid grid-cols-2 gap-1 mb-3 text-xs">
+            {([
+              ["sku", "SKU จริง"], ["group", "Product Group"],
+              ["favorite", "⭐ รายการโปรด"], ["frequent", "🔁 ซื้อบ่อย"],
+            ] as [Source, string][]).map(([s, label]) => (
+              <button key={s} onClick={() => switchSource(s)}
+                className={`py-1.5 rounded-md border transition-colors ${source === s ? "bg-blue-600 text-white border-blue-600" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
+            ))}
           </div>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาสินค้า..."
             className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md mb-3" />
@@ -356,7 +418,12 @@ export default function PurchasingShopPage() {
                           <input type="number" placeholder="สูงสุด" value={cur && cur.type === "number" ? cur.max : ""} onChange={e => setFV(k, { type: "number", min: cur && cur.type === "number" ? cur.min : "", max: e.target.value })} className="w-full h-8 px-2 text-xs border border-slate-200 rounded-md" />
                         </div>
                       ) : (
-                        <input value={cur && cur.type === "text" ? cur.value : ""} onChange={e => setFV(k, e.target.value ? { type: "text", value: e.target.value } : null)} placeholder={`ค้นหา ${fd.label}`} className="w-full h-8 px-2 text-xs border border-slate-200 rounded-md" />
+                        <FilterCombobox
+                          column={fd.column}
+                          label={fd.label}
+                          value={cur && cur.type === "select" ? (cur.selected[0] ?? null) : null}
+                          onChange={(v) => setFV(k, v ? { type: "select", selected: [v] } : null)}
+                        />
                       )}
                     </div>
                   );
@@ -378,26 +445,36 @@ export default function PurchasingShopPage() {
 
           <div className={`grid gap-4 transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {cards.map(c => (
-              <button key={c.id} onClick={() => onCardClick(c)}
-                className="text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-md transition-all">
-                <div className="aspect-square bg-slate-50 flex items-center justify-center">
-                  {img(c.image_key)
-                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(c.image_key)!} alt="" className="w-full h-full object-cover" />
-                    : <span className="text-slate-300 text-3xl">📦</span>}
-                </div>
-                <div className="p-3">
-                  <div className="font-medium text-slate-800 text-sm line-clamp-2">{c.name}</div>
-                  {c.sku ? (
-                    <>
-                      {c.sub && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{c.sub}</div>}
-                      <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">🏪 {c.sku.seller}</div>
-                      <div className="text-sm font-semibold text-blue-600 mt-1">{c.sku.price.toLocaleString()} {c.sku.currency}<span className="text-xs font-normal text-slate-400"> / {c.sku.uom}</span></div>
-                    </>
-                  ) : (
-                    <div className="text-xs text-slate-400 line-clamp-1">{c.sub || "—"}</div>
-                  )}
-                </div>
-              </button>
+              <div key={c.id} className="relative group">
+                {/* ปุ่มดาว ⭐ (เฉพาะการ์ด SKU จริง — favorite เก็บเป็น sku_id) */}
+                {c.sku && (
+                  <button type="button" title={favorites.has(c.id) ? "เอาออกจากรายการโปรด" : "เพิ่มเป็นรายการโปรด"}
+                    onClick={(e) => { e.stopPropagation(); void toggleFavorite(c.id); }}
+                    className="absolute top-2 right-2 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-amber-50">
+                    <span className={`text-base leading-none ${favorites.has(c.id) ? "text-amber-400" : "text-slate-300"}`}>{favorites.has(c.id) ? "★" : "☆"}</span>
+                  </button>
+                )}
+                <button onClick={() => onCardClick(c)}
+                  className="w-full text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-md transition-all">
+                  <div className="aspect-square bg-slate-50 flex items-center justify-center">
+                    {img(c.image_key)
+                      ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(c.image_key)!} alt="" className="w-full h-full object-cover" />
+                      : <span className="text-slate-300 text-3xl">📦</span>}
+                  </div>
+                  <div className="p-3">
+                    <div className="font-medium text-slate-800 text-sm line-clamp-2">{c.name}</div>
+                    {c.sku ? (
+                      <>
+                        {c.sub && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{c.sub}</div>}
+                        <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">🏪 {c.sku.seller}</div>
+                        <div className="text-sm font-semibold text-blue-600 mt-1">{c.sku.price.toLocaleString()} {c.sku.currency}<span className="text-xs font-normal text-slate-400"> / {c.sku.uom}</span></div>
+                      </>
+                    ) : (
+                      <div className="text-xs text-slate-400 line-clamp-1">{c.sub || "—"}</div>
+                    )}
+                  </div>
+                </button>
+              </div>
             ))}
             {!loading && cards.length === 0 && <div className="col-span-full text-center text-slate-300 py-16">ไม่พบสินค้า</div>}
           </div>
@@ -684,6 +761,65 @@ function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () 
           <button onClick={() => onAdd(qty, note)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// FilterCombobox — dropdown เลือก "ค่าจริง" ของ field (ของกลาง ไม่ hardcode)
+// ค่าตัวเลือกดึงจาก /api/master-v2/skus/distinct (distinct ของคอลัมน์นั้น)
+// ============================================================
+function FilterCombobox({ column, label, value, onChange }: {
+  column: string; label: string; value: string | null; onChange: (v: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [opts, setOpts] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  const openList = async () => {
+    setOpen(true);
+    if (opts === null && !loading) {
+      setLoading(true);
+      try {
+        const j = await apiFetch(`/api/master-v2/skus/distinct?column=${encodeURIComponent(column)}&limit=1000`).then(r => r.json());
+        setOpts(Array.isArray(j.values) ? (j.values as string[]) : []);
+      } catch { setOpts([]); } finally { setLoading(false); }
+    }
+  };
+
+  const ql = q.trim().toLowerCase();
+  const shown = (opts ?? []).filter(o => !ql || o.toLowerCase().includes(ql)).slice(0, 200);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => (open ? setOpen(false) : void openList())}
+        className="w-full h-8 px-2 text-xs text-left border border-slate-200 rounded-md bg-white flex items-center justify-between gap-1">
+        <span className={value ? "text-slate-700 truncate" : "text-slate-400"}>{value || `เลือก ${label}`}</span>
+        {value
+          ? <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onChange(null); }} className="text-slate-400 hover:text-red-500">✕</span>
+          : <span className="text-slate-400">▾</span>}
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-auto">
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหา..."
+            className="w-full h-8 px-2 text-xs border-b border-slate-100 outline-none" />
+          {loading && <div className="px-2 py-2 text-xs text-slate-400">กำลังโหลด…</div>}
+          {!loading && shown.length === 0 && <div className="px-2 py-2 text-xs text-slate-300">— ไม่พบค่า —</div>}
+          {shown.map(o => (
+            <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); setQ(""); }}
+              className={`block w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 ${o === value ? "bg-blue-50 text-blue-700" : "text-slate-700"}`}>{o}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
