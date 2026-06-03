@@ -114,10 +114,19 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; 
   draft:            { bg: "bg-slate-100",   text: "text-slate-600",   border: "border-slate-200",   label: "ร่าง" },
   submitted:        { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รออนุมัติ" },
   waiting_approval: { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รอ Approve" },
-  approved:         { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "Approved" },
-  rejected:         { bg: "bg-red-50",      text: "text-red-700",     border: "border-red-200",     label: "Rejected" },
-  cancelled:        { bg: "bg-red-50",      text: "text-red-600",     border: "border-red-200",     label: "Cancelled" },
+  approved:         { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "อนุมัติแล้ว" },
+  rejected:         { bg: "bg-red-50",      text: "text-red-700",     border: "border-red-200",     label: "ไม่อนุมัติ" },
+  cancelled:        { bg: "bg-red-50",      text: "text-red-600",     border: "border-red-200",     label: "ยกเลิก" },
   low_stock:        { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "Low Stock" },
+  // ---- จัดซื้อ v2 (purchasing) ----
+  waiting:          { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รออนุมัติ" },
+  rfq_created:      { bg: "bg-blue-50",     text: "text-blue-700",    border: "border-blue-200",    label: "ออกใบสั่งซื้อแล้ว" },
+  confirmed:        { bg: "bg-blue-50",     text: "text-blue-700",    border: "border-blue-200",    label: "ยืนยันแล้ว" },
+  partial:          { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รับบางส่วน" },
+  received:         { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "รับของแล้ว" },
+  short_closed:     { bg: "bg-slate-100",   text: "text-slate-600",   border: "border-slate-200",   label: "ปิดยอดขาด" },
+  completed:        { bg: "bg-purple-50",   text: "text-purple-700",  border: "border-purple-200",  label: "เสร็จสิ้น" },
+  done:             { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "เสร็จสิ้น" },
 };
 
 export function StatusBadge({ status }: { status: string }) {

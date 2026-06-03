@@ -7,8 +7,15 @@
  */
 import { useParams } from "next/navigation";
 import { MasterPage, type MasterPageProps } from "@/components/master-page";
+import { StatusBadge } from "@/components/data-table";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+
+// หน้าจัดซื้อ v2 — แสดงคอลัมน์ status เป็นป้ายสถานะภาษาไทย (ของกลาง StatusBadge)
+const PURCHASING_V2 = ["purchase-requests-v2", "purchase-orders-v2", "goods-receipts-v2"];
+const STATUS_CELL: NonNullable<MasterPageProps["cellRenderers"]> = {
+  status: (v: unknown) => <StatusBadge status={String(v ?? "")} />,
+};
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 
@@ -116,6 +123,7 @@ export default function GenericModulePage() {
   const extraBulkActions = moduleKey === "purchase-requests-v2"
     ? purchaseRequestActions({ actor: user?.name, canApprove: can("pr.approve"), canReject: can("pr.reject") })
     : undefined;
+  const cellRenderers = PURCHASING_V2.includes(moduleKey) ? STATUS_CELL : undefined;
 
   if (!moduleKey) return <div className="p-10 text-center text-slate-400">ไม่พบโมดูล</div>;
   return (
@@ -126,6 +134,7 @@ export default function GenericModulePage() {
       icon="🧩"
       description="โมดูลที่สร้างจากเว็บ — จัด field/layout ได้ที่ปุ่มด้านบน"
       extraBulkActions={extraBulkActions}
+      cellRenderers={cellRenderers}
     />
   );
 }
