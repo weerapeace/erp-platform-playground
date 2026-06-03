@@ -2478,15 +2478,29 @@ function ReportPopup({ bill, onClose, onPrinted }: {
         .then(j => ((j.data ?? []).find((x: Record<string, unknown>) => x.skey === "line_config")?.sval ?? {}))
         .catch(() => ({}));
       const link = `${window.location.origin}/app/china-pay?bill=${String(bill.id)}`;
-      const text = `🧾 ใบสรุปบิลจีน\nร้าน: ${supName}\nยอดโอนรวม: ¥${fmt(totalRmb)}${rate ? ` (฿${fmt(thb)})` : ""}\nเลขบัญชี: ${String(sup?.account_number ?? "—")}\nดูในแอป: ${link}`;
-      let imageUrl = "";
-      if (cfg.share_base) {
-        const up = await apiFetch("/api/china-pay/share-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl, name: `bill-${supName}` }) }).then(r => r.json()).catch(() => ({}));
-        if (up.key) imageUrl = `${String(cfg.share_base).replace(/\/$/, "")}/${up.key}`;
+      const text = `🧾 ใบสรุปบิลจีน\nร้าน: ${supName}\nยอดโอนรวม: ¥${fmt(totalRmb)}${rate ? ` (฿${fmt(thb)})` : ""}\nเลขบัญชี: ${String(sup?.account_number ?? "—")}`;
+      const base = String(cfg.share_base ?? "").replace(/\/$/, "");
+      // อัปโหลด dataURL/key → bucket public → คืน URL
+      const toPublic = async (dataUrl: string, name: string) => {
+        const up = await apiFetch("/api/china-pay/share-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl, name }) }).then(r => r.json()).catch(() => ({}));
+        return up.key ? `${base}/${up.key}` : "";
+      };
+      const keyToDataUrl = async (key: string) => {
+        try { const r = await apiFetch(`/api/r2-image?key=${encodeURIComponent(key)}`); const blob = await r.blob();
+          return await new Promise<string>((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = () => res(""); fr.readAsDataURL(blob); });
+        } catch { return ""; }
+      };
+      let imageUrl = "", slipUrls: string[] = [];
+      if (base) {
+        imageUrl = await toPublic(dataUrl, `bill-${supName}`);
+        // แนบสลิป/รูปที่แนบในบิล (เฉพาะรูป ไม่เอา PDF) สูงสุด 3 ใบ
+        const atts = Array.isArray(bill.attachments) ? (bill.attachments as unknown[]).map(String) : [];
+        const imgs = atts.filter(k => !k.toLowerCase().endsWith(".pdf")).slice(0, 3);
+        for (const k of imgs) { const du = await keyToDataUrl(k); if (du) { const u = await toPublic(du, "slip"); if (u) slipUrls.push(u); } }
       }
-      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, imageUrl }) });
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปบิลจีน", url: link } }) });
       const j = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success(imageUrl ? "ส่งรูปเข้า LINE แล้ว" : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); await markPrinted(); return; }
+      if (res.ok) { toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); await markPrinted(); return; }
       if (j.needConfig) { toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง"); window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); }
       else toast.error(j.error ?? "ส่ง LINE ไม่ได้");
     } catch (e) { toast.error(String((e as Error).message ?? e)); }

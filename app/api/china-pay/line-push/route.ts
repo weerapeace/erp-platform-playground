@@ -16,13 +16,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { text?: string; imageUrl?: string; button?: { label?: string; url?: string } };
+  let body: { text?: string; imageUrl?: string; imageUrls?: unknown[]; button?: { label?: string; url?: string } };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const text = String(body.text ?? "").trim();
   const imageUrl = String(body.imageUrl ?? "").trim();
+  const imageUrls = Array.isArray(body.imageUrls) ? body.imageUrls.map((u: unknown) => String(u)).filter((u: string) => /^https:\/\//.test(u)) : [];
+  const allImages = [imageUrl, ...imageUrls].filter((u) => /^https:\/\//.test(u)).slice(0, 4);   // LINE: รวมข้อความ ≤5
   const btnUrl = String(body.button?.url ?? "").trim();
   const btnLabel = String(body.button?.label ?? "เปิดดู").slice(0, 38) || "เปิดดู";
-  if (!text && !imageUrl) return NextResponse.json({ error: "ไม่มีข้อความ" }, { status: 400 });
+  if (!text && allImages.length === 0) return NextResponse.json({ error: "ไม่มีข้อความ" }, { status: 400 });
 
   const admin = supabaseAdmin();
   const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // ประกอบข้อความ: รูป (ถ้ามี) → ข้อความ/Flex (LINE ส่งได้สูงสุด 5 ข้อความ/ครั้ง)
   const messages: Array<Record<string, unknown>> = [];
-  if (imageUrl && /^https:\/\//.test(imageUrl)) messages.push({ type: "image", originalContentUrl: imageUrl, previewImageUrl: imageUrl });
+  for (const u of allImages) messages.push({ type: "image", originalContentUrl: u, previewImageUrl: u });
   if (btnUrl && /^https:\/\//.test(btnUrl)) {
     // Flex bubble: ข้อความ + ปุ่มลิงก์ (กดเปิดได้ ไม่โชว์ URL ยาว)
     const textLines = (text || " ").split("\n").map((line) => ({ type: "text", text: line || " ", size: "sm", wrap: true, color: "#334155" }));
