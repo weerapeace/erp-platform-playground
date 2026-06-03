@@ -2284,7 +2284,9 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fontsReady, setFontsReady] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  useEffect(() => { const d = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready; if (d) d.then(() => setFontsReady(true)); else setFontsReady(true); }, []);
   const ls = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
   const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
   const atts = Array.isArray(t.attachments) ? (t.attachments as unknown[]).map(String) : [];
@@ -2337,8 +2339,8 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
     ctx.fillText(`เลขโอน ${String(t.transfer_no ?? "—")} · ${String(t.date ?? "")}`, padX, 70);
     let y = headerH + padTop;
     const fit = (text: string, size: number, bold: boolean, color: string, leftBound: number) => {
-      const maxW = (W - padX) - leftBound; let s = size; ctx.fillStyle = color; ctx.textAlign = "right";
-      do { ctx.font = `${bold ? "bold " : ""}${s}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 10);
+      const maxW = (W - padX) - leftBound - 4; let s = size; ctx.fillStyle = color; ctx.textAlign = "right";
+      do { ctx.font = `${bold ? "bold " : ""}${s}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 9);
       ctx.fillText(text, W - padX, y);
     };
     for (const r of rows) {
@@ -2351,7 +2353,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
       else { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `17px ${FONT}`; const lw = r.l ? ctx.measureText(r.l).width : 0; if (r.l) ctx.fillText(r.l, padX, my); fit(r.r ?? "", r.bold ? 20 : 18, !!r.bold, r.color ?? "#1e293b", padX + lw + 16); }
       y = oldY + h;
     }
-  }, [t, cn, cw]);
+  }, [t, cn, cw, fontsReady]);
 
   const saveImage = async () => {
     setBusy(true);
@@ -2547,6 +2549,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [sup, setSup] = useState<Record<string, unknown> | null>((bill._sup as Record<string, unknown>) ?? null);
   const [busy, setBusy] = useState(false);
+  const [fontsReady, setFontsReady] = useState(false);
   const [printedLabel] = useState(() => new Date().toLocaleString("th-TH"));
 
   const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
@@ -2554,6 +2557,8 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     if (sup || !supplierId) return;
     apiFetch(`/api/master-v2/partners/${supplierId}`).then(r => r.json()).then(j => setSup(j.data ?? null)).catch(() => {});
   }, [supplierId, sup]);
+  // วาด canvas ใหม่หลังฟอนต์ไทยโหลดเสร็จ (กันตัวเลข ฿ / ตัวไทยวัดความกว้างเพี้ยน → ล้นขอบ)
+  useEffect(() => { const d = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready; if (d) d.then(() => setFontsReady(true)); else setFontsReady(true); }, []);
 
   const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
   const thb = totalRmb * rate;
@@ -2607,10 +2612,10 @@ function ReportPopup({ bill, onClose, onPrinted }: {
 
     // วาดค่าแบบย่อฟอนต์อัตโนมัติให้พอดี (กันข้อความยาวล้นขอบ)
     const drawValueFit = (text: string, baseSize: number, bold: boolean, color: string, yy: number, leftBound: number) => {
-      const maxW = (W - padX) - leftBound;
+      const maxW = (W - padX) - leftBound - 4;   // เผื่อขอบขวา 4px กันชนขอบ
       let size = baseSize;
       ctx.fillStyle = color; ctx.textAlign = "right";
-      do { ctx.font = `${bold ? "bold " : ""}${size}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; size -= 1; } while (size > 11);
+      do { ctx.font = `${bold ? "bold " : ""}${size}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; size -= 1; } while (size > 9);
       ctx.fillText(text, W - padX, yy);
     };
 
@@ -2630,7 +2635,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       drawValueFit(ln.r, ln.big ? BIG_SIZE : VAL_SIZE, !!ln.bold, ln.color ?? "#1e293b", y, padX + labelW + 16);
       y += rowH;
     }
-  }, [sup, supName, amount, fee, totalRmb, rate, thb, bill, printedLabel]);
+  }, [sup, supName, amount, fee, totalRmb, rate, thb, bill, printedLabel, fontsReady]);
 
   const filename = `china-bill-${supName}-${String(bill.transfer_date ?? today())}.png`.replace(/[\\/:*?"<>|]/g, "_");
 
@@ -2747,7 +2752,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
               <div className="flex justify-between items-center gap-3">
                 <span className="text-slate-500 flex-shrink-0">เป็นเงินบาท</span>
                 {rate > 0
-                  ? <span className="min-w-0 flex-1 text-xl font-bold text-orange-600 text-right break-words">฿{fmt(thb)}</span>
+                  ? <span className="text-xl font-bold text-orange-600 text-right ml-auto whitespace-nowrap">฿{fmt(thb)}</span>
                   : <span className="text-base font-bold text-amber-600 text-right flex-shrink-0">รอเรทเงิน</span>}
               </div>
               <div className="border-t border-slate-100 my-1" />
@@ -2806,14 +2811,14 @@ function Money({ value, onChange, placeholder, className }: { value: string; onC
 }
 function Row({ label, v }: { label: string; v: unknown }) {
   if (v == null || v === "") return null;
-  return <div className="flex justify-between"><span className="text-slate-400">{label}</span><span className="text-slate-700">{String(v)}</span></div>;
+  return <div className="flex justify-between gap-3"><span className="text-slate-400 flex-shrink-0">{label}</span><span className="text-slate-700 text-right ml-auto break-words">{String(v)}</span></div>;
 }
 function SlipRow({ l, r, bold }: { l: string; r: unknown; bold?: boolean }) {
   if (r == null || r === "") return null;
   return (
     <div className="flex justify-between gap-3">
       <span className="text-slate-500 flex-shrink-0">{l}</span>
-      <span className={`min-w-0 flex-1 text-right break-words ${bold ? "font-bold text-slate-900" : "text-slate-800"}`}>{String(r)}</span>
+      <span className={`text-right ml-auto break-words ${bold ? "font-bold text-slate-900" : "text-slate-800"}`}>{String(r)}</span>
     </div>
   );
 }
