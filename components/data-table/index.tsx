@@ -350,6 +350,7 @@ type StoredView = {
   colFilterValues: Record<string, ColumnFilterValue>;
   globalSearch: string;
   columnVisibility: VisibilityState;
+  groupBy?: string | null;            // เฟส 3: จำการจัดกลุ่ม
   visibility?: "personal" | "team" | "system";
   is_default?: boolean;
   owner_name?: string | null;
@@ -813,7 +814,7 @@ export function DataTable<T extends Record<string, unknown>>({
       body: JSON.stringify({
         table_id: tableId, label: saveViewName.trim(),
         visibility: saveViewVis,
-        config: { baseViewId: activeView, colFilterValues, globalSearch, columnVisibility },
+        config: { baseViewId: activeView, colFilterValues, globalSearch, columnVisibility, groupBy },
       }),
     });
     setSavingView(false);
@@ -842,6 +843,8 @@ export function DataTable<T extends Record<string, unknown>>({
     setColFilterValues(view.colFilterValues ?? {});
     setGlobalSearch(view.globalSearch ?? "");
     setColumnVisibility(view.columnVisibility ?? {});
+    setGroupBy(view.groupBy ?? null);   // เฟส 3: คืนค่าการจัดกลุ่ม
+    setCollapsedGroups(new Set());
     setRowSelection({});
   };
 
