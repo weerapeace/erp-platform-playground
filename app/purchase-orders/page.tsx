@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
+import { AttachmentPanel } from "@/components/attachment-panel";
 import { ERPModal } from "@/components/modal";
 import { SupplierPicker, WarehousePicker } from "@/components/pickers";
 import type { SupplierPickerValue, WarehousePickerValue } from "@/components/pickers";
@@ -321,6 +322,11 @@ export default function PurchaseOrdersPage() {
                 <strong>หมายเหตุ:</strong> {detail.note}
               </div>
             )}
+
+            {/* Attachments (ของกลาง N) */}
+            <div className="border-t border-slate-100 pt-4">
+              <AttachmentPanel entityType="erp_playground_po" entityId={detail.id} />
+            </div>
           </div>
         )}
       </ERPModal>

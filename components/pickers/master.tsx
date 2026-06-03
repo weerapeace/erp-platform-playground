@@ -157,7 +157,34 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
 
     const exactMatch = results.some(r => r.name.toLowerCase() === query.trim().toLowerCase());
     const showCreate = canCreate && query.trim() && !exactMatch && !loading;
-    const list = query.trim() ? results : (recent.length ? recent : results);
+    const favIds = new Set(favs.map(f => f.id));
+    // ไม่มีคำค้น: โชว์ favorites ก่อน แล้วตามด้วย recent (ที่ไม่ซ้ำ favorite)
+    const baseList = recent.length ? recent : results;
+    const list = query.trim()
+      ? results
+      : [...favs, ...baseList.filter(v => !favIds.has(v.id))];
+
+    // row เดียว — ใช้ซ้ำ (มีปุ่มดาวปักหมุด)
+    const renderRow = (v: V) => (
+      <div key={v.id}
+        className={`w-full px-3 py-2 flex items-center gap-1.5 hover:bg-blue-50 transition-colors ${value?.id === v.id ? "bg-blue-50" : ""}`}>
+        <button type="button" onClick={() => select(v)} className="flex-1 flex flex-col text-left min-w-0">
+          <div className="flex items-center gap-2">
+            {v.code && <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{v.code}</span>}
+            {cfg.badgeRender?.(v)}
+            <span className="text-sm text-slate-800 truncate">{v.name}</span>
+          </div>
+          {cfg.secondaryRender && <div className="text-xs text-slate-400 mt-0.5">{cfg.secondaryRender(v)}</div>}
+        </button>
+        <button type="button" onClick={(e) => onToggleFav(e, v)}
+          title={favIds.has(v.id) ? "เอาออกจากรายการโปรด" : "ปักหมุดเป็นรายการโปรด"}
+          className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-amber-50 ${
+            favIds.has(v.id) ? "text-amber-400" : "text-slate-300 hover:text-amber-400"
+          }`}>
+          {favIds.has(v.id) ? "★" : "☆"}
+        </button>
+      </div>
+    );
 
     return (
       <div className="relative" ref={boxRef}>
@@ -185,27 +212,21 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
             </div>
 
             <div className="max-h-64 overflow-y-auto">
-              {!query.trim() && recent.length > 0 && (
-                <div className="px-3 py-1 text-xs text-slate-400">⏱ เคยใช้ล่าสุด</div>
-              )}
               {loading ? (
                 <div className="px-3 py-4 flex items-center justify-center text-slate-400"><IconLoader /></div>
               ) : list.length === 0 && !showCreate ? (
                 <div className="px-3 py-4 text-center text-sm text-slate-400">{cfg.emptyLabel}</div>
+              ) : query.trim() ? (
+                list.map(renderRow)
               ) : (
-                list.map(v => (
-                  <button key={v.id} type="button" onClick={() => select(v)}
-                    className={`w-full px-3 py-2 flex flex-col hover:bg-blue-50 transition-colors text-left ${value?.id === v.id ? "bg-blue-50" : ""}`}>
-                    <div className="flex items-center gap-2">
-                      {v.code && <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{v.code}</span>}
-                      {cfg.badgeRender?.(v)}
-                      <span className="text-sm text-slate-800 truncate">{v.name}</span>
-                    </div>
-                    {cfg.secondaryRender && (
-                      <div className="text-xs text-slate-400 mt-0.5">{cfg.secondaryRender(v)}</div>
-                    )}
-                  </button>
-                ))
+                <>
+                  {favs.length > 0 && <div className="px-3 py-1 text-xs text-amber-500">★ รายการโปรด</div>}
+                  {favs.map(renderRow)}
+                  {recent.filter(v => !favIds.has(v.id)).length > 0 && (
+                    <div className="px-3 py-1 text-xs text-slate-400">⏱ เคยใช้ล่าสุด</div>
+                  )}
+                  {recent.filter(v => !favIds.has(v.id)).map(renderRow)}
+                </>
               )}
 
               {showCreate && (

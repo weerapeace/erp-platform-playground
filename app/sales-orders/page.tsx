@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
+import { AttachmentPanel } from "@/components/attachment-panel";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { CustomerPicker, WarehousePicker } from "@/components/pickers";
 import type { CustomerPickerValue, WarehousePickerValue } from "@/components/pickers";
@@ -383,6 +384,11 @@ export default function SalesOrdersPage() {
                 <strong>เหตุผลยกเลิก:</strong> {detail.reject_reason}
               </div>
             )}
+
+            {/* Attachments (ของกลาง N) */}
+            <div className="border-t border-slate-100 pt-4">
+              <AttachmentPanel entityType="erp_playground_so" entityId={detail.id} />
+            </div>
           </div>
         )}
       </ERPModal>

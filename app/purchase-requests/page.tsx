@@ -7,6 +7,7 @@ import { ERPModal, ConfirmDialog, ApprovalDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { ActivityFeed } from "@/components/activity-feed";
 import { CommentThread } from "@/components/comment-thread";
+import { AttachmentPanel } from "@/components/attachment-panel";
 import type { ActivityEntry } from "@/components/activity-feed";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -455,6 +456,13 @@ function PRDetailDrawer({
                   </table>
                 </div>
               </div>
+
+              {/* Attachments (ของกลาง N) */}
+              {detail && (
+                <div className="border-t border-slate-100 pt-4">
+                  <AttachmentPanel entityType="erp_playground_pr" entityId={detail.id} />
+                </div>
+              )}
 
               {/* Comments */}
               {detail && (
