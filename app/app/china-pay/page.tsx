@@ -336,7 +336,7 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
       else toast.error("ยังไม่พบ Group ID — เชิญบอทเข้ากลุ่ม + พิมพ์ในกลุ่ม 1 ครั้งก่อน");
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
   };
-  const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/china-pay/line-webhook` : "";
+  const webhookUrl = "https://cyivhkecxeoonlowcvaz.supabase.co/functions/v1/line-webhook";
 
   const isOn = (role: string, k: string) => (local[role] ?? ALL_TAB_KEYS).includes(k);
   const toggle = (role: string, k: string) => setLocal(prev => {
