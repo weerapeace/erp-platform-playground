@@ -16,6 +16,7 @@ import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { SkuImagePicker, type PickedSku } from "@/components/sku-image-picker";
+import { ImageGallery, HoverZoomImage } from "@/components/image-input";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
@@ -532,7 +533,7 @@ export default function PurchasingShopPage() {
                   className="w-full text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-md transition-all">
                   <div className="aspect-square bg-slate-50 flex items-center justify-center">
                     {img(c.image_key)
-                      ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(c.image_key)!} alt="" className="w-full h-full object-cover" />
+                      ? <HoverZoomImage src={img(c.image_key)!} className="w-full h-full object-cover" />
                       : <span className="text-slate-300 text-3xl">📦</span>}
                   </div>
                   <div className="p-3">
@@ -826,9 +827,9 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: 
         </>
       }>
       <div className="flex gap-3">
-        <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden">
-          {img(card.image_key)
-            ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(card.image_key)!} alt="" className="w-full h-full object-cover" />
+        <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden" title="คลิกเพื่อดูรูปใหญ่">
+          {card.image_key
+            ? <ImageGallery r2Key={card.image_key} />
             : <span className="text-slate-300 text-2xl">📦</span>}
         </div>
         <div className="min-w-0">

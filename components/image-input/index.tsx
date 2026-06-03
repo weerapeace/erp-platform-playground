@@ -234,3 +234,36 @@ export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefin
     </div>
   );
 }
+
+/**
+ * HoverZoomImage (ของกลาง) — รูปที่เอาเมาส์ชี้แล้วเด้งรูปใหญ่ลอยตามเมาส์
+ * ใช้ครอบรูปการ์ด/thumbnail ที่อยากให้ดูใหญ่ตอน hover (คลิกยังส่งต่อไปยัง element แม่ได้ปกติ)
+ */
+export function HoverZoomImage({ src, alt = "", className = "", previewSize = 320 }: {
+  src: string; alt?: string; className?: string; previewSize?: number;
+}) {
+  const [hover, setHover] = useState(false);
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const flipLeft = typeof window !== "undefined" && pos.x + 24 + previewSize > window.innerWidth;
+  const px = flipLeft ? pos.x - previewSize - 24 : pos.x + 24;
+  const py = Math.max(8, Math.min(pos.y - previewSize / 2, (typeof window !== "undefined" ? window.innerHeight : 800) - previewSize - 8));
+
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} className={className}
+        onMouseEnter={(e) => { setHover(true); setPos({ x: e.clientX, y: e.clientY }); }}
+        onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
+        onMouseLeave={() => setHover(false)} />
+      {hover && createPortal(
+        <div className="fixed z-[120] pointer-events-none rounded-lg shadow-2xl border-2 border-white bg-white overflow-hidden"
+          style={{ left: px, top: py, width: previewSize, height: previewSize }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={src} alt="" className="w-full h-full object-contain bg-slate-50" />
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
