@@ -58,6 +58,27 @@ function pushRecent<V extends { id: string }>(key: string, v: V) {
   } catch { /* ignore */ }
 }
 
+// ---- Favorite / pinned (กลาง — ทุก picker ได้ฟรี) ----
+
+const favKey = (storageKey: string) => `${storageKey}-fav`;
+function loadFav<V>(key: string): V[] {
+  try { return JSON.parse(localStorage.getItem(favKey(key)) ?? "[]"); } catch { return []; }
+}
+function isFav(key: string, id: string): boolean {
+  return loadFav<{ id: string }>(key).some(x => x.id === id);
+}
+/** toggle ปักหมุด/เอาออก — คืน list ใหม่ */
+function toggleFav<V extends { id: string }>(key: string, v: V): V[] {
+  try {
+    const list = loadFav<V>(key);
+    const next = list.some(x => x.id === v.id)
+      ? list.filter(x => x.id !== v.id)            // เอาออก
+      : [v, ...list].slice(0, 12);                  // ปักหมุด (สูงสุด 12)
+    localStorage.setItem(favKey(key), JSON.stringify(next));
+    return next;
+  } catch { return loadFav<V>(key); }
+}
+
 // ============================================================
 // Factory
 // ============================================================
@@ -78,6 +99,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
     const [query, setQuery]     = useState("");
     const [results, setResults] = useState<V[]>([]);
     const [recent, setRecent]   = useState<V[]>([]);
+    const [favs, setFavs]       = useState<V[]>([]);
     const [loading, setLoading] = useState(false);
     const [creating, setCreating] = useState(false);
     const boxRef = useRef<HTMLDivElement>(null);
@@ -90,7 +112,14 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
       return () => document.removeEventListener("mousedown", h);
     }, []);
 
-    useEffect(() => { if (open) setRecent(loadRecent<V>(cfg.storageKey)); }, [open]);
+    useEffect(() => {
+      if (open) { setRecent(loadRecent<V>(cfg.storageKey)); setFavs(loadFav<V>(cfg.storageKey)); }
+    }, [open]);
+
+    const onToggleFav = useCallback((e: React.MouseEvent, v: V) => {
+      e.stopPropagation();
+      setFavs(toggleFav(cfg.storageKey, v));
+    }, []);
 
     useEffect(() => {
       if (!open) return;

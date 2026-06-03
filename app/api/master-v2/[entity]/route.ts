@@ -143,7 +143,7 @@ export async function resolveRelationLabels(
     const sel = rr.secondaryField ? `id, ${rr.labelField}, ${rr.secondaryField}` : `id, ${rr.labelField}`;
     const { data: td } = await supabase.from(rr.targetTable).select(sel).in("id", ids);
     const map = new Map<string, Record<string, unknown>>();
-    (td ?? []).forEach((t) => { const o = t as Record<string, unknown>; map.set(String(o.id), o); });
+    (td ?? []).forEach((t) => { const o = t as unknown as Record<string, unknown>; map.set(String(o.id), o); });
     return { rr, map };
   }));
 

@@ -619,7 +619,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const emptyForm = useMemo(() => {
     const e: Record<string, unknown> = {};
     effectiveFields.forEach(f => {
-      const dtype = (f.type === "many2many" || f.type === "one2many") ? "text" : f.type;
+      // many2many/one2many/computed ไม่มี default ที่ resolveDefault รองรับ → fallback เป็น text
+      const dtype = (f.type === "many2many" || f.type === "one2many" || f.type === "computed") ? "text" : f.type;
       e[f.key] = resolveDefault(dtype, f.defaultValue, f.defaultExpression, user?.email ?? null);
     });
     return e;

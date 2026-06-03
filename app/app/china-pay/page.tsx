@@ -836,28 +836,43 @@ function CtwList() {
 
   if (mode === "form") return <CtwForm onCancel={() => setMode("list")} onSaved={() => { setMode("list"); load(); }} />;
 
+  const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
+  const unpaid = rows.filter(r => !r.cleared_at);
+  const unclearedTotal = unpaid.reduce((a, r) => a + ctwRemain(r), 0);
+
   return (
     <div className="space-y-3">
       <button onClick={() => setMode("form")} className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold active:scale-[0.99] transition-transform">+ เพิ่มบิล CTW</button>
+      {!loading && rows.length > 0 && (
+        <div className="rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white p-4 shadow-sm">
+          <div className="text-sm opacity-90">ยอดคงเหลือยังไม่ตัด ({unpaid.length} บิล)</div>
+          <div className="text-3xl font-bold mt-1">฿{fmt(unclearedTotal)}</div>
+        </div>
+      )}
       {loading ? (
         <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
       ) : rows.length === 0 ? (
         <div className="text-center text-slate-300 py-10">— ยังไม่มีบิล CTW —</div>
       ) : (
-        rows.map((r) => (
+        rows.map((r) => {
+          const paid = num(r.cleared_amount), cleared = !!r.cleared_at;
+          return (
           <Card key={String(r.id)}>
             <button onClick={() => setDetail(r)} className="w-full text-left flex justify-between items-start gap-2">
               <div className="min-w-0">
                 <div className="font-medium text-slate-800 truncate">{String(r.company_name ?? "—")}</div>
-                <div className="text-xs text-slate-400">เลขที่ {String(r.doc_number ?? "—")} · {String(r.doc_date ?? "—")}</div>
+                <div className="text-xs text-slate-400">เลขที่ {String(r.doc_number ?? "—")} · {String(r.doc_date ?? "—")}{paid > 0 && !cleared ? ` · จ่ายแล้ว ฿${fmt(paid)}` : ""}</div>
               </div>
               <div className="text-right flex-shrink-0">
-                <div className="font-semibold text-slate-800">฿{fmt(num(r.net_amount))}</div>
-                <div className="text-[11px] text-slate-400">ก่อนภาษี ฿{fmt(num(r.amount_before_tax))}</div>
+                <div className="font-semibold text-slate-800">฿{fmt(cleared ? num(r.net_amount) : ctwRemain(r))}</div>
+                {cleared
+                  ? <span className="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">ตัดแล้ว</span>
+                  : <div className="text-[11px] text-slate-400">เต็ม ฿{fmt(num(r.net_amount))}</div>}
               </div>
             </button>
           </Card>
-        ))
+          );
+        })
       )}
       {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
     </div>
@@ -1024,6 +1039,7 @@ function TransferPage() {
   const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
   const [useBalance, setUseBalance] = useState(false);          // สวิตช์ใช้ยอดคงเหลือบัญชีจีน
   const [amount, setAmount] = useState("");
+  const [refNo, setRefNo] = useState("");                       // หมายเลข/เลขอ้างอิงการโอน
   const [rate, setRate] = useState("");
   const [transferDate, setTransferDate] = useState(today());
   const [rateInfo, setRateInfo] = useState(false);
@@ -1082,13 +1098,14 @@ function TransferPage() {
   // ยอด ¥ ที่จะตัดรอบนี้ (จากช่องต่อบิล)
   const selectedRmb = useMemo(() => [...sel].reduce((a, id) => a + num(pay[id]), 0), [sel, pay]);
   // หักยอดคงเหลือบัญชีจีน (ถ้าเปิดสวิตช์) → เหลือ ¥ ที่ต้องโอนจริง
-  const netRmb = Math.max(0, selectedRmb - (useBalance ? balance.rmb : 0));
+  const transferred = num(amount);                     // กรอกเอง (ยอดที่ส่งจริง)
   // เรทที่ใช้จริง — เลือกชั้นตามยอดที่โอนจริง (฿)
-  const effRate = hasRate ? (useBalance ? rateFor(netRmb * r1, r1) : rateFor(num(amount), r1)) : 0;
+  const effRate = hasRate ? rateFor(transferred, r1) : 0;
   const selectedSum = selectedRmb * effRate;          // ยอดบิลที่เลือก (฿)
-  const netThb = netRmb * effRate;                    // ยอดที่ต้องโอนจริง (฿) เมื่อใช้ยอดคงเหลือ
-  const transferred = useBalance ? netThb : num(amount);
-  const leftover = transferred - selectedSum;          // ส่วนต่างที่จะเข้าบัญชีจีน
+  // เปิดสวิตช์ = แค่โชว์ "เหลือที่ต้องโอน" (ไม่เติมลงช่อง) — ยอดคงเหลือถูกหักตอนบันทึกผ่าน leftover เอง
+  const netRmb = Math.max(0, selectedRmb - balance.rmb);
+  const netThb = netRmb * effRate;
+  const leftover = transferred - selectedSum;          // ส่วนต่างที่จะเข้าบัญชีจีน (ติดลบ = ใช้ยอดคงเหลือ)
   const leftoverRmb = effRate ? leftover / effRate : 0;
   const activeTier = transferred <= 5000 ? "R1" : transferred <= 99999 ? "R2" : transferred <= 399999 ? "R3" : "R4";
 
@@ -1097,7 +1114,7 @@ function TransferPage() {
   const ctwToggle = (id: string, remain: number) => setCtwSel(s => {
     const n = new Set(s);
     if (n.has(id)) { n.delete(id); setCtwPay(p => { const q = { ...p }; delete q[id]; return q; }); }
-    else { n.add(id); setCtwPay(p => ({ ...p, [id]: String(remain) })); }   // default = ยอดคงเหลือของบิล CTW
+    else { n.add(id); setCtwPay(p => ({ ...p, [id]: String(num(amount) > 0 ? num(amount) : remain) })); }   // default = จำนวนเงินที่โอนจริง (ว่าง → ยอดคงเหลือบิล)
     return n;
   });
   const ctwTotal = useMemo(() => ctw.reduce((a, r) => a + ctwRemain(r), 0), [ctw]);
@@ -1117,7 +1134,7 @@ function TransferPage() {
             transfer_date: transferDate || today(), bill_ids: ids, bills_total_thb: +selectedSum.toFixed(2),
             amount_transferred_thb: +transferred.toFixed(2), rate: effRate,
             leftover_thb: +leftover.toFixed(2), leftover_rmb: +leftoverRmb.toFixed(2),
-            attachments: slip, note: note || null, actor: "china-app",
+            ref_no: refNo || null, attachments: slip, note: note || null, actor: "china-app",
           }),
         });
         const j = await res.json();
@@ -1148,7 +1165,7 @@ function TransferPage() {
       }
       toast.success("บันทึก + ตัดบิลแล้ว");
       setSel(new Set()); setPay({}); setCtwSel(new Set()); setCtwPay({}); setUseBalance(false);
-      setAmount(""); setSlip([]); setNote("");
+      setAmount(""); setRefNo(""); setSlip([]); setNote("");
       loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
@@ -1239,11 +1256,7 @@ function TransferPage() {
 
       <Card>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label>
-            {useBalance
-              ? <div className="w-full h-11 px-3 flex items-center justify-end text-base font-semibold text-emerald-700 border border-emerald-200 rounded-lg bg-emerald-50">฿{fmt(transferred)}</div>
-              : <Money value={amount} onChange={setAmount} />}
-          </div>
+          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label><Money value={amount} onChange={setAmount} /></div>
           <div><Label>วันที่โอน</Label>
             <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
               className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
@@ -1282,6 +1295,9 @@ function TransferPage() {
               : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
           </div>
         </div>
+        <div className="mt-3"><Label>หมายเลขโอน / เลขอ้างอิง</Label>
+          <input value={refNo} onChange={e => setRefNo(e.target.value)} placeholder="เช่น เลขอ้างอิงจากสลิป"
+            className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน" value={slip} onChange={setSlip} folder="china-transfers" /></div>
         <button onClick={save} disabled={saving}
           className="mt-3 w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">

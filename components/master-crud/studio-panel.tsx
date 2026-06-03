@@ -350,7 +350,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onMoveGroup,
+  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup,
 }: {
   grouped: [string, StudioField[]][];
   sensors: ReturnType<typeof useSensors>;

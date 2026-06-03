@@ -7,6 +7,7 @@ import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ImageThumbnail } from "@/components/image-manager";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
+import { readRelationLabel } from "@/lib/relation";
 import {
   useReactTable,
   getCoreRowModel,
@@ -353,8 +354,20 @@ function uiTypeToFilterType(uiType: string): FilterFieldType {
   return "text";
 }
 
-function buildRegistryCell(uiType: string) {
-  return ({ getValue }: { getValue: () => unknown }) => {
+// R5: fieldKey ส่งเข้ามาเพื่อให้ relation column อ่าน label คู่ (`{base}_label`) อัตโนมัติ
+function buildRegistryCell(uiType: string, fieldKey?: string) {
+  // เป็น relation ถ้า ui_type = "relation" หรือ field ลงท้าย _id (convention)
+  const isRelation = uiType === "relation" || (!!fieldKey && fieldKey.endsWith("_id"));
+  return ({ getValue, row }: { getValue: () => unknown; row?: { original: Record<string, unknown> } }) => {
+    // R5: relation → โชว์ชื่อ (จาก sibling _label/_name) แทน id ดิบ
+    if (isRelation && fieldKey && row?.original) {
+      const label = readRelationLabel(row.original, fieldKey);
+      const raw = getValue();
+      if (label) return <span className="text-sm text-slate-700 line-clamp-1">{label}</span>;
+      if (raw == null || raw === "") return <span className="text-xs text-slate-400">—</span>;
+      // ไม่มี label มาให้ → โชว์ id แบบย่อ + เตือนว่า relation ยัง resolve ไม่ได้
+      return <span className="text-xs text-slate-400 font-mono" title="ยังไม่มีชื่อ (label) — ตรวจ relation_joins ใน API">{String(raw).slice(0, 8)}…</span>;
+    }
     const val = getValue();
     if (val == null || val === "") return <span className="text-xs text-slate-400">—</span>;
     if ((uiType === "currency" || uiType === "number") && !isNaN(Number(val))) {
@@ -716,7 +729,7 @@ export function DataTable<T extends Record<string, unknown>>({
           filterable:   reg?.is_filterable ?? false,
           filterType:   reg ? uiTypeToFilterType(reg.ui_type) : undefined,
         },
-        cell: buildRegistryCell(reg?.ui_type ?? "text"),
+        cell: buildRegistryCell(reg?.ui_type ?? "text", key),
       } as ColumnDef<T>;
     });
   }, [extraDataKeys, registryMap]);

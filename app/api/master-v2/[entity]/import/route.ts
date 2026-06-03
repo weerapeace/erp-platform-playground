@@ -63,7 +63,7 @@ export async function POST(
     relMap[rf.col] = new Map();
     if (vals.length === 0) continue;
     const { data: td } = await admin.from(rf.tgt).select(`id, ${rf.labelField}`).in(rf.labelField, vals);
-    (td ?? []).forEach((t) => { const o = t as Record<string, unknown>; relMap[rf.col].set(String(o[rf.labelField]).toLowerCase(), String(o.id)); });
+    (td ?? []).forEach((t) => { const o = t as unknown as Record<string, unknown>; relMap[rf.col].set(String(o[rf.labelField]).toLowerCase(), String(o.id)); });
   }
 
   // ---- เตรียมแถว: แปลง relation + คงเลขแถวจริงไว้ (สำหรับรายงาน) ----
