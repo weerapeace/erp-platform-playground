@@ -1664,6 +1664,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       {studioOpen && (
         <StudioPanel
           moduleLabel={config.title}
+          sampleRows={rows.slice(0, 5) as Record<string, unknown>[]}
           fields={effectiveFields
             .filter((f) => f.fieldId)
             .map<StudioField>((f) => ({

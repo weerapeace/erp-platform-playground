@@ -66,14 +66,16 @@ const ALL_GROUPS = Object.keys(GROUP_META);
 type Tab = "table" | "form";
 
 export function StudioPanel({
-  fields, moduleLabel, onClose, onSaved,
+  fields, moduleLabel, onClose, onSaved, sampleRows = [],
 }: {
   fields:      StudioField[];
   moduleLabel: string;
   onClose:     () => void;
   onSaved:     () => void;
+  sampleRows?: Record<string, unknown>[];
 }) {
   const [tab, setTab] = useState<Tab>("table");
+  const [previewIdx, setPreviewIdx] = useState(0);
   const [items, setItems] = useState<StudioField[]>(() =>
     [...fields].sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
   );
@@ -287,11 +289,24 @@ export function StudioPanel({
 
         {/* ---- RIGHT: live preview ---- */}
         <div className="w-1/2 overflow-y-auto bg-white p-5">
-          <div className="text-xs font-semibold text-slate-400 uppercase mb-3">👁 Preview สด</div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs font-semibold text-slate-400 uppercase">👁 Preview สด {tab==="form" && sampleRows.length>0 ? "(ข้อมูลจริง)" : ""}</div>
+            {tab==="form" && sampleRows.length>0 && (
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] text-slate-400 mr-1">ตัวอย่างรายการ:</span>
+                {sampleRows.map((_,i)=>(
+                  <button key={i} onClick={()=>setPreviewIdx(i)}
+                    className={`w-6 h-6 rounded text-xs ${previewIdx===i?"bg-orange-500 text-white":"bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{i+1}</button>
+                ))}
+              </div>
+            )}
+          </div>
           {tab === "table" ? (
             <TablePreview cols={visibleCols} />
           ) : (
-            <FormPreview grouped={grouped.map(([g,fs])=>[g,fs.filter(f=>f.showInForm)] as [string,StudioField[]]).filter(([,fs])=>fs.length>0)} />
+            <FormPreview
+              grouped={grouped.map(([g,fs])=>[g,fs.filter(f=>f.showInForm)] as [string,StudioField[]]).filter(([,fs])=>fs.length>0)}
+              row={sampleRows[previewIdx]} moduleLabel={moduleLabel} />
           )}
         </div>
       </div>
@@ -528,10 +543,36 @@ function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGro
   );
 }
 
-function FormPreview({ grouped }: { grouped: [string, StudioField[]][] }) {
+// preset → CSS (ให้ตรงกับฝั่ง form จริงใน MasterCRUD)
+function uiStyleCss(us: Record<string, unknown>): React.CSSProperties {
+  const SZ: Record<string, string> = { sm: "12px", base: "14px", lg: "16px", xl: "20px" };
+  const FF: Record<string, string> = { serif: "Georgia, 'Times New Roman', serif", mono: "ui-monospace, 'Courier New', monospace" };
+  return {
+    fontSize: SZ[String(us.size ?? "")] || undefined,
+    fontWeight: us.bold ? 700 : undefined,
+    fontStyle: us.italic ? "italic" : undefined,
+    textDecoration: us.underline ? "underline" : undefined,
+    color: typeof us.color === "string" && us.color ? us.color : undefined,
+    fontFamily: FF[String(us.font ?? "")] || undefined,
+    textAlign: (["left", "center", "right"].includes(String(us.align)) ? (us.align as "left" | "center" | "right") : undefined),
+  };
+}
+function previewVal(row: Record<string, unknown> | undefined, f: StudioField): string {
+  if (!row) return "";
+  if (f.type === "relation" || f.type === "many2many" || f.type === "one2many")
+    return String(row[`${f.key}_label`] ?? row[f.key] ?? "");
+  const v = row[f.key];
+  if (v == null || v === "") return "";
+  if (f.type === "boolean") return v ? "✓ เปิด" : "✗ ปิด";
+  if (f.type === "image") return "🖼 (รูป)";
+  return String(v);
+}
+
+function FormPreview({ grouped, row, moduleLabel }: { grouped: [string, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string }) {
   if (grouped.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
   return (
-    <div className="space-y-4 max-w-md">
+    <div className="space-y-4 max-w-lg">
+      <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}</div>
       {grouped.map(([gk, fs])=>{
         const m = gmeta(gk);
         return (
@@ -540,12 +581,18 @@ function FormPreview({ grouped }: { grouped: [string, StudioField[]][] }) {
               <span>{m.icon}</span>{m.label}
             </div>
             <div className="p-3 grid grid-cols-2 gap-3">
-              {fs.map(f=>(
-                <div key={f.key} className="space-y-0.5">
-                  <div className="text-[11px] text-slate-500">{f.label}</div>
-                  <div className="h-8 rounded border border-slate-200 bg-slate-50" />
-                </div>
-              ))}
+              {fs.map(f=>{
+                const us = (f.uiStyle ?? {}) as Record<string, unknown>;
+                const css = uiStyleCss(us);
+                const hl = !!us.highlight;
+                const val = previewVal(row, f);
+                return (
+                  <div key={f.key} className={`space-y-0.5 ${f.formSpan===2?"col-span-2":""} ${hl?"bg-amber-50 border border-amber-200 rounded p-1.5":""}`}>
+                    <div className="text-[11px] text-slate-500" style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}</div>
+                    <div className="text-sm text-slate-800 min-h-[1.25rem] break-words" style={css}>{val || <span className="text-slate-300">—</span>}</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
