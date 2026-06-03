@@ -34,7 +34,6 @@ type PR = {
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
-const pad = (n: number, w: number) => String(n).padStart(w, "0");
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   // ตรวจ login
@@ -67,22 +66,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     groups.set(key, arr);
   }
 
-  // เลขที่ PO: PO-YYYYMMDD-#### (นับต่อจากจำนวนใบในวันนั้น)
+  // เลขที่ PO: ใช้ระบบเลขเอกสารกลาง erp_next_number('po') — atomic กันเลขซ้ำ
+  // ตั้งค่ารูปแบบได้ที่หน้า /admin/numbering (ไม่ต้องแก้โค้ด)
   const now = new Date();
-  const ymd = `${now.getFullYear()}${pad(now.getMonth() + 1, 2)}${pad(now.getDate(), 2)}`;
-  const { count: todayCount } = await admin
-    .from("purchase_orders_v2")
-    .select("id", { count: "exact", head: true })
-    .like("po_no", `PO-${ymd}-%`);
-  let seq = (todayCount ?? 0);
-
   const actor = body.actor ?? user.email ?? "system";
   const created: Array<{ po_no: string; seller_name: string; currency: string; grand_total: number; line_count: number }> = [];
 
   for (const [key, items] of groups) {
     const [seller, currency] = key.split("|||");
-    seq += 1;
-    const poNo = `PO-${ymd}-${pad(seq, 4)}`;
+    const { data: poNo, error: numErr } = await admin.rpc("erp_next_number", { p_key: "po" });
+    if (numErr || !poNo) return NextResponse.json({ error: "ออกเลข PO ไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
     const grandTotal = items.reduce((a, p) => a + num(p.qty) * num(p.price_est), 0);
     const orderDate = items.find((p) => p.order_date)?.order_date ?? now.toISOString().slice(0, 10);
     const requester = items.find((p) => p.requester)?.requester ?? actor;

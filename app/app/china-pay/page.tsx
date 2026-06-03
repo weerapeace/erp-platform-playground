@@ -1151,13 +1151,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   // ยอด ¥ ที่จะตัดรอบนี้ (จากช่องต่อบิล)
   const selectedRmb = useMemo(() => [...sel].reduce((a, id) => a + num(pay[id]), 0), [sel, pay]);
   // หักยอดคงเหลือบัญชีจีน (ถ้าเปิดสวิตช์) → เหลือ ¥ ที่ต้องโอนจริง
-  const transferred = num(amount);                     // กรอกเอง (ยอดที่ส่งจริง)
-  // เรทที่ใช้จริง — เลือกชั้นตามยอดที่โอนจริง (฿)
-  const effRate = hasRate ? rateFor(transferred, r1) : 0;
+  const netRmb = Math.max(0, selectedRmb - (useBalance ? balance.rmb : 0));
+  // เรท — เปิดสวิตช์: คิดชั้นจาก "เหลือที่ต้องโอน" / ปิด: คิดจากที่กรอกเอง
+  const effRate = hasRate ? (useBalance ? rateFor(netRmb * r1, r1) : rateFor(num(amount), r1)) : 0;
   const selectedSum = selectedRmb * effRate;          // ยอดบิลที่เลือก (฿)
-  // เปิดสวิตช์ = แค่โชว์ "เหลือที่ต้องโอน" (ไม่เติมลงช่อง) — ยอดคงเหลือถูกหักตอนบันทึกผ่าน leftover เอง
-  const netRmb = Math.max(0, selectedRmb - balance.rmb);
-  const netThb = netRmb * effRate;
+  const netThb = netRmb * effRate;                    // เหลือที่ต้องโอนจริง (฿) เมื่อหักยอดคงเหลือ
+  // เปิดสวิตช์ → คำนวณจาก netThb (เหลือที่ต้องโอน) / ปิด → ใช้ที่กรอกเอง
+  const transferred = useBalance ? netThb : num(amount);
   const leftover = transferred - selectedSum;          // ส่วนต่างที่จะเข้าบัญชีจีน (ติดลบ = ใช้ยอดคงเหลือ)
   const leftoverRmb = effRate ? leftover / effRate : 0;
   const activeTier = transferred <= 5000 ? "R1" : transferred <= 99999 ? "R2" : transferred <= 399999 ? "R3" : "R4";
@@ -1320,7 +1320,11 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
       <Card>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label><Money value={amount} onChange={setAmount} /></div>
+          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label>
+            {useBalance
+              ? <div className="w-full h-11 px-3 flex items-center justify-end text-base font-semibold text-emerald-700 border border-emerald-200 rounded-lg bg-emerald-50">฿{fmt(netThb)}</div>
+              : <Money value={amount} onChange={setAmount} />}
+          </div>
           <div><Label>วันที่โอน</Label>
             <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
               className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
