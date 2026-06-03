@@ -193,7 +193,7 @@ export default function ChinaPayApp() {
           return { ...l, sup: { name_en: sp.name_en ?? "", phone: sp.phone ?? "", bank_account_name: sp.bank_account_name ?? "", account_number: sp.account_number ?? "", bank_name_brief: sp.bank_name_brief ?? "" } };
         });
         const lo = Number(String(row.leftover_rmb ?? "0").replace(/,/g, "")) || 0;
-        setDeepTransfer({ transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, lo), lines });
+        setDeepTransfer({ transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, lo), lines, attachments: Array.isArray(row.attachments) ? row.attachments.map(String) : [] });
       }).catch(() => {});
     }
     if (billId || txId) window.history.replaceState({}, "", "/app/china-pay");
@@ -1502,7 +1502,8 @@ function buildTransferReceipt(row: Record<string, unknown>, pmap: Record<string,
     const sp = pmap[String(l.label ?? "").trim()] ?? {};
     return { ...l, sup: { name_en: sp.name_en ?? "", phone: sp.phone ?? "", bank_account_name: sp.bank_account_name ?? "", account_number: sp.account_number ?? "", bank_name_brief: sp.bank_name_brief ?? "" } };
   });
-  return { transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, num(row.leftover_rmb)), lines };
+  const attachments = Array.isArray(row.attachments) ? (row.attachments as unknown[]).map(String) : [];
+  return { transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, num(row.leftover_rmb)), lines, attachments };
 }
 
 // ส่งสรุปการโอนเข้า LINE (Flex + ปุ่มเปิดใบสรุป) — ใช้ร่วม TransferPage + TransferList
@@ -1641,6 +1642,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [slipUploading, setSlipUploading] = useState(false);
   const [savedTransfer, setSavedTransfer] = useState<Record<string, unknown> | null>(null);   // หลังโอน → popup พิมพ์/ส่งไลน์
   const [txReport, setTxReport] = useState<Record<string, unknown> | null>(null);
+  const [txReportAuto, setTxReportAuto] = useState(false);   // เปิดใบสรุปแล้วส่งไลน์(รูป)อัตโนมัติ
   const [sendingTxLine, setSendingTxLine] = useState(false);
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -1916,7 +1918,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       setSavedTransfer({
         transfer_id: String(j.data?.id ?? ""), transfer_no: String(j.data?.transfer_no ?? ""),
         ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
-        lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum,
+        lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum, attachments: slip,
       });
       setSel(new Set()); setPay({}); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(false);
       setAmount(""); setRefNo(""); setSlip([]); setNote(""); setStep(1);
@@ -2264,25 +2266,30 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             <div className="text-lg font-semibold text-slate-800">โอนสำเร็จ</div>
             <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · โอนจริง ฿{fmt(num(savedTransfer.transferred))}</div>
             <div className="mt-4 space-y-2">
-              <button onClick={() => setTxReport(savedTransfer)} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์รายการ</button>
-              <button onClick={() => sendTransferLine(savedTransfer)} disabled={sendingTxLine} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{sendingTxLine ? "กำลังส่ง…" : "📩 ส่ง Line"}</button>
+              <button onClick={() => { setTxReportAuto(false); setTxReport(savedTransfer); }} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์ / ใบสรุป</button>
+              <button onClick={() => { setTxReportAuto(true); setTxReport(savedTransfer); }} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium">📩 ส่งไลน์ (รูป) + สลิป</button>
+              <button onClick={() => sendTransferLine(savedTransfer)} disabled={sendingTxLine} className="w-full h-11 border border-[#06C755] text-[#06C755] rounded-lg font-medium disabled:opacity-50">{sendingTxLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
               <button onClick={() => setSavedTransfer(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
             </div>
           </div>
         </div></Portal>
       )}
-      {txReport && <TransferReceiptPopup t={txReport} onClose={() => setTxReport(null)} />}
+      {txReport && <TransferReceiptPopup t={txReport} autoSendLine={txReportAuto} onClose={() => { setTxReport(null); setTxReportAuto(false); }} />}
     </div>
   );
 }
 
 // ---------------- ใบสรุปการโอน (โหลดเป็นรูปได้) ----------------
-function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onClose: () => void }) {
+function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean }) {
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const ls = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
   const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
+  const atts = Array.isArray(t.attachments) ? (t.attachments as unknown[]).map(String) : [];
+  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
 
   // วาดใบสรุปการโอนลง canvas (สำหรับโหลดเป็นรูป)
   useEffect(() => {
@@ -2308,7 +2315,10 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
     }
     if (cw.length) {
       rows.push({ t: "sep" }, { t: "head", l: `บิล CTW (${cw.length})` });
-      cw.forEach(l => rows.push({ t: "kv", l: String(l.label || "—") + (l.doc_number ? ` (${String(l.doc_number)})` : ""), r: "฿" + fmt(num(l.paid_thb)) }));
+      cw.forEach(l => {
+        rows.push({ t: "kv", l: String(l.label || "—"), r: "฿" + fmt(num(l.paid_thb)) });
+        if (l.doc_number) rows.push({ t: "sub", l: "เลขที่บิล: " + String(l.doc_number) });
+      });
     }
     const DPR = Math.min(window.devicePixelRatio || 1, 2);
     const W = 600, headerH = 96, padX = 36, padTop = 24, padBottom = 36;
@@ -2357,6 +2367,55 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
     finally { setBusy(false); }
   };
 
+  // ส่งใบสรุปการโอน "เป็นรูป" + สลิปที่แนบ เข้า LINE กลุ่ม
+  const sendLineImage = async () => {
+    setBusy(true);
+    try {
+      const cv = canvasRef.current; if (!cv) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      const dataUrl = cv.toDataURL("image/png");
+      const cfg: Record<string, string> = await apiFetch("/api/master-v2/china-app-settings?limit=20").then(r => r.json())
+        .then(j => ((j.data ?? []).find((x: Record<string, unknown>) => x.skey === "line_config")?.sval ?? {}))
+        .catch(() => ({}));
+      const base = String(cfg.share_base ?? "").replace(/\/$/, "");
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
+      let text = `💸 ใบสรุปการโอนเงินจีน\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\nเรท: ${fmt(num(t.rate))} · โอนจริง ฿${fmt(num(t.transferred))}`;
+      if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label || "—")} ¥${fmt(num(l.paid_rmb))}`).join("\n");
+      if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label || "—")}${l.doc_number ? ` (${String(l.doc_number)})` : ""} ฿${fmt(num(l.paid_thb))}`).join("\n");
+      const toPublic = async (du: string, name: string) => {
+        const up = await apiFetch("/api/china-pay/share-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl: du, name }) }).then(r => r.json()).catch(() => ({}));
+        return up.key ? `${base}/${up.key}` : "";
+      };
+      const keyToDataUrl = async (key: string) => {
+        try { const r = await apiFetch(`/api/r2-image?key=${encodeURIComponent(key)}`); const blob = await r.blob();
+          return await new Promise<string>((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = () => res(""); fr.readAsDataURL(blob); });
+        } catch { return ""; }
+      };
+      let imageUrl = "", slipUrls: string[] = [];
+      if (base) {
+        imageUrl = await toPublic(dataUrl, `transfer-${String(t.transfer_no ?? "")}`);
+        const imgs = atts.filter(k => !isPdf(k)).slice(0, 3);   // LINE: รูปสรุป + สลิป ≤4 รูป/ครั้ง
+        for (const k of imgs) { const du = await keyToDataUrl(k); if (du) { const u = await toPublic(du, "slip"); if (u) slipUrls.push(u); } }
+      }
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปการโอน", url: link } }) });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); return; }
+      if (j.needConfig) { toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง"); window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); }
+      else toast.error(j.error ?? "ส่ง LINE ไม่ได้");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  // เปิดมาจากปุ่ม "ส่งไลน์ (รูป)" ของ popup โอนสำเร็จ → ส่งอัตโนมัติครั้งเดียว (รอ canvas วาดเสร็จ)
+  const autoRef = useRef(false);
+  useEffect(() => {
+    if (!autoSendLine || autoRef.current) return;
+    autoRef.current = true;
+    const id = setTimeout(() => { sendLineImage(); }, 200);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <Portal>
     <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
@@ -2402,19 +2461,55 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิล CTW ({cw.length})</div>
               {cw.map((l, i) => (
-                <div key={i} className="flex justify-between text-sm border-b border-slate-100 py-1">
-                  <span className="text-slate-700 truncate mr-2">{String(l.label || "—")}{l.doc_number ? ` (${String(l.doc_number)})` : ""}</span>
-                  <span className="text-slate-800 flex-shrink-0">฿{fmt(num(l.paid_thb))}</span>
+                <div key={i} className="border-b border-slate-100 py-1.5">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-700 truncate mr-2">{String(l.label || "—")}</span>
+                    <span className="text-slate-800 flex-shrink-0">฿{fmt(num(l.paid_thb))}</span>
+                  </div>
+                  {!!l.doc_number && <div className="text-[11px] text-slate-500 mt-0.5">เลขที่บิล: {String(l.doc_number)}</div>}
                 </div>
               ))}
             </div>
           )}
+          {/* สลิป/รูปที่แนบกับการโอน — แตะดูเต็มจอ */}
+          {atts.length > 0 && (
+            <div className="mt-3">
+              <div className="text-xs font-semibold text-slate-500 mb-1">สลิป/รูปที่แนบ ({atts.length})</div>
+              <div className="grid grid-cols-3 gap-2">
+                {atts.map((k) => (
+                  isPdf(k) ? (
+                    <a key={k} href={r2Url(k)} target="_blank" rel="noreferrer"
+                      className="rounded-md border border-slate-200 overflow-hidden bg-slate-50 flex flex-col items-center justify-center h-24 text-slate-600">
+                      <span className="text-3xl">📄</span>
+                      <span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span>
+                    </a>
+                  ) : (
+                    <button key={k} type="button" onClick={() => setLightbox(r2Url(k))}
+                      className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
+                    </button>
+                  )
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-        <div className="px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t border-slate-100 bg-white flex-shrink-0 grid grid-cols-2 gap-2 print:hidden">
-          <button onClick={saveImage} disabled={busy} className="h-12 bg-slate-700 text-white rounded-lg font-medium disabled:opacity-50">💾 โหลดรูป</button>
-          <button onClick={() => window.print()} className="h-12 border border-slate-300 text-slate-700 rounded-lg font-medium">🖨️ พิมพ์</button>
+        <div className="px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t border-slate-100 bg-white flex-shrink-0 space-y-2 print:hidden">
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={saveImage} disabled={busy} className="h-12 bg-slate-700 text-white rounded-lg font-medium disabled:opacity-50">💾 โหลดรูป</button>
+            <button onClick={() => window.print()} className="h-12 border border-slate-300 text-slate-700 rounded-lg font-medium">🖨️ พิมพ์</button>
+          </div>
+          <button onClick={sendLineImage} disabled={busy} className="w-full h-12 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{busy ? "กำลังส่ง…" : "📩 ส่งไลน์ (รูป) + สลิป"}</button>
         </div>
       </div>
+      {lightbox && (
+        <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setLightbox(null); }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="" className="max-w-full max-h-full object-contain" />
+          <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
+        </div></Portal>
+      )}
     </div>
     </Portal>
   );
