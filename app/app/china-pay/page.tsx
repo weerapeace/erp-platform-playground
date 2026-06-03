@@ -635,6 +635,9 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
   const [editId, setEditId] = useState<string | null>(null);   // tid ที่กำลังแก้จำนวน
   const [editVal, setEditVal] = useState("");
   const [delId, setDelId] = useState<string | null>(null);     // tid ที่กำลังยืนยันลบ
+  const [viewId, setViewId] = useState<string | null>(null);   // tid ที่กำลังกางดู (สลิป)
+  const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+  const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
 
   const load = useCallback(() => {
     apiFetch("/api/master-v2/china-transfers?limit=500&sort_by=transfer_date&sort_dir=desc")
@@ -650,19 +653,21 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
     const idx = lines.findIndex(l => String(l.bill_id) === billId && l.kind === kind);
     const no = t.transfer_no ? String(t.transfer_no) : (t.ref_no ? String(t.ref_no) : "—");
     const date = String(t.transfer_date ?? "");
+    const atts = Array.isArray(t.attachments) ? (t.attachments as unknown[]).map(String) : [];
+    const refNo = t.ref_no ? String(t.ref_no) : "";
     if (idx >= 0) {
       const mine = lines[idx];
       // ดูบิลจีน → โชว์เลขบิล CTW ที่ตัดพร้อมกันในการโอนนั้น
       const ctwDocs = kind === "china" ? lines.filter(l => l.kind === "ctw").map(l => String(l.doc_number ?? "")).filter(Boolean) : [];
       return [{
-        tid: String(t.id), no, date, editable: true,
+        tid: String(t.id), no, date, editable: true, atts, refNo,
         amt: kind === "china" ? num(mine.paid_rmb) : num(mine.paid_thb),
         cur: kind === "china" ? "¥" : "฿",
         note: ctwDocs.length ? `ตัดพร้อม CTW: ${ctwDocs.join(", ")}` : "",
       }];
     }
     if (kind === "china" && Array.isArray(t.bill_ids) && (t.bill_ids as unknown[]).map(String).includes(billId)) {
-      return [{ tid: String(t.id), no, date, editable: false, amt: 0, cur: "¥", note: "(รายการเก่า)" }];
+      return [{ tid: String(t.id), no, date, editable: false, atts, refNo, amt: 0, cur: "¥", note: "(รายการเก่า)" }];
     }
     return [];
   });
@@ -737,7 +742,10 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
         {items.map((it) => (
           <div key={it.tid} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
             <div className="flex justify-between gap-2 items-start">
-              <span className="text-slate-500">{it.date} · เลขโอน {it.no}</span>
+              <button onClick={() => setViewId(v => v === it.tid ? null : it.tid)} className="text-left text-slate-500 hover:text-slate-700 flex items-center gap-1">
+                <span className={`text-[10px] transition-transform ${viewId === it.tid ? "rotate-90" : ""}`}>▶</span>
+                {it.date} · เลขโอน {it.no}
+              </button>
               <div className="flex items-center gap-2 flex-shrink-0">
                 {it.amt > 0 && <span className="font-medium text-slate-700">{it.cur}{fmt(it.amt)}</span>}
                 {it.editable && (
@@ -749,6 +757,26 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
               </div>
             </div>
             {it.note && <div className="text-[11px] text-slate-400 mt-0.5">{it.note}</div>}
+            {viewId === it.tid && (
+              <div className="mt-2 rounded-lg bg-white border border-slate-200 p-2.5 text-xs space-y-2">
+                {it.refNo && <div className="text-slate-500">เลขอ้างอิงสลิป: <span className="text-slate-700 font-medium">{it.refNo}</span></div>}
+                {it.atts.length > 0 ? (
+                  <div>
+                    <div className="text-slate-500 mb-1">สลิปที่แนบ ({it.atts.length})</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {it.atts.map((k) => (
+                        <a key={k} href={r2Url(k)} target="_blank" rel="noreferrer" className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
+                          {isPdf(k)
+                            ? <div className="flex flex-col items-center justify-center h-20 text-slate-600"><span className="text-2xl">📄</span><span className="text-[9px] truncate w-full px-1 text-center">{k.split("/").pop()}</span></div>
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            : <img src={r2Url(k)} alt="" className="w-full h-20 object-cover" />}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ) : <div className="text-slate-400">— ไม่มีสลิปแนบ —</div>}
+              </div>
+            )}
             {editId === it.tid && (
               <div className="mt-2 flex items-center gap-2">
                 <span className="text-xs text-slate-500">{it.cur}</span>
@@ -1248,6 +1276,7 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<strin
 function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: string[]; onConsumePreselect?: () => void }) {
   const toast = useToast();
   const celebrate = useCelebrate();
+  const [step, setStep] = useState(1);   // 1=เลือกบิลจีน · 2=เลือกบิล CTW · 3=กรอก+บันทึก
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
@@ -1412,7 +1441,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       }));
       celebrate("โอนสำเร็จ 🎉", { confetti: true });
       setSel(new Set()); setPay({}); setCtwSel(new Set()); setCtwPay({}); setUseBalance(false);
-      setAmount(""); setRefNo(""); setSlip([]); setNote("");
+      setAmount(""); setRefNo(""); setSlip([]); setNote(""); setStep(1);
       loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
@@ -1431,7 +1460,21 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
       </div>
 
-      {/* ทำรายการโอน */}
+      {/* แถบบอกขั้นตอน 1-2-3 */}
+      <div className="flex items-center gap-1">
+        {[{ n: 1, l: "บิลจีน" }, { n: 2, l: "บิล CTW" }, { n: 3, l: "ยืนยัน" }].map((s, i) => (
+          <div key={s.n} className="flex items-center gap-1 flex-1 last:flex-initial">
+            <div className={`flex items-center gap-1.5 ${step === s.n ? "text-emerald-700" : step > s.n ? "text-emerald-500" : "text-slate-400"}`}>
+              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step === s.n ? "bg-emerald-600 text-white" : step > s.n ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>{step > s.n ? "✓" : s.n}</span>
+              <span className="text-xs font-medium whitespace-nowrap">{s.l}</span>
+            </div>
+            {i < 2 && <div className={`h-0.5 flex-1 rounded ${step > s.n ? "bg-emerald-400" : "bg-slate-200"}`} />}
+          </div>
+        ))}
+      </div>
+
+      {/* STEP 1: เลือกบิลจีน */}
+      {step === 1 && (<>
       <Card>
         <div className="font-semibold text-slate-800 mb-2">เลือกบิลที่จะตัด (รอโอน)</div>
         {pending.length === 0 ? (
@@ -1500,7 +1543,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
+      <button onClick={() => setStep(2)}
+        className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition">
+        ถัดไป: เลือกบิล CTW →
+      </button>
+      </>)}
 
+      {/* STEP 3: กรอกจำนวน + เรท + บันทึก */}
+      {step === 3 && (<>
       <Card>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>จำนวนเงินที่โอนจริง (฿)</Label>
@@ -1568,8 +1618,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           className="mt-3 w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">
           {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
         </button>
+        <button onClick={() => setStep(2)} className="mt-2 w-full h-10 text-slate-500 text-sm">← ย้อนกลับ</button>
       </Card>
+      </>)}
 
+      {/* STEP 2: เลือกบิล CTW */}
+      {step === 2 && (<>
       {/* บิล CTW ที่ยังไม่ตัด — ยอดคงเหลือสีส้ม + ตัดบางส่วนได้ */}
       <Card>
         <div className="flex justify-between items-center mb-2">
@@ -1616,10 +1670,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                 <span className="font-bold text-orange-600">฿{fmt([...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0))}</span>
               </div>
             )}
-            <div className="mt-2 text-[11px] text-slate-400 text-center">กด “บันทึกการโอน + ตัดบิล” ด้านบน เพื่อตัดทั้งบิลจีน + CTW พร้อมกัน</div>
           </>
         )}
       </Card>
+      <div className="flex gap-2">
+        <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 text-slate-600 rounded-xl font-medium">← กลับ</button>
+        <button onClick={() => setStep(3)} className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition">ถัดไป: ยืนยันการโอน →</button>
+      </div>
+      </>)}
     </div>
   );
 }
