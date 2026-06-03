@@ -173,6 +173,7 @@ export function ERPModal({
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -207,7 +208,7 @@ export function ERPModal({
 
       {/* Modal panel */}
       <div
-        className={`relative w-full ${SIZE_CLASS[size]} bg-white rounded-xl shadow-2xl flex flex-col max-h-[90vh]`}
+        className={`relative bg-white rounded-xl shadow-2xl flex flex-col ${expanded ? "w-[96vw] max-w-[96vw] h-[94vh] max-h-[94vh]" : `w-full ${SIZE_CLASS[size]} max-h-[90vh]`}`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Unsaved changes guard */}
@@ -223,12 +224,29 @@ export function ERPModal({
             <h2 className="text-base font-semibold text-slate-900">{title}</h2>
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
           </div>
-          <button
-            onClick={handleClose}
-            className="ml-4 flex-shrink-0 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-          >
-            <IconX />
-          </button>
+          <div className="ml-4 flex-shrink-0 flex items-center gap-1">
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              title={expanded ? "ย่อหน้าต่าง" : "ขยายหน้าต่าง"}
+              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              {expanded ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 9H4m0 0V4m0 5 6-6m5 16h5m0 0v-5m0 5-6-6" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M15 3h6m0 0v6m0-6-7 7M9 21H3m0 0v-6m0 6 7-7" />
+                </svg>
+              )}
+            </button>
+            <button
+              onClick={handleClose}
+              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <IconX />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
