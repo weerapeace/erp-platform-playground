@@ -76,7 +76,7 @@ export function FileMultiInput({
         ))}
         {!disabled && keys.length < max && (
           <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
-            className="h-24 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50">
+            className={`h-24 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50 ${keys.length === 0 ? "col-span-3" : ""}`}>
             <span className="text-xl">📎</span>
             <span className="text-[11px]">{uploading ? "กำลังอัปโหลด..." : "เพิ่มไฟล์"}</span>
           </button>
