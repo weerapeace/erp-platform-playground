@@ -42,5 +42,8 @@
   // → bundle เล็กลงหลาย MB → ไม่ชน Worker 1102 อีก + เร็วขึ้น
   "r2_buckets": [
     { "binding": "R2_IMAGES", "bucket_name": "odoo-product-images" }
-  ]
+  ],
+
+  // Workers AI — OCR อ่านยอดจากสลิป (china-pay) · มีโควตาฟรีรายวัน
+  "ai": { "binding": "AI" }
 }

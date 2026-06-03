@@ -1277,6 +1277,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const toast = useToast();
   const celebrate = useCelebrate();
   const [step, setStep] = useState(1);   // 1=เลือกบิลจีน · 2=เลือกบิล CTW · 3=กรอก+บันทึก
+  const [ocrBusy, setOcrBusy] = useState(false);   // กำลังอ่านยอดจากสลิป
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
@@ -1382,6 +1383,23 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     return n;
   });
   const ctwTotal = useMemo(() => ctw.reduce((a, r) => a + ctwRemain(r), 0), [ctw]);
+
+  // อ่าน "ยอดที่โอน" จากรูปสลิปด้วย AI → เติมช่องจำนวนเงิน (ผู้ใช้ตรวจก่อนบันทึก)
+  const readSlip = async () => {
+    const key = slip.find(k => !k.toLowerCase().endsWith(".pdf"));
+    if (!key) { toast.error("แนบรูปสลิป (jpg/png) ก่อน"); return; }
+    setOcrBusy(true);
+    try {
+      const res = await apiFetch("/api/china-pay/ocr-slip", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      if (j.amount) { setAmount(String(j.amount)); toast.success(`อ่านยอดได้ ฿${fmt(j.amount)} — ตรวจสอบก่อนบันทึก`); }
+      else { toast.error("อ่านยอดจากสลิปไม่ได้ — กรอกเอง"); }
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setOcrBusy(false); }
+  };
 
   // ปุ่มเดียว: ตัดบิลจีน + ตัดบิล CTW พร้อมกัน (+ เก็บประวัติ lines/เลขโอน)
   const save = async () => {
@@ -1614,6 +1632,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <input value={refNo} onChange={e => setRefNo(e.target.value)} placeholder="เช่น เลขอ้างอิงจากสลิป"
             className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน" value={slip} onChange={setSlip} folder="china-transfers" /></div>
+        {slip.some(k => !k.toLowerCase().endsWith(".pdf")) && (
+          <button type="button" onClick={readSlip} disabled={ocrBusy}
+            className="mt-2 w-full h-10 border border-violet-300 text-violet-700 bg-violet-50 rounded-lg text-sm font-semibold disabled:opacity-50 active:scale-[0.99] transition flex items-center justify-center gap-1.5">
+            {ocrBusy ? "กำลังอ่านสลิป…" : "📷 อ่านยอดจากสลิป (AI ช่วยกรอก)"}
+          </button>
+        )}
         <button onClick={save} disabled={saving}
           className="mt-3 w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">
           {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
