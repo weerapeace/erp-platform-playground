@@ -147,6 +147,7 @@ export default function ChinaPayApp() {
   const [menuCfg, setMenuCfg] = useState<Record<string, string[]>>({});
   const [preselect, setPreselect] = useState<string[]>([]);   // บิลจีนที่เลือกจากหน้า "ทั้งหมด" → ส่งไปหน้าโอน
   const [deepBill, setDeepBill] = useState<Record<string, unknown> | null>(null);   // เปิดบิลจากลิงก์ ?bill=id
+  const [deepTransfer, setDeepTransfer] = useState<Record<string, unknown> | null>(null);   // เปิดใบสรุปการโอนจากลิงก์ ?transfer=id
 
   // โหลดสิทธิ์เมนูตาม role
   useEffect(() => {
@@ -156,13 +157,32 @@ export default function ChinaPayApp() {
     }).catch(() => {});
   }, []);
 
-  // ลิงก์ ?bill=id → เปิดรายละเอียดบิลนั้น
+  // ลิงก์ ?bill=id → เปิดรายละเอียดบิล / ?transfer=id → เปิดใบสรุปการโอน
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const id = new URLSearchParams(window.location.search).get("bill");
-    if (!id) return;
-    apiFetch(`/api/master-v2/china-bills/${id}`).then(r => r.json()).then(j => { if (j.data) setDeepBill(j.data); }).catch(() => {});
-    window.history.replaceState({}, "", "/app/china-pay");
+    const p = new URLSearchParams(window.location.search);
+    const billId = p.get("bill"), txId = p.get("transfer");
+    if (billId) {
+      apiFetch(`/api/master-v2/china-bills/${billId}`).then(r => r.json()).then(j => { if (j.data) setDeepBill(j.data); }).catch(() => {});
+    }
+    if (txId) {
+      Promise.all([
+        apiFetch(`/api/master-v2/china-transfers/${txId}`).then(r => r.json()).catch(() => ({})),
+        apiFetch(`/api/master-v2/partners?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
+      ]).then(([tr, pn]) => {
+        const row = tr.data; if (!row) return;
+        const pmap: Record<string, Record<string, unknown>> = {};
+        (pn.data ?? []).forEach((x: Record<string, unknown>) => { const k = String(x.name_th ?? "").trim(); if (k) pmap[k] = x; });
+        const lines = (Array.isArray(row.lines) ? row.lines : []).map((l: Record<string, unknown>) => {
+          if (l.kind !== "china") return l;
+          const sp = pmap[String(l.label ?? "").trim()] ?? {};
+          return { ...l, sup: { name_en: sp.name_en ?? "", phone: sp.phone ?? "", bank_account_name: sp.bank_account_name ?? "", account_number: sp.account_number ?? "", bank_name_brief: sp.bank_name_brief ?? "" } };
+        });
+        const lo = Number(String(row.leftover_rmb ?? "0").replace(/,/g, "")) || 0;
+        setDeepTransfer({ transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, lo), lines });
+      }).catch(() => {});
+    }
+    if (billId || txId) window.history.replaceState({}, "", "/app/china-pay");
   }, []);
 
   if (!ready) return <Center>กำลังโหลด…</Center>;
@@ -283,8 +303,9 @@ export default function ChinaPayApp() {
         </div>
       )}
 
-      {/* เปิดบิลจากลิงก์ ?bill=id */}
+      {/* เปิดบิล/ใบสรุปจากลิงก์ */}
       {deepBill && <BillDetail bill={deepBill} onClose={() => setDeepBill(null)} />}
+      {deepTransfer && <TransferReceiptPopup t={deepTransfer} onClose={() => setDeepTransfer(null)} />}
     </div>
     </CelebrateProvider>
   );
@@ -1586,16 +1607,16 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const sendTransferLine = async (t: Record<string, unknown>) => {
     const ls = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
     const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
-    const link = `${typeof window !== "undefined" ? window.location.origin : ""}/app/china-pay`;
-    let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")}\n`;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
+    let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
     if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
     text += `โอนจริง: ฿${fmt(num(t.transferred))}`;
     if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label)} ¥${fmt(num(l.paid_rmb))}`).join("\n");
     if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label)} ฿${fmt(num(l.paid_thb))}`).join("\n");
-    text += `\n\nดูในแอป: ${link}`;
     setSendingTxLine(true);
     try {
-      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, button: { label: "เปิดใบสรุปการโอน", url: link } }) });
       const j = await res.json().catch(() => ({}));
       if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
       if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง");
@@ -1668,9 +1689,16 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       // เก็บสรุปการโอนไว้ทำ popup พิมพ์/ส่งไลน์
       const chinaThbSum = lines.filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_thb), 0);
       const ctwThbSum = lines.filter(l => l.kind === "ctw").reduce((a, l) => a + num(l.paid_thb), 0);
+      // เติมข้อมูลร้าน (จาก Partners) ในบรรทัดบิลจีน เพื่อโชว์ในใบสรุป/LINE
+      const enrichedLines = lines.map(l => {
+        if (l.kind !== "china") return l;
+        const sp = (partnerByName[String(l.label ?? "").trim()] ?? {}) as Record<string, unknown>;
+        return { ...l, sup: { name_en: sp.name_en ?? "", phone: sp.phone ?? "", bank_account_name: sp.bank_account_name ?? "", account_number: sp.account_number ?? "", bank_name_brief: sp.bank_name_brief ?? "" } };
+      });
       setSavedTransfer({
-        transfer_no: String(j.data?.transfer_no ?? ""), ref_no: refNo, date: transferDate || today(),
-        lines, rate: effRate, selectedRmb, transferred, chinaIn, chinaThbSum, ctwThbSum,
+        transfer_id: String(j.data?.id ?? ""), transfer_no: String(j.data?.transfer_no ?? ""),
+        ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
+        lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum,
       });
       setSel(new Set()); setPay({}); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(false);
       setAmount(""); setRefNo(""); setSlip([]); setNote(""); setStep(1);
@@ -1792,10 +1820,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                     </span>
                   </button>
                   {on && (
-                    <div className="px-2.5 pb-2.5 flex items-center gap-2">
-                      <span className="text-xs text-slate-500 flex-shrink-0">จำนวนที่โอน (¥)</span>
-                      <Money value={pay[id] ?? ""} onChange={(v) => setPay(p => ({ ...p, [id]: v }))}
-                        className="flex-1 h-9 px-2 text-base text-right border border-emerald-300 rounded-lg" />
+                    <div className="px-2.5 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-500 flex-shrink-0">จำนวนที่โอน (¥)</span>
+                        <Money value={pay[id] ?? ""} onChange={(v) => setPay(p => ({ ...p, [id]: num(v) > remain ? String(remain) : v }))}
+                          className="flex-1 h-9 px-2 text-base text-right border border-emerald-300 rounded-lg" />
+                      </div>
+                      <div className="text-[10px] text-slate-400 text-right mt-0.5">สูงสุด ¥{fmt(remain)}</div>
                     </div>
                   )}
                 </div>
@@ -1815,10 +1846,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
-      <button onClick={() => setStep(2)}
-        className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition">
-        ถัดไป: ยืนยันการโอน →
-      </button>
+      <div className="sticky bottom-[76px] z-30 -mx-4 px-4 py-2 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent">
+        <button onClick={() => setStep(2)} disabled={sel.size === 0}
+          className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
+          {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : "ถัดไป: ยืนยันการโอน →"}
+        </button>
+      </div>
       </>)}
 
       {/* STEP 2: กรอกจำนวน + เรท + สลิป */}
@@ -1868,12 +1901,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         {/* วันที่โอน + เรท — บรรทัดเดียว สีเทาอ่อน (รอง) */}
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
-            <span className="text-[11px] font-medium text-slate-400">วันที่โอน</span>
+            <div className="flex items-center justify-between h-5 mb-1"><span className="text-[11px] font-medium text-slate-400">วันที่โอน</span></div>
             <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
               className="w-full h-10 px-2 text-sm text-slate-500 border border-slate-200 rounded-lg bg-slate-50" />
           </div>
           <div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between h-5 mb-1">
               <span className="text-[11px] font-medium text-slate-400">เรท R1</span>
               <button type="button" onClick={() => setRateInfo(v => !v)} className="text-[10px] text-blue-400">ⓘ R1–R4</button>
             </div>
@@ -1918,9 +1951,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
         {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
       </Card>
-      <div className="sticky bottom-0 -mx-4 px-4 py-2 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent flex gap-2">
+      <div className="sticky bottom-[76px] z-30 -mx-4 px-4 py-2 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
-        <button onClick={() => setStep(3)} className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition shadow-lg shadow-emerald-500/30">ถัดไป: เลือกบิล CTW →</button>
+        <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin}
+          className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
+          {num(amount) <= 0 || belowMin ? `ใส่ยอดให้ครบ (≥ ฿${fmt(minTransfer)})` : "ถัดไป: เลือกบิล CTW →"}
+        </button>
       </div>
       </>)}
 
@@ -2036,16 +2072,28 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
           {!!t.ref_no && <Row label="เลขอ้างอิง" v={String(t.ref_no)} />}
           <Row label="เรทที่ใช้" v={fmt(num(t.rate))} />
           <Row label="โอนจริง" v={`฿${fmt(num(t.transferred))}`} />
-          <Row label="เข้าบัญชีจีน (ส่วนต่าง)" v={`฿${fmt(num(t.chinaIn))}`} />
+          <Row label="เข้าบัญชีจีน (ส่วนต่าง)" v={`¥${fmt(num(t.chinaInRmb))}`} />
           {cn.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิลจีน ({cn.length})</div>
-              {cn.map((l, i) => (
-                <div key={i} className="flex justify-between text-sm border-b border-slate-100 py-1">
-                  <span className="text-slate-700 truncate mr-2">{String(l.label || "—")}</span>
-                  <span className="text-slate-800 flex-shrink-0">¥{fmt(num(l.paid_rmb))} · ฿{fmt(num(l.paid_thb))}</span>
-                </div>
-              ))}
+              {cn.map((l, i) => {
+                const sp = (l.sup ?? {}) as Record<string, unknown>;
+                return (
+                  <div key={i} className="border-b border-slate-100 py-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="font-medium text-slate-800 mr-2">{String(l.label || "—")}</span>
+                      <span className="font-semibold text-slate-800 flex-shrink-0">¥{fmt(num(l.paid_rmb))}</span>
+                    </div>
+                    {!!sp.name_en && <div className="text-[11px] text-slate-500">{String(sp.name_en)}</div>}
+                    <div className="text-[11px] text-slate-500 mt-0.5 space-y-0.5">
+                      {!!sp.phone && <div>โทร: {String(sp.phone)}</div>}
+                      {!!sp.bank_account_name && <div>ชื่อบัญชี: {String(sp.bank_account_name)}</div>}
+                      {!!sp.account_number && <div>เลขบัญชี: {String(sp.account_number)}</div>}
+                      {!!sp.bank_name_brief && <div>ธนาคาร: {String(sp.bank_name_brief)}</div>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
           {cw.length > 0 && (
