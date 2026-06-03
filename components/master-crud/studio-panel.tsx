@@ -111,12 +111,17 @@ export function StudioPanel({
       const withId = items.filter((i) => i.fieldId);
 
       // 1. reorder (display_order — global, step 10)
+      //    แบ่งเป็นก้อนละ 30 — กัน Cloudflare Worker (แผนฟรี) จำกัด 50 subrequest/คำขอ
       const reorder = withId.map((i, idx) => ({ id: i.fieldId!, display_order: (idx + 1) * 10 }));
-      const r1 = await apiFetch("/api/admin/field-registry-v2/bulk", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reorder }),
-      });
-      if ((await r1.json()).error) throw new Error("reorder failed");
+      for (let s = 0; s < reorder.length; s += 30) {
+        const chunk = reorder.slice(s, s + 30);
+        const r1 = await apiFetch("/api/admin/field-registry-v2/bulk", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reorder: chunk }),
+        });
+        const j1 = await r1.json();
+        if (j1.error) throw new Error("reorder: " + j1.error);
+      }
 
       // 2. group_key (ทีละ value)
       const byGroup = new Map<string, string[]>();
