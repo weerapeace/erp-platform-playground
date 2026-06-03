@@ -114,7 +114,7 @@ function rateFor(amt: number, r1: number): number {
   return +(r1 - RATE_OFFSET.r4).toFixed(4);
 }
 
-type Tab = "dashboard" | "bill" | "transfer" | "all" | "rate" | "ctw" | "menusettings";
+type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "menusettings";
 
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
@@ -124,6 +124,7 @@ const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "dashboard", icon: "📊", label: "Dashboard" },
   { k: "bill", icon: "💴", label: "ลงบิลจีน" },
   { k: "transfer", icon: "💰", label: "โอนเข้าจีน" },
+  { k: "transfers", icon: "🧾", label: "รายการโอน" },
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
   { k: "rate", icon: "💱", label: "เรท" },
   { k: "ctw", icon: "📑", label: "บิลจาก CTW" },
@@ -257,6 +258,7 @@ export default function ChinaPayApp() {
           {renderTab === "rate" && <RateTab />}
           {renderTab === "ctw" && <CtwList />}
           {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
+          {renderTab === "transfers" && <TransferList />}
           {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
         </main>
 
@@ -1415,6 +1417,91 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<strin
         <ConfirmPopup title="ลบบิล CTW นี้?" message={`${String(bill.company_name ?? "")} · เลขที่ ${String(bill.doc_number ?? "—")}`}
           confirmText="ลบ" tone="rose" onCancel={() => setDel(false)} onConfirm={doDelete} />
       )}
+    </div>
+  );
+}
+
+// สร้าง object ใบสรุปจาก row china_transfers + แมพ partners (ใช้ทั้งรายการโอน + deep link)
+function buildTransferReceipt(row: Record<string, unknown>, pmap: Record<string, Record<string, unknown>>): Record<string, unknown> {
+  const lines = (Array.isArray(row.lines) ? row.lines : []).map((l: Record<string, unknown>) => {
+    if (l.kind !== "china") return l;
+    const sp = pmap[String(l.label ?? "").trim()] ?? {};
+    return { ...l, sup: { name_en: sp.name_en ?? "", phone: sp.phone ?? "", bank_account_name: sp.bank_account_name ?? "", account_number: sp.account_number ?? "", bank_name_brief: sp.bank_name_brief ?? "" } };
+  });
+  return { transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, num(row.leftover_rmb)), lines };
+}
+
+// ส่งสรุปการโอนเข้า LINE (Flex + ปุ่มเปิดใบสรุป) — ใช้ร่วม TransferPage + TransferList
+async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m: string) => void; error: (m: string) => void }): Promise<void> {
+  const ls = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
+  const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
+  let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
+  if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
+  text += `โอนจริง: ฿${fmt(num(t.transferred))}`;
+  if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label)} ¥${fmt(num(l.paid_rmb))}`).join("\n");
+  if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label)} ฿${fmt(num(l.paid_thb))}`).join("\n");
+  try {
+    const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, button: { label: "เปิดใบสรุปการโอน", url: link } }) });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
+    if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง");
+    else toast.error(j.error ?? "ส่ง LINE ไม่ได้ — เปิดให้เลือกกลุ่มเอง");
+    window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
+  } catch { window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); }
+}
+
+// ---------------- รายการที่โอนแล้ว (ประวัติการโอน) ----------------
+function TransferList() {
+  const toast = useToast();
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [pmap, setPmap] = useState<Record<string, Record<string, unknown>>>({});
+  const [loading, setLoading] = useState(true);
+  const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
+  const [sendingId, setSendingId] = useState("");
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      apiFetch("/api/master-v2/china-transfers?limit=200&sort_by=transfer_date&sort_dir=desc").then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch("/api/master-v2/partners?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
+    ]).then(([t, pn]) => {
+      setRows(t.data ?? []);
+      const m: Record<string, Record<string, unknown>> = {};
+      (pn.data ?? []).forEach((p: Record<string, unknown>) => { const k = String(p.name_th ?? "").trim(); if (k) m[k] = p; });
+      setPmap(m);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
+  if (rows.length === 0) return <div className="text-center text-slate-300 py-10">— ยังไม่มีรายการโอน —</div>;
+  return (
+    <div className="space-y-3">
+      {rows.map((r) => {
+        const ls = Array.isArray(r.lines) ? (r.lines as Record<string, unknown>[]) : [];
+        const cn = ls.filter(l => l.kind === "china").length, cw = ls.filter(l => l.kind === "ctw").length;
+        const t = buildTransferReceipt(r, pmap);
+        const id = String(r.id);
+        return (
+          <Card key={id}>
+            <div className="flex justify-between items-start gap-2">
+              <div className="min-w-0">
+                <div className="font-semibold text-slate-800">{String(r.transfer_no ?? "—")}</div>
+                <div className="text-xs text-slate-400">{String(r.transfer_date ?? "—")}{r.ref_no ? ` · ${String(r.ref_no)}` : ""}</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">บิลจีน {cn} · CTW {cw}</div>
+              </div>
+              <div className="font-bold text-emerald-700 flex-shrink-0">฿{fmt(num(r.amount_transferred_thb))}</div>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button onClick={() => setReceipt(t)} className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์/ใบสรุป</button>
+              <button onClick={async () => { setSendingId(id); await pushTransferLine(t, toast); setSendingId(""); }} disabled={sendingId === id}
+                className="h-10 bg-[#06C755] text-white rounded-lg text-sm font-medium disabled:opacity-50">{sendingId === id ? "กำลังส่ง…" : "📩 ส่งไลน์"}</button>
+            </div>
+          </Card>
+        );
+      })}
+      {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)} />}
     </div>
   );
 }
