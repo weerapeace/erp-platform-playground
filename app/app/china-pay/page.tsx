@@ -294,7 +294,7 @@ export default function ChinaPayApp() {
         </main>
 
         {/* แถบเมนูล่าง — ซ่อนตอนอยู่หน้าโอน (ใช้ ☰ สลับแทน) เพื่อให้ปุ่มบันทึกติดล่างสุดไม่ซ้อน */}
-        {cols > 0 && renderTab !== "transfer" && (
+        {cols > 0 && (
           <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 grid z-20 px-1 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] shadow-[0_-6px_20px_rgba(0,0,0,0.06)]"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
             {bottomItems.map(m => {
@@ -1261,6 +1261,64 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
   );
 }
 
+// ---------------- แก้ไขบิล (ร้าน/ยอด/ค่าโอน/วันที่/หมายเหตุ) ----------------
+function EditBillPopup({ bill, sup, onClose, onSaved }: { bill: Record<string, unknown>; sup: Record<string, unknown> | null; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [supplierId, setSupplierId] = useState<string | null>(bill.supplier_id ? String(bill.supplier_id) : null);
+  const [amount, setAmount] = useState(String(num(bill.amount_rmb) || ""));
+  const [fee, setFee] = useState(String(num(bill.fee_rmb) || ""));
+  const [transferDate, setTransferDate] = useState(bill.transfer_date ? String(bill.transfer_date) : "");
+  const [billDate, setBillDate] = useState(bill.bill_date ? String(bill.bill_date) : "");
+  const [note, setNote] = useState(bill.note ? String(bill.note) : "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!supplierId) { toast.error("เลือกร้านค้าก่อน"); return; }
+    if (num(amount) <= 0) { toast.error("กรอกยอดรวม (¥)"); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-bills/${String(bill.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ supplier_id: supplierId, amount_rmb: num(amount), fee_rmb: num(fee), transfer_date: transferDate || null, bill_date: billDate || null, note: note || null, actor: "china-app" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.error) { toast.error(j.error); return; }
+      toast.success("แก้ไขบิลแล้ว"); onSaved();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !saving && onClose()}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+          <div className="font-semibold text-slate-800">✎ แก้ไขบิล</div>
+          <button onClick={() => !saving && onClose()} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+        </div>
+        <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-3">
+          <div><Label>ร้านค้า (จีน)</Label>
+            <RelationPicker value={supplierId} onChange={(id) => setSupplierId(id)} config={SUPPLIER_CFG} />
+            {!!sup?.name_en && <div className="mt-1 text-xs text-slate-400">{String(sup.name_en)}</div>}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>ยอดรวม (¥)</Label><Num value={amount} onChange={setAmount} /></div>
+            <div><Label>ค่าโอน (¥)</Label><Num value={fee} onChange={setFee} /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>วันที่วางบิล</Label>
+              <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)} className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+            <div><Label>วันที่ลงบิล</Label>
+              <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)} className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+          </div>
+          <div><Label>หมายเหตุ</Label>
+            <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} className="w-full px-3 py-2 text-base border border-slate-200 rounded-lg resize-none" /></div>
+          <button onClick={save} disabled={saving} className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกการแก้ไข"}</button>
+        </div>
+      </div>
+    </div></Portal>
+  );
+}
+
 // ---------------- รายละเอียดบิล ----------------
 function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void; onChanged?: () => void; canDelete?: boolean }) {
   const toast = useToast();
@@ -1268,6 +1326,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
   const [report, setReport] = useState(false);
   const [askCancel, setAskCancel] = useState(false);
   const [askDelete, setAskDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sendingLine, setSendingLine] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);   // รูปที่กดดูเต็มจอ
@@ -1383,6 +1442,14 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
 
           <TransferHistory bill={bill} kind="china" onChanged={() => onChanged?.()} />
 
+          {/* แก้ไขบิล */}
+          {canCancel && (
+            <button onClick={() => setEditing(true)} disabled={busy}
+              className="w-full h-11 border border-blue-300 text-blue-700 bg-blue-50 rounded-lg text-sm font-medium hover:bg-blue-100 disabled:opacity-50">
+              ✎ แก้ไขบิล
+            </button>
+          )}
+
           {/* ปุ่มพิมพ์/ใบสรุป + ส่งไลน์ (ส่งได้แม้ยังไม่มีเรท) */}
           <button onClick={() => setReport(true)}
             className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">
@@ -1450,6 +1517,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
         <ConfirmPopup title="ลบบิลนี้ถาวร?" message={`${String(bill.supplier_label ?? bill.supplier_id ?? "บิลนี้")} · ¥${fmt(totalRmb)} — ลบแล้วกู้คืนไม่ได้`}
           confirmText="ลบถาวร" tone="rose" onCancel={() => setAskDelete(false)} onConfirm={deleteBill} />
       )}
+      {editing && <EditBillPopup bill={bill} sup={sup} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged?.(); onClose(); }} />}
       {lightbox && (
         <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setLightbox(null); }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2404,7 +2472,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
-      <div className="sticky bottom-0 z-30 -mx-4 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-slate-50 border-t border-slate-200">
+      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
         <button onClick={() => setStep(2)} disabled={sel.size === 0 || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: ยืนยันการโอน →"}
@@ -2509,7 +2577,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
         {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
       </Card>
-      <div className="sticky bottom-0 z-30 -mx-4 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-slate-50 border-t border-slate-200 flex gap-2">
+      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
         <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
@@ -2584,7 +2652,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
       )}
 
-      <div className="sticky bottom-0 z-30 -mx-4 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-slate-50 border-t border-slate-200">
+      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
         <button onClick={save} disabled={saving || ctwOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform shadow-lg shadow-emerald-500/30">
           {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
