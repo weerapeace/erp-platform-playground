@@ -1498,12 +1498,31 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     finally { setSaving(false); }
   };
 
+  // แนบรูปสลิป → อ่านยอดอัตโนมัติ (ครั้งเดียวต่อรูปใหม่)
+  const ocrDoneRef = useRef<string>("");
+  useEffect(() => {
+    const key = slip.find(k => !k.toLowerCase().endsWith(".pdf"));
+    if (!key || ocrDoneRef.current === key || ocrBusy) return;
+    ocrDoneRef.current = key;
+    readSlip();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slip]);
+
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
 
   const ctwSelTotal = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);   // ยอด CTW ที่เลือกตัดรอบนี้ (฿)
+  const lineRequestRate = () => window.open(`https://line.me/R/share?text=${encodeURIComponent("ขอเรทเงินวันนี้ด้วยค่ะ 🙏")}`, "_blank");
 
   return (
     <div className="space-y-4">
+      {/* มุมขวาบน: เรทวันนี้ + ปุ่มขอเรท */}
+      <div className="flex justify-end items-center gap-2">
+        <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasRate ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
+          {hasRate ? `เรทวันนี้ ${fmt(r1)}` : "ยังไม่มีเรทวันนี้"}
+        </span>
+        <button type="button" onClick={lineRequestRate} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>
+      </div>
+
       {/* ยอดรวมที่ตัดรอบนี้ — ทุก step (ตัวเลขใหญ่) */}
       <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
         <div className="text-sm text-slate-500 mb-2">🧾 ยอดรวมที่ตัดรอบนี้</div>
@@ -1512,19 +1531,21 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <span className="text-3xl font-extrabold text-slate-800">¥{fmt(selectedRmb)}</span>
         </div>
         {hasRate && selectedSum > 0 && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ฿{fmt(selectedSum)}</div>}
-        <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-slate-100">
-          <span className="text-sm text-slate-500">บิล CTW ({ctwSel.size})</span>
-          <span className="text-3xl font-extrabold text-orange-600">฿{fmt(ctwSelTotal)}</span>
-        </div>
+        {step >= 2 && (
+          <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-slate-100">
+            <span className="text-sm text-slate-500">จำนวนเงินที่โอนจริง</span>
+            <span className="text-3xl font-extrabold text-emerald-600">฿{fmt(num(amount))}</span>
+          </div>
+        )}
       </div>
 
-      {/* ยอดคงเหลือบัญชีจีน — เฉพาะ step 3 + ปุ่มใช้ยอดคงเหลือ */}
-      {step === 3 && (
+      {/* ยอดคงเหลือบัญชีจีน (¥ นำ) — เฉพาะ step 2 (ยืนยัน) + ปุ่มใช้ยอดคงเหลือ */}
+      {step === 2 && (
         <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 shadow-sm">
           <div className="text-sm opacity-90">💰 ยอดคงเหลือในบัญชีจีน</div>
           <div className="flex items-end justify-between mt-1">
-            <div className="text-3xl font-bold">฿{fmt(balance.thb)}</div>
-            <div className="text-lg font-semibold opacity-95">≈ ¥{fmt(balance.rmb)}</div>
+            <div className="text-3xl font-bold">¥{fmt(balance.rmb)}</div>
+            <div className="text-lg font-semibold opacity-95">≈ ฿{fmt(balance.thb)}</div>
           </div>
           {hasRate && selectedSum > 0 && balance.rmb > 0 && (
             <>
@@ -1547,9 +1568,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
       )}
 
-      {/* แถบบอกขั้นตอน 1-2-3 */}
+      {/* แถบบอกขั้นตอน 1-2-3 (บิลจีน → ยืนยัน → บิล CTW) */}
       <div className="flex items-center gap-1">
-        {[{ n: 1, l: "บิลจีน" }, { n: 2, l: "บิล CTW" }, { n: 3, l: "ยืนยัน" }].map((s, i) => (
+        {[{ n: 1, l: "บิลจีน" }, { n: 2, l: "ยืนยัน" }, { n: 3, l: "บิล CTW" }].map((s, i) => (
           <div key={s.n} className="flex items-center gap-1 flex-1 last:flex-initial">
             <div className={`flex items-center gap-1.5 ${step === s.n ? "text-emerald-700" : step > s.n ? "text-emerald-500" : "text-slate-400"}`}>
               <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step === s.n ? "bg-emerald-600 text-white" : step > s.n ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>{step > s.n ? "✓" : s.n}</span>
@@ -1611,13 +1632,18 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       </Card>
       <button onClick={() => setStep(2)}
         className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition">
-        ถัดไป: เลือกบิล CTW →
+        ถัดไป: ยืนยันการโอน →
       </button>
       </>)}
 
-      {/* STEP 3: กรอกจำนวน + เรท + บันทึก */}
-      {step === 3 && (<>
+      {/* STEP 2: กรอกจำนวน + เรท + สลิป */}
+      {step === 2 && (<>
       <Card>
+        {/* ยอดที่ต้องโอน (เด่น) */}
+        <div className="rounded-xl bg-emerald-600 text-white p-3 flex justify-between items-center mb-3">
+          <span className="text-sm opacity-90">ยอดที่ต้องโอนรอบนี้</span>
+          <span className="text-2xl font-extrabold">{hasRate ? `฿${fmt(minTransfer)}` : "รอเรท"}</span>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>จำนวนเงินที่โอนจริง (฿)</Label>
             <Money value={amount} onChange={setAmount} />
@@ -1637,14 +1663,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             <button type="button" onClick={() => setRateInfo(v => !v)} className="text-[11px] text-blue-500">ⓘ R1–R4</button>
           </div>
           <Num value={rate} onChange={setRate} placeholder="เช่น 5.08" />
-          {!hasRate && <div className="mt-1 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — ใส่เอง หรือไปตั้งในแท็บ “เรท”</div>}
-          {!hasRate && (
-            <button type="button"
-              onClick={() => window.open(`https://line.me/R/share?text=${encodeURIComponent("ขอเรทเงินวันนี้ด้วยค่ะ 🙏")}`, "_blank")}
-              className="mt-2 w-full h-10 bg-[#06C755] text-white rounded-lg text-sm font-semibold active:scale-[0.99] transition flex items-center justify-center gap-1.5">
-              📩 ขอเรทเงินวันนี้ (ส่งเข้า LINE)
-            </button>
-          )}
+          {!hasRate && <div className="mt-1 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือใส่เอง</div>}
         </div>
         {rateInfo && hasRate && (
           <div className="mt-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs space-y-1">
@@ -1679,62 +1698,17 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><Label>หมายเลขโอน / เลขอ้างอิง</Label>
           <input value={refNo} onChange={e => setRefNo(e.target.value)} placeholder="เช่น เลขอ้างอิงจากสลิป"
             className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
-        <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน" value={slip} onChange={setSlip} folder="china-transfers" /></div>
-        {slip.some(k => !k.toLowerCase().endsWith(".pdf")) && (
-          <button type="button" onClick={readSlip} disabled={ocrBusy}
-            className="mt-2 w-full h-10 border border-violet-300 text-violet-700 bg-violet-50 rounded-lg text-sm font-semibold disabled:opacity-50 active:scale-[0.99] transition flex items-center justify-center gap-1.5">
-            {ocrBusy ? "กำลังอ่านสลิป…" : "📷 อ่านยอดจากสลิป (AI ช่วยกรอก)"}
-          </button>
-        )}
-        {ctwSel.size > 0 && (
-          <div className="mt-3 rounded-lg bg-orange-50 border border-orange-100 p-3 space-y-2">
-            <div className="flex justify-between items-center">
-              <div className="font-medium text-slate-700 text-sm">บิล CTW ที่ตัดรอบนี้ ({ctwSel.size})</div>
-              {ctwUnallocated > 0 && <div className="text-xs text-amber-600 font-medium">คงเหลือยังไม่ตัด ฿{fmt(ctwUnallocated)}</div>}
-            </div>
-            {[...ctwSel].map(id => {
-              const b = ctw.find(x => String(x.id) === id);
-              if (!b) return null;
-              const partner = partnerByName[String(b.company_name ?? "").trim()];
-              const acc = String(partner?.account_number ?? b.account_number ?? "");
-              const bankName = String(partner?.bank_name ?? partner?.bank_name_brief ?? "");
-              const accName = String(partner?.bank_account_name ?? "");
-              return (
-                <div key={id} className="rounded-lg bg-white border border-orange-200 p-3">
-                  <div className="font-medium text-slate-800 text-sm">{String(b.company_name ?? "—")}</div>
-                  <div className="text-[11px] text-slate-400">เลขที่ {String(b.doc_number ?? "—")}</div>
-                  {/* บัญชีปลายทาง — ตัวใหญ่ + ปุ่ม copy เลขบัญชี */}
-                  <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 p-2.5">
-                    {!!accName && <div className="text-sm font-semibold text-slate-800">{accName}</div>}
-                    {!!bankName && <div className="text-xs text-slate-500">{bankName}</div>}
-                    {acc ? (
-                      <div className="mt-1 flex items-center justify-between gap-2">
-                        <span className="text-xl font-bold tracking-wide text-slate-900">{acc}</span>
-                        <button type="button" onClick={() => { navigator.clipboard?.writeText(acc); toast.success("คัดลอกเลขบัญชีแล้ว"); }}
-                          className="flex-shrink-0 h-9 px-3 rounded-lg bg-orange-600 text-white text-xs font-medium active:scale-95 transition">📋 คัดลอก</button>
-                      </div>
-                    ) : <div className="mt-1 text-xs text-slate-400">— ไม่พบเลขบัญชีใน Partners —</div>}
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้ (฿)</span>
-                    <Money value={ctwPay[id] ?? ""} onChange={(v) => { setCtwEdited(e => new Set(e).add(id)); setCtwPay(p => ({ ...p, [id]: v })); }}
-                      className="flex-1 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <button onClick={save} disabled={saving}
-          className="mt-3 w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">
-          {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
-        </button>
-        <button onClick={() => setStep(2)} className="mt-2 w-full h-10 text-slate-500 text-sm">← ย้อนกลับ</button>
+        <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
+        {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
       </Card>
+      <div className="flex gap-2">
+        <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 text-slate-600 rounded-xl font-medium">← กลับ</button>
+        <button onClick={() => setStep(3)} className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition">ถัดไป: เลือกบิล CTW →</button>
+      </div>
       </>)}
 
-      {/* STEP 2: เลือกบิล CTW */}
-      {step === 2 && (<>
+      {/* STEP 3: เลือกบิล CTW (หน้าสุดท้าย) + บันทึก */}
+      {step === 3 && (<>
       {/* บิล CTW ที่ยังไม่ตัด — ยอดคงเหลือสีส้ม + ตัดบางส่วนได้ */}
       <Card>
         <div className="flex justify-between items-center mb-2">
@@ -1768,19 +1742,55 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                 );
               })}
             </div>
-            {ctwSel.size > 0 && (
-              <div className="mt-3 flex justify-between items-center rounded-lg bg-orange-50 border border-orange-100 p-2.5 text-sm">
-                <span className="text-slate-500">เลือกตัด {ctwSel.size} บิล</span>
-                <span className="text-[11px] text-slate-400">กรอกยอดที่ step ยืนยัน</span>
-              </div>
-            )}
           </>
         )}
       </Card>
-      <div className="flex gap-2">
-        <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 text-slate-600 rounded-xl font-medium">← กลับ</button>
-        <button onClick={() => setStep(3)} className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition">ถัดไป: ยืนยันการโอน →</button>
-      </div>
+
+      {/* บิล CTW ที่เลือก + บัญชีปลายทาง + ยอดที่โอน (กระจายจาก "จำนวนเงินที่โอนจริง") */}
+      {ctwSel.size > 0 && (
+        <div className="rounded-2xl bg-orange-50 border border-orange-100 p-3 space-y-2">
+          <div className="flex justify-between items-center">
+            <div className="font-medium text-slate-700 text-sm">บิล CTW ที่ตัดรอบนี้ ({ctwSel.size})</div>
+            {ctwUnallocated > 0 && <div className="text-xs text-amber-600 font-medium">คงเหลือยังไม่ตัด ฿{fmt(ctwUnallocated)}</div>}
+          </div>
+          {[...ctwSel].map(id => {
+            const b = ctw.find(x => String(x.id) === id);
+            if (!b) return null;
+            const partner = partnerByName[String(b.company_name ?? "").trim()];
+            const acc = String(partner?.account_number ?? b.account_number ?? "");
+            const bankName = String(partner?.bank_name ?? partner?.bank_name_brief ?? "");
+            const accName = String(partner?.bank_account_name ?? "");
+            return (
+              <div key={id} className="rounded-lg bg-white border border-orange-200 p-3">
+                <div className="font-medium text-slate-800 text-sm">{String(b.company_name ?? "—")}</div>
+                <div className="text-[11px] text-slate-400">เลขที่ {String(b.doc_number ?? "—")}</div>
+                <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 p-2.5">
+                  {!!accName && <div className="text-sm font-semibold text-slate-800">{accName}</div>}
+                  {!!bankName && <div className="text-xs text-slate-500">{bankName}</div>}
+                  {acc ? (
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <span className="text-xl font-bold tracking-wide text-slate-900">{acc}</span>
+                      <button type="button" onClick={() => { navigator.clipboard?.writeText(acc); toast.success("คัดลอกเลขบัญชีแล้ว"); }}
+                        className="flex-shrink-0 h-9 px-3 rounded-lg bg-orange-600 text-white text-xs font-medium active:scale-95 transition">📋 คัดลอก</button>
+                    </div>
+                  ) : <div className="mt-1 text-xs text-slate-400">— ไม่พบเลขบัญชีใน Partners —</div>}
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้ (฿)</span>
+                  <Money value={ctwPay[id] ?? ""} onChange={(v) => { setCtwEdited(e => new Set(e).add(id)); setCtwPay(p => ({ ...p, [id]: v })); }}
+                    className="flex-1 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <button onClick={save} disabled={saving}
+        className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">
+        {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
+      </button>
+      <button onClick={() => setStep(2)} className="w-full h-10 text-slate-500 text-sm">← กลับ</button>
       </>)}
     </div>
   );
