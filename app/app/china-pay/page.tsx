@@ -2286,7 +2286,14 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
   const [busy, setBusy] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
-  useEffect(() => { const d = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready; if (d) d.then(() => setFontsReady(true)); else setFontsReady(true); }, []);
+  useEffect(() => {
+    const f = (document as Document & { fonts?: FontFaceSet & { load?: (s: string) => Promise<unknown>; ready?: Promise<unknown> } }).fonts;
+    if (!f) { setFontsReady(true); return; }
+    const fams = ["'Noto Sans Thai'", "'Sarabun'"];
+    const specs = fams.flatMap((fam) => [`14px ${fam}`, `17px ${fam}`, `bold 20px ${fam}`, `bold 28px ${fam}`]);
+    Promise.all([...(f.load ? specs.map((s) => f.load!(s).catch(() => {})) : []), f.ready].filter(Boolean))
+      .then(() => setFontsReady(true)).catch(() => setFontsReady(true));
+  }, []);
   const ls = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
   const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
   const atts = Array.isArray(t.attachments) ? (t.attachments as unknown[]).map(String) : [];
@@ -2338,10 +2345,11 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
     ctx.font = `15px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.9)";
     ctx.fillText(`เลขโอน ${String(t.transfer_no ?? "—")} · ${String(t.date ?? "")}`, padX, 70);
     let y = headerH + padTop;
+    const padR = 56;   // ขอบขวากว้างพิเศษ กันค่าชนขอบ/โดนตัด
     const fit = (text: string, size: number, bold: boolean, color: string, leftBound: number) => {
-      const maxW = (W - padX) - leftBound - 4; let s = size; ctx.fillStyle = color; ctx.textAlign = "right";
+      const maxW = (W - padR) - leftBound; let s = size; ctx.fillStyle = color; ctx.textAlign = "right";
       do { ctx.font = `${bold ? "bold " : ""}${s}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 9);
-      ctx.fillText(text, W - padX, y);
+      ctx.fillText(text, W - padR, y);
     };
     for (const r of rows) {
       const h = hOf(r);
@@ -2557,8 +2565,15 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     if (sup || !supplierId) return;
     apiFetch(`/api/master-v2/partners/${supplierId}`).then(r => r.json()).then(j => setSup(j.data ?? null)).catch(() => {});
   }, [supplierId, sup]);
-  // วาด canvas ใหม่หลังฟอนต์ไทยโหลดเสร็จ (กันตัวเลข ฿ / ตัวไทยวัดความกว้างเพี้ยน → ล้นขอบ)
-  useEffect(() => { const d = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready; if (d) d.then(() => setFontsReady(true)); else setFontsReady(true); }, []);
+  // บังคับโหลดฟอนต์ที่ canvas ใช้ให้เสร็จก่อนวาด (กัน iOS วัดความกว้าง ฿/ตัวไทยเพี้ยน → วางตำแหน่งผิด/ตัดขอบ)
+  useEffect(() => {
+    const f = (document as Document & { fonts?: FontFaceSet & { load?: (s: string) => Promise<unknown>; ready?: Promise<unknown> } }).fonts;
+    if (!f) { setFontsReady(true); return; }
+    const fams = ["'Noto Sans Thai'", "'Sarabun'"];
+    const specs = fams.flatMap((fam) => [`20px ${fam}`, `bold 23px ${fam}`, `bold 34px ${fam}`]);
+    Promise.all([...(f.load ? specs.map((s) => f.load!(s).catch(() => {})) : []), f.ready].filter(Boolean))
+      .then(() => setFontsReady(true)).catch(() => setFontsReady(true));
+  }, []);
 
   const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
   const thb = totalRmb * rate;
@@ -2611,12 +2626,13 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     ctx.fillText(`พิมพ์เมื่อ ${printedLabel}`, padX, 90);
 
     // วาดค่าแบบย่อฟอนต์อัตโนมัติให้พอดี (กันข้อความยาวล้นขอบ)
+    const padR = 64;   // ขอบขวากว้างพิเศษ กันค่าชนขอบ/โดนตัดเวลาเปิดดูในแอปแชต
     const drawValueFit = (text: string, baseSize: number, bold: boolean, color: string, yy: number, leftBound: number) => {
-      const maxW = (W - padX) - leftBound - 4;   // เผื่อขอบขวา 4px กันชนขอบ
+      const maxW = (W - padR) - leftBound;
       let size = baseSize;
       ctx.fillStyle = color; ctx.textAlign = "right";
       do { ctx.font = `${bold ? "bold " : ""}${size}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; size -= 1; } while (size > 9);
-      ctx.fillText(text, W - padX, yy);
+      ctx.fillText(text, W - padR, yy);
     };
 
     // body
