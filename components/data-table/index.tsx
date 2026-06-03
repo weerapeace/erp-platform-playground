@@ -186,6 +186,8 @@ export type DataTableView = {
   id: string;
   label: string;
   filter?: (row: Record<string, unknown>) => boolean;
+  /** server mode: ตัวกรองที่ส่งให้ server แทน filter() ฝั่งหน้าจอ (เช่น is_active) */
+  serverFilter?: Record<string, ColumnFilterValue>;
 };
 
 export type RowAction<T> = {
@@ -642,11 +644,15 @@ export function DataTable<T extends Record<string, unknown>>({
   // F27: serialize filter values → stable dep + ส่งเฉพาะ filter ที่ active
   const activeServerFilters = useMemo(() => {
     const out: Record<string, ColumnFilterValue> = {};
+    // system view tab (เปิดอยู่/ปิดอยู่) → ส่งเป็น server filter (server mode กรองฝั่งจอไม่ได้)
+    const sv = views.find(v => v.id === activeView)?.serverFilter;
+    if (sv) for (const [k, v] of Object.entries(sv)) out[k] = v;
+    // ตัวกรองที่ user เลือกเอง — ทับ system view ได้ถ้าเป็น field เดียวกัน
     for (const [k, v] of Object.entries(colFilterValues)) {
       if (isColFilterActive(v)) out[k] = v;
     }
     return out;
-  }, [colFilterValues]);
+  }, [colFilterValues, views, activeView]);
   const filtersKey = JSON.stringify(activeServerFilters);
 
   // reset to page 1 เมื่อ search/filter เปลี่ยน
@@ -1142,8 +1148,8 @@ export function DataTable<T extends Record<string, unknown>>({
         </div>
       )}
 
-      {/* ---- View Tabs + Saved Views ---- */}
-      {!isServer && (views.length > 0 || userViews.length > 0 || tableId) && (
+      {/* ---- View Tabs + Saved Views ---- (server mode: tabs ส่ง filter ให้ server) */}
+      {(views.length > 0 || userViews.length > 0 || tableId) && (
         <div className="flex items-center border-b border-slate-200 bg-white px-4 overflow-x-auto gap-0">
           {/* System views (from props) — สไตล์ tab เดียวกับ saved view */}
           {views.map(view => {

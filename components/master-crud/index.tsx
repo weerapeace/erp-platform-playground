@@ -909,9 +909,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ---- Views ----
   // ⚠️ DataTableView field คือ "filter" (ไม่ใช่ "predicate")
   const views: DataTableView[] = useMemo(() => [
-    { id: "active",   label: "เปิดอยู่",  filter: (r) => r[activeField] === true },
+    { id: "active",   label: "เปิดอยู่",  filter: (r) => r[activeField] === true,
+      serverFilter: { [activeField]: { type: "boolean", value: "true" } } },
     { id: "all",      label: "ทั้งหมด",   filter: () => true },
-    { id: "inactive", label: "ปิดอยู่",   filter: (r) => r[activeField] === false },
+    { id: "inactive", label: "ปิดอยู่",   filter: (r) => r[activeField] === false,
+      serverFilter: { [activeField]: { type: "boolean", value: "false" } } },
   ], [activeField]);
 
   // ---- Row actions ----
