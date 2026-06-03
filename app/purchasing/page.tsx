@@ -22,7 +22,8 @@ type Line = { label: string; qty: number; uom: string; seller: string; price: nu
 type Source = "sku" | "group" | "favorite" | "frequent";
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
-type FilterField = { key: string; column: string; label: string; type: string };
+// relation = field ที่เป็น FK → ต้องโชว์ "ชื่อ" จากตารางปลายทาง แต่กรองด้วย id
+type FilterField = { key: string; column: string; label: string; type: string; relation?: { moduleKey: string; labelField: string } };
 type ColFilter =
   | { type: "text"; value: string }
   | { type: "number"; min: string; max: string }
@@ -120,10 +121,15 @@ export default function PurchasingShopPage() {
     apiFetch("/api/admin/field-registry-v2?module=skus-v2").then(r => r.json()).then(j => {
       const ff: FilterField[] = (j.fields ?? [])
         .filter((f: Record<string, unknown>) => f.is_filterable)
-        .map((f: Record<string, unknown>) => ({
-          key: String(f.field_key), column: String(f.column_name ?? f.field_key),
-          label: String(f.field_label ?? f.field_key), type: String(f.ui_field_type ?? "text"),
-        }));
+        .map((f: Record<string, unknown>) => {
+          const rc = (f.relation_config ?? {}) as Record<string, unknown>;
+          const isRel = f.ui_field_type === "relation" && rc.target_module_key;
+          return {
+            key: String(f.field_key), column: String(f.column_name ?? f.field_key),
+            label: String(f.field_label ?? f.field_key), type: String(f.ui_field_type ?? "text"),
+            relation: isRel ? { moduleKey: String(rc.target_module_key), labelField: String(rc.target_label_field ?? "name") } : undefined,
+          };
+        });
       setFilterFields(ff);
     }).catch(() => {});
   }, []);
@@ -421,6 +427,7 @@ export default function PurchasingShopPage() {
                         <FilterCombobox
                           column={fd.column}
                           label={fd.label}
+                          relation={fd.relation}
                           value={cur && cur.type === "select" ? (cur.selected[0] ?? null) : null}
                           onChange={(v) => setFV(k, v ? { type: "select", selected: [v] } : null)}
                         />
@@ -769,14 +776,35 @@ function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () 
 // FilterCombobox — dropdown เลือก "ค่าจริง" ของ field (ของกลาง ไม่ hardcode)
 // ค่าตัวเลือกดึงจาก /api/master-v2/skus/distinct (distinct ของคอลัมน์นั้น)
 // ============================================================
-function FilterCombobox({ column, label, value, onChange }: {
+function FilterCombobox({ column, label, value, onChange, relation }: {
   column: string; label: string; value: string | null; onChange: (v: string | null) => void;
+  relation?: { moduleKey: string; labelField: string };
 }) {
   const [open, setOpen] = useState(false);
-  const [opts, setOpts] = useState<string[] | null>(null);
+  const [opts, setOpts] = useState<{ value: string; label: string }[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+
+  // โหลดตัวเลือก: relation → ดึง id+ชื่อ จากตารางปลายทาง / text → ดึงค่า distinct ของคอลัมน์
+  const load = useCallback(async () => {
+    if (opts !== null || loading) return;
+    setLoading(true);
+    try {
+      if (relation) {
+        const j = await apiFetch(`/api/master-v2/${relation.moduleKey}?limit=1000`).then(r => r.json());
+        setOpts(((j.data ?? []) as Record<string, unknown>[]).map(r => ({
+          value: String(r.id), label: String(r[relation.labelField] ?? r.id),
+        })));
+      } else {
+        const j = await apiFetch(`/api/master-v2/skus/distinct?column=${encodeURIComponent(column)}&limit=1000`).then(r => r.json());
+        setOpts((Array.isArray(j.values) ? (j.values as string[]) : []).map(v => ({ value: v, label: v })));
+      }
+    } catch { setOpts([]); } finally { setLoading(false); }
+  }, [opts, loading, relation, column]);
+
+  // relation: โหลดทันที (เพื่อโชว์ "ชื่อ" ของค่าที่เลือกไว้) / text: โหลดตอนเปิด
+  useEffect(() => { if (relation) void load(); }, [relation, load]);
 
   useEffect(() => {
     if (!open) return;
@@ -785,25 +813,16 @@ function FilterCombobox({ column, label, value, onChange }: {
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  const openList = async () => {
-    setOpen(true);
-    if (opts === null && !loading) {
-      setLoading(true);
-      try {
-        const j = await apiFetch(`/api/master-v2/skus/distinct?column=${encodeURIComponent(column)}&limit=1000`).then(r => r.json());
-        setOpts(Array.isArray(j.values) ? (j.values as string[]) : []);
-      } catch { setOpts([]); } finally { setLoading(false); }
-    }
-  };
-
+  const openList = () => { setOpen(true); void load(); };
   const ql = q.trim().toLowerCase();
-  const shown = (opts ?? []).filter(o => !ql || o.toLowerCase().includes(ql)).slice(0, 200);
+  const shown = (opts ?? []).filter(o => !ql || o.label.toLowerCase().includes(ql)).slice(0, 200);
+  const selectedLabel = value ? (opts?.find(o => o.value === value)?.label ?? "…") : null;
 
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => (open ? setOpen(false) : void openList())}
+      <button type="button" onClick={() => (open ? setOpen(false) : openList())}
         className="w-full h-8 px-2 text-xs text-left border border-slate-200 rounded-md bg-white flex items-center justify-between gap-1">
-        <span className={value ? "text-slate-700 truncate" : "text-slate-400"}>{value || `เลือก ${label}`}</span>
+        <span className={value ? "text-slate-700 truncate" : "text-slate-400"}>{selectedLabel || `เลือก ${label}`}</span>
         {value
           ? <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onChange(null); }} className="text-slate-400 hover:text-red-500">✕</span>
           : <span className="text-slate-400">▾</span>}
@@ -815,8 +834,8 @@ function FilterCombobox({ column, label, value, onChange }: {
           {loading && <div className="px-2 py-2 text-xs text-slate-400">กำลังโหลด…</div>}
           {!loading && shown.length === 0 && <div className="px-2 py-2 text-xs text-slate-300">— ไม่พบค่า —</div>}
           {shown.map(o => (
-            <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); setQ(""); }}
-              className={`block w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 ${o === value ? "bg-blue-50 text-blue-700" : "text-slate-700"}`}>{o}</button>
+            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); setQ(""); }}
+              className={`block w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 ${o.value === value ? "bg-blue-50 text-blue-700" : "text-slate-700"}`}>{o.label}</button>
           ))}
         </div>
       )}
