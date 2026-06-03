@@ -313,6 +313,8 @@ export const ENTITIES: Record<string, EntityConfig> = {
   "defect-logs":           { table: "defect_logs",             selectColumns: `*`, searchColumns: ["defect_no","source_job","defect_type"], softDeleteColumn: "is_active", defaults: { is_active: true } },
   "rework-jobs":           { table: "rework_jobs",             selectColumns: `*`, searchColumns: ["rework_no","source_defect","assigned_to"], softDeleteColumn: "is_active", defaults: { is_active: true, status: "pending" } },
   "task-templates":        { table: "task_templates",          selectColumns: `*`, searchColumns: ["task_code","name","applies_to"], softDeleteColumn: "is_active", defaults: { is_active: true } },
+  // china-pay: ตารางตั้งค่า (menu_roles, line_config) — ไม่มีคอลัมน์ is_active
+  "china-app-settings":    { table: "china_app_settings",       selectColumns: `*`, searchColumns: ["skey"], defaults: {} },
   brands: {
     table: "brands",
     selectColumns: `*, parent_brand:brands!parent_brand_id ( name )`,
