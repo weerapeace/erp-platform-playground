@@ -131,7 +131,23 @@ type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "c
 
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
+  "โอนแล้วบางส่วน": "bg-sky-100 text-sky-700", "โอนครบแล้ว": "bg-emerald-100 text-emerald-700",
 };
+
+// ---- สถานะบิลจีน 3 ระดับ (คิดจากยอดรวมสลิปเทียบยอดบิล) ----
+type Slip = { key: string; amount_rmb: number; at?: string };
+const billSlips = (b: Record<string, unknown>): Slip[] =>
+  Array.isArray(b.slips) ? (b.slips as Record<string, unknown>[]).map((s) => ({ key: String(s.key ?? ""), amount_rmb: num(s.amount_rmb), at: s.at ? String(s.at) : undefined })) : [];
+const billTotalRmb = (b: Record<string, unknown>) => num(b.amount_rmb) + num(b.fee_rmb);
+const slipSumRmb = (b: Record<string, unknown>) => billSlips(b).reduce((a, s) => a + s.amount_rmb, 0);
+// คืนสถานะ: ยกเลิก / รอโอน / โอนแล้วบางส่วน / โอนครบแล้ว
+function billStatus3(b: Record<string, unknown>): string {
+  if (String(b.status ?? "") === "ยกเลิก") return "ยกเลิก";
+  const total = billTotalRmb(b), sum = slipSumRmb(b);
+  if (total > 0 && sum >= total - 0.001) return "โอนครบแล้ว";
+  if (sum > 0) return "โอนแล้วบางส่วน";
+  return "รอโอน";
+}
 
 const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "dashboard", icon: "📊", label: "Dashboard" },
@@ -674,32 +690,54 @@ function BillForm() {
 }
 
 // ---------------- บิลจีนทั้งหมด (รวมหน้ารอโอนเดิม) ----------------
-const ALL_FILTERS = ["รอโอน", "โอนแล้ว", "ยกเลิก", "ทั้งหมด"] as const;
+const ALL_FILTERS = ["ทั้งหมด", "รอโอน", "โอนแล้วบางส่วน", "โอนครบแล้ว", "ยกเลิก"] as const;
 function AllList({ canDelete }: { canDelete: boolean }) {
+  const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("รอโอน");   // default = รอโอน
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());          // เลือกหลายบิล
+  const [attachOpen, setAttachOpen] = useState(false);             // popup เลือกบิลเพื่อแนบสลิป
+  const [sendingCombined, setSendingCombined] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
-    let url = "/api/master-v2/china-bills?limit=200&sort_by=bill_date&sort_dir=desc";
-    if (filter !== "ทั้งหมด") {
-      const flt = encodeURIComponent(JSON.stringify({ status: { type: "text", value: filter } }));
-      url += `&filters=${flt}`;
-    }
-    apiFetch(url).then(r => r.json()).then(j => setRows(j.data ?? [])).catch(() => setRows([])).finally(() => setLoading(false));
-  }, [filter]);
+    apiFetch("/api/master-v2/china-bills?limit=300&sort_by=bill_date&sort_dir=desc")
+      .then(r => r.json()).then(j => setRows(j.data ?? [])).catch(() => setRows([])).finally(() => setLoading(false));
+  }, []);
   useEffect(() => { load(); }, [load]);
 
-  const total = useMemo(() => rows.reduce((a, r) => a + (num(r.amount_rmb) + num(r.fee_rmb)), 0), [rows]);
+  const shown = useMemo(() => filter === "ทั้งหมด" ? rows : rows.filter(r => billStatus3(r) === filter), [rows, filter]);
+  const total = useMemo(() => shown.reduce((a, r) => a + billTotalRmb(r), 0), [shown]);
+  const onPrinted = (id: string, at: string) => setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
+  const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const selRows = rows.filter(r => sel.has(String(r.id)));
+  const openBills = rows.filter(r => { const s = billStatus3(r); return s === "รอโอน" || s === "โอนแล้วบางส่วน"; });
 
-  const onPrinted = (id: string, at: string) =>
-    setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
+  const sendCombined = async () => {
+    if (!selRows.length) return;
+    setSendingCombined(true);
+    try {
+      let tot = 0;
+      const lines = selRows.map(r => { const rem = Math.max(0, billTotalRmb(r) - slipSumRmb(r)); tot += rem; return `• ${String(r.supplier_label ?? r.supplier_id ?? "—")} · ค้าง ¥${fmt(rem)} · ${billStatus3(r)}`; });
+      const text = `🧾 บิลจีน (${selRows.length} รายการ)\n` + lines.join("\n") + `\n\nรวมค้าง ¥${fmt(tot)}`;
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); setSel(new Set()); }
+      else if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot");
+      else toast.error(j.error ?? "ส่งไม่ได้");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSendingCombined(false); }
+  };
 
   return (
     <div className="space-y-3">
+      {/* ปุ่มแนบสลิป (เลือกบิล) */}
+      <button onClick={() => setAttachOpen(true)}
+        className="w-full h-11 bg-emerald-600 text-white rounded-xl font-semibold shadow-sm active:scale-[0.99] transition">📎 แนบสลิปจ่ายร้าน (เลือกบิล)</button>
+
       {/* ตัวกรองสถานะ */}
       <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
         {ALL_FILTERS.map((f) => (
@@ -711,26 +749,40 @@ function AllList({ canDelete }: { canDelete: boolean }) {
       </div>
 
       {/* สรุปยอด */}
-      {!loading && rows.length > 0 && (
+      {!loading && shown.length > 0 && (
         <div className="rounded-xl bg-white border border-slate-200 p-3 flex justify-between items-center">
-          <span className="text-sm text-slate-500">{filter} {rows.length} บิล</span>
+          <span className="text-sm text-slate-500">{filter} {shown.length} บิล</span>
           <span className="font-bold text-orange-600">¥{fmt(total)}</span>
+        </div>
+      )}
+
+      {/* แถบเลือกหลายบิล → ส่งไลน์รวม */}
+      {sel.size > 0 && (
+        <div className="sticky top-0 z-10 rounded-xl bg-emerald-600 text-white p-2.5 flex items-center justify-between gap-2 shadow">
+          <span className="text-sm font-medium pl-1">เลือก {sel.size} บิล</span>
+          <div className="flex gap-2">
+            <button onClick={sendCombined} disabled={sendingCombined} className="h-9 px-3 bg-white text-emerald-700 rounded-lg text-sm font-medium disabled:opacity-50">{sendingCombined ? "กำลังส่ง…" : "📩 ส่งไลน์รวม"}</button>
+            <button onClick={() => setSel(new Set())} className="h-9 px-3 bg-emerald-700/40 rounded-lg text-sm">ล้าง</button>
+          </div>
         </div>
       )}
 
       {loading ? (
         <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
-      ) : rows.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="text-center text-slate-300 py-10">— ไม่มีรายการ —</div>
       ) : (
-        rows.map((r) => {
-          const id = String(r.id), st = String(r.status ?? "—"), rate = num(r.rate);
-          const isPending = st === "รอโอน";
-          const fullRmb = num(r.amount_rmb) + num(r.fee_rmb);
-          const remainRmb = Math.max(0, fullRmb - num(r.paid_rmb));
+        shown.map((r) => {
+          const id = String(r.id), rate = num(r.rate);
+          const s3 = billStatus3(r);
+          const fullRmb = billTotalRmb(r);
+          const remainRmb = Math.max(0, fullRmb - slipSumRmb(r));
+          const on = sel.has(id);
           return (
             <Card key={id}>
               <div className="flex items-start gap-2">
+                <button onClick={() => toggle(id)}
+                  className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</button>
                 <button onClick={() => setDetail(r)} className="flex-1 min-w-0 text-left flex justify-between items-start gap-2">
                   <div className="min-w-0">
                     <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
@@ -740,24 +792,45 @@ function AllList({ canDelete }: { canDelete: boolean }) {
                   <div className="text-right flex-shrink-0">
                     <div className="text-lg font-bold text-orange-600">¥{fmt(remainRmb)}</div>
                     <div className="text-[11px] text-slate-400">เต็ม ¥{fmt(fullRmb)}{rate > 0 ? ` · ฿${fmt(remainRmb * rate)}` : ""}</div>
-                    <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[st] ?? "bg-slate-100 text-slate-500"}`}>{st}</span>
+                    <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[s3] ?? "bg-slate-100 text-slate-500"}`}>{s3}</span>
                   </div>
                 </button>
               </div>
-              {isPending && (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button onClick={() => setReport(r)}
-                    className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์</button>
-                  <button onClick={() => setDetail(r)}
-                    className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">👁 ดูข้อมูล</button>
-                </div>
-              )}
             </Card>
           );
         })
       )}
       {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} canDelete={canDelete} />}
       {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
+
+      {/* popup เลือกบิลเพื่อแนบสลิป (แมนนวล) */}
+      {attachOpen && (
+        <Portal><div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setAttachOpen(false)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+              <div className="font-semibold text-slate-800">เลือกบิลที่จะแนบสลิป</div>
+              <button onClick={() => setAttachOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+            </div>
+            <div className="p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] space-y-2">
+              <div className="text-xs text-slate-400 px-1">แสดงเฉพาะบิลที่ยังไม่ครบ (รอโอน / บางส่วน)</div>
+              {openBills.length === 0 ? <div className="text-center text-slate-300 py-8">— ไม่มีบิลค้าง —</div>
+                : openBills.map((r) => {
+                  const rem = Math.max(0, billTotalRmb(r) - slipSumRmb(r));
+                  return (
+                    <button key={String(r.id)} onClick={() => { setAttachOpen(false); setDetail(r); }}
+                      className="w-full flex justify-between items-center gap-2 text-left rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
+                        <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")} · {billStatus3(r)}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0"><div className="font-bold text-orange-600">¥{fmt(rem)}</div><div className="text-[10px] text-slate-400">ยังขาด</div></div>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </div></Portal>
+      )}
     </div>
   );
 }
@@ -939,6 +1012,108 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
   );
 }
 
+// ---------------- สลิปจ่ายร้าน (หลายรอบ + ยอดต่อสลิป) → สถานะ 3 ระดับ ----------------
+function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onChanged?: () => void }) {
+  const toast = useToast();
+  const totalRmb = billTotalRmb(bill);
+  const [slips, setSlips] = useState<Slip[]>(() => billSlips(bill));
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+  const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
+
+  const sum = slips.reduce((a, s) => a + num(s.amount_rmb), 0);
+  const remain = Math.max(0, totalRmb - sum);
+  const status = String(bill.status ?? "") === "ยกเลิก" ? "ยกเลิก"
+    : (totalRmb > 0 && sum >= totalRmb - 0.001) ? "โอนครบแล้ว" : sum > 0 ? "โอนแล้วบางส่วน" : "รอโอน";
+
+  const onPick = async (files: FileList) => {
+    setBusy(true);
+    try {
+      const added: Slip[] = [];
+      for (const f of Array.from(files)) {
+        const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-slips");
+        const r = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+        const j = await r.json().catch(() => ({}));
+        if (j.r2_key) added.push({ key: j.r2_key, amount_rmb: 0, at: new Date().toISOString() });
+        else if (j.error) toast.error(j.error);
+      }
+      if (added.length) {
+        if (added[0] && remain > 0) added[0].amount_rmb = +remain.toFixed(2);   // ใบแรกเดายอด = ยอดคงเหลือ
+        setSlips(s => [...s, ...added]); setDirty(true);
+      }
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+  const setAmt = (i: number, v: string) => { setSlips(s => s.map((x, idx) => idx === i ? { ...x, amount_rmb: num(v) } : x)); setDirty(true); };
+  const removeAt = (i: number) => { setSlips(s => s.filter((_, idx) => idx !== i)); setDirty(true); };
+  const save = async () => {
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-bills/${String(bill.id)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slips, actor: "china-app" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.error) { toast.error(j.error); return; }
+      setDirty(false); toast.success("บันทึกสลิปแล้ว"); onChanged?.();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <Label>สลิปจ่ายร้าน (แนบเป็นรอบได้)</Label>
+        <span className={`text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[status] ?? "bg-slate-100 text-slate-500"}`}>{status}</span>
+      </div>
+      <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-2">
+        <div className="flex justify-between text-xs"><span className="text-slate-500">ยอดบิล</span><span className="text-slate-700">¥{fmt(totalRmb)}</span></div>
+        <div className="flex justify-between text-xs"><span className="text-slate-500">รวมสลิปแล้ว</span><span className="font-medium text-emerald-700">¥{fmt(sum)}</span></div>
+        <div className="flex justify-between text-xs"><span className="text-slate-500">ยังขาด</span><span className={`font-medium ${remain > 0.001 ? "text-amber-600" : "text-emerald-700"}`}>¥{fmt(remain)}</span></div>
+
+        {slips.length > 0 && (
+          <div className="space-y-2 pt-1">
+            {slips.map((s, i) => (
+              <div key={s.key + i} className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg p-2">
+                {isPdf(s.key)
+                  ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-12 h-12 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
+                  : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] text-slate-400 mb-0.5">ยอดสลิป (¥)</div>
+                  <Num value={s.amount_rmb ? String(s.amount_rmb) : ""} onChange={(v) => setAmt(i, v)} />
+                </div>
+                <button type="button" onClick={() => removeAt(i)} className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded-full">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" className="hidden"
+          onChange={(e) => { const fs = e.target.files; if (fs && fs.length) onPick(fs); }} />
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+            className="h-10 border-2 border-dashed border-slate-300 text-slate-600 rounded-lg text-sm hover:border-orange-300 hover:text-orange-600 disabled:opacity-50">📎 เพิ่มสลิป</button>
+          <button type="button" onClick={save} disabled={busy || !dirty}
+            className="h-10 bg-orange-600 text-white rounded-lg text-sm font-medium disabled:opacity-50">{busy ? "กำลังบันทึก…" : dirty ? "💾 บันทึกสลิป" : "บันทึกแล้ว"}</button>
+        </div>
+        {dirty && <div className="text-[11px] text-amber-600 text-center">* มีการเปลี่ยนแปลง ยังไม่บันทึก</div>}
+      </div>
+      {lightbox && (
+        <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setLightbox(null); }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="" className="max-w-full max-h-full object-contain" />
+          <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
+        </div></Portal>
+      )}
+    </div>
+  );
+}
+
 // ---------------- รายละเอียดบิล ----------------
 function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void; onChanged?: () => void; canDelete?: boolean }) {
   const toast = useToast();
@@ -1019,7 +1194,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-800">รายละเอียดบิล</div>
           <div className="flex items-center gap-2">
-            <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_STYLE[st] ?? "bg-slate-100 text-slate-500"}`}>{st}</span>
+            {(() => { const s3 = billStatus3(bill); return <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_STYLE[s3] ?? "bg-slate-100 text-slate-500"}`}>{s3}</span>; })()}
             <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
           </div>
         </div>
@@ -1056,6 +1231,8 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
             <Row label="วันที่ลงบิล" v={bill.bill_date} />
             {bill.printed_at ? <Row label="พิมพ์เมื่อ" v={String(bill.printed_at).slice(0, 16).replace("T", " ")} /> : null}
           </div>
+
+          <SlipSection bill={bill} onChanged={() => onChanged?.()} />
 
           <TransferHistory bill={bill} kind="china" onChanged={() => onChanged?.()} />
 
