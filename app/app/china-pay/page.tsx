@@ -127,7 +127,7 @@ function rateFor(amt: number, r1: number): number {
   return +(r1 - RATE_OFFSET.r4).toFixed(4);
 }
 
-type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "menusettings";
+type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "automation" | "menusettings";
 
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
@@ -141,6 +141,7 @@ const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
   { k: "rate", icon: "💱", label: "เรท" },
   { k: "ctw", icon: "📑", label: "บิลจาก CTW" },
+  { k: "automation", icon: "🤖", label: "กฎอัตโนมัติ" },
 ];
 const ALL_TAB_KEYS = MENU.map(m => m.k);
 
@@ -272,6 +273,7 @@ export default function ChinaPayApp() {
           {renderTab === "ctw" && <CtwList canDelete={isAdmin} />}
           {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
           {renderTab === "transfers" && <TransferList canDelete={isAdmin} />}
+          {renderTab === "automation" && <AutomationPage />}
           {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
         </main>
 
@@ -2845,6 +2847,72 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       {sendState && <SendingOverlay state={sendState} />}
     </div>
     </Portal>
+  );
+}
+
+// ---------------- กฎอัตโนมัติ (สรุปบิลค้าง ส่ง LINE ทุกวันที่ 26 + ส่งทดสอบ/พรีวิว) ----------------
+const SUMMARY_FN_URL = "https://cyivhkecxeoonlowcvaz.supabase.co/functions/v1/china-monthly-summary";
+const SUMMARY_FN_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5aXZoa2VjeGVvb25sb3djdmF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NzIwOTAsImV4cCI6MjA5MzA0ODA5MH0.5tAnCX7v41dvAsbjJ9oKm8cvLiJB6dgEbdaGL1v1CMg";
+
+function AutomationPage() {
+  const toast = useToast();
+  const [text, setText] = useState("");
+  const [count, setCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+
+  const hdr = { "Content-Type": "application/json", apikey: SUMMARY_FN_KEY, Authorization: `Bearer ${SUMMARY_FN_KEY}` };
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch(`${SUMMARY_FN_URL}?preview=1`, { method: "POST", headers: hdr, body: JSON.stringify({ preview: true }) })
+      .then(r => r.json()).then(j => { setText(String(j.text ?? "")); setCount(typeof j.count === "number" ? j.count : null); })
+      .catch(() => setText("โหลดตัวอย่างข้อความไม่สำเร็จ")).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const sendNow = async () => {
+    setSending(true);
+    try {
+      const r = await fetch(SUMMARY_FN_URL, { method: "POST", headers: hdr, body: JSON.stringify({}) });
+      const j = await r.json().catch(() => ({}));
+      if (j.sent) toast.success("ส่งสรุปเข้า LINE กลุ่มแล้ว");
+      else toast.error(j.error ?? "ส่งไม่ได้ — ตรวจการตั้งค่า LINE");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSending(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex items-start gap-3">
+          <div className="text-3xl">🤖</div>
+          <div>
+            <div className="font-semibold text-slate-800">สรุปบิลค้างโอน → LINE อัตโนมัติ</div>
+            <div className="text-sm text-slate-500 mt-0.5">ระบบจะส่งสรุปบิลที่ยัง “รอโอน” เข้า LINE กลุ่ม</div>
+          </div>
+        </div>
+        <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
+          <Row label="ทำงานทุก" v="วันที่ 26 ของเดือน" />
+          <Row label="เวลา" v="09:00 น." />
+          <Row label="สถานะ" v="✅ เปิดใช้งาน" />
+        </div>
+        <div className="mt-2 text-[11px] text-slate-400">* ทำงานบนเซิร์ฟเวอร์อัตโนมัติ ไม่ต้องเปิดแอปค้างไว้</div>
+      </Card>
+
+      <Card>
+        <div className="flex items-center justify-between mb-2">
+          <Label>ตัวอย่างข้อความที่จะส่ง {count != null ? `(${count} บิล)` : ""}</Label>
+          <button onClick={load} disabled={loading} className="text-xs text-blue-500 disabled:opacity-50">↻ รีเฟรช</button>
+        </div>
+        {loading
+          ? <div className="text-center text-slate-400 py-6 text-sm">กำลังโหลด…</div>
+          : <pre className="whitespace-pre-wrap break-words text-sm text-slate-700 bg-slate-50 border border-slate-100 rounded-lg p-3 font-sans">{text || "— ไม่มีข้อมูล —"}</pre>}
+        <button onClick={sendNow} disabled={sending || loading}
+          className="mt-3 w-full h-12 bg-[#06C755] text-white rounded-xl font-semibold disabled:opacity-50">{sending ? "กำลังส่ง…" : "📩 ส่งทดสอบตอนนี้"}</button>
+        <div className="mt-1 text-[11px] text-slate-400 text-center">ส่งสรุปชุดนี้เข้า LINE กลุ่มทันที (ใช้ทดสอบ)</div>
+      </Card>
+    </div>
   );
 }
 
