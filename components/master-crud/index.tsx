@@ -1222,6 +1222,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // F11: render ค่าแบบอ่านอย่างเดียว (detail view)
   const renderDetailValue = (f: FieldDef): React.ReactNode => {
     const v = form[f.key];
+    const vs = fieldStyleCss(f.uiStyle);   // สไตล์จาก Studio (ใช้กับค่าในหน้า detail)
     // Quick edit: field ที่ตั้ง inline + แก้ได้ + ชนิดง่ายๆ → กดแก้ได้เลยในหน้า detail
     if (drawerMode === "view" && editingId && canEdit && f.inlineEditable && !f.readonly
         && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select")) {
@@ -1229,7 +1230,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     }
     if (f.type === "computed") {
       const n = computeField(f.formula, form);
-      return <span className="text-sm tabular-nums font-medium text-slate-800">{formatComputed(n, f.computeFormat, f.computeDecimals)}</span>;
+      return <span className="text-sm tabular-nums font-medium text-slate-800" style={vs}>{formatComputed(n, f.computeFormat, f.computeDecimals)}</span>;
     }
     if (f.type === "image") {
       return <ImageCell r2Key={(v as string) || null} size={160} />;
@@ -1249,7 +1250,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const base = f.key.endsWith("_id") ? f.key.slice(0, -3) : f.key;
       const label = form[`${base}_label`] ?? form[`${base}_name`];
       const content: React.ReactNode = f.cellRender ? f.cellRender(v, form)
-        : label ? <span className="text-sm text-slate-800">{String(label)}</span>
+        : label ? <span className="text-sm text-slate-800" style={vs}>{String(label)}</span>
         : v ? <code className="text-xs text-slate-400">{String(v).slice(0, 8)}…</code>
         : <span className="text-slate-300">—</span>;
       const tgt = (f.relationConfig as RelationConfig | undefined)?.target_module_key
@@ -1268,9 +1269,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (v == null || v === "") return <span className="text-slate-300 text-sm">—</span>;
     if (f.type === "number") {
       const n = Number(v);
-      return <span className="text-sm tabular-nums text-slate-800">{isNaN(n) ? String(v) : n.toLocaleString("th-TH")}</span>;
+      return <span className="text-sm tabular-nums text-slate-800" style={vs}>{isNaN(n) ? String(v) : n.toLocaleString("th-TH")}</span>;
     }
-    return <span className="text-sm text-slate-800 whitespace-pre-wrap break-words">{String(v)}</span>;
+    return <span className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{String(v)}</span>;
   };
 
   // F11: header ของ detail view
@@ -1924,6 +1925,22 @@ function SectionTabBar({
 // DetailSections — F11: read-only detail view (group by section)
 // ============================================================
 
+// ui_style preset → CSS (ใช้ทั้ง form, detail, preview)
+function fieldStyleCss(uiStyle?: Record<string, unknown>): React.CSSProperties {
+  const us = uiStyle ?? {};
+  const SZ: Record<string, string> = { sm: "12px", base: "14px", lg: "16px", xl: "20px" };
+  const FF: Record<string, string> = { serif: "Georgia, 'Times New Roman', serif", mono: "ui-monospace, 'Courier New', monospace" };
+  return {
+    fontSize: SZ[String(us.size ?? "")] || undefined,
+    fontWeight: us.bold ? 700 : undefined,
+    fontStyle: us.italic ? "italic" : undefined,
+    textDecoration: us.underline ? "underline" : undefined,
+    color: typeof us.color === "string" && us.color ? us.color : undefined,
+    fontFamily: FF[String(us.font ?? "")] || undefined,
+    textAlign: (["left", "center", "right"].includes(String(us.align)) ? (us.align as "left" | "center" | "right") : undefined),
+  };
+}
+
 function DetailSections({
   fields, renderValue, layout,
 }: {
@@ -1943,12 +1960,17 @@ function DetailSections({
   // dl grid ตามจำนวน column
   const renderDl = (fs: FieldDef[], cols: number) => (
     <dl className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-x-4 gap-y-3`}>
-      {fs.map((f) => (
-        <div key={f.key} className={(f.type === "textarea" || f.type === "image") && cols > 1 ? "col-span-2" : ""}>
-          <dt className="text-[11px] text-slate-400 mb-0.5">{f.label}</dt>
-          <dd>{renderValue(f)}</dd>
-        </div>
-      ))}
+      {fs.map((f) => {
+        const css = fieldStyleCss(f.uiStyle);
+        const hl = !!(f.uiStyle ?? {}).highlight;
+        const wide = (f.type === "textarea" || f.type === "image") && cols > 1;
+        return (
+          <div key={f.key} className={`${wide ? "col-span-2" : ""} ${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
+            <dt className="text-[11px] text-slate-400 mb-0.5" style={css}>{f.label}</dt>
+            <dd style={css}>{renderValue(f)}</dd>
+          </div>
+        );
+      })}
     </dl>
   );
 
