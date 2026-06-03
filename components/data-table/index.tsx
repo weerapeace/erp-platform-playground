@@ -475,7 +475,7 @@ export function DataTable<T extends Record<string, unknown>>({
   const [groupBy, setGroupBy] = useState<string | null>(null);
   const [groupMenuOpen, setGroupMenuOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const isGrouped = !!groupBy && !isServer;
+  const isGrouped = !!groupBy;
 
   // ---- View mode (table / cards) ----
   const showCardToggle = !!enableCards || !!cardConfig;
@@ -615,6 +615,10 @@ export function DataTable<T extends Record<string, unknown>>({
   const [srvRows,     setSrvRows]     = useState<T[]>([]);
   const [srvTotal,    setSrvTotal]    = useState(0);
   const [srvLoading,  setSrvLoading]  = useState(false);
+  // เฟส 4 (แบบ A): batch ใหญ่สำหรับจัดกลุ่ม server mode
+  const [srvGroupRows,    setSrvGroupRows]    = useState<T[]>([]);
+  const [srvGroupLoading, setSrvGroupLoading] = useState(false);
+  const [srvGroupCapped,  setSrvGroupCapped]  = useState(false);
   const [srvPage,     setSrvPage]     = useState(0);   // 0-based
   const [srvPageSize, setSrvPageSize] = useState(initialPageSize);
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -661,6 +665,27 @@ export function DataTable<T extends Record<string, unknown>>({
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
+
+  // เฟส 4 (แบบ A): server mode + จัดกลุ่ม → ดึง batch ใหญ่ (cap) มาจัดกลุ่มในจอ
+  useEffect(() => {
+    if (!isServer || !serverFetch || !groupBy) { setSrvGroupRows([]); setSrvGroupCapped(false); return; }
+    let active = true;
+    setSrvGroupLoading(true);
+    const sort = sorting[0];
+    const t = setTimeout(() => {
+      if (!active) return;
+      serverFetch({
+        page: 1, pageSize: 3000, search: debouncedSearch,
+        sortBy: sort?.id ?? null, sortDir: sort ? (sort.desc ? "desc" : "asc") : null,
+        filters: activeServerFilters,
+      })
+        .then(r => { if (active) { setSrvGroupRows(r.rows); setSrvGroupCapped(r.total > r.rows.length); } })
+        .catch(() => { if (active) { setSrvGroupRows([]); setSrvGroupCapped(false); } })
+        .finally(() => { if (active) setSrvGroupLoading(false); });
+    }, 120);
+    return () => { active = false; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isServer, serverFetch, groupBy, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
 
   // ---- Saved Views (Supabase — owner-based, ข้ามเครื่อง) ----
   const [userViews, setUserViews] = useState<StoredView[]>([]);
@@ -857,7 +882,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
   // ---- Filtered data ----
   const filteredData = useMemo(() => {
-    if (isServer) return srvRows;   // server mode — ใช้ rows จาก server ตรงๆ
+    if (isServer) return groupBy ? srvGroupRows : srvRows;   // server: จัดกลุ่ม=ใช้ batch ใหญ่, ปกติ=หน้าปัจจุบัน
     let d = data;
     const view = views.find(v => v.id === activeView);
     if (view?.filter) d = d.filter(row => view.filter!(row as Record<string, unknown>));
@@ -890,7 +915,7 @@ export function DataTable<T extends Record<string, unknown>>({
       );
     }
     return d;
-  }, [isServer, srvRows, data, activeView, views, colFilterValues, filterableFromColumns, globalSearch, searchableKeys]);
+  }, [isServer, srvRows, srvGroupRows, groupBy, data, activeView, views, colFilterValues, filterableFromColumns, globalSearch, searchableKeys]);
 
   // ---- Column building ----
   // แสดง checkbox เลือกแถว เมื่อมี bulk actions หรือ bulk edit
@@ -1320,8 +1345,8 @@ export function DataTable<T extends Record<string, unknown>>({
           </button>
         )}
 
-        {/* Group by (จัดกลุ่ม) — เฉพาะ table + client mode */}
-        {viewMode === "table" && !isServer && (
+        {/* Group by (จัดกลุ่ม) — เฉพาะ table (client + server แบบ A) */}
+        {viewMode === "table" && (
           <div className="relative">
             <button onClick={() => setGroupMenuOpen(o => !o)} title="จัดกลุ่มตาราง"
               className={`flex items-center gap-1.5 h-8 px-2.5 text-sm border rounded-md transition-colors ${groupBy ? "bg-blue-50 text-blue-700 border-blue-200" : "text-slate-600 border-slate-200 bg-white hover:bg-slate-50"}`}>
@@ -1478,7 +1503,13 @@ export function DataTable<T extends Record<string, unknown>>({
 
       {/* Table / Cards */}
       <div className="flex-1 overflow-auto">
-        {(loading || srvLoading) ? (
+        {/* เฟส 4: เตือนเมื่อจัดกลุ่มจากตัวอย่าง (ข้อมูลเกิน cap) */}
+        {isGrouped && srvGroupCapped && !srvGroupLoading && (
+          <div className="mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+            ⚠ จัดกลุ่มจาก {srvGroupRows.length.toLocaleString()} แถวแรก (ข้อมูลมีมากกว่านี้) — กรองให้แคบลงเพื่อยอดที่ครบถ้วน
+          </div>
+        )}
+        {(loading || srvLoading || srvGroupLoading) ? (
           <LoadingSkeleton columns={tableColumns.length} rows={initialPageSize} />
         ) : error ? (
           <ErrorState message={error} onRetry={onRetry} />
@@ -1573,8 +1604,8 @@ export function DataTable<T extends Record<string, unknown>>({
             </thead>
             <tbody className="bg-white divide-y divide-slate-100">
               {isGrouped ? (() => {
-                // ---- จัดกลุ่ม (manual, client mode) ----
-                const grows = table.getSortedRowModel().rows;
+                // ---- จัดกลุ่ม (manual) — client: sorted model / server: core model (batch ใหญ่) ----
+                const grows = (isServer ? table.getCoreRowModel() : table.getSortedRowModel()).rows;
                 const leaf = table.getVisibleLeafColumns();
                 if (grows.length === 0) return (
                   <tr><td colSpan={tableColumns.length} className="py-16 text-center"><EmptyState message={emptyMessage} /></td></tr>
