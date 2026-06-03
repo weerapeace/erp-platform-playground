@@ -1,0 +1,52 @@
+"use client";
+
+/**
+ * Payroll module — งวดเงินเดือน (Phase 2) — ของจริง 8 งวด
+ * ต่อ payroll_periods ผ่าน /api/payroll/master/periods (route กลาง)
+ */
+import dynamic from "next/dynamic";
+import type { MasterCRUDConfig } from "@/components/master-crud";
+
+const MasterCRUDPage = dynamic(
+  () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
+  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+);
+
+const COMPANY_NAMES = ["ไอ.เอส.จี. เทรดดิ้ง", "หลุยส์ มอนตินี่"];
+const PERIOD_STATUS = ["draft", "review", "approved", "locked", "paid", "cancelled"];
+const STATUS_LABEL: Record<string, { th: string; cls: string }> = {
+  draft:     { th: "ร่าง",       cls: "bg-slate-100 text-slate-600" },
+  review:    { th: "รอตรวจ",     cls: "bg-amber-100 text-amber-700" },
+  approved:  { th: "อนุมัติ",    cls: "bg-blue-100 text-blue-700" },
+  locked:    { th: "ล็อกแล้ว",   cls: "bg-purple-100 text-purple-700" },
+  paid:      { th: "จ่ายแล้ว",   cls: "bg-emerald-100 text-emerald-700" },
+  cancelled: { th: "ยกเลิก",     cls: "bg-red-100 text-red-700" },
+};
+
+const CONFIG: MasterCRUDConfig = {
+  apiBase: "/api/payroll/master/", apiPath: "periods", tableId: "payroll-periods-master",
+  title: "งวดเงินเดือน (Payroll)", icon: "🗓️",
+  description: "งวดเงินเดือนจริง 8 งวด — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
+  uniqueKey: "period_name", activeField: "active", exportEntityType: "payroll_period",
+  searchKeys: ["period_name", "company_name"],
+  permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
+  defaultShowAllColumns: true,
+  fields: [
+    { key: "period_name",  label: "ชื่องวด",   type: "text", colSize: 200, required: true, formSpan: 2, groupKey: "core", order: 10 },
+    { key: "company_name", label: "บริษัท",    type: "select", colSize: 150, options: COMPANY_NAMES, filterable: true, groupKey: "core", order: 20 },
+    { key: "start_date",   label: "เริ่มงวด",  type: "text", colSize: 110, placeholder: "YYYY-MM-DD", required: true, groupKey: "core", order: 30 },
+    { key: "end_date",     label: "สิ้นงวด",   type: "text", colSize: 110, placeholder: "YYYY-MM-DD", required: true, groupKey: "core", order: 40 },
+    { key: "payment_date", label: "วันจ่าย",   type: "text", colSize: 110, placeholder: "YYYY-MM-DD", groupKey: "core", order: 50 },
+    { key: "default_work_days",     label: "วันทำงาน", type: "number", colSize: 90, groupKey: "calc", order: 60 },
+    { key: "default_hours_per_day", label: "ชม./วัน",  type: "number", colSize: 80, groupKey: "calc", order: 70 },
+    { key: "status", label: "สถานะ", type: "select", colSize: 110, options: PERIOD_STATUS, filterable: true, groupKey: "core", order: 80,
+      cellRender: (v) => {
+        const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
+        return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
+      } },
+  ],
+};
+
+export default function PayrollPeriodsPage() {
+  return <MasterCRUDPage config={CONFIG} />;
+}

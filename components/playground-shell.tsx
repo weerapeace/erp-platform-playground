@@ -62,6 +62,9 @@ export const navGroups = [
     items: [
       { href: "/payroll/employees", icon: "🪪", labelTH: "พนักงาน (Payroll)" },
       { href: "/payroll/contracts", icon: "📄", labelTH: "สัญญาจ้าง (Payroll)" },
+      { href: "/payroll/periods",   icon: "🗓️", labelTH: "งวดเงินเดือน" },
+      { href: "/payroll/departments", icon: "🗂️", labelTH: "แผนก (Payroll)" },
+      { href: "/payroll/companies", icon: "🏢", labelTH: "บริษัท (Payroll)" },
     ],
   },
   {
