@@ -267,11 +267,11 @@ export default function ChinaPayApp() {
         <main key={renderTab} className="cp-anim relative z-10 flex-1 overflow-y-auto p-4 pb-28">
           {renderTab === "dashboard" && <Dashboard onGo={go} />}
           {renderTab === "bill" && <BillForm />}
-          {renderTab === "all" && <AllList onTransfer={(ids) => { setPreselect(ids); go("transfer"); }} />}
+          {renderTab === "all" && <AllList canDelete={isAdmin} />}
           {renderTab === "rate" && <RateTab />}
-          {renderTab === "ctw" && <CtwList />}
+          {renderTab === "ctw" && <CtwList canDelete={isAdmin} />}
           {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
-          {renderTab === "transfers" && <TransferList />}
+          {renderTab === "transfers" && <TransferList canDelete={isAdmin} />}
           {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
         </main>
 
@@ -691,14 +691,12 @@ function BillForm() {
 
 // ---------------- บิลจีนทั้งหมด (รวมหน้ารอโอนเดิม) ----------------
 const ALL_FILTERS = ["รอโอน", "โอนแล้ว", "ยกเลิก", "ทั้งหมด"] as const;
-function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
+function AllList({ canDelete }: { canDelete: boolean }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("รอโอน");   // default = รอโอน
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
-  const [tsel, setTsel] = useState<Set<string>>(new Set());   // ติ๊กเลือกไปโอน
-  const tToggle = (id: string) => setTsel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const load = useCallback(() => {
     setLoading(true);
@@ -736,14 +734,6 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
         </div>
       )}
 
-      {/* ติ๊กเลือก → โอนเข้าจีน */}
-      {tsel.size > 0 && (
-        <button onClick={() => onTransfer([...tsel])}
-          className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold shadow-md shadow-emerald-500/30 active:scale-[0.99] transition">
-          💰 โอนเข้าจีน ({tsel.size} บิล) →
-        </button>
-      )}
-
       {loading ? (
         <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
       ) : rows.length === 0 ? (
@@ -757,11 +747,7 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
           return (
             <Card key={id}>
               <div className="flex items-start gap-2">
-                {isPending && (
-                  <button onClick={() => tToggle(id)}
-                    className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${tsel.has(id) ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{tsel.has(id) ? "✓" : ""}</button>
-                )}
-                <button onClick={() => isPending ? tToggle(id) : setDetail(r)} className="flex-1 min-w-0 text-left flex justify-between items-start gap-2">
+                <button onClick={() => setDetail(r)} className="flex-1 min-w-0 text-left flex justify-between items-start gap-2">
                   <div className="min-w-0">
                     <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
                     <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")}</div>
@@ -786,7 +772,7 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
           );
         })
       )}
-      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} />}
+      {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} canDelete={canDelete} />}
       {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
     </div>
   );
@@ -970,11 +956,12 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
 }
 
 // ---------------- รายละเอียดบิล ----------------
-function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void; onChanged?: () => void }) {
+function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void; onChanged?: () => void; canDelete?: boolean }) {
   const toast = useToast();
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState(false);
   const [askCancel, setAskCancel] = useState(false);
+  const [askDelete, setAskDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sendingLine, setSendingLine] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);   // รูปที่กดดูเต็มจอ
@@ -1024,6 +1011,18 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
       toast.success("ยกเลิกบิลแล้ว"); onChanged?.(); onClose();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const paidRmb = num(bill.paid_rmb);
+  const deleteBill = async () => {
+    setBusy(true); setAskDelete(false);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-bills/${String(bill.id)}?hard=1`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (j.error) { toast.error(j.error); return; }
+      toast.success("ลบบิลถาวรแล้ว"); onChanged?.(); onClose();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   };
@@ -1120,12 +1119,28 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
               ✕ ยกเลิกบิลนี้
             </button>
           )}
+
+          {/* ลบบิลถาวร — เฉพาะแอดมิน (พนักงานไม่เห็น) */}
+          {canDelete && (
+            <button
+              onClick={() => paidRmb > 0
+                ? toast.error("บิลนี้มีการโอนแล้ว ลบไม่ได้ — ให้ลบรายการโอนก่อน (จะคืนยอดให้)")
+                : setAskDelete(true)}
+              disabled={busy}
+              className="w-full h-11 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 disabled:opacity-50">
+              🗑 ลบบิลถาวร
+            </button>
+          )}
         </div>
       </div>
       {report && <ReportPopup bill={{ ...bill, _sup: sup }} onClose={() => setReport(false)} onPrinted={onPrinted} />}
       {askCancel && (
         <ConfirmPopup title="ยกเลิกบิลนี้?" message={`${String(bill.supplier_label ?? bill.supplier_id ?? "บิลนี้")} · ¥${fmt(totalRmb)}`}
           confirmText="ยกเลิกบิล" tone="rose" onCancel={() => setAskCancel(false)} onConfirm={cancelBill} />
+      )}
+      {askDelete && (
+        <ConfirmPopup title="ลบบิลนี้ถาวร?" message={`${String(bill.supplier_label ?? bill.supplier_id ?? "บิลนี้")} · ¥${fmt(totalRmb)} — ลบแล้วกู้คืนไม่ได้`}
+          confirmText="ลบถาวร" tone="rose" onCancel={() => setAskDelete(false)} onConfirm={deleteBill} />
       )}
       {lightbox && (
         <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setLightbox(null); }}>
@@ -1262,7 +1277,7 @@ function RateTab() {
 }
 
 // ---------------- บิลจาก CTW ----------------
-function CtwList() {
+function CtwList({ canDelete }: { canDelete?: boolean }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<"list" | "form">("list");
@@ -1315,7 +1330,7 @@ function CtwList() {
           );
         })
       )}
-      {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onChanged={load} onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
+      {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onChanged={load} canDelete={canDelete} onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
     </div>
   );
 }
@@ -1405,7 +1420,7 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
   );
 }
 
-function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void; onChanged?: () => void }) {
+function CtwDetail({ bill, onClose, onDeleted, onChanged, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void; onChanged?: () => void; canDelete?: boolean }) {
   const toast = useToast();
   const [del, setDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1465,8 +1480,10 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<strin
               </div>
             </div>
           )}
-          <button onClick={() => setDel(true)} disabled={busy}
-            className="w-full h-11 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50">🗑 ลบบิลนี้</button>
+          {canDelete && (
+            <button onClick={() => setDel(true)} disabled={busy}
+              className="w-full h-11 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50">🗑 ลบบิลนี้</button>
+          )}
         </div>
       </div>
       {del && (
@@ -1515,13 +1532,51 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
 }
 
 // ---------------- รายการที่โอนแล้ว (ประวัติการโอน) ----------------
-function TransferList() {
+function TransferList({ canDelete }: { canDelete?: boolean }) {
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [pmap, setPmap] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
   const [sendingId, setSendingId] = useState("");
+  const [delTarget, setDelTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังยืนยันลบ
+  const [busy, setBusy] = useState(false);
+
+  // ลบรายการโอน + คืนยอดบิลที่เกี่ยวข้อง (paid_rmb / cleared_amount คำนวณใหม่จากการโอนที่เหลือ)
+  const removeTransfer = async (target: Record<string, unknown>) => {
+    const id = String(target.id);
+    const linesOf = (t: Record<string, unknown>) => (Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : []);
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-transfers/${id}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (j.error) { toast.error(j.error); return; }
+
+      const remaining = rows.filter(x => String(x.id) !== id && x.is_active !== false);
+      const tl = linesOf(target);
+      const chinaIds = [...new Set(tl.filter(l => l.kind === "china").map(l => String(l.bill_id)).filter(Boolean))];
+      const ctwIds = [...new Set(tl.filter(l => l.kind === "ctw").map(l => String(l.bill_id)).filter(Boolean))];
+
+      for (const bid of chinaIds) {
+        const paid = remaining.reduce((s, t) => s + linesOf(t).filter(l => l.kind === "china" && String(l.bill_id) === bid).reduce((a, l) => a + num(l.paid_rmb), 0), 0);
+        const b = (await apiFetch(`/api/master-v2/china-bills/${bid}`).then(r => r.json()).catch(() => ({}))).data;
+        const total = b ? num(b.amount_rmb) + num(b.fee_rmb) : 0;
+        const body: Record<string, unknown> = { paid_rmb: +paid.toFixed(2), actor: "china-app" };
+        if (b && b.status !== "ยกเลิก") body.status = total > 0 && paid >= total - 0.001 ? "โอนแล้ว" : "รอโอน";
+        await apiFetch(`/api/master-v2/china-bills/${bid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      }
+      for (const bid of ctwIds) {
+        const cleared = remaining.reduce((s, t) => s + linesOf(t).filter(l => l.kind === "ctw" && String(l.bill_id) === bid).reduce((a, l) => a + num(l.paid_thb), 0), 0);
+        const c = (await apiFetch(`/api/master-v2/ctw-bills/${bid}`).then(r => r.json()).catch(() => ({}))).data;
+        const net = c ? num(c.net_amount) : 0;
+        await apiFetch(`/api/master-v2/ctw-bills/${bid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cleared_amount: +cleared.toFixed(2), cleared_at: net > 0 && cleared >= net - 0.001 ? new Date().toISOString() : null, actor: "china-app" }) });
+      }
+
+      setRows(p => p.filter(x => String(x.id) !== id));
+      toast.success("ลบรายการโอน + คืนยอดบิลแล้ว");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); setDelTarget(null); }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -1560,10 +1615,18 @@ function TransferList() {
               <button onClick={async () => { setSendingId(id); await pushTransferLine(t, toast); setSendingId(""); }} disabled={sendingId === id}
                 className="h-10 bg-[#06C755] text-white rounded-lg text-sm font-medium disabled:opacity-50">{sendingId === id ? "กำลังส่ง…" : "📩 ส่งไลน์"}</button>
             </div>
+            {canDelete && (
+              <button onClick={() => setDelTarget(r)} disabled={busy}
+                className="mt-2 w-full h-10 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 disabled:opacity-50">🗑 ลบรายการโอน (คืนยอดบิล)</button>
+            )}
           </Card>
         );
       })}
       {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)} />}
+      {delTarget && (
+        <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
+          confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
+      )}
     </div>
   );
 }
@@ -2418,7 +2481,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       { l: "ค่าโอน (¥)", r: fmt(fee) },
       { l: "ยอดโอนรวม", r: "¥" + fmt(totalRmb), bold: true },
       { l: "เรท", r: rate ? fmt(rate) : "—" },
-      { l: "เป็นเงินบาท", r: "฿" + fmt(thb), bold: true, color: "#e11d48", big: true },
+      { l: "เป็นเงินบาท", r: rate > 0 ? "฿" + fmt(thb) : "รอเรทเงิน", bold: true, color: rate > 0 ? "#e11d48" : "#d97706", big: rate > 0 },
       { l: "", r: "", sep: true },
       { l: "วันที่โอน", r: String(bill.transfer_date ?? "—") },
       { l: "วันที่ลงบิล", r: String(bill.bill_date ?? "—") },
@@ -2588,7 +2651,9 @@ function ReportPopup({ bill, onClose, onPrinted }: {
               <SlipRow l="เรท" r={rate ? fmt(rate) : "—"} />
               <div className="flex justify-between items-center gap-3">
                 <span className="text-slate-500 flex-shrink-0">เป็นเงินบาท</span>
-                <span className="text-2xl font-bold text-orange-600 text-right break-all">฿{fmt(thb)}</span>
+                {rate > 0
+                  ? <span className="text-2xl font-bold text-orange-600 text-right break-all">฿{fmt(thb)}</span>
+                  : <span className="text-base font-bold text-amber-600 text-right flex-shrink-0">รอเรทเงิน</span>}
               </div>
               <div className="border-t border-slate-100 my-1" />
               <SlipRow l="วันที่โอน" r={bill.transfer_date} />
