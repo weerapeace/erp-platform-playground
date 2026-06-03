@@ -43,6 +43,15 @@ export const PAYROLL_ENTITIES: Record<string, EntityCfg> = {
     required: ["name"],
     defaultSort: "company_code",
   },
+  "work-time-profiles": {
+    table: "work_time_profiles",
+    cols: "id, profile_code, profile_name, morning_check_in_cutoff, noon_check_in_cutoff, checkout_required_at, early_checkout_grace_minutes, status, sort_order, note, created_at, updated_at",
+    search: ["profile_code", "profile_name"],
+    statusField: "status", activeVal: "active", inactiveVal: "inactive",
+    writable: ["profile_code", "profile_name", "morning_check_in_cutoff", "noon_check_in_cutoff", "checkout_required_at", "early_checkout_grace_minutes", "status", "sort_order", "note"],
+    required: ["profile_name"], numeric: ["early_checkout_grace_minutes", "sort_order"],
+    defaultSort: "sort_order",
+  },
   periods: {
     table: "payroll_periods",
     cols: "id, period_name, start_date, end_date, payment_date, status, default_work_days, default_hours_per_day, company_id, created_at, updated_at",

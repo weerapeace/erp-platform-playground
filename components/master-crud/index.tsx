@@ -341,6 +341,11 @@ export type MasterCRUDConfig = {
    */
   serverMode?: boolean;
   /**
+   * อ่านอย่างเดียว — ซ่อนปุ่มสร้าง/แก้/ลบ (ใช้กับหน้าแสดงข้อมูลที่คำนวณแล้ว
+   * เช่น payroll lines / payslips ที่ห้ามแก้ตรง ๆ) — ของกลาง
+   */
+  readOnly?: boolean;
+  /**
    * กลุ่ม A: โชว์ทุก column ที่ลงทะเบียนไว้เป็น default (ไม่สนใจ is_visible)
    * เหมาะกับหน้าที่ field ไม่เยอะ (skeleton/operation) — ผู้ใช้ยังซ่อนเองได้ทีหลังผ่าน Column Manager
    */
@@ -375,8 +380,8 @@ type Row = Record<string, unknown> & { id: string; active?: boolean };
 
 export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const canView   = usePermission(config.permissions.view);
-  const canCreate = usePermission(config.permissions.create);
-  const canEdit   = usePermission(config.permissions.edit);
+  const canCreate = usePermission(config.permissions.create) && !config.readOnly;
+  const canEdit   = usePermission(config.permissions.edit)   && !config.readOnly;
   const { user, can } = useAuth();
   const apiBase    = config.apiBase ?? "/api/master/";
   const activeField = config.activeField ?? "active";
