@@ -1,0 +1,38 @@
+name: CI
+
+# รันอัตโนมัติทุกครั้งที่ push หรือเปิด Pull Request
+# ตรวจ: typecheck (TS) + test (Vitest) + lint (advisory)
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  quality:
+    name: Typecheck · Test · Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Unit tests (Vitest)
+        run: npm run test:run
+
+      - name: Lint (ESLint)
+        # advisory ก่อน (ไม่ทำ CI ล้ม) จนกว่าจะเคลียร์ lint debt เดิม
+        # แล้วค่อยเปลี่ยนเป็น hard gate เพื่อบังคับกฎ K3 (ห้าม raw <table> ใน admin)
+        continue-on-error: true
+        run: npm run lint
