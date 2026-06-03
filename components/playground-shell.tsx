@@ -57,6 +57,14 @@ export const navGroups = [
     ],
   },
   {
+    phase: 1,
+    label: "💰 Payroll (HR) ⭐",
+    items: [
+      { href: "/payroll/employees", icon: "🪪", labelTH: "พนักงาน (Payroll)" },
+      { href: "/payroll/contracts", icon: "📄", labelTH: "สัญญาจ้าง (Payroll)" },
+    ],
+  },
+  {
     phase: 2,
     label: "Operations",
     items: [
