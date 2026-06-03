@@ -33,18 +33,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า LINE Bot", needConfig: true }, { status: 503 });
   }
 
-  // ประกอบข้อความ: รูป (ถ้ามี) → ข้อความ/Flex (LINE ส่งได้สูงสุด 5 ข้อความ/ครั้ง)
+  // ประกอบข้อความ: รูป (ถ้ามี) → ข้อความธรรมดา (คัดลอกได้) → Flex ปุ่มลิงก์
+  // LINE ส่งได้สูงสุด 5 ข้อความ/ครั้ง — เผื่อช่องข้อความ+ปุ่มไว้ 2 → จำกัดรูป ≤3 เมื่อมีปุ่ม
+  const hasButton = !!btnUrl && /^https:\/\//.test(btnUrl);
+  const imgs = hasButton ? allImages.slice(0, 3) : allImages;
   const messages: Array<Record<string, unknown>> = [];
-  for (const u of allImages) messages.push({ type: "image", originalContentUrl: u, previewImageUrl: u });
-  if (btnUrl && /^https:\/\//.test(btnUrl)) {
-    // Flex bubble: ข้อความ + ปุ่มลิงก์ (กดเปิดได้ ไม่โชว์ URL ยาว)
-    const textLines = (text || " ").split("\n").map((line) => ({ type: "text", text: line || " ", size: "sm", wrap: true, color: "#334155" }));
+  for (const u of imgs) messages.push({ type: "image", originalContentUrl: u, previewImageUrl: u });
+  if (hasButton) {
+    // 1) ข้อความธรรมดา — กดค้างเพื่อ "คัดลอก" ได้ใน LINE (เช่น เลขบัญชี)
+    if (text) messages.push({ type: "text", text: text.slice(0, 4900) });
+    // 2) Flex bubble: ปุ่มลิงก์เปิดใบสรุป (เนื้อหาอยู่ในข้อความด้านบนแล้ว)
     messages.push({
       type: "flex",
       altText: (text || "ใบสรุปการโอน").slice(0, 380),
       contents: {
         type: "bubble",
-        body: { type: "box", layout: "vertical", spacing: "sm", contents: textLines },
+        body: { type: "box", layout: "vertical", contents: [{ type: "text", text: "กดปุ่มด้านล่างเพื่อเปิดใบสรุปแบบเต็ม", size: "sm", wrap: true, color: "#64748b" }] },
         footer: { type: "box", layout: "vertical", contents: [{ type: "button", style: "primary", color: "#06C755", height: "sm", action: { type: "uri", label: btnLabel, uri: btnUrl } }] },
       },
     });

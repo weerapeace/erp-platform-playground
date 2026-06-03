@@ -2576,7 +2576,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       { l: "ค่าโอน (¥)", r: fmt(fee) },
       { l: "ยอดโอนรวม", r: "¥" + fmt(totalRmb), bold: true },
       { l: "เรท", r: rate ? fmt(rate) : "—" },
-      { l: "เป็นเงินบาท", r: rate > 0 ? "฿" + fmt(thb) : "รอเรทเงิน", bold: true, color: rate > 0 ? "#e11d48" : "#d97706", big: rate > 0 },
+      { l: "เป็นเงินบาท", r: rate > 0 ? "฿" + fmt(thb) : "รอเรทเงิน", bold: true, color: rate > 0 ? "#e11d48" : "#d97706" },
       { l: "", r: "", sep: true },
       { l: "วันที่โอน", r: String(bill.transfer_date ?? "—") },
       { l: "วันที่ลงบิล", r: String(bill.bill_date ?? "—") },
@@ -2747,7 +2747,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
               <div className="flex justify-between items-center gap-3">
                 <span className="text-slate-500 flex-shrink-0">เป็นเงินบาท</span>
                 {rate > 0
-                  ? <span className="text-2xl font-bold text-orange-600 text-right break-all">฿{fmt(thb)}</span>
+                  ? <span className="min-w-0 flex-1 text-xl font-bold text-orange-600 text-right break-words">฿{fmt(thb)}</span>
                   : <span className="text-base font-bold text-amber-600 text-right flex-shrink-0">รอเรทเงิน</span>}
               </div>
               <div className="border-t border-slate-100 my-1" />
@@ -2813,7 +2813,7 @@ function SlipRow({ l, r, bold }: { l: string; r: unknown; bold?: boolean }) {
   return (
     <div className="flex justify-between gap-3">
       <span className="text-slate-500 flex-shrink-0">{l}</span>
-      <span className={`text-right break-all ${bold ? "font-bold text-slate-900" : "text-slate-800"}`}>{String(r)}</span>
+      <span className={`min-w-0 flex-1 text-right break-words ${bold ? "font-bold text-slate-900" : "text-slate-800"}`}>{String(r)}</span>
     </div>
   );
 }
