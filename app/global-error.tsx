@@ -12,7 +12,18 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  useEffect(() => { console.error("[app/global-error]", error); }, [error]);
+  const isChunkError =
+    error?.name === "ChunkLoadError" ||
+    /Loading chunk [\w-]+ failed|ChunkLoadError|error loading dynamically imported module|importing a module script failed/i.test(error?.message || "");
+
+  useEffect(() => {
+    console.error("[app/global-error]", error);
+    if (isChunkError && typeof window !== "undefined") {
+      const KEY = "__chunk_reload_at";
+      const last = Number(sessionStorage.getItem(KEY) || 0);
+      if (Date.now() - last > 10000) { sessionStorage.setItem(KEY, String(Date.now())); window.location.reload(); }
+    }
+  }, [error, isChunkError]);
 
   return (
     <html lang="th">

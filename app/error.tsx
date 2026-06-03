@@ -10,10 +10,35 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  // ChunkLoadError มักเกิดหลัง deploy (ไฟล์ย่อยเปลี่ยน hash) → reload ดึงเวอร์ชันใหม่ให้อัตโนมัติ
+  const isChunkError =
+    error?.name === "ChunkLoadError" ||
+    /Loading chunk [\w-]+ failed|ChunkLoadError|error loading dynamically imported module|importing a module script failed/i.test(error?.message || "");
+
   useEffect(() => {
-    // log ไปยัง console — ในอนาคต ส่งไป error tracking service ได้ที่นี่
     console.error("[app/error]", error);
-  }, [error]);
+    if (isChunkError && typeof window !== "undefined") {
+      const KEY = "__chunk_reload_at";
+      const last = Number(sessionStorage.getItem(KEY) || 0);
+      // กู้คืนอัตโนมัติ: reload ได้ 1 ครั้งต่อ 10 วินาที (กันลูปถ้าเกิดซ้ำจริง ๆ)
+      if (Date.now() - last > 10000) {
+        sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+      }
+    }
+  }, [error, isChunkError]);
+
+  // ระหว่างกำลัง reload (chunk error) → โชว์หน้าโหลดแทนหน้า error สีแดง
+  if (isChunkError) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
+        <div className="text-center text-slate-500 text-sm">
+          <div className="w-8 h-8 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin mx-auto mb-3" />
+          กำลังโหลดเวอร์ชันใหม่…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
