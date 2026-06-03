@@ -531,6 +531,7 @@ function BillForm() {
   const [fee, setFee] = useState("");
   const [transferDate, setTransferDate] = useState(today());
   const [files, setFiles] = useState<string[]>([]);
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [feeInfo, setFeeInfo] = useState(false);
   const [savedBill, setSavedBill] = useState<Record<string, unknown> | null>(null);   // หลังบันทึก → popup พิมพ์/ส่งไลน์
@@ -560,7 +561,7 @@ function BillForm() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           supplier_id: supplierId, amount_rmb: num(amount), fee_rmb: num(fee),
-          transfer_date: transferDate || null,
+          transfer_date: transferDate || null, note: note || null,
           attachments: files, status: "รอโอน", actor: "china-app",
         }),
       });
@@ -570,7 +571,7 @@ function BillForm() {
       setSavedBill({ ...(j.data ?? {}), _sup: sup, supplier_label: sup?.name_th ?? sup?.name_en });
       // reset ฟอร์ม
       setSupplierId(null); setSup(null); setAmount(""); setFee(""); setTransferDate(today());
-      setFiles([]);
+      setFiles([]); setNote("");
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -580,11 +581,12 @@ function BillForm() {
     const sp = (b._sup ?? {}) as Record<string, unknown>;
     const total = num(b.amount_rmb) + num(b.fee_rmb);
     const link = `${typeof window !== "undefined" ? window.location.origin : ""}/app/china-pay?bill=${String(b.id)}`;
-    const text = `🧾 บิลจีนใหม่\nร้าน: ${String(b.supplier_label ?? sp.name_th ?? "—")}\nยอดโอนรวม: ¥${fmt(total)}\nวันที่วางบิล: ${String(b.transfer_date ?? "—")}\nเลขบัญชี: ${String(sp.account_number ?? "—")}\nดูในแอป: ${link}`;
+    let text = `🧾 บิลจีนใหม่\nร้าน: ${String(b.supplier_label ?? sp.name_th ?? "—")}\nยอดโอนรวม: ¥${fmt(total)}\nวันที่วางบิล: ${String(b.transfer_date ?? "—")}\nเลขบัญชี: ${String(sp.account_number ?? "—")}`;
+    if (b.note) text += `\nหมายเหตุ: ${String(b.note)}`;
     setSendingLine(true);
     try {
       const res = await apiFetch("/api/china-pay/line-push", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, button: { label: "เปิดใบสรุปบิลจีน", url: link } }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
@@ -643,6 +645,9 @@ function BillForm() {
 
       <Card>
         <FileMultiInput label="📎 ไฟล์แนบ (ใบรับ/บิล, สลิป WeChat ฯลฯ)" value={files} onChange={setFiles} folder="china-bills" />
+        <div className="mt-3"><Label>หมายเหตุ</Label>
+          <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="เช่น รายละเอียดเพิ่มเติม / ออเดอร์"
+            className="w-full px-3 py-2 text-base border border-slate-200 rounded-lg resize-none" /></div>
       </Card>
 
       <button onClick={save} disabled={saving}
@@ -659,7 +664,8 @@ function BillForm() {
             <div className="mt-1 text-sm text-slate-500">{String(savedBill.supplier_label ?? "")} · ¥{fmt(num(savedBill.amount_rmb) + num(savedBill.fee_rmb))}</div>
             <div className="mt-4 space-y-2">
               <button onClick={() => setReport(savedBill)} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์ / ใบสรุป</button>
-              <button onClick={() => sendLine(savedBill)} disabled={sendingLine} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{sendingLine ? "กำลังส่ง…" : "📩 ส่งไลน์"}</button>
+              <button onClick={() => setReport(savedBill)} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium">📩 ส่งไลน์ (รูป)</button>
+              <button onClick={() => sendLine(savedBill)} disabled={sendingLine} className="w-full h-11 border border-[#06C755] text-[#06C755] rounded-lg font-medium disabled:opacity-50">{sendingLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
               <button onClick={() => setSavedBill(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
             </div>
           </div>
@@ -2269,6 +2275,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       { l: "วันที่โอน", r: String(bill.transfer_date ?? "—") },
       { l: "วันที่ลงบิล", r: String(bill.bill_date ?? "—") },
       { l: "สถานะ", r: String(bill.status ?? "—") },
+      ...(bill.note ? [{ l: "หมายเหตุ", r: String(bill.note) } as Line] : []),
     ];
     const DPR = Math.min(window.devicePixelRatio || 1, 2);
     const W = 680, headerH = 120, rowH = 56, padX = 40, padTop = 30, padBottom = 40;
@@ -2424,6 +2431,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
               <SlipRow l="วันที่โอน" r={bill.transfer_date} />
               <SlipRow l="วันที่ลงบิล" r={bill.bill_date} />
               <SlipRow l="สถานะ" r={st} />
+              {!!bill.note && <SlipRow l="หมายเหตุ" r={String(bill.note)} />}
             </div>
           </div>
           {/* canvas ซ่อน — ใช้สร้างรูปตอนบันทึก/แชร์เท่านั้น */}
