@@ -453,11 +453,14 @@ export default function PurchasingShopPage() {
 
         {/* Grid */}
         <main className="flex-1 md:overflow-auto p-5">
-          <div className="flex items-center justify-between mb-4 gap-3">
-            <h1 className="text-xl font-semibold text-slate-800">เลือกสินค้าที่ต้องการขอซื้อ</h1>
+          <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            <h1 className="text-xl font-semibold text-slate-800 flex-shrink-0">เลือกสินค้าที่ต้องการขอซื้อ</h1>
+            {/* ช่องค้นหาด้านบน (ใช้ร่วมกับช่องค้นหาแถบซ้าย) */}
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 ค้นหาสินค้า (ชื่อ/รหัส)..."
+              className="flex-1 min-w-[180px] max-w-md h-9 px-3 text-sm border border-slate-200 rounded-md" />
             {source === "sku" && (
               <button onClick={() => setSkuForm({ mode: "create" })}
-                className="h-8 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
+                className="h-9 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
             )}
           </div>
 
