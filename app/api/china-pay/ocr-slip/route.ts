@@ -58,7 +58,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const bytes = [...new Uint8Array(buf)];
 
     const prompt = "นี่คือสลิปโอนเงินจากธนาคาร อ่านเฉพาะ 'จำนวนเงินที่โอน' (ยอดเงินหลัก) แล้วตอบกลับเป็นตัวเลขล้วนอย่างเดียว ไม่ต้องมีสกุลเงินหรือคำอื่น เช่น 20000.00";
-    const out: any = await ai.run(MODEL, { image: bytes, prompt, max_tokens: 64 });
+    // Llama 3.2 vision ต้องยอมรับ license ครั้งแรก (error 5016 → ส่ง 'agree' แล้วลองใหม่)
+    const runVision = async () => ai.run(MODEL, { image: bytes, prompt, max_tokens: 64 });
+    let out: any;
+    try { out = await runVision(); }
+    catch (e) {
+      const msg = String((e as Error)?.message ?? e);
+      if (/5016|agree/i.test(msg)) { try { await ai.run(MODEL, { prompt: "agree" }); } catch { /* noop */ } out = await runVision(); }
+      else throw e;
+    }
     const raw = String(out?.response ?? "").trim();
     const amount = parseAmount(raw);
 

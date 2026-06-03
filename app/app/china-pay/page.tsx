@@ -1297,6 +1297,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [ctw, setCtw] = useState<Record<string, unknown>[]>([]);
   const [ctwSel, setCtwSel] = useState<Set<string>>(new Set());
   const [ctwPay, setCtwPay] = useState<Record<string, string>>({});
+  // ข้อมูลบัญชีปลายทาง (partners) แมปด้วยชื่อ name_th → ใช้โชว์ใน step 3
+  const [partnerByName, setPartnerByName] = useState<Record<string, Record<string, unknown>>>({});
 
   const loadAll = useCallback(() => {
     setLoading(true);
@@ -1305,7 +1307,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       apiFetch(`/api/master-v2/china-bills?limit=200&filters=${fPending}&sort_by=bill_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch(`/api/master-v2/china-transfers?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch(`/api/master-v2/ctw-bills?limit=500&sort_by=doc_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
-    ]).then(([p, t, c]) => {
+      apiFetch(`/api/master-v2/partners-v2?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
+    ]).then(([p, t, c, pn]) => {
       setPending(p.data ?? []);
       const tr = t.data ?? [];
       setBalance({
@@ -1313,6 +1316,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         rmb: tr.reduce((a: number, r: Record<string, unknown>) => a + num(r.leftover_rmb), 0),
       });
       setCtw((c.data ?? []).filter((r: Record<string, unknown>) => !r.cleared_at));
+      const map: Record<string, Record<string, unknown>> = {};
+      (pn.data ?? []).forEach((x: Record<string, unknown>) => { const k = String(x.name_th ?? "").trim(); if (k) map[k] = x; });
+      setPartnerByName(map);
     }).finally(() => setLoading(false));
   }, []);
   useEffect(() => { loadAll(); }, [loadAll]);
@@ -1467,16 +1473,31 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
 
+  const ctwSelTotal = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);   // ยอด CTW ที่เลือกตัดรอบนี้ (฿)
+
   return (
     <div className="space-y-4">
-      {/* ยอดคงเหลือบัญชีจีน */}
-      <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 shadow-sm">
-        <div className="text-sm opacity-90">💰 ยอดคงเหลือในบัญชีจีน</div>
-        <div className="flex items-end justify-between mt-1">
-          <div className="text-3xl font-bold">฿{fmt(balance.thb)}</div>
-          <div className="text-lg font-semibold opacity-95">≈ ¥{fmt(balance.rmb)}</div>
+      {/* ยอดรวมที่ตัดรอบนี้ — ทุก step */}
+      <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
+        <div className="text-sm text-slate-500 mb-1">🧾 ยอดรวมที่ตัดรอบนี้</div>
+        <div className="space-y-0.5 text-sm">
+          <div className="flex justify-between"><span className="text-slate-500">บิลจีน ({sel.size})</span>
+            <span className="font-semibold text-slate-800">¥{fmt(selectedRmb)}{hasRate && selectedSum > 0 ? <span className="text-slate-400 font-normal"> ≈ ฿{fmt(selectedSum)}</span> : null}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">บิล CTW ({ctwSel.size})</span>
+            <span className="font-semibold text-orange-600">฿{fmt(ctwSelTotal)}</span></div>
         </div>
       </div>
+
+      {/* ยอดคงเหลือบัญชีจีน — เฉพาะ step 3 */}
+      {step === 3 && (
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 shadow-sm">
+          <div className="text-sm opacity-90">💰 ยอดคงเหลือในบัญชีจีน</div>
+          <div className="flex items-end justify-between mt-1">
+            <div className="text-3xl font-bold">฿{fmt(balance.thb)}</div>
+            <div className="text-lg font-semibold opacity-95">≈ ¥{fmt(balance.rmb)}</div>
+          </div>
+        </div>
+      )}
 
       {/* แถบบอกขั้นตอน 1-2-3 */}
       <div className="flex items-center gap-1">
@@ -1638,6 +1659,33 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             {ocrBusy ? "กำลังอ่านสลิป…" : "📷 อ่านยอดจากสลิป (AI ช่วยกรอก)"}
           </button>
         )}
+        {ctwSel.size > 0 && (
+          <div className="mt-3 rounded-lg bg-orange-50 border border-orange-100 p-3 space-y-2">
+            <div className="font-medium text-slate-700 text-sm">บิล CTW ที่ตัดรอบนี้ ({ctwSel.size})</div>
+            {[...ctwSel].map(id => {
+              const b = ctw.find(x => String(x.id) === id);
+              if (!b) return null;
+              const partner = partnerByName[String(b.company_name ?? "").trim()];
+              const acc = String(partner?.account_number ?? b.account_number ?? "");
+              return (
+                <div key={id} className="rounded-lg bg-white border border-orange-200 p-2.5">
+                  <div className="font-medium text-slate-800 text-sm truncate">{String(b.company_name ?? "—")}</div>
+                  <div className="text-[11px] text-slate-400">เลขที่ {String(b.doc_number ?? "—")}</div>
+                  <div className="mt-1 text-[11px] text-slate-500 space-y-0.5">
+                    {!!partner?.bank_account_name && <div>ชื่อบัญชี: {String(partner.bank_account_name)}</div>}
+                    {!!(partner?.bank_name ?? partner?.bank_name_brief) && <div>ธนาคาร: {String(partner.bank_name ?? partner.bank_name_brief)}</div>}
+                    {!!acc && <div>เลขบัญชี: {acc}</div>}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้ (฿)</span>
+                    <Money value={ctwPay[id] ?? ""} onChange={(v) => setCtwPay(p => ({ ...p, [id]: v }))}
+                      className="flex-1 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <button onClick={save} disabled={saving}
           className="mt-3 w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">
           {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
@@ -1677,13 +1725,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                         {paid > 0 && <span className="block text-[10px] text-slate-400">เต็ม ฿{fmt(num(r.net_amount))}</span>}
                       </span>
                     </button>
-                    {on && (
-                      <div className="px-2.5 pb-2.5 flex items-center gap-2">
-                        <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้</span>
-                        <Money value={ctwPay[id] ?? ""} onChange={(v) => setCtwPay(p => ({ ...p, [id]: v }))}
-                          className="flex-1 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
-                      </div>
-                    )}
                   </div>
                 );
               })}
