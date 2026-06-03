@@ -9,7 +9,6 @@
  */
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -189,12 +188,12 @@ export default function BomWorkspacePage() {
       } },
   ], []);
 
-  if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
+  if (!canView) return <AccessDenied />;
 
   const isCreate = form?.id == null;
 
   return (
-    <PlaygroundShell>
+    <>
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -318,6 +317,6 @@ export default function BomWorkspacePage() {
         message={`สูตร "${archiveTarget?.bom_code ?? ""}" และรายการวัตถุดิบทั้งหมดจะถูกซ่อน (กู้คืนได้ภายหลัง)`}
         confirmText="ย้ายเข้าคลังเก็บ"
       />
-    </PlaygroundShell>
+    </>
   );
 }
