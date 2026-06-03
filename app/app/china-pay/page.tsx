@@ -326,6 +326,18 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
     finally { setLineSaving(false); }
   };
 
+  // ดึง Group ID ที่ webhook จับได้ (โหลด line_config ใหม่)
+  const reloadLineCfg = async () => {
+    try {
+      const j = await apiFetch("/api/master-v2/china-app-settings?limit=20").then(r => r.json());
+      const lrow = (j.data ?? []).find((x: Record<string, unknown>) => x.skey === "line_config");
+      const v = (lrow?.sval ?? {}) as Record<string, string>;
+      if (v.group_id) { setLineGroup(String(v.group_id)); toast.success(`ได้ Group ID แล้ว: ${v.group_id}`); }
+      else toast.error("ยังไม่พบ Group ID — เชิญบอทเข้ากลุ่ม + พิมพ์ในกลุ่ม 1 ครั้งก่อน");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+  };
+  const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/china-pay/line-webhook` : "";
+
   const isOn = (role: string, k: string) => (local[role] ?? ALL_TAB_KEYS).includes(k);
   const toggle = (role: string, k: string) => setLocal(prev => {
     const cur = prev[role] ?? ALL_TAB_KEYS;
@@ -379,12 +391,25 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
         <input value={lineToken} onChange={e => setLineToken(e.target.value)} placeholder="วาง token ยาว ๆ ที่นี่"
           className="w-full h-11 px-3 text-sm border border-slate-200 rounded-lg" />
         <div className="mt-3"><Label>Group ID</Label>
-          <input value={lineGroup} onChange={e => setLineGroup(e.target.value)} placeholder="เช่น Cxxxxxxxx"
-            className="w-full h-11 px-3 text-sm border border-slate-200 rounded-lg" /></div>
+          <div className="flex gap-2">
+            <input value={lineGroup} onChange={e => setLineGroup(e.target.value)} placeholder="เช่น Cxxxxxxxx"
+              className="flex-1 h-11 px-3 text-sm border border-slate-200 rounded-lg" />
+            <button type="button" onClick={reloadLineCfg} className="flex-shrink-0 h-11 px-3 rounded-lg bg-slate-700 text-white text-xs font-medium">🔄 ดึงอัตโนมัติ</button>
+          </div>
+        </div>
         <button onClick={saveLine} disabled={lineSaving}
           className="mt-3 w-full h-11 bg-[#06C755] text-white rounded-lg font-semibold disabled:opacity-50">
           {lineSaving ? "กำลังบันทึก…" : "บันทึกตั้งค่า LINE"}
         </button>
+        {/* Webhook URL สำหรับดึง Group ID */}
+        <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-2.5">
+          <div className="text-[11px] text-slate-500 mb-1">เอา URL นี้ไปวางใน LINE Developers → Messaging API → Webhook URL (เปิด Use webhook)</div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-[11px] text-slate-700 break-all">{webhookUrl}</code>
+            <button type="button" onClick={() => { navigator.clipboard?.writeText(webhookUrl); toast.success("คัดลอก URL แล้ว"); }}
+              className="flex-shrink-0 h-8 px-2 rounded-lg bg-slate-700 text-white text-[11px]">📋</button>
+          </div>
+        </div>
       </Card>
     </div>
   );
