@@ -33,6 +33,15 @@ export type BomLine = {
   sequence:        number | null;
   source?:         string | null;
   odoo_bom_line_id?: number | null;
+  // ชั้น 2: เครื่องคำนวณบล็อกตัด
+  calc_mode?:      string | null;   // manual | block
+  cut_block_id?:   number | null;
+  cut_block_code?: string | null;
+  pieces?:         number | null;
+  cut_width?:      number | null;
+  cut_length?:     number | null;
+  face_width_cm?:  number | null;
+  material_type?:  string | null;
 };
 
 export type BomHeader = {
@@ -175,6 +184,15 @@ export function lineToRow(l: BomLine, bomCode: string, idx: number): Record<stri
     sequence:         l.sequence ?? idx + 1,
     source:           l.source ?? "manual",
     odoo_bom_line_id: l.odoo_bom_line_id ?? null,
+    // ชั้น 2: ฟิลด์คำนวณบล็อกตัด
+    calc_mode:        l.calc_mode ?? "manual",
+    cut_block_id:     l.cut_block_id ?? null,
+    cut_block_code:   l.cut_block_code || null,
+    pieces:           l.pieces != null ? Number(l.pieces) : null,
+    cut_width:        l.cut_width != null ? Number(l.cut_width) : null,
+    cut_length:       l.cut_length != null ? Number(l.cut_length) : null,
+    face_width_cm:    l.face_width_cm != null ? Number(l.face_width_cm) : null,
+    material_type:    l.material_type || null,
     is_active:        true,
   };
 }

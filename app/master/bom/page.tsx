@@ -26,6 +26,9 @@ type BomLineRow = {
   id: string; slot_code: string | null; component_sku: string | null; component_name: string | null;
   qty: number; uom: string | null; waste_percent: number | null; is_optional: boolean;
   sequence: number | null; source: string | null; odoo_bom_line_id: number | null;
+  calc_mode: string | null; cut_block_id: number | null; cut_block_code: string | null;
+  pieces: number | null; cut_width: number | null; cut_length: number | null;
+  face_width_cm: number | null; material_type: string | null;
 };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -105,6 +108,10 @@ export default function BomWorkspacePage() {
           key: l.id, slot_code: l.slot_code, component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
           qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
           source: l.source, odoo_bom_line_id: l.odoo_bom_line_id,
+          calc_mode: (l.calc_mode === "block" ? "block" : "manual") as "manual" | "block",
+          cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "",
+          pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
+          face_width_cm: Number(l.face_width_cm) || 0, material_type: l.material_type ?? "",
         })),
       });
       setDirty(false);
@@ -131,6 +138,9 @@ export default function BomWorkspacePage() {
         slot_code: l.slot_code, component_sku: l.component_sku || null, component_name: l.component_name || null,
         qty: l.qty, uom: l.uom || null, waste_percent: l.waste_percent, is_optional: l.is_optional,
         sequence: i + 1, source: l.source ?? "manual", odoo_bom_line_id: l.odoo_bom_line_id ?? null,
+        calc_mode: l.calc_mode, cut_block_id: l.cut_block_id, cut_block_code: l.cut_block_code || null,
+        pieces: l.pieces, cut_width: l.cut_width, cut_length: l.cut_length,
+        face_width_cm: l.face_width_cm, material_type: l.material_type || null,
       })),
     };
     try {
