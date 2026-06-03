@@ -54,8 +54,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .in("id", prIds);
   if (prErr) return NextResponse.json({ error: prErr.message }, { status: 500 });
 
-  const usable = (prs ?? []).filter((p) => (p as PR).status === "waiting" && !(p as PR).po_id) as PR[];
-  if (usable.length === 0) return NextResponse.json({ error: "รายการที่เลือกถูกสั่งซื้อไปแล้ว หรือไม่อยู่ในสถานะรอ" }, { status: 400 });
+  // ขั้น 2: สร้าง PO ได้เฉพาะใบที่ "อนุมัติแล้ว" (approved) และยังไม่ถูกแปลงเป็น PO
+  const usable = (prs ?? []).filter((p) => (p as PR).status === "approved" && !(p as PR).po_id) as PR[];
+  if (usable.length === 0) return NextResponse.json({ error: "ต้องเป็นใบที่ 'อนุมัติแล้ว' และยังไม่ถูกสั่งซื้อ" }, { status: 400 });
 
   // จัดกลุ่มตามร้าน + สกุลเงิน
   const groups = new Map<string, PR[]>();

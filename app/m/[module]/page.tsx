@@ -7,18 +7,67 @@
  */
 import { useParams } from "next/navigation";
 import { MasterPage, type MasterPageProps } from "@/components/master-page";
+import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 
-/** bulk action เฉพาะหน้าใบขอซื้อ: เลือกหลายรายการ → สร้างใบสั่งซื้อ (แยกตามร้าน) */
-function purchaseRequestActions(): NonNullable<MasterPageProps["extraBulkActions"]> {
-  return [{
+type BulkActions = NonNullable<MasterPageProps["extraBulkActions"]>;
+
+/**
+ * bulk action เฉพาะหน้าใบขอซื้อ (PR v2):
+ *  - อนุมัติ / ไม่อนุมัติ (ขั้น 2 — เฉพาะผู้มีสิทธิ์ pr.approve / pr.reject)
+ *  - สร้างใบสั่งซื้อ จากใบที่ "อนุมัติแล้ว" (แยกตามร้าน)
+ */
+function purchaseRequestActions(opts: { actor?: string; canApprove: boolean; canReject: boolean }): BulkActions {
+  const { actor, canApprove, canReject } = opts;
+  const actions: BulkActions = [];
+
+  if (canApprove) {
+    actions.push({
+      label: "✅ อนุมัติ",
+      onClick: async (selected) => {
+        const usable = selected.filter((r) => r.status === "waiting");
+        if (usable.length === 0) { alert("เลือกได้เฉพาะใบที่ยัง 'รออนุมัติ' (waiting)"); return; }
+        if (!confirm(`อนุมัติใบขอซื้อ ${usable.length} ใบ?`)) return;
+        const res = await apiFetch("/api/purchasing/pr-approve", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "approve", pr_ids: usable.map((r) => r.id), actor }),
+        });
+        const j = await res.json();
+        if (j.error) { alert("อนุมัติไม่สำเร็จ: " + j.error); return; }
+        alert(`✅ อนุมัติแล้ว ${j.updated} ใบ — สร้างใบสั่งซื้อได้แล้ว`);
+      },
+    });
+  }
+
+  if (canReject) {
+    actions.push({
+      label: "❌ ไม่อนุมัติ",
+      variant: "danger",
+      onClick: async (selected) => {
+        const usable = selected.filter((r) => r.status === "waiting");
+        if (usable.length === 0) { alert("เลือกได้เฉพาะใบที่ยัง 'รออนุมัติ' (waiting)"); return; }
+        const reason = prompt(`ระบุเหตุผลที่ไม่อนุมัติ (${usable.length} ใบ):`);
+        if (reason === null) return;               // กดยกเลิก
+        if (!reason.trim()) { alert("ต้องระบุเหตุผล"); return; }
+        const res = await apiFetch("/api/purchasing/pr-approve", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reject", reason, pr_ids: usable.map((r) => r.id), actor }),
+        });
+        const j = await res.json();
+        if (j.error) { alert("ไม่สำเร็จ: " + j.error); return; }
+        alert(`ไม่อนุมัติแล้ว ${j.updated} ใบ`);
+      },
+    });
+  }
+
+  actions.push({
     label: "🧾 สร้างใบสั่งซื้อ",
     onClick: async (selected) => {
-      // เฉพาะที่ยังรออยู่ (waiting) และยังไม่ถูกแปลงเป็น PO
-      const usable = selected.filter((r) => r.status === "waiting" && !r.po_id);
-      if (usable.length === 0) { alert("รายการที่เลือกถูกสั่งซื้อไปแล้ว หรือไม่อยู่ในสถานะ 'waiting'"); return; }
+      // เฉพาะที่ "อนุมัติแล้ว" และยังไม่ถูกแปลงเป็น PO (ขั้น 2: ต้องผ่านอนุมัติก่อน)
+      const usable = selected.filter((r) => r.status === "approved" && !r.po_id);
+      if (usable.length === 0) { alert("สร้างใบสั่งซื้อได้เฉพาะใบที่ 'อนุมัติแล้ว' (approved) และยังไม่ถูกสั่งซื้อ"); return; }
 
       // สรุปแยกตามร้าน + สกุลเงิน
       const groups = new Map<string, { seller: string; currency: string; count: number; total: number }>();
@@ -43,7 +92,7 @@ function purchaseRequestActions(): NonNullable<MasterPageProps["extraBulkActions
       const res = await apiFetch("/api/purchasing/create-po", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pr_ids: usable.map((r) => r.id) }),
+        body: JSON.stringify({ pr_ids: usable.map((r) => r.id), actor }),
       });
       const j = await res.json();
       if (j.error) { alert("สร้างไม่สำเร็จ: " + j.error); return; }
@@ -54,14 +103,21 @@ function purchaseRequestActions(): NonNullable<MasterPageProps["extraBulkActions
         `\n\nดูได้ที่หน้า "ใบสั่งซื้อ"`,
       );
     },
-  }];
+  });
+
+  return actions;
 }
 
 export default function GenericModulePage() {
   const params = useParams();
+  const { user, can } = useAuth();
   const moduleKey = String(params.module ?? "");
+
+  const extraBulkActions = moduleKey === "purchase-requests-v2"
+    ? purchaseRequestActions({ actor: user?.name, canApprove: can("pr.approve"), canReject: can("pr.reject") })
+    : undefined;
+
   if (!moduleKey) return <div className="p-10 text-center text-slate-400">ไม่พบโมดูล</div>;
-  const extraBulkActions = moduleKey === "purchase-requests-v2" ? purchaseRequestActions() : undefined;
   return (
     <MasterPage
       apiPath={moduleKey}
