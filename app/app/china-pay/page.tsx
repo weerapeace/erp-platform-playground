@@ -262,8 +262,8 @@ export default function ChinaPayApp() {
           {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
         </main>
 
-        {/* แถบเมนูล่าง */}
-        {cols > 0 && (
+        {/* แถบเมนูล่าง — ซ่อนตอนอยู่หน้าโอน (ใช้ ☰ สลับแทน) เพื่อให้ปุ่มบันทึกติดล่างสุดไม่ซ้อน */}
+        {cols > 0 && renderTab !== "transfer" && (
           <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 grid z-20 px-1 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] shadow-[0_-6px_20px_rgba(0,0,0,0.06)]"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
             {bottomItems.map(m => {
@@ -1953,7 +1953,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
-      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+      <div className="sticky bottom-0 z-30 -mx-4 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-slate-50 border-t border-slate-200">
         <button onClick={() => setStep(2)} disabled={sel.size === 0 || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: ยืนยันการโอน →"}
@@ -2058,7 +2058,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
         {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
       </Card>
-      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
+      <div className="sticky bottom-0 z-30 -mx-4 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
         <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
@@ -2133,7 +2133,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
       )}
 
-      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+      <div className="sticky bottom-0 z-30 -mx-4 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-slate-50 border-t border-slate-200">
         <button onClick={save} disabled={saving || ctwOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform shadow-lg shadow-emerald-500/30">
           {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}

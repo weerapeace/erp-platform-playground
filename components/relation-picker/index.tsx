@@ -242,10 +242,10 @@ export function RelationPicker({
       {open && (
         <>
           {/* backdrop — มือถือเปิดเป็น popup เต็มจอ */}
-          <div className="fixed inset-0 z-40 bg-black/40 sm:hidden" onClick={() => setOpen(false)} />
-          <div className="z-50 bg-white flex flex-col overflow-hidden
-                          fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-2xl shadow-2xl
-                          sm:absolute sm:inset-x-0 sm:bottom-auto sm:top-full sm:mt-1 sm:max-h-80 sm:rounded-lg sm:border sm:border-slate-200 sm:shadow-lg">
+          <div className="fixed inset-0 z-[55] bg-black/40 sm:hidden" onClick={() => setOpen(false)} />
+          <div className="z-[60] bg-white flex flex-col overflow-hidden
+                          fixed inset-0
+                          sm:absolute sm:inset-auto sm:left-0 sm:right-0 sm:top-full sm:mt-1 sm:max-h-80 sm:rounded-lg sm:border sm:border-slate-200 sm:shadow-lg sm:z-50">
             {/* หัว (เฉพาะมือถือ) */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sm:hidden">
               <span className="font-semibold text-slate-800">เลือกรายการ</span>
