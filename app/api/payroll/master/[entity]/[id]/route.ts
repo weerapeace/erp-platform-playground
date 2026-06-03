@@ -6,13 +6,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getEntityCfg, getMaster, updateMaster, softDeleteMaster } from "@/lib/payroll-master-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Ctx = { params: Promise<{ entity: string; id: string }> };
 
-export async function GET(_req: NextRequest, ctx: Ctx) {
+export async function GET(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req); if (denied) return denied;
   const { entity, id } = await ctx.params;
   const cfg = getEntityCfg(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
@@ -26,6 +28,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;
   const { entity, id } = await ctx.params;
   const cfg = getEntityCfg(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
@@ -46,6 +49,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 }
 
 export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;
   const { entity, id } = await ctx.params;
   const cfg = getEntityCfg(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });

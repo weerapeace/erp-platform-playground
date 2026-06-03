@@ -7,11 +7,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { listContracts, createContract } from "@/lib/payroll-contracts-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
+  const denied = await guardPayroll(req); if (denied) return denied;
   try {
     const includeInactive = req.nextUrl.searchParams.get("include_inactive") !== "false";
     const rows = await listContracts(includeInactive);
@@ -22,6 +24,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await guardPayroll(req, "employees.create"); if (denied) return denied;
   let body: Record<string, unknown>;
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }

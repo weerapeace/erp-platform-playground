@@ -11,13 +11,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getEmployee, updateEmployee, softDeleteEmployee } from "@/lib/payroll-employees-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(_req: NextRequest, ctx: Ctx) {
+export async function GET(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req); if (denied) return denied;
   const { id } = await ctx.params;
   try {
     const row = await getEmployee(id);
@@ -29,6 +31,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;
   const { id } = await ctx.params;
   let body: Record<string, unknown>;
   try { body = await req.json(); }
@@ -49,6 +52,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 }
 
 export async function DELETE(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;
   const { id } = await ctx.params;
   // ลบถาวรไม่ได้ — กันข้อมูลพนักงานจริงหาย (มีสัญญา/เงินเดือน/สลิปผูกอยู่)
   if (req.nextUrl.searchParams.get("hard") === "1") {

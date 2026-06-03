@@ -2,8 +2,9 @@
  * Payroll module — Dashboard summary API (read-only) / Phase 4
  * GET /api/payroll/dashboard → ตัวเลขสรุปภาพรวม
  */
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,7 +16,8 @@ async function count(table: string, eq?: [string, string]): Promise<number> {
   return count ?? 0;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const denied = await guardPayroll(req); if (denied) return denied;
   try {
     const [
       employeesTotal, employeesActive, contractsActive,

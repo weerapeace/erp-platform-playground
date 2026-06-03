@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getEntityCfg, listMaster, createMaster } from "@/lib/payroll-master-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,6 +16,7 @@ export const revalidate = 0;
 type Ctx = { params: Promise<{ entity: string }> };
 
 export async function GET(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req); if (denied) return denied;
   const { entity } = await ctx.params;
   const cfg = getEntityCfg(entity);
   if (!cfg) return NextResponse.json({ data: [], error: "entity ไม่รองรับ" }, { status: 400 });
@@ -28,6 +30,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req, "employees.create"); if (denied) return denied;
   const { entity } = await ctx.params;
   const cfg = getEntityCfg(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });

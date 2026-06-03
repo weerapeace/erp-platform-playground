@@ -7,6 +7,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getViewCfg, listView } from "@/lib/payroll-view-db";
+import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -14,6 +15,7 @@ export const revalidate = 0;
 type Ctx = { params: Promise<{ entity: string }> };
 
 export async function GET(req: NextRequest, ctx: Ctx) {
+  const denied = await guardPayroll(req); if (denied) return denied;
   const { entity } = await ctx.params;
   const cfg = getViewCfg(entity);
   if (!cfg) return NextResponse.json({ data: [], error: "entity ไม่รองรับ" }, { status: 400 });
