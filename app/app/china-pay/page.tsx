@@ -538,18 +538,19 @@ function StatCard({ label, main, sub, onClick, wide }: { label: string; main: st
 // ---------------- ลงบิล (ไม่ใส่เรท — เรทมาตอนโอน) ----------------
 function BillForm() {
   const toast = useToast();
+  const celebrate = useCelebrate();
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [amount, setAmount] = useState("");
   const [fee, setFee] = useState("");
   const [transferDate, setTransferDate] = useState(today());
+  const [billDate, setBillDate] = useState(today());   // วันที่ลงบิล (default วันนี้)
   const [files, setFiles] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [feeInfo, setFeeInfo] = useState(false);
-  const [savedBill, setSavedBill] = useState<Record<string, unknown> | null>(null);   // หลังบันทึก → popup พิมพ์/ส่งไลน์
+  const [savedBill, setSavedBill] = useState<Record<string, unknown> | null>(null);   // หลังบันทึก → popup พิมพ์
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
-  const [sendingLine, setSendingLine] = useState(false);
 
   // ค่าโอนอัตโนมัติตามยอด (แก้มือทับได้)
   useEffect(() => {
@@ -574,42 +575,20 @@ function BillForm() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           supplier_id: supplierId, amount_rmb: num(amount), fee_rmb: num(fee),
-          transfer_date: transferDate || null, note: note || null,
+          transfer_date: transferDate || null, bill_date: billDate || null, note: note || null,
           attachments: files, status: "รอโอน", actor: "china-app",
         }),
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      // เก็บบิลที่เพิ่งบันทึก (พร้อมข้อมูลร้าน) ไว้ทำ popup พิมพ์/ส่งไลน์
+      celebrate("บันทึกบิลแล้ว 🎉", { confetti: true });
+      // เก็บบิลที่เพิ่งบันทึก (พร้อมข้อมูลร้าน) ไว้ทำ popup พิมพ์
       setSavedBill({ ...(j.data ?? {}), _sup: sup, supplier_label: sup?.name_th ?? sup?.name_en });
       // reset ฟอร์ม
-      setSupplierId(null); setSup(null); setAmount(""); setFee(""); setTransferDate(today());
+      setSupplierId(null); setSup(null); setAmount(""); setFee(""); setTransferDate(today()); setBillDate(today());
       setFiles([]); setNote("");
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
-  };
-
-  // ส่งรายละเอียดบิลเข้า LINE (อัตโนมัติถ้าตั้งค่า Bot แล้ว / ไม่งั้น share เลือกกลุ่มเอง) + แนบลิงก์เปิดบิลในแอป
-  const sendLine = async (b: Record<string, unknown>) => {
-    const sp = (b._sup ?? {}) as Record<string, unknown>;
-    const total = num(b.amount_rmb) + num(b.fee_rmb);
-    const link = `${typeof window !== "undefined" ? window.location.origin : ""}/app/china-pay?bill=${String(b.id)}`;
-    let text = `🧾 บิลจีนใหม่\nร้าน: ${String(b.supplier_label ?? sp.name_th ?? "—")}\nยอดโอนรวม: ¥${fmt(total)}\nวันที่วางบิล: ${String(b.transfer_date ?? "—")}\nเลขบัญชี: ${String(sp.account_number ?? "—")}`;
-    if (b.note) text += `\nหมายเหตุ: ${String(b.note)}`;
-    setSendingLine(true);
-    try {
-      const res = await apiFetch("/api/china-pay/line-push", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, button: { label: "เปิดใบสรุปบิลจีน", url: link } }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
-      // ยังไม่ตั้งค่า Bot → เปิด LINE ให้เลือกกลุ่มเอง
-      if (j.needConfig) { toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง"); }
-      else { toast.error(j.error ?? "ส่ง LINE ไม่ได้ — เปิดให้เลือกกลุ่มเอง"); }
-      window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
-    } catch {
-      window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
-    } finally { setSendingLine(false); }
   };
 
   return (
@@ -645,9 +624,14 @@ function BillForm() {
             {FEE_TABLE.map(t => <div key={t.label} className="flex justify-between"><span className="text-slate-500">{t.label}</span><span className="text-slate-700">{t.fee} หยวน</span></div>)}
           </div>
         )}
-        <div className="mt-3"><Label>วันที่วางบิล</Label>
-          <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
-            className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div><Label>วันที่วางบิล</Label>
+            <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
+              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+          <div><Label>วันที่ลงบิล</Label>
+            <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)}
+              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+        </div>
         {/* สรุปยอด ¥ (เรทมาตอนโอน) */}
         <div className="mt-3 rounded-lg bg-orange-50 border border-orange-100 p-3 flex justify-between items-center">
           <div className="text-sm text-slate-600">ยอดโอนรวม</div>
@@ -677,8 +661,6 @@ function BillForm() {
             <div className="mt-1 text-sm text-slate-500">{String(savedBill.supplier_label ?? "")} · ¥{fmt(num(savedBill.amount_rmb) + num(savedBill.fee_rmb))}</div>
             <div className="mt-4 space-y-2">
               <button onClick={() => setReport(savedBill)} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์ / ใบสรุป</button>
-              <button onClick={() => setReport(savedBill)} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium">📩 ส่งไลน์ (รูป)</button>
-              <button onClick={() => sendLine(savedBill)} disabled={sendingLine} className="w-full h-11 border border-[#06C755] text-[#06C755] rounded-lg font-medium disabled:opacity-50">{sendingLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
               <button onClick={() => setSavedBill(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
             </div>
           </div>
@@ -1542,6 +1524,31 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
   const [sendingId, setSendingId] = useState("");
   const [delTarget, setDelTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังยืนยันลบ
   const [busy, setBusy] = useState(false);
+  const [slipTarget, setSlipTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังแนบสลิป
+  const [slipKeys, setSlipKeys] = useState<string[]>([]);
+  const [slipBusy, setSlipBusy] = useState(false);
+
+  const openSlip = (r: Record<string, unknown>) => {
+    setSlipTarget(r);
+    setSlipKeys(Array.isArray(r.attachments) ? (r.attachments as unknown[]).map(String) : []);
+  };
+  const saveSlip = async () => {
+    if (!slipTarget) return;
+    const id = String(slipTarget.id);
+    setSlipBusy(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/china-transfers/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ attachments: slipKeys, actor: "china-app" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j.error) { toast.error(j.error); return; }
+      setRows(p => p.map(x => String(x.id) === id ? { ...x, attachments: slipKeys } : x));
+      toast.success(slipKeys.length ? "บันทึกสลิป → โอนแล้ว" : "บันทึกแล้ว");
+      setSlipTarget(null);
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSlipBusy(false); }
+  };
 
   // ลบรายการโอน + คืนยอดบิลที่เกี่ยวข้อง (paid_rmb / cleared_amount คำนวณใหม่จากการโอนที่เหลือ)
   const removeTransfer = async (target: Record<string, unknown>) => {
@@ -1601,6 +1608,8 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
         const cn = ls.filter(l => l.kind === "china").length, cw = ls.filter(l => l.kind === "ctw").length;
         const t = buildTransferReceipt(r, pmap);
         const id = String(r.id);
+        const slipCount = Array.isArray(r.attachments) ? (r.attachments as unknown[]).length : 0;
+        const transferred = slipCount > 0;   // มีสลิป = โอนแล้ว / ไม่มี = ยังไม่โอน
         return (
           <Card key={id}>
             <button onClick={() => setReceipt(t)} className="w-full flex justify-between items-start gap-2 text-left">
@@ -1609,13 +1618,22 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
                 <div className="text-xs text-slate-400">{String(r.transfer_date ?? "—")}{r.ref_no ? ` · ${String(r.ref_no)}` : ""}</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">บิลจีน {cn} · CTW {cw}</div>
               </div>
-              <div className="font-bold text-emerald-700 flex-shrink-0">฿{fmt(num(r.amount_transferred_thb))}</div>
+              <div className="text-right flex-shrink-0">
+                <div className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</div>
+                <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${transferred ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  {transferred ? `✓ โอนแล้ว${slipCount > 1 ? ` (${slipCount})` : ""}` : "○ ยังไม่โอน"}
+                </span>
+              </div>
             </button>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <button onClick={() => setReceipt(t)} className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์/ใบสรุป</button>
               <button onClick={async () => { setSendingId(id); await pushTransferLine(t, toast); setSendingId(""); }} disabled={sendingId === id}
                 className="h-10 bg-[#06C755] text-white rounded-lg text-sm font-medium disabled:opacity-50">{sendingId === id ? "กำลังส่ง…" : "📩 ส่งไลน์"}</button>
             </div>
+            <button onClick={() => openSlip(r)}
+              className={`mt-2 w-full h-10 rounded-lg text-sm font-medium border ${transferred ? "border-slate-300 text-slate-600 hover:bg-slate-50" : "border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100"}`}>
+              📎 {transferred ? "ดู/แก้สลิป" : "แนบสลิป (ยืนยันว่าโอนแล้ว)"}
+            </button>
             {canDelete && (
               <button onClick={() => setDelTarget(r)} disabled={busy}
                 className="mt-2 w-full h-10 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 disabled:opacity-50">🗑 ลบรายการโอน (คืนยอดบิล)</button>
@@ -1624,6 +1642,22 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
         );
       })}
       {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)} />}
+      {slipTarget && (
+        <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !slipBusy && setSlipTarget(null)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+              <div className="font-semibold text-slate-800">แนบสลิปการโอน · {String(slipTarget.transfer_no ?? "—")}</div>
+              <button onClick={() => !slipBusy && setSlipTarget(null)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+            </div>
+            <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-3">
+              <div className="text-xs text-slate-500">แนบสลิปแล้ว = รายการนี้จะขึ้นสถานะ <span className="font-medium text-emerald-700">“โอนแล้ว”</span> · ถ้าลบสลิปออกหมดจะกลับเป็น “ยังไม่โอน”</div>
+              <FileMultiInput label="📎 สลิปการโอน" value={slipKeys} onChange={setSlipKeys} folder="china-transfers" />
+              <button onClick={saveSlip} disabled={slipBusy}
+                className="w-full h-11 bg-orange-600 text-white rounded-lg font-medium disabled:opacity-50">{slipBusy ? "กำลังบันทึก…" : "บันทึก"}</button>
+            </div>
+          </div>
+        </div></Portal>
+      )}
       {delTarget && (
         <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
           confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
@@ -2286,6 +2320,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
   const [busy, setBusy] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [sendState, setSendState] = useState<"" | "sending" | "sent">("");
   useEffect(() => {
     const f = (document as Document & { fonts?: FontFaceSet & { load?: (s: string) => Promise<unknown>; ready?: Promise<unknown> } }).fonts;
     if (!f) { setFontsReady(true); return; }
@@ -2379,9 +2414,9 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
 
   // ส่งใบสรุปการโอน "เป็นรูป" + สลิปที่แนบ เข้า LINE กลุ่ม
   const sendLineImage = async () => {
-    setBusy(true);
+    setBusy(true); setSendState("sending");
     try {
-      const cv = canvasRef.current; if (!cv) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      const cv = canvasRef.current; if (!cv) { toast.error("สร้างรูปไม่สำเร็จ"); setSendState(""); return; }
       const dataUrl = cv.toDataURL("image/png");
       const cfg: Record<string, string> = await apiFetch("/api/master-v2/china-app-settings?limit=20").then(r => r.json())
         .then(j => ((j.data ?? []).find((x: Record<string, unknown>) => x.skey === "line_config")?.sval ?? {}))
@@ -2409,10 +2444,11 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
       }
       const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปการโอน", url: link } }) });
       const j = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); return; }
+      if (res.ok) { setSendState("sent"); setTimeout(() => setSendState(""), 1600); toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); return; }
+      setSendState("");
       if (j.needConfig) { toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง"); window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); }
       else toast.error(j.error ?? "ส่ง LINE ไม่ได้");
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    } catch (e) { setSendState(""); toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   };
 
@@ -2520,6 +2556,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
           <button onClick={(e) => { e.stopPropagation(); setLightbox(null); }} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
         </div></Portal>
       )}
+      {sendState && <SendingOverlay state={sendState} />}
     </div>
     </Portal>
   );
@@ -2549,6 +2586,19 @@ function ConfirmPopup({ title, message, confirmText = "ยืนยัน", tone
   );
 }
 
+// ---------------- Overlay "กำลังส่ง/ส่งแล้ว" เข้า LINE (ของกลาง) ----------------
+function SendingOverlay({ state }: { state: "sending" | "sent" }) {
+  return (
+    <Portal><div className="fixed inset-0 z-[320] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl px-8 py-6 text-center shadow-xl cpok-card min-w-[200px]">
+        {state === "sending"
+          ? <><div className="text-4xl"><span className="cp-spin inline-block">⏳</span></div><div className="mt-3 text-slate-700 font-medium">กำลังส่งเข้า LINE…</div></>
+          : <><div className="text-5xl">✅</div><div className="mt-2 text-emerald-700 font-semibold">ส่งเข้า LINE แล้ว</div></>}
+      </div>
+    </div></Portal>
+  );
+}
+
 // ---------------- ใบสรุป (report) → บันทึกรูป / ส่ง LINE ----------------
 function ReportPopup({ bill, onClose, onPrinted }: {
   bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void;
@@ -2559,6 +2609,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
   const [busy, setBusy] = useState(false);
   const [fontsReady, setFontsReady] = useState(false);
   const [printedLabel] = useState(() => new Date().toLocaleString("th-TH"));
+  const [sendState, setSendState] = useState<"" | "sending" | "sent">("");
 
   const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
   useEffect(() => {
@@ -2702,9 +2753,9 @@ function ReportPopup({ bill, onClose, onPrinted }: {
 
   // ส่งใบสรุป "เป็นรูป" เข้า LINE กลุ่ม (อัปโหลด R2 public → push image) + ข้อความ + ลิงก์เปิดบิล
   const sendLineImage = async () => {
-    setBusy(true);
+    setBusy(true); setSendState("sending");
     try {
-      const cv = canvasRef.current; if (!cv) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      const cv = canvasRef.current; if (!cv) { toast.error("สร้างรูปไม่สำเร็จ"); setSendState(""); return; }
       const dataUrl = cv.toDataURL("image/png");
       const cfg: Record<string, string> = await apiFetch("/api/master-v2/china-app-settings?limit=20").then(r => r.json())
         .then(j => ((j.data ?? []).find((x: Record<string, unknown>) => x.skey === "line_config")?.sval ?? {}))
@@ -2732,10 +2783,11 @@ function ReportPopup({ bill, onClose, onPrinted }: {
       }
       const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปบิลจีน", url: link } }) });
       const j = await res.json().catch(() => ({}));
-      if (res.ok) { toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); await markPrinted(); return; }
+      if (res.ok) { setSendState("sent"); setTimeout(() => setSendState(""), 1600); toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); await markPrinted(); return; }
+      setSendState("");
       if (j.needConfig) { toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง"); window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); }
       else toast.error(j.error ?? "ส่ง LINE ไม่ได้");
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    } catch (e) { setSendState(""); toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   };
 
@@ -2790,6 +2842,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
           <button onClick={sendLineImage} disabled={busy} className="w-full h-12 bg-[#06C755] text-white rounded-xl font-medium disabled:opacity-50">📩 ส่งเข้า LINE กลุ่ม (รูป)</button>
         </div>
       </div>
+      {sendState && <SendingOverlay state={sendState} />}
     </div>
     </Portal>
   );
