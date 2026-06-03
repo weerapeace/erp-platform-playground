@@ -11,6 +11,7 @@ import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { StockMovement, MovementsResponse } from "@/app/api/inventory/movements/route";
 import type { StockBalance, BalancesResponse } from "@/app/api/inventory/balances/route";
+import type { ReorderItem, ReorderResponse } from "@/app/api/inventory/reorder/route";
 
 // ---- Movement type config ----
 const MOVE_TYPE: Record<string, { icon: string; label: string; color: string }> = {
@@ -27,7 +28,7 @@ const fmtMoney = (n: number) => "฿" + Number(n).toLocaleString("th-TH", { mini
 // Page
 // ============================================================
 
-type Tab = "movements" | "stock";
+type Tab = "movements" | "stock" | "reorder";
 
 export default function InventoryPage() {
   const canView   = usePermission("stock.view");
@@ -38,8 +39,15 @@ export default function InventoryPage() {
   const [tab, setTab] = useState<Tab>("movements");
   const [moves, setMoves]       = useState<StockMovement[]>([]);
   const [balances, setBalances] = useState<StockBalance[]>([]);
+  const [reorder, setReorder]   = useState<ReorderItem[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error,   setError]     = useState<string | null>(null);
+
+  // ตั้งจุดสั่งซื้อ (min stock) modal
+  const [minModal, setMinModal]   = useState<ReorderItem | { product_id: string; sku: string | null; name: string; min_stock: number; reorder_qty: number } | null>(null);
+  const [minVal, setMinVal]       = useState("0");
+  const [reorderVal, setReorderVal] = useState("0");
+  const [minSaving, setMinSaving] = useState(false);
 
   // create modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -70,7 +78,7 @@ export default function InventoryPage() {
         const json: MovementsResponse = await res.json();
         if (json.error) throw new Error(json.error);
         setMoves(json.data);
-      } else {
+      } else if (tab === "stock") {
         const params = new URLSearchParams();
         if (filterWh) params.set("warehouse_id", filterWh.id);
         if (showLowOnly) params.set("low_stock", "true");
@@ -78,10 +86,46 @@ export default function InventoryPage() {
         const json: BalancesResponse = await res.json();
         if (json.error) throw new Error(json.error);
         setBalances(json.data);
+      } else {
+        const res = await apiFetch(`/api/inventory/reorder`);
+        const json: ReorderResponse = await res.json();
+        if (json.error) throw new Error(json.error);
+        setReorder(json.data);
       }
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
   }, [tab, filterWh, showLowOnly]);
+
+  // ตั้งจุดสั่งซื้อ
+  const openMinModal = (r: ReorderItem) => {
+    setMinModal(r); setMinVal(String(r.min_stock)); setReorderVal(String(r.reorder_qty));
+  };
+  // เริ่มเฝ้าระวังจากแท็บ Stock Balance (ยังไม่รู้ค่าปัจจุบัน → เริ่มที่ 0)
+  const openMinFromBalance = (b: StockBalance) => {
+    setMinModal({ product_id: b.product_id, sku: b.product_sku, name: b.product_name, min_stock: 0, reorder_qty: 0 });
+    setMinVal("0"); setReorderVal("0");
+  };
+  const saveMin = async () => {
+    if (!minModal) return;
+    setMinSaving(true);
+    try {
+      const res = await apiFetch("/api/inventory/reorder", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_id: minModal.product_id,
+          min_stock: parseFloat(minVal) || 0,
+          reorder_qty: parseFloat(reorderVal) || 0,
+          actor: user?.name,
+        }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash("บันทึกจุดสั่งซื้อแล้ว");
+      setMinModal(null);
+      await fetchData();
+    } catch (err) { setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
+    finally { setMinSaving(false); }
+  };
 
   useEffect(() => { if (canView) fetchData(); }, [canView, fetchData]);
 
@@ -224,6 +268,28 @@ export default function InventoryPage() {
     },
   ], []);
 
+  // ---- Columns: reorder (จุดสั่งซื้อ) ----
+  const reorderColumns = useMemo<ColumnDef<ReorderItem>[]>(() => [
+    { id: "sku", accessorKey: "sku", header: "SKU", size: 110,
+      cell: ({ getValue }) => <span className="font-mono text-xs text-slate-600">{String(getValue() ?? "")}</span> },
+    { id: "name", accessorKey: "name", header: "สินค้า", size: 220 },
+    { id: "total_available", accessorKey: "total_available", header: "คงเหลือ", size: 100,
+      cell: ({ getValue }) => {
+        const n = getValue() as number;
+        return <span className={`tabular-nums font-mono font-semibold ${n <= 0 ? "text-red-700" : "text-amber-700"}`}>{fmtQty(n)}</span>;
+      } },
+    { id: "min_stock", accessorKey: "min_stock", header: "จุดสั่งซื้อ", size: 100,
+      cell: ({ getValue }) => <span className="tabular-nums font-mono text-xs text-slate-500">{fmtQty(getValue() as number)}</span> },
+    { id: "suggested_qty", accessorKey: "suggested_qty", header: "แนะนำสั่ง", size: 110,
+      cell: ({ getValue, row }) => (
+        <span className="tabular-nums font-mono font-semibold text-blue-700">
+          {fmtQty(getValue() as number)} <span className="text-[10px] text-slate-400">{row.original.uom_name}</span>
+        </span>
+      ) },
+    { id: "avg_cost", accessorKey: "avg_cost", header: "ทุน/หน่วย", size: 100,
+      cell: ({ getValue }) => <span className="tabular-nums font-mono text-xs">{fmtMoney(getValue() as number)}</span> },
+  ], []);
+
   // summary
   const summary = useMemo(() => {
     const totalValue = balances.reduce((s, b) => s + b.total_value, 0);
@@ -270,6 +336,10 @@ export default function InventoryPage() {
             <button onClick={() => setTab("stock")}
               className={`h-9 px-4 text-sm font-medium border-l border-slate-200 ${tab === "stock" ? "bg-blue-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
               📊 Stock Balance ({balances.length})
+            </button>
+            <button onClick={() => setTab("reorder")}
+              className={`h-9 px-4 text-sm font-medium border-l border-slate-200 ${tab === "reorder" ? "bg-amber-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}>
+              ⚠️ จุดสั่งซื้อ {reorder.length > 0 && <span className={`ml-1 px-1.5 rounded-full text-[10px] ${tab === "reorder" ? "bg-white/25" : "bg-amber-100 text-amber-700"}`}>{reorder.length}</span>}
             </button>
           </div>
 
@@ -319,7 +389,7 @@ export default function InventoryPage() {
             canCheck={(p) => can(p as Parameters<typeof can>[0])}
             pageSize={20}
           />
-        ) : (
+        ) : tab === "stock" ? (
           <DataTable
             tableId="inventory-balances"
             data={balances}
@@ -330,8 +400,38 @@ export default function InventoryPage() {
             exportFilename="stock-balances"
             exportEntityType="erp_playground_stock_balance"
             canCheck={(p) => can(p as Parameters<typeof can>[0])}
+            rowActions={canAdjust ? [
+              { label: "ตั้งจุดสั่งซื้อ", icon: "⚙", onClick: (b) => openMinFromBalance(b) },
+            ] : []}
             pageSize={30}
           />
+        ) : (
+          <>
+            {!loading && reorder.length === 0 && (
+              <div className="px-4 py-12 bg-white border border-dashed border-emerald-300 rounded-xl text-center">
+                <div className="text-3xl mb-2">✅</div>
+                <p className="text-sm text-emerald-700 font-medium">ไม่มีสินค้าที่ถึงจุดสั่งซื้อ</p>
+                <p className="text-xs text-slate-400 mt-1">ตั้งค่า &ldquo;จุดสั่งซื้อ&rdquo; ในแท็บ Stock Balance หรือกดปุ่ม ⚙ ในรายการเพื่อเริ่มเฝ้าระวัง</p>
+              </div>
+            )}
+            {(loading || reorder.length > 0) && (
+              <DataTable
+                tableId="inventory-reorder"
+                data={reorder}
+                columns={reorderColumns}
+                loading={loading}
+                searchableKeys={["sku", "name"]}
+                searchPlaceholder="ค้นหา SKU / สินค้า..."
+                exportFilename="reorder-list"
+                exportEntityType="erp_playground_reorder"
+                canCheck={(p) => can(p as Parameters<typeof can>[0])}
+                rowActions={canAdjust ? [
+                  { label: "ตั้งจุดสั่งซื้อ", icon: "⚙", onClick: (r) => openMinModal(r) },
+                ] : []}
+                pageSize={30}
+              />
+            )}
+          </>
         )}
 
         {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm">✓ {toast}</div>}
@@ -402,6 +502,41 @@ export default function InventoryPage() {
             {movType === "adjust" && "ปรับให้ qty = ค่าใหม่ (ใช้หลังนับ stock)"}
           </div>
         </div>
+      </ERPModal>
+
+      {/* Set min stock modal (จุดสั่งซื้อ) */}
+      <ERPModal open={minModal !== null} onClose={() => !minSaving && setMinModal(null)} size="sm"
+        title="⚙ ตั้งจุดสั่งซื้อ"
+        footer={
+          <>
+            <button onClick={() => setMinModal(null)} disabled={minSaving}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+            <button onClick={saveMin} disabled={minSaving}
+              className="h-9 px-4 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">
+              {minSaving ? "..." : "บันทึก"}
+            </button>
+          </>
+        }>
+        {minModal && (
+          <div className="space-y-3">
+            <div className="text-sm text-slate-700">
+              <span className="font-mono text-xs text-slate-400">{minModal.sku}</span> {minModal.name}
+            </div>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">จุดสั่งซื้อ (min stock) — เตือนเมื่อคงเหลือ ≤ ค่านี้</span>
+              <input type="number" value={minVal} onChange={e => setMinVal(e.target.value)} step="any" min="0"
+                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">จำนวนสั่งเติม (reorder qty) — เว้น 0 = แนะนำ 2 เท่าของจุดสั่งซื้อ</span>
+              <input type="number" value={reorderVal} onChange={e => setReorderVal(e.target.value)} step="any" min="0"
+                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded" />
+            </label>
+            <div className="text-[10px] text-slate-400 bg-amber-50 p-2 rounded">
+              💡 ตั้ง min stock = 0 เพื่อหยุดเฝ้าระวังสินค้านี้
+            </div>
+          </div>
+        )}
       </ERPModal>
     </PlaygroundShell>
   );

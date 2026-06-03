@@ -36,6 +36,7 @@ export type Permission =
   | "stock.view" | "stock.create" | "stock.adjust"
   | "po.view" | "po.create" | "po.edit" | "po.confirm" | "po.receive" | "po.complete" | "po.cancel"
   | "attachments.view" | "attachments.upload" | "attachments.delete"
+  | "accounting.view" | "accounting.manage" | "accounting.post"
   | "admin.users" | "admin.audit_log";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
@@ -68,6 +69,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "stock.view", "stock.create", "stock.adjust",
     "po.view", "po.create", "po.edit", "po.confirm", "po.receive", "po.complete", "po.cancel",
     "attachments.view", "attachments.upload", "attachments.delete",
+    "accounting.view", "accounting.manage", "accounting.post",
     "admin.users", "admin.audit_log",
   ],
   manager: [
@@ -82,6 +84,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "departments.view", "departments.create", "departments.edit",
     "units.view", "units.create", "taxes.view", "taxes.create",
     "attachments.view", "attachments.upload", "attachments.delete",
+    "accounting.view", "accounting.manage", "accounting.post",
     "admin.audit_log",
   ],
   staff: [

@@ -71,6 +71,7 @@ export const navGroups = [
       { href: "/purchase-orders",   icon: "🛒", labelTH: "ใบสั่งซื้อ (PO)" },
       { href: "/sales-orders",      icon: "🧾", labelTH: "ใบขาย (SO)" },
       { href: "/inventory",         icon: "🗄️", labelTH: "คลังสินค้า/Stock" },
+      { href: "/accounting",        icon: "📒", labelTH: "บัญชี (GL/งบทดลอง)" },
     ],
   },
   {

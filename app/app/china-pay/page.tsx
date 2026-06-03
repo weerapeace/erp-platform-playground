@@ -458,14 +458,11 @@ function BillForm() {
 // ---------------- บิลจีนทั้งหมด (รวมหน้ารอโอนเดิม) ----------------
 const ALL_FILTERS = ["รอโอน", "โอนแล้ว", "ยกเลิก", "ทั้งหมด"] as const;
 function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
-  const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("รอโอน");   // default = รอโอน
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
-  const [confirm, setConfirm] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
   const [tsel, setTsel] = useState<Set<string>>(new Set());   // ติ๊กเลือกไปโอน
   const tToggle = (id: string) => setTsel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -481,20 +478,6 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
   useEffect(() => { load(); }, [load]);
 
   const total = useMemo(() => rows.reduce((a, r) => a + (num(r.amount_rmb) + num(r.fee_rmb)), 0), [rows]);
-
-  const markDone = async (id: string) => {
-    setBusy(id); setConfirm(null);
-    try {
-      const res = await apiFetch(`/api/master-v2/china-bills/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "โอนแล้ว", actor: "china-app" }),
-      });
-      const j = await res.json();
-      if (j.error) { toast.error(j.error); return; }
-      toast.success("ทำเครื่องหมายโอนแล้ว"); load();
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
-    finally { setBusy(null); }
-  };
 
   const onPrinted = (id: string, at: string) =>
     setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
@@ -542,7 +525,7 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
                   <button onClick={() => tToggle(id)}
                     className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${tsel.has(id) ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{tsel.has(id) ? "✓" : ""}</button>
                 )}
-                <button onClick={() => setDetail(r)} className="flex-1 min-w-0 text-left flex justify-between items-start gap-2">
+                <button onClick={() => isPending ? tToggle(id) : setDetail(r)} className="flex-1 min-w-0 text-left flex justify-between items-start gap-2">
                   <div className="min-w-0">
                     <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
                     <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")}</div>
@@ -559,10 +542,8 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   <button onClick={() => setReport(r)}
                     className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์</button>
-                  <button onClick={() => setConfirm(r)} disabled={busy === id}
-                    className="h-10 border border-emerald-300 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 disabled:opacity-50">
-                    {busy === id ? "…" : "✓ โอนแล้ว"}
-                  </button>
+                  <button onClick={() => setDetail(r)}
+                    className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">👁 ดูข้อมูล</button>
                 </div>
               )}
             </Card>
@@ -570,14 +551,6 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
         })
       )}
       {detail && <BillDetail bill={detail} onClose={() => setDetail(null)} onPrinted={onPrinted} onChanged={load} />}
-      {confirm && (
-        <ConfirmPopup
-          title="ยืนยันว่าโอนแล้ว?"
-          message={`${String(confirm.supplier_label ?? confirm.supplier_id ?? "บิลนี้")} · ¥${fmt(num(confirm.amount_rmb) + num(confirm.fee_rmb))}`}
-          confirmText="ยืนยัน โอนแล้ว" tone="emerald"
-          onCancel={() => setConfirm(null)} onConfirm={() => markDone(String(confirm.id))}
-        />
-      )}
       {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={onPrinted} />}
     </div>
   );
@@ -585,21 +558,27 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
 
 // ---------------- ประวัติการตัด/โอน (ดึงจาก china_transfers.lines) ----------------
 function TransferHistory({ billId, kind }: { billId: string; kind: "china" | "ctw" }) {
-  const [items, setItems] = useState<{ date: string; ref: string; amt: number; cur: string }[]>([]);
+  const [items, setItems] = useState<{ date: string; ref: string; amt: number; cur: string; note: string }[]>([]);
   useEffect(() => {
     apiFetch("/api/master-v2/china-transfers?limit=500&sort_by=transfer_date&sort_dir=desc")
       .then(r => r.json()).then(j => {
-        const out: { date: string; ref: string; amt: number; cur: string }[] = [];
+        const out: { date: string; ref: string; amt: number; cur: string; note: string }[] = [];
         (j.data ?? []).forEach((t: Record<string, unknown>) => {
           const lines = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
-          lines.forEach((l) => {
-            if (String(l.bill_id) === billId && l.kind === kind) {
-              out.push({
-                date: String(t.transfer_date ?? ""), ref: t.ref_no ? String(t.ref_no) : "—",
-                amt: kind === "china" ? num(l.paid_rmb) : num(l.paid_thb), cur: kind === "china" ? "¥" : "฿",
-              });
-            }
-          });
+          const mine = lines.find(l => String(l.bill_id) === billId && l.kind === kind);
+          const date = String(t.transfer_date ?? ""), ref = t.ref_no ? String(t.ref_no) : "—";
+          if (mine) {
+            // ดูบิลจีน → โชว์เลขบิล CTW ที่ตัดพร้อมกันในการโอนนั้น
+            const ctwDocs = kind === "china"
+              ? lines.filter(l => l.kind === "ctw").map(l => String(l.doc_number ?? "")).filter(Boolean) : [];
+            out.push({
+              date, ref, amt: kind === "china" ? num(mine.paid_rmb) : num(mine.paid_thb),
+              cur: kind === "china" ? "¥" : "฿",
+              note: ctwDocs.length ? `ตัดพร้อม CTW: ${ctwDocs.join(", ")}` : "",
+            });
+          } else if (kind === "china" && Array.isArray(t.bill_ids) && (t.bill_ids as unknown[]).map(String).includes(billId)) {
+            out.push({ date, ref, amt: 0, cur: "¥", note: "(รายการเก่า)" });   // ของเก่าไม่มีรายการย่อย
+          }
         });
         setItems(out);
       }).catch(() => {});
@@ -608,11 +587,14 @@ function TransferHistory({ billId, kind }: { billId: string; kind: "china" | "ct
   return (
     <div>
       <Label>ประวัติการตัด/โอน ({items.length})</Label>
-      <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1.5">
+      <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-2">
         {items.map((it, i) => (
-          <div key={i} className="flex justify-between gap-2">
-            <span className="text-slate-500">{it.date} · เลขโอน {it.ref}</span>
-            <span className="font-medium text-slate-700">{it.cur}{fmt(it.amt)}</span>
+          <div key={i} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">{it.date} · เลขโอน {it.ref}</span>
+              {it.amt > 0 && <span className="font-medium text-slate-700">{it.cur}{fmt(it.amt)}</span>}
+            </div>
+            {it.note && <div className="text-[11px] text-slate-400 mt-0.5">{it.note}</div>}
           </div>
         ))}
       </div>
