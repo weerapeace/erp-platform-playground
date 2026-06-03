@@ -1446,7 +1446,12 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
   let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
   if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
   text += `โอนจริง: ฿${fmt(num(t.transferred))}`;
-  if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label)} ¥${fmt(num(l.paid_rmb))}`).join("\n");
+  if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
+    const sp = (l.sup ?? {}) as Record<string, unknown>;
+    const acc = sp.account_number ? `\n   บัญชี ${String(sp.account_number)}` : "";
+    const bn = sp.bank_name_brief ? ` · ${String(sp.bank_name_brief)}` : "";
+    return `• ${String(l.label)} ¥${fmt(num(l.paid_rmb))}${acc}${bn}`;
+  }).join("\n");
   if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label)} ฿${fmt(num(l.paid_thb))}`).join("\n");
   try {
     const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, button: { label: "เปิดใบสรุปการโอน", url: link } }) });
@@ -1662,6 +1667,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const ctwAllocated = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);
   const ctwUnallocated = Math.max(0, num(amount) - ctwAllocated);
   const ctwOver = num(amount) > 0 && ctwAllocated > num(amount) + 0.001;   // ตัด CTW เกินจำนวนเงินที่โอนจริง
+  const anyChinaOver = [...sel].some(id => { const r = pending.find(p => String(p.id) === id); return !!r && num(pay[id]) > billRemainRmb(r) + 0.001; });
 
   // อัปโหลดสลิป (จากปุ่มข้างช่องจำนวนเงิน) → เพิ่มเข้า slip → effect อ่านยอดอัตโนมัติ
   const uploadSlip = async (files: FileList) => {
@@ -1705,7 +1711,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
     if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
     text += `โอนจริง: ฿${fmt(num(t.transferred))}`;
-    if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => `• ${String(l.label)} ¥${fmt(num(l.paid_rmb))}`).join("\n");
+    if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
+      const sp = (l.sup ?? {}) as Record<string, unknown>;
+      const acc = sp.account_number ? `\n   บัญชี ${String(sp.account_number)}` : "";
+      const bn = sp.bank_name_brief ? ` · ${String(sp.bank_name_brief)}` : "";
+      return `• ${String(l.label)} ¥${fmt(num(l.paid_rmb))}${acc}${bn}`;
+    }).join("\n");
     if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label)} ฿${fmt(num(l.paid_thb))}`).join("\n");
     setSendingTxLine(true);
     try {
@@ -1912,16 +1923,19 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                       {paid > 0 && <span className="block text-[10px] text-slate-400">เต็ม ¥{fmt(billTotalRmb(r))}</span>}
                     </span>
                   </button>
-                  {on && (
-                    <div className="px-2.5 pb-2.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-500 flex-shrink-0">จำนวนที่โอน (¥)</span>
-                        <Money value={pay[id] ?? ""} onChange={(v) => setPay(p => ({ ...p, [id]: num(v) > remain ? String(remain) : v }))}
-                          className="flex-1 h-9 px-2 text-base text-right border border-emerald-300 rounded-lg" />
+                  {on && (() => {
+                    const over = num(pay[id]) > remain + 0.001;
+                    return (
+                      <div className="px-2.5 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 flex-shrink-0">จำนวนที่โอน (¥)</span>
+                          <Money value={pay[id] ?? ""} onChange={(v) => setPay(p => ({ ...p, [id]: v }))}
+                            className={`flex-1 h-9 px-2 text-base text-right border rounded-lg ${over ? "border-red-500 bg-red-50" : "border-emerald-300"}`} />
+                        </div>
+                        <div className={`text-[10px] text-right mt-0.5 ${over ? "text-red-500 font-medium" : "text-slate-400"}`}>{over ? `เกินยอดคงเหลือ! สูงสุด ¥${fmt(remain)}` : `สูงสุด ¥${fmt(remain)}`}</div>
                       </div>
-                      <div className="text-[10px] text-slate-400 text-right mt-0.5">สูงสุด ¥{fmt(remain)}</div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -1939,10 +1953,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
-      <div className="sticky bottom-[76px] z-30 -mx-4 px-4 py-2 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent">
-        <button onClick={() => setStep(2)} disabled={sel.size === 0}
+      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+        <button onClick={() => setStep(2)} disabled={sel.size === 0 || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
-          {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : "ถัดไป: ยืนยันการโอน →"}
+          {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: ยืนยันการโอน →"}
         </button>
       </div>
       </>)}
@@ -2044,7 +2058,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
         {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
       </Card>
-      <div className="sticky bottom-[76px] z-30 -mx-4 px-4 py-2 bg-gradient-to-t from-slate-50 via-slate-50/95 to-transparent flex gap-2">
+      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
         <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
@@ -2119,11 +2133,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
       )}
 
-      <button onClick={save} disabled={saving || ctwOver}
-        className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform">
-        {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
-      </button>
-      <button onClick={() => setStep(2)} className="w-full h-10 text-slate-500 text-sm">← กลับ</button>
+      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+        <button onClick={save} disabled={saving || ctwOver}
+          className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform shadow-lg shadow-emerald-500/30">
+          {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
+        </button>
+        <button onClick={() => setStep(2)} className="w-full h-9 text-slate-500 text-sm mt-1">← กลับ</button>
+      </div>
       </>)}
 
       {/* popup หลังโอนสำเร็จ: พิมพ์รายการ / ส่งไลน์ */}
@@ -2146,18 +2162,96 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   );
 }
 
-// ---------------- ใบสรุปการโอน (พิมพ์ได้) ----------------
+// ---------------- ใบสรุปการโอน (โหลดเป็นรูปได้) ----------------
 function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onClose: () => void }) {
+  const toast = useToast();
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [busy, setBusy] = useState(false);
   const ls = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
   const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
+
+  // วาดใบสรุปการโอนลง canvas (สำหรับโหลดเป็นรูป)
+  useEffect(() => {
+    const cv = canvasRef.current; if (!cv) return;
+    type Row = { t: "kv" | "sep" | "head" | "sub"; l?: string; r?: string; bold?: boolean; color?: string };
+    const rows: Row[] = [
+      ...(t.ref_no ? [{ t: "kv", l: "เลขอ้างอิง", r: String(t.ref_no) } as Row] : []),
+      { t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) },
+      { t: "kv", l: "โอนจริง", r: "฿" + fmt(num(t.transferred)), bold: true },
+      { t: "kv", l: "เข้าบัญชีจีน (ส่วนต่าง)", r: "¥" + fmt(num(t.chinaInRmb)), color: "#059669" },
+    ];
+    if (cn.length) {
+      rows.push({ t: "sep" }, { t: "head", l: `บิลจีน (${cn.length})` });
+      cn.forEach(l => {
+        const sp = (l.sup ?? {}) as Record<string, unknown>;
+        rows.push({ t: "kv", l: String(l.label || "—"), r: "¥" + fmt(num(l.paid_rmb)), bold: true });
+        if (sp.name_en) rows.push({ t: "sub", l: String(sp.name_en) });
+        if (sp.phone) rows.push({ t: "sub", l: "โทร: " + String(sp.phone) });
+        if (sp.bank_account_name) rows.push({ t: "sub", l: "ชื่อบัญชี: " + String(sp.bank_account_name) });
+        if (sp.account_number) rows.push({ t: "sub", l: "เลขบัญชี: " + String(sp.account_number) });
+        if (sp.bank_name_brief) rows.push({ t: "sub", l: "ธนาคาร: " + String(sp.bank_name_brief) });
+      });
+    }
+    if (cw.length) {
+      rows.push({ t: "sep" }, { t: "head", l: `บิล CTW (${cw.length})` });
+      cw.forEach(l => rows.push({ t: "kv", l: String(l.label || "—") + (l.doc_number ? ` (${String(l.doc_number)})` : ""), r: "฿" + fmt(num(l.paid_thb)) }));
+    }
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const W = 600, headerH = 96, padX = 36, padTop = 24, padBottom = 36;
+    const hOf = (r: Row) => r.t === "sep" ? 18 : r.t === "sub" ? 26 : r.t === "head" ? 40 : 40;
+    const H = headerH + padTop + rows.reduce((a, r) => a + hOf(r), 0) + padBottom;
+    cv.width = W * DPR; cv.height = H * DPR; cv.style.width = "100%"; cv.style.height = "auto";
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    ctx.scale(DPR, DPR);
+    const FONT = "'Noto Sans Thai','Sarabun',-apple-system,'Segoe UI',sans-serif";
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+    const grad = ctx.createLinearGradient(0, 0, W, 0); grad.addColorStop(0, "#10b981"); grad.addColorStop(1, "#0d9488");
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, W, headerH);
+    ctx.fillStyle = "#fff"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+    ctx.font = `bold 28px ${FONT}`; ctx.fillText("💸 ใบสรุปการโอนเงินจีน", padX, 38);
+    ctx.font = `15px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.9)";
+    ctx.fillText(`เลขโอน ${String(t.transfer_no ?? "—")} · ${String(t.date ?? "")}`, padX, 70);
+    let y = headerH + padTop;
+    const fit = (text: string, size: number, bold: boolean, color: string, leftBound: number) => {
+      const maxW = (W - padX) - leftBound; let s = size; ctx.fillStyle = color; ctx.textAlign = "right";
+      do { ctx.font = `${bold ? "bold " : ""}${s}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 10);
+      ctx.fillText(text, W - padX, y);
+    };
+    for (const r of rows) {
+      const h = hOf(r);
+      if (r.t === "sep") { ctx.strokeStyle = "#e5e7eb"; ctx.beginPath(); ctx.moveTo(padX, y + 9); ctx.lineTo(W - padX, y + 9); ctx.stroke(); y += h; continue; }
+      const my = y + h / 2;
+      const oldY = y; y = my; // fit() uses y
+      if (r.t === "head") { ctx.textAlign = "left"; ctx.fillStyle = "#0f766e"; ctx.font = `bold 17px ${FONT}`; ctx.fillText(r.l ?? "", padX, my); }
+      else if (r.t === "sub") { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `14px ${FONT}`; ctx.fillText(r.l ?? "", padX + 8, my); }
+      else { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `17px ${FONT}`; const lw = r.l ? ctx.measureText(r.l).width : 0; if (r.l) ctx.fillText(r.l, padX, my); fit(r.r ?? "", r.bold ? 20 : 18, !!r.bold, r.color ?? "#1e293b", padX + lw + 16); }
+      y = oldY + h;
+    }
+  }, [t, cn, cw]);
+
+  const saveImage = async () => {
+    setBusy(true);
+    try {
+      const cv = canvasRef.current; const blob = await new Promise<Blob | null>(res => cv ? cv.toBlob(res, "image/png") : res(null));
+      if (!blob) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `china-transfer-${String(t.transfer_no ?? "")}.png`.replace(/[\\/:*?"<>|]/g, "_");
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success("โหลดรูปแล้ว");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between print:hidden">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
           <div className="font-semibold text-slate-800">ใบสรุปการโอน</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
         </div>
-        <div id="tx-receipt" className="p-4">
+        <canvas ref={canvasRef} className="hidden" />
+        <div id="tx-receipt" className="p-4 overflow-y-auto flex-1">
           <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-xl p-3 mb-3">
             <div className="font-bold">💸 ใบสรุปการโอนเงินจีน</div>
             <div className="text-xs opacity-90">เลขโอน {String(t.transfer_no ?? "—")} · {String(t.date ?? "")}</div>
@@ -2201,8 +2295,9 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
             </div>
           )}
         </div>
-        <div className="p-4 pt-0 print:hidden">
-          <button onClick={() => window.print()} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์</button>
+        <div className="p-3 border-t border-slate-100 bg-white flex-shrink-0 grid grid-cols-2 gap-2 print:hidden">
+          <button onClick={saveImage} disabled={busy} className="h-11 bg-slate-700 text-white rounded-lg font-medium disabled:opacity-50">💾 โหลดรูป</button>
+          <button onClick={() => window.print()} className="h-11 border border-slate-300 text-slate-700 rounded-lg font-medium">🖨️ พิมพ์</button>
         </div>
       </div>
     </div>
@@ -2400,12 +2495,12 @@ function ReportPopup({ bill, onClose, onPrinted }: {
 
   return (
     <div className="fixed inset-0 z-[210] bg-black/50 flex items-end sm:items-center justify-center p-3" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-sm max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+      <div className="bg-white rounded-2xl w-full max-w-sm max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
           <div className="font-semibold text-slate-800">ใบสรุป</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
         </div>
-        <div className="p-4">
+        <div className="p-4 overflow-y-auto flex-1">
           {/* พรีวิว (HTML — responsive ไม่ถูกตัดบนมือถือ) */}
           <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
             <div className="bg-gradient-to-r from-orange-600 to-orange-500 text-white px-4 py-3">
@@ -2436,15 +2531,14 @@ function ReportPopup({ bill, onClose, onPrinted }: {
           </div>
           {/* canvas ซ่อน — ใช้สร้างรูปตอนบันทึก/แชร์เท่านั้น */}
           <canvas ref={canvasRef} className="hidden" />
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <button onClick={saveImage} disabled={busy}
-              className="h-12 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
-            <button onClick={shareImage} disabled={busy}
-              className="h-12 bg-orange-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์</button>
-          </div>
-          <button onClick={sendLineImage} disabled={busy}
-            className="mt-2 w-full h-12 bg-[#06C755] text-white rounded-xl font-medium disabled:opacity-50">📩 ส่งเข้า LINE กลุ่ม (รูป)</button>
           <div className="mt-2 text-center text-[11px] text-slate-400">เมื่อบันทึก/แชร์ ระบบจะทำเครื่องหมาย “พิมพ์แล้ว” ให้</div>
+        </div>
+        <div className="p-3 border-t border-slate-100 flex-shrink-0 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={saveImage} disabled={busy} className="h-11 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
+            <button onClick={shareImage} disabled={busy} className="h-11 bg-orange-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์</button>
+          </div>
+          <button onClick={sendLineImage} disabled={busy} className="w-full h-11 bg-[#06C755] text-white rounded-xl font-medium disabled:opacity-50">📩 ส่งเข้า LINE กลุ่ม (รูป)</button>
         </div>
       </div>
     </div>
