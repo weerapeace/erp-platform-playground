@@ -41,7 +41,8 @@
   // F20: R2 native binding — เข้าถึง R2 ตรงๆ ไม่ต้องใช้ AWS SDK
   // → bundle เล็กลงหลาย MB → ไม่ชน Worker 1102 อีก + เร็วขึ้น
   "r2_buckets": [
-    { "binding": "R2_IMAGES", "bucket_name": "odoo-product-images" }
+    { "binding": "R2_IMAGES", "bucket_name": "odoo-product-images" },
+    { "binding": "R2_SHARE",  "bucket_name": "china-pay-share" }
   ],
 
   // Workers AI — OCR อ่านยอดจากสลิป (china-pay) · มีโควตาฟรีรายวัน

@@ -66,6 +66,30 @@ export async function r2PutObject(key: string, body: ArrayBuffer | Uint8Array | 
   await bucket.put(key, ab, { httpMetadata: { contentType } });
 }
 
+/** ดึง binding R2_SHARE (bucket รูปแชร์ public สำหรับ LINE) */
+export async function getR2ShareBinding(): Promise<R2BucketLike | null> {
+  try {
+    const wk: any = await import(/* webpackIgnore: true */ ("cloudflare:workers" as string));
+    if (wk?.env?.R2_SHARE) return wk.env.R2_SHARE;
+  } catch { /* noop */ }
+  try {
+    const mod: any = await import(/* webpackIgnore: true */ ("@opennextjs/cloudflare" as string));
+    const ctx = mod.getCloudflareContext ? mod.getCloudflareContext() : null;
+    if (ctx?.env?.R2_SHARE) return ctx.env.R2_SHARE;
+  } catch { /* noop */ }
+  return null;
+}
+
+/** อัปโหลดรูปขึ้น bucket แชร์ (public) */
+export async function r2PutShare(key: string, body: ArrayBuffer | Uint8Array, contentType: string): Promise<void> {
+  const bucket = await getR2ShareBinding();
+  if (!bucket) throw new Error("R2 binding ไม่พร้อม (R2_SHARE)");
+  const ab: ArrayBuffer = body instanceof ArrayBuffer
+    ? body
+    : (body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer);
+  await bucket.put(key, ab, { httpMetadata: { contentType } });
+}
+
 /** ลบไฟล์จาก R2 (ผ่าน binding) */
 export async function r2DeleteObject(key: string): Promise<void> {
   const bucket = await getR2Binding();

@@ -300,6 +300,7 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
   const [lineRowId, setLineRowId] = useState<string | null>(null);
   const [lineToken, setLineToken] = useState("");
   const [lineGroup, setLineGroup] = useState("");
+  const [lineShareBase, setLineShareBase] = useState("");   // R2 public base URL (สำหรับส่งรูปเข้า LINE)
   const [lineSaving, setLineSaving] = useState(false);
 
   useEffect(() => {
@@ -308,14 +309,14 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
       const row = rows.find((x: Record<string, unknown>) => x.skey === "menu_roles");
       if (row) { setRowId(String(row.id)); if (row.sval && typeof row.sval === "object") setLocal(row.sval as Record<string, string[]>); }
       const lrow = rows.find((x: Record<string, unknown>) => x.skey === "line_config");
-      if (lrow) { setLineRowId(String(lrow.id)); const v = (lrow.sval ?? {}) as Record<string, string>; setLineToken(String(v.token ?? "")); setLineGroup(String(v.group_id ?? "")); }
+      if (lrow) { setLineRowId(String(lrow.id)); const v = (lrow.sval ?? {}) as Record<string, string>; setLineToken(String(v.token ?? "")); setLineGroup(String(v.group_id ?? "")); setLineShareBase(String(v.share_base ?? "")); }
     }).catch(() => {});
   }, []);
 
   const saveLine = async () => {
     setLineSaving(true);
     try {
-      const sval = { token: lineToken.trim(), group_id: lineGroup.trim() };
+      const sval = { token: lineToken.trim(), group_id: lineGroup.trim(), share_base: lineShareBase.trim().replace(/\/$/, "") };
       const res = lineRowId
         ? await apiFetch(`/api/master-v2/china-app-settings/${lineRowId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sval, actor: "china-app" }) })
         : await apiFetch(`/api/master-v2/china-app-settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ skey: "line_config", sval, actor: "china-app" }) });
@@ -397,6 +398,11 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
               className="flex-1 h-11 px-3 text-sm border border-slate-200 rounded-lg" />
             <button type="button" onClick={reloadLineCfg} className="flex-shrink-0 h-11 px-3 rounded-lg bg-slate-700 text-white text-xs font-medium">🔄 ดึงอัตโนมัติ</button>
           </div>
+        </div>
+        <div className="mt-3"><Label>R2 Public URL (สำหรับส่งรูปเข้า LINE)</Label>
+          <input value={lineShareBase} onChange={e => setLineShareBase(e.target.value)} placeholder="https://pub-xxxx.r2.dev"
+            className="w-full h-11 px-3 text-sm border border-slate-200 rounded-lg" />
+          <div className="text-[11px] text-slate-400 mt-1">เปิด Public access ของ bucket “china-pay-share” ใน Cloudflare → เอา URL r2.dev มาวาง (เว้นว่าง = ส่งเป็นข้อความ)</div>
         </div>
         <button onClick={saveLine} disabled={lineSaving}
           className="mt-3 w-full h-11 bg-[#06C755] text-white rounded-lg font-semibold disabled:opacity-50">
@@ -2225,6 +2231,31 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     } finally { setBusy(false); }
   };
 
+  // ส่งใบสรุป "เป็นรูป" เข้า LINE กลุ่ม (อัปโหลด R2 public → push image) + ข้อความ + ลิงก์เปิดบิล
+  const sendLineImage = async () => {
+    setBusy(true);
+    try {
+      const cv = canvasRef.current; if (!cv) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      const dataUrl = cv.toDataURL("image/png");
+      const cfg: Record<string, string> = await apiFetch("/api/master-v2/china-app-settings?limit=20").then(r => r.json())
+        .then(j => ((j.data ?? []).find((x: Record<string, unknown>) => x.skey === "line_config")?.sval ?? {}))
+        .catch(() => ({}));
+      const link = `${window.location.origin}/app/china-pay?bill=${String(bill.id)}`;
+      const text = `🧾 ใบสรุปบิลจีน\nร้าน: ${supName}\nยอดโอนรวม: ¥${fmt(totalRmb)}${rate ? ` (฿${fmt(thb)})` : ""}\nเลขบัญชี: ${String(sup?.account_number ?? "—")}\nดูในแอป: ${link}`;
+      let imageUrl = "";
+      if (cfg.share_base) {
+        const up = await apiFetch("/api/china-pay/share-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl, name: `bill-${supName}` }) }).then(r => r.json()).catch(() => ({}));
+        if (up.key) imageUrl = `${String(cfg.share_base).replace(/\/$/, "")}/${up.key}`;
+      }
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, imageUrl }) });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success(imageUrl ? "ส่งรูปเข้า LINE แล้ว" : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); await markPrinted(); return; }
+      if (j.needConfig) { toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง"); window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); }
+      else toast.error(j.error ?? "ส่ง LINE ไม่ได้");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className="fixed inset-0 z-[210] bg-black/50 flex items-end sm:items-center justify-center p-3" onClick={onClose}>
       <div className="bg-white rounded-2xl w-full max-w-sm max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -2266,8 +2297,10 @@ function ReportPopup({ bill, onClose, onPrinted }: {
             <button onClick={saveImage} disabled={busy}
               className="h-12 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
             <button onClick={shareImage} disabled={busy}
-              className="h-12 bg-orange-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์ / ส่ง LINE</button>
+              className="h-12 bg-orange-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์</button>
           </div>
+          <button onClick={sendLineImage} disabled={busy}
+            className="mt-2 w-full h-12 bg-[#06C755] text-white rounded-xl font-medium disabled:opacity-50">📩 ส่งเข้า LINE กลุ่ม (รูป)</button>
           <div className="mt-2 text-center text-[11px] text-slate-400">เมื่อบันทึก/แชร์ ระบบจะทำเครื่องหมาย “พิมพ์แล้ว” ให้</div>
         </div>
       </div>
