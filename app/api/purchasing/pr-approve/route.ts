@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAuditMany } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -73,14 +74,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { error: updErr } = await admin.from("purchase_requests_v2").update(patch).in("id", ids);
   if (updErr) return NextResponse.json({ error: "อัปเดตสถานะไม่สำเร็จ: " + updErr.message }, { status: 500 });
 
-  // audit (best-effort — ขั้น 3 จะทำให้ครบ)
-  await admin.from("erp_audit_logs").insert({
-    actor_name: actor,
-    action: action === "approve" ? "purchase.pr_approve" : "purchase.pr_reject",
-    module: "purchase-requests-v2",
-    record_label: usable.map((p) => p.pr_no).filter(Boolean).join(", ") || `${ids.length} ใบ`,
-    new_value: { count: ids.length, reason: reason || null },
-  }).then(() => {}, () => {});
+  // audit — 1 แถวต่อ 1 ใบ (ของกลาง, เขียนลงตาราง audit_logs จริง)
+  await writeAuditMany(admin, usable.map((p) => ({
+    action:     action,                       // approve | reject
+    entityType: "purchase_requests_v2",
+    entityId:   p.id,
+    actorId:    user.id,
+    actorName:  actor,
+    metadata:   { pr_no: p.pr_no, reason: reason || null },
+  })));
 
   return NextResponse.json({ ok: true, action, updated: ids.length, error: null });
 }

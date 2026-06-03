@@ -16,6 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -109,11 +110,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const poStatus = allClosed ? "received" : anyReceived ? "partial" : "confirmed";
   await admin.from("purchase_orders_v2").update({ status: poStatus }).eq("id", poId);
 
-  // 4) audit (best-effort)
-  await admin.from("erp_audit_logs").insert({
-    actor_name: actor, action: "purchase.receive_goods", module: "goods-receipts-v2",
-    record_label: grNo, new_value: { po_no: po.po_no, lines: grLines.length, po_status: poStatus },
-  }).then(() => {}, () => {});
+  // 4) audit — 1 แถวต่อ 1 ใบรับ (ของกลาง, เขียนลงตาราง audit_logs จริง)
+  await writeAudit(admin, {
+    action:     "receive",
+    entityType: "goods_receipts_v2",
+    entityId:   gr.id,
+    actorId:    user.id,
+    actorName:  actor,
+    metadata:   { gr_no: grNo, po_no: po.po_no, lines: grLines.length, po_status: poStatus },
+  });
 
   return NextResponse.json({ ok: true, gr_no: grNo, po_status: poStatus, line_count: grLines.length, error: null });
 }

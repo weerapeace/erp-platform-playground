@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -113,11 +114,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .in("id", items.map((p) => p.id));
     if (updErr) return NextResponse.json({ error: "อัปเดตสถานะ PR ไม่สำเร็จ: " + updErr.message }, { status: 500 });
 
-    // audit (best-effort)
-    await admin.from("erp_audit_logs").insert({
-      actor_name: actor, action: "purchase.create_po", module: "purchase-orders-v2",
-      record_label: poNo, new_value: { seller, currency, grand_total: grandTotal, line_count: items.length },
-    }).then(() => {}, () => {});
+    // audit — 1 แถวต่อ 1 ใบสั่งซื้อ (ของกลาง, เขียนลงตาราง audit_logs จริง)
+    await writeAudit(admin, {
+      action:     "create",
+      entityType: "purchase_orders_v2",
+      entityId:   po.id,
+      actorId:    user.id,
+      actorName:  actor,
+      metadata:   { po_no: poNo, seller, currency, grand_total: grandTotal, line_count: items.length },
+    });
 
     created.push({ po_no: poNo, seller_name: seller, currency, grand_total: grandTotal, line_count: items.length });
   }
