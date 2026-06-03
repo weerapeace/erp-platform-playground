@@ -276,13 +276,21 @@ export default function PurchasingShopPage() {
     if (cart.length === 0) return;
     setSaving(true);
     try {
-      // Logic ใหม่: 1 สินค้า = 1 ใบขอซื้อ (แยกใบ) + วันที่สั่งเดียวกันทุกใบ
-      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const base = String(Date.now()).slice(-4);
+      // Logic: 1 สินค้า = 1 ใบขอซื้อ (แยกใบ) + วันที่สั่งเดียวกันทุกใบ
+      // เลขใบขอซื้อ: ขอจากระบบเลขกลาง (atomic กันเลขซ้ำ) ทีเดียวตามจำนวนใบ
+      const nrRes = await apiFetch("/api/purchasing/next-number", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "pr", count: cart.length }),
+      });
+      const nrJson = await nrRes.json();
+      if (nrJson.error || !Array.isArray(nrJson.numbers) || nrJson.numbers.length < cart.length) {
+        throw new Error(nrJson.error || "ออกเลขใบขอซื้อไม่สำเร็จ");
+      }
+      const numbers: string[] = nrJson.numbers;
       let count = 0;
       for (let i = 0; i < cart.length; i++) {
         const l = cart[i];
-        const prNo = `PR-${stamp}-${base}-${i + 1}`;
+        const prNo = numbers[i];
         // 1 ใบ = 1 สินค้า → เก็บข้อมูลสินค้าตรงๆ บนใบ (ไม่ใช้ pr_lines)
         const hr = await apiFetch("/api/master-v2/purchase-requests-v2", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
           pr_no: prNo, requester: user?.name ?? "", status: "waiting", order_date: orderDate,

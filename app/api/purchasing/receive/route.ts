@@ -21,7 +21,6 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
-const pad = (n: number, w: number) => String(n).padStart(w, "0");
 
 type InLine = { po_line_id: string; qty_received: number; qty_defective?: number; case_type: string };
 
@@ -62,10 +61,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const actor = body.actor ?? user.email ?? "system";
   const now = new Date();
-  const ymd = `${now.getFullYear()}${pad(now.getMonth() + 1, 2)}${pad(now.getDate(), 2)}`;
-  const { count: todayCount } = await admin
-    .from("goods_receipts_v2").select("id", { count: "exact", head: true }).like("gr_no", `GR-${ymd}-%`);
-  const grNo = `GR-${ymd}-${pad((todayCount ?? 0) + 1, 4)}`;
+  // เลขใบรับ: ใช้ระบบเลขเอกสารกลาง erp_next_number('gr') — atomic กันเลขซ้ำ
+  const { data: grNo, error: numErr } = await admin.rpc("erp_next_number", { p_key: "gr" });
+  if (numErr || !grNo) return NextResponse.json({ error: "ออกเลขใบรับไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
   const receiveDate = body.receive_date || now.toISOString().slice(0, 10);
 
   // 1) หัว GR
