@@ -13,7 +13,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
 import { RecordFormModal } from "@/components/record-form-modal";
-import { useBackdropDismiss } from "@/components/modal";
+import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
@@ -71,7 +71,6 @@ export default function PurchasingShopPage() {
   const [addLoading, setAddLoading] = useState(false);
   const [addBusy, setAddBusy] = useState<string | null>(null);  // id ที่กำลังผูก
   const [createSku, setCreateSku] = useState(false);      // ฟอร์มสร้าง SKU ใหม่ในกลุ่ม
-  const pickerDismiss = useBackdropDismiss(() => setPickerOpen(false));
   const groupDismiss = useBackdropDismiss(() => { setSel(null); setVars([]); });
 
   // sku-mode confirm popup
@@ -159,6 +158,13 @@ export default function PurchasingShopPage() {
     }
     return out;
   }, [activeKeys, filterValues, filterFields]);
+
+  // ข้อ 6: จำนวนรวมต่อ SKU ที่อยู่ในตะกร้า (ใช้โชว์ป้ายบนการ์ด)
+  const cartQtyBySku = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of cart) if (l.skuId) m.set(l.skuId, (m.get(l.skuId) ?? 0) + (Number(l.qty) || 0));
+    return m;
+  }, [cart]);
 
   // ดึงการ์ดแบบทีละหน้า (แทนที่ทั้งหน้า ไม่ใช่ต่อท้าย)
   // แปลง 1 record SKU → Card (ใช้ซ้ำทุกโหมด)
@@ -387,9 +393,9 @@ export default function PurchasingShopPage() {
 
   return (
     <PlaygroundShell>
-      <div className="flex h-[calc(100vh-3.5rem)]">
+      <div className="flex flex-col md:flex-row md:h-[calc(100vh-3.5rem)]">
         {/* Filter sidebar */}
-        <aside className="w-60 flex-shrink-0 border-r border-slate-200 p-4 overflow-auto">
+        <aside className="w-full md:w-60 flex-shrink-0 border-b md:border-b-0 md:border-r border-slate-200 p-4 md:overflow-auto">
           <h2 className="font-semibold text-slate-800 mb-3">🛒 ขอซื้อ</h2>
           {/* source toggle (โหมดแสดงสินค้า) */}
           <div className="grid grid-cols-2 gap-1 mb-3 text-xs">
@@ -433,8 +439,8 @@ export default function PurchasingShopPage() {
                           column={fd.column}
                           label={fd.label}
                           relation={fd.relation}
-                          value={cur && cur.type === "select" ? (cur.selected[0] ?? null) : null}
-                          onChange={(v) => setFV(k, v ? { type: "select", selected: [v] } : null)}
+                          values={cur && cur.type === "select" ? cur.selected : []}
+                          onChange={(vals) => setFV(k, vals.length ? { type: "select", selected: vals } : null)}
                         />
                       )}
                     </div>
@@ -446,7 +452,7 @@ export default function PurchasingShopPage() {
         </aside>
 
         {/* Grid */}
-        <main className="flex-1 overflow-auto p-5">
+        <main className="flex-1 md:overflow-auto p-5">
           <div className="flex items-center justify-between mb-4 gap-3">
             <h1 className="text-xl font-semibold text-slate-800">เลือกสินค้าที่ต้องการขอซื้อ</h1>
             {source === "sku" && (
@@ -473,6 +479,10 @@ export default function PurchasingShopPage() {
                     className="absolute top-2 right-2 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-amber-50">
                     <span className={`text-base leading-none ${favorites.has(c.id) ? "text-amber-400" : "text-slate-300"}`}>{favorites.has(c.id) ? "★" : "☆"}</span>
                   </button>
+                )}
+                {/* ข้อ 6: ป้ายบอกว่าอยู่ในตะกร้าแล้ว + จำนวน */}
+                {c.sku && cartQtyBySku.has(c.id) && (
+                  <span className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-medium shadow-sm">🛒 {cartQtyBySku.get(c.id)}</span>
                 )}
                 <button onClick={() => onCardClick(c)}
                   className="w-full text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-md transition-all">
@@ -530,7 +540,7 @@ export default function PurchasingShopPage() {
         </main>
 
         {/* Cart */}
-        <aside className="w-80 flex-shrink-0 border-l border-slate-200 flex flex-col">
+        <aside className="w-full md:w-80 flex-shrink-0 border-t md:border-t-0 md:border-l border-slate-200 flex flex-col">
           <div className="p-4 border-b border-slate-100 font-semibold text-slate-800">ใบขอซื้อ ({cart.length})</div>
           <div className="flex-1 overflow-auto p-3 space-y-2">
             {cart.length === 0 && <div className="text-sm text-slate-300 text-center py-8">ยังไม่มีรายการ<br />กดสินค้าทางซ้ายเพื่อเพิ่ม</div>}
@@ -591,30 +601,22 @@ export default function PurchasingShopPage() {
       </div>
 
       {/* Filter picker (เลือก field ที่จะใช้กรอง) */}
-      {pickerOpen && (
-        <div className="fixed inset-0 z-[130] bg-black/40 flex items-center justify-center p-4" {...pickerDismiss}>
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-slate-800">เลือกตัวกรอง</h3>
-              <button onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
-            </div>
-            <div className="p-4 space-y-1 max-h-[60vh] overflow-auto">
-              <p className="text-xs text-slate-400 mb-2">ติ๊กเลือก field ที่อยากใช้เป็นตัวกรอง (มาจากทะเบียน field ของ SKU)</p>
-              {filterFields.length === 0 && <p className="text-sm text-slate-300 py-4 text-center">— ยังไม่มี field ที่ตั้งค่าให้กรองได้ —</p>}
-              {filterFields.map(f => (
-                <label key={f.key} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer">
-                  <input type="checkbox" checked={activeKeys.includes(f.key)} onChange={() => toggleFilterKey(f.key)} />
-                  <span className="text-sm text-slate-700">{f.label}</span>
-                  <span className="ml-auto text-[11px] text-slate-300">{f.type}</span>
-                </label>
-              ))}
-            </div>
-            <div className="px-5 py-3 border-t border-slate-100 text-right">
-              <button onClick={() => setPickerOpen(false)} className="px-4 h-9 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">เสร็จ</button>
-            </div>
-          </div>
+      {/* เลือกตัวกรอง (ของกลาง ERPModal) */}
+      <ERPModal open={pickerOpen} onClose={() => setPickerOpen(false)} size="md"
+        title="เลือกตัวกรอง"
+        description="ติ๊กเลือก field ที่อยากใช้เป็นตัวกรอง (มาจากทะเบียน field ของ SKU)"
+        footer={<button onClick={() => setPickerOpen(false)} className="px-4 h-9 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">เสร็จ</button>}>
+        <div className="space-y-1">
+          {filterFields.length === 0 && <p className="text-sm text-slate-300 py-4 text-center">— ยังไม่มี field ที่ตั้งค่าให้กรองได้ —</p>}
+          {filterFields.map(f => (
+            <label key={f.key} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer">
+              <input type="checkbox" checked={activeKeys.includes(f.key)} onChange={() => toggleFilterKey(f.key)} />
+              <span className="text-sm text-slate-700">{f.label}</span>
+              <span className="ml-auto text-[11px] text-slate-300">{f.type}</span>
+            </label>
+          ))}
         </div>
-      )}
+      </ERPModal>
 
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
@@ -740,48 +742,39 @@ function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () 
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const s = card.sku!;
-  const dismiss = useBackdropDismiss(onClose);
   return (
-    <div className="fixed inset-0 z-[120] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-slate-800 line-clamp-1">เพิ่มลงใบขอซื้อ</h3>
-          <div className="flex items-center gap-2">
-            <button onClick={onEdit} className="h-7 px-2.5 text-xs border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">✎ แก้ไขสินค้า</button>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
-          </div>
-        </div>
-        <div className="p-4">
-          <div className="flex gap-3">
-            <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden">
-              {img(card.image_key)
-                ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(card.image_key)!} alt="" className="w-full h-full object-cover" />
-                : <span className="text-slate-300 text-2xl">📦</span>}
-            </div>
-            <div className="min-w-0">
-              <div className="font-medium text-slate-800 text-sm">{card.name}</div>
-              <div className="text-xs text-slate-400 mt-0.5">{s.code}</div>
-              <div className="text-xs text-slate-500 mt-0.5">🏪 {s.seller}</div>
-              <div className="text-sm font-semibold text-blue-600 mt-1">{s.price.toLocaleString()} {s.currency} / {s.uom}</div>
-            </div>
-          </div>
-          <div className="mt-4 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({s.uom})</label>
-              <input type="number" value={qty} min={1} step="any" onChange={e => setQty(Number(e.target.value))} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ (ถ้ามี)</label>
-              <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น สีพิเศษ / ด่วน" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
-            </div>
-          </div>
-        </div>
-        <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+    <ERPModal open onClose={onClose} size="md" title="เพิ่มลงใบขอซื้อ"
+      footer={
+        <>
+          <button onClick={onEdit} className="mr-auto h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">✎ แก้ไขสินค้า</button>
           <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
           <button onClick={() => onAdd(qty, note)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
+        </>
+      }>
+      <div className="flex gap-3">
+        <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden">
+          {img(card.image_key)
+            ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(card.image_key)!} alt="" className="w-full h-full object-cover" />
+            : <span className="text-slate-300 text-2xl">📦</span>}
+        </div>
+        <div className="min-w-0">
+          <div className="font-medium text-slate-800 text-sm">{card.name}</div>
+          <div className="text-xs text-slate-400 mt-0.5">{s.code}</div>
+          <div className="text-xs text-slate-500 mt-0.5">🏪 {s.seller}</div>
+          <div className="text-sm font-semibold text-blue-600 mt-1">{s.price.toLocaleString()} {s.currency} / {s.uom}</div>
         </div>
       </div>
-    </div>
+      <div className="mt-4 space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({s.uom})</label>
+          <input type="number" value={qty} min={1} step="any" onChange={e => setQty(Number(e.target.value))} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ (ถ้ามี)</label>
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น สีพิเศษ / ด่วน" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        </div>
+      </div>
+    </ERPModal>
   );
 }
 
@@ -789,8 +782,8 @@ function ConfirmSku({ card, onClose, onAdd, onEdit }: { card: Card; onClose: () 
 // FilterCombobox — dropdown เลือก "ค่าจริง" ของ field (ของกลาง ไม่ hardcode)
 // ค่าตัวเลือกดึงจาก /api/master-v2/skus/distinct (distinct ของคอลัมน์นั้น)
 // ============================================================
-function FilterCombobox({ column, label, value, onChange, relation }: {
-  column: string; label: string; value: string | null; onChange: (v: string | null) => void;
+function FilterCombobox({ column, label, values, onChange, relation }: {
+  column: string; label: string; values: string[]; onChange: (vals: string[]) => void;
   relation?: { moduleKey: string; labelField: string };
 }) {
   const [open, setOpen] = useState(false);
@@ -827,18 +820,22 @@ function FilterCombobox({ column, label, value, onChange, relation }: {
   }, [open]);
 
   const openList = () => { setOpen(true); void load(); };
+  const toggle = (val: string) => onChange(values.includes(val) ? values.filter(v => v !== val) : [...values, val]);
+
   const ql = q.trim().toLowerCase();
   const shown = (opts ?? []).filter(o => !ql || o.label.toLowerCase().includes(ql)).slice(0, 200);
-  const selectedLabel = value ? (opts?.find(o => o.value === value)?.label ?? "…") : null;
+  // ข้อความสรุปบนปุ่ม: 0 = placeholder, 1 = ชื่อค่านั้น, >1 = "N รายการ"
+  const labelOf = (v: string) => opts?.find(o => o.value === v)?.label ?? "…";
+  const summary = values.length === 0 ? null : values.length === 1 ? labelOf(values[0]) : `เลือก ${values.length} รายการ`;
 
   return (
     <div className="relative" ref={ref}>
       <button type="button" onClick={() => (open ? setOpen(false) : openList())}
-        className="w-full h-8 px-2 text-xs text-left border border-slate-200 rounded-md bg-white flex items-center justify-between gap-1">
-        <span className={value ? "text-slate-700 truncate" : "text-slate-400"}>{selectedLabel || `เลือก ${label}`}</span>
-        {value
-          ? <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onChange(null); }} className="text-slate-400 hover:text-red-500">✕</span>
-          : <span className="text-slate-400">▾</span>}
+        className="w-full min-h-8 px-2 py-1 text-xs text-left border border-slate-200 rounded-md bg-white flex items-center justify-between gap-1">
+        <span className={summary ? "text-slate-700 truncate" : "text-slate-400"}>{summary || `เลือก ${label}`}</span>
+        {values.length > 0
+          ? <span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); onChange([]); }} className="text-slate-400 hover:text-red-500 flex-shrink-0">✕</span>
+          : <span className="text-slate-400 flex-shrink-0">▾</span>}
       </button>
       {open && (
         <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-60 overflow-auto">
@@ -846,10 +843,16 @@ function FilterCombobox({ column, label, value, onChange, relation }: {
             className="w-full h-8 px-2 text-xs border-b border-slate-100 outline-none" />
           {loading && <div className="px-2 py-2 text-xs text-slate-400">กำลังโหลด…</div>}
           {!loading && shown.length === 0 && <div className="px-2 py-2 text-xs text-slate-300">— ไม่พบค่า —</div>}
-          {shown.map(o => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); setQ(""); }}
-              className={`block w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 ${o.value === value ? "bg-blue-50 text-blue-700" : "text-slate-700"}`}>{o.label}</button>
-          ))}
+          {shown.map(o => {
+            const on = values.includes(o.value);
+            return (
+              <button key={o.value} type="button" onClick={() => toggle(o.value)}
+                className={`flex items-center gap-2 w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 ${on ? "bg-blue-50/60 text-blue-700" : "text-slate-700"}`}>
+                <input type="checkbox" readOnly checked={on} className="pointer-events-none" />
+                <span className="truncate">{o.label}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
