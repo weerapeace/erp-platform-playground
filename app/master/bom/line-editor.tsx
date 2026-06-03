@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import type { PickerOption } from "@/app/api/admin/picker/route";
+import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 
 export type EditorLine = {
   key:            string;   // local-only id สำหรับ React
@@ -103,8 +104,10 @@ export function SkuPicker({
 }
 
 // ============================================================
-// BomLineEditor
+// BomLineEditor — ใช้ตารางรายการกลาง LineItemsGrid (ของกลาง)
 // ============================================================
+const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
+
 export function BomLineEditor({
   lines, onChange, readonly,
 }: {
@@ -112,58 +115,59 @@ export function BomLineEditor({
   onChange: (lines: EditorLine[]) => void;
   readonly?: boolean;
 }) {
-  const add    = () => onChange([...lines, emptyLine()]);
-  const remove = (key: string) => onChange(lines.filter((l) => l.key !== key));
-  const update = (key: string, patch: Partial<EditorLine>) =>
-    onChange(lines.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const columns: LineColumn<EditorLine>[] = [
+    {
+      key: "component", header: "วัตถุดิบ", minWidth: 300, sortable: true,
+      getValue: (l) => l.component_name || l.component_sku,
+      render: (l, update) => (
+        <SkuPicker sku={l.component_sku} name={l.component_name} placeholder="— เลือกวัตถุดิบ —"
+          onPick={(sku, name) => update({ component_sku: sku, component_name: name })} />
+      ),
+    },
+    {
+      key: "qty", header: "จำนวน", width: 90, align: "right", sortable: true,
+      getValue: (l) => l.qty,
+      render: (l, update, ro) => (
+        <input type="number" min={0} step="any" value={l.qty} disabled={ro}
+          onChange={(e) => update({ qty: Number(e.target.value) })} className={`${inputCls} text-right`} />
+      ),
+    },
+    {
+      key: "uom", header: "หน่วย", width: 90, sortable: true,
+      getValue: (l) => l.uom,
+      render: (l, update, ro) => (
+        <input type="text" value={l.uom} disabled={ro}
+          onChange={(e) => update({ uom: e.target.value })} className={inputCls} />
+      ),
+    },
+    {
+      key: "waste_percent", header: "% เผื่อเสีย", width: 100, align: "right",
+      render: (l, update, ro) => (
+        <input type="number" min={0} step="any" value={l.waste_percent} disabled={ro}
+          onChange={(e) => update({ waste_percent: Number(e.target.value) })} className={`${inputCls} text-right`} />
+      ),
+    },
+    {
+      key: "is_optional", header: "ทางเลือก", width: 80, align: "center",
+      render: (l, update, ro) => (
+        <input type="checkbox" checked={l.is_optional} disabled={ro}
+          onChange={(e) => update({ is_optional: e.target.checked })} className="rounded border-slate-300" />
+      ),
+    },
+  ];
 
   return (
-    <div className="space-y-2">
-      <div className="hidden sm:grid grid-cols-[36px_1fr_90px_90px_90px_70px_36px] gap-2 px-1 text-xs font-medium text-slate-400">
-        <span>#</span><span>วัตถุดิบ</span><span className="text-right">จำนวน</span><span>หน่วย</span>
-        <span className="text-right">% เผื่อเสีย</span><span className="text-center">ทางเลือก</span><span />
-      </div>
-
-      {lines.length === 0 ? (
-        <div className="text-center py-6 border-2 border-dashed border-slate-200 rounded-lg">
-          <p className="text-sm text-slate-400 mb-2">ยังไม่มีวัตถุดิบในสูตรนี้</p>
-          {!readonly && <button type="button" onClick={add} className="text-sm text-blue-600 hover:text-blue-800 font-medium">＋ เพิ่มวัตถุดิบรายการแรก</button>}
-        </div>
-      ) : (
-        <>
-          {lines.map((line, idx) => (
-            <div key={line.key} className="grid grid-cols-[36px_1fr_90px_90px_90px_70px_36px] gap-2 items-center">
-              <span className="text-xs text-slate-400 text-center tabular-nums">{idx + 1}</span>
-              <SkuPicker sku={line.component_sku} name={line.component_name} placeholder="— เลือกวัตถุดิบ —"
-                onPick={(sku, name) => update(line.key, { component_sku: sku, component_name: name })} />
-              <input type="number" min={0} step="any" value={line.qty} disabled={readonly}
-                onChange={(e) => update(line.key, { qty: Number(e.target.value) })}
-                className="h-9 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-              <input type="text" value={line.uom} disabled={readonly}
-                onChange={(e) => update(line.key, { uom: e.target.value })}
-                className="h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-              <input type="number" min={0} step="any" value={line.waste_percent} disabled={readonly}
-                onChange={(e) => update(line.key, { waste_percent: Number(e.target.value) })}
-                className="h-9 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-              <div className="flex justify-center">
-                <input type="checkbox" checked={line.is_optional} disabled={readonly}
-                  onChange={(e) => update(line.key, { is_optional: e.target.checked })}
-                  className="rounded border-slate-300" />
-              </div>
-              {!readonly ? (
-                <button type="button" onClick={() => remove(line.key)}
-                  className="h-9 w-9 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
-              ) : <span />}
-            </div>
-          ))}
-          {!readonly && (
-            <div className="flex items-center justify-between pt-2">
-              <button type="button" onClick={add} className="text-sm text-blue-600 hover:text-blue-800 font-medium">＋ เพิ่มวัตถุดิบ</button>
-              <div className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
+    <LineItemsGrid<EditorLine>
+      rows={lines}
+      columns={columns}
+      onChange={onChange}
+      rowId={(l) => l.key}
+      readonly={readonly}
+      onAdd={emptyLine}
+      addLabel="＋ เพิ่มวัตถุดิบ"
+      emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"
+      groupByOptions={[{ key: "uom", label: "หน่วย" }]}
+      footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
+    />
   );
 }

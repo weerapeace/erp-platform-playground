@@ -167,20 +167,20 @@ export default function ChinaPayApp() {
 
         {/* แถบเมนูล่าง */}
         {cols > 0 && (
-          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 grid z-20 px-1 pt-1.5 pb-2 shadow-[0_-6px_20px_rgba(0,0,0,0.06)]"
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-100 grid z-20 px-1 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] shadow-[0_-6px_20px_rgba(0,0,0,0.06)]"
             style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}>
             {bottomItems.map(m => {
               const on = renderTab === m.k;
               return (
                 <button key={m.k} onClick={() => go(m.k)}
-                  className={`py-1 flex flex-col items-center gap-0.5 text-[10px] transition ${on ? "text-orange-600 font-semibold" : "text-slate-400"}`}>
+                  className={`py-1.5 flex flex-col items-center gap-1 text-[10px] transition ${on ? "text-orange-600 font-semibold" : "text-slate-400"}`}>
                   <span className={`text-lg leading-none px-3 py-1 rounded-2xl transition ${on ? "bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-md shadow-orange-500/40" : ""}`}>{m.icon}</span>{m.label}
                 </button>
               );
             })}
             {hasMore && (
               <button onClick={() => setMenuOpen(true)}
-                className="py-1 flex flex-col items-center gap-0.5 text-[10px] text-slate-400">
+                className="py-1.5 flex flex-col items-center gap-1 text-[10px] text-slate-400">
                 <span className="text-lg leading-none px-3 py-1">⋯</span>เพิ่มเติม
               </button>
             )}
@@ -556,45 +556,148 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
   );
 }
 
-// ---------------- ประวัติการตัด/โอน (ดึงจาก china_transfers.lines) ----------------
-function TransferHistory({ billId, kind }: { billId: string; kind: "china" | "ctw" }) {
-  const [items, setItems] = useState<{ date: string; ref: string; amt: number; cur: string; note: string }[]>([]);
-  useEffect(() => {
+// ---------------- ประวัติการตัด/โอน (ดึงจาก china_transfers.lines) — แก้ไข/ลบได้ (คืนยอด) ----------------
+function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unknown>; kind: "china" | "ctw"; onChanged?: () => void }) {
+  const toast = useToast();
+  const billId = String(bill.id);
+  const billTotal = kind === "china" ? num(bill.amount_rmb) + num(bill.fee_rmb) : num(bill.net_amount);
+  const curStatus = String(bill.status ?? "");
+  const [raw, setRaw] = useState<Record<string, unknown>[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);   // tid ที่กำลังแก้จำนวน
+  const [editVal, setEditVal] = useState("");
+  const [delId, setDelId] = useState<string | null>(null);     // tid ที่กำลังยืนยันลบ
+
+  const load = useCallback(() => {
     apiFetch("/api/master-v2/china-transfers?limit=500&sort_by=transfer_date&sort_dir=desc")
-      .then(r => r.json()).then(j => {
-        const out: { date: string; ref: string; amt: number; cur: string; note: string }[] = [];
-        (j.data ?? []).forEach((t: Record<string, unknown>) => {
-          const lines = Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
-          const mine = lines.find(l => String(l.bill_id) === billId && l.kind === kind);
-          const date = String(t.transfer_date ?? ""), ref = t.ref_no ? String(t.ref_no) : "—";
-          if (mine) {
-            // ดูบิลจีน → โชว์เลขบิล CTW ที่ตัดพร้อมกันในการโอนนั้น
-            const ctwDocs = kind === "china"
-              ? lines.filter(l => l.kind === "ctw").map(l => String(l.doc_number ?? "")).filter(Boolean) : [];
-            out.push({
-              date, ref, amt: kind === "china" ? num(mine.paid_rmb) : num(mine.paid_thb),
-              cur: kind === "china" ? "¥" : "฿",
-              note: ctwDocs.length ? `ตัดพร้อม CTW: ${ctwDocs.join(", ")}` : "",
-            });
-          } else if (kind === "china" && Array.isArray(t.bill_ids) && (t.bill_ids as unknown[]).map(String).includes(billId)) {
-            out.push({ date, ref, amt: 0, cur: "¥", note: "(รายการเก่า)" });   // ของเก่าไม่มีรายการย่อย
-          }
+      .then(r => r.json()).then(j => setRaw(j.data ?? [])).catch(() => setRaw([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const linesOf = (t: Record<string, unknown>) => Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : [];
+
+  // รายการประวัติของบิลนี้
+  const items = raw.flatMap((t) => {
+    const lines = linesOf(t);
+    const idx = lines.findIndex(l => String(l.bill_id) === billId && l.kind === kind);
+    const no = t.transfer_no ? String(t.transfer_no) : (t.ref_no ? String(t.ref_no) : "—");
+    const date = String(t.transfer_date ?? "");
+    if (idx >= 0) {
+      const mine = lines[idx];
+      // ดูบิลจีน → โชว์เลขบิล CTW ที่ตัดพร้อมกันในการโอนนั้น
+      const ctwDocs = kind === "china" ? lines.filter(l => l.kind === "ctw").map(l => String(l.doc_number ?? "")).filter(Boolean) : [];
+      return [{
+        tid: String(t.id), no, date, editable: true,
+        amt: kind === "china" ? num(mine.paid_rmb) : num(mine.paid_thb),
+        cur: kind === "china" ? "¥" : "฿",
+        note: ctwDocs.length ? `ตัดพร้อม CTW: ${ctwDocs.join(", ")}` : "",
+      }];
+    }
+    if (kind === "china" && Array.isArray(t.bill_ids) && (t.bill_ids as unknown[]).map(String).includes(billId)) {
+      return [{ tid: String(t.id), no, date, editable: false, amt: 0, cur: "¥", note: "(รายการเก่า)" }];
+    }
+    return [];
+  });
+
+  // คำนวณยอดจ่ายรวมของบิลนี้ใหม่จากทุกการโอน (= source of truth)
+  const recomputeBillPaid = (transfers: Record<string, unknown>[]) =>
+    transfers.reduce((sum, t) => {
+      const mine = linesOf(t).find(l => String(l.bill_id) === billId && l.kind === kind);
+      return mine ? sum + (kind === "china" ? num(mine.paid_rmb) : num(mine.paid_thb)) : sum;
+    }, 0);
+
+  // แก้ไข (newVal != null) หรือ ลบ (newVal == null) รายการในการโอน tid
+  const apply = async (tid: string, newVal: number | null) => {
+    const t = raw.find(x => String(x.id) === tid);
+    if (!t) return;
+    setBusy(true);
+    try {
+      const rate = num(t.rate);
+      const lines = linesOf(t).map(l => ({ ...l }));
+      const idx = lines.findIndex(l => String(l.bill_id) === billId && l.kind === kind);
+      if (idx < 0) throw new Error("ไม่พบรายการ");
+
+      if (newVal == null) lines.splice(idx, 1);                       // ลบรายการ
+      else if (kind === "china") { lines[idx].paid_rmb = +newVal.toFixed(2); lines[idx].paid_thb = +(newVal * rate).toFixed(2); }
+      else lines[idx].paid_thb = +newVal.toFixed(2);
+
+      // ---- จัดการ record การโอน (คง leftover เดิม → ยอดคงเหลือบัญชีจีนไม่เพี้ยน) ----
+      const chinaThb = lines.filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_thb), 0);
+      const leftoverThb = num(t.leftover_thb);
+      if (lines.length === 0) {
+        await apiFetch(`/api/master-v2/china-transfers/${tid}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_active: false, actor: "china-app" }),     // ไม่เหลือรายการ → ปิดการโอนนี้
         });
-        setItems(out);
-      }).catch(() => {});
-  }, [billId, kind]);
+      } else {
+        await apiFetch(`/api/master-v2/china-transfers/${tid}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lines, bills_total_thb: +chinaThb.toFixed(2), amount_transferred_thb: +(chinaThb + leftoverThb).toFixed(2), actor: "china-app" }),
+        });
+      }
+
+      // ---- คืนยอดบิล: คำนวณ paid รวมใหม่จากสถานะหลังแก้ ----
+      const after = raw
+        .map(x => String(x.id) === tid ? { ...x, lines, is_active: lines.length === 0 ? false : x.is_active } : x)
+        .filter(x => x.is_active !== false);
+      const paidSum = recomputeBillPaid(after);
+
+      if (kind === "china") {
+        const body: Record<string, unknown> = { paid_rmb: +paidSum.toFixed(2), actor: "china-app" };
+        if (curStatus !== "ยกเลิก") body.status = paidSum >= billTotal - 0.001 ? "โอนแล้ว" : "รอโอน";
+        await apiFetch(`/api/master-v2/china-bills/${billId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      } else {
+        const cleared = Math.min(billTotal, paidSum);
+        await apiFetch(`/api/master-v2/ctw-bills/${billId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cleared_amount: +cleared.toFixed(2), cleared_at: cleared >= billTotal - 0.001 ? new Date().toISOString() : null, actor: "china-app" }),
+        });
+      }
+
+      toast.success(newVal == null ? "ลบรายการ + คืนยอดแล้ว" : "แก้ไขรายการแล้ว");
+      setEditId(null); setDelId(null);
+      load(); onChanged?.();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
   if (items.length === 0) return null;
   return (
     <div>
       <Label>ประวัติการตัด/โอน ({items.length})</Label>
       <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-2">
-        {items.map((it, i) => (
-          <div key={i} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
-            <div className="flex justify-between gap-2">
-              <span className="text-slate-500">{it.date} · เลขโอน {it.ref}</span>
-              {it.amt > 0 && <span className="font-medium text-slate-700">{it.cur}{fmt(it.amt)}</span>}
+        {items.map((it) => (
+          <div key={it.tid} className="border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+            <div className="flex justify-between gap-2 items-start">
+              <span className="text-slate-500">{it.date} · เลขโอน {it.no}</span>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {it.amt > 0 && <span className="font-medium text-slate-700">{it.cur}{fmt(it.amt)}</span>}
+                {it.editable && (
+                  <>
+                    <button onClick={() => { setEditId(it.tid); setEditVal(String(it.amt)); setDelId(null); }} className="text-slate-400 hover:text-blue-500" title="แก้ไขจำนวน">✎</button>
+                    <button onClick={() => { setDelId(it.tid); setEditId(null); }} className="text-slate-400 hover:text-red-500" title="ลบ (คืนยอด)">🗑</button>
+                  </>
+                )}
+              </div>
             </div>
             {it.note && <div className="text-[11px] text-slate-400 mt-0.5">{it.note}</div>}
+            {editId === it.tid && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-xs text-slate-500">{it.cur}</span>
+                <div className="flex-1"><Money value={editVal} onChange={setEditVal} /></div>
+                <button disabled={busy} onClick={() => apply(it.tid, num(editVal))} className="h-9 px-3 bg-emerald-600 text-white rounded-lg text-xs font-medium disabled:opacity-50">บันทึก</button>
+                <button disabled={busy} onClick={() => setEditId(null)} className="h-9 px-3 border border-slate-200 rounded-lg text-xs">ยกเลิก</button>
+              </div>
+            )}
+            {delId === it.tid && (
+              <div className="mt-2 rounded-lg bg-red-50 border border-red-100 p-2 text-xs">
+                <div className="text-red-600 mb-2">ลบรายการนี้? ระบบจะคืนยอดบิลกลับ (ยอดคงเหลือบัญชีจีนไม่เปลี่ยน)</div>
+                <div className="flex gap-2">
+                  <button disabled={busy} onClick={() => apply(it.tid, null)} className="h-9 px-3 bg-red-600 text-white rounded-lg font-medium disabled:opacity-50">ลบ + คืนยอด</button>
+                  <button disabled={busy} onClick={() => setDelId(null)} className="h-9 px-3 border border-slate-200 rounded-lg">ยกเลิก</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -653,7 +756,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
           </div>
         </div>
 
-        <div className="p-4 space-y-4">
+        <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-4">
           {/* ร้านค้า + ธนาคาร */}
           <div>
             <div className="font-medium text-slate-800">{String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—")}</div>
@@ -686,7 +789,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
             {bill.printed_at ? <Row label="พิมพ์เมื่อ" v={String(bill.printed_at).slice(0, 16).replace("T", " ")} /> : null}
           </div>
 
-          <TransferHistory billId={String(bill.id)} kind="china" />
+          <TransferHistory bill={bill} kind="china" onChanged={() => onChanged?.()} />
 
           {/* ปุ่มพิมพ์/ใบสรุป — พิมพ์ได้เมื่อมีเรทแล้ว */}
           <button onClick={() => canPrint && setReport(true)} disabled={!canPrint}
@@ -912,7 +1015,7 @@ function CtwList() {
           );
         })
       )}
-      {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
+      {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onChanged={load} onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
     </div>
   );
 }
@@ -1001,7 +1104,7 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
   );
 }
 
-function CtwDetail({ bill, onClose, onDeleted }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void }) {
+function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void; onChanged?: () => void }) {
   const toast = useToast();
   const [del, setDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1027,7 +1130,7 @@ function CtwDetail({ bill, onClose, onDeleted }: { bill: Record<string, unknown>
           <div className="font-semibold text-slate-800">บิลจาก CTW</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
         </div>
-        <div className="p-4 space-y-4">
+        <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-4">
           <div>
             <div className="font-medium text-slate-800 text-lg">{String(bill.company_name ?? "—")}</div>
             <div className="text-sm text-slate-400">เลขที่เอกสาร {String(bill.doc_number ?? "—")}</div>
@@ -1042,7 +1145,7 @@ function CtwDetail({ bill, onClose, onDeleted }: { bill: Record<string, unknown>
             {num(bill.cleared_amount) > 0 && <Row label="ตัดไปแล้ว" v={"฿" + fmt(num(bill.cleared_amount))} />}
           </div>
 
-          <TransferHistory billId={String(bill.id)} kind="ctw" />
+          <TransferHistory bill={bill} kind="ctw" onChanged={() => onChanged?.()} />
           {atts.length > 0 && (
             <div>
               <Label>ไฟล์แนบ ({atts.length})</Label>
@@ -1170,13 +1273,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const chinaIn = Math.max(0, transferred + balanceUsedThb - selectedSum);
   const chinaInRmb = effRate ? chinaIn / effRate : 0;
   const activeTier = tierBasis <= 5000 ? "R1" : tierBasis <= 99999 ? "R2" : tierBasis <= 399999 ? "R3" : "R4";
-
-  // เติม "จำนวนเงินที่โอนจริง" ให้เป็นขั้นต่ำอัตโนมัติเมื่อช่องยังว่าง (แก้ขึ้นได้)
-  useEffect(() => {
-    if (!hasRate || selectedSum <= 0 || useBalance) return;
-    setAmount(a => (num(a) <= 0 ? String(+selectedSum.toFixed(4)) : a));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSum, hasRate, useBalance]);
 
   // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
@@ -1315,17 +1411,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                 <label className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-white border border-emerald-300 px-3 py-2 cursor-pointer">
                   <span className="text-sm text-emerald-700 font-medium">ใช้ยอดคงเหลือบัญชีจีน (¥{fmt(balance.rmb)})</span>
                   <span className="relative inline-flex flex-shrink-0">
-                    <input type="checkbox" checked={useBalance} onChange={e => {
-                      const on = e.target.checked;
-                      setUseBalance(on);
-                      // เติมขั้นต่ำใหม่ให้ช่อง "จำนวนเงินที่โอนจริง" ตามสถานะสวิตช์ (แก้ขึ้นได้)
-                      if (hasRate && selectedSum > 0) {
-                        const nRmb = Math.max(0, selectedRmb - (on ? balance.rmb : 0));
-                        const eff = rateFor(nRmb * r1, r1);
-                        const min = on ? nRmb * eff : selectedRmb * eff;
-                        setAmount(String(+min.toFixed(4)));
-                      }
-                    }} className="sr-only peer" />
+                    <input type="checkbox" checked={useBalance} onChange={e => setUseBalance(e.target.checked)} className="sr-only peer" />
                     <span className="w-10 h-6 bg-slate-200 rounded-full peer-checked:bg-emerald-500 transition" />
                     <span className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow transition peer-checked:translate-x-4" />
                   </span>
