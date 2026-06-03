@@ -1526,31 +1526,7 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
   const [sendingId, setSendingId] = useState("");
   const [delTarget, setDelTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังยืนยันลบ
   const [busy, setBusy] = useState(false);
-  const [slipTarget, setSlipTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังแนบสลิป
-  const [slipKeys, setSlipKeys] = useState<string[]>([]);
-  const [slipBusy, setSlipBusy] = useState(false);
-
-  const openSlip = (r: Record<string, unknown>) => {
-    setSlipTarget(r);
-    setSlipKeys(Array.isArray(r.attachments) ? (r.attachments as unknown[]).map(String) : []);
-  };
-  const saveSlip = async () => {
-    if (!slipTarget) return;
-    const id = String(slipTarget.id);
-    setSlipBusy(true);
-    try {
-      const res = await apiFetch(`/api/master-v2/china-transfers/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attachments: slipKeys, actor: "china-app" }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (j.error) { toast.error(j.error); return; }
-      setRows(p => p.map(x => String(x.id) === id ? { ...x, attachments: slipKeys } : x));
-      toast.success(slipKeys.length ? "บันทึกสลิป → โอนแล้ว" : "บันทึกแล้ว");
-      setSlipTarget(null);
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
-    finally { setSlipBusy(false); }
-  };
+  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);   // เปิดหน้ารายละเอียดการโอน
 
   // ลบรายการโอน + คืนยอดบิลที่เกี่ยวข้อง (paid_rmb / cleared_amount คำนวณใหม่จากการโอนที่เหลือ)
   const removeTransfer = async (target: Record<string, unknown>) => {
@@ -1608,13 +1584,10 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
       {rows.map((r) => {
         const ls = Array.isArray(r.lines) ? (r.lines as Record<string, unknown>[]) : [];
         const cn = ls.filter(l => l.kind === "china").length, cw = ls.filter(l => l.kind === "ctw").length;
-        const t = buildTransferReceipt(r, pmap);
         const id = String(r.id);
-        const slipCount = Array.isArray(r.attachments) ? (r.attachments as unknown[]).length : 0;
-        const transferred = slipCount > 0;   // มีสลิป = โอนแล้ว / ไม่มี = ยังไม่โอน
         return (
           <Card key={id}>
-            <button onClick={() => setReceipt(t)} className="w-full flex justify-between items-start gap-2 text-left">
+            <button onClick={() => setDetail(r)} className="w-full flex justify-between items-start gap-2 text-left">
               <div className="min-w-0">
                 <div className="font-semibold text-slate-800">{String(r.transfer_no ?? "—")}</div>
                 <div className="text-xs text-slate-400">{String(r.transfer_date ?? "—")}{r.ref_no ? ` · ${String(r.ref_no)}` : ""}</div>
@@ -1622,44 +1595,46 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
               </div>
               <div className="text-right flex-shrink-0">
                 <div className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</div>
-                <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${transferred ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                  {transferred ? `✓ โอนแล้ว${slipCount > 1 ? ` (${slipCount})` : ""}` : "○ ยังไม่โอน"}
-                </span>
+                <div className="text-[11px] text-slate-400 mt-1">แตะดูรายละเอียด ›</div>
               </div>
             </button>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button onClick={() => setReceipt(t)} className="h-10 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ พิมพ์/ใบสรุป</button>
-              <button onClick={async () => { setSendingId(id); await pushTransferLine(t, toast); setSendingId(""); }} disabled={sendingId === id}
-                className="h-10 bg-[#06C755] text-white rounded-lg text-sm font-medium disabled:opacity-50">{sendingId === id ? "กำลังส่ง…" : "📩 ส่งไลน์"}</button>
-            </div>
-            <button onClick={() => openSlip(r)}
-              className={`mt-2 w-full h-10 rounded-lg text-sm font-medium border ${transferred ? "border-slate-300 text-slate-600 hover:bg-slate-50" : "border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100"}`}>
-              📎 {transferred ? "ดู/แก้สลิป" : "แนบสลิป (ยืนยันว่าโอนแล้ว)"}
-            </button>
-            {canDelete && (
-              <button onClick={() => setDelTarget(r)} disabled={busy}
-                className="mt-2 w-full h-10 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 disabled:opacity-50">🗑 ลบรายการโอน (คืนยอดบิล)</button>
-            )}
           </Card>
         );
       })}
       {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)} />}
-      {slipTarget && (
-        <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !slipBusy && setSlipTarget(null)}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
-              <div className="font-semibold text-slate-800">แนบสลิปการโอน · {String(slipTarget.transfer_no ?? "—")}</div>
-              <button onClick={() => !slipBusy && setSlipTarget(null)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+      {detail && (() => {
+        const r = detail; const id = String(r.id);
+        const ls = Array.isArray(r.lines) ? (r.lines as Record<string, unknown>[]) : [];
+        const cn = ls.filter(l => l.kind === "china").length, cw = ls.filter(l => l.kind === "ctw").length;
+        const t = buildTransferReceipt(r, pmap);
+        return (
+          <Portal><div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setDetail(null)}>
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+                <div className="font-semibold text-slate-800">รายละเอียดการโอน · {String(r.transfer_no ?? "—")}</div>
+                <button onClick={() => setDetail(null)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+              </div>
+              <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-4">
+                <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
+                  <Row label="วันที่โอน" v={r.transfer_date} />
+                  {!!r.ref_no && <Row label="เลขอ้างอิงสลิป" v={r.ref_no} />}
+                  <Row label="เรทที่ใช้" v={fmt(num(r.rate))} />
+                  <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1"><span className="text-slate-500">โอนจริง</span><span className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</span></div>
+                  <Row label="เข้าบัญชีจีน (ส่วนต่าง)" v={`¥${fmt(Math.max(0, num(r.leftover_rmb)))}`} />
+                  <Row label="ตัดบิล" v={`บิลจีน ${cn} · CTW ${cw}`} />
+                </div>
+                <button onClick={() => setReceipt(t)} className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ ดูใบสรุป / พิมพ์ / ส่งไลน์(รูป)</button>
+                <button onClick={async () => { setSendingId(id); await pushTransferLine(t, toast); setSendingId(""); }} disabled={sendingId === id}
+                  className="w-full h-11 bg-[#06C755] text-white rounded-lg text-sm font-medium disabled:opacity-50">{sendingId === id ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
+                {canDelete && (
+                  <button onClick={() => { setDelTarget(r); setDetail(null); }} disabled={busy}
+                    className="w-full h-11 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 disabled:opacity-50">🗑 ลบรายการโอน (คืนยอดบิล)</button>
+                )}
+              </div>
             </div>
-            <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-3">
-              <div className="text-xs text-slate-500">แนบสลิปแล้ว = รายการนี้จะขึ้นสถานะ <span className="font-medium text-emerald-700">“โอนแล้ว”</span> · ถ้าลบสลิปออกหมดจะกลับเป็น “ยังไม่โอน”</div>
-              <FileMultiInput label="📎 สลิปการโอน" value={slipKeys} onChange={setSlipKeys} folder="china-transfers" />
-              <button onClick={saveSlip} disabled={slipBusy}
-                className="w-full h-11 bg-orange-600 text-white rounded-lg font-medium disabled:opacity-50">{slipBusy ? "กำลังบันทึก…" : "บันทึก"}</button>
-            </div>
-          </div>
-        </div></Portal>
-      )}
+          </div></Portal>
+        );
+      })()}
       {delTarget && (
         <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
           confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
