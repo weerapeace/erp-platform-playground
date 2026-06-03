@@ -822,10 +822,15 @@ function FilterCombobox({ column, label, values, onChange, relation }: {
     setLoading(true);
     try {
       if (relation) {
-        const j = await apiFetch(`/api/master-v2/${relation.moduleKey}?limit=1000`).then(r => r.json());
-        setOpts(((j.data ?? []) as Record<string, unknown>[]).map(r => ({
-          value: String(r.id), label: String(r[relation.labelField] ?? r.id),
-        })));
+        // โชว์เฉพาะค่าที่ "มีใช้จริง": 1) หา id ที่ถูกผูกกับสินค้าในคอลัมน์นี้ 2) ดึงชื่อเฉพาะ id เหล่านั้น
+        const dj = await apiFetch(`/api/master-v2/skus/distinct?column=${encodeURIComponent(column)}&limit=2000`).then(r => r.json());
+        const usedIds: string[] = Array.isArray(dj.values) ? dj.values : [];
+        if (usedIds.length === 0) { setOpts([]); return; }
+        const f = encodeURIComponent(JSON.stringify({ id: { type: "select", selected: usedIds } }));
+        const j = await apiFetch(`/api/master-v2/${relation.moduleKey}?limit=2000&include_inactive=true&filters=${f}`).then(r => r.json());
+        const byId = new Map(((j.data ?? []) as Record<string, unknown>[]).map(r => [String(r.id), String(r[relation.labelField] ?? r.id)]));
+        // คงเฉพาะ id ที่ใช้จริง + เรียงตามชื่อ
+        setOpts(usedIds.map(id => ({ value: id, label: byId.get(id) ?? id })).sort((a, b) => a.label.localeCompare(b.label, "th")));
       } else {
         const j = await apiFetch(`/api/master-v2/skus/distinct?column=${encodeURIComponent(column)}&limit=1000`).then(r => r.json());
         setOpts((Array.isArray(j.values) ? (j.values as string[]) : []).map(v => ({ value: v, label: v })));
