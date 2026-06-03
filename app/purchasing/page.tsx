@@ -15,11 +15,12 @@ import { SkuFormModal } from "@/components/sku-form-modal";
 import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { SkuImagePicker, type PickedSku } from "@/components/sku-image-picker";
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
 type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null };
-type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string };
+type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; usedForId?: string | null; usedForLabel?: string | null };
 type Source = "sku" | "group" | "favorite" | "frequent";
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
@@ -373,9 +374,9 @@ export default function PurchasingShopPage() {
     setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, skuId: v.skuId, note: "" }]);
     setSel(null); setVars([]);
   };
-  const addSku = (c: Card, qty: number, note: string) => {
+  const addSku = (c: Card, qty: number, note: string, usedFor?: PickedSku | null) => {
     const s = c.sku!;
-    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note }]);
+    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note, usedForId: usedFor?.id ?? null, usedForLabel: usedFor?.name ?? null }]);
     setConfirmSku(null);
   };
 
@@ -392,6 +393,7 @@ export default function PurchasingShopPage() {
             sku_id: l.skuId, item_name: l.label, qty: l.qty, uom: l.uom,
             seller_name: l.seller, price_est: l.price, currency: l.currency,
             image_key: l.image, note: l.note || null,
+            used_for_sku_id: l.usedForId ?? null, used_for_label: l.usedForLabel ?? null,
           })),
         }),
       });
@@ -666,7 +668,7 @@ export default function PurchasingShopPage() {
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
         <ConfirmSku card={confirmSku} rate={cnyRate} onClose={() => setConfirmSku(null)}
-          onAdd={(qty, note) => addSku(confirmSku, qty, note)}
+          onAdd={(qty, note, usedFor) => addSku(confirmSku, qty, note, usedFor)}
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
       )}
 
@@ -783,9 +785,11 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string) => void; onEdit: () => void }) {
+function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null) => void; onEdit: () => void }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
+  const [usedFor, setUsedFor] = useState<PickedSku | null>(null);   // 🎯 ใช้กับสินค้า (ปลายทาง)
+  const [pickerOpen, setPickerOpen] = useState(false);
   const s = card.sku!;
   return (
     <ERPModal open onClose={onClose} size="md" title="เพิ่มลงใบขอซื้อ"
@@ -793,7 +797,7 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: 
         <>
           <button onClick={onEdit} className="mr-auto h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">✎ แก้ไขสินค้า</button>
           <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={() => onAdd(qty, note)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
+          <button onClick={() => onAdd(qty, note, usedFor)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
         </>
       }>
       <div className="flex gap-3">
@@ -819,7 +823,26 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: 
           <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ (ถ้ามี)</label>
           <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น สีพิเศษ / ด่วน" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
         </div>
+        {/* 🎯 ใช้กับสินค้า (ปลายทาง) — เลือกจาก SKU แบบมีรูป */}
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">🎯 ใช้กับสินค้า (ปลายทาง) — ถ้ามี</label>
+          {usedFor ? (
+            <div className="flex items-center gap-2 h-9 px-2 border border-slate-200 rounded-md bg-slate-50">
+              <span className="text-sm text-slate-700 truncate flex-1">{usedFor.name}{usedFor.code ? ` (${usedFor.code})` : ""}</span>
+              <button type="button" onClick={() => setPickerOpen(true)} className="text-xs text-blue-600 hover:underline shrink-0">เปลี่ยน</button>
+              <button type="button" onClick={() => setUsedFor(null)} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setPickerOpen(true)}
+              className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
+              + เลือกสินค้าปลายทาง (เช่น PIX10)
+            </button>
+          )}
+        </div>
       </div>
+      <SkuImagePicker open={pickerOpen} onClose={() => setPickerOpen(false)}
+        title="เลือกสินค้าปลายทาง (ที่จะเอาของนี้ไปใช้)"
+        onPick={(sku) => { setUsedFor(sku); setPickerOpen(false); }} />
     </ERPModal>
   );
 }
