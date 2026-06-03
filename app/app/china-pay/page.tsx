@@ -225,8 +225,8 @@ export default function ChinaPayApp() {
     <CelebrateProvider>
     <div className="min-h-screen bg-slate-100">
       <style>{`
-        @keyframes cpRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
-        .cp-anim{animation:cpRise .42s ease both}
+        @keyframes cpRise{from{opacity:0}to{opacity:1}}
+        .cp-anim{animation:cpRise .35s ease both}
         @keyframes cpSpin{to{transform:rotate(360deg)}}
         .cp-spin{display:inline-block;animation:cpSpin 1.1s linear infinite}
         @keyframes cpFloat{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(18px,-22px) scale(1.08)}66%{transform:translate(-16px,12px) scale(.95)}}
@@ -976,6 +976,8 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
   const [report, setReport] = useState(false);
   const [askCancel, setAskCancel] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sendingLine, setSendingLine] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);   // รูปที่กดดูเต็มจอ
   const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
   useEffect(() => {
     if (!supplierId) return;
@@ -993,6 +995,24 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
   const canPrint = rate > 0;                       // พิมพ์ได้เมื่อมีเรทแล้ว
   const canCancel = st !== "ยกเลิก" && st !== "โอนแล้ว";
+
+  // ส่งบิลเข้า LINE (ข้อความ Flex + ปุ่มเปิดบิล)
+  const sendLine = async () => {
+    const total = num(bill.amount_rmb) + num(bill.fee_rmb);
+    const link = `${typeof window !== "undefined" ? window.location.origin : ""}/app/china-pay?bill=${String(bill.id)}`;
+    let text = `🧾 บิลจีน\nร้าน: ${String(bill.supplier_label ?? sup?.name_th ?? "—")}\nยอดโอนรวม: ¥${fmt(total)}\nวันที่วางบิล: ${String(bill.transfer_date ?? "—")}\nเลขบัญชี: ${String(sup?.account_number ?? "—")}`;
+    if (bill.note) text += `\nหมายเหตุ: ${String(bill.note)}`;
+    setSendingLine(true);
+    try {
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, button: { label: "เปิดใบสรุปบิลจีน", url: link } }) });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
+      if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง");
+      else toast.error(j.error ?? "ส่ง LINE ไม่ได้ — เปิดให้เลือกกลุ่มเอง");
+      window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
+    } catch { window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); }
+    finally { setSendingLine(false); }
+  };
 
   const cancelBill = async () => {
     setBusy(true); setAskCancel(false);
@@ -1056,31 +1076,38 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
 
           <TransferHistory bill={bill} kind="china" onChanged={() => onChanged?.()} />
 
-          {/* ปุ่มพิมพ์/ใบสรุป — พิมพ์ได้เมื่อมีเรทแล้ว */}
+          {/* ปุ่มพิมพ์/ใบสรุป + ส่งไลน์ */}
           <button onClick={() => canPrint && setReport(true)} disabled={!canPrint}
             className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50">
             🖨️ พิมพ์ / ใบสรุป
           </button>
           {!canPrint && <div className="-mt-2 text-[11px] text-amber-600 text-center">* ใส่เรทก่อนถึงพิมพ์ได้ (เรทจะมาตอนตัดโอนเข้าจีน)</div>}
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => canPrint ? setReport(true) : toast.error("ใส่เรทก่อนถึงส่งรูปได้")}
+              className="h-11 bg-[#06C755] text-white rounded-lg text-sm font-medium">📩 ส่งไลน์ (รูป)</button>
+            <button onClick={sendLine} disabled={sendingLine}
+              className="h-11 border border-[#06C755] text-[#06C755] rounded-lg text-sm font-medium disabled:opacity-50">{sendingLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
+          </div>
 
-          {/* แนบไฟล์ */}
+          {/* แนบไฟล์ — กดดูเต็มจอ (กดอีกครั้งปิด) */}
           {allFiles.length > 0 && (
             <div>
               <Label>ไฟล์แนบ ({allFiles.length})</Label>
               <div className="grid grid-cols-3 gap-2">
                 {allFiles.map((k) => (
-                  <a key={k} href={r2Url(k)} target="_blank" rel="noreferrer"
-                    className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
-                    {isPdf(k) ? (
-                      <div className="flex flex-col items-center justify-center h-24 text-slate-600">
-                        <span className="text-3xl">📄</span>
-                        <span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span>
-                      </div>
-                    ) : (
-                      /* eslint-disable-next-line @next/next/no-img-element */
+                  isPdf(k) ? (
+                    <a key={k} href={r2Url(k)} target="_blank" rel="noreferrer"
+                      className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50 flex flex-col items-center justify-center h-24 text-slate-600">
+                      <span className="text-3xl">📄</span>
+                      <span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span>
+                    </a>
+                  ) : (
+                    <button key={k} type="button" onClick={() => setLightbox(r2Url(k))}
+                      className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
-                    )}
-                  </a>
+                    </button>
+                  )
                 ))}
               </div>
             </div>
@@ -1099,6 +1126,13 @@ function BillDetail({ bill, onClose, onPrinted, onChanged }: { bill: Record<stri
       {askCancel && (
         <ConfirmPopup title="ยกเลิกบิลนี้?" message={`${String(bill.supplier_label ?? bill.supplier_id ?? "บิลนี้")} · ¥${fmt(totalRmb)}`}
           confirmText="ยกเลิกบิล" tone="rose" onCancel={() => setAskCancel(false)} onConfirm={cancelBill} />
+      )}
+      {lightbox && (
+        <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="" className="max-w-full max-h-full object-contain" />
+          <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
+        </div></Portal>
       )}
     </div>
     </Portal>
