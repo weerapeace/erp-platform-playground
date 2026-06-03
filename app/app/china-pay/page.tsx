@@ -2295,9 +2295,9 @@ function TransferReceiptPopup({ t, onClose }: { t: Record<string, unknown>; onCl
             </div>
           )}
         </div>
-        <div className="p-3 border-t border-slate-100 bg-white flex-shrink-0 grid grid-cols-2 gap-2 print:hidden">
-          <button onClick={saveImage} disabled={busy} className="h-11 bg-slate-700 text-white rounded-lg font-medium disabled:opacity-50">💾 โหลดรูป</button>
-          <button onClick={() => window.print()} className="h-11 border border-slate-300 text-slate-700 rounded-lg font-medium">🖨️ พิมพ์</button>
+        <div className="px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t border-slate-100 bg-white flex-shrink-0 grid grid-cols-2 gap-2 print:hidden">
+          <button onClick={saveImage} disabled={busy} className="h-12 bg-slate-700 text-white rounded-lg font-medium disabled:opacity-50">💾 โหลดรูป</button>
+          <button onClick={() => window.print()} className="h-12 border border-slate-300 text-slate-700 rounded-lg font-medium">🖨️ พิมพ์</button>
         </div>
       </div>
     </div>
@@ -2547,12 +2547,12 @@ function ReportPopup({ bill, onClose, onPrinted }: {
           <canvas ref={canvasRef} className="hidden" />
           <div className="mt-2 text-center text-[11px] text-slate-400">เมื่อบันทึก/แชร์ ระบบจะทำเครื่องหมาย “พิมพ์แล้ว” ให้</div>
         </div>
-        <div className="p-3 border-t border-slate-100 flex-shrink-0 space-y-2">
+        <div className="px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t border-slate-100 flex-shrink-0 space-y-2">
           <div className="grid grid-cols-2 gap-2">
-            <button onClick={saveImage} disabled={busy} className="h-11 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
-            <button onClick={shareImage} disabled={busy} className="h-11 bg-orange-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์</button>
+            <button onClick={saveImage} disabled={busy} className="h-12 border border-slate-300 text-slate-700 rounded-xl font-medium disabled:opacity-50">💾 บันทึกรูป</button>
+            <button onClick={shareImage} disabled={busy} className="h-12 bg-orange-600 text-white rounded-xl font-medium disabled:opacity-50">📤 แชร์</button>
           </div>
-          <button onClick={sendLineImage} disabled={busy} className="w-full h-11 bg-[#06C755] text-white rounded-xl font-medium disabled:opacity-50">📩 ส่งเข้า LINE กลุ่ม (รูป)</button>
+          <button onClick={sendLineImage} disabled={busy} className="w-full h-12 bg-[#06C755] text-white rounded-xl font-medium disabled:opacity-50">📩 ส่งเข้า LINE กลุ่ม (รูป)</button>
         </div>
       </div>
     </div>
