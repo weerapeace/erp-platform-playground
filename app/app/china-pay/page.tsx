@@ -5,7 +5,7 @@
  * เปิดผ่าน /app/china-pay · เห็นแค่โมดูลนี้ ไม่มี sidebar/โมดูลอื่น
  * reuse data layer กลาง: /api/master-v2/china-bills + RelationPicker + FileInput + toast
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -25,6 +25,60 @@ const CTW_PARTNER_CFG: RelationConfig = {
   target_label_field: "name_th", target_search_fields: ["name_th", "name_en"], allow_create: false,
   filter: { column: "buy_bill", value: "true" },
 } as RelationConfig;
+
+// ---------------- Animation "บันทึกสำเร็จ" (ของกลางใน china-pay) ----------------
+type CelebrateFn = (msg?: string, opts?: { confetti?: boolean }) => void;
+const CelebrateCtx = createContext<CelebrateFn>(() => {});
+const useCelebrate = () => useContext(CelebrateCtx);
+
+function CelebrateProvider({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<{ id: number; msg: string; confetti: boolean } | null>(null);
+  const fire = useCallback<CelebrateFn>((msg = "บันทึกสำเร็จ", opts) => {
+    setState(s => ({ id: (s?.id ?? 0) + 1, msg, confetti: !!opts?.confetti }));
+  }, []);
+  useEffect(() => {
+    if (!state) return;
+    const t = setTimeout(() => setState(null), state.confetti ? 1900 : 1300);
+    return () => clearTimeout(t);
+  }, [state]);
+  // กระดาษโปรย (สุ่มตำแหน่ง/สี ครั้งเดียวต่อการแสดง)
+  const pieces = useMemo(() => {
+    if (!state?.confetti) return [];
+    const colors = ["#fb923c", "#34d399", "#60a5fa", "#fbbf24", "#f472b6", "#a78bfa"];
+    return Array.from({ length: 30 }, (_, i) => ({
+      left: ((i * 37) % 100),
+      delay: (i % 8) * 55,
+      dur: 1100 + (i % 5) * 200,
+      color: colors[i % colors.length],
+    }));
+  }, [state?.id, state?.confetti]);
+
+  return (
+    <CelebrateCtx.Provider value={fire}>
+      {children}
+      {state && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 bg-black/10 cpok-bg" />
+          <div className="cpok-card relative flex flex-col items-center gap-3">
+            <svg viewBox="0 0 80 80" className="w-24 h-24 drop-shadow-lg">
+              <circle cx="40" cy="40" r="37" fill="#10b981" />
+              <path d="M24 41 L35 53 L57 28" className="cpok-check" />
+            </svg>
+            <div className="text-white font-semibold text-lg drop-shadow">{state.msg}</div>
+          </div>
+          {state.confetti && (
+            <div className="absolute inset-0 overflow-hidden">
+              {pieces.map((p, i) => (
+                <span key={i} className="cpok-confetti"
+                  style={{ left: `${p.left}%`, background: p.color, animationDelay: `${p.delay}ms`, animationDuration: `${p.dur}ms` }} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </CelebrateCtx.Provider>
+  );
+}
 
 const VAT_RATE = 0.07;   // ภาษี 7%
 
@@ -124,6 +178,7 @@ export default function ChinaPayApp() {
   const cols = bottomItems.length + (hasMore ? 1 : 0);
 
   return (
+    <CelebrateProvider>
     <div className="min-h-screen bg-slate-100">
       <style>{`
         @keyframes cpRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
@@ -136,6 +191,15 @@ export default function ChinaPayApp() {
         .cp-bg .b1{width:200px;height:200px;background:#fdba74;top:18%;left:-50px;animation-delay:0s}
         .cp-bg .b2{width:240px;height:240px;background:#fed7aa;top:45%;right:-70px;animation-delay:-4s}
         .cp-bg .b3{width:180px;height:180px;background:#fcd34d;bottom:8%;left:30%;animation-delay:-8s;opacity:.3}
+        /* บันทึกสำเร็จ */
+        @keyframes cpokIn{0%{opacity:0;transform:scale(.6)}55%{opacity:1;transform:scale(1.1)}100%{opacity:1;transform:scale(1)}}
+        .cpok-card{animation:cpokIn .4s cubic-bezier(.2,.8,.3,1.5) both}
+        @keyframes cpokFade{from{opacity:0}to{opacity:1}}
+        .cpok-bg{animation:cpokFade .25s ease both}
+        .cpok-check{fill:none;stroke:#fff;stroke-width:7;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:64;stroke-dashoffset:64;animation:cpokDraw .45s .2s ease forwards}
+        @keyframes cpokDraw{to{stroke-dashoffset:0}}
+        @keyframes cpokFall{0%{transform:translateY(-12vh) rotate(0);opacity:1}100%{transform:translateY(112vh) rotate(560deg);opacity:.85}}
+        .cpok-confetti{position:absolute;top:0;width:9px;height:14px;border-radius:2px;animation-name:cpokFall;animation-timing-function:linear;animation-fill-mode:forwards}
       `}</style>
       <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm relative overflow-hidden">
         <div className="cp-bg" aria-hidden><i className="b1"></i><i className="b2"></i><i className="b3"></i></div>
@@ -208,6 +272,7 @@ export default function ChinaPayApp() {
         </div>
       )}
     </div>
+    </CelebrateProvider>
   );
 }
 
@@ -353,6 +418,7 @@ function StatCard({ label, main, sub, onClick, wide }: { label: string; main: st
 // ---------------- ลงบิล (ไม่ใส่เรท — เรทมาตอนโอน) ----------------
 function BillForm() {
   const toast = useToast();
+  const celebrate = useCelebrate();
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [amount, setAmount] = useState("");
@@ -391,7 +457,7 @@ function BillForm() {
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      toast.success("บันทึกบิลแล้ว");
+      celebrate("บันทึกบิลแล้ว");
       // reset
       setSupplierId(null); setSup(null); setAmount(""); setFee(""); setTransferDate(today());
       setFiles([]);
@@ -1022,6 +1088,7 @@ function CtwList() {
 
 function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => void }) {
   const toast = useToast();
+  const celebrate = useCelebrate();
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [company, setCompany] = useState("");
   const [docNo, setDocNo] = useState("");
@@ -1062,7 +1129,7 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      toast.success("บันทึกบิล CTW แล้ว"); onSaved();
+      celebrate("บันทึกบิล CTW แล้ว"); onSaved();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -1178,6 +1245,7 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged }: { bill: Record<strin
 // ---------------- โอนเข้าบัญชีจีน ----------------
 function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: string[]; onConsumePreselect?: () => void }) {
   const toast = useToast();
+  const celebrate = useCelebrate();
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
@@ -1340,7 +1408,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           body: JSON.stringify({ cleared_amount: newCleared, cleared_at: newCleared >= net ? new Date().toISOString() : null, actor: "china-app" }),
         });
       }));
-      toast.success("บันทึก + ตัดบิลแล้ว");
+      celebrate("โอนสำเร็จ 🎉", { confetti: true });
       setSel(new Set()); setPay({}); setCtwSel(new Set()); setCtwPay({}); setUseBalance(false);
       setAmount(""); setRefNo(""); setSlip([]); setNote("");
       loadAll();

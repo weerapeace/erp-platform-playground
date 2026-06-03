@@ -110,6 +110,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const poStatus = allClosed ? "received" : anyReceived ? "partial" : "confirmed";
   await admin.from("purchase_orders_v2").update({ status: poStatus }).eq("id", poId);
 
+  // 3.5) รับเข้าสต็อก (ขั้น 4 แบบเล็ก) — เพิ่มยอดคงเหลือต่อ SKU เฉพาะ "ของดี" (qty_received)
+  // ของเสีย (qty_defective) ไม่เข้าสต็อก / บรรทัดที่ไม่มี SKU จริง (item_sku_id) ข้าม
+  let stockedLines = 0;
+  const stockWarnings: string[] = [];
+  for (const l of valid) {
+    const pl = lineById.get(String(l.po_line_id));
+    if (!pl || !pl.item_sku_id) continue;
+    const recQty = num(l.qty_received);
+    if (recQty <= 0) continue;
+    const { error: stkErr } = await admin.rpc("sku_stock_receive", {
+      p_sku_id:    pl.item_sku_id as string,
+      p_qty:       recQty,
+      p_uom:       (pl.uom as string) ?? null,
+      p_ref_id:    gr.id,
+      p_ref_label: grNo,
+      p_actor:     actor,
+    });
+    if (stkErr) { console.error("[receive] รับเข้าสต็อกไม่สำเร็จ:", stkErr.message); stockWarnings.push(`${pl.item_name ?? pl.item_sku_id}: ${stkErr.message}`); }
+    else stockedLines += 1;
+  }
+
   // 4) audit — 1 แถวต่อ 1 ใบรับ (ของกลาง, เขียนลงตาราง audit_logs จริง)
   await writeAudit(admin, {
     action:     "receive",
@@ -117,8 +138,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     entityId:   gr.id,
     actorId:    user.id,
     actorName:  actor,
-    metadata:   { gr_no: grNo, po_no: po.po_no, lines: grLines.length, po_status: poStatus },
+    metadata:   { gr_no: grNo, po_no: po.po_no, lines: grLines.length, po_status: poStatus, stocked_lines: stockedLines },
   });
 
-  return NextResponse.json({ ok: true, gr_no: grNo, po_status: poStatus, line_count: grLines.length, error: null });
+  return NextResponse.json({ ok: true, gr_no: grNo, po_status: poStatus, line_count: grLines.length, stocked_lines: stockedLines, stock_warnings: stockWarnings, error: null });
 }
