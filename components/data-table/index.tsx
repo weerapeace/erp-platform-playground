@@ -470,6 +470,12 @@ export function DataTable<T extends Record<string, unknown>>({
   const [density, setDensity] = useState<"normal" | "compact">("normal");
   const cellPad = density === "compact" ? "px-3 py-1" : "px-4 py-3";
 
+  // ---- Group by (จัดกลุ่ม) — ของกลาง (client mode เท่านั้น) ----
+  const [groupBy, setGroupBy] = useState<string | null>(null);
+  const [groupMenuOpen, setGroupMenuOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const isGrouped = !!groupBy && !isServer;
+
   // ---- View mode (table / cards) ----
   const showCardToggle = !!enableCards || !!cardConfig;
   // มือถือ (จอ < 768px) + มีการ์ด → เริ่มต้นเป็น "การ์ด" อัตโนมัติ (ไม่ต้องเลื่อนตารางซ้าย-ขวา)
@@ -1311,6 +1317,35 @@ export function DataTable<T extends Record<string, unknown>>({
           </button>
         )}
 
+        {/* Group by (จัดกลุ่ม) — เฉพาะ table + client mode */}
+        {viewMode === "table" && !isServer && (
+          <div className="relative">
+            <button onClick={() => setGroupMenuOpen(o => !o)} title="จัดกลุ่มตาราง"
+              className={`flex items-center gap-1.5 h-8 px-2.5 text-sm border rounded-md transition-colors ${groupBy ? "bg-blue-50 text-blue-700 border-blue-200" : "text-slate-600 border-slate-200 bg-white hover:bg-slate-50"}`}>
+              <span>⊞</span>
+              <span className="hidden sm:inline">{groupBy ? "จัดกลุ่มแล้ว" : "จัดกลุ่ม"}</span>
+              <span className="text-slate-400">▾</span>
+            </button>
+            {groupMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setGroupMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden max-h-72 overflow-y-auto">
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-400 bg-slate-50 border-b border-slate-100">จัดกลุ่มตาม</div>
+                  <button onClick={() => { setGroupBy(null); setGroupMenuOpen(false); }}
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${!groupBy ? "text-blue-700 font-medium" : "text-slate-600"}`}>— ไม่จัดกลุ่ม —</button>
+                  {table.getVisibleLeafColumns().filter(c => c.id !== "__select__" && c.id !== "__actions__").map(c => {
+                    const label = typeof c.columnDef.header === "string" ? c.columnDef.header : c.id;
+                    return (
+                      <button key={c.id} onClick={() => { setGroupBy(c.id); setCollapsedGroups(new Set()); setGroupMenuOpen(false); }}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${groupBy === c.id ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700"}`}>{label}</button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Export — dropdown */}
         <div className="relative">
           <button
@@ -1534,7 +1569,69 @@ export function DataTable<T extends Record<string, unknown>>({
               ))}
             </thead>
             <tbody className="bg-white divide-y divide-slate-100">
-              {table.getRowModel().rows.length === 0 ? (
+              {isGrouped ? (() => {
+                // ---- จัดกลุ่ม (manual, client mode) ----
+                const grows = table.getSortedRowModel().rows;
+                const leaf = table.getVisibleLeafColumns();
+                if (grows.length === 0) return (
+                  <tr><td colSpan={tableColumns.length} className="py-16 text-center"><EmptyState message={emptyMessage} /></td></tr>
+                );
+                const order: string[] = [];
+                const groups = new Map<string, typeof grows>();
+                for (const r of grows) {
+                  const key = String(r.getValue(groupBy as string) ?? "");
+                  let g = groups.get(key);
+                  if (!g) { g = []; groups.set(key, g); order.push(key); }
+                  g.push(r);
+                }
+                order.sort((a, b) => a.localeCompare(b, "th"));
+                return order.flatMap(key => {
+                  const grp = groups.get(key)!;
+                  const collapsed = collapsedGroups.has(key);
+                  const headerCell = grp[0].getVisibleCells().find(cc => cc.column.id === groupBy);
+                  const out: React.ReactNode[] = [
+                    <tr key={"grp_" + key}
+                      onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
+                      className="bg-slate-100/70 border-y border-slate-200 cursor-pointer hover:bg-slate-100">
+                      {leaf.map(col => {
+                        let content: React.ReactNode = null;
+                        if (col.id === groupBy) {
+                          content = (
+                            <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
+                              <span className="text-slate-400 text-xs">{collapsed ? "▶" : "▼"}</span>
+                              {headerCell ? flexRender(headerCell.column.columnDef.cell, headerCell.getContext()) : (key || "—")}
+                              <span className="text-xs font-normal text-slate-500">({grp.length})</span>
+                            </span>
+                          );
+                        } else if (col.id !== "__select__" && col.id !== "__actions__") {
+                          let sum = 0, has = false;
+                          for (const r of grp) {
+                            const v = r.getValue(col.id); const n = Number(v);
+                            if (v !== null && v !== "" && typeof v !== "boolean" && isFinite(n)) { sum += n; has = true; }
+                          }
+                          if (has) content = <span className="font-semibold text-slate-700 tabular-nums">{sum.toLocaleString("th-TH")}</span>;
+                        }
+                        return <td key={col.id} className={`${cellPad} text-sm`}>{content}</td>;
+                      })}
+                    </tr>,
+                  ];
+                  if (!collapsed) for (const row of grp) {
+                    out.push(
+                      <tr key={row.id} onClick={() => isRowClickable && handleRowClick(row.original)}
+                        className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable ? "cursor-pointer" : ""}`}>
+                        {row.getVisibleCells().map(cell => (
+                          <td key={cell.id} className={`${cellPad} text-slate-700 overflow-hidden text-ellipsis`}>
+                            {cell.column.columnDef.meta?.type === "image"
+                              ? <ImageThumbnail url={cell.getValue() as string | null} />
+                              : flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  }
+                  return out;
+                });
+              })() : table.getRowModel().rows.length === 0 ? (
                 <tr>
                   <td colSpan={tableColumns.length} className="py-16 text-center">
                     <EmptyState message={emptyMessage} />
@@ -1634,8 +1731,8 @@ export function DataTable<T extends Record<string, unknown>>({
         )}
       </div>
 
-      {/* Pagination (รองรับทั้ง client + server mode) */}
-      {!loading && !error && (() => {
+      {/* Pagination (รองรับทั้ง client + server mode) — ซ่อนตอนจัดกลุ่ม (โชว์ทุกแถว) */}
+      {!loading && !error && !isGrouped && (() => {
         const pageIndex = isServer ? srvPage : table.getState().pagination.pageIndex;
         const pageSize  = isServer ? srvPageSize : table.getState().pagination.pageSize;
         const pageCount = isServer ? Math.max(1, Math.ceil(srvTotal / srvPageSize)) : table.getPageCount();
