@@ -86,6 +86,9 @@ export default function PurchasingShopPage() {
   const [done, setDone] = useState<string | null>(null);
   // วันที่สั่ง — ใส่ครั้งเดียวตอนกดสร้าง ใช้กับทุกใบ (default = วันนี้)
   const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // ข้อ 4: ใช้กับสินค้า (ปลายทาง) ระดับตะกร้า — เติมเฉพาะใบที่ยังไม่ได้ตั้งรายชิ้น
+  const [cartUsedFor, setCartUsedFor] = useState<PickedSku | null>(null);
+  const [cartPickerOpen, setCartPickerOpen] = useState(false);
 
   // ⭐ favorite (รายการโปรด) — แบบรวมทั้งบริษัท
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -393,7 +396,8 @@ export default function PurchasingShopPage() {
             sku_id: l.skuId, item_name: l.label, qty: l.qty, uom: l.uom,
             seller_name: l.seller, price_est: l.price, currency: l.currency,
             image_key: l.image, note: l.note || null,
-            used_for_sku_id: l.usedForId ?? null, used_for_label: l.usedForLabel ?? null,
+            used_for_sku_id: l.usedForId ?? cartUsedFor?.id ?? null,        // รายชิ้นก่อน → ไม่มีค่อยใช้ระดับตะกร้า
+            used_for_label:  l.usedForLabel ?? cartUsedFor?.name ?? null,
           })),
         }),
       });
@@ -639,6 +643,22 @@ export default function PurchasingShopPage() {
               <input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)}
                 className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
             </div>
+            {/* ข้อ 4: ใช้กับสินค้า (ปลายทาง) — ใช้กับทุกใบ (เติมเฉพาะใบที่ยังไม่ได้ตั้งรายชิ้น) */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">🎯 ใช้กับสินค้า (ทุกใบ)</label>
+              {cartUsedFor ? (
+                <div className="flex items-center gap-2 h-9 px-2 border border-slate-200 rounded-md bg-slate-50">
+                  <span className="text-sm text-slate-700 truncate flex-1">{cartUsedFor.name}{cartUsedFor.code ? ` (${cartUsedFor.code})` : ""}</span>
+                  <button type="button" onClick={() => setCartPickerOpen(true)} className="text-xs text-blue-600 hover:underline shrink-0">เปลี่ยน</button>
+                  <button type="button" onClick={() => setCartUsedFor(null)} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => setCartPickerOpen(true)}
+                  className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
+                  + เลือกสินค้าปลายทาง (ใช้กับใบที่ยังไม่ได้ตั้ง)
+                </button>
+              )}
+            </div>
             <button onClick={save} disabled={saving || cart.length === 0}
               className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
               {saving ? "กำลังสร้าง..." : `สร้างใบขอซื้อ (${cart.length} ใบ) →`}
@@ -646,6 +666,11 @@ export default function PurchasingShopPage() {
           </div>
         </aside>
       </div>
+
+      {/* ข้อ 4: picker เลือกสินค้าปลายทางระดับตะกร้า */}
+      <SkuImagePicker open={cartPickerOpen} onClose={() => setCartPickerOpen(false)}
+        title="เลือกสินค้าปลายทาง (ใช้กับทุกใบในตะกร้า)"
+        onPick={(sku) => { setCartUsedFor(sku); setCartPickerOpen(false); }} />
 
       {/* Filter picker (เลือก field ที่จะใช้กรอง) */}
       {/* เลือกตัวกรอง (ของกลาง ERPModal) */}

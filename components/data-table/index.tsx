@@ -475,6 +475,7 @@ export function DataTable<T extends Record<string, unknown>>({
   const [groupBy, setGroupBy] = useState<string | null>(null);
   const [groupMenuOpen, setGroupMenuOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [groupSort, setGroupSort] = useState<"label_asc" | "label_desc" | "count_desc" | "count_asc">("label_asc");
   const isGrouped = !!groupBy;
 
   // ---- View mode (table / cards) ----
@@ -1368,6 +1369,19 @@ export function DataTable<T extends Record<string, unknown>>({
                         className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${groupBy === c.id ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700"}`}>{label}</button>
                     );
                   })}
+                  {/* ข้อ 3a: เรียงกลุ่มตาม */}
+                  {groupBy && (
+                    <>
+                      <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-slate-400 bg-slate-50 border-y border-slate-100">เรียงกลุ่มตาม</div>
+                      {([
+                        ["label_asc", "ชื่อกลุ่ม ก→ฮ"], ["label_desc", "ชื่อกลุ่ม ฮ→ก"],
+                        ["count_desc", "จำนวนมาก→น้อย"], ["count_asc", "จำนวนน้อย→มาก"],
+                      ] as [typeof groupSort, string][]).map(([val, lbl]) => (
+                        <button key={val} onClick={() => setGroupSort(val)}
+                          className={`w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${groupSort === val ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700"}`}>{lbl}</button>
+                      ))}
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -1618,26 +1632,48 @@ export function DataTable<T extends Record<string, unknown>>({
                   if (!g) { g = []; groups.set(key, g); order.push(key); }
                   g.push(r);
                 }
-                order.sort((a, b) => a.localeCompare(b, "th"));
+                // ข้อ 3a: เรียงกลุ่มตามที่เลือก (ชื่อ/จำนวน)
+                order.sort((a, b) =>
+                  groupSort === "label_asc"  ? a.localeCompare(b, "th") :
+                  groupSort === "label_desc" ? b.localeCompare(a, "th") :
+                  groupSort === "count_asc"  ? (groups.get(a)!.length - groups.get(b)!.length) :
+                                               (groups.get(b)!.length - groups.get(a)!.length));
+                // ข้อ 1: ชื่อกลุ่มไปคอลัมน์แรก (คอลัมน์ data แรกที่ไม่ใช่ checkbox/actions)
+                const firstDataCol = leaf.find(c => c.id !== "__select__" && c.id !== "__actions__");
+                const gFieldLabel = (() => { const c = leaf.find(cc => cc.id === groupBy); return c && typeof c.columnDef.header === "string" ? c.columnDef.header : ""; })();
                 return order.flatMap(key => {
                   const grp = groups.get(key)!;
                   const collapsed = collapsedGroups.has(key);
                   const headerCell = grp[0].getVisibleCells().find(cc => cc.column.id === groupBy);
+                  // ข้อ 2: สถานะเลือกของทั้งกลุ่ม
+                  const allSel = grp.length > 0 && grp.every(r => r.getIsSelected());
+                  const someSel = grp.some(r => r.getIsSelected());
                   const out: React.ReactNode[] = [
                     <tr key={"grp_" + key}
                       onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; })}
                       className="bg-slate-100/70 border-y border-slate-200 cursor-pointer hover:bg-slate-100">
                       {leaf.map(col => {
                         let content: React.ReactNode = null;
-                        if (col.id === groupBy) {
+                        if (col.id === "__select__") {
+                          // ข้อ 2: checkbox เลือกทั้งกลุ่ม
+                          content = (
+                            <input type="checkbox" checked={allSel}
+                              ref={el => { if (el) el.indeterminate = someSel && !allSel; }}
+                              onClick={e => e.stopPropagation()}
+                              onChange={() => grp.forEach(r => r.toggleSelected(!allSel))}
+                              className="rounded border-slate-300 text-blue-600" />
+                          );
+                        } else if (firstDataCol && col.id === firstDataCol.id) {
+                          // ข้อ 1: ชื่อกลุ่ม (caret + field + ค่า + จำนวน) ที่คอลัมน์แรก
                           content = (
                             <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
                               <span className="text-slate-400 text-xs">{collapsed ? "▶" : "▼"}</span>
+                              {gFieldLabel && <span className="text-slate-400 font-normal">{gFieldLabel}:</span>}
                               {headerCell ? flexRender(headerCell.column.columnDef.cell, headerCell.getContext()) : (key || "—")}
                               <span className="text-xs font-normal text-slate-500">({grp.length})</span>
                             </span>
                           );
-                        } else if (col.id !== "__select__" && col.id !== "__actions__") {
+                        } else if (col.id !== "__actions__") {
                           let sum = 0, has = false;
                           for (const r of grp) {
                             const v = r.getValue(col.id); const n = Number(v);
