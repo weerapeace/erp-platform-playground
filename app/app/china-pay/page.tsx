@@ -146,6 +146,7 @@ export default function ChinaPayApp() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuCfg, setMenuCfg] = useState<Record<string, string[]>>({});
   const [preselect, setPreselect] = useState<string[]>([]);   // บิลจีนที่เลือกจากหน้า "ทั้งหมด" → ส่งไปหน้าโอน
+  const [deepBill, setDeepBill] = useState<Record<string, unknown> | null>(null);   // เปิดบิลจากลิงก์ ?bill=id
 
   // โหลดสิทธิ์เมนูตาม role
   useEffect(() => {
@@ -153,6 +154,15 @@ export default function ChinaPayApp() {
       const row = (j.data ?? []).find((x: Record<string, unknown>) => x.skey === "menu_roles");
       if (row && row.sval && typeof row.sval === "object") setMenuCfg(row.sval as Record<string, string[]>);
     }).catch(() => {});
+  }, []);
+
+  // ลิงก์ ?bill=id → เปิดรายละเอียดบิลนั้น
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = new URLSearchParams(window.location.search).get("bill");
+    if (!id) return;
+    apiFetch(`/api/master-v2/china-bills/${id}`).then(r => r.json()).then(j => { if (j.data) setDeepBill(j.data); }).catch(() => {});
+    window.history.replaceState({}, "", "/app/china-pay");
   }, []);
 
   if (!ready) return <Center>กำลังโหลด…</Center>;
@@ -271,6 +281,9 @@ export default function ChinaPayApp() {
           </div>
         </div>
       )}
+
+      {/* เปิดบิลจากลิงก์ ?bill=id */}
+      {deepBill && <BillDetail bill={deepBill} onClose={() => setDeepBill(null)} />}
     </div>
     </CelebrateProvider>
   );
@@ -282,13 +295,36 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
   const [local, setLocal] = useState<Record<string, string[]>>({});
   const [rowId, setRowId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // ตั้งค่า LINE Bot (ส่งเข้ากลุ่มอัตโนมัติ)
+  const [lineRowId, setLineRowId] = useState<string | null>(null);
+  const [lineToken, setLineToken] = useState("");
+  const [lineGroup, setLineGroup] = useState("");
+  const [lineSaving, setLineSaving] = useState(false);
 
   useEffect(() => {
-    apiFetch("/api/master-v2/china-app-settings?limit=5").then(r => r.json()).then(j => {
-      const row = (j.data ?? []).find((x: Record<string, unknown>) => x.skey === "menu_roles");
+    apiFetch("/api/master-v2/china-app-settings?limit=20").then(r => r.json()).then(j => {
+      const rows = j.data ?? [];
+      const row = rows.find((x: Record<string, unknown>) => x.skey === "menu_roles");
       if (row) { setRowId(String(row.id)); if (row.sval && typeof row.sval === "object") setLocal(row.sval as Record<string, string[]>); }
+      const lrow = rows.find((x: Record<string, unknown>) => x.skey === "line_config");
+      if (lrow) { setLineRowId(String(lrow.id)); const v = (lrow.sval ?? {}) as Record<string, string>; setLineToken(String(v.token ?? "")); setLineGroup(String(v.group_id ?? "")); }
     }).catch(() => {});
   }, []);
+
+  const saveLine = async () => {
+    setLineSaving(true);
+    try {
+      const sval = { token: lineToken.trim(), group_id: lineGroup.trim() };
+      const res = lineRowId
+        ? await apiFetch(`/api/master-v2/china-app-settings/${lineRowId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sval, actor: "china-app" }) })
+        : await apiFetch(`/api/master-v2/china-app-settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ skey: "line_config", sval, actor: "china-app" }) });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      if (!lineRowId && j.data?.id) setLineRowId(String(j.data.id));
+      toast.success("บันทึกตั้งค่า LINE แล้ว");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setLineSaving(false); }
+  };
 
   const isOn = (role: string, k: string) => (local[role] ?? ALL_TAB_KEYS).includes(k);
   const toggle = (role: string, k: string) => setLocal(prev => {
@@ -334,6 +370,22 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
         className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold disabled:opacity-50">
         {saving ? "กำลังบันทึก…" : "บันทึกสิทธิ์เมนู"}
       </button>
+
+      {/* ตั้งค่า LINE Bot (ส่งเข้ากลุ่มอัตโนมัติ) */}
+      <Card>
+        <div className="font-semibold text-slate-800 mb-1">📩 ตั้งค่า LINE (ส่งเข้ากลุ่มอัตโนมัติ)</div>
+        <div className="text-[11px] text-slate-400 mb-3">วางค่าจาก LINE Official Account · ถ้าเว้นว่าง ระบบจะใช้แบบเลือกกลุ่มเอง (share)</div>
+        <Label>Channel Access Token</Label>
+        <input value={lineToken} onChange={e => setLineToken(e.target.value)} placeholder="วาง token ยาว ๆ ที่นี่"
+          className="w-full h-11 px-3 text-sm border border-slate-200 rounded-lg" />
+        <div className="mt-3"><Label>Group ID</Label>
+          <input value={lineGroup} onChange={e => setLineGroup(e.target.value)} placeholder="เช่น Cxxxxxxxx"
+            className="w-full h-11 px-3 text-sm border border-slate-200 rounded-lg" /></div>
+        <button onClick={saveLine} disabled={lineSaving}
+          className="mt-3 w-full h-11 bg-[#06C755] text-white rounded-lg font-semibold disabled:opacity-50">
+          {lineSaving ? "กำลังบันทึก…" : "บันทึกตั้งค่า LINE"}
+        </button>
+      </Card>
     </div>
   );
 }
@@ -418,7 +470,6 @@ function StatCard({ label, main, sub, onClick, wide }: { label: string; main: st
 // ---------------- ลงบิล (ไม่ใส่เรท — เรทมาตอนโอน) ----------------
 function BillForm() {
   const toast = useToast();
-  const celebrate = useCelebrate();
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [amount, setAmount] = useState("");
@@ -427,6 +478,9 @@ function BillForm() {
   const [files, setFiles] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [feeInfo, setFeeInfo] = useState(false);
+  const [savedBill, setSavedBill] = useState<Record<string, unknown> | null>(null);   // หลังบันทึก → popup พิมพ์/ส่งไลน์
+  const [report, setReport] = useState<Record<string, unknown> | null>(null);
+  const [sendingLine, setSendingLine] = useState(false);
 
   // ค่าโอนอัตโนมัติตามยอด (แก้มือทับได้)
   useEffect(() => {
@@ -457,12 +511,35 @@ function BillForm() {
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      celebrate("บันทึกบิลแล้ว");
-      // reset
+      // เก็บบิลที่เพิ่งบันทึก (พร้อมข้อมูลร้าน) ไว้ทำ popup พิมพ์/ส่งไลน์
+      setSavedBill({ ...(j.data ?? {}), _sup: sup, supplier_label: sup?.name_th ?? sup?.name_en });
+      // reset ฟอร์ม
       setSupplierId(null); setSup(null); setAmount(""); setFee(""); setTransferDate(today());
       setFiles([]);
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
+  };
+
+  // ส่งรายละเอียดบิลเข้า LINE (อัตโนมัติถ้าตั้งค่า Bot แล้ว / ไม่งั้น share เลือกกลุ่มเอง) + แนบลิงก์เปิดบิลในแอป
+  const sendLine = async (b: Record<string, unknown>) => {
+    const sp = (b._sup ?? {}) as Record<string, unknown>;
+    const total = num(b.amount_rmb) + num(b.fee_rmb);
+    const link = `${typeof window !== "undefined" ? window.location.origin : ""}/app/china-pay?bill=${String(b.id)}`;
+    const text = `🧾 บิลจีนใหม่\nร้าน: ${String(b.supplier_label ?? sp.name_th ?? "—")}\nยอดโอนรวม: ¥${fmt(total)}\nวันที่วางบิล: ${String(b.transfer_date ?? "—")}\nเลขบัญชี: ${String(sp.account_number ?? "—")}\nดูในแอป: ${link}`;
+    setSendingLine(true);
+    try {
+      const res = await apiFetch("/api/china-pay/line-push", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
+      // ยังไม่ตั้งค่า Bot → เปิด LINE ให้เลือกกลุ่มเอง
+      if (j.needConfig) { toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง"); }
+      else { toast.error(j.error ?? "ส่ง LINE ไม่ได้ — เปิดให้เลือกกลุ่มเอง"); }
+      window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
+    } catch {
+      window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
+    } finally { setSendingLine(false); }
   };
 
   return (
@@ -517,6 +594,23 @@ function BillForm() {
         className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold text-base disabled:opacity-50 active:scale-[0.99] transition-transform">
         {saving ? "กำลังบันทึก…" : "บันทึกบิล"}
       </button>
+
+      {/* popup หลังบันทึก: พิมพ์ / ส่งไลน์ */}
+      {savedBill && !report && (
+        <div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={() => setSavedBill(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
+            <div className="text-3xl mb-1">✅</div>
+            <div className="text-lg font-semibold text-slate-800">บันทึกบิลแล้ว</div>
+            <div className="mt-1 text-sm text-slate-500">{String(savedBill.supplier_label ?? "")} · ¥{fmt(num(savedBill.amount_rmb) + num(savedBill.fee_rmb))}</div>
+            <div className="mt-4 space-y-2">
+              <button onClick={() => setReport(savedBill)} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์ / ใบสรุป</button>
+              <button onClick={() => sendLine(savedBill)} disabled={sendingLine} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{sendingLine ? "กำลังส่ง…" : "📩 ส่งไลน์"}</button>
+              <button onClick={() => setSavedBill(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {report && <ReportPopup bill={report} onClose={() => setReport(null)} onPrinted={() => {}} />}
     </div>
   );
 }
@@ -1278,6 +1372,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const celebrate = useCelebrate();
   const [step, setStep] = useState(1);   // 1=เลือกบิลจีน · 2=เลือกบิล CTW · 3=กรอก+บันทึก
   const [ocrBusy, setOcrBusy] = useState(false);   // กำลังอ่านยอดจากสลิป
+  const slipInputRef = useRef<HTMLInputElement>(null);
+  const [slipUploading, setSlipUploading] = useState(false);
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
@@ -1417,6 +1513,22 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const ctwAllocated = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);
   const ctwUnallocated = Math.max(0, num(amount) - ctwAllocated);
 
+  // อัปโหลดสลิป (จากปุ่มข้างช่องจำนวนเงิน) → เพิ่มเข้า slip → effect อ่านยอดอัตโนมัติ
+  const uploadSlip = async (files: FileList) => {
+    setSlipUploading(true);
+    try {
+      const added: string[] = [];
+      for (const f of Array.from(files)) {
+        const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-transfers");
+        const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+        const j = await res.json().catch(() => ({}));
+        if (j.r2_key) added.push(j.r2_key);
+      }
+      if (added.length) setSlip(s => [...s, ...added]);
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setSlipUploading(false); if (slipInputRef.current) slipInputRef.current.value = ""; }
+  };
+
   // อ่าน "ยอดที่โอน" จากรูปสลิปด้วย AI → เติมช่องจำนวนเงิน (ผู้ใช้ตรวจก่อนบันทึก)
   const readSlip = async () => {
     const key = slip.find(k => !k.toLowerCase().endsWith(".pdf"));
@@ -1512,6 +1624,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   const ctwSelTotal = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);   // ยอด CTW ที่เลือกตัดรอบนี้ (฿)
   const lineRequestRate = () => window.open(`https://line.me/R/share?text=${encodeURIComponent("ขอเรทเงินวันนี้ด้วยค่ะ 🙏")}`, "_blank");
+  // บริษัท CTW ที่ค้างเก่าสุด (เรียงตามวันที่บิล) → บัญชีที่ควรโอนไป
+  const oldestCtw = [...ctw].filter(b => ctwRemain(b) > 0)
+    .sort((a, b) => String(a.doc_date ?? "").localeCompare(String(b.doc_date ?? "")))[0];
+  const oldestPartner = oldestCtw ? partnerByName[String(oldestCtw.company_name ?? "").trim()] : undefined;
 
   return (
     <div className="space-y-4">
@@ -1531,7 +1647,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <span className="text-3xl font-extrabold text-slate-800">¥{fmt(selectedRmb)}</span>
         </div>
         {hasRate && selectedSum > 0 && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ฿{fmt(selectedSum)}</div>}
-        {step >= 2 && (
+        {step === 3 && (
           <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-slate-100">
             <span className="text-sm text-slate-500">จำนวนเงินที่โอนจริง</span>
             <span className="text-3xl font-extrabold text-emerald-600">฿{fmt(num(amount))}</span>
@@ -1644,19 +1760,42 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <span className="text-sm opacity-90">ยอดที่ต้องโอนรอบนี้</span>
           <span className="text-2xl font-extrabold">{hasRate ? `฿${fmt(minTransfer)}` : "รอเรท"}</span>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><Label>จำนวนเงินที่โอนจริง (฿)</Label>
-            <Money value={amount} onChange={setAmount} />
-            {belowMin && (
-              <div className="mt-1 text-[11px] text-red-500">
-                * ต้องไม่น้อยกว่า{useBalance ? "เหลือที่ต้องโอน" : "ยอดรวม"} ฿{fmt(minTransfer)}
-              </div>
-            )}
+        {/* บัญชีที่ต้องโอนไป = บริษัท CTW ค้างเก่าสุด */}
+        {oldestCtw && (
+          <div className="mb-3 rounded-xl bg-orange-50 border border-orange-200 p-3">
+            <div className="text-xs text-orange-700 font-medium mb-1">🏦 บัญชีที่ต้องโอนไป (บิลค้างเก่าสุด)</div>
+            <div className="font-semibold text-slate-800 text-sm">{String(oldestPartner?.bank_account_name ?? oldestCtw.company_name ?? "—")}</div>
+            {!!(oldestPartner?.bank_name ?? oldestPartner?.bank_name_brief) && <div className="text-xs text-slate-500">{String(oldestPartner?.bank_name ?? oldestPartner?.bank_name_brief)}</div>}
+            {(() => {
+              const acc = String(oldestPartner?.account_number ?? oldestCtw.account_number ?? "");
+              return acc ? (
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <span className="text-2xl font-bold tracking-wide text-slate-900">{acc}</span>
+                  <button type="button" onClick={() => { navigator.clipboard?.writeText(acc); toast.success("คัดลอกเลขบัญชีแล้ว"); }}
+                    className="flex-shrink-0 h-9 px-3 rounded-lg bg-orange-600 text-white text-xs font-medium active:scale-95 transition">📋 คัดลอก</button>
+                </div>
+              ) : <div className="mt-1 text-xs text-slate-400">— ไม่พบเลขบัญชีใน Partners —</div>;
+            })()}
+            <div className="mt-1 text-[11px] text-slate-400">เลขที่ {String(oldestCtw.doc_number ?? "—")} · ค้าง ฿{fmt(ctwRemain(oldestCtw))}</div>
           </div>
-          <div><Label>วันที่โอน</Label>
-            <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
-              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+        )}
+        {/* จำนวนเงินที่โอนจริง (เต็มความกว้าง) + ปุ่มแนบสลิป */}
+        <div>
+          <Label>จำนวนเงินที่โอนจริง (฿)</Label>
+          <div className="flex gap-2">
+            <div className="flex-1"><Money value={amount} onChange={setAmount} /></div>
+            <button type="button" onClick={() => slipInputRef.current?.click()} disabled={slipUploading || ocrBusy}
+              className="flex-shrink-0 h-11 px-3 rounded-lg bg-violet-600 text-white text-sm font-medium disabled:opacity-50 active:scale-95 transition">
+              {slipUploading || ocrBusy ? "…" : "📎 สลิป"}
+            </button>
+          </div>
+          {belowMin && <div className="mt-1 text-[11px] text-red-500">* ต้องไม่น้อยกว่า{useBalance ? "เหลือที่ต้องโอน" : "ยอดรวม"} ฿{fmt(minTransfer)}</div>}
+          <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+            onChange={e => { const fs = e.target.files; if (fs && fs.length) uploadSlip(fs); }} />
         </div>
+        <div className="mt-3"><Label>วันที่โอน</Label>
+          <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
+            className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         <div className="mt-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-medium text-slate-500">เรท R1 (ตามวันที่โอน)</span>
@@ -1756,25 +1895,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           {[...ctwSel].map(id => {
             const b = ctw.find(x => String(x.id) === id);
             if (!b) return null;
-            const partner = partnerByName[String(b.company_name ?? "").trim()];
-            const acc = String(partner?.account_number ?? b.account_number ?? "");
-            const bankName = String(partner?.bank_name ?? partner?.bank_name_brief ?? "");
-            const accName = String(partner?.bank_account_name ?? "");
             return (
               <div key={id} className="rounded-lg bg-white border border-orange-200 p-3">
                 <div className="font-medium text-slate-800 text-sm">{String(b.company_name ?? "—")}</div>
-                <div className="text-[11px] text-slate-400">เลขที่ {String(b.doc_number ?? "—")}</div>
-                <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 p-2.5">
-                  {!!accName && <div className="text-sm font-semibold text-slate-800">{accName}</div>}
-                  {!!bankName && <div className="text-xs text-slate-500">{bankName}</div>}
-                  {acc ? (
-                    <div className="mt-1 flex items-center justify-between gap-2">
-                      <span className="text-xl font-bold tracking-wide text-slate-900">{acc}</span>
-                      <button type="button" onClick={() => { navigator.clipboard?.writeText(acc); toast.success("คัดลอกเลขบัญชีแล้ว"); }}
-                        className="flex-shrink-0 h-9 px-3 rounded-lg bg-orange-600 text-white text-xs font-medium active:scale-95 transition">📋 คัดลอก</button>
-                    </div>
-                  ) : <div className="mt-1 text-xs text-slate-400">— ไม่พบเลขบัญชีใน Partners —</div>}
-                </div>
+                <div className="text-[11px] text-slate-400">เลขที่ {String(b.doc_number ?? "—")} · ค้าง ฿{fmt(ctwRemain(b))}</div>
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้ (฿)</span>
                   <Money value={ctwPay[id] ?? ""} onChange={(v) => { setCtwEdited(e => new Set(e).add(id)); setCtwPay(p => ({ ...p, [id]: v })); }}
