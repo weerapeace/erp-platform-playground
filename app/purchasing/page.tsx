@@ -171,12 +171,16 @@ export default function PurchasingShopPage() {
   const mapSku = useCallback((s: Record<string, unknown>): Card => {
     const sid = String(s.seller_partner_id ?? "");
     const country = partnerCountry[sid] ?? "TH";
+    // สินค้าจีน = มีราคาหยวน (rmb_cost) → ใช้ ¥ เป็นราคาสั่งจริง; ที่เหลือใช้บาท
+    const rmb = num(s.rmb_cost);
+    const isYuan = rmb > 0;
     return {
       id: String(s.id), name: String(s.name_th || s.code || ""), sub: (s.code as string) ?? null,
       image_key: (s.cover_image_r2_key as string) ?? null,
       sku: {
         code: (s.code as string) ?? null, seller: String(s.seller_partner_label ?? "—"), country,
-        price: num(s.list_price) || num(s.standard_price), currency: country === "CN" ? "YUAN" : "THB",
+        price: isYuan ? rmb : (num(s.list_price) || num(s.standard_price)),
+        currency: isYuan ? "YUAN" : "THB",
         uom: String(s.uom_label ?? "ชิ้น"),
       },
     };
@@ -300,10 +304,12 @@ export default function PurchasingShopPage() {
     setVars((j.data ?? []).map((s: Record<string, unknown>) => {
       const sid = String(s.seller_partner_id ?? "");
       const country = partnerCountry[sid] ?? "TH";
+      const rmb = num(s.rmb_cost);
+      const isYuan = rmb > 0;
       return {
         key: String(s.id), label: String(s.name_th || s.code || ""), color: (s.color as string) ?? null,
         seller: String(s.seller_partner_label ?? "—"), country,
-        price: num(s.list_price) || num(s.standard_price), currency: country === "CN" ? "YUAN" : "THB",
+        price: isYuan ? rmb : (num(s.list_price) || num(s.standard_price)), currency: isYuan ? "YUAN" : "THB",
         uom: String(s.uom_label ?? "ชิ้น"), image: (s.cover_image_r2_key as string) ?? null,
         variationId: null, skuRef: (s.code as string) ?? null, skuId: String(s.id),
       } as Variation;
