@@ -48,6 +48,8 @@ export type FormField = {
   is_bulk_editable:     boolean;
   // Sprint 13
   condition_rules:      Record<string, unknown>;
+  // Studio style (presets: ขนาด/หนา/เอียง/สี/ฟอนต์/จัดชิด/ไฮไลต์)
+  ui_style:             Record<string, unknown>;
 };
 
 // กลุ่ม B: layout ฟอร์ม (Tab -> Section -> columns) เก็บใน erp_modules.config.layout
@@ -90,7 +92,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
 
   const { data, error } = await supabase
     .from("erp_module_fields")
-    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, show_in_form, form_column_span, width, display_order, options, relation_config, validation_rules, placeholder, help_text, default_value, default_expression, is_inline_editable, is_bulk_editable, condition_rules")
+    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, show_in_form, form_column_span, width, display_order, options, relation_config, validation_rules, placeholder, help_text, default_value, default_expression, is_inline_editable, is_bulk_editable, condition_rules, ui_style")
     .eq("module_id", mod.id)
     .eq("is_active", true)
     .order("display_order");

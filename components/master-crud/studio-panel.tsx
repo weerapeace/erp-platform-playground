@@ -37,6 +37,14 @@ export type StudioField = {
   showInForm?: boolean;   // field show ในฟอร์ม
   inlineEditable?: boolean; // แก้ไขเร็ว (quick edit) ในหน้า detail
   bulkEditable?: boolean;   // แก้แบบ bulk (หลายรายการ) ได้
+  // ตั้งค่า field (เฟส Studio styling)
+  formSpan?:     number;            // 1 = ครึ่งแถว, 2 = เต็มแถว
+  helpText?:     string;
+  placeholder?:  string;
+  required?:     boolean;
+  editable?:     boolean;           // false = อ่านอย่างเดียว
+  defaultValue?: string | null;
+  uiStyle?:      Record<string, unknown>;   // {size,bold,italic,underline,color,font,align,highlight}
 };
 
 const GROUP_META: Record<string, { label: string; icon: string; order: number }> = {
@@ -72,6 +80,7 @@ export function StudioPanel({
   const [saving, setSaving] = useState(false);
   const [dirty,  setDirty]  = useState(false);
   const [msg,    setMsg]    = useState<string | null>(null);
+  const [settingsKey, setSettingsKey] = useState<string | null>(null);   // field ที่กำลังเปิด ⚙️ ตั้งค่า
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -168,6 +177,22 @@ export function StudioPanel({
         if ((await r.json()).error) throw new Error("is_bulk_editable failed");
       }
 
+      // 7. ตั้งค่า field รายตัว (ความกว้าง/help/placeholder/required/readonly/default/สไตล์) — PATCH ทีละ field
+      await Promise.all(withId.map((i) =>
+        apiFetch(`/api/admin/field-registry-v2/${i.fieldId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            form_column_span: i.formSpan ?? 1,
+            help_text: i.helpText || null,
+            placeholder: i.placeholder || null,
+            is_required: !!i.required,
+            is_editable: i.editable !== false,
+            default_value: (i.defaultValue ?? "") || null,
+            ui_style: i.uiStyle ?? {},
+          }),
+        })
+      ));
+
       setMsg("✓ บันทึก layout สำเร็จ");
       setDirty(false);
       setTimeout(() => onSaved(), 600);
@@ -255,6 +280,7 @@ export function StudioPanel({
             <FormEditor
               grouped={grouped} sensors={sensors} onDragEnd={onDragEnd}
               items={items} onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
+              settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)} onPatch={patchItem}
             />
           )}
         </div>
@@ -350,7 +376,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup,
+  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch,
 }: {
   grouped: [string, StudioField[]][];
   sensors: ReturnType<typeof useSensors>;
@@ -360,10 +386,13 @@ function FormEditor({
   onToggleInline: (key: string)=>void;
   onToggleBulk: (key: string)=>void;
   onMoveGroup: (key: string, group: string)=>void;
+  settingsKey: string | null;
+  onToggleSettings: (key: string)=>void;
+  onPatch: (key: string, patch: Partial<StudioField>)=>void;
 }) {
   return (
     <div>
-      <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว (ในหน้า detail) • ∑ = แก้แบบ bulk (หลายรายการ) • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
+      <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว • ∑ = bulk • ⚙️ = ตั้งค่า/สไตล์ • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
         <SortableContext items={grouped.flatMap(([,fs])=>fs.map(f=>f.key))} strategy={verticalListSortingStrategy}>
           <div className="space-y-3">
@@ -372,7 +401,11 @@ function FormEditor({
               return (
                 <FormSectionZone key={gk} groupKey={gk} label={m.label} icon={m.icon} count={fs.length}>
                   {fs.map(f=>(
-                    <FormFieldRow key={f.key} field={f} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)} />
+                    <div key={f.key}>
+                      <FormFieldRow field={f} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)}
+                        settingsOpen={settingsKey===f.key} onToggleSettings={()=>onToggleSettings(f.key)} />
+                      {settingsKey===f.key && <FieldSettings field={f} onPatch={(patch)=>onPatch(f.key,patch)} />}
+                    </div>
                   ))}
                 </FormSectionZone>
               );
@@ -380,6 +413,69 @@ function FormEditor({
           </div>
         </SortableContext>
       </DndContext>
+    </div>
+  );
+}
+
+// ⚙️ แผงตั้งค่า field (ความกว้าง/help/required/readonly/default + สไตล์ presets)
+const STYLE_COLORS = ["", "#0f172a", "#dc2626", "#ea580c", "#16a34a", "#2563eb", "#7c3aed", "#64748b"];
+function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch: Partial<StudioField>)=>void }) {
+  const us = (field.uiStyle ?? {}) as Record<string, unknown>;
+  const setUi = (k: string, v: unknown) => onPatch({ uiStyle: { ...us, [k]: v } });
+  const Toggle = ({ on, label, onClick }: { on: boolean; label: string; onClick: ()=>void }) => (
+    <button type="button" onClick={onClick} className={`px-2 py-1 rounded border text-xs ${on?"bg-orange-100 border-orange-300 text-orange-700":"bg-white border-slate-200 text-slate-500"}`}>{label}</button>
+  );
+  return (
+    <div className="mt-1 mb-1 ml-7 mr-1 p-3 rounded-lg border border-orange-200 bg-orange-50/40 space-y-2.5 text-xs">
+      {/* แถว 1: ความกว้าง + required + readonly */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-slate-500">ความกว้าง:</span>
+        <Toggle on={(field.formSpan??1)!==2} label="ครึ่งแถว" onClick={()=>onPatch({formSpan:1})} />
+        <Toggle on={(field.formSpan??1)===2} label="เต็มแถว" onClick={()=>onPatch({formSpan:2})} />
+        <span className="ml-2 text-slate-300">|</span>
+        <Toggle on={!!field.required} label="บังคับกรอก" onClick={()=>onPatch({required:!field.required})} />
+        <Toggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />
+      </div>
+      {/* แถว 2: help/placeholder/default */}
+      <div className="grid grid-cols-1 gap-1.5">
+        <input value={field.helpText ?? ""} onChange={(e)=>onPatch({helpText:e.target.value})} placeholder="ข้อความช่วย (help text)" className="h-8 px-2 border border-slate-200 rounded" />
+        <div className="grid grid-cols-2 gap-1.5">
+          <input value={field.placeholder ?? ""} onChange={(e)=>onPatch({placeholder:e.target.value})} placeholder="placeholder" className="h-8 px-2 border border-slate-200 rounded" />
+          <input value={String(field.defaultValue ?? "")} onChange={(e)=>onPatch({defaultValue:e.target.value})} placeholder="ค่าเริ่มต้น" className="h-8 px-2 border border-slate-200 rounded" />
+        </div>
+      </div>
+      {/* แถว 3: สไตล์ตัวอักษร */}
+      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-orange-100">
+        <span className="text-slate-500">สไตล์:</span>
+        {(["sm","base","lg","xl"] as const).map(s=>(
+          <Toggle key={s} on={String(us.size??"base")===s} label={s==="sm"?"เล็ก":s==="base"?"ปกติ":s==="lg"?"ใหญ่":"ใหญ่มาก"} onClick={()=>setUi("size",s)} />
+        ))}
+        <Toggle on={!!us.bold} label="B" onClick={()=>setUi("bold",!us.bold)} />
+        <Toggle on={!!us.italic} label="I" onClick={()=>setUi("italic",!us.italic)} />
+        <Toggle on={!!us.underline} label="U" onClick={()=>setUi("underline",!us.underline)} />
+      </div>
+      {/* แถว 4: ฟอนต์ + จัดชิด + ไฮไลต์ */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-slate-500">ฟอนต์:</span>
+        {(["","serif","mono"] as const).map(ff=>(
+          <Toggle key={ff||"sans"} on={String(us.font??"")===ff} label={ff===""?"ปกติ":ff==="serif"?"มีหัว":"monospace"} onClick={()=>setUi("font",ff)} />
+        ))}
+        <span className="ml-1 text-slate-300">|</span>
+        {(["left","center","right"] as const).map(al=>(
+          <Toggle key={al} on={String(us.align??"left")===al} label={al==="left"?"⬅":al==="center"?"↔":"➡"} onClick={()=>setUi("align",al)} />
+        ))}
+        <span className="ml-1 text-slate-300">|</span>
+        <Toggle on={!!us.highlight} label="ไฮไลต์" onClick={()=>setUi("highlight",!us.highlight)} />
+      </div>
+      {/* แถว 5: สี */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-slate-500">สี:</span>
+        {STYLE_COLORS.map(c=>(
+          <button key={c||"default"} type="button" onClick={()=>setUi("color",c)}
+            className={`w-6 h-6 rounded-full border-2 ${String(us.color??"")===c?"border-orange-500":"border-slate-200"} ${c===""?"bg-white text-[9px] text-slate-400 flex items-center justify-center":""}`}
+            style={c?{background:c}:undefined} title={c||"ค่าเริ่มต้น"}>{c===""?"—":""}</button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -397,7 +493,7 @@ function FormSectionZone({ groupKey, label, icon, count, children }: { groupKey:
   );
 }
 
-function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGroup }: { field: StudioField; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void }) {
+function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGroup, settingsOpen, onToggleSettings }: { field: StudioField; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void; settingsOpen: boolean; onToggleSettings: ()=>void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
   // ชนิดที่ quick-edit ได้ (text/number/boolean/select)
@@ -425,6 +521,9 @@ function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGro
         className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white" title="ย้ายหมวด">
         {ALL_GROUPS.map(g=><option key={g} value={g}>{gmeta(g).label}</option>)}
       </select>
+      <button type="button" onClick={(e)=>{ e.stopPropagation(); onToggleSettings(); }}
+        title="ตั้งค่า/สไตล์ field"
+        className={`text-xs px-1.5 py-0.5 rounded border ${settingsOpen?"bg-orange-100 border-orange-300 text-orange-700":"bg-white border-slate-200 text-slate-400"}`}>⚙️</button>
     </div>
   );
 }

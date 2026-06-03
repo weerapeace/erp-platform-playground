@@ -141,6 +141,8 @@ function registryToFieldDef(
     bulkEditable:      rf.is_bulk_editable,
     // Sprint 13
     conditionRules:    rf.condition_rules ?? null,
+    // Studio style presets
+    uiStyle:           (rf.ui_style as Record<string, unknown>) ?? undefined,
     // computed field
     formula:         compFormula,
     computeFormat:   compFormat,
@@ -274,6 +276,8 @@ export type FieldDef = {
   bulkEditable?: boolean;
   /** config สำหรับ relation field (FK picker) */
   relationConfig?: RelationConfig;
+  /** Studio style presets (ขนาด/หนา/เอียง/ขีดเส้นใต้/สี/ฟอนต์/จัดชิด/ไฮไลต์) */
+  uiStyle?:   Record<string, unknown>;
   /** Sprint 7: section group สำหรับ form layout */
   groupKey?:  string;
   /** Sprint 7: lower number = ขึ้นก่อนใน group + section ordering */
@@ -1112,9 +1116,23 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       : disabled ? "border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed"
       : "border-slate-200 focus:ring-orange-500 focus:border-orange-500"
     }`;
+    // Studio style presets → CSS (ปรับขนาด/หนา/เอียง/สี/ฟอนต์/จัดชิด/ไฮไลต์ จาก ui_style)
+    const us = (f.uiStyle ?? {}) as Record<string, unknown>;
+    const SZ: Record<string, string> = { sm: "12px", base: "14px", lg: "16px", xl: "20px" };
+    const FF: Record<string, string> = { serif: "Georgia, 'Times New Roman', serif", mono: "ui-monospace, 'Courier New', monospace" };
+    const tStyle: React.CSSProperties = {
+      fontSize: SZ[String(us.size ?? "")] || undefined,
+      fontWeight: us.bold ? 700 : undefined,
+      fontStyle: us.italic ? "italic" : undefined,
+      textDecoration: us.underline ? "underline" : undefined,
+      color: typeof us.color === "string" && us.color ? us.color : undefined,
+      fontFamily: FF[String(us.font ?? "")] || undefined,
+      textAlign: (["left", "center", "right"].includes(String(us.align)) ? (us.align as "left" | "center" | "right") : undefined),
+    };
+    const highlight = !!us.highlight;
     return (
-      <label key={f.key} className={`block ${f.formSpan === 2 ? "col-span-2" : ""}`}>
-        <span className="text-xs font-medium text-slate-600">
+      <label key={f.key} className={`block ${f.formSpan === 2 ? "col-span-2" : ""} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
+        <span className="text-xs font-medium text-slate-600" style={tStyle}>
           {f.label}
           {f.required && <span className="text-red-500 ml-0.5">*</span>}
           {f.readonly && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
@@ -1158,6 +1176,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         ) : f.type === "select" ? (
           <select value={(v as string) || ""} disabled={disabled}
             onChange={e => updateForm({ [f.key]: e.target.value })}
+            style={tStyle}
             className={`${common} bg-white`}>
             <option value="">— เลือก —</option>
             {f.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
@@ -1165,7 +1184,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         ) : f.type === "textarea" ? (
           <textarea value={(v as string) || ""} disabled={disabled}
             onChange={e => updateForm({ [f.key]: e.target.value })}
-            rows={3} placeholder={f.placeholder}
+            rows={3} placeholder={f.placeholder} style={tStyle}
             className={`w-full mt-0.5 px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-1 ${
               hasErr ? "border-red-300 focus:ring-red-500"
               : disabled ? "border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed"
@@ -1185,6 +1204,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             value={(v as string | number | undefined) ?? ""}
             onChange={e => updateForm({ [f.key]: e.target.value })}
             placeholder={f.placeholder}
+            style={tStyle}
             className={common}
           />
         )}
@@ -1657,6 +1677,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               showInForm: f.showInForm ?? false,  // F23: form toggle
               inlineEditable: f.inlineEditable ?? false,  // ⚡ quick edit toggle
               bulkEditable: f.bulkEditable ?? false,      // ∑ bulk edit toggle
+              // ตั้งค่า field (styling)
+              formSpan:    f.formSpan ?? 1,
+              helpText:    f.helpText ?? "",
+              placeholder: f.placeholder ?? "",
+              required:    f.required ?? false,
+              editable:    !f.readonly,
+              defaultValue: (f.defaultValue as string | null) ?? "",
+              uiStyle:     f.uiStyle ?? {},
             }))}
           onClose={() => setStudioOpen(false)}
           onSaved={() => {

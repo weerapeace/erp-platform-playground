@@ -20,6 +20,8 @@ const ALLOWED_FIELDS = [
   "default_value", "default_expression", "is_inline_editable",
   // Sprint 13
   "condition_rules",
+  // Studio style presets
+  "ui_style",
 ];
 
 export async function PATCH(
