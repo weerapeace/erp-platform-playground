@@ -351,6 +351,14 @@ type StoredView = {
   globalSearch: string;
   columnVisibility: VisibilityState;
   groupBy?: string | null;            // เฟส 3: จำการจัดกลุ่ม
+  // จำหน้าตาตารางครบ (แบบ A): ลำดับ/ความกว้าง/ตรึง/เรียง/density/หน้า/โหมด
+  columnOrder?: string[];
+  columnSizing?: Record<string, number>;
+  columnPinning?: { left?: string[]; right?: string[] };
+  sorting?: { id: string; desc: boolean }[];
+  density?: "normal" | "compact";
+  pageSize?: number;
+  viewMode?: "table" | "cards";
   visibility?: "personal" | "team" | "system";
   is_default?: boolean;
   owner_name?: string | null;
@@ -693,6 +701,7 @@ export function DataTable<T extends Record<string, unknown>>({
   const [savingView,    setSavingView]    = useState(false);
   const [saveViewName,  setSaveViewName]  = useState("");
   const [saveViewVis,   setSaveViewVis]   = useState<"personal" | "team">("personal");
+  const [saveViewDefault, setSaveViewDefault] = useState(false);   // แบบ A: ตั้งเป็นค่าเริ่มต้นเลย
   const saveInputRef = useRef<HTMLInputElement>(null);
 
   // โหลด views จาก Supabase (ต้อง login)
@@ -711,6 +720,14 @@ export function DataTable<T extends Record<string, unknown>>({
         colFilterValues:  (r.config.colFilterValues as Record<string, ColumnFilterValue>) ?? {},
         globalSearch:     (r.config.globalSearch as string) ?? "",
         columnVisibility: (r.config.columnVisibility as VisibilityState) ?? {},
+        groupBy:          (r.config.groupBy as string | null) ?? null,
+        columnOrder:      r.config.columnOrder as string[] | undefined,
+        columnSizing:     r.config.columnSizing as Record<string, number> | undefined,
+        columnPinning:    r.config.columnPinning as { left?: string[]; right?: string[] } | undefined,
+        sorting:          r.config.sorting as { id: string; desc: boolean }[] | undefined,
+        density:          r.config.density as "normal" | "compact" | undefined,
+        pageSize:         r.config.pageSize as number | undefined,
+        viewMode:         r.config.viewMode as "table" | "cards" | undefined,
         visibility:       r.visibility ?? "personal",
         is_default:       r.is_default ?? false,
         owner_name:       r.owner_name ?? null,
@@ -835,17 +852,26 @@ export function DataTable<T extends Record<string, unknown>>({
   // ---- Saved views helpers (Supabase) ----
   const saveView = async () => {
     if (!saveViewName.trim() || !tableId) return;
-    await apiFetch("/api/saved-views", {
+    // แบบ A: เก็บหน้าตาตารางครบ
+    const config = {
+      baseViewId: activeView, colFilterValues, globalSearch, columnVisibility, groupBy,
+      columnOrder, columnSizing, columnPinning, sorting, density, viewMode,
+      pageSize: isServer ? srvPageSize : table.getState().pagination.pageSize,
+    };
+    const res = await apiFetch("/api/saved-views", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        table_id: tableId, label: saveViewName.trim(),
-        visibility: saveViewVis,
-        config: { baseViewId: activeView, colFilterValues, globalSearch, columnVisibility, groupBy },
-      }),
+      body: JSON.stringify({ table_id: tableId, label: saveViewName.trim(), visibility: saveViewVis, config }),
     });
-    setSavingView(false);
-    setSaveViewName("");
-    setSaveViewVis("personal");
+    const j = await res.json().catch(() => ({}));
+    // ติ๊ก "ตั้งเป็นค่าเริ่มต้น" → PATCH view ที่เพิ่งสร้าง (clear default ตัวอื่นให้อัตโนมัติ)
+    const newId = typeof j.data === "string" ? j.data : (j.data?.id as string | undefined);
+    if (saveViewDefault && newId) {
+      await apiFetch(`/api/saved-views?id=${newId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_default: true }),
+      }).catch(() => {});
+    }
+    setSavingView(false); setSaveViewName(""); setSaveViewVis("personal"); setSaveViewDefault(false);
     await fetchUserViews();
   };
 
@@ -871,6 +897,14 @@ export function DataTable<T extends Record<string, unknown>>({
     setColumnVisibility(view.columnVisibility ?? {});
     setGroupBy(view.groupBy ?? null);   // เฟส 3: คืนค่าการจัดกลุ่ม
     setCollapsedGroups(new Set());
+    // แบบ A: คืนหน้าตาตารางครบ (ถ้ามีเก็บไว้)
+    if (view.columnOrder) setColumnOrder(view.columnOrder);
+    if (view.columnSizing) setColumnSizing(view.columnSizing);
+    if (view.columnPinning) setColumnPinning(view.columnPinning);
+    if (view.sorting) setSorting(view.sorting);
+    if (view.density) setDensity(view.density);
+    if (view.viewMode) setViewMode(view.viewMode);
+    if (view.pageSize) setPendingDefaultPageSize(view.pageSize);
     setRowSelection({});
   };
 
@@ -1171,7 +1205,7 @@ export function DataTable<T extends Record<string, unknown>>({
                   ref={saveInputRef}
                   value={saveViewName}
                   onChange={e => setSaveViewName(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") saveView(); if (e.key === "Escape") { setSavingView(false); setSaveViewName(""); } }}
+                  onKeyDown={e => { if (e.key === "Enter") saveView(); if (e.key === "Escape") { setSavingView(false); setSaveViewName(""); setSaveViewDefault(false); } }}
                   placeholder="ชื่อ View..."
                   autoFocus
                   className="h-7 w-28 px-2 text-xs border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1184,8 +1218,12 @@ export function DataTable<T extends Record<string, unknown>>({
                     <option value="team">👥 ทีม</option>
                   </select>
                 )}
+                <label className="flex items-center gap-1 text-xs text-slate-600 whitespace-nowrap" title="เปิดหน้านี้ครั้งหน้าจะใช้มุมมองนี้อัตโนมัติ">
+                  <input type="checkbox" checked={saveViewDefault} onChange={e => setSaveViewDefault(e.target.checked)} className="rounded border-slate-300" />
+                  ⭐ค่าเริ่มต้น
+                </label>
                 <button onClick={saveView} className="h-7 px-2 text-xs text-white bg-blue-600 rounded-md hover:bg-blue-700">บันทึก</button>
-                <button onClick={() => { setSavingView(false); setSaveViewName(""); }} className="h-7 px-2 text-xs text-slate-500 hover:text-slate-700">ยกเลิก</button>
+                <button onClick={() => { setSavingView(false); setSaveViewName(""); setSaveViewDefault(false); }} className="h-7 px-2 text-xs text-slate-500 hover:text-slate-700">ยกเลิก</button>
               </div>
             ) : (
               <button onClick={() => setSavingView(true)}
