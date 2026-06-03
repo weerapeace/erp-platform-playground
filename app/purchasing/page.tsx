@@ -100,7 +100,7 @@ export default function PurchasingShopPage() {
   // โหลด preference (จำนวนคอลัมน์ + filter ที่เคยเลือก)
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 6) setCols(c);
+    const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 10) setCols(c);
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
     // ข้อ 4: กู้ตะกร้าที่ค้างไว้ (กันหายเมื่อรีเฟรช)
     try { const c2 = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]"); if (Array.isArray(c2) && c2.length) setCart(c2 as Line[]); } catch { /* ignore */ }
@@ -193,9 +193,14 @@ export default function PurchasingShopPage() {
     return mapped;
   }, [mapSku]);
 
+  // ข้อ 3: กำกับลำดับคำขอ — แสดงเฉพาะผลของคำค้นล่าสุด (กัน race คำขอเก่ามาทับ)
+  const reqIdRef = useRef(0);
   const fetchCards = useCallback(async (pg: number) => {
+    const myId = ++reqIdRef.current;
     setLoading(true); setError(null);
     try {
+      let nextCards: Card[] = [];
+      let nextTotal = 0;
       if (source === "sku") {
         const fp = Object.keys(builtFilters).length ? `&filters=${encodeURIComponent(JSON.stringify(builtFilters))}` : "";
         const sp = q ? `&search=${encodeURIComponent(q)}` : "";
@@ -217,16 +222,15 @@ export default function PurchasingShopPage() {
           };
           mapped.sort((a, b) => score(a) - score(b));
         }
-        setTotal(num(j.total) || num(j.count) || (pg * PAGE + mapped.length));
-        setCards(mapped);
+        nextCards = mapped;
+        nextTotal = num(j.total) || num(j.count) || (pg * PAGE + mapped.length);
       } else if (source === "group") {
         const j = await apiFetch("/api/master-v2/product-groups?limit=500").then(r => r.json());
-        const mapped: Card[] = (j.data ?? []).map((g: Record<string, unknown>) => ({
+        nextCards = (j.data ?? []).map((g: Record<string, unknown>) => ({
           id: String(g.id), name: String(g.name ?? ""), sub: (g.brand as string) ?? null,
           image_key: (g.image_key as string) ?? null,
         }));
-        setTotal(mapped.length);
-        setCards(mapped);
+        nextTotal = nextCards.length;
       } else {
         // favorite | frequent — โหลดรายการ id แล้วดึง SKU (กรองด้วยคำค้นฝั่ง client)
         let ids: string[] = [];
@@ -237,13 +241,18 @@ export default function PurchasingShopPage() {
           const ql = q.trim().toLowerCase();
           mapped = mapped.filter(c => (c.name ?? "").toLowerCase().includes(ql) || (c.sub ?? "").toLowerCase().includes(ql));
         }
-        setTotal(mapped.length);
-        setCards(mapped);
+        nextCards = mapped;
+        nextTotal = mapped.length;
       }
+      if (myId !== reqIdRef.current) return;   // มีคำขอใหม่กว่าแล้ว → ทิ้งผลเก่า
+      setCards(nextCards); setTotal(nextTotal);
     } catch (e) {
+      if (myId !== reqIdRef.current) return;
       setError(e instanceof Error ? e.message : "โหลดสินค้าไม่สำเร็จ");
       setCards([]); setTotal(0);
-    } finally { setLoading(false); }
+    } finally {
+      if (myId === reqIdRef.current) setLoading(false);
+    }
   }, [source, q, builtFilters, mapSku, fetchSkusByIds]);
 
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
@@ -472,6 +481,18 @@ export default function PurchasingShopPage() {
             </div>
           )}
 
+          {/* ข้อ 1: ปุ่มเลื่อนหน้าด้านบน (เฉพาะ SKU ที่แบ่งหน้าฝั่ง server) */}
+          {!loading && source === "sku" && total > PAGE && (
+            <div className="flex items-center justify-end gap-2 mb-3">
+              <span className="text-xs text-slate-400 mr-1">{total.toLocaleString()} รายการ</span>
+              <button onClick={() => goToPage(page - 1)} disabled={page <= 0}
+                className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">◀ หน้าก่อน</button>
+              <span className="text-xs font-semibold text-slate-700">หน้า {page + 1} / {totalPages}</span>
+              <button onClick={() => goToPage(page + 1)} disabled={page >= totalPages - 1}
+                className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">หน้าถัดไป ▶</button>
+            </div>
+          )}
+
           <div className={`grid gap-4 transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {cards.map(c => (
               <div key={c.id} className="relative group">
@@ -534,7 +555,7 @@ export default function PurchasingShopPage() {
                   <span>การ์ด/แถว</span>
                   <select value={cols} onChange={e => changeCols(Number(e.target.value))}
                     className="h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600">
-                    {[2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{n}</option>)}
+                    {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </label>
               </div>
