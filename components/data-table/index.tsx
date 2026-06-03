@@ -1674,12 +1674,18 @@ export function DataTable<T extends Record<string, unknown>>({
                             </span>
                           );
                         } else if (col.id !== "__actions__") {
-                          let sum = 0, has = false;
-                          for (const r of grp) {
-                            const v = r.getValue(col.id); const n = Number(v);
-                            if (v !== null && v !== "" && typeof v !== "boolean" && isFinite(n)) { sum += n; has = true; }
+                          const s = col.columnDef.meta?.summary;
+                          if (typeof s === "function") {
+                            // คอลัมน์ computed (มีสูตรรวม) → ใช้ตัวรวมเดียวกับแถวรวมท้ายตาราง (ยอดเงินรวมกลุ่ม)
+                            content = <span className="font-semibold text-slate-700 tabular-nums">{s(grp.map(r => r.original))}</span>;
+                          } else {
+                            let sum = 0, has = false;
+                            for (const r of grp) {
+                              const v = r.getValue(col.id); const n = Number(v);
+                              if (v !== null && v !== "" && typeof v !== "boolean" && isFinite(n)) { sum += n; has = true; }
+                            }
+                            if (has) content = <span className="font-semibold text-slate-700 tabular-nums">{sum.toLocaleString("th-TH")}</span>;
                           }
-                          if (has) content = <span className="font-semibold text-slate-700 tabular-nums">{sum.toLocaleString("th-TH")}</span>;
                         }
                         return <td key={col.id} className={`${cellPad} text-sm`}>{content}</td>;
                       })}

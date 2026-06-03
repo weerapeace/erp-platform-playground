@@ -129,6 +129,19 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
 
   useEffect(() => { load(); }, [load]);
 
+  // ดึง label หัวคอลัมน์จากทะเบียน field ของโมดูลลูก (ของกลาง)
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!moduleKey) return;
+    apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json())
+      .then((j) => {
+        const m: Record<string, string> = {};
+        (j.fields ?? []).forEach((f: Record<string, unknown>) => { const k = String(f.column_name ?? f.field_key); m[k] = String(f.field_label ?? k); });
+        setLabels(m);
+      }).catch(() => {});
+  }, [moduleKey]);
+  const labelOf = (k: string) => labels[k] ?? k;
+
   const loadMore = async () => {
     setLoadingMore(true);
     try { const { data } = await fetchPage(rows.length); setRows((p) => [...p, ...data]); }
@@ -161,33 +174,61 @@ export function RelationOne2Many({ config, recordId, title }: { config: RelConfi
         </li>
       ))}
     </ul>
-  ) : (
-    <ul className="space-y-1.5">
-      {rows.map((r) => {
-        const sub = subFields.map((f) => fmtVal(r[f])).filter(Boolean).join(" · ");
-        const imgKey = imageField ? r[imageField] : null;
-        return (
-          <li key={String(r.id)} className="group flex items-center gap-2.5 px-2 py-1.5 bg-slate-50 rounded-lg border border-slate-100 hover:border-blue-300 hover:bg-blue-50/40">
-            <button type="button" onClick={() => setPeek({ id: String(r.id), edit: false })} className="flex-1 min-w-0 text-left flex items-center gap-2.5">
-              {imageField && (
-                <div className="w-9 h-9 rounded bg-white border border-slate-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                  {r2img(imgKey)
-                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(imgKey)!} alt="" className="w-full h-full object-cover" />
-                    : <span className="text-slate-300 text-sm">📦</span>}
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="text-sm text-slate-700 truncate">{String(r[titleField] ?? r.name ?? r.id)}</div>
-                {sub && <div className="text-xs text-slate-400 truncate">{sub}</div>}
-              </div>
-            </button>
-            <button type="button" onClick={() => setPeek({ id: String(r.id), edit: true })} title="แก้ไข"
-              className="flex-shrink-0 w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
-          </li>
-        );
-      })}
-    </ul>
-  );
+  ) : (() => {
+    // แบบตาราง (ของกลาง) — คอลัมน์ = title + sub fields, มียอดรวมท้ายตาราง
+    const sums: Record<string, number> = {};
+    let anySum = false;
+    for (const f of subFields) {
+      let s = 0, has = false;
+      for (const r of rows) { const n = Number(r[f]); if (r[f] !== null && r[f] !== "" && typeof r[f] !== "boolean" && isFinite(n)) { s += n; has = true; } }
+      if (has) { sums[f] = s; anySum = true; }
+    }
+    return (
+      <div className="overflow-x-auto border border-slate-100 rounded-lg">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs text-slate-500">
+            <tr>
+              {imageField && <th className="px-2 py-1.5 w-10" />}
+              <th className="px-2 py-1.5 text-left font-medium">{labelOf(titleField)}</th>
+              {subFields.map((f) => <th key={f} className="px-2 py-1.5 text-right font-medium whitespace-nowrap">{labelOf(f)}</th>)}
+              <th className="px-2 py-1.5 w-8" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={String(r.id)} className="group hover:bg-blue-50/40 cursor-pointer" onClick={() => setPeek({ id: String(r.id), edit: false })}>
+                {imageField && (
+                  <td className="px-2 py-1.5">
+                    <div className="w-8 h-8 rounded bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center">
+                      {r2img(r[imageField])
+                        ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(r[imageField])!} alt="" className="w-full h-full object-cover" />
+                        : <span className="text-slate-300 text-xs">📦</span>}
+                    </div>
+                  </td>
+                )}
+                <td className="px-2 py-1.5 text-slate-700">{String(r[titleField] ?? r.name ?? r.id)}</td>
+                {subFields.map((f) => <td key={f} className="px-2 py-1.5 text-right tabular-nums text-slate-600 whitespace-nowrap">{fmtVal(r[f]) ?? "—"}</td>)}
+                <td className="px-2 py-1.5 text-right">
+                  <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
+                    className="w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {anySum && (
+            <tfoot className="bg-slate-50 font-semibold text-slate-700">
+              <tr>
+                {imageField && <td />}
+                <td className="px-2 py-1.5 text-xs text-slate-500">รวม ({rows.length})</td>
+                {subFields.map((f) => <td key={f} className="px-2 py-1.5 text-right tabular-nums">{sums[f] != null ? sums[f].toLocaleString() : ""}</td>)}
+                <td />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    );
+  })();
 
   return (
     <>
