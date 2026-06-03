@@ -584,6 +584,8 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
         rows.map((r) => {
           const id = String(r.id), st = String(r.status ?? "—"), rate = num(r.rate);
           const isPending = st === "รอโอน";
+          const fullRmb = num(r.amount_rmb) + num(r.fee_rmb);
+          const remainRmb = Math.max(0, fullRmb - num(r.paid_rmb));
           return (
             <Card key={id}>
               <div className="flex items-start gap-2">
@@ -598,8 +600,8 @@ function AllList({ onTransfer }: { onTransfer: (ids: string[]) => void }) {
                     {r.printed_at ? <PrintedBadge /> : null}
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <div className="font-semibold text-slate-800">¥{fmt(num(r.amount_rmb) + num(r.fee_rmb))}</div>
-                    {rate > 0 && <div className="text-xs text-orange-600">฿{fmt((num(r.amount_rmb) + num(r.fee_rmb)) * rate)}</div>}
+                    <div className="text-lg font-bold text-orange-600">¥{fmt(remainRmb)}</div>
+                    <div className="text-[11px] text-slate-400">เต็ม ¥{fmt(fullRmb)}{rate > 0 ? ` · ฿${fmt(remainRmb * rate)}` : ""}</div>
                     <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[st] ?? "bg-slate-100 text-slate-500"}`}>{st}</span>
                   </div>
                 </button>
@@ -1520,6 +1522,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
           <Num value={rate} onChange={setRate} placeholder="เช่น 5.08" />
           {!hasRate && <div className="mt-1 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — ใส่เอง หรือไปตั้งในแท็บ “เรท”</div>}
+          {!hasRate && (
+            <button type="button"
+              onClick={() => window.open(`https://line.me/R/share?text=${encodeURIComponent("ขอเรทเงินวันนี้ด้วยค่ะ 🙏")}`, "_blank")}
+              className="mt-2 w-full h-10 bg-[#06C755] text-white rounded-lg text-sm font-semibold active:scale-[0.99] transition flex items-center justify-center gap-1.5">
+              📩 ขอเรทเงินวันนี้ (ส่งเข้า LINE)
+            </button>
+          )}
         </div>
         {rateInfo && hasRate && (
           <div className="mt-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs space-y-1">
