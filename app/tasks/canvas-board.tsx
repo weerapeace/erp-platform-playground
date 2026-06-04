@@ -9,6 +9,7 @@
 // ============================================================
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
+import { apiFetch } from "@/lib/api";
 import {
   STATUS_META, PRIORITY_META, isOverdue,
   type Task, type TaskStatus, type TaskPriority,
@@ -21,7 +22,10 @@ type Style = { fontSize: number; bold: boolean; italic: boolean; underline: bool
 type Sticky = { id: string; x: number; y: number; text: string; color: string; fontSize: number };
 type BoardObject =
   | ({ id: string; type: "box"; x: number; y: number; w: number; h: number; text: string; fill: string; border: string } & Style)
-  | ({ id: string; type: "text"; x: number; y: number; w: number; h: number; text: string; highlight: string } & Style);
+  | ({ id: string; type: "text"; x: number; y: number; w: number; h: number; text: string; highlight: string } & Style)
+  | { id: string; type: "image"; x: number; y: number; w: number; h: number; key: string; url: string };
+type ImageObject = Extract<BoardObject, { type: "image" }>;
+type StyledObject = Extract<BoardObject, { type: "box" | "text" }>;   // วัตถุที่จัดรูปแบบตัวอักษรได้
 type Connector = { id: string; from: string; to: string };   // เชื่อมระหว่าง node (การ์ด/กล่อง/text/โน้ต) แบบเกาะวัตถุ
 type Board = { positions: Record<string, Pos>; stickies: Sticky[]; objects: BoardObject[]; connectors: Connector[] };
 type Rect = { x: number; y: number; w: number; h: number };
@@ -71,7 +75,7 @@ function edgePoint(r: Rect, tx: number, ty: number): Pos {
   const t = Math.min(sx, sy);
   return { x: cx + dx * t, y: cy + dy * t };
 }
-const styleOf = (o: BoardObject): React.CSSProperties => ({
+const styleOf = (o: StyledObject): React.CSSProperties => ({
   fontSize: o.fontSize, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? "italic" : "normal",
   textDecoration: o.underline ? "underline" : "none", color: o.color, textAlign: o.align,
   fontFamily: o.fontFamily || undefined,
@@ -95,6 +99,7 @@ export function CanvasBoard({
   const [vp, setVp] = useState<Viewport>({ x: 40, y: 24, scale: 0.7 });
   const [board, setBoard] = useState<Board>({ positions: {}, stickies: [], objects: [], connectors: [] });
   const [connectFrom, setConnectFrom] = useState<string | null>(null);   // ต้นทางลูกศรที่กำลังเลือก
+  const [uploading, setUploading] = useState(false);   // กำลังอัปโหลดรูปที่ paste ขึ้น R2
   const [past, setPast] = useState<Board[]>([]);
   const [future, setFuture] = useState<Board[]>([]);
   const [tool, setTool] = useState<Tool>("select");
@@ -118,7 +123,7 @@ export function CanvasBoard({
 
   // ---- selection helpers ----
   const sel = selId ? (board.objects.find(o => o.id === selId) ?? board.stickies.find(s => s.id === selId) ?? null) : null;
-  const selKind: "box" | "text" | "sticky" | null = sel ? ("type" in sel ? (sel as BoardObject).type : "sticky") : null;
+  const selKind: "box" | "text" | "image" | "sticky" | null = sel ? ("type" in sel ? (sel as BoardObject).type : "sticky") : null;
 
   const patchObject = (id: string, patch: Partial<BoardObject>) =>
     commit({ ...board, objects: board.objects.map(o => o.id === id ? { ...o, ...patch } as BoardObject : o) });
@@ -127,11 +132,17 @@ export function CanvasBoard({
 
   const deleteSelected = () => {
     if (!selId) return;
-    commit({ ...board,
+    const next: Board = { ...board,
       objects: board.objects.filter(o => o.id !== selId),
       stickies: board.stickies.filter(s => s.id !== selId),
       connectors: board.connectors.filter(c => c.from !== selId && c.to !== selId),   // ลบลูกศรที่ต่อกับวัตถุนี้ด้วย
-    });
+    };
+    // ถ้าลบรูป → ลบไฟล์จริงใน R2 ด้วย (เฉพาะเมื่อไม่มีรูปอื่นใช้ key เดียวกัน)
+    const img = board.objects.find(o => o.id === selId && o.type === "image") as ImageObject | undefined;
+    if (img && !next.objects.some(o => o.type === "image" && o.key === img.key)) {
+      apiFetch(`/api/admin/upload?key=${encodeURIComponent(img.key)}`, { method: "DELETE" }).catch(() => { /* best-effort */ });
+    }
+    commit(next);
     setSelId(null);
   };
   const removeConnector = (id: string) => commit({ ...board, connectors: board.connectors.filter(c => c.id !== id) });
@@ -176,6 +187,45 @@ export function CanvasBoard({
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [selId, board, past, future]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- paste image → อัปโหลดขึ้น R2 แล้ววางบนกระดาน ----
+  useEffect(() => {
+    const onPaste = async (e: ClipboardEvent) => {
+      if (["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? "")) return;   // กำลังพิมพ์ → ปล่อยให้ paste ปกติ
+      const item = Array.from(e.clipboardData?.items ?? []).find(it => it.type.startsWith("image/"));
+      if (!item) return;
+      const file = item.getAsFile(); if (!file) return;
+      e.preventDefault();
+      setUploading(true);
+      try {
+        const ext = (file.type.split("/")[1] || "png").replace("+xml", "");
+        const fd = new FormData();
+        fd.append("file", file, `paste-${Date.now()}.${ext}`);
+        fd.append("folder", "task-canvas");
+        const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+        const json = await res.json();
+        if (json.error) throw new Error(json.error);
+        const key: string = json.r2_key;
+        const url = `/api/r2-image?key=${encodeURIComponent(key)}`;
+        const rect = boardRef.current?.getBoundingClientRect();
+        const sx = rect ? rect.width / 2 : 300, sy = rect ? rect.height / 2 : 220;
+        const wx = (sx - vp.x) / vp.scale, wy = (sy - vp.y) / vp.scale;
+        const place = (w: number, h: number) => {
+          const id = `img-${Date.now()}`;
+          commit({ ...board, objects: [...board.objects, { id, type: "image", x: wx - w / 2, y: wy - h / 2, w, h, key, url }] });
+          setSelId(id);
+        };
+        const img = new window.Image();
+        img.onload = () => { const W = 320; place(W, Math.max(60, Math.round(W * (img.naturalHeight / img.naturalWidth || 0.66)))); };
+        img.onerror = () => place(320, 220);
+        img.src = url;
+      } catch (err) {
+        alert("อัปโหลดรูปไม่สำเร็จ: " + ((err as Error).message ?? err));
+      } finally { setUploading(false); }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [board, vp]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- auto layout (การ์ดที่ยังไม่เคยลาก) ----
   const autoPos = useMemo(() => {
@@ -334,7 +384,7 @@ export function CanvasBoard({
         </div>
       ) : !isMax && (
         <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
-          ดับเบิลคลิกการ์ด = ดูรายละเอียด · คลิกกล่อง/ข้อความ = จัดรูปแบบ · Del = ลบ · Ctrl+Z = ย้อน
+          ดับเบิลคลิกการ์ด = ดูรายละเอียด · วางรูป (Ctrl+V) ได้ · ↗ เชื่อมลูกศร · Del = ลบ · Ctrl+Z = ย้อน
         </div>
       )}
 
@@ -387,6 +437,16 @@ export function CanvasBoard({
           {board.objects.map(o => {
             const selected = selId === o.id;
             const common = `absolute group ${connectFrom === o.id ? "ring-2 ring-blue-400" : selected ? "ring-2 ring-violet-400" : ""}`;
+            if (o.type === "image") {
+              return (
+                <div key={o.id} className={`${common} rounded-md overflow-hidden border border-slate-200 shadow-sm bg-white`} style={{ left: o.x, top: o.y, width: o.w, height: o.h }}
+                  onPointerDown={e => startDrag(e, o.id)}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={o.url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none select-none" />
+                  {selected && <div onPointerDown={e => startResize(e, o.id)} className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />}
+                </div>
+              );
+            }
             if (o.type === "box") {
               return (
                 <div key={o.id} className={`${common} rounded-lg border-2 shadow-sm`} style={{ left: o.x, top: o.y, width: o.w, height: o.h, background: o.fill, borderColor: o.border }}
@@ -453,15 +513,21 @@ export function CanvasBoard({
           })}
         </div>
 
+        {uploading && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-slate-900/90 text-white text-sm rounded-lg px-3 py-1.5 shadow-lg">
+            <span className="h-3 w-3 rounded-full border-2 border-white/40 border-t-white animate-spin" /> กำลังอัปโหลดรูปขึ้น R2...
+          </div>
+        )}
+
         {/* Format bar (minimal) — ซ่อนตอนกำลังลาก */}
         {sel && barPos && !dragging && (() => {
-          const o = (selKind === "box" || selKind === "text") ? (sel as BoardObject) : null;
+          const o = (selKind === "box" || selKind === "text") ? (sel as StyledObject) : null;
           const fi = o ? FONT_SIZES.indexOf(o.fontSize) : -1;
           const setSize = (d: number) => { if (o) patchObject(o.id, { fontSize: FONT_SIZES[clamp((fi < 0 ? 2 : fi) + d, 0, FONT_SIZES.length - 1)] }); };
           const nextAlign: Record<Align, Align> = { left: "center", center: "right", right: "left" };
           return (
             <div ref={barRef} className="absolute z-30 flex items-stretch bg-white rounded-xl border border-slate-200 shadow-lg h-11" style={{ left: barPos.left, top: barPos.top }} onPointerDown={e => e.stopPropagation()}>
-              <div className="flex items-center px-3 text-slate-700 font-semibold text-sm">{o?.type === "text" ? "T" : o?.type === "box" ? "▭" : "🟨"}</div>
+              <div className="flex items-center px-3 text-slate-700 font-semibold text-sm">{selKind === "text" ? "T" : selKind === "box" ? "▭" : selKind === "image" ? "🖼" : "🟨"}</div>
 
               {o && <>
                 <BarSep />
