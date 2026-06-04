@@ -238,7 +238,7 @@ export function CanvasBoard({
     try { boardRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (!it) return;
     if (it.type === "card") {
-      if (!movedRef.current) { onCardClick(it.id); return; }
+      if (!movedRef.current) return;   // คลิกเดียว = ไม่เปิด (ใช้ดับเบิลคลิกเปิด Drawer)
       if (dragStartRef.current) pushPast(dragStartRef.current);
       const centerX = posOf(it.id).x + CARD_W / 2;
       const zi = zoneIndexAtWorldX(centerX);
@@ -285,7 +285,7 @@ export function CanvasBoard({
       </div>
       {!isMax && (
         <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
-          คลิกกล่อง/ข้อความ = เลือก+จัดรูปแบบ · ดับเบิลคลิก = พิมพ์ · Del = ลบ · Ctrl+Z = ย้อน
+          ดับเบิลคลิกการ์ด = ดูรายละเอียด · คลิกกล่อง/ข้อความ = จัดรูปแบบ · Del = ลบ · Ctrl+Z = ย้อน
         </div>
       )}
 
@@ -375,7 +375,7 @@ export function CanvasBoard({
           {/* Task cards */}
           {tasks.map(t => {
             const p = posOf(t.id);
-            return <div key={t.id} className="absolute" style={{ left: p.x, top: p.y, width: CARD_W }} onPointerDown={e => startCardDrag(e, t.id)}><CanvasCard task={t} /></div>;
+            return <div key={t.id} className="absolute" style={{ left: p.x, top: p.y, width: CARD_W }} onPointerDown={e => startCardDrag(e, t.id)} onDoubleClick={() => onCardClick(t.id)}><CanvasCard task={t} /></div>;
           })}
         </div>
 
