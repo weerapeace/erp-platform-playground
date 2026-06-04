@@ -1514,8 +1514,6 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           const visibleFields = effectiveFields.filter(f =>
             !f.hideInForm && f.key !== "cover_image_r2_key" && evaluateCondition(f.conditionRules, form)
           );
-          const coreFields = visibleFields.filter(f => (f.groupKey ?? "other") === "core");
-          const tabFields  = visibleFields.filter(f => (f.groupKey ?? "other") !== "core");
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
@@ -1584,7 +1582,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                       : <div className="text-slate-300 text-sm">ไม่มีรูป</div>}
                 </div>
 
-                {/* code + status */}
+                {/* code + status — บอกว่ากำลังดูใบไหน (ข้อมูลหลักย้ายไปเป็นแท็บทางขวา) */}
                 <div>
                   {detailCode && <code className="inline-block text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 mb-1">{detailCode}</code>}
                   <div>
@@ -1592,23 +1590,6 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                       ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
                       : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
                   </div>
-                </div>
-
-                {/* core fields (Code/Name) — โชว์ตลอด ไม่อยู่ใน tab */}
-                <div className="space-y-3 pt-3 border-t border-slate-100">
-                  {drawerMode === "view"
-                    ? coreFields.map((f) => {
-                        // ใส่สไตล์ (uiStyle) ที่ตั้งไว้ ให้ detail ตรงกับฟอร์ม
-                        const css = fieldStyleCss(f.uiStyle);
-                        const hl = !!(f.uiStyle ?? {}).highlight;
-                        return (
-                          <div key={f.key} className={hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}>
-                            <div className="text-[11px] text-slate-400 mb-0.5" style={css}>{f.label}</div>
-                            <div style={css}>{renderDetailValue(f)}</div>
-                          </div>
-                        );
-                      })
-                    : coreFields.map((f) => <div key={f.key}>{renderField(f)}</div>)}
                 </div>
               </div>
 
@@ -1618,10 +1599,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 {drawerMode === "edit" && formErr && (
                   <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
                 )}
-                {tabFields.length > 0 ? (
+                {visibleFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={tabFields} renderValue={renderDetailValue} layout={registryLayout} />
-                    : <FormSections fields={tabFields} renderField={renderField} layout={registryLayout} />
+                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} />
+                    : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
                 )}
