@@ -28,6 +28,30 @@ const COL_TH: Record<string, string> = {
 
 const baht = (v: unknown) => v == null ? "—" : `฿${Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
 
+// สถานะงวด — ชื่อไทย + สี + เส้นทางที่อนุญาต (ตรงกับ API period-status)
+const STATUS_TH: Record<string, string> = {
+  draft: "ร่าง", calculating: "กำลังคำนวณ", review: "รอตรวจ", approved: "อนุมัติแล้ว",
+  locked: "ล็อกแล้ว", synced_to_odoo: "ซิงก์ Odoo", paid: "จ่ายแล้ว", cancelled: "ยกเลิก",
+};
+const STATUS_CLS: Record<string, string> = {
+  draft: "bg-slate-100 text-slate-600", review: "bg-amber-100 text-amber-700", approved: "bg-blue-100 text-blue-700",
+  locked: "bg-purple-100 text-purple-700", paid: "bg-emerald-100 text-emerald-700", cancelled: "bg-red-100 text-red-700",
+};
+const TRANSITIONS: Record<string, string[]> = {
+  draft: ["review", "cancelled"], review: ["approved", "draft", "cancelled"],
+  approved: ["locked", "review", "cancelled"], locked: ["paid", "approved"], paid: [], cancelled: ["draft"],
+};
+// ป้ายปุ่มตามปลายทาง + บริบท (from→to)
+const BTN_LABEL = (from: string, to: string): { label: string; cls: string } => {
+  if (to === "review") return from === "draft" ? { label: "📤 ส่งตรวจ", cls: "bg-amber-600 hover:bg-amber-700" } : { label: "↩ ถอยเป็นรอตรวจ", cls: "bg-slate-500 hover:bg-slate-600" };
+  if (to === "approved") return from === "locked" ? { label: "🔓 ปลดล็อก", cls: "bg-slate-500 hover:bg-slate-600" } : { label: "✔ อนุมัติ", cls: "bg-blue-600 hover:bg-blue-700" };
+  if (to === "locked") return { label: "🔒 ล็อกงวด", cls: "bg-purple-600 hover:bg-purple-700" };
+  if (to === "paid") return { label: "💵 จ่ายแล้ว", cls: "bg-emerald-600 hover:bg-emerald-700" };
+  if (to === "draft") return { label: "↩ ตีกลับเป็นร่าง", cls: "bg-slate-500 hover:bg-slate-600" };
+  if (to === "cancelled") return { label: "✕ ยกเลิกงวด", cls: "bg-red-600 hover:bg-red-700" };
+  return { label: to, cls: "bg-slate-500" };
+};
+
 export default function PayrollCalcRunPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [periodId, setPeriodId] = useState<string>("");
@@ -43,10 +67,31 @@ export default function PayrollCalcRunPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
-      .then((j) => { const ps = (j.data ?? []) as Period[]; setPeriods(ps); if (ps[0]) setPeriodId(ps[0].id); }).catch(() => {});
-  }, []);
+  async function loadPeriods(keepSelected = false) {
+    try {
+      const j = await apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json());
+      const ps = (j.data ?? []) as Period[];
+      setPeriods(ps);
+      if (!keepSelected && ps[0]) setPeriodId(ps[0].id);
+    } catch { /* ignore */ }
+  }
+  useEffect(() => { loadPeriods(); }, []);
+
+  const curPeriod = periods.find((p) => p.id === periodId);
+
+  async function changeStatus(toStatus: string) {
+    if (!periodId || !curPeriod) return;
+    if (!confirm(`เปลี่ยนสถานะงวด "${curPeriod.period_name}"\nจาก "${STATUS_TH[curPeriod.status] ?? curPeriod.status}" → "${STATUS_TH[toStatus] ?? toStatus}" ?`)) return;
+    setErr(null); setSaveMsg(null);
+    try {
+      const j = await apiFetch("/api/payroll/period-status", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId, to_status: toStatus }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else { setSaveMsg(`✅ เปลี่ยนสถานะงวดเป็น "${STATUS_TH[toStatus] ?? toStatus}" แล้ว`); await loadPeriods(true); await run(); }
+    } catch { setErr("เปลี่ยนสถานะไม่สำเร็จ"); }
+  }
 
   async function run() {
     if (!periodId) return;
@@ -101,6 +146,28 @@ export default function PayrollCalcRunPage() {
           {loading ? "กำลังคำนวณ..." : "▶ คำนวณ + เทียบ"}
         </button>
       </div>
+
+      {/* สถานะงวด + เปลี่ยนสถานะ (workflow) */}
+      {curPeriod && (
+        <div className="flex flex-wrap items-center gap-2 mb-5 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <span className="text-sm text-slate-500">สถานะงวด:</span>
+          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${STATUS_CLS[curPeriod.status] ?? "bg-slate-100 text-slate-600"}`}>
+            {STATUS_TH[curPeriod.status] ?? curPeriod.status}
+          </span>
+          <span className="text-slate-300 mx-1">→</span>
+          {(TRANSITIONS[curPeriod.status] ?? []).length === 0 ? (
+            <span className="text-xs text-slate-400">สิ้นสุดเส้นทางแล้ว</span>
+          ) : (
+            (TRANSITIONS[curPeriod.status] ?? []).map((to) => {
+              const b = BTN_LABEL(curPeriod.status, to);
+              return (
+                <button key={to} onClick={() => changeStatus(to)}
+                  className={`h-8 px-3 text-white rounded-lg text-xs font-medium ${b.cls}`}>{b.label}</button>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm mb-4">{err}</div>}
 
