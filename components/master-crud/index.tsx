@@ -1814,19 +1814,23 @@ function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unkno
   }
 
   if (!editing) {
-    const display = value == null || value === "" ? "—" : String(value);
+    const empty = value == null || value === "";
+    // คลิกได้เต็มความกว้างช่อง (ตาม span) + ถ้าว่างก็ยังกดเพิ่มได้
     return (
       <button type="button" onClick={() => { setVal(value == null ? "" : String(value)); setEditing(true); }}
-        className="text-left text-sm text-slate-800 hover:bg-blue-50/60 rounded px-1 -mx-1 inline-flex items-center gap-1 group max-w-full">
-        <span className="truncate">{display}</span>
-        <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 flex-shrink-0">✎</span>
+        className={`block w-full text-left text-sm rounded px-2 py-1 -mx-2 border border-transparent hover:border-blue-200 hover:bg-blue-50/60 group ${empty ? "text-slate-300 italic" : "text-slate-800"}`}>
+        <span className="inline-flex items-center gap-1 max-w-full align-middle">
+          <span className="truncate">{empty ? "คลิกเพื่อเพิ่มข้อมูล" : String(value)}</span>
+          <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 flex-shrink-0">✎</span>
+        </span>
       </button>
     );
   }
 
-  const inputCls = "h-8 px-2 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
+  // ช่องแก้กว้างเต็มช่อง (ตามจำนวนคอลัมน์ที่ตั้งให้ field)
+  const inputCls = "w-full h-8 px-2 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 w-full">
       {field.type === "select" && field.options ? (
         <select autoFocus value={val} disabled={saving} onChange={(e) => setVal(e.target.value)} onBlur={() => commit(val)} className={`${inputCls} bg-white`}>
           <option value="">—</option>
