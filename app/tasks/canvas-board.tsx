@@ -407,8 +407,8 @@ export function CanvasBoard({
                 <div className="flex items-center pl-2.5 pr-1.5 gap-1.5">
                   <span className="text-sm text-slate-700 tabular-nums w-5 text-center">{o.fontSize}</span>
                   <div className="flex flex-col text-slate-400">
-                    <button onClick={() => setSize(1)} title="ใหญ่ขึ้น" className="leading-[0.6] hover:text-slate-700">▲</button>
-                    <button onClick={() => setSize(-1)} title="เล็กลง" className="leading-[0.6] hover:text-slate-700">▼</button>
+                    <button onClick={() => setSize(1)} title="ใหญ่ขึ้น" className="h-3 flex items-center hover:text-slate-700"><IconCaret dir="up" /></button>
+                    <button onClick={() => setSize(-1)} title="เล็กลง" className="h-3 flex items-center hover:text-slate-700"><IconCaret dir="down" /></button>
                   </div>
                 </div>
                 <BarSep />
@@ -473,12 +473,12 @@ function BarBtn({ active, onClick, title, children }: { active?: boolean; onClic
     className={`px-2.5 flex items-center justify-center transition-colors first:rounded-l-xl ${active ? "bg-violet-50 text-violet-700" : "text-slate-700 hover:bg-slate-50"}`}>{children}</button>;
 }
 function Swatch({ c, className = "" }: { c: string; className?: string }) {
-  return <span className={`rounded border border-slate-300 ${className}`}
+  return <span className={`block rounded border border-slate-300 ${className}`}
     style={c === "transparent" ? { backgroundImage: "linear-gradient(45deg,#e2e8f0 25%,transparent 25%,transparent 75%,#e2e8f0 75%)", backgroundSize: "8px 8px" } : { background: c }} />;
 }
 function ColorPopover({ colors, value, onPick }: { colors: string[]; value: string; onPick: (c: string) => void }) {
   return (
-    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-white border border-slate-200 rounded-lg shadow-lg p-2 grid grid-cols-5 gap-1.5 z-40">
+    <div className="absolute top-full right-2 mt-1.5 bg-white border border-slate-200 rounded-lg shadow-lg p-2 grid grid-cols-5 gap-1.5 z-40">
       {colors.map(c => (
         <button key={c} onClick={() => onPick(c)} title={c} className={`h-6 w-6 rounded ${value === c ? "ring-2 ring-violet-400" : "hover:ring-1 hover:ring-slate-300"}`}>
           <Swatch c={c} className="h-full w-full" />
@@ -491,6 +491,7 @@ function MenuItem({ onClick, danger, children }: { onClick: () => void; danger?:
   return <button onClick={onClick} className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 ${danger ? "text-red-600" : "text-slate-700"}`}>{children}</button>;
 }
 function IconChevron() { return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>; }
+function IconCaret({ dir }: { dir: "up" | "down" }) { return <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d={dir === "up" ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} /></svg>; }
 function IconMore() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" /></svg>; }
 function IconAlign({ align }: { align: Align }) {
   const lines = align === "center" ? ["M6 7h12", "M8 12h8", "M6 17h12"] : align === "right" ? ["M6 7h12", "M10 12h8", "M6 17h12"] : ["M6 7h12", "M6 12h8", "M6 17h12"];
