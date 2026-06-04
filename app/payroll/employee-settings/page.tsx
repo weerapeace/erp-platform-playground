@@ -20,14 +20,31 @@ const yesNo = (v: unknown) => v === true
   ? <span className="text-emerald-600 text-xs font-medium">✓ เปิด</span>
   : <span className="text-slate-300 text-xs">✕ ปิด</span>;
 
+// ของพิเศษหน้าตั้งค่า — registry mode merge ตาม field key
+const settingsCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
+  tax_calculation_method: (v) => <span className="text-sm">{v === "manual" ? "กรอกเอง" : v === "progressive" ? "ขั้นบันได" : String(v)}</span>,
+  social_security_employee_amount: fmtBaht,
+  social_security_employer_amount: fmtBaht,
+  max_advance_amount: fmtBaht,
+  default_mid_month_advance_amount: fmtBaht,
+  social_security_enabled: yesNo,
+  withholding_tax_enabled: yesNo,
+  overtime_enabled: yesNo,
+  piece_rate_enabled: yesNo,
+  attendance_bonus_enabled: yesNo,
+  advance_payment_allowed: yesNo,
+};
+
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/core/", apiPath: "settings", tableId: "payroll-employee-settings",
+  moduleKey: "payroll-employee-settings",
   title: "ตั้งค่าเงินเดือนรายคน (Payroll)", icon: "⚙️",
   description: "ตั้งค่าการคำนวณต่อพนักงาน 76 รายการ — ประกันสังคม/ภาษี/OT ฯลฯ (คุมเครื่องคำนวณ)",
   uniqueKey: "employee_name", activeField: "active", exportEntityType: "payroll_setting",
   searchKeys: ["employee_name"],
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true,
+  cellRenderers: settingsCellRenderers,
   fields: [
     { key: "employee_name", label: "พนักงาน", type: "text", colSize: 200, readonly: true, groupKey: "core", order: 10 },
     { key: "employee_code", label: "รหัสพนักงาน (ตอนสร้างใหม่)", type: "text", colSize: 0, hideInForm: false, groupKey: "core", order: 12,

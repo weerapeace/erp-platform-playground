@@ -78,10 +78,38 @@ const fmtBaht = (v: unknown) => {
     : <span className="text-slate-300">—</span>;
 };
 
+// ของพิเศษทั้งหมดของหน้าพนักงาน — registry mode merge ตาม field key (ไม่หาย)
+const employeeCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
+  current_contract_no: (v) =>
+    v ? <span className="font-mono text-xs">{String(v)}</span> : <span className="text-slate-300">— ไม่มีสัญญา —</span>,
+  current_contract_salary: fmtBaht,
+  payroll_register_base_salary: fmtBaht,
+  employment_status: (v) => {
+    const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
+    return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
+  },
+  // ปุ่มกระโดดดูข้อมูลพนักงานในหน้าอื่น (สัญญา / ค่าประจำ / เงินเดือน / สลิป)
+  id: (v, row) => {
+    const id = String(v); const code = String(row?.employee_code ?? ""); const name = String(row?.full_name ?? "");
+    return (
+      <span className="flex gap-1.5 flex-wrap items-center">
+        <ContractPeekCell employeeId={id} employeeCode={code} employeeName={name} />
+        <RecordPeekCell label="🔁 ค่าประจำ" title="รายการประจำ" employeeId={id} employeeCode={code} employeeName={name}
+          apiPath="/api/payroll/view/recurring" empty="ไม่มีรายการประจำ" renderRow={peekRecurring} />
+        <RecordPeekCell label="✅ เงินเดือน" title="ผลคำนวณเงินเดือน" employeeId={id} employeeCode={code} employeeName={name}
+          apiPath="/api/payroll/view/payroll-lines" empty="ยังไม่มีบรรทัดเงินเดือน" renderRow={peekLine} />
+        <RecordPeekCell label="🧾 สลิป" title="สลิปเงินเดือน" employeeId={id} employeeCode={code} employeeName={name}
+          apiPath="/api/payroll/view/payslips" empty="ยังไม่มีสลิป" renderRow={peekSlip} />
+      </span>
+    );
+  },
+};
+
 const CONFIG: MasterCRUDConfig = {
   apiBase:     "/api/payroll/core/",
   apiPath:     "employees",
   tableId:     "payroll-employees",
+  moduleKey:   "payroll-employees",
   title:       "พนักงาน (Payroll)",
   icon:        "🪪",
   description: "ทะเบียนพนักงานจริง 78 คน — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
@@ -91,6 +119,9 @@ const CONFIG: MasterCRUDConfig = {
   searchKeys:  ["employee_code", "first_name", "last_name", "nickname", "full_name", "phone", "scanner_employee_code"],
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true,
+  // registry override fields[] เมื่อโหลดสำเร็จ; cellRenderers ประคองของพิเศษไว้
+  cellRenderers: employeeCellRenderers,
+  // fields[] ด้านล่าง = fallback ถ้าโหลดทะเบียนไม่ได้
   fields: [
     { key: "employee_code", label: "รหัส",        type: "text",   colSize: 100, placeholder: "อัตโนมัติ", groupKey: "core", order: 10 },
     { key: "first_name",    label: "ชื่อ",         type: "text",   colSize: 130, required: true, groupKey: "core", order: 20 },

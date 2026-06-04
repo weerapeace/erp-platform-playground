@@ -34,10 +34,31 @@ const fmtBaht = (v: unknown) => {
     : <span className="text-slate-300">—</span>;
 };
 
+// ของพิเศษหน้าสัญญา — registry mode merge ตาม field key
+const contractCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
+  wage_type: (v) => <span className="text-sm">{WAGE_LABEL[String(v)] ?? String(v)}</span>,
+  base_salary: fmtBaht,
+  daily_wage: fmtBaht,
+  hourly_wage: fmtBaht,
+  piece_rate_default: fmtBaht,
+  payroll_register_base_salary: fmtBaht,
+  status: (v) => {
+    const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
+    return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
+  },
+  employee_id: (_v, row) => (
+    <span className="flex gap-2">
+      {relLink("/payroll/recurring", "employee_id", row?.employee_id, "🔁 ค่าประจำ")}
+      {relLink("/payroll/review", "employee_id", row?.employee_id, "✅ เงินเดือน")}
+    </span>
+  ),
+};
+
 const CONFIG: MasterCRUDConfig = {
   apiBase:     "/api/payroll/core/",
   apiPath:     "contracts",
   tableId:     "payroll-contracts",
+  moduleKey:   "payroll-contracts",
   title:       "สัญญาจ้าง (Payroll)",
   icon:        "📄",
   description: "สัญญาจ้างจริง 78 รายการ — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
@@ -47,6 +68,7 @@ const CONFIG: MasterCRUDConfig = {
   searchKeys:  ["contract_no", "employee_name", "company_name", "contract_type"],
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true,
+  cellRenderers: contractCellRenderers,
   fields: [
     { key: "contract_no",   label: "เลขที่สัญญา", type: "text", colSize: 150, groupKey: "core", order: 10 },
     { key: "employee_name", label: "พนักงาน",     type: "text", colSize: 200, readonly: true, groupKey: "core", order: 20,
