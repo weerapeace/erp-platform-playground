@@ -39,7 +39,7 @@ const fmtBaht = (v: unknown) => {
 };
 
 const CONFIG: MasterCRUDConfig = {
-  apiBase:     "/api/payroll/",
+  apiBase:     "/api/payroll/core/",
   apiPath:     "employees",
   tableId:     "payroll-employees",
   title:       "พนักงาน (Payroll)",

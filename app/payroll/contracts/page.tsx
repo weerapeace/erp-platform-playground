@@ -35,7 +35,7 @@ const fmtBaht = (v: unknown) => {
 };
 
 const CONFIG: MasterCRUDConfig = {
-  apiBase:     "/api/payroll/",
+  apiBase:     "/api/payroll/core/",
   apiPath:     "contracts",
   tableId:     "payroll-contracts",
   title:       "สัญญาจ้าง (Payroll)",
