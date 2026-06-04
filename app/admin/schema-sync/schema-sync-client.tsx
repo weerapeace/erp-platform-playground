@@ -81,10 +81,10 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
 } = {}) {
   const [moduleKey, setModuleKey] = useState(initialModule ?? "parent-skus-v2");
   // โหลดรายชื่อโมดูลทั้งหมดจากทะเบียน (ไม่ hardcode) — fallback ถ้าโหลดไม่ได้
-  const [modules, setModules] = useState<{ key: string; label: string }[]>(FALLBACK_MODULES);
+  const [modules, setModules] = useState<{ key: string; label: string; table?: string }[]>(FALLBACK_MODULES);
   useEffect(() => {
     apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
-      if (Array.isArray(j.data) && j.data.length) setModules(j.data as { key: string; label: string }[]);
+      if (Array.isArray(j.data) && j.data.length) setModules(j.data as { key: string; label: string; table?: string }[]);
     }).catch(() => {});
   }, []);
   const [data,      setData]      = useState<SchemaSyncResponse | null>(null);
@@ -118,6 +118,51 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
     } catch (e) { flash("❌ " + (e instanceof Error ? e.message : "ลบไม่สำเร็จ")); }
     finally { setDeleting(false); }
   };
+
+  // เปลี่ยนประเภท field (เตือน + ยืนยัน 2 ชั้น + ตั้งค่า select/relation)
+  const [typeChange, setTypeChange] = useState<{ field: RegistryField; newType: string } | null>(null);
+  const [tcStats, setTcStats] = useState<{ total: number; filled: number } | null>(null);
+  const [tcAck, setTcAck] = useState(false);
+  const [tcOptions, setTcOptions] = useState("");
+  const [tcTargetTable, setTcTargetTable] = useState("");
+  const [tcTargetLabel, setTcTargetLabel] = useState("name");
+  const [tcApplying, setTcApplying] = useState(false);
+
+  const openTypeChange = (f: RegistryField, newType: string) => {
+    setTypeChange({ field: f, newType });
+    setTcStats(null); setTcAck(false); setTcApplying(false);
+    setTcOptions(((f.options as { options?: string[] })?.options ?? []).join("\n"));
+    setTcTargetTable(""); setTcTargetLabel("name");
+    apiFetch(`/api/admin/schema/field-stats?module=${encodeURIComponent(moduleKey)}&field=${encodeURIComponent(f.column_name ?? f.field_key)}`)
+      .then((r) => r.json()).then((j) => { if (!j.error) setTcStats({ total: j.total, filled: j.filled }); }).catch(() => {});
+  };
+
+  const applyTypeChange = async () => {
+    if (!typeChange) return;
+    const { field, newType } = typeChange;
+    const patch: Record<string, unknown> = { ui_field_type: newType };
+    if (newType === "select") {
+      const opts = tcOptions.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+      patch.options = { options: opts };
+    }
+    if (newType === "relation") {
+      if (!tcTargetTable) { flash("เลือกตารางปลายทางก่อน"); return; }
+      const tgt = modules.find((m) => m.table === tcTargetTable);
+      patch.relation_config = {
+        allow_create: false, target_table: tcTargetTable,
+        target_module_key: tgt?.key ?? tcTargetTable,
+        target_label_field: tcTargetLabel || "name",
+        target_search_fields: [tcTargetLabel || "name"],
+      };
+      patch.is_editable = true;
+    }
+    setTcApplying(true);
+    try { await updateField(field.id, patch); setTypeChange(null); flash("✓ เปลี่ยนประเภทแล้ว"); }
+    finally { setTcApplying(false); }
+  };
+  const tcCanApply = !!typeChange && tcAck && !tcApplying
+    && (typeChange.newType !== "select" || tcOptions.split(/[\n,]/).some((s) => s.trim()))
+    && (typeChange.newType !== "relation" || !!tcTargetTable);
 
   // Sprint 11
   const [selected,    setSelected]    = useState<Set<string>>(new Set());
@@ -546,6 +591,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                                   onUpdate={(patch) => updateField(f.id, patch)}
                                   onEditCondition={() => setConditionEditing(f)}
                                   onDelete={() => setDeleteTarget(f)}
+                                  onChangeType={(nt) => openTypeChange(f, nt)}
                                 />
                               ))}
                             </React.Fragment>
@@ -632,6 +678,74 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
             </div>
           </div>
         )}
+
+        {/* เปลี่ยนประเภท field — เตือนผลกระทบ + ตั้งค่า select/relation + ยืนยัน 2 ชั้น */}
+        {typeChange && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4" onClick={() => !tcApplying && setTypeChange(null)}>
+            <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-3 border-b border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-800">เปลี่ยนประเภท: {typeChange.field.field_label}</h3>
+                <div className="text-xs text-slate-500 mt-0.5">
+                  <code className="bg-slate-100 px-1 rounded">{typeChange.field.ui_field_type}</code> → <code className="bg-amber-100 px-1 rounded text-amber-700">{typeChange.newType}</code>
+                </div>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                {/* ผลกระทบ + จำนวนข้อมูล */}
+                <div className="p-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800">
+                  {tcStats === null
+                    ? "กำลังตรวจจำนวนข้อมูล…"
+                    : <>field นี้มีข้อมูลอยู่ <b>{tcStats.filled.toLocaleString()}</b> แถว (จากทั้งหมด {tcStats.total.toLocaleString()})</>}
+                  <div className="mt-1 text-amber-700">
+                    เปลี่ยนประเภทไม่ลบข้อมูลใน Supabase — แต่ถ้าข้อมูลเดิมไม่เข้ากับประเภทใหม่ อาจแสดงเพี้ยน/ว่าง
+                  </div>
+                </div>
+
+                {/* select → ตัวเลือก */}
+                {typeChange.newType === "select" && (
+                  <div>
+                    <div className="text-xs text-slate-600 mb-1">ตัวเลือก (บรรทัดละ 1 ค่า)</div>
+                    <textarea value={tcOptions} onChange={(e) => setTcOptions(e.target.value)} rows={4}
+                      placeholder={"ตัวเลือก 1\nตัวเลือก 2"} className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md" />
+                  </div>
+                )}
+
+                {/* relation → ตารางปลายทาง + field ชื่อ */}
+                {typeChange.newType === "relation" && (
+                  <div className="space-y-2">
+                    <div>
+                      <div className="text-xs text-slate-600 mb-1">ตารางปลายทาง</div>
+                      <select value={tcTargetTable} onChange={(e) => setTcTargetTable(e.target.value)}
+                        className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md bg-white">
+                        <option value="">— เลือก —</option>
+                        {modules.filter((m) => m.table).map((m) => <option key={m.key} value={m.table}>{m.label} ({m.table})</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-600 mb-1">field ที่ใช้แสดงชื่อ</div>
+                      <input value={tcTargetLabel} onChange={(e) => setTcTargetLabel(e.target.value)} placeholder="name"
+                        className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md" />
+                    </div>
+                    <div className="text-[11px] text-slate-400">หมายเหตุ: ตั้งค่าเพื่อแสดง/เลือกค่า (ไม่บังคับสร้าง FK) — ถ้าต้องการ relation เต็มควรสร้าง field ใหม่</div>
+                  </div>
+                )}
+
+                {/* ยืนยันชั้นที่ 2 */}
+                <label className="flex items-start gap-2 text-xs text-slate-600">
+                  <input type="checkbox" checked={tcAck} onChange={(e) => setTcAck(e.target.checked)} className="mt-0.5" />
+                  เข้าใจว่าข้อมูลเดิมอาจแสดงไม่ตรงกับประเภทใหม่
+                </label>
+              </div>
+              <div className="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+                <button onClick={() => setTypeChange(null)} disabled={tcApplying}
+                  className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                <button onClick={applyTypeChange} disabled={!tcCanApply}
+                  className="h-9 px-4 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-40">
+                  {tcApplying ? "กำลังเปลี่ยน..." : "เปลี่ยนประเภท"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
   );
   return embedded ? inner : <PlaygroundShell>{inner}</PlaygroundShell>;
@@ -642,7 +756,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
 // ============================================================
 
 function SortableFieldRow({
-  field, saving, selected, onToggle, onUpdate, onEditCondition, onDelete,
+  field, saving, selected, onToggle, onUpdate, onEditCondition, onDelete, onChangeType,
 }: {
   field:    RegistryField;
   saving:   boolean;
@@ -651,6 +765,7 @@ function SortableFieldRow({
   onUpdate: (patch: Record<string, unknown>) => void | Promise<void>;
   onEditCondition?: () => void;
   onDelete?: () => void;
+  onChangeType?: (newType: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
   const style: React.CSSProperties = {
@@ -699,7 +814,7 @@ function SortableFieldRow({
       <td className="px-3 py-1.5">
         <select
           value={field.ui_field_type}
-          onChange={(e) => onUpdate({ ui_field_type: e.target.value })}
+          onChange={(e) => { if (e.target.value !== field.ui_field_type) onChangeType?.(e.target.value); }}
           className="text-xs px-1.5 py-1 border border-slate-200 rounded bg-white"
         >
           {UI_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
