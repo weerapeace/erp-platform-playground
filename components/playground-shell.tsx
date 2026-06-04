@@ -119,8 +119,10 @@ export const navGroups = [
     phase: 2,
     label: "🛒 Sales/Purchase v2 (Phase 5)",
     items: [
-      { href: "/master/quotations",      icon: "📄", labelTH: "Quotations" },
-      { href: "/master/sales-orders-v2", icon: "🧾", labelTH: "Sales Orders (v2)" },
+      // ซ่อนหน้าเดโม่งานขายที่ซ้ำซ้อน (ตารางเปล่า ไม่มี line/workflow) — ใช้ "ใบขาย (SO)" ตัวจริงแทน
+      // ตาราง quotations / sales_orders ใน DB ยังคงอยู่ (ไม่ลบ) — แค่ซ่อนลิงก์
+      // { href: "/master/quotations",      icon: "📄", labelTH: "Quotations" },
+      // { href: "/master/sales-orders-v2", icon: "🧾", labelTH: "Sales Orders (v2)" },
       { href: "/master/goods-receipts",  icon: "📥", labelTH: "Goods Receipts" },
       { href: "/master/deliveries",      icon: "🚚", labelTH: "Deliveries" },
     ],

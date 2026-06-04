@@ -241,6 +241,22 @@ export default function SalesOrdersPage() {
     },
   ], []);
 
+  // ---- Saved Views (มุมมองบันทึกไว้ — ของกลาง §14) ----
+  // "ของฉัน" + "เดือนนี้" ต้องอิงค่า dynamic (ชื่อผู้ใช้ / เดือนปัจจุบัน) จึงสร้างใน useMemo
+  const views = useMemo(() => {
+    const monthPrefix = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const myName = user?.name ?? "";
+    return [
+      { id: "all",       label: "ทั้งหมด" },
+      { id: "mine",      label: "👤 ของฉัน",     filter: (r: Record<string, unknown>) => String(r.sale_person_name ?? "") === myName },
+      { id: "draft",     label: "📝 ร่าง",        filter: (r: Record<string, unknown>) => r.status === "draft" },
+      { id: "confirmed", label: "✅ ยืนยันแล้ว",  filter: (r: Record<string, unknown>) => r.status === "confirmed" },
+      { id: "shipped",   label: "📦 ส่งของแล้ว",  filter: (r: Record<string, unknown>) => r.status === "shipped" },
+      { id: "month",     label: "🗓 เดือนนี้",    filter: (r: Record<string, unknown>) => String(r.order_date ?? "").startsWith(monthPrefix) },
+      { id: "cancelled", label: "⊘ ยกเลิก",       filter: (r: Record<string, unknown>) => r.status === "cancelled" },
+    ];
+  }, [user?.name]);
+
   // F14 fix: early return หลัง hooks ทั้งหมด (กัน React #310)
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
@@ -268,6 +284,7 @@ export default function SalesOrdersPage() {
           tableId="sales-orders"
           data={rows}
           columns={columns}
+          views={views}
           loading={loading}
           searchableKeys={["so_number", "customer_name", "customer_code"]}
           searchPlaceholder="ค้นหา เลข SO / ลูกค้า..."
