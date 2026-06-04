@@ -469,38 +469,49 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const relatedFieldsRef = useRef(relatedFields);
   relatedFieldsRef.current = relatedFields;
 
-  // โหลด map ของ target ที่ยังไม่มี (await ได้) — เรียกก่อน enrich เพื่อกันกระพริบ (ไม่ refetch ซ้ำ)
-  const ensureRelatedMaps = useCallback(async () => {
+  // โหลดค่า related "เฉพาะ id ที่อยู่ในแถวหน้านี้" (เร็ว ไม่โหลดทั้งตาราง) + cache ต่อ id
+  // เรียกก่อน enrich เพื่อกันกระพริบ — id ที่เคยโหลดแล้วจะไม่ดึงซ้ำ
+  const ensureRelatedMaps = useCallback(async (rowsToResolve: Row[]) => {
+    const CHUNK = 80;  // กัน URL ยาวเกิน (include_ids)
+    const resolveInChunks = async (cfg: { target_table: string; target_label_field: string }, ids: string[]) => {
+      const out = new Map<string, { label: string }>();
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const part = await resolveRelationLabels(apiFetch, cfg, ids.slice(i, i + CHUNK));
+        part.forEach((v, k) => out.set(k, v));
+      }
+      return out;
+    };
     for (const f of relatedFieldsRef.current) {
       const rc = (f.relation_config ?? {}) as Record<string, unknown>;
+      const targetTable = String(rc.target_table ?? "");
       const tmk = String(rc.target_module_key ?? rc.target_table ?? "");
       const tf  = String(rc.target_field ?? "");
-      if (!tmk || !tf) continue;
+      const viaCol = String(rc.via_column ?? rc.via_field ?? "");
+      if (!targetTable || !tf || !viaCol) continue;
       const ck = `${tmk}.${tf}`;
-      if (relatedMapsRef.current[ck]) continue;
+      const cache = (relatedMapsRef.current[ck] ??= {} as Record<string, unknown>);
+      // id ที่ต้องการ (เฉพาะแถวหน้านี้) ที่ยังไม่มีใน cache
+      const need = Array.from(new Set(
+        rowsToResolve.map((r) => r[viaCol]).filter((v) => v != null && v !== "").map((v) => String(v)),
+      )).filter((id) => !(id in cache));
+      if (need.length === 0) continue;
       try {
-        // limit 2000 → ครอบตารางใบแม่ทั้งหมด (เช่น parent_skus_v2 1,471 แถว)
-        const j = await apiFetch(`${apiBase}${tmk}?limit=2000&include_inactive=true`).then((r) => r.json());
-        const m: Record<string, unknown> = {};
-        (j.data ?? []).forEach((row: Record<string, unknown>) => { m[String(row.id)] = row[tf]; });
-        // 2-hop: ถ้า target_field เป็น FK (เช่น brand_id) → ดึงต่อเป็นชื่อ (id→ชื่อ) ผ่าน resolver กลาง
+        // hop 1: parent id → ค่า target_field (เช่น brand_id)
+        const parentMap = await resolveInChunks({ target_table: targetTable, target_label_field: tf }, need);
+        const idToVal: Record<string, string | null> = {};
+        need.forEach((id) => { idToVal[id] = parentMap.get(id)?.label ?? null; });
+        // hop 2 (ถ้ามี resolve_table): ค่า FK → ชื่อ (เช่น brand_id → brands.name)
         const resolveTable = String(rc.resolve_table ?? "");
         const resolveLabel = String(rc.resolve_label ?? "");
         if (resolveTable && resolveLabel) {
-          const ids = Array.from(new Set(Object.values(m).filter((v) => v != null && v !== "").map((v) => String(v))));
-          if (ids.length) {
-            const labelMap = await resolveRelationLabels(apiFetch,
-              { target_table: resolveTable, target_label_field: resolveLabel }, ids);
-            for (const k of Object.keys(m)) {
-              const id = m[k] != null ? String(m[k]) : "";
-              m[k] = (id && labelMap.get(id)?.label) || null;
-            }
-          }
+          const vals = Array.from(new Set(Object.values(idToVal).filter(Boolean).map((v) => String(v))));
+          const valMap = vals.length ? await resolveInChunks({ target_table: resolveTable, target_label_field: resolveLabel }, vals) : new Map();
+          for (const id of need) { const v = idToVal[id]; idToVal[id] = v ? (valMap.get(String(v))?.label ?? null) : null; }
         }
-        relatedMapsRef.current[ck] = m;
+        Object.assign(cache, idToVal);
       } catch { /* related จะว่างไว้ */ }
     }
-  }, [apiBase]);
+  }, []);
 
   // เติมค่า related ลงใน row (ใช้ทั้ง list + detail) จาก map ที่โหลดไว้
   const enrichRelated = useCallback((list: Row[]): Row[] => {
@@ -599,8 +610,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      await ensureRelatedMaps();
-      setRows(enrichRelated((json.data ?? []) as Row[]));
+      const raw = (json.data ?? []) as Row[];
+      await ensureRelatedMaps(raw);
+      setRows(enrichRelated(raw));
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
   }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, urlFilter, enrichRelated, ensureRelatedMaps]);
@@ -631,8 +643,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
-    await ensureRelatedMaps();
-    return { rows: enrichRelated((json.data ?? []) as Row[]), total: (json.total as number) ?? 0 };
+    const raw = (json.data ?? []) as Row[];
+    await ensureRelatedMaps(raw);
+    return { rows: enrichRelated(raw), total: (json.total as number) ?? 0 };
   }, [apiBase, config.apiPath, config.baseFilter, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
@@ -678,9 +691,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (!isRest) return;
     apiFetch(`${apiBase}${config.apiPath}/${r.id}`)
       .then((res) => res.json())
-      .then((json) => {
+      .then(async (json) => {
         if (json.error || !json.data) return;
         // ข้อ 2: เติมค่า related ลง full row ก่อน (full row ไม่มี column related)
+        await ensureRelatedMaps([json.data as Row]);
         const [full] = enrichRelated([json.data as Row]);
         const f: Record<string, unknown> = {};
         effectiveFields.forEach((field) => {
