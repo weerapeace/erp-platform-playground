@@ -20,6 +20,10 @@ import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { apiFetch } from "@/lib/api";
 
+// โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
+// เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
+export const STANDALONE_HREFS = new Set<string>(["/tasks"]);
+
 // Sidebar structure ใหม่ — รวมตามการใช้งานจริง (ไม่ใช่ phase dev)
 // = "เมนู default" (fallback) ถ้าทะเบียนเมนูใน DB ว่าง/โหลดไม่ได้
 export const navGroups = [
@@ -497,10 +501,14 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                 {group.items.map((item) => {
                   const isActive = pathname === item.href;
                   const isReady = readySections.includes(item.href);
+                  const isStandalone = STANDALONE_HREFS.has(item.href);
                   return (
                     <Link
                       key={item.href}
                       href={item.href}
+                      target={isStandalone ? "_blank" : undefined}
+                      rel={isStandalone ? "noopener" : undefined}
+                      title={isStandalone ? "เปิดเป็นแอปแยกในแท็บใหม่" : undefined}
                       className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
                         isActive
                           ? "bg-blue-50 text-blue-700 font-medium"
@@ -509,6 +517,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                     >
                       <span className="text-base leading-none">{item.icon}</span>
                       <span className="flex-1 leading-tight">{item.labelTH}</span>
+                      {isStandalone && (
+                        <span className="text-[11px] text-slate-400 flex-shrink-0" aria-hidden>↗</span>
+                      )}
                       {isReady && !isActive && (
                         <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full flex-shrink-0" />
                       )}

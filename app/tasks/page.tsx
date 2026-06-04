@@ -8,7 +8,7 @@
 // ============================================================
 
 import { useMemo, useState } from "react";
-import { PlaygroundShell } from "@/components/playground-shell";
+import { StandaloneShell } from "@/components/standalone-shell";
 import { DataTable } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
@@ -226,7 +226,7 @@ export default function TasksPage() {
   };
 
   return (
-    <PlaygroundShell>
+    <StandaloneShell title="จัดการงาน (Task Manager)" icon="✅" accent="violet">
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="inline-flex items-center gap-2 bg-violet-50 text-violet-700 border border-violet-200 px-3 py-1 rounded-full text-xs font-medium mb-3">
@@ -374,7 +374,7 @@ export default function TasksPage() {
       />
 
       <ToastStack toasts={toasts} onDismiss={id => setToasts(p => p.filter(t => t.id !== id))} />
-    </PlaygroundShell>
+    </StandaloneShell>
   );
 }
 
