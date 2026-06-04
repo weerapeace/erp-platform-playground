@@ -2,10 +2,10 @@
 
 // ============================================================
 // Task Manager — Canvas / Whiteboard (แบบ Miro) · ขั้น A mock
-// รอบ 1: พื้นขาว, fullscreen, โซนตามสถานะ, ลากการ์ดอิสระ (ปล่อยในโซน=เปลี่ยนสถานะ),
-//        sticky note, สร้างกล่อง (box), เพิ่ม text, จำ layout (localStorage)
-// รอบ 2 (ถัดไป): ลูกศรเชื่อมกล่องแบบเกาะวัตถุ + paste รูปขึ้น R2
-// ขั้น B: ตำแหน่ง/กล่อง/โน้ตจะย้ายไปเก็บใน Supabase ต่อ record + workflow กลาง
+// พื้นขาว · ขยายเต็มหน้าต่าง · โซนตามสถานะ · ลากการ์ด (ปล่อยในโซน=เปลี่ยนสถานะ)
+// กล่อง/ข้อความ/โน้ต · จัดรูปแบบตัวอักษร (ขนาด/หนา/เอียง/ขีด/สี/ไฮไลต์/จัดชิด)
+// คัดลอก · ลบ (ปุ่ม Del) · จัดชั้นหน้า/หลัง · Undo/Redo · จำ layout (localStorage)
+// รอบ 2 (ถัดไป): ลูกศรเชื่อมกล่อง + paste รูปขึ้น R2 (+ลบใน R2)
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
@@ -16,47 +16,47 @@ import {
 
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
-type Sticky = { id: string; x: number; y: number; text: string; color: string };
+type Align = "left" | "center" | "right";
+type Style = { fontSize: number; bold: boolean; italic: boolean; underline: boolean; color: string; align: Align };
+type Sticky = { id: string; x: number; y: number; text: string; color: string; fontSize: number };
 type BoardObject =
-  | { id: string; type: "box"; x: number; y: number; w: number; h: number; text: string; color: string }
-  | { id: string; type: "text"; x: number; y: number; w: number; text: string };
+  | ({ id: string; type: "box"; x: number; y: number; w: number; h: number; text: string; fill: string; border: string } & Style)
+  | ({ id: string; type: "text"; x: number; y: number; w: number; h: number; text: string; highlight: string } & Style);
+type Board = { positions: Record<string, Pos>; stickies: Sticky[]; objects: BoardObject[] };
 type Tool = "select" | "pan" | "sticky" | "box" | "text";
 type Interaction =
   | { type: "pan"; sx: number; sy: number; ox: number; oy: number }
   | { type: "card"; id: string; sx: number; sy: number; ox: number; oy: number }
-  | { type: "sticky"; id: string; sx: number; sy: number; ox: number; oy: number }
-  | { type: "object"; id: string; sx: number; sy: number; ox: number; oy: number }
+  | { type: "drag"; id: string; sx: number; sy: number; ox: number; oy: number }       // sticky/object move
   | { type: "resize"; id: string; sx: number; sy: number; ow: number; oh: number }
   | null;
 
 const COLUMNS: TaskStatus[] = ["new", "in_progress", "review", "done", "cancelled"];
 const CARD_W = 280;
-const ZONE_W = 340;
-const ZONE_H = 1240;
-const ZONE_GAP = 32;
-const CARD_GAP_Y = 150;
-const POS_KEY = "erp-tasks-canvas-pos:v1";
-const STICKY_KEY = "erp-tasks-canvas-stickies:v1";
-const OBJ_KEY = "erp-tasks-canvas-objects:v1";
-const STICKY_COLORS = ["#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6"];
+const ZONE_W = 340, ZONE_H = 1240, ZONE_GAP = 32, CARD_GAP_Y = 150;
+const BOARD_KEY = "erp-tasks-canvas:v2";
+const STICKY_COLORS = ["#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#fed7aa", "#e0e7ff"];
+const TEXT_COLORS = ["#1e293b", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#2563eb", "#7c3aed", "#db2777", "#ffffff"];
+const FILL_COLORS = ["transparent", "#ffffff", "#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#1e293b"];
+const FONT_SIZES = [12, 14, 16, 20, 24, 32, 44];
+const DEF_STYLE: Style = { fontSize: 16, bold: false, italic: false, underline: false, color: "#1e293b", align: "left" };
 
 const ZONE_TONE: Record<TaskStatus, string> = {
-  new:         "border-blue-200 bg-blue-50/40",
-  in_progress: "border-indigo-200 bg-indigo-50/40",
-  review:      "border-amber-200 bg-amber-50/40",
-  done:        "border-emerald-200 bg-emerald-50/40",
-  cancelled:   "border-slate-200 bg-slate-50/50",
+  new: "border-blue-200 bg-blue-50/40", in_progress: "border-indigo-200 bg-indigo-50/40",
+  review: "border-amber-200 bg-amber-50/40", done: "border-emerald-200 bg-emerald-50/40",
+  cancelled: "border-slate-200 bg-slate-50/50",
 };
-
 const zoneX = (i: number) => i * (ZONE_W + ZONE_GAP);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-
+const clone = (b: Board): Board => JSON.parse(JSON.stringify(b));
 function zoneIndexAtWorldX(wx: number): number {
-  for (let i = 0; i < COLUMNS.length; i++) {
-    if (wx >= zoneX(i) && wx <= zoneX(i) + ZONE_W) return i;
-  }
+  for (let i = 0; i < COLUMNS.length; i++) if (wx >= zoneX(i) && wx <= zoneX(i) + ZONE_W) return i;
   return -1;
 }
+const styleOf = (o: BoardObject): React.CSSProperties => ({
+  fontSize: o.fontSize, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? "italic" : "normal",
+  textDecoration: o.underline ? "underline" : "none", color: o.color, textAlign: o.align,
+});
 
 export function CanvasBoard({
   tasks, onMove, onCardClick,
@@ -69,48 +69,76 @@ export function CanvasBoard({
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Interaction>(null);
   const movedRef = useRef(false);
+  const dragStartRef = useRef<Board | null>(null);   // snapshot ก่อนเริ่มลาก (สำหรับ undo)
+  const editStartRef = useRef<Board | null>(null);   // snapshot ก่อนเริ่มพิมพ์
+
   const [vp, setVp] = useState<Viewport>({ x: 40, y: 24, scale: 0.7 });
-  const [positions, setPositions] = useState<Record<string, Pos>>({});
-  const [stickies, setStickies] = useState<Sticky[]>([]);
-  const [objects, setObjects] = useState<BoardObject[]>([]);
+  const [board, setBoard] = useState<Board>({ positions: {}, stickies: [], objects: [] });
+  const [past, setPast] = useState<Board[]>([]);
+  const [future, setFuture] = useState<Board[]>([]);
   const [tool, setTool] = useState<Tool>("select");
-  const [editingId, setEditingId] = useState<string | null>(null);   // sticky / object ที่กำลังแก้
+  const [selId, setSelId] = useState<string | null>(null);
   const [isMax, setIsMax] = useState(false);
 
-  // ---- load/save layout ----
-  useEffect(() => {
-    try {
-      const p = localStorage.getItem(POS_KEY); if (p) setPositions(JSON.parse(p));
-      const s = localStorage.getItem(STICKY_KEY); if (s) setStickies(JSON.parse(s));
-      const o = localStorage.getItem(OBJ_KEY); if (o) setObjects(JSON.parse(o));
-    } catch { /* ignore */ }
-  }, []);
-  useEffect(() => { try { localStorage.setItem(POS_KEY, JSON.stringify(positions)); } catch { /* ignore */ } }, [positions]);
-  useEffect(() => { try { localStorage.setItem(STICKY_KEY, JSON.stringify(stickies)); } catch { /* ignore */ } }, [stickies]);
-  useEffect(() => { try { localStorage.setItem(OBJ_KEY, JSON.stringify(objects)); } catch { /* ignore */ } }, [objects]);
+  // ---- load/save ----
+  useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) setBoard(JSON.parse(r)); } catch { /* ignore */ } }, []);
+  useEffect(() => { try { localStorage.setItem(BOARD_KEY, JSON.stringify(board)); } catch { /* ignore */ } }, [board]);
 
-  // ---- ขยายเต็มหน้าต่างเบราว์เซอร์ (ไม่ใช่ OS fullscreen) — กด Esc เพื่อย่อกลับ ----
+  // ---- history ----
+  const commit = (next: Board) => { setPast(p => [...p, board]); setFuture([]); setBoard(next); };
+  const pushPast = (snap: Board) => { setPast(p => [...p, snap]); setFuture([]); };
+  const undo = () => { if (!past.length) return; const prev = past[past.length - 1]; setFuture(f => [board, ...f]); setBoard(prev); setPast(p => p.slice(0, -1)); setSelId(null); };
+  const redo = () => { if (!future.length) return; const nxt = future[0]; setPast(p => [...p, board]); setBoard(nxt); setFuture(f => f.slice(1)); setSelId(null); };
+
+  // ---- selection helpers ----
+  const sel = selId ? (board.objects.find(o => o.id === selId) ?? board.stickies.find(s => s.id === selId) ?? null) : null;
+  const selKind: "box" | "text" | "sticky" | null = sel ? ("type" in sel ? (sel as BoardObject).type : "sticky") : null;
+
+  const patchObject = (id: string, patch: Partial<BoardObject>) =>
+    commit({ ...board, objects: board.objects.map(o => o.id === id ? { ...o, ...patch } as BoardObject : o) });
+  const patchSticky = (id: string, patch: Partial<Sticky>) =>
+    commit({ ...board, stickies: board.stickies.map(s => s.id === id ? { ...s, ...patch } : s) });
+
+  const deleteSelected = () => {
+    if (!selId) return;
+    commit({ ...board, objects: board.objects.filter(o => o.id !== selId), stickies: board.stickies.filter(s => s.id !== selId) });
+    setSelId(null);
+  };
+  const duplicateSelected = () => {
+    if (!selId) return;
+    const o = board.objects.find(x => x.id === selId);
+    if (o) { const id = `${o.type}-${Date.now()}`; commit({ ...board, objects: [...board.objects, { ...o, id, x: o.x + 24, y: o.y + 24 }] }); setSelId(id); return; }
+    const s = board.stickies.find(x => x.id === selId);
+    if (s) { const id = `st-${Date.now()}`; commit({ ...board, stickies: [...board.stickies, { ...s, id, x: s.x + 24, y: s.y + 24 }] }); setSelId(id); }
+  };
+  const bringFront = () => { if (!selId) return; const o = board.objects.find(x => x.id === selId); if (!o) return; commit({ ...board, objects: [...board.objects.filter(x => x.id !== selId), o] }); };
+  const sendBack = () => { if (!selId) return; const o = board.objects.find(x => x.id === selId); if (!o) return; commit({ ...board, objects: [o, ...board.objects.filter(x => x.id !== selId)] }); };
+
+  // ---- fullscreen(in-window) + keyboard ----
+  const toggleFs = () => setIsMax(m => !m);
   useEffect(() => {
-    if (!isMax) return;
-    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setIsMax(false); };
+    const h = (e: KeyboardEvent) => {
+      const typing = ["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? "");
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (mod && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
+      else if (mod && e.key.toLowerCase() === "d" && selId) { e.preventDefault(); duplicateSelected(); }
+      else if ((e.key === "Delete" || e.key === "Backspace") && selId && !typing) { e.preventDefault(); deleteSelected(); }
+      else if (e.key === "Escape") { setIsMax(false); setSelId(null); }
+    };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [isMax]);
-  const toggleFs = () => setIsMax(m => !m);
+  }, [selId, board, past, future]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ---- auto layout (เมื่อยังไม่เคยลาก) ----
+  // ---- auto layout (การ์ดที่ยังไม่เคยลาก) ----
   const autoPos = useMemo(() => {
     const map: Record<string, Pos> = {};
-    COLUMNS.forEach((status, ci) => {
-      tasks.filter(t => t.status === status).forEach((t, ri) => {
-        map[t.id] = { x: zoneX(ci) + 30, y: 90 + ri * CARD_GAP_Y };
-      });
-    });
+    COLUMNS.forEach((status, ci) => tasks.filter(t => t.status === status).forEach((t, ri) => { map[t.id] = { x: zoneX(ci) + 30, y: 90 + ri * CARD_GAP_Y }; }));
     return map;
   }, [tasks]);
-  const posOf = (id: string): Pos => positions[id] ?? autoPos[id] ?? { x: 40, y: 90 };
+  const posOf = (id: string): Pos => board.positions[id] ?? autoPos[id] ?? { x: 40, y: 90 };
 
-  // ---- wheel zoom (anchor ที่เคอร์เซอร์) ----
+  // ---- zoom ----
   useEffect(() => {
     const el = boardRef.current; if (!el) return;
     const onWheel = (e: WheelEvent) => {
@@ -118,81 +146,67 @@ export function CanvasBoard({
       const rect = el.getBoundingClientRect();
       const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-      setVp(v => {
-        const ns = clamp(v.scale * factor, 0.25, 2);
-        return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns };
-      });
+      setVp(v => { const ns = clamp(v.scale * factor, 0.25, 2); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
-
   const zoomBtn = (factor: number) => {
     const el = boardRef.current; if (!el) return;
     const rect = el.getBoundingClientRect();
     const sx = rect.width / 2, sy = rect.height / 2;
-    setVp(v => {
-      const ns = clamp(v.scale * factor, 0.25, 2);
-      return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns };
-    });
+    setVp(v => { const ns = clamp(v.scale * factor, 0.25, 2); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; });
   };
   const resetView = () => setVp({ x: 40, y: 24, scale: 0.7 });
-  const resetLayout = () => { setPositions({}); };
+  const resetLayout = () => commit({ ...board, positions: {} });
 
   const screenToWorld = (clientX: number, clientY: number): Pos => {
     const rect = boardRef.current!.getBoundingClientRect();
     return { x: (clientX - rect.left - vp.x) / vp.scale, y: (clientY - rect.top - vp.y) / vp.scale };
   };
 
-  // ---- pointer handlers (จับที่ board ใช้ pointer capture) ----
+  // ---- pointer ----
   const onBoardPointerDown = (e: RPE) => {
     const w = screenToWorld(e.clientX, e.clientY);
     if (tool === "sticky") {
       const id = `st-${Date.now()}`;
-      setStickies(p => [...p, { id, x: w.x - 90, y: w.y - 60, text: "", color: STICKY_COLORS[p.length % STICKY_COLORS.length] }]);
-      setEditingId(id); setTool("select"); return;
+      commit({ ...board, stickies: [...board.stickies, { id, x: w.x - 90, y: w.y - 60, text: "", color: STICKY_COLORS[board.stickies.length % STICKY_COLORS.length], fontSize: 14 }] });
+      setSelId(id); setTool("select"); return;
     }
     if (tool === "box") {
-      const id = `bx-${Date.now()}`;
-      setObjects(p => [...p, { id, type: "box", x: w.x - 110, y: w.y - 70, w: 220, h: 140, text: "", color: "#ffffff" }]);
-      setEditingId(id); setTool("select"); return;
+      const id = `box-${Date.now()}`;
+      commit({ ...board, objects: [...board.objects, { id, type: "box", x: w.x - 110, y: w.y - 70, w: 220, h: 140, text: "", fill: "#ffffff", border: "#cbd5e1", ...DEF_STYLE }] });
+      setSelId(id); setTool("select"); return;
     }
     if (tool === "text") {
-      const id = `tx-${Date.now()}`;
-      setObjects(p => [...p, { id, type: "text", x: w.x - 80, y: w.y - 12, w: 200, text: "" }]);
-      setEditingId(id); setTool("select"); return;
+      const id = `text-${Date.now()}`;
+      commit({ ...board, objects: [...board.objects, { id, type: "text", x: w.x - 80, y: w.y - 14, w: 200, h: 40, text: "", highlight: "transparent", ...DEF_STYLE, fontSize: 20 }] });
+      setSelId(id); setTool("select"); return;
     }
+    setSelId(null);
     boardRef.current?.setPointerCapture(e.pointerId);
     interRef.current = { type: "pan", sx: e.clientX, sy: e.clientY, ox: vp.x, oy: vp.y };
   };
 
   const startCardDrag = (e: RPE, id: string) => {
-    e.stopPropagation();
-    boardRef.current?.setPointerCapture(e.pointerId);
-    movedRef.current = false;
+    e.stopPropagation(); setSelId(null);
+    boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
+    dragStartRef.current = clone(board);
     const p = posOf(id);
     interRef.current = { type: "card", id, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
   };
-  const startStickyDrag = (e: RPE, id: string) => {
-    e.stopPropagation();
-    boardRef.current?.setPointerCapture(e.pointerId);
-    movedRef.current = false;
-    const s = stickies.find(x => x.id === id)!;
-    interRef.current = { type: "sticky", id, sx: e.clientX, sy: e.clientY, ox: s.x, oy: s.y };
-  };
-  const startObjectDrag = (e: RPE, id: string) => {
-    e.stopPropagation();
-    if (editingId === id) return;
-    boardRef.current?.setPointerCapture(e.pointerId);
-    movedRef.current = false;
-    const o = objects.find(x => x.id === id)!;
-    interRef.current = { type: "object", id, sx: e.clientX, sy: e.clientY, ox: o.x, oy: o.y };
+  const startDrag = (e: RPE, id: string) => {
+    e.stopPropagation(); setSelId(id);
+    boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
+    dragStartRef.current = clone(board);
+    const node = board.objects.find(o => o.id === id) ?? board.stickies.find(s => s.id === id)!;
+    interRef.current = { type: "drag", id, sx: e.clientX, sy: e.clientY, ox: node.x, oy: node.y };
   };
   const startResize = (e: RPE, id: string) => {
     e.stopPropagation();
     boardRef.current?.setPointerCapture(e.pointerId);
-    const o = objects.find(x => x.id === id);
-    if (!o || o.type !== "box") return;
+    dragStartRef.current = clone(board);
+    const o = board.objects.find(x => x.id === id); if (!o) return;
     interRef.current = { type: "resize", id, sx: e.clientX, sy: e.clientY, ow: o.w, oh: o.h };
   };
 
@@ -200,37 +214,35 @@ export function CanvasBoard({
     const it = interRef.current; if (!it) return;
     const dx = e.clientX - it.sx, dy = e.clientY - it.sy;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
-    if (it.type === "pan") {
-      setVp(v => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
-    } else if (it.type === "card") {
-      setPositions(p => ({ ...p, [it.id]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
-    } else if (it.type === "sticky") {
-      setStickies(p => p.map(s => s.id === it.id ? { ...s, x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } : s));
-    } else if (it.type === "object") {
-      setObjects(p => p.map(o => o.id === it.id ? { ...o, x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } : o));
+    if (it.type === "pan") setVp(v => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
+    else if (it.type === "card") setBoard(b => ({ ...b, positions: { ...b.positions, [it.id]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } } }));
+    else if (it.type === "drag") {
+      const nx = it.ox + dx / vp.scale, ny = it.oy + dy / vp.scale;
+      setBoard(b => ({ ...b, objects: b.objects.map(o => o.id === it.id ? { ...o, x: nx, y: ny } : o), stickies: b.stickies.map(s => s.id === it.id ? { ...s, x: nx, y: ny } : s) }));
     } else if (it.type === "resize") {
-      const nw = Math.max(120, it.ow + dx / vp.scale), nh = Math.max(80, it.oh + dy / vp.scale);
-      setObjects(p => p.map(o => o.id === it.id && o.type === "box" ? { ...o, w: nw, h: nh } : o));
+      const nw = Math.max(120, it.ow + dx / vp.scale), nh = Math.max(60, it.oh + dy / vp.scale);
+      setBoard(b => ({ ...b, objects: b.objects.map(o => o.id === it.id ? { ...o, w: nw, h: nh } : o) }));
     }
   };
-
   const onBoardPointerUp = (e: RPE) => {
     const it = interRef.current; interRef.current = null;
     try { boardRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (!it) return;
     if (it.type === "card") {
       if (!movedRef.current) { onCardClick(it.id); return; }
+      if (dragStartRef.current) pushPast(dragStartRef.current);
       const centerX = posOf(it.id).x + CARD_W / 2;
       const zi = zoneIndexAtWorldX(centerX);
       const task = tasks.find(t => t.id === it.id);
       if (zi >= 0 && task && task.status !== COLUMNS[zi]) onMove(it.id, COLUMNS[zi]);
-    } else if (it.type === "object" && !movedRef.current) {
-      setEditingId(it.id);   // คลิก (ไม่ลาก) = แก้ข้อความ
+    } else if ((it.type === "drag" || it.type === "resize") && movedRef.current && dragStartRef.current) {
+      pushPast(dragStartRef.current);
     }
+    dragStartRef.current = null;
   };
 
-  const deleteSticky = (id: string) => { setStickies(p => p.filter(s => s.id !== id)); if (editingId === id) setEditingId(null); };
-  const deleteObject = (id: string) => { setObjects(p => p.filter(o => o.id !== id)); if (editingId === id) setEditingId(null); };
+  // ---- format bar position ----
+  const barPos = sel ? { left: clamp(vp.x + sel.x * vp.scale, 4, 9999), top: Math.max(4, vp.y + sel.y * vp.scale - 46) } : null;
 
   return (
     <div ref={wrapRef} className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "relative"}>
@@ -238,34 +250,32 @@ export function CanvasBoard({
       <div className={`${isMax ? "" : "absolute top-3 left-3"} z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit`}>
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
         <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
-        <span className="w-px h-6 bg-slate-200 mx-0.5" />
-        <ToolBtn active={tool === "box"} onClick={() => setTool("box")} title="กล่อง — คลิกบนกระดานเพื่อวาง">▭</ToolBtn>
-        <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title="ข้อความ — คลิกบนกระดานเพื่อวาง">𝐓</ToolBtn>
-        <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title="โน้ตกาว — คลิกบนกระดานเพื่อวาง">🟨</ToolBtn>
-        <span className="w-px h-6 bg-slate-200 mx-0.5" />
+        <Sep />
+        <ToolBtn active={tool === "box"} onClick={() => setTool("box")} title="กล่อง">▭</ToolBtn>
+        <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title="ข้อความ">𝐓</ToolBtn>
+        <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title="โน้ตกาว">🟨</ToolBtn>
+        <Sep />
+        <ToolBtn onClick={undo} title="ย้อนกลับ (Ctrl+Z)" disabled={!past.length}>↶</ToolBtn>
+        <ToolBtn onClick={redo} title="ทำซ้ำ (Ctrl+Y)" disabled={!future.length}>↷</ToolBtn>
+        <Sep />
         <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title="ซูมออก">➖</ToolBtn>
         <span className="text-xs text-slate-500 tabular-nums w-10 text-center">{Math.round(vp.scale * 100)}%</span>
         <ToolBtn onClick={() => zoomBtn(1.2)} title="ซูมเข้า">➕</ToolBtn>
-        <span className="w-px h-6 bg-slate-200 mx-0.5" />
+        <Sep />
         <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
-        <ToolBtn onClick={resetLayout} title="จัดเรียงการ์ดใหม่อัตโนมัติ">↺</ToolBtn>
+        <ToolBtn onClick={resetLayout} title="จัดเรียงการ์ดใหม่">↺</ToolBtn>
         <ToolBtn onClick={toggleFs} title={isMax ? "ย่อกลับ (Esc)" : "ขยายเต็มหน้าต่าง"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
       </div>
       {!isMax && (
         <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
-          ลากพื้นหลัง = เลื่อน · ล้อเมาส์ = ซูม · ลากการ์ดข้ามโซน = เปลี่ยนสถานะ · คลิกกล่อง/ข้อความ = แก้
+          คลิกกล่อง/ข้อความ = เลือก+จัดรูปแบบ · ดับเบิลคลิก = พิมพ์ · Del = ลบ · Ctrl+Z = ย้อน
         </div>
       )}
 
-      {/* Canvas (พื้นขาว) */}
-      <div
-        ref={boardRef}
-        onPointerDown={onBoardPointerDown}
-        onPointerMove={onBoardPointerMove}
-        onPointerUp={onBoardPointerUp}
+      {/* Canvas */}
+      <div ref={boardRef} onPointerDown={onBoardPointerDown} onPointerMove={onBoardPointerMove} onPointerUp={onBoardPointerUp}
         className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isMax ? "flex-1 mt-2" : "h-[calc(100vh-260px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-default" : "cursor-crosshair"}`}
-        style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}
-      >
+        style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
         <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
           {/* Zones */}
           {COLUMNS.map((status, i) => {
@@ -282,90 +292,140 @@ export function CanvasBoard({
             );
           })}
 
-          {/* Box / Text objects */}
-          {objects.map(o => {
-            const editing = editingId === o.id;
+          {/* Objects (box/text) */}
+          {board.objects.map(o => {
+            const selected = selId === o.id;
+            const common = `absolute group ${selected ? "ring-2 ring-violet-400" : ""}`;
             if (o.type === "box") {
               return (
-                <div key={o.id} className="absolute group rounded-lg border-2 border-slate-300 shadow-sm" style={{ left: o.x, top: o.y, width: o.w, height: o.h, background: o.color }}
-                  onPointerDown={e => startObjectDrag(e, o.id)}>
-                  <button onPointerDown={e => e.stopPropagation()} onClick={() => deleteObject(o.id)}
-                    className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-500 text-xs hidden group-hover:flex items-center justify-center shadow">✕</button>
-                  {editing ? (
-                    <textarea autoFocus value={o.text}
-                      onPointerDown={e => e.stopPropagation()} onBlur={() => setEditingId(null)}
-                      onChange={e => setObjects(p => p.map(x => x.id === o.id ? { ...x, text: e.target.value } : x))}
-                      placeholder="พิมพ์ข้อความ..."
-                      className="w-full h-full bg-transparent resize-none p-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 cursor-text" />
+                <div key={o.id} className={`${common} rounded-lg border-2 shadow-sm`} style={{ left: o.x, top: o.y, width: o.w, height: o.h, background: o.fill, borderColor: o.border }}
+                  onPointerDown={e => startDrag(e, o.id)} onDoubleClick={() => setSelId(o.id)}>
+                  {selected ? (
+                    <textarea autoFocus value={o.text} onPointerDown={e => e.stopPropagation()}
+                      onFocus={() => { editStartRef.current = clone(board); }}
+                      onBlur={() => { if (editStartRef.current) { pushPast(editStartRef.current); editStartRef.current = null; } }}
+                      onChange={e => setBoard(b => ({ ...b, objects: b.objects.map(x => x.id === o.id ? { ...x, text: e.target.value } : x) }))}
+                      placeholder="พิมพ์ข้อความ..." style={styleOf(o)}
+                      className="w-full h-full bg-transparent resize-none p-2 outline-none placeholder:text-slate-400 cursor-text" />
                   ) : (
-                    <div className="w-full h-full p-2 text-sm text-slate-700 whitespace-pre-wrap overflow-hidden cursor-grab active:cursor-grabbing">
-                      {o.text || <span className="text-slate-300">กล่อง (คลิกเพื่อพิมพ์)</span>}
+                    <div className="w-full h-full p-2 whitespace-pre-wrap overflow-hidden cursor-grab active:cursor-grabbing" style={styleOf(o)}>
+                      {o.text || <span className="text-slate-300">กล่อง</span>}
                     </div>
                   )}
-                  <div onPointerDown={e => startResize(e, o.id)}
-                    className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize opacity-0 group-hover:opacity-100"
-                    style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />
+                  {selected && <div onPointerDown={e => startResize(e, o.id)} className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />}
                 </div>
               );
             }
-            // text
             return (
-              <div key={o.id} className="absolute group" style={{ left: o.x, top: o.y, width: o.w }}
-                onPointerDown={e => startObjectDrag(e, o.id)}>
-                <button onPointerDown={e => e.stopPropagation()} onClick={() => deleteObject(o.id)}
-                  className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-500 text-xs hidden group-hover:flex items-center justify-center shadow z-10">✕</button>
-                {editing ? (
-                  <textarea autoFocus value={o.text} rows={2}
-                    onPointerDown={e => e.stopPropagation()} onBlur={() => setEditingId(null)}
-                    onChange={e => setObjects(p => p.map(x => x.id === o.id ? { ...x, text: e.target.value } : x))}
-                    placeholder="พิมพ์ข้อความ..."
-                    className="w-full bg-white/70 rounded resize-none p-1 text-base font-medium text-slate-800 outline-none ring-1 ring-violet-300 placeholder:text-slate-400 cursor-text" />
+              <div key={o.id} className={common} style={{ left: o.x, top: o.y, width: o.w, height: o.h }}
+                onPointerDown={e => startDrag(e, o.id)} onDoubleClick={() => setSelId(o.id)}>
+                {selected ? (
+                  <textarea autoFocus value={o.text} onPointerDown={e => e.stopPropagation()}
+                    onFocus={() => { editStartRef.current = clone(board); }}
+                    onBlur={() => { if (editStartRef.current) { pushPast(editStartRef.current); editStartRef.current = null; } }}
+                    onChange={e => setBoard(b => ({ ...b, objects: b.objects.map(x => x.id === o.id ? { ...x, text: e.target.value } : x) }))}
+                    placeholder="พิมพ์ข้อความ..." style={{ ...styleOf(o), background: o.highlight }}
+                    className="w-full h-full resize-none p-1 rounded outline-none placeholder:text-slate-400 cursor-text" />
                 ) : (
-                  <div className="w-full p-1 text-base font-medium text-slate-800 whitespace-pre-wrap cursor-grab active:cursor-grabbing rounded group-hover:bg-slate-50">
+                  <div className="w-full h-full p-1 rounded whitespace-pre-wrap cursor-grab active:cursor-grabbing" style={{ ...styleOf(o), background: o.highlight }}>
                     {o.text || <span className="text-slate-300">ข้อความ</span>}
                   </div>
                 )}
+                {selected && <div onPointerDown={e => startResize(e, o.id)} className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />}
               </div>
             );
           })}
 
           {/* Sticky notes */}
-          {stickies.map(s => (
-            <div key={s.id} className="absolute rounded-lg shadow-md group" style={{ left: s.x, top: s.y, width: 180, minHeight: 120, background: s.color }}
-              onPointerDown={e => startStickyDrag(e, s.id)}>
-              <div className="flex justify-between items-center px-2 pt-1 cursor-grab active:cursor-grabbing">
-                <span className="text-[10px] text-slate-500">โน้ต</span>
-                <button onPointerDown={e => e.stopPropagation()} onClick={() => deleteSticky(s.id)} className="text-slate-400 hover:text-red-500 text-xs leading-none">✕</button>
+          {board.stickies.map(s => {
+            const selected = selId === s.id;
+            return (
+              <div key={s.id} className={`absolute rounded-lg shadow-md ${selected ? "ring-2 ring-violet-400" : ""}`} style={{ left: s.x, top: s.y, width: 180, minHeight: 120, background: s.color }}
+                onPointerDown={e => startDrag(e, s.id)}>
+                <div className="flex justify-between items-center px-2 pt-1 cursor-grab active:cursor-grabbing">
+                  <span className="text-[10px] text-slate-500">โน้ต</span>
+                </div>
+                <textarea value={s.text} onPointerDown={e => e.stopPropagation()}
+                  onFocus={() => { setSelId(s.id); editStartRef.current = clone(board); }}
+                  onBlur={() => { if (editStartRef.current) { pushPast(editStartRef.current); editStartRef.current = null; } }}
+                  onChange={e => setBoard(b => ({ ...b, stickies: b.stickies.map(x => x.id === s.id ? { ...x, text: e.target.value } : x) }))}
+                  placeholder="พิมพ์โน้ต..." style={{ fontSize: s.fontSize }}
+                  className="w-full bg-transparent resize-none px-2 pb-2 text-slate-700 outline-none placeholder:text-slate-400 cursor-text" rows={4} />
               </div>
-              <textarea value={s.text}
-                onPointerDown={e => e.stopPropagation()}
-                onChange={e => setStickies(p => p.map(x => x.id === s.id ? { ...x, text: e.target.value } : x))}
-                placeholder="พิมพ์โน้ต..."
-                className="w-full bg-transparent resize-none px-2 pb-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 cursor-text" rows={4} />
-            </div>
-          ))}
+            );
+          })}
 
           {/* Task cards */}
           {tasks.map(t => {
             const p = posOf(t.id);
-            return (
-              <div key={t.id} className="absolute" style={{ left: p.x, top: p.y, width: CARD_W }} onPointerDown={e => startCardDrag(e, t.id)}>
-                <CanvasCard task={t} />
-              </div>
-            );
+            return <div key={t.id} className="absolute" style={{ left: p.x, top: p.y, width: CARD_W }} onPointerDown={e => startCardDrag(e, t.id)}><CanvasCard task={t} /></div>;
           })}
         </div>
+
+        {/* Format bar (ลอยเหนือวัตถุที่เลือก) */}
+        {sel && barPos && (
+          <div className="absolute z-30 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-lg p-1 flex-wrap" style={{ left: barPos.left, top: barPos.top, maxWidth: 420 }} onPointerDown={e => e.stopPropagation()}>
+            {selKind === "sticky" && sel && "color" in sel && (
+              <SwatchRow colors={STICKY_COLORS} value={(sel as Sticky).color} onPick={c => patchSticky(sel.id, { color: c })} />
+            )}
+            {(selKind === "box" || selKind === "text") && sel && "fontSize" in sel && (() => {
+              const o = sel as BoardObject;
+              const fi = FONT_SIZES.indexOf(o.fontSize);
+              const setSize = (d: number) => patchObject(o.id, { fontSize: FONT_SIZES[clamp((fi < 0 ? 2 : fi) + d, 0, FONT_SIZES.length - 1)] });
+              return (
+                <>
+                  <FmtBtn onClick={() => setSize(-1)} title="เล็กลง">A−</FmtBtn>
+                  <span className="text-xs text-slate-500 w-6 text-center tabular-nums">{o.fontSize}</span>
+                  <FmtBtn onClick={() => setSize(1)} title="ใหญ่ขึ้น">A+</FmtBtn>
+                  <Sep />
+                  <FmtBtn active={o.bold} onClick={() => patchObject(o.id, { bold: !o.bold })} title="ตัวหนา"><b>B</b></FmtBtn>
+                  <FmtBtn active={o.italic} onClick={() => patchObject(o.id, { italic: !o.italic })} title="ตัวเอียง"><i>I</i></FmtBtn>
+                  <FmtBtn active={o.underline} onClick={() => patchObject(o.id, { underline: !o.underline })} title="ขีดเส้นใต้"><u>U</u></FmtBtn>
+                  <Sep />
+                  <FmtBtn active={o.align === "left"} onClick={() => patchObject(o.id, { align: "left" })} title="ชิดซ้าย">⬅</FmtBtn>
+                  <FmtBtn active={o.align === "center"} onClick={() => patchObject(o.id, { align: "center" })} title="กึ่งกลาง">⬌</FmtBtn>
+                  <FmtBtn active={o.align === "right"} onClick={() => patchObject(o.id, { align: "right" })} title="ชิดขวา">➡</FmtBtn>
+                  <Sep />
+                  <span className="text-[10px] text-slate-400 px-0.5">สี</span>
+                  <SwatchRow colors={TEXT_COLORS} value={o.color} onPick={c => patchObject(o.id, { color: c })} />
+                  <span className="text-[10px] text-slate-400 px-0.5">{o.type === "box" ? "พื้น" : "ไฮไลต์"}</span>
+                  <SwatchRow colors={FILL_COLORS} value={o.type === "box" ? o.fill : o.highlight}
+                    onPick={c => patchObject(o.id, o.type === "box" ? { fill: c } : { highlight: c })} />
+                </>
+              );
+            })()}
+            <Sep />
+            <FmtBtn onClick={duplicateSelected} title="คัดลอก (Ctrl+D)">⧉</FmtBtn>
+            {(selKind === "box" || selKind === "text") && <>
+              <FmtBtn onClick={bringFront} title="ขึ้นหน้าสุด">⬆</FmtBtn>
+              <FmtBtn onClick={sendBack} title="ลงหลังสุด">⬇</FmtBtn>
+            </>}
+            <FmtBtn onClick={deleteSelected} title="ลบ (Del)" danger>🗑</FmtBtn>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function ToolBtn({ active, onClick, title, children }: { active?: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+function Sep() { return <span className="w-px h-6 bg-slate-200 mx-0.5" />; }
+function ToolBtn({ active, onClick, title, disabled, children }: { active?: boolean; onClick: () => void; title: string; disabled?: boolean; children: React.ReactNode }) {
+  return <button onClick={onClick} title={title} disabled={disabled}
+    className={`h-8 min-w-8 px-1.5 flex items-center justify-center rounded-md text-sm transition-colors disabled:opacity-30 ${active ? "bg-violet-100 ring-1 ring-violet-300" : "hover:bg-slate-100"}`}>{children}</button>;
+}
+function FmtBtn({ active, onClick, title, danger, children }: { active?: boolean; onClick: () => void; title: string; danger?: boolean; children: React.ReactNode }) {
+  return <button onClick={onClick} title={title}
+    className={`h-7 min-w-7 px-1.5 flex items-center justify-center rounded text-sm transition-colors ${danger ? "text-red-500 hover:bg-red-50" : active ? "bg-violet-100 ring-1 ring-violet-300" : "hover:bg-slate-100"}`}>{children}</button>;
+}
+function SwatchRow({ colors, value, onPick }: { colors: string[]; value: string; onPick: (c: string) => void }) {
   return (
-    <button onClick={onClick} title={title}
-      className={`h-8 min-w-8 px-1.5 flex items-center justify-center rounded-md text-sm transition-colors ${active ? "bg-violet-100 ring-1 ring-violet-300" : "hover:bg-slate-100"}`}>
-      {children}
-    </button>
+    <div className="flex items-center gap-0.5">
+      {colors.map(c => (
+        <button key={c} onClick={() => onPick(c)} title={c}
+          className={`h-5 w-5 rounded border ${value === c ? "ring-2 ring-violet-400 border-white" : "border-slate-200"}`}
+          style={c === "transparent" ? { backgroundImage: "linear-gradient(45deg,#e2e8f0 25%,transparent 25%,transparent 75%,#e2e8f0 75%)", backgroundSize: "8px 8px" } : { background: c }} />
+      ))}
+    </div>
   );
 }
 
@@ -390,8 +450,7 @@ function CanvasCard({ task }: { task: Task }) {
         <span className="text-slate-500 line-clamp-1">👤 {task.assignee_name}</span>
       </div>
       <div className="flex items-center justify-between gap-2 mt-1.5 text-[11px] text-slate-400">
-        <span>{(task.subtasks.length > 0 || task.checklist.length > 0)
-          ? `☑️ ${doneSub}/${task.subtasks.length} · ✓ ${doneChk}/${task.checklist.length}` : ""}</span>
+        <span>{(task.subtasks.length > 0 || task.checklist.length > 0) ? `☑️ ${doneSub}/${task.subtasks.length} · ✓ ${doneChk}/${task.checklist.length}` : ""}</span>
         {task.due_date && <span className={overdue ? "text-red-600 font-semibold" : ""}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>}
       </div>
     </div>
