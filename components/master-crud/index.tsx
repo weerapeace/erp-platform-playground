@@ -881,6 +881,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // one2many/many2many = ลิสต์ความสัมพันธ์ → ไม่เหมาะเป็นคอลัมน์ตาราง (ดูเต็มในหน้า detail)
     const tableFields = effectiveFields
       .filter(f => f.type !== "one2many" && f.type !== "many2many")
+      // กัน column id ซ้ำ: ถ้ามีคอลัมน์ "สถานะ" (activeField) เติมท้ายอยู่แล้ว → ไม่เอา field activeField จาก registry มาเป็นคอลัมน์ซ้ำ
+      .filter(f => config.hideActiveStatus ? true : f.key !== activeField)
       .filter(f => showAll ? true : f.colSize !== undefined);
     const cols: ColumnDef<Row>[] = tableFields.map(f => ({
       id: f.key, accessorKey: f.key, header: f.label, size: f.colSize ?? f.width ?? 150,
