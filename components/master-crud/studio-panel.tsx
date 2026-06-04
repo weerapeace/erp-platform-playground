@@ -216,6 +216,7 @@ export function StudioPanel({
     setDirty(true);
   };
   const [previewIdx, setPreviewIdx] = useState(0);
+  const [previewFull, setPreviewFull] = useState(false);   // 3a: ขยาย preview ให้กว้าง/เต็ม
   const [items, setItems] = useState<StudioField[]>(() =>
     [...fields].sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
   );
@@ -444,7 +445,7 @@ export function StudioPanel({
       {tab !== "registry" && (
       <div className="flex-1 overflow-hidden flex">
         {/* ---- LEFT: editor ---- */}
-        <div className="w-1/2 overflow-y-auto border-r border-slate-200 p-5">
+        <div className={`${previewFull ? "hidden" : "w-2/5"} overflow-y-auto border-r border-slate-200 p-5`}>
           {tab === "table" ? (
             <TableEditor
               items={items} sensors={sensors}
@@ -462,9 +463,13 @@ export function StudioPanel({
         </div>
 
         {/* ---- RIGHT: live preview ---- */}
-        <div className="w-1/2 overflow-y-auto bg-white p-5">
+        <div className={`${previewFull ? "w-full" : "flex-1 min-w-0"} overflow-y-auto bg-white p-5`}>
           <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-            <div className="text-xs font-semibold text-slate-400 uppercase">👁 Preview สด {tab==="form" && (pickedRow || sampleRows.length>0) ? "(ข้อมูลจริง)" : ""}</div>
+            <div className="text-xs font-semibold text-slate-400 uppercase flex items-center gap-2">
+              👁 Preview สด {tab==="form" && (pickedRow || sampleRows.length>0) ? "(ข้อมูลจริง)" : ""}
+              <button type="button" onClick={()=>setPreviewFull(v=>!v)} title={previewFull?"ย่อ (โชว์ตัวแก้ไข)":"ขยาย preview เต็มจอ"}
+                className="text-slate-400 hover:text-slate-700 normal-case">{previewFull ? "⤡ ย่อ" : "⤢ ขยาย"}</button>
+            </div>
             {tab==="form" && (
               <div className="flex items-center gap-2">
                 {/* เลือกรายการจริงมาโชว์ (pickup) */}
@@ -642,8 +647,9 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
       {/* แถว 1: ความกว้าง + required + readonly */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-slate-500">ความกว้าง:</span>
-        <Toggle on={(field.formSpan??1)!==2} label="ครึ่งแถว" onClick={()=>onPatch({formSpan:1})} />
-        <Toggle on={(field.formSpan??1)===2} label="เต็มแถว" onClick={()=>onPatch({formSpan:2})} />
+        <Toggle on={(field.formSpan??1)===1} label="1 ช่อง" onClick={()=>onPatch({formSpan:1})} />
+        <Toggle on={(field.formSpan??1)===2} label="2 ช่อง" onClick={()=>onPatch({formSpan:2})} />
+        <Toggle on={(field.formSpan??1)===3} label="3 ช่อง" onClick={()=>onPatch({formSpan:3})} />
         <span className="ml-2 text-slate-300">|</span>
         <Toggle on={!!field.required} label="บังคับกรอก" onClick={()=>onPatch({required:!field.required})} />
         <Toggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />

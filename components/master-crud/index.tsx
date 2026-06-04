@@ -127,7 +127,7 @@ function registryToFieldDef(
     // Sprint 9: เปลี่ยน is_editable=false → readonly (แสดงแต่ disable) ไม่ใช่ซ่อน
     hideInForm:  !rf.show_in_form,
     readonly:    !rf.is_editable,
-    formSpan:    (rf.form_column_span >= 2 ? 2 : 1) as 1 | 2,
+    formSpan:    (Math.min(3, Math.max(1, Number(rf.form_column_span) || 1))) as 1 | 2 | 3,
     filterable:  rf.is_filterable,
     sortable:    rf.is_sortable,
     cellRender:  effectiveCellRender,
@@ -263,8 +263,8 @@ export type FieldDef = {
   readonly?:  boolean;
   /** custom cell render ใน table (row available เพื่ออ่าน sibling fields เช่น *_label สำหรับ relation) */
   cellRender?: (value: unknown, row?: Record<string, unknown>) => React.ReactNode;
-  /** กว้างใน form drawer: 1 / 2 / 3 (default 1 = col-span-1 from 2-col grid) */
-  formSpan?:  1 | 2;
+  /** กว้างใน form drawer: 1 / 2 / 3 (default 1) */
+  formSpan?:  1 | 2 | 3;
   /** validation rule keys ที่จะรัน (เช่น ['required','email']) */
   validations?: string[];
   /** เปิด column filter ใน DataTable */
@@ -1180,7 +1180,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     };
     const highlight = !!us.highlight;
     return (
-      <label key={f.key} className={`block ${f.formSpan === 2 ? "col-span-2" : ""} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
+      <label key={f.key} className={`block ${f.formSpan === 3 ? "col-span-3" : f.formSpan === 2 ? "col-span-2" : ""} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
         <span className="text-xs font-medium text-slate-600" style={tStyle}>
           {f.label}
           {f.required && <span className="text-red-500 ml-0.5">*</span>}
@@ -1291,6 +1291,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     }
     if (f.type === "image") {
       return <ImageCell r2Key={(v as string) || null} size={160} />;
+    }
+    // textarea/หลายบรรทัด → คงการขึ้นบรรทัด (\n) ในหน้า detail
+    if (f.type === "textarea") {
+      if (v == null || v === "") return <span className="text-slate-300">—</span>;
+      return <div className="text-sm text-slate-700 whitespace-pre-wrap break-words" style={vs}>{String(v)}</div>;
     }
     if (f.type === "many2many") {
       return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={false} />;
@@ -2064,9 +2069,11 @@ function DetailSections({
       {fs.map((f) => {
         const css = fieldStyleCss(f.uiStyle);
         const hl = !!(f.uiStyle ?? {}).highlight;
-        const wide = (f.type === "textarea" || f.type === "image") && cols > 1;
+        // ความกว้าง field ตามที่ตั้ง (1/2/3) — textarea/image กินเต็มถ้าไม่ได้ตั้ง span
+        const span = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type === "textarea" || f.type === "image") && cols > 1 ? 2 : 1);
+        const spanCls = span >= 3 ? "col-span-3" : span === 2 ? "col-span-2" : "";
         return (
-          <div key={f.key} className={`${wide ? "col-span-2" : ""} ${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
+          <div key={f.key} className={`${spanCls} ${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
             <dt className="text-[11px] text-slate-400 mb-0.5" style={css}>{f.label}</dt>
             <dd style={css}>{renderValue(f)}</dd>
           </div>

@@ -18,6 +18,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useBackdropDismiss } from "@/components/modal";
+import { FieldCreatorModal } from "@/components/field-creator";
 import { apiFetch } from "@/lib/api";
 import type { SchemaSyncResponse, RegistryField } from "@/app/api/admin/schema-sync/route";
 import {
@@ -93,6 +94,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
   const [toast,     setToast]     = useState<string | null>(null);
   const [filter,    setFilter]    = useState("");
   const [groupFilter, setGroupFilter] = useState("");
+  const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);   // เพิ่ม field จากหน้านี้
 
   // Sprint 11
   const [selected,    setSelected]    = useState<Set<string>>(new Set());
@@ -307,13 +309,21 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                   อ่าน fields จริงจาก Supabase + admin tick visible/filterable/sortable/required • ✋ลากเรียงลำดับ • ☑ เลือกหลายเพื่อแก้พร้อมกัน
                 </p>
               </div>
-              <button
-                onClick={sync}
-                disabled={syncing}
-                className="h-10 px-5 text-sm font-semibold text-white bg-gradient-to-r from-orange-500 to-amber-500 rounded-lg hover:from-orange-600 hover:to-amber-600 disabled:opacity-50 shadow-sm"
-              >
-                {syncing ? "กำลัง sync..." : "🔄 Sync from Supabase"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setFieldCreatorOpen(true)}
+                  className="h-10 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50"
+                >
+                  ➕ เพิ่ม field
+                </button>
+                <button
+                  onClick={sync}
+                  disabled={syncing}
+                  className="h-10 px-5 text-sm font-semibold text-white bg-gradient-to-r from-orange-500 to-amber-500 rounded-lg hover:from-orange-600 hover:to-amber-600 disabled:opacity-50 shadow-sm"
+                >
+                  {syncing ? "กำลัง sync..." : "🔄 Sync from Supabase"}
+                </button>
+              </div>
             </div>
 
             {/* controls */}
@@ -544,6 +554,16 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
               await updateField(conditionEditing.id, { condition_rules: rules });
               setConditionEditing(null);
             }}
+          />
+        )}
+
+        {/* เพิ่ม field ใหม่ (column จริงใน Supabase) จากหน้านี้ */}
+        {fieldCreatorOpen && (
+          <FieldCreatorModal
+            moduleKey={moduleKey}
+            moduleTitle={modules.find((m) => m.key === moduleKey)?.label ?? moduleKey}
+            onClose={() => setFieldCreatorOpen(false)}
+            onCreated={() => { setFieldCreatorOpen(false); load(); }}
           />
         )}
       </div>
