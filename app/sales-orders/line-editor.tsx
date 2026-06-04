@@ -77,7 +77,7 @@ export function SOLineEditor({
             <th className="text-right px-2 py-1.5 w-24">ราคา/หน่วย</th>
             <th className="text-right px-2 py-1.5 w-20">ส่วนลด</th>
             <th className="text-left px-2 py-1.5 w-20">ภาษี</th>
-            <th className="text-right px-2 py-1.5 w-24">รวม</th>
+            <th className="text-right px-2 py-1.5 w-24">รวม<span className="font-normal text-[10px] text-slate-400"> (ก่อนภาษี)</span></th>
             <th className="w-8" />
           </tr>
         </thead>

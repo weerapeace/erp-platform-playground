@@ -5,8 +5,9 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { AttachmentPanel } from "@/components/attachment-panel";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
-import { CustomerPicker, WarehousePicker } from "@/components/pickers";
-import type { CustomerPickerValue, WarehousePickerValue } from "@/components/pickers";
+import { CustomerPicker, WarehousePicker, EmployeePicker } from "@/components/pickers";
+import type { CustomerPickerValue, WarehousePickerValue, EmployeePickerValue } from "@/components/pickers";
+import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
@@ -446,21 +447,27 @@ export default function SalesOrdersPage() {
                 <WarehousePicker value={form.warehouse} onChange={(v) => setForm({ ...form, warehouse: v })} />
               </div>
             </div>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">เซลส์</span>
-              <input value={form.sale_person_name} onChange={e => setForm({ ...form, sale_person_name: e.target.value })}
-                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded" />
-            </label>
-            <label className="block">
+            <div>
+              <span className="text-xs font-medium text-slate-600">เซลส์ <span className="text-slate-400">(พนักงาน — ไม่บังคับ)</span></span>
+              <div className="mt-0.5">
+                <EmployeePicker
+                  value={form.sale_person_name ? { id: "", code: null, name: form.sale_person_name } as EmployeePickerValue : null}
+                  onChange={(v: EmployeePickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
+                />
+              </div>
+            </div>
+            <div>
               <span className="text-xs font-medium text-slate-600">วันที่สั่ง</span>
-              <input type="date" value={form.order_date} onChange={e => setForm({ ...form, order_date: e.target.value })}
-                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded" />
-            </label>
-            <label className="block">
+              <div className="mt-0.5">
+                <DateInput value={form.order_date} onChange={(iso) => setForm({ ...form, order_date: iso })} />
+              </div>
+            </div>
+            <div>
               <span className="text-xs font-medium text-slate-600">วันที่ส่งคาด</span>
-              <input type="date" value={form.expected_ship_date} onChange={e => setForm({ ...form, expected_ship_date: e.target.value })}
-                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded" />
-            </label>
+              <div className="mt-0.5">
+                <DateInput value={form.expected_ship_date} onChange={(iso) => setForm({ ...form, expected_ship_date: iso })} />
+              </div>
+            </div>
           </div>
 
           <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} />
