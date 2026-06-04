@@ -196,6 +196,7 @@ export type MenuRow = {
   show_in_sidebar: boolean; show_in_launcher: boolean;
   permission_key: string | null; is_active: boolean;
   app_keys?: string[];   // โมดูลใหญ่ (App) ที่เมนูนี้สังกัด — many-to-many
+  module_key?: string | null;   // โมดูลที่เมนูนี้ผูก (สำหรับหมวด ⚙ ตั้งค่า) — ตั้งที่ /admin/menu
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
@@ -391,7 +392,8 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       if (!r.is_active || !r.show_in_sidebar) continue;
       if (!(r.app_keys ?? []).includes(activeApp)) continue;
       if (r.permission_key && !can(r.permission_key as Parameters<typeof can>[0])) continue;
-      const mk = resolveKey(r.href);
+      // ใช้ module_key ที่ตั้งไว้ใน /admin/menu ก่อน (แม่นยำ) — ไม่งั้น fallback เดาจาก href
+      const mk = (r.module_key && labelOf.has(r.module_key)) ? r.module_key : resolveKey(r.href);
       if (!mk || seen.has(mk)) continue;
       seen.add(mk);
       out.push({ href: `/admin/module/${mk}`, icon: "⚙", labelTH: labelOf.get(mk) ?? r.label });
@@ -590,6 +592,13 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                     </Link>
                   );
                 })}
+                <Link href="/admin/modules"
+                  className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
+                    pathname === "/admin/modules" ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+                  }`}>
+                  <span className="text-base leading-none">📋</span>
+                  <span className="flex-1 leading-tight truncate">ดูโมดูลทั้งหมด</span>
+                </Link>
               </div>
             </div>
           )}

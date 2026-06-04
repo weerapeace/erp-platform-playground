@@ -15,6 +15,7 @@ export default function MenuManagerPage() {
   const { user } = useAuth();
   const [rows, setRows] = useState<MenuRow[]>([]);
   const [apps, setApps] = useState<AppGroup[]>([]);
+  const [modules, setModules] = useState<{ key: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -25,13 +26,15 @@ export default function MenuManagerPage() {
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const [m, a] = await Promise.all([
+      const [m, a, mod] = await Promise.all([
         apiFetch("/api/menu?all=1").then((r) => r.json()),
         apiFetch("/api/menu/apps").then((r) => r.json()),
+        apiFetch("/api/admin/modules").then((r) => r.json()),
       ]);
       if (m.error) throw new Error(m.error);
       setRows(m.data as MenuRow[]);
       setApps(((a.data ?? []) as AppGroup[]));
+      setModules(Array.isArray(mod.data) ? (mod.data as { key: string; label: string }[]) : []);
     } catch (e) { setErr(String(e)); }
     finally { setLoading(false); }
   }, []);
@@ -204,6 +207,12 @@ export default function MenuManagerPage() {
                       <label className="flex items-center gap-1 text-xs text-slate-600" title="โชว์ใน App Launcher">
                         <input type="checkbox" checked={it.show_in_launcher} onChange={(e) => patch(it.id!, { show_in_launcher: e.target.checked })} /> Launcher
                       </label>
+                      <select value={it.module_key ?? ""} title="ผูกโมดูล (สำหรับหมวด ⚙ ตั้งค่า)"
+                        onChange={(e) => { const v = e.target.value || null; setRows((rs) => rs.map((r) => r.id === it.id ? { ...r, module_key: v } : r)); patch(it.id!, { module_key: v }); }}
+                        className="w-36 h-8 px-1 text-xs border border-slate-200 rounded bg-white">
+                        <option value="">— ไม่ใช่โมดูล —</option>
+                        {modules.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                      </select>
                       <input value={it.permission_key ?? ""} onChange={(e) => setRows((rs) => rs.map((r) => r.id === it.id ? { ...r, permission_key: e.target.value || null } : r))}
                         onBlur={(e) => patch(it.id!, { permission_key: e.target.value.trim() || null })}
                         placeholder="สิทธิ์ (ว่าง=ทุกคน)" list="perm-list"
