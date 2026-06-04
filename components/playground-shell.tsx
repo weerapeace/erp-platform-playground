@@ -346,6 +346,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
+  const [modules, setModules] = useState<{ key: string; label: string }[]>([]);
   const [activeApp, setActiveAppState] = useState<string | null>(null);
   const setActiveApp = (k: string | null) => {
     setActiveAppState(k);
@@ -367,8 +368,36 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         setActiveAppState(saved && apps.some((a) => a.key === saved) ? saved : (apps[0]?.key ?? null));
       } catch { setActiveAppState(apps[0]?.key ?? null); }
     }).catch(() => { if (alive) setAppGroups([]); });
+    // รายชื่อโมดูล (key+label) สำหรับหมวด "⚙ ตั้งค่า" — จับคู่กับเมนูของแอป
+    apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
+      if (alive && Array.isArray(j.data)) setModules(j.data as { key: string; label: string }[]);
+    }).catch(() => {});
     return () => { alive = false; };
   }, []);
+
+  // หมวด "⚙ ตั้งค่า" — โมดูลย่อยของแอปปัจจุบัน (resolve module_key จาก href ของเมนู)
+  const settingsItems = (() => {
+    if (!menuRows || !activeApp || modules.length === 0) return [] as { href: string; icon: string; labelTH: string }[];
+    const labelOf = new Map(modules.map((m) => [m.key, m.label]));
+    const resolveKey = (href: string): string | null => {
+      const seg = href.split("?")[0].replace(/\/+$/, "").split("/").pop() ?? "";
+      if (!seg) return null;
+      for (const cand of [seg, `${seg}-v2`]) if (labelOf.has(cand)) return cand;
+      return null;
+    };
+    const seen = new Set<string>();
+    const out: { href: string; icon: string; labelTH: string }[] = [];
+    for (const r of menuRows) {
+      if (!r.is_active || !r.show_in_sidebar) continue;
+      if (!(r.app_keys ?? []).includes(activeApp)) continue;
+      if (r.permission_key && !can(r.permission_key as Parameters<typeof can>[0])) continue;
+      const mk = resolveKey(r.href);
+      if (!mk || seen.has(mk)) continue;
+      seen.add(mk);
+      out.push({ href: `/admin/module/${mk}`, icon: "⚙", labelTH: labelOf.get(mk) ?? r.label });
+    }
+    return out;
+  })();
 
   // หน้าแรกของโมดูลใหญ่ (App) = เมนูย่อยตัวบนสุดของหมวดนั้น (ตามลำดับใน /admin/menu)
   const firstHrefForApp = (key: string): string | null => {
@@ -541,6 +570,29 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           ))}
+
+          {/* หมวดตั้งค่าของแอปปัจจุบัน — โชว์เฉพาะโมดูลย่อยในแอปนี้ */}
+          {settingsItems.length > 0 && (
+            <div>
+              <div className="px-2 mb-1 flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">⚙ ตั้งค่า</span>
+              </div>
+              <div className="space-y-0.5">
+                {settingsItems.map((item) => {
+                  const isActive = pathname === item.href;
+                  return (
+                    <Link key={item.href} href={item.href}
+                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors ${
+                        isActive ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                      }`}>
+                      <span className="text-base leading-none">{item.icon}</span>
+                      <span className="flex-1 leading-tight truncate">{item.labelTH}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </nav>
 
         <UserSwitcher />

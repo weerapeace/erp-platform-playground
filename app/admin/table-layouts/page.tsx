@@ -67,6 +67,13 @@ export default function AdminTableLayoutsPage() {
   }, [selected]);
 
   useEffect(() => { if (canView) load(); }, [canView, load]);
+  // deep-link: /admin/table-layouts?table=<tableId> → เปิดตรงตารางนั้น (จากหน้า "ตั้งค่าโมดูล")
+  useEffect(() => {
+    if (!layouts.length) return;
+    const t = new URLSearchParams(window.location.search).get("table");
+    if (t && layouts.some(l => l.table_id === t)) setSelected(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layouts.length]);
   useEffect(() => {
     const item = layouts.find(l => l.table_id === selected);
     setDraft(item ? { ...item, columns: [...item.columns] } : null);

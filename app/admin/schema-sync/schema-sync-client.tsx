@@ -73,8 +73,12 @@ function groupMeta(key: string) {
   return GROUP_META[key] ?? { icon: "📁", label: key, order: 99 };
 }
 
-export function SchemaSyncClient() {
-  const [moduleKey, setModuleKey] = useState("parent-skus-v2");
+export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
+  initialModule?: string;   // เปิดมาที่โมดูลนี้เลย (deep-link)
+  lockModule?: boolean;     // ซ่อน dropdown เลือกโมดูล (ใช้ตอนฝังในหน้าตั้งค่าของโมดูล)
+  embedded?: boolean;       // ฝังในหน้าอื่น → ไม่ครอบ PlaygroundShell ซ้ำ
+} = {}) {
+  const [moduleKey, setModuleKey] = useState(initialModule ?? "parent-skus-v2");
   // โหลดรายชื่อโมดูลทั้งหมดจากทะเบียน (ไม่ hardcode) — fallback ถ้าโหลดไม่ได้
   const [modules, setModules] = useState<{ key: string; label: string }[]>(FALLBACK_MODULES);
   useEffect(() => {
@@ -290,8 +294,7 @@ export function SchemaSyncClient() {
     });
   };
 
-  return (
-    <PlaygroundShell>
+  const inner = (
       <div className="min-h-screen bg-slate-50">
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
           <div className="max-w-[1600px] mx-auto px-6 py-4">
@@ -315,14 +318,16 @@ export function SchemaSyncClient() {
 
             {/* controls */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <label className="text-xs text-slate-600">Module:</label>
-              <select
-                value={moduleKey}
-                onChange={(e) => setModuleKey(e.target.value)}
-                className="h-9 px-2 text-sm border border-slate-300 rounded-md bg-white"
-              >
-                {modules.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-              </select>
+              {!lockModule && <>
+                <label className="text-xs text-slate-600">Module:</label>
+                <select
+                  value={moduleKey}
+                  onChange={(e) => setModuleKey(e.target.value)}
+                  className="h-9 px-2 text-sm border border-slate-300 rounded-md bg-white"
+                >
+                  {modules.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                </select>
+              </>}
 
               <input
                 value={filter}
@@ -542,8 +547,8 @@ export function SchemaSyncClient() {
           />
         )}
       </div>
-    </PlaygroundShell>
   );
+  return embedded ? inner : <PlaygroundShell>{inner}</PlaygroundShell>;
 }
 
 // ============================================================
