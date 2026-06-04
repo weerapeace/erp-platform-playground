@@ -17,6 +17,7 @@ import type { EmployeePickerValue, ProductPickerValue } from "@/components/picke
 import { ActivityFeed, type ActivityEntry } from "@/components/activity-feed";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
+import { CanvasBoard } from "./canvas-board";
 import {
   MOCK_TASKS, MOCK_ME, STATUS_META, PRIORITY_META, TASK_TRANSITIONS,
   isOverdue, withinThisWeek,
@@ -144,7 +145,7 @@ const EMPTY_FORM: FormState = {
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
-  const [boardView, setBoardView] = useState<"table" | "kanban">("table");
+  const [boardView, setBoardView] = useState<"table" | "kanban" | "canvas">("table");
 
   // create modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -269,13 +270,14 @@ export default function TasksPage() {
           </div>
         </div>
 
-        {/* View toggle: ตาราง / Kanban */}
+        {/* View toggle: ตาราง / Kanban / Canvas */}
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
           <ViewToggleBtn active={boardView === "table"} onClick={() => setBoardView("table")} icon="📋" label="ตาราง" />
           <ViewToggleBtn active={boardView === "kanban"} onClick={() => setBoardView("kanban")} icon="🟦" label="Kanban" />
+          <ViewToggleBtn active={boardView === "canvas"} onClick={() => setBoardView("canvas")} icon="🟪" label="Canvas" />
         </div>
 
-        {boardView === "table" ? (
+        {boardView === "table" && (
           /* Table (ของกลาง) */
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
             <DataTable<Task>
@@ -297,7 +299,9 @@ export default function TasksPage() {
               onRowClick={(row) => setDetailId(row.id)}
             />
           </div>
-        ) : (
+        )}
+
+        {boardView === "kanban" && (
           /* Kanban board — ลากการ์ดข้ามคอลัมน์ = เปลี่ยนสถานะ */
           <div>
             <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด</p>
@@ -307,6 +311,15 @@ export default function TasksPage() {
               onMove={(taskId, to) => doTransition(taskId, to, "ลากบนกระดาน")}
             />
           </div>
+        )}
+
+        {boardView === "canvas" && (
+          /* Canvas board (แบบ Miro) — ลากการ์ดอิสระ + โซน + sticky note */
+          <CanvasBoard
+            tasks={tasks}
+            onCardClick={(id) => setDetailId(id)}
+            onMove={(taskId, to) => doTransition(taskId, to, "ลากบน Canvas")}
+          />
         )}
       </div>
 
