@@ -1,10 +1,11 @@
 "use client";
 
 // ============================================================
-// Task Manager — Canvas Board (แบบ Miro) · ขั้น A mock
-// ผืนผ้าใบไม่มีขอบ: pan/zoom, โซนตามสถานะ, ลากการ์ดอิสระ,
-// ปล่อยการ์ดในโซน = เปลี่ยนสถานะ, sticky note, จำ layout (localStorage)
-// ขั้น B: ตำแหน่ง/sticky จะเก็บลง Supabase ต่อ record + workflow กลาง
+// Task Manager — Canvas / Whiteboard (แบบ Miro) · ขั้น A mock
+// รอบ 1: พื้นขาว, fullscreen, โซนตามสถานะ, ลากการ์ดอิสระ (ปล่อยในโซน=เปลี่ยนสถานะ),
+//        sticky note, สร้างกล่อง (box), เพิ่ม text, จำ layout (localStorage)
+// รอบ 2 (ถัดไป): ลูกศรเชื่อมกล่องแบบเกาะวัตถุ + paste รูปขึ้น R2
+// ขั้น B: ตำแหน่ง/กล่อง/โน้ตจะย้ายไปเก็บใน Supabase ต่อ record + workflow กลาง
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
@@ -16,11 +17,16 @@ import {
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
 type Sticky = { id: string; x: number; y: number; text: string; color: string };
-type Tool = "select" | "pan" | "sticky";
+type BoardObject =
+  | { id: string; type: "box"; x: number; y: number; w: number; h: number; text: string; color: string }
+  | { id: string; type: "text"; x: number; y: number; w: number; text: string };
+type Tool = "select" | "pan" | "sticky" | "box" | "text";
 type Interaction =
   | { type: "pan"; sx: number; sy: number; ox: number; oy: number }
   | { type: "card"; id: string; sx: number; sy: number; ox: number; oy: number }
   | { type: "sticky"; id: string; sx: number; sy: number; ox: number; oy: number }
+  | { type: "object"; id: string; sx: number; sy: number; ox: number; oy: number }
+  | { type: "resize"; id: string; sx: number; sy: number; ow: number; oh: number }
   | null;
 
 const COLUMNS: TaskStatus[] = ["new", "in_progress", "review", "done", "cancelled"];
@@ -31,14 +37,15 @@ const ZONE_GAP = 32;
 const CARD_GAP_Y = 150;
 const POS_KEY = "erp-tasks-canvas-pos:v1";
 const STICKY_KEY = "erp-tasks-canvas-stickies:v1";
+const OBJ_KEY = "erp-tasks-canvas-objects:v1";
 const STICKY_COLORS = ["#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6"];
 
 const ZONE_TONE: Record<TaskStatus, string> = {
-  new:         "border-blue-200 bg-blue-50/50",
-  in_progress: "border-indigo-200 bg-indigo-50/50",
-  review:      "border-amber-200 bg-amber-50/50",
-  done:        "border-emerald-200 bg-emerald-50/50",
-  cancelled:   "border-slate-200 bg-slate-50/60",
+  new:         "border-blue-200 bg-blue-50/40",
+  in_progress: "border-indigo-200 bg-indigo-50/40",
+  review:      "border-amber-200 bg-amber-50/40",
+  done:        "border-emerald-200 bg-emerald-50/40",
+  cancelled:   "border-slate-200 bg-slate-50/50",
 };
 
 const zoneX = (i: number) => i * (ZONE_W + ZONE_GAP);
@@ -58,24 +65,40 @@ export function CanvasBoard({
   onMove: (taskId: string, to: TaskStatus) => void;
   onCardClick: (id: string) => void;
 }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Interaction>(null);
   const movedRef = useRef(false);
   const [vp, setVp] = useState<Viewport>({ x: 40, y: 24, scale: 0.7 });
   const [positions, setPositions] = useState<Record<string, Pos>>({});
   const [stickies, setStickies] = useState<Sticky[]>([]);
+  const [objects, setObjects] = useState<BoardObject[]>([]);
   const [tool, setTool] = useState<Tool>("select");
-  const [editingSticky, setEditingSticky] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);   // sticky / object ที่กำลังแก้
+  const [isFs, setIsFs] = useState(false);
 
   // ---- load/save layout ----
   useEffect(() => {
     try {
       const p = localStorage.getItem(POS_KEY); if (p) setPositions(JSON.parse(p));
       const s = localStorage.getItem(STICKY_KEY); if (s) setStickies(JSON.parse(s));
+      const o = localStorage.getItem(OBJ_KEY); if (o) setObjects(JSON.parse(o));
     } catch { /* ignore */ }
   }, []);
   useEffect(() => { try { localStorage.setItem(POS_KEY, JSON.stringify(positions)); } catch { /* ignore */ } }, [positions]);
   useEffect(() => { try { localStorage.setItem(STICKY_KEY, JSON.stringify(stickies)); } catch { /* ignore */ } }, [stickies]);
+  useEffect(() => { try { localStorage.setItem(OBJ_KEY, JSON.stringify(objects)); } catch { /* ignore */ } }, [objects]);
+
+  // ---- fullscreen ----
+  useEffect(() => {
+    const h = () => setIsFs(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", h);
+    return () => document.removeEventListener("fullscreenchange", h);
+  }, []);
+  const toggleFs = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else wrapRef.current?.requestFullscreen().catch(() => {});
+  };
 
   // ---- auto layout (เมื่อยังไม่เคยลาก) ----
   const autoPos = useMemo(() => {
@@ -87,7 +110,6 @@ export function CanvasBoard({
     });
     return map;
   }, [tasks]);
-
   const posOf = (id: string): Pos => positions[id] ?? autoPos[id] ?? { x: 40, y: 90 };
 
   // ---- wheel zoom (anchor ที่เคอร์เซอร์) ----
@@ -124,16 +146,23 @@ export function CanvasBoard({
     return { x: (clientX - rect.left - vp.x) / vp.scale, y: (clientY - rect.top - vp.y) / vp.scale };
   };
 
-  // ---- pointer handlers (จับที่ board, ใช้ pointer capture) ----
+  // ---- pointer handlers (จับที่ board ใช้ pointer capture) ----
   const onBoardPointerDown = (e: RPE) => {
-    // คลิกพื้นหลัง
+    const w = screenToWorld(e.clientX, e.clientY);
     if (tool === "sticky") {
-      const w = screenToWorld(e.clientX, e.clientY);
       const id = `st-${Date.now()}`;
-      setStickies(p => [...p, { id, x: w.x - 80, y: w.y - 60, text: "", color: STICKY_COLORS[p.length % STICKY_COLORS.length] }]);
-      setEditingSticky(id);
-      setTool("select");
-      return;
+      setStickies(p => [...p, { id, x: w.x - 90, y: w.y - 60, text: "", color: STICKY_COLORS[p.length % STICKY_COLORS.length] }]);
+      setEditingId(id); setTool("select"); return;
+    }
+    if (tool === "box") {
+      const id = `bx-${Date.now()}`;
+      setObjects(p => [...p, { id, type: "box", x: w.x - 110, y: w.y - 70, w: 220, h: 140, text: "", color: "#ffffff" }]);
+      setEditingId(id); setTool("select"); return;
+    }
+    if (tool === "text") {
+      const id = `tx-${Date.now()}`;
+      setObjects(p => [...p, { id, type: "text", x: w.x - 80, y: w.y - 12, w: 200, text: "" }]);
+      setEditingId(id); setTool("select"); return;
     }
     boardRef.current?.setPointerCapture(e.pointerId);
     interRef.current = { type: "pan", sx: e.clientX, sy: e.clientY, ox: vp.x, oy: vp.y };
@@ -146,14 +175,27 @@ export function CanvasBoard({
     const p = posOf(id);
     interRef.current = { type: "card", id, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
   };
-
   const startStickyDrag = (e: RPE, id: string) => {
     e.stopPropagation();
-    if (editingSticky === id) return;
     boardRef.current?.setPointerCapture(e.pointerId);
     movedRef.current = false;
     const s = stickies.find(x => x.id === id)!;
     interRef.current = { type: "sticky", id, sx: e.clientX, sy: e.clientY, ox: s.x, oy: s.y };
+  };
+  const startObjectDrag = (e: RPE, id: string) => {
+    e.stopPropagation();
+    if (editingId === id) return;
+    boardRef.current?.setPointerCapture(e.pointerId);
+    movedRef.current = false;
+    const o = objects.find(x => x.id === id)!;
+    interRef.current = { type: "object", id, sx: e.clientX, sy: e.clientY, ox: o.x, oy: o.y };
+  };
+  const startResize = (e: RPE, id: string) => {
+    e.stopPropagation();
+    boardRef.current?.setPointerCapture(e.pointerId);
+    const o = objects.find(x => x.id === id);
+    if (!o || o.type !== "box") return;
+    interRef.current = { type: "resize", id, sx: e.clientX, sy: e.clientY, ow: o.w, oh: o.h };
   };
 
   const onBoardPointerMove = (e: RPE) => {
@@ -163,11 +205,14 @@ export function CanvasBoard({
     if (it.type === "pan") {
       setVp(v => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
     } else if (it.type === "card") {
-      const nx = it.ox + dx / vp.scale, ny = it.oy + dy / vp.scale;
-      setPositions(p => ({ ...p, [it.id]: { x: nx, y: ny } }));
+      setPositions(p => ({ ...p, [it.id]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
     } else if (it.type === "sticky") {
-      const nx = it.ox + dx / vp.scale, ny = it.oy + dy / vp.scale;
-      setStickies(p => p.map(s => s.id === it.id ? { ...s, x: nx, y: ny } : s));
+      setStickies(p => p.map(s => s.id === it.id ? { ...s, x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } : s));
+    } else if (it.type === "object") {
+      setObjects(p => p.map(o => o.id === it.id ? { ...o, x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } : o));
+    } else if (it.type === "resize") {
+      const nw = Math.max(120, it.ow + dx / vp.scale), nh = Math.max(80, it.oh + dy / vp.scale);
+      setObjects(p => p.map(o => o.id === it.id && o.type === "box" ? { ...o, w: nw, h: nh } : o));
     }
   };
 
@@ -176,23 +221,28 @@ export function CanvasBoard({
     try { boardRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (!it) return;
     if (it.type === "card") {
-      if (!movedRef.current) { onCardClick(it.id); return; }   // คลิก (ไม่ลาก) = เปิดรายละเอียด
-      const p = posOf(it.id);
-      const centerX = p.x + CARD_W / 2;
+      if (!movedRef.current) { onCardClick(it.id); return; }
+      const centerX = posOf(it.id).x + CARD_W / 2;
       const zi = zoneIndexAtWorldX(centerX);
       const task = tasks.find(t => t.id === it.id);
       if (zi >= 0 && task && task.status !== COLUMNS[zi]) onMove(it.id, COLUMNS[zi]);
+    } else if (it.type === "object" && !movedRef.current) {
+      setEditingId(it.id);   // คลิก (ไม่ลาก) = แก้ข้อความ
     }
   };
 
-  const deleteSticky = (id: string) => { setStickies(p => p.filter(s => s.id !== id)); if (editingSticky === id) setEditingSticky(null); };
+  const deleteSticky = (id: string) => { setStickies(p => p.filter(s => s.id !== id)); if (editingId === id) setEditingId(null); };
+  const deleteObject = (id: string) => { setObjects(p => p.filter(o => o.id !== id)); if (editingId === id) setEditingId(null); };
 
   return (
-    <div className="relative">
+    <div ref={wrapRef} className={isFs ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "relative"}>
       {/* Toolbar */}
-      <div className="absolute top-3 left-3 z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1">
+      <div className={`${isFs ? "" : "absolute top-3 left-3"} z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit`}>
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
         <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
+        <span className="w-px h-6 bg-slate-200 mx-0.5" />
+        <ToolBtn active={tool === "box"} onClick={() => setTool("box")} title="กล่อง — คลิกบนกระดานเพื่อวาง">▭</ToolBtn>
+        <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title="ข้อความ — คลิกบนกระดานเพื่อวาง">𝐓</ToolBtn>
         <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title="โน้ตกาว — คลิกบนกระดานเพื่อวาง">🟨</ToolBtn>
         <span className="w-px h-6 bg-slate-200 mx-0.5" />
         <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title="ซูมออก">➖</ToolBtn>
@@ -201,19 +251,22 @@ export function CanvasBoard({
         <span className="w-px h-6 bg-slate-200 mx-0.5" />
         <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
         <ToolBtn onClick={resetLayout} title="จัดเรียงการ์ดใหม่อัตโนมัติ">↺</ToolBtn>
+        <ToolBtn onClick={toggleFs} title={isFs ? "ออกจากเต็มจอ" : "เต็มจอ"}>{isFs ? "🗗" : "⛶"}</ToolBtn>
       </div>
-      <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
-        ลากพื้นหลัง = เลื่อน · ล้อเมาส์ = ซูม · ลากการ์ดข้ามโซน = เปลี่ยนสถานะ
-      </div>
+      {!isFs && (
+        <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
+          ลากพื้นหลัง = เลื่อน · ล้อเมาส์ = ซูม · ลากการ์ดข้ามโซน = เปลี่ยนสถานะ · คลิกกล่อง/ข้อความ = แก้
+        </div>
+      )}
 
-      {/* Canvas */}
+      {/* Canvas (พื้นขาว) */}
       <div
         ref={boardRef}
         onPointerDown={onBoardPointerDown}
         onPointerMove={onBoardPointerMove}
         onPointerUp={onBoardPointerUp}
-        className={`relative overflow-hidden rounded-xl border border-slate-200 bg-slate-100 h-[calc(100vh-260px)] min-h-[520px] ${tool === "pan" ? "cursor-grab" : "cursor-default"}`}
-        style={{ backgroundImage: "radial-gradient(#cbd5e1 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}
+        className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isFs ? "flex-1 mt-2" : "h-[calc(100vh-260px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-default" : "cursor-crosshair"}`}
+        style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}
       >
         <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
           {/* Zones */}
@@ -231,24 +284,66 @@ export function CanvasBoard({
             );
           })}
 
+          {/* Box / Text objects */}
+          {objects.map(o => {
+            const editing = editingId === o.id;
+            if (o.type === "box") {
+              return (
+                <div key={o.id} className="absolute group rounded-lg border-2 border-slate-300 shadow-sm" style={{ left: o.x, top: o.y, width: o.w, height: o.h, background: o.color }}
+                  onPointerDown={e => startObjectDrag(e, o.id)}>
+                  <button onPointerDown={e => e.stopPropagation()} onClick={() => deleteObject(o.id)}
+                    className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-500 text-xs hidden group-hover:flex items-center justify-center shadow">✕</button>
+                  {editing ? (
+                    <textarea autoFocus value={o.text}
+                      onPointerDown={e => e.stopPropagation()} onBlur={() => setEditingId(null)}
+                      onChange={e => setObjects(p => p.map(x => x.id === o.id ? { ...x, text: e.target.value } : x))}
+                      placeholder="พิมพ์ข้อความ..."
+                      className="w-full h-full bg-transparent resize-none p-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 cursor-text" />
+                  ) : (
+                    <div className="w-full h-full p-2 text-sm text-slate-700 whitespace-pre-wrap overflow-hidden cursor-grab active:cursor-grabbing">
+                      {o.text || <span className="text-slate-300">กล่อง (คลิกเพื่อพิมพ์)</span>}
+                    </div>
+                  )}
+                  <div onPointerDown={e => startResize(e, o.id)}
+                    className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize opacity-0 group-hover:opacity-100"
+                    style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />
+                </div>
+              );
+            }
+            // text
+            return (
+              <div key={o.id} className="absolute group" style={{ left: o.x, top: o.y, width: o.w }}
+                onPointerDown={e => startObjectDrag(e, o.id)}>
+                <button onPointerDown={e => e.stopPropagation()} onClick={() => deleteObject(o.id)}
+                  className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-red-500 text-xs hidden group-hover:flex items-center justify-center shadow z-10">✕</button>
+                {editing ? (
+                  <textarea autoFocus value={o.text} rows={2}
+                    onPointerDown={e => e.stopPropagation()} onBlur={() => setEditingId(null)}
+                    onChange={e => setObjects(p => p.map(x => x.id === o.id ? { ...x, text: e.target.value } : x))}
+                    placeholder="พิมพ์ข้อความ..."
+                    className="w-full bg-white/70 rounded resize-none p-1 text-base font-medium text-slate-800 outline-none ring-1 ring-violet-300 placeholder:text-slate-400 cursor-text" />
+                ) : (
+                  <div className="w-full p-1 text-base font-medium text-slate-800 whitespace-pre-wrap cursor-grab active:cursor-grabbing rounded group-hover:bg-slate-50">
+                    {o.text || <span className="text-slate-300">ข้อความ</span>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
           {/* Sticky notes */}
           {stickies.map(s => (
-            <div key={s.id} className="absolute rounded-lg shadow-md" style={{ left: s.x, top: s.y, width: 180, minHeight: 120, background: s.color }}
+            <div key={s.id} className="absolute rounded-lg shadow-md group" style={{ left: s.x, top: s.y, width: 180, minHeight: 120, background: s.color }}
               onPointerDown={e => startStickyDrag(e, s.id)}>
               <div className="flex justify-between items-center px-2 pt-1 cursor-grab active:cursor-grabbing">
                 <span className="text-[10px] text-slate-500">โน้ต</span>
                 <button onPointerDown={e => e.stopPropagation()} onClick={() => deleteSticky(s.id)} className="text-slate-400 hover:text-red-500 text-xs leading-none">✕</button>
               </div>
-              <textarea
-                value={s.text}
+              <textarea value={s.text}
                 onPointerDown={e => e.stopPropagation()}
-                onFocus={() => setEditingSticky(s.id)}
-                onBlur={() => setEditingSticky(null)}
                 onChange={e => setStickies(p => p.map(x => x.id === s.id ? { ...x, text: e.target.value } : x))}
                 placeholder="พิมพ์โน้ต..."
-                className="w-full bg-transparent resize-none px-2 pb-2 text-sm text-slate-700 outline-none placeholder:text-slate-400"
-                rows={4}
-              />
+                className="w-full bg-transparent resize-none px-2 pb-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 cursor-text" rows={4} />
             </div>
           ))}
 
@@ -270,7 +365,7 @@ export function CanvasBoard({
 function ToolBtn({ active, onClick, title, children }: { active?: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
   return (
     <button onClick={onClick} title={title}
-      className={`h-8 w-8 flex items-center justify-center rounded-md text-sm transition-colors ${active ? "bg-violet-100 ring-1 ring-violet-300" : "hover:bg-slate-100"}`}>
+      className={`h-8 min-w-8 px-1.5 flex items-center justify-center rounded-md text-sm transition-colors ${active ? "bg-violet-100 ring-1 ring-violet-300" : "hover:bg-slate-100"}`}>
       {children}
     </button>
   );
