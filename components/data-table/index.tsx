@@ -489,6 +489,10 @@ export function DataTable<T extends Record<string, unknown>>({
   const [groupSort, setGroupSort] = useState<"label_asc" | "label_desc" | "count_desc" | "count_asc">("label_asc");
   const isGrouped = !!groupBy;
 
+  // ---- Freeze header: ref/ความสูงของพื้นที่ตาราง (effect คำนวณอยู่ด้านล่าง หลัง state ครบ) ----
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const [tableMaxH, setTableMaxH] = useState<number | null>(null);
+
   // ---- View mode (table / cards) ----
   const showCardToggle = !!enableCards || !!cardConfig;
   // มือถือ (จอ < 768px) + มีการ์ด → เริ่มต้นเป็น "การ์ด" อัตโนมัติ (ไม่ต้องเลื่อนตารางซ้าย-ขวา)
@@ -1040,6 +1044,21 @@ export function DataTable<T extends Record<string, unknown>>({
   const selectedRows  = table.getSelectedRowModel().rows.map(r => r.original);
   const selectedCount = selectedRows.length;
 
+  // ---- Freeze header: ให้พื้นที่ตาราง scroll ในตัว (สูงพอดีจอ) → thead sticky ค้างได้จริง ----
+  useEffect(() => {
+    const el = tableScrollRef.current;
+    if (!el) return;
+    const recalc = () => {
+      const top = el.getBoundingClientRect().top;          // ระยะจากบนจอถึงหัวตาราง
+      const h = Math.round(window.innerHeight - top - 12);  // เผื่อขอบล่างนิดหน่อย
+      setTableMaxH(h > 240 ? h : 240);
+    };
+    const raf = requestAnimationFrame(recalc);
+    window.addEventListener("resize", recalc);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", recalc); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, loading, srvLoading, srvGroupLoading, showFilterPanel, selectedCount]);
+
   // apply pendingDefaultPageSize หลัง table create
   useEffect(() => {
     if (pendingDefaultPageSize == null) return;
@@ -1560,8 +1579,8 @@ export function DataTable<T extends Record<string, unknown>>({
         </div>
       )}
 
-      {/* Table / Cards */}
-      <div className="flex-1 overflow-auto">
+      {/* Table / Cards — scroll ในตัว (สูงพอดีจอ) เพื่อให้ header (thead sticky) ค้างเวลาเลื่อน */}
+      <div ref={tableScrollRef} className="flex-1 overflow-auto" style={tableMaxH ? { maxHeight: tableMaxH } : undefined}>
         {/* เฟส 4: เตือนเมื่อจัดกลุ่มจากตัวอย่าง (ข้อมูลเกิน cap) */}
         {isGrouped && srvGroupCapped && !srvGroupLoading && (
           <div className="mb-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
