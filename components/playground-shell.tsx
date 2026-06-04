@@ -29,6 +29,7 @@ export const navGroups = [
     items: [
       { href: "/apps",      icon: "🏠", labelTH: "App Launcher" },
       { href: "/dashboard", icon: "📊", labelTH: "Dashboard" },
+      { href: "/tasks",     icon: "✅", labelTH: "จัดการงาน (Task Manager) ⭐" },
     ],
   },
   {
