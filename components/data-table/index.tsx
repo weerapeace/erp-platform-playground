@@ -605,6 +605,7 @@ export function DataTable<T extends Record<string, unknown>>({
   const [globalSearch,     setGlobalSearch]     = useState("");
   const [activeView,       setActiveView]       = useState(views[0]?.id ?? "all");
   const [showColumnMgr,    setShowColumnMgr]    = useState(false);
+  const [copiedField,      setCopiedField]      = useState<string | null>(null);  // F1: คัดลอกชื่อ field จริง
   const [exportOpen,       setExportOpen]       = useState(false);
   const [rowMenu,          setRowMenu]          = useState<{ row: T; x: number; y: number } | null>(null);
   const [mounted,          setMounted]          = useState(false);
@@ -1333,12 +1334,23 @@ export function DataTable<T extends Record<string, unknown>>({
                       <label className="flex items-center gap-2 flex-1 cursor-pointer min-w-0">
                         <input type="checkbox" checked={col.getIsVisible()}
                           onChange={col.getToggleVisibilityHandler()}
-                          className="rounded border-slate-300 text-blue-600" />
-                        <span className="text-sm text-slate-700 truncate">
-                          {typeof col.columnDef.header === "string" ? col.columnDef.header : col.id}
+                          className="rounded border-slate-300 text-blue-600 shrink-0" />
+                        <span className="flex flex-col min-w-0">
+                          <span className="text-sm text-slate-700 truncate">
+                            {typeof col.columnDef.header === "string" ? col.columnDef.header : col.id}
+                          </span>
+                          {/* ชื่อ field จริงในฐานข้อมูล (เอาไว้บอกตอนดึงข้อมูล) */}
+                          <code className="text-[10px] text-slate-400 truncate font-mono">{col.id}</code>
                         </span>
-                        {col.columnDef.meta?.filterable && <span className="text-xs text-slate-400" title="filterable">⚙</span>}
+                        {col.columnDef.meta?.filterable && <span className="text-xs text-slate-400 shrink-0" title="filterable">⚙</span>}
                       </label>
+                      {/* ปุ่มคัดลอกชื่อ field จริง */}
+                      <button
+                        onClick={() => { try { navigator.clipboard?.writeText(col.id); setCopiedField(col.id); setTimeout(() => setCopiedField(null), 1200); } catch { /* ignore */ } }}
+                        title={`คัดลอกชื่อ field: ${col.id}`}
+                        className={`text-xs shrink-0 ${copiedField === col.id ? "text-emerald-600" : "text-slate-300 hover:text-slate-600"}`}>
+                        {copiedField === col.id ? "✓" : "⧉"}
+                      </button>
                       {/* ปุ่มตรึงคอลัมน์ (pin ซ้าย) */}
                       <button
                         onClick={() => col.pin(col.getIsPinned() === "left" ? false : "left")}
@@ -1385,6 +1397,15 @@ export function DataTable<T extends Record<string, unknown>>({
             </>
           )}
         </div>
+
+        {/* F2: ปุ่มเข้าหน้าตั้งค่าฟิลด์ (Field Registry) ของโมดูลนี้ */}
+        {tableId && (
+          <a href={`/admin/module/${tableId.replace(/^master-/, "")}`}
+            title="ตั้งค่าฟิลด์ของตารางนี้ (Field Registry)"
+            className="flex items-center gap-1.5 h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-md bg-white hover:bg-slate-50 transition-colors">
+            <span>⚙</span><span className="hidden sm:inline">ตั้งค่าฟิลด์</span>
+          </a>
+        )}
 
         {/* View Switcher (Table / Cards) */}
         {showCardToggle && (

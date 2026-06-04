@@ -13,6 +13,7 @@ import { DataTable, type DataTableView, type RowAction, type BulkAction, type Bu
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { resolveRelationLabels } from "@/lib/relation";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/admin/field-registry-v2/route";
@@ -478,9 +479,24 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const ck = `${tmk}.${tf}`;
       if (relatedMapsRef.current[ck]) continue;
       try {
-        const j = await apiFetch(`${apiBase}${tmk}?limit=1000&include_inactive=true`).then((r) => r.json());
+        // limit 2000 → ครอบตารางใบแม่ทั้งหมด (เช่น parent_skus_v2 1,471 แถว)
+        const j = await apiFetch(`${apiBase}${tmk}?limit=2000&include_inactive=true`).then((r) => r.json());
         const m: Record<string, unknown> = {};
         (j.data ?? []).forEach((row: Record<string, unknown>) => { m[String(row.id)] = row[tf]; });
+        // 2-hop: ถ้า target_field เป็น FK (เช่น brand_id) → ดึงต่อเป็นชื่อ (id→ชื่อ) ผ่าน resolver กลาง
+        const resolveTable = String(rc.resolve_table ?? "");
+        const resolveLabel = String(rc.resolve_label ?? "");
+        if (resolveTable && resolveLabel) {
+          const ids = Array.from(new Set(Object.values(m).filter((v) => v != null && v !== "").map((v) => String(v))));
+          if (ids.length) {
+            const labelMap = await resolveRelationLabels(apiFetch,
+              { target_table: resolveTable, target_label_field: resolveLabel }, ids);
+            for (const k of Object.keys(m)) {
+              const id = m[k] != null ? String(m[k]) : "";
+              m[k] = (id && labelMap.get(id)?.label) || null;
+            }
+          }
+        }
         relatedMapsRef.current[ck] = m;
       } catch { /* related จะว่างไว้ */ }
     }
