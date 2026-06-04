@@ -13,20 +13,27 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const TABLE = "employees";
-const SELECT =
-  "id, employee_code, first_name, last_name, nickname, department_id, position_id, " +
-  "employment_status, start_date, resign_date, phone, email, national_id, " +
-  "payroll_register_base_salary, scanner_employee_code, line_display_name, line_user_id, " +
-  "notes, created_at, updated_at";
+// ดึงทุกคอลัมน์ (เหมือนแอปเก่า) — field ใหม่ที่เพิ่มใน DB ก็ติดมาอัตโนมัติ
+const SELECT = "*";
 
 export type EmployeeRow = Record<string, unknown> & { id: string };
 
-/** คอลัมน์ที่อนุญาตให้เขียน (กัน inject field แปลก ๆ) */
+/** คอลัมน์ที่อนุญาตให้เขียน (กัน inject field แปลก ๆ + กัน system/FK/portal columns) */
 const WRITABLE = new Set([
-  "employee_code", "first_name", "last_name", "nickname",
-  "employment_status", "start_date", "resign_date", "phone", "email",
-  "national_id", "payroll_register_base_salary", "scanner_employee_code", "notes",
+  // ตัวตน
+  "employee_code", "title", "first_name", "last_name", "nickname",
+  "first_name_th", "last_name_th", "first_name_en", "last_name_en",
+  // ส่วนตัว
+  "birth_date", "gender", "marital_status", "nationality",
+  "national_id", "passport_no", "visa_no", "work_permit_id", "work_permit_id_expire_date",
+  // ติดต่อ
+  "phone", "email", "address", "emergency_contact_name", "emergency_contact_phone",
+  // งาน/เงินเดือน
+  "employment_status", "start_date", "resign_date", "payroll_register_base_salary",
+  "scanner_employee_code", "payslip_language", "notes",
 ]);
+/** คอลัมน์วันที่ที่ต้องแปลง '' → null */
+const DATE_COLS = ["start_date", "resign_date", "birth_date", "work_permit_id_expire_date"];
 
 async function deptMap(): Promise<Record<string, string>> {
   const { data } = await supabaseAdmin().from("departments").select("id, name");
@@ -110,8 +117,8 @@ async function toColumns(body: Record<string, unknown>): Promise<Record<string, 
   if ("department_name" in body) {
     out.department_id = await nameToDeptId(String(body.department_name ?? ""));
   }
-  // ช่องว่าง → null (กัน '' ลง column ที่เป็น date/uuid)
-  for (const k of ["start_date", "resign_date"]) {
+  // ช่องว่าง → null (กัน '' ลง column ที่เป็น date)
+  for (const k of DATE_COLS) {
     if (out[k] === "") out[k] = null;
   }
   return out;

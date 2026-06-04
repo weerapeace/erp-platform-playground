@@ -96,6 +96,11 @@ const CONFIG: MasterCRUDConfig = {
     { key: "first_name",    label: "ชื่อ",         type: "text",   colSize: 130, required: true, groupKey: "core", order: 20 },
     { key: "last_name",     label: "นามสกุล",      type: "text",   colSize: 130, groupKey: "core", order: 30 },
     { key: "nickname",      label: "ชื่อเล่น",     type: "text",   colSize: 90,  groupKey: "core", order: 40 },
+    { key: "title",         label: "คำนำหน้า",     type: "select", colSize: 90, options: ["นาย", "นาง", "นางสาว", "Mr.", "Mrs.", "Ms."], groupKey: "core", order: 22 },
+    { key: "first_name_th", label: "ชื่อ (ไทย)",   type: "text", colSize: 120, groupKey: "core", order: 24 },
+    { key: "last_name_th",  label: "นามสกุล (ไทย)", type: "text", colSize: 120, groupKey: "core", order: 26 },
+    { key: "first_name_en", label: "ชื่อ (Eng)",   type: "text", colSize: 120, groupKey: "core", order: 28 },
+    { key: "last_name_en",  label: "นามสกุล (Eng)", type: "text", colSize: 120, groupKey: "core", order: 29 },
     { key: "department_name", label: "แผนก",       type: "select", colSize: 120, options: DEPARTMENT_NAMES, filterable: true, groupKey: "core", order: 50,
       helpText: "เลือกแผนก — ระบบจะผูกกับ department_id ให้อัตโนมัติ" },
     // สัญญาปัจจุบันของพนักงาน (จาก employee_contracts) — โชว์ความสัมพันธ์พนักงาน ↔ สัญญา
@@ -118,7 +123,21 @@ const CONFIG: MasterCRUDConfig = {
     { key: "national_id",   label: "เลขบัตร ปชช.", type: "text",   colSize: 130, groupKey: "pay", order: 120, helpText: "ข้อมูลอ่อนไหว" },
     { key: "line_display_name", label: "LINE", type: "text", colSize: 110, readonly: true, groupKey: "work", order: 130,
       helpText: "ชื่อ LINE ที่พนักงานผูกผ่าน portal (แก้ไม่ได้)" },
-    { key: "notes",         label: "หมายเหตุ",     type: "textarea", formSpan: 2, groupKey: "work", order: 140 },
+    { key: "resign_date",   label: "วันลาออก",     type: "text", colSize: 110, placeholder: "YYYY-MM-DD", groupKey: "work", order: 72 },
+    { key: "payslip_language", label: "ภาษาสลิป",  type: "select", colSize: 90, options: ["th", "en"], groupKey: "work", order: 135 },
+    // ข้อมูลส่วนตัว
+    { key: "birth_date",    label: "วันเกิด",      type: "text", colSize: 110, placeholder: "YYYY-MM-DD", groupKey: "ข้อมูลส่วนตัว", order: 200 },
+    { key: "gender",        label: "เพศ",          type: "text", colSize: 80,  groupKey: "ข้อมูลส่วนตัว", order: 202 },
+    { key: "marital_status", label: "สถานภาพสมรส", type: "text", colSize: 110, groupKey: "ข้อมูลส่วนตัว", order: 204 },
+    { key: "nationality",   label: "สัญชาติ",      type: "text", colSize: 90,  groupKey: "ข้อมูลส่วนตัว", order: 206 },
+    { key: "address",       label: "ที่อยู่",      type: "textarea", formSpan: 2, groupKey: "ข้อมูลส่วนตัว", order: 208 },
+    { key: "emergency_contact_name",  label: "ผู้ติดต่อฉุกเฉิน", type: "text", colSize: 140, groupKey: "ข้อมูลส่วนตัว", order: 210 },
+    { key: "emergency_contact_phone", label: "เบอร์ฉุกเฉิน",   type: "text", colSize: 120, groupKey: "ข้อมูลส่วนตัว", order: 212 },
+    // เอกสาร / ต่างชาติ
+    { key: "passport_no",   label: "เลขพาสปอร์ต",  type: "text", colSize: 120, groupKey: "เอกสาร/ต่างชาติ", order: 220 },
+    { key: "visa_no",       label: "เลขวีซ่า",     type: "text", colSize: 120, groupKey: "เอกสาร/ต่างชาติ", order: 222 },
+    { key: "work_permit_id", label: "ใบอนุญาตทำงาน", type: "text", colSize: 130, groupKey: "เอกสาร/ต่างชาติ", order: 224 },
+    { key: "work_permit_id_expire_date", label: "วันหมด Work Permit", type: "text", colSize: 130, placeholder: "YYYY-MM-DD", groupKey: "เอกสาร/ต่างชาติ", order: 226 },
     // เชื่อมความสัมพันธ์: กระโดดไปดูข้อมูลของพนักงานคนนี้ในหน้าอื่น (กรองอัตโนมัติ)
     { key: "id", label: "เชื่อมโยง", type: "text", colSize: 250, sortable: false, hideInForm: true, order: 150,
       cellRender: (v, row) => {
