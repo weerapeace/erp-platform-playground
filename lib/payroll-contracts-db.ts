@@ -60,9 +60,10 @@ function decorate(row: Record<string, unknown>, em: Record<string, string>, cm: 
   };
 }
 
-export async function listContracts(includeInactive: boolean): Promise<ContractRow[]> {
+export async function listContracts(includeInactive: boolean, employeeId?: string | null): Promise<ContractRow[]> {
   let q = supabaseAdmin().from(TABLE).select(SELECT).order("contract_no", { ascending: true });
   if (!includeInactive) q = q.eq("status", "active");
+  if (employeeId) q = q.eq("employee_id", employeeId);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   const [em, cm] = await Promise.all([empMap(), companyMap()]);

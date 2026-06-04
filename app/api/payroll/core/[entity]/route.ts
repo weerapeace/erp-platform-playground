@@ -18,7 +18,7 @@ type Ctx = { params: Promise<{ entity: string }> };
 
 const CORE: Record<string, {
   auditType: string;
-  list: (inc: boolean) => Promise<Array<Record<string, unknown>>>;
+  list: (inc: boolean, employeeId?: string | null) => Promise<Array<Record<string, unknown>>>;
   create: (b: Record<string, unknown>) => Promise<Record<string, unknown> & { id: string }>;
   validateCreate: (b: Record<string, unknown>) => string | null;
   label: (row: Record<string, unknown>) => unknown;
@@ -42,7 +42,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   if (!cfg) return NextResponse.json({ data: [], error: "entity ไม่รองรับ" }, { status: 400 });
   try {
     const includeInactive = req.nextUrl.searchParams.get("include_inactive") !== "false";
-    const rows = await cfg.list(includeInactive);
+    // รองรับกรองตามพนักงาน (จากลิงก์ ?flt={employee_id:...} ในหน้าพนักงาน)
+    let employeeId: string | null = null;
+    const raw = req.nextUrl.searchParams.get("filters");
+    if (raw) {
+      try {
+        const f = JSON.parse(raw) as Record<string, { value?: string }>;
+        const v = f.employee_id?.value;
+        if (typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v)) employeeId = v;
+      } catch { /* ignore */ }
+    }
+    const rows = await cfg.list(includeInactive, employeeId);
     return NextResponse.json({ data: rows, total: rows.length, error: null });
   } catch (e) {
     return NextResponse.json({ data: [], error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });

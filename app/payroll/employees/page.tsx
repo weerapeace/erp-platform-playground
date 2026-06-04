@@ -58,6 +58,10 @@ const CONFIG: MasterCRUDConfig = {
     { key: "nickname",      label: "ชื่อเล่น",     type: "text",   colSize: 90,  groupKey: "core", order: 40 },
     { key: "department_name", label: "แผนก",       type: "select", colSize: 120, options: DEPARTMENT_NAMES, filterable: true, groupKey: "core", order: 50,
       helpText: "เลือกแผนก — ระบบจะผูกกับ department_id ให้อัตโนมัติ" },
+    // สัญญาปัจจุบันของพนักงาน (จาก employee_contracts) — โชว์ความสัมพันธ์พนักงาน ↔ สัญญา
+    { key: "current_contract_no", label: "สัญญาปัจจุบัน", type: "text", colSize: 160, readonly: true, hideInForm: true, groupKey: "contract", order: 54,
+      cellRender: (v) => v ? <span className="font-mono text-xs">{String(v)}</span> : <span className="text-slate-300">— ไม่มีสัญญา —</span> },
+    { key: "current_contract_salary", label: "เงินเดือน(สัญญา)", type: "number", colSize: 120, readonly: true, hideInForm: true, groupKey: "contract", order: 55, cellRender: fmtBaht },
     { key: "employment_status", label: "สถานะ",    type: "select", colSize: 110, options: EMPLOYMENT_STATUS, filterable: true, groupKey: "core", order: 60,
       cellRender: (v) => {
         const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
@@ -78,7 +82,8 @@ const CONFIG: MasterCRUDConfig = {
     // เชื่อมความสัมพันธ์: กระโดดไปดูข้อมูลของพนักงานคนนี้ในหน้าอื่น (กรองอัตโนมัติ)
     { key: "id", label: "เชื่อมโยง", type: "text", colSize: 220, sortable: false, hideInForm: true, order: 150,
       cellRender: (v) => (
-        <span className="flex gap-2">
+        <span className="flex gap-2 flex-wrap">
+          {relLink("/payroll/contracts", "employee_id", v, "📄 สัญญา")}
           {relLink("/payroll/recurring", "employee_id", v, "🔁 ค่าประจำ")}
           {relLink("/payroll/review", "employee_id", v, "✅ เงินเดือน")}
           {relLink("/payroll/payslips", "employee_id", v, "🧾 สลิป")}
