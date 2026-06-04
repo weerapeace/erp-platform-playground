@@ -13,8 +13,47 @@
 
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
-import { relLink } from "@/components/payroll/cells";
+import { money, statusBadge, PAY_STATUS } from "@/components/payroll/cells";
 import { ContractPeekCell } from "@/components/payroll/contract-peek-cell";
+import { RecordPeekCell } from "@/components/payroll/record-peek-cell";
+
+// render แต่ละแถวใน drawer (ค่าประจำ / เงินเดือน / สลิป)
+const peekRecurring = (r: Record<string, unknown>) => (
+  <div className="rounded-lg border border-slate-200 p-3">
+    <div className="flex items-center justify-between gap-2">
+      <span className="font-medium text-slate-800 text-sm truncate">{String(r.item_name ?? "")}</span>
+      <span className="text-sm tabular-nums">{money(r.amount_per_period)}</span>
+    </div>
+    <div className="text-xs text-slate-400 mt-0.5">
+      {r.item_type === "earning" ? "🟢 เพิ่ม" : r.item_type === "deduction" ? "🔴 หัก" : String(r.item_type ?? "")} · {String(r.status ?? "")}
+    </div>
+  </div>
+);
+const peekLine = (r: Record<string, unknown>) => (
+  <div className="rounded-lg border border-slate-200 p-3">
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-sm text-slate-700 truncate">{String(r.period_name || "—")}</span>
+      {statusBadge(PAY_STATUS)(r.status)}
+    </div>
+    <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
+      <div><div className="text-slate-400">รายได้รวม</div>{money(r.gross_pay)}</div>
+      <div><div className="text-slate-400">หัก</div>{money(r.total_deduction)}</div>
+      <div><div className="text-slate-400">สุทธิ</div><b>{money(r.net_pay)}</b></div>
+    </div>
+  </div>
+);
+const peekSlip = (r: Record<string, unknown>) => (
+  <div className="rounded-lg border border-slate-200 p-3">
+    <div className="flex items-center justify-between gap-2">
+      <span className="font-mono text-xs">{String(r.payslip_no ?? "")}</span>
+      {statusBadge(PAY_STATUS)(r.status)}
+    </div>
+    <div className="flex items-center justify-between mt-1 text-xs text-slate-500">
+      <span className="truncate">{String(r.period_name || "")}</span>
+      <span>{money(r.net_pay)}</span>
+    </div>
+  </div>
+);
 
 // UI constants (กำหนดในหน้า — ไม่ import จาก db lib ที่มี service-role เพื่อกัน bundle รั่วเข้า client)
 const DEPARTMENT_NAMES = ["ประกอบ", "ตัด/เตรียม", "ช่างเหมา"];
@@ -81,16 +120,21 @@ const CONFIG: MasterCRUDConfig = {
       helpText: "ชื่อ LINE ที่พนักงานผูกผ่าน portal (แก้ไม่ได้)" },
     { key: "notes",         label: "หมายเหตุ",     type: "textarea", formSpan: 2, groupKey: "work", order: 140 },
     // เชื่อมความสัมพันธ์: กระโดดไปดูข้อมูลของพนักงานคนนี้ในหน้าอื่น (กรองอัตโนมัติ)
-    { key: "id", label: "เชื่อมโยง", type: "text", colSize: 230, sortable: false, hideInForm: true, order: 150,
-      cellRender: (v, row) => (
-        <span className="flex gap-2 flex-wrap items-center">
-          <ContractPeekCell employeeId={String(v)} employeeCode={String(row?.employee_code ?? "")}
-            employeeName={String(row?.full_name ?? "")} />
-          {relLink("/payroll/recurring", "employee_id", v, "🔁 ค่าประจำ")}
-          {relLink("/payroll/review", "employee_id", v, "✅ เงินเดือน")}
-          {relLink("/payroll/payslips", "employee_id", v, "🧾 สลิป")}
+    { key: "id", label: "เชื่อมโยง", type: "text", colSize: 250, sortable: false, hideInForm: true, order: 150,
+      cellRender: (v, row) => {
+        const id = String(v); const code = String(row?.employee_code ?? ""); const name = String(row?.full_name ?? "");
+        return (
+        <span className="flex gap-1.5 flex-wrap items-center">
+          <ContractPeekCell employeeId={id} employeeCode={code} employeeName={name} />
+          <RecordPeekCell label="🔁 ค่าประจำ" title="รายการประจำ" employeeId={id} employeeCode={code} employeeName={name}
+            apiPath="/api/payroll/view/recurring" empty="ไม่มีรายการประจำ" renderRow={peekRecurring} />
+          <RecordPeekCell label="✅ เงินเดือน" title="ผลคำนวณเงินเดือน" employeeId={id} employeeCode={code} employeeName={name}
+            apiPath="/api/payroll/view/payroll-lines" empty="ยังไม่มีบรรทัดเงินเดือน" renderRow={peekLine} />
+          <RecordPeekCell label="🧾 สลิป" title="สลิปเงินเดือน" employeeId={id} employeeCode={code} employeeName={name}
+            apiPath="/api/payroll/view/payslips" empty="ยังไม่มีสลิป" renderRow={peekSlip} />
         </span>
-      ) },
+        );
+      } },
   ],
 };
 
