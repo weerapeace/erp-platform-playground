@@ -22,8 +22,10 @@ type Sticky = { id: string; x: number; y: number; text: string; color: string; f
 type BoardObject =
   | ({ id: string; type: "box"; x: number; y: number; w: number; h: number; text: string; fill: string; border: string } & Style)
   | ({ id: string; type: "text"; x: number; y: number; w: number; h: number; text: string; highlight: string } & Style);
-type Board = { positions: Record<string, Pos>; stickies: Sticky[]; objects: BoardObject[] };
-type Tool = "select" | "pan" | "sticky" | "box" | "text";
+type Connector = { id: string; from: string; to: string };   // เชื่อมระหว่าง node (การ์ด/กล่อง/text/โน้ต) แบบเกาะวัตถุ
+type Board = { positions: Record<string, Pos>; stickies: Sticky[]; objects: BoardObject[]; connectors: Connector[] };
+type Rect = { x: number; y: number; w: number; h: number };
+type Tool = "select" | "pan" | "sticky" | "box" | "text" | "connect";
 type Interaction =
   | { type: "pan"; sx: number; sy: number; ox: number; oy: number }
   | { type: "card"; id: string; sx: number; sy: number; ox: number; oy: number }
@@ -32,7 +34,7 @@ type Interaction =
   | null;
 
 const COLUMNS: TaskStatus[] = ["new", "in_progress", "review", "done", "cancelled"];
-const CARD_W = 280;
+const CARD_W = 280, CARD_H = 150;
 const ZONE_W = 340, ZONE_H = 1240, ZONE_GAP = 32, CARD_GAP_Y = 150;
 const BOARD_KEY = "erp-tasks-canvas:v2";
 const STICKY_COLORS = ["#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#fed7aa", "#e0e7ff"];
@@ -59,6 +61,16 @@ function zoneIndexAtWorldX(wx: number): number {
   for (let i = 0; i < COLUMNS.length; i++) if (wx >= zoneX(i) && wx <= zoneX(i) + ZONE_W) return i;
   return -1;
 }
+// จุดบนขอบสี่เหลี่ยม r ในทิศไปยัง (tx,ty) — ใช้ให้ลูกศรแตะขอบกล่อง ไม่ใช่กลาง
+function edgePoint(r: Rect, tx: number, ty: number): Pos {
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+  const dx = tx - cx, dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const sx = dx !== 0 ? (r.w / 2) / Math.abs(dx) : Infinity;
+  const sy = dy !== 0 ? (r.h / 2) / Math.abs(dy) : Infinity;
+  const t = Math.min(sx, sy);
+  return { x: cx + dx * t, y: cy + dy * t };
+}
 const styleOf = (o: BoardObject): React.CSSProperties => ({
   fontSize: o.fontSize, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? "italic" : "normal",
   textDecoration: o.underline ? "underline" : "none", color: o.color, textAlign: o.align,
@@ -81,7 +93,8 @@ export function CanvasBoard({
   const editStartRef = useRef<Board | null>(null);   // snapshot ก่อนเริ่มพิมพ์
 
   const [vp, setVp] = useState<Viewport>({ x: 40, y: 24, scale: 0.7 });
-  const [board, setBoard] = useState<Board>({ positions: {}, stickies: [], objects: [] });
+  const [board, setBoard] = useState<Board>({ positions: {}, stickies: [], objects: [], connectors: [] });
+  const [connectFrom, setConnectFrom] = useState<string | null>(null);   // ต้นทางลูกศรที่กำลังเลือก
   const [past, setPast] = useState<Board[]>([]);
   const [future, setFuture] = useState<Board[]>([]);
   const [tool, setTool] = useState<Tool>("select");
@@ -94,7 +107,7 @@ export function CanvasBoard({
   useEffect(() => { setPop(null); }, [selId]);
 
   // ---- load/save ----
-  useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) setBoard(JSON.parse(r)); } catch { /* ignore */ } }, []);
+  useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) { const b = JSON.parse(r); setBoard({ positions: b.positions ?? {}, stickies: b.stickies ?? [], objects: b.objects ?? [], connectors: b.connectors ?? [] }); } } catch { /* ignore */ } }, []);
   useEffect(() => { try { localStorage.setItem(BOARD_KEY, JSON.stringify(board)); } catch { /* ignore */ } }, [board]);
 
   // ---- history ----
@@ -114,8 +127,29 @@ export function CanvasBoard({
 
   const deleteSelected = () => {
     if (!selId) return;
-    commit({ ...board, objects: board.objects.filter(o => o.id !== selId), stickies: board.stickies.filter(s => s.id !== selId) });
+    commit({ ...board,
+      objects: board.objects.filter(o => o.id !== selId),
+      stickies: board.stickies.filter(s => s.id !== selId),
+      connectors: board.connectors.filter(c => c.from !== selId && c.to !== selId),   // ลบลูกศรที่ต่อกับวัตถุนี้ด้วย
+    });
     setSelId(null);
+  };
+  const removeConnector = (id: string) => commit({ ...board, connectors: board.connectors.filter(c => c.id !== id) });
+
+  // ---- connectors (ลูกศรเกาะวัตถุ) ----
+  const nodeRect = (id: string): Rect | null => {
+    const o = board.objects.find(x => x.id === id);
+    if (o) return { x: o.x, y: o.y, w: o.w, h: o.h };
+    const s = board.stickies.find(x => x.id === id);
+    if (s) return { x: s.x, y: s.y, w: 180, h: 140 };
+    const t = tasks.find(x => x.id === id);
+    if (t) { const p = posOf(id); return { x: p.x, y: p.y, w: CARD_W, h: CARD_H }; }
+    return null;
+  };
+  const handleConnectClick = (id: string) => {
+    if (!connectFrom) { setConnectFrom(id); return; }
+    if (connectFrom !== id) commit({ ...board, connectors: [...board.connectors, { id: `cn-${Date.now()}`, from: connectFrom, to: id }] });
+    setConnectFrom(null); setTool("select");
   };
   const duplicateSelected = () => {
     if (!selId) return;
@@ -181,6 +215,7 @@ export function CanvasBoard({
   // ---- pointer ----
   const onBoardPointerDown = (e: RPE) => {
     const w = screenToWorld(e.clientX, e.clientY);
+    if (tool === "connect") { setConnectFrom(null); return; }   // คลิกพื้นหลัง = ยกเลิกการเชื่อมที่ค้าง
     if (tool === "sticky") {
       const id = `st-${Date.now()}`;
       commit({ ...board, stickies: [...board.stickies, { id, x: w.x - 90, y: w.y - 60, text: "", color: STICKY_COLORS[board.stickies.length % STICKY_COLORS.length], fontSize: 14 }] });
@@ -202,14 +237,18 @@ export function CanvasBoard({
   };
 
   const startCardDrag = (e: RPE, id: string) => {
-    e.stopPropagation(); setSelId(null);
+    e.stopPropagation();
+    if (tool === "connect") { handleConnectClick(id); return; }
+    setSelId(null);
     boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
     dragStartRef.current = clone(board);
     const p = posOf(id);
     interRef.current = { type: "card", id, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
   };
   const startDrag = (e: RPE, id: string) => {
-    e.stopPropagation(); setSelId(id); setDragging(true);
+    e.stopPropagation();
+    if (tool === "connect") { handleConnectClick(id); return; }
+    setSelId(id); setDragging(true);
     boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
     dragStartRef.current = clone(board);
     const node = board.objects.find(o => o.id === id) ?? board.stickies.find(s => s.id === id)!;
@@ -276,6 +315,7 @@ export function CanvasBoard({
         <ToolBtn active={tool === "box"} onClick={() => setTool("box")} title="กล่อง">▭</ToolBtn>
         <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title="ข้อความ">𝐓</ToolBtn>
         <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title="โน้ตกาว">🟨</ToolBtn>
+        <ToolBtn active={tool === "connect"} onClick={() => { setTool(tool === "connect" ? "select" : "connect"); setConnectFrom(null); }} title="เชื่อมลูกศร (คลิกต้นทาง → ปลายทาง)">↗</ToolBtn>
         <Sep />
         <ToolBtn onClick={undo} title="ย้อนกลับ (Ctrl+Z)" disabled={!past.length}>↶</ToolBtn>
         <ToolBtn onClick={redo} title="ทำซ้ำ (Ctrl+Y)" disabled={!future.length}>↷</ToolBtn>
@@ -288,7 +328,11 @@ export function CanvasBoard({
         <ToolBtn onClick={resetLayout} title="จัดเรียงการ์ดใหม่">↺</ToolBtn>
         <ToolBtn onClick={toggleFs} title={isMax ? "ย่อกลับ (Esc)" : "ขยายเต็มหน้าต่าง"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
       </div>
-      {!isMax && (
+      {tool === "connect" ? (
+        <div className="absolute top-3 right-3 z-20 text-xs font-medium text-blue-700 bg-blue-50 rounded px-2.5 py-1.5 border border-blue-200">
+          ↗ โหมดเชื่อมลูกศร: {connectFrom ? "คลิกวัตถุปลายทาง" : "คลิกวัตถุต้นทาง"} · ชี้ที่เส้นแล้วกด ✕ เพื่อลบ
+        </div>
+      ) : !isMax && (
         <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
           ดับเบิลคลิกการ์ด = ดูรายละเอียด · คลิกกล่อง/ข้อความ = จัดรูปแบบ · Del = ลบ · Ctrl+Z = ย้อน
         </div>
@@ -314,10 +358,35 @@ export function CanvasBoard({
             );
           })}
 
+          {/* Connectors (ลูกศรเกาะวัตถุ) */}
+          <svg className="absolute top-0 left-0 pointer-events-none" width="1" height="1" style={{ overflow: "visible" }}>
+            <defs>
+              <marker id="ctm-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L7,3 L0,6 Z" fill="#64748b" />
+              </marker>
+            </defs>
+            {board.connectors.map(c => {
+              const ra = nodeRect(c.from), rb = nodeRect(c.to);
+              if (!ra || !rb) return null;
+              const ca = { x: ra.x + ra.w / 2, y: ra.y + ra.h / 2 }, cb = { x: rb.x + rb.w / 2, y: rb.y + rb.h / 2 };
+              const a = edgePoint(ra, cb.x, cb.y), b = edgePoint(rb, ca.x, ca.y);
+              const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+              return (
+                <g key={c.id} className="group">
+                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#64748b" strokeWidth={2} markerEnd="url(#ctm-arrow)" />
+                  <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={16} className="pointer-events-auto cursor-pointer" />
+                  <circle cx={mid.x} cy={mid.y} r={9} fill="white" stroke="#e2e8f0" className="opacity-0 group-hover:opacity-100 pointer-events-auto cursor-pointer"
+                    onPointerDown={e => { e.stopPropagation(); removeConnector(c.id); }} />
+                  <text x={mid.x} y={mid.y + 3.5} textAnchor="middle" fontSize="11" fill="#ef4444" className="opacity-0 group-hover:opacity-100 pointer-events-none select-none">✕</text>
+                </g>
+              );
+            })}
+          </svg>
+
           {/* Objects (box/text) */}
           {board.objects.map(o => {
             const selected = selId === o.id;
-            const common = `absolute group ${selected ? "ring-2 ring-violet-400" : ""}`;
+            const common = `absolute group ${connectFrom === o.id ? "ring-2 ring-blue-400" : selected ? "ring-2 ring-violet-400" : ""}`;
             if (o.type === "box") {
               return (
                 <div key={o.id} className={`${common} rounded-lg border-2 shadow-sm`} style={{ left: o.x, top: o.y, width: o.w, height: o.h, background: o.fill, borderColor: o.border }}
@@ -362,7 +431,7 @@ export function CanvasBoard({
           {board.stickies.map(s => {
             const selected = selId === s.id;
             return (
-              <div key={s.id} className={`absolute rounded-lg shadow-md ${selected ? "ring-2 ring-violet-400" : ""}`} style={{ left: s.x, top: s.y, width: 180, minHeight: 120, background: s.color }}
+              <div key={s.id} className={`absolute rounded-lg shadow-md ${connectFrom === s.id ? "ring-2 ring-blue-400" : selected ? "ring-2 ring-violet-400" : ""}`} style={{ left: s.x, top: s.y, width: 180, minHeight: 120, background: s.color }}
                 onPointerDown={e => startDrag(e, s.id)}>
                 <div className="flex justify-between items-center px-2 pt-1 cursor-grab active:cursor-grabbing">
                   <span className="text-[10px] text-slate-500">โน้ต</span>
@@ -380,7 +449,7 @@ export function CanvasBoard({
           {/* Task cards */}
           {tasks.map(t => {
             const p = posOf(t.id);
-            return <div key={t.id} className="absolute" style={{ left: p.x, top: p.y, width: CARD_W }} onPointerDown={e => startCardDrag(e, t.id)} onDoubleClick={() => onCardClick(t.id)}><CanvasCard task={t} /></div>;
+            return <div key={t.id} className={`absolute rounded-lg ${connectFrom === t.id ? "ring-2 ring-blue-400" : ""}`} style={{ left: p.x, top: p.y, width: CARD_W }} onPointerDown={e => startCardDrag(e, t.id)} onDoubleClick={() => onCardClick(t.id)}><CanvasCard task={t} /></div>;
           })}
         </div>
 
