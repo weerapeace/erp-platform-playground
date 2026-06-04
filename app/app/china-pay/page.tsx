@@ -97,7 +97,8 @@ const VAT_RATE = 0.07;   // ภาษี 7%
 
 const num = (v: unknown) => { const n = Number(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
 const fmt = (n: number) => n.toLocaleString("th-TH", { maximumFractionDigits: 4 });
-const today = () => new Date().toISOString().slice(0, 10);
+// วันที่ "วันนี้" อิงเวลาเครื่อง (ไทย) — ห้ามใช้ toISOString (UTC) เพราะช่วงเช้าไทยจะกลายเป็นเมื่อวาน
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
 // ค่าโอน (¥) ตามชั้นยอด
 const FEE_TABLE = [
@@ -2350,7 +2351,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const oldestPartner = oldestCtw ? partnerByName[String(oldestCtw.company_name ?? "").trim()] : undefined;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4 min-h-[calc(100dvh-9.5rem)]">
       {/* มุมขวาบน: เรทวันนี้ + ปุ่มขอเรท */}
       <div className="flex justify-end items-center gap-2">
         <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasRate ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
@@ -2472,7 +2473,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
-      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+      <div className="mt-auto sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
         <button onClick={() => setStep(2)} disabled={sel.size === 0 || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: ยืนยันการโอน →"}
@@ -2577,7 +2578,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
         {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
       </Card>
-      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
+      <div className="mt-auto sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
         <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
@@ -2652,7 +2653,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
       )}
 
-      <div className="sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+      <div className="mt-auto sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
         <button onClick={save} disabled={saving || ctwOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform shadow-lg shadow-emerald-500/30">
           {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
@@ -2846,9 +2847,10 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
             <div className="text-xs opacity-90">เลขโอน {String(t.transfer_no ?? "—")} · {String(t.date ?? "")}</div>
           </div>
           {!!t.ref_no && <Row label="เลขอ้างอิง" v={String(t.ref_no)} />}
-          <Row label="เรทที่ใช้" v={fmt(num(t.rate))} />
-          <Row label="โอนจริง" v={`฿${fmt(num(t.transferred))}`} />
-          <Row label="เข้าบัญชีจีน (ส่วนต่าง)" v={`¥${fmt(num(t.chinaInRmb))}`} />
+          {/* แถวค่าเงิน — ห้ามตัดบรรทัด (whitespace-nowrap) ค่าแสดงเต็มเสมอ */}
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้</span><span className="font-medium text-slate-800 whitespace-nowrap">{fmt(num(t.rate))}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap">฿{fmt(num(t.transferred))}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap">¥{fmt(num(t.chinaInRmb))}</span></div>
           {cn.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิลจีน ({cn.length})</div>
