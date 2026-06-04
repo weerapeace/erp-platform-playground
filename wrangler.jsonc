@@ -18,13 +18,10 @@
   "compatibility_date": "2026-05-31",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 
-  // ★★★ แก้ Error 1102 ถาวร — ทำ 2 ขั้นนี้เมื่อพร้อมจ่าย $5/เดือน ★★★
-  // 1) Cloudflare dashboard → Workers & Pages → erp-platform-playground → Settings
-  //    → Usage Model/Plan → เปลี่ยนเป็น "Standard (Paid)" ($5/mo)
-  // 2) เอา // ออกจากบรรทัด limits ข้างล่าง → commit + push (CI deploy ให้)
-  // ผล: CPU 10ms → 300000ms ต่อ request → cold-start ไม่ timeout → 1102 หายถาวร
-  // ⚠️ ถ้ายังอยู่ FREE plan แล้วเปิดบรรทัดนี้ = deploy จะ fail ('CPU limits not supported for Free plan')
-  // "limits": { "cpu_ms": 300000 },
+  // ✅ Paid plan (Standard $5/mo) เปิดใช้แล้ว — แก้ Error 1102 ถาวร
+  // CPU ต่อ request: 10ms (Free) → 300000ms (5 นาที) → cold-start ไม่ timeout อีก
+  // ⚠️ บรรทัดนี้ต้องอยู่บน Paid plan เท่านั้น (ถ้ากลับไป Free จะ deploy fail)
+  "limits": { "cpu_ms": 300000 },
 
   "assets": {
     "directory": ".open-next/assets",
