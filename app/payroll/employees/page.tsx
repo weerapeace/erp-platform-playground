@@ -14,6 +14,7 @@
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { relLink } from "@/components/payroll/cells";
+import { ContractPeekCell } from "@/components/payroll/contract-peek-cell";
 
 // UI constants (กำหนดในหน้า — ไม่ import จาก db lib ที่มี service-role เพื่อกัน bundle รั่วเข้า client)
 const DEPARTMENT_NAMES = ["ประกอบ", "ตัด/เตรียม", "ช่างเหมา"];
@@ -80,10 +81,11 @@ const CONFIG: MasterCRUDConfig = {
       helpText: "ชื่อ LINE ที่พนักงานผูกผ่าน portal (แก้ไม่ได้)" },
     { key: "notes",         label: "หมายเหตุ",     type: "textarea", formSpan: 2, groupKey: "work", order: 140 },
     // เชื่อมความสัมพันธ์: กระโดดไปดูข้อมูลของพนักงานคนนี้ในหน้าอื่น (กรองอัตโนมัติ)
-    { key: "id", label: "เชื่อมโยง", type: "text", colSize: 220, sortable: false, hideInForm: true, order: 150,
-      cellRender: (v) => (
-        <span className="flex gap-2 flex-wrap">
-          {relLink("/payroll/contracts", "employee_id", v, "📄 สัญญา")}
+    { key: "id", label: "เชื่อมโยง", type: "text", colSize: 230, sortable: false, hideInForm: true, order: 150,
+      cellRender: (v, row) => (
+        <span className="flex gap-2 flex-wrap items-center">
+          <ContractPeekCell employeeId={String(v)} employeeCode={String(row?.employee_code ?? "")}
+            employeeName={String(row?.full_name ?? "")} />
           {relLink("/payroll/recurring", "employee_id", v, "🔁 ค่าประจำ")}
           {relLink("/payroll/review", "employee_id", v, "✅ เงินเดือน")}
           {relLink("/payroll/payslips", "employee_id", v, "🧾 สลิป")}
