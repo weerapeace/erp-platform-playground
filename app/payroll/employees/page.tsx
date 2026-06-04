@@ -121,6 +121,11 @@ const CONFIG: MasterCRUDConfig = {
       helpText: "ข้อมูลอ่อนไหว — ควรจำกัดสิทธิ์การมองเห็น (Phase 4: field permission)",
       cellRender: fmtBaht },
     { key: "national_id",   label: "เลขบัตร ปชช.", type: "text",   colSize: 130, groupKey: "pay", order: 120, helpText: "ข้อมูลอ่อนไหว" },
+    // บัญชีธนาคาร (จากตาราง employee_bank_accounts — บัญชีหลัก)
+    { key: "bank_name",        label: "ธนาคาร",     type: "text", colSize: 110, readonly: true, groupKey: "ธนาคาร", order: 400 },
+    { key: "bank_account_no",  label: "เลขบัญชี",   type: "text", colSize: 150, readonly: true, groupKey: "ธนาคาร", order: 402, helpText: "ข้อมูลอ่อนไหว" },
+    { key: "bank_account_name", label: "ชื่อบัญชี",  type: "text", colSize: 160, readonly: true, groupKey: "ธนาคาร", order: 404 },
+    { key: "bank_branch",      label: "สาขา",       type: "text", colSize: 120, readonly: true, groupKey: "ธนาคาร", order: 406 },
     { key: "line_display_name", label: "LINE", type: "text", colSize: 110, readonly: true, groupKey: "work", order: 130,
       helpText: "ชื่อ LINE ที่พนักงานผูกผ่าน portal (แก้ไม่ได้)" },
     { key: "resign_date",   label: "วันลาออก",     type: "text", colSize: 110, placeholder: "YYYY-MM-DD", groupKey: "work", order: 72 },
