@@ -138,6 +138,20 @@ const CONFIG: MasterCRUDConfig = {
     { key: "visa_no",       label: "เลขวีซ่า",     type: "text", colSize: 120, groupKey: "เอกสาร/ต่างชาติ", order: 222 },
     { key: "work_permit_id", label: "ใบอนุญาตทำงาน", type: "text", colSize: 130, groupKey: "เอกสาร/ต่างชาติ", order: 224 },
     { key: "work_permit_id_expire_date", label: "วันหมด Work Permit", type: "text", colSize: 130, placeholder: "YYYY-MM-DD", groupKey: "เอกสาร/ต่างชาติ", order: 226 },
+    // ตำแหน่ง/สังกัด (FK — แสดงผล, แก้ผ่าน picker ภายหลัง)
+    { key: "supervisor_name", label: "หัวหน้า", type: "text", colSize: 160, readonly: true, groupKey: "ตำแหน่ง/สังกัด", order: 300 },
+    { key: "position_id", label: "ตำแหน่ง (id)", type: "text", colSize: 120, readonly: true, groupKey: "ตำแหน่ง/สังกัด", order: 302 },
+    { key: "cost_center_id", label: "ศูนย์ต้นทุน (id)", type: "text", colSize: 120, readonly: true, groupKey: "ตำแหน่ง/สังกัด", order: 304 },
+    // ไฟล์แนบ
+    { key: "profile_photo_key", label: "รูปโปรไฟล์ (key)", type: "text", colSize: 140, readonly: true, groupKey: "ไฟล์", order: 320 },
+    { key: "document_file_key", label: "เอกสารแนบ (key)", type: "text", colSize: 140, readonly: true, groupKey: "ไฟล์", order: 322 },
+    // LINE
+    { key: "line_user_id",   label: "LINE User ID", type: "text", colSize: 140, readonly: true, groupKey: "LINE", order: 340 },
+    { key: "line_picture_url", label: "รูป LINE", type: "text", colSize: 140, readonly: true, groupKey: "LINE", order: 342 },
+    { key: "line_linked_at", label: "ผูก LINE เมื่อ", type: "text", colSize: 150, readonly: true, groupKey: "LINE", order: 344 },
+    // ระบบ
+    { key: "created_at", label: "สร้างเมื่อ", type: "text", colSize: 150, readonly: true, hideInForm: false, groupKey: "ระบบ", order: 360 },
+    { key: "updated_at", label: "แก้ล่าสุด", type: "text", colSize: 150, readonly: true, hideInForm: false, groupKey: "ระบบ", order: 362 },
     // เชื่อมความสัมพันธ์: กระโดดไปดูข้อมูลของพนักงานคนนี้ในหน้าอื่น (กรองอัตโนมัติ)
     { key: "id", label: "เชื่อมโยง", type: "text", colSize: 250, sortable: false, hideInForm: true, order: 150,
       cellRender: (v, row) => {

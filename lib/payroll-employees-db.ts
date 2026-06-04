@@ -65,7 +65,19 @@ async function contractMap(): Promise<Record<string, ContractInfo>> {
   return m;
 }
 
-function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cmap: Record<string, ContractInfo>): EmployeeRow {
+/** map พนักงาน id → "รหัส · ชื่อ" (สำหรับ supervisor) */
+async function selfMap(): Promise<Record<string, string>> {
+  const { data } = await supabaseAdmin().from("employees").select("id, employee_code, first_name, last_name, nickname");
+  const m: Record<string, string> = {};
+  (data ?? []).forEach((e) => {
+    const r = e as { id: string; employee_code: string; first_name: string; last_name: string; nickname: string | null };
+    const nm = [r.first_name, r.last_name].filter((x) => x && x !== "-").join(" ") || r.nickname || r.employee_code;
+    m[r.id] = `${r.employee_code} · ${nm}`;
+  });
+  return m;
+}
+
+function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cmap: Record<string, ContractInfo>, smap: Record<string, string> = {}): EmployeeRow {
   const first = String(row.first_name ?? "").trim();
   const last  = String(row.last_name ?? "").trim();
   const full  = [first, last].filter((x) => x && x !== "-").join(" ") || String(row.nickname ?? "");
@@ -76,6 +88,7 @@ function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cm
     id: row.id as string,
     full_name:       full,
     department_name: deptId ? (dmap[deptId] ?? "") : "",
+    supervisor_name: row.supervisor_id ? (smap[row.supervisor_id as string] ?? "") : "",
     current_contract_no:     con?.no ?? "",
     current_contract_salary: con?.salary ?? null,
     active:          row.employment_status === "active",
@@ -87,16 +100,16 @@ export async function listEmployees(includeInactive: boolean): Promise<EmployeeR
   if (!includeInactive) q = q.eq("employment_status", "active");
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  const [dmap, cmap] = await Promise.all([deptMap(), contractMap()]);
-  return (data ?? []).map((r) => decorate(r as Record<string, unknown>, dmap, cmap));
+  const [dmap, cmap, smap] = await Promise.all([deptMap(), contractMap(), selfMap()]);
+  return (data ?? []).map((r) => decorate(r as Record<string, unknown>, dmap, cmap, smap));
 }
 
 export async function getEmployee(id: string): Promise<EmployeeRow | null> {
   const { data, error } = await supabaseAdmin().from(TABLE).select(SELECT).eq("id", id).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
-  const [dmap, cmap] = await Promise.all([deptMap(), contractMap()]);
-  return decorate(data[0] as Record<string, unknown>, dmap, cmap);
+  const [dmap, cmap, smap] = await Promise.all([deptMap(), contractMap(), selfMap()]);
+  return decorate(data[0] as Record<string, unknown>, dmap, cmap, smap);
 }
 
 /** แปลง body จาก frontend → คอลัมน์จริง (รวม mapping พิเศษ) */
