@@ -6,7 +6,7 @@
  * entity: payroll-lines | payslips | payment-batches | attendance | recurring | requests
  */
 import { NextRequest, NextResponse } from "next/server";
-import { getViewCfg, listView } from "@/lib/payroll-view-db";
+import { getViewCfg, listView, type ColFilter } from "@/lib/payroll-view-db";
 import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +25,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const offset = Math.max(parseInt(sp.get("offset") ?? "0", 10) || 0, 0);
     const sortBy = sp.get("sort_by") ?? undefined;
     const sortDir = (sp.get("sort_dir") === "asc" ? "asc" : sp.get("sort_dir") === "desc" ? "desc" : undefined) as "asc" | "desc" | undefined;
-    const { data, total } = await listView(cfg, { limit, offset, sortBy, sortDir });
+    let filters: Record<string, ColFilter> | undefined;
+    const raw = sp.get("filters");
+    if (raw) { try { filters = JSON.parse(raw) as Record<string, ColFilter>; } catch { /* ignore bad filter */ } }
+    const { data, total } = await listView(cfg, { limit, offset, sortBy, sortDir, filters });
     return NextResponse.json({ data, total, error: null });
   } catch (e) {
     return NextResponse.json({ data: [], error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });

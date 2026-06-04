@@ -12,7 +12,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-type RelKind = "employee" | "period" | "company" | "department";
+type RelKind = "employee" | "period" | "company" | "department" | "contract";
 type ViewRel = { field: string; as: string; kind: RelKind };
 
 type ViewCfg = {
@@ -64,7 +64,8 @@ export const VIEW_ENTITIES: Record<string, ViewCfg> = {
   },
   recurring: {
     table: "employee_recurring_pay_items",
-    cols: "id, employee_id, item_name, item_type, amount_per_period, duration_type, calculation_method, status, start_date, end_date",
+    // หมายเหตุ: contract_id ในข้อมูลจริงเป็น null ทั้งหมด — ค่าประจำผูกกับ "พนักงาน" ไม่ใช่ "สัญญา"
+    cols: "id, employee_id, contract_id, item_name, item_type, amount_per_period, duration_type, calculation_method, status, start_date, end_date",
     defaultSort: "created_at", defaultDir: "desc",
     sortable: ["created_at", "amount_per_period"],
     relations: [{ field: "employee_id", as: "employee_name", kind: "employee" }],
@@ -85,7 +86,7 @@ export function getViewCfg(entity: string): ViewCfg | null {
 // ---- relation label maps (โหลดครั้งเดียวต่อ request ตามที่ entity ต้องใช้) ----
 async function buildMaps(kinds: Set<RelKind>): Promise<Record<RelKind, Record<string, string>>> {
   const a = supabaseAdmin();
-  const maps: Record<RelKind, Record<string, string>> = { employee: {}, period: {}, company: {}, department: {} };
+  const maps: Record<RelKind, Record<string, string>> = { employee: {}, period: {}, company: {}, department: {}, contract: {} };
   const jobs: Promise<void>[] = [];
   if (kinds.has("employee")) jobs.push(a.from("employees").select("id, employee_code, first_name, last_name, nickname").then(({ data }) => {
     (data ?? []).forEach((e) => {
@@ -103,18 +104,46 @@ async function buildMaps(kinds: Set<RelKind>): Promise<Record<RelKind, Record<st
   if (kinds.has("department")) jobs.push(a.from("departments").select("id, name").then(({ data }) => {
     (data ?? []).forEach((d) => { maps.department[(d as { id: string }).id] = (d as { name: string }).name; });
   }));
+  if (kinds.has("contract")) jobs.push(a.from("employee_contracts").select("id, contract_no").then(({ data }) => {
+    (data ?? []).forEach((c) => { maps.contract[(c as { id: string }).id] = (c as { contract_no: string }).contract_no; });
+  }));
   await Promise.all(jobs);
   return maps;
 }
 
-export type ViewParams = { limit: number; offset: number; sortBy?: string; sortDir?: "asc" | "desc" };
+// ---- column filters (รูปแบบเดียวกับ master-v2: { col: {type,value/min/max/selected} }) ----
+export type ColFilter =
+  | { type: "text"; value: string }
+  | { type: "number"; min: string; max: string }
+  | { type: "select"; selected: string[] }
+  | { type: "boolean"; value: string };
+
+const SAFE_IDENT = /^[a-z_][a-z0-9_]*$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export type ViewParams = { limit: number; offset: number; sortBy?: string; sortDir?: "asc" | "desc"; filters?: Record<string, ColFilter> };
 
 export async function listView(cfg: ViewCfg, p: ViewParams): Promise<{ data: Record<string, unknown>[]; total: number }> {
   const sortBy = p.sortBy && cfg.sortable.includes(p.sortBy) ? p.sortBy : cfg.defaultSort;
   const sortDir = p.sortDir ?? cfg.defaultDir;
-  const { data, error, count } = await supabaseAdmin()
-    .from(cfg.table)
-    .select(cfg.cols, { count: "exact" })
+  // คอลัมน์จริงของตาราง (กันกรองด้วย computed เช่น employee_name ที่ไม่มีใน table)
+  const realCols = new Set(cfg.cols.split(",").map((c) => c.trim()));
+
+  let q = supabaseAdmin().from(cfg.table).select(cfg.cols, { count: "exact" });
+  for (const [col, f] of Object.entries(p.filters ?? {})) {
+    if (!SAFE_IDENT.test(col) || !realCols.has(col)) continue;
+    if (f.type === "text" && f.value) {
+      if (UUID_RE.test(f.value)) q = q.eq(col, f.value); else q = q.ilike(col, `%${f.value}%`);
+    } else if (f.type === "number") {
+      if (f.min !== "" && f.min != null) q = q.gte(col, Number(f.min));
+      if (f.max !== "" && f.max != null) q = q.lte(col, Number(f.max));
+    } else if (f.type === "select" && Array.isArray(f.selected) && f.selected.length > 0) {
+      q = q.in(col, f.selected);
+    } else if (f.type === "boolean" && (f.value === "true" || f.value === "false")) {
+      q = q.eq(col, f.value === "true");
+    }
+  }
+  const { data, error, count } = await q
     .order(sortBy, { ascending: sortDir === "asc" })
     .range(p.offset, p.offset + p.limit - 1);
   if (error) throw new Error(error.message);

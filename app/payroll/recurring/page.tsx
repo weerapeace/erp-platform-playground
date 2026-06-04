@@ -21,7 +21,7 @@ const CONFIG: MasterCRUDConfig = {
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: ["employee_name", "item_name"],
   fields: [
-    { key: "employee_name",    label: "พนักงาน",    type: "text", colSize: 200 },
+    { key: "employee_name",    label: "พนักงาน",    type: "text", colSize: 200, filterable: true },
     { key: "item_name",        label: "รายการ",     type: "text", colSize: 160 },
     { key: "item_type",        label: "ประเภท",     type: "text", colSize: 90, cellRender: (v) => <span className="text-sm">{ITEM_TYPE[String(v)] ?? String(v)}</span> },
     { key: "amount_per_period", label: "ยอด/งวด",   type: "number", colSize: 110, cellRender: money },

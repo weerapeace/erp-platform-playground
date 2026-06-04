@@ -7,6 +7,7 @@
 
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { relLink } from "@/components/payroll/cells";
 
 // UI constants (กำหนดในหน้า — ไม่ import จาก db lib ที่มี service-role เพื่อกัน bundle รั่วเข้า client)
 const WAGE_TYPES = ["monthly", "daily", "hourly", "piece_rate", "mixed"];
@@ -68,6 +69,14 @@ const CONFIG: MasterCRUDConfig = {
         const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
         return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
       } },
+    // เชื่อมความสัมพันธ์: เปิดดูค่าประจำ/เงินเดือนของพนักงานในสัญญานี้ (ผูกผ่าน employee_id)
+    { key: "employee_id", label: "เชื่อมโยง", type: "text", colSize: 190, sortable: false, hideInForm: true, order: 140,
+      cellRender: (_v, row) => (
+        <span className="flex gap-2">
+          {relLink("/payroll/recurring", "employee_id", row?.employee_id, "🔁 ค่าประจำ")}
+          {relLink("/payroll/review", "employee_id", row?.employee_id, "✅ เงินเดือน")}
+        </span>
+      ) },
   ],
 };
 

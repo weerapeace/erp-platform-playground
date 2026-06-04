@@ -13,6 +13,20 @@ export const money = (v: unknown): React.ReactNode => {
     : <span className="text-slate-300">—</span>;
 };
 
+/**
+ * ลิงก์ "เชื่อม" ไปหน้า view อื่นพร้อมกรองล่วงหน้า (deep-link)
+ * master-crud อ่าน ?flt=<json> → กรองตามคอลัมน์จริง (เช่น employee_id / contract_id)
+ * ใช้เชื่อมความสัมพันธ์ เช่น สัญญา → ค่าประจำของพนักงาน/สัญญานั้น
+ */
+export function relLink(href: string, col: string, id: unknown, label: string): React.ReactNode {
+  if (!id) return <span className="text-slate-300">—</span>;
+  const flt = encodeURIComponent(JSON.stringify({ [col]: { type: "text", value: String(id) } }));
+  return (
+    <a href={`${href}?flt=${flt}`} onClick={(e) => e.stopPropagation()}
+       className="text-blue-600 hover:underline text-xs whitespace-nowrap">{label}</a>
+  );
+}
+
 export function statusBadge(map: Record<string, { th: string; cls: string }>) {
   return (v: unknown): React.ReactNode => {
     const s = map[String(v)] ?? { th: String(v ?? "—"), cls: "bg-slate-100 text-slate-600" };
