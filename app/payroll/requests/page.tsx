@@ -16,7 +16,7 @@ const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/view/", apiPath: "requests", tableId: "payroll-requests",
   title: "คำขอจากพนักงาน (Payroll)", icon: "📨",
   description: "คำขอที่พนักงานส่งผ่าน LINE portal — อ่านอย่างเดียว (อนุมัติทำที่แอปเดิม)",
-  readOnly: true, pageLimit: 1000, exportEntityType: "employee_portal_request",
+  readOnly: true, hideActiveStatus: true, pageLimit: 1000, exportEntityType: "employee_portal_request",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: ["employee_name"],
   fields: [

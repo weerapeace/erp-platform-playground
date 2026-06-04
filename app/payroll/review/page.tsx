@@ -18,7 +18,7 @@ const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/view/", apiPath: "payroll-lines", tableId: "payroll-review",
   title: "ตรวจสอบเงินเดือน (Payroll)", icon: "✅",
   description: "ผลคำนวณเงินเดือน 2,644 รายการ — อ่านอย่างเดียว (การคำนวณยังทำที่แอปเดิม)",
-  readOnly: true, serverMode: true, exportEntityType: "payroll_line",
+  readOnly: true, hideActiveStatus: true, serverMode: true, exportEntityType: "payroll_line",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: [],
   fields: [

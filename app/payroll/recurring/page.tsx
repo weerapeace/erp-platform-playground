@@ -18,7 +18,7 @@ const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/view/", apiPath: "recurring", tableId: "payroll-recurring",
   title: "เงินประจำ (Payroll)", icon: "🔁",
   description: "รายการเงินเพิ่ม/หักประจำ 17 รายการ — อ่านอย่างเดียว",
-  readOnly: true, pageLimit: 1000, exportEntityType: "recurring_pay_item",
+  readOnly: true, hideActiveStatus: true, pageLimit: 1000, exportEntityType: "recurring_pay_item",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: ["employee_name", "contract_no", "item_name"],
   fields: [

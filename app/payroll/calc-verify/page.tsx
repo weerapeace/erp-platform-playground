@@ -64,7 +64,7 @@ const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/", apiPath: "calc-verify", tableId: "payroll-calc-verify",
   title: "เทียบยอดเครื่องคำนวณ", icon: "🧮",
   description: "เทียบสูตรใหม่ vs แอปเก่า (อ่านอย่างเดียว)",
-  readOnly: true, pageLimit: 5000, uniqueKey: "id",
+  readOnly: true, hideActiveStatus: true, pageLimit: 5000, uniqueKey: "id",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   searchKeys: ["employee_name", "period_name"],
   defaultShowAllColumns: true,

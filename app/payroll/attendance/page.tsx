@@ -16,7 +16,7 @@ const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/view/", apiPath: "attendance", tableId: "payroll-attendance",
   title: "เวลาเข้าออก (Payroll)", icon: "⏰",
   description: "บันทึกเวลาเข้าออก 242 รายการ — อ่านอย่างเดียว",
-  readOnly: true, pageLimit: 1000, exportEntityType: "attendance_entry",
+  readOnly: true, hideActiveStatus: true, pageLimit: 1000, exportEntityType: "attendance_entry",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: ["employee_name", "period_name"],
   fields: [

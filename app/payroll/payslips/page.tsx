@@ -14,7 +14,7 @@ const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/view/", apiPath: "payslips", tableId: "payroll-payslips",
   title: "สลิปเงินเดือน (Payroll)", icon: "🧾",
   description: "สลิปที่ออกแล้ว 133 ใบ — อ่านอย่างเดียว",
-  readOnly: true, pageLimit: 1000, exportEntityType: "payroll_payslip",
+  readOnly: true, hideActiveStatus: true, pageLimit: 1000, exportEntityType: "payroll_payslip",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: ["payslip_no", "employee_name", "period_name"],
   fields: [

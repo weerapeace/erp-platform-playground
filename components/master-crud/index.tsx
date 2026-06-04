@@ -333,6 +333,9 @@ export type MasterCRUDConfig = {
   apiBase?: string;
   /** field ที่เป็น soft-delete (default 'active' for RPC, 'is_active' for v2) */
   activeField?: string;
+  /** ซ่อนคอลัมน์ "สถานะ เปิด/ปิดใช้งาน" + แท็บ เปิดอยู่/ปิดอยู่ — ใช้กับตารางผลลัพธ์ที่ไม่มีฟิลด์ active
+   *  (เช่น payroll_lines/payslips ที่มีแต่ status เอกสาร ไม่มี active boolean) */
+  hideActiveStatus?: boolean;
   /** จำนวน row ที่ดึงตอนโหลด (client mode, default 200) */
   pageLimit?: number;
   /**
@@ -903,20 +906,23 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           },
     }));
     // active column สุดท้ายเสมอ (รองรับทั้ง 'active' และ 'is_active')
-    cols.push({
-      id: activeField, accessorKey: activeField, header: "สถานะ", size: 90,
-      cell: ({ getValue }) => {
-        const a = getValue() as boolean;
-        return a ? (
-          <span className="inline-flex items-center gap-1.5 text-xs"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>เปิด</span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300"/>ปิดอยู่</span>
-        );
-      },
-    });
+    // ข้ามถ้า hideActiveStatus — ตารางผลลัพธ์ที่ไม่มีฟิลด์ active จะได้ไม่ขึ้น "ปิดอยู่" ทุกแถว
+    if (!config.hideActiveStatus) {
+      cols.push({
+        id: activeField, accessorKey: activeField, header: "สถานะ", size: 90,
+        cell: ({ getValue }) => {
+          const a = getValue() as boolean;
+          return a ? (
+            <span className="inline-flex items-center gap-1.5 text-xs"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>เปิด</span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300"/>ปิดอยู่</span>
+          );
+        },
+      });
+    }
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveFields, activeField]);
+  }, [effectiveFields, activeField, config.hideActiveStatus]);
 
   // F30: ตัวเลือก field สำหรับปุ่ม "เลือก field กรอง"
   // จำกัดเฉพาะ field ที่เป็น column ในตาราง (colSize) — เพราะการ์ดกรองสร้างจาก column ที่โชว์
@@ -943,13 +949,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // ---- Views ----
   // ⚠️ DataTableView field คือ "filter" (ไม่ใช่ "predicate")
-  const views: DataTableView[] = useMemo(() => [
-    { id: "active",   label: "เปิดอยู่",  filter: (r) => r[activeField] === true,
-      serverFilter: { [activeField]: { type: "boolean", value: "true" } } },
-    { id: "all",      label: "ทั้งหมด",   filter: () => true },
-    { id: "inactive", label: "ปิดอยู่",   filter: (r) => r[activeField] === false,
-      serverFilter: { [activeField]: { type: "boolean", value: "false" } } },
-  ], [activeField]);
+  const views: DataTableView[] = useMemo(() => (
+    config.hideActiveStatus
+      ? [{ id: "all", label: "ทั้งหมด", filter: () => true }]   // ไม่มีฟิลด์ active → แท็บเดียวพอ
+      : [
+          { id: "active",   label: "เปิดอยู่",  filter: (r) => r[activeField] === true,
+            serverFilter: { [activeField]: { type: "boolean", value: "true" } } },
+          { id: "all",      label: "ทั้งหมด",   filter: () => true },
+          { id: "inactive", label: "ปิดอยู่",   filter: (r) => r[activeField] === false,
+            serverFilter: { [activeField]: { type: "boolean", value: "false" } } },
+        ]
+  ), [activeField, config.hideActiveStatus]);
 
   // ---- Row actions ----
   const rowActions: RowAction<Row>[] = useMemo(() => {

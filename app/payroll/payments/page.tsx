@@ -16,7 +16,7 @@ const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/view/", apiPath: "payment-batches", tableId: "payroll-payments",
   title: "รอบจ่ายเงิน (Payroll)", icon: "🏦",
   description: "รอบจ่ายเงิน 6 รอบ — อ่านอย่างเดียว",
-  readOnly: true, pageLimit: 1000, exportEntityType: "payment_batch",
+  readOnly: true, hideActiveStatus: true, pageLimit: 1000, exportEntityType: "payment_batch",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: ["batch_no", "period_name"],
   fields: [
