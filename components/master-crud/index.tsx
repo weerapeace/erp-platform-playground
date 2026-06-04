@@ -1569,12 +1569,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 {/* core fields (Code/Name) — โชว์ตลอด ไม่อยู่ใน tab */}
                 <div className="space-y-3 pt-3 border-t border-slate-100">
                   {drawerMode === "view"
-                    ? coreFields.map((f) => (
-                        <div key={f.key}>
-                          <div className="text-[11px] text-slate-400 mb-0.5">{f.label}</div>
-                          <div>{renderDetailValue(f)}</div>
-                        </div>
-                      ))
+                    ? coreFields.map((f) => {
+                        // ใส่สไตล์ (uiStyle) ที่ตั้งไว้ ให้ detail ตรงกับฟอร์ม
+                        const css = fieldStyleCss(f.uiStyle);
+                        const hl = !!(f.uiStyle ?? {}).highlight;
+                        return (
+                          <div key={f.key} className={hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}>
+                            <div className="text-[11px] text-slate-400 mb-0.5" style={css}>{f.label}</div>
+                            <div style={css}>{renderDetailValue(f)}</div>
+                          </div>
+                        );
+                      })
                     : coreFields.map((f) => <div key={f.key}>{renderField(f)}</div>)}
                 </div>
               </div>
