@@ -17,7 +17,7 @@ import {
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
 type Align = "left" | "center" | "right";
-type Style = { fontSize: number; bold: boolean; italic: boolean; underline: boolean; color: string; align: Align };
+type Style = { fontSize: number; bold: boolean; italic: boolean; underline: boolean; color: string; align: Align; fontFamily: string };
 type Sticky = { id: string; x: number; y: number; text: string; color: string; fontSize: number };
 type BoardObject =
   | ({ id: string; type: "box"; x: number; y: number; w: number; h: number; text: string; fill: string; border: string } & Style)
@@ -39,7 +39,13 @@ const STICKY_COLORS = ["#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#
 const TEXT_COLORS = ["#1e293b", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#2563eb", "#7c3aed", "#db2777", "#ffffff"];
 const FILL_COLORS = ["transparent", "#ffffff", "#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#1e293b"];
 const FONT_SIZES = [12, 14, 16, 20, 24, 32, 44];
-const DEF_STYLE: Style = { fontSize: 16, bold: false, italic: false, underline: false, color: "#1e293b", align: "left" };
+const FONTS: { label: string; value: string }[] = [
+  { label: "ค่าเริ่มต้น", value: "" },
+  { label: "ไม่มีหัว (Sans)", value: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
+  { label: "มีเชิง (Serif)", value: "Georgia, 'Times New Roman', serif" },
+  { label: "พิมพ์ดีด (Mono)", value: "'Courier New', monospace" },
+];
+const DEF_STYLE: Style = { fontSize: 16, bold: false, italic: false, underline: false, color: "#1e293b", align: "left", fontFamily: "" };
 
 const ZONE_TONE: Record<TaskStatus, string> = {
   new: "border-blue-200 bg-blue-50/40", in_progress: "border-indigo-200 bg-indigo-50/40",
@@ -56,6 +62,7 @@ function zoneIndexAtWorldX(wx: number): number {
 const styleOf = (o: BoardObject): React.CSSProperties => ({
   fontSize: o.fontSize, fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? "italic" : "normal",
   textDecoration: o.underline ? "underline" : "none", color: o.color, textAlign: o.align,
+  fontFamily: o.fontFamily || undefined,
 });
 
 export function CanvasBoard({
@@ -384,6 +391,12 @@ export function CanvasBoard({
               const setSize = (d: number) => patchObject(o.id, { fontSize: FONT_SIZES[clamp((fi < 0 ? 2 : fi) + d, 0, FONT_SIZES.length - 1)] });
               return (
                 <>
+                  <select value={o.fontFamily} onChange={e => patchObject(o.id, { fontFamily: e.target.value })}
+                    title="ฟอนต์" className="h-7 text-xs border border-slate-200 rounded px-1 bg-white hover:bg-slate-50 outline-none max-w-[96px]"
+                    style={{ fontFamily: o.fontFamily || undefined }}>
+                    {FONTS.map(f => <option key={f.label} value={f.value} style={{ fontFamily: f.value || undefined }}>{f.label}</option>)}
+                  </select>
+                  <Sep />
                   <FmtBtn onClick={() => setSize(-1)} title="เล็กลง">A−</FmtBtn>
                   <span className="text-xs text-slate-500 w-6 text-center tabular-nums">{o.fontSize}</span>
                   <FmtBtn onClick={() => setSize(1)} title="ใหญ่ขึ้น">A+</FmtBtn>
