@@ -8,7 +8,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useAuth } from "@/components/auth";
+import { useAuth, roleLabel } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
@@ -173,7 +173,8 @@ const ROLE_OPTS: { key: string; label: string }[] = [
 ];
 
 export default function ChinaPayApp() {
-  const { user, ready } = useAuth();
+  const { user, ready, logout } = useAuth();
+  const [acctOpen, setAcctOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuCfg, setMenuCfg] = useState<Record<string, string[]>>({});
@@ -274,10 +275,11 @@ export default function ChinaPayApp() {
             <button onClick={() => setMenuOpen(true)} aria-label="เมนู"
               className="w-10 h-10 flex items-center justify-center rounded-2xl bg-white/20 hover:bg-white/30 text-xl active:scale-95 transition">☰</button>
             <div className="font-bold text-lg flex-1 truncate">{current ? `${current.icon} ${current.label}` : "💸 โอนเงินจีน"}</div>
-            <div className="flex items-center gap-2 bg-white/20 rounded-full pl-1 pr-3 py-1 text-xs">
+            <button onClick={() => setAcctOpen(true)}
+              className="flex items-center gap-2 bg-white/20 hover:bg-white/30 active:scale-95 transition rounded-full pl-1 pr-3 py-1 text-xs">
               <span className="w-6 h-6 rounded-full bg-white text-orange-600 flex items-center justify-center font-bold">{(user.name || "?").slice(0, 1).toUpperCase()}</span>
               <span className="truncate max-w-[90px]">{user.name}</span>
-            </div>
+            </button>
           </div>
         </header>
 
@@ -332,6 +334,28 @@ export default function ChinaPayApp() {
                   <span className="text-xl w-7 text-center">{m.icon}</span>{m.label}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* เมนูบัญชีพนักงาน (กดชื่อมุมขวาบน) */}
+      {acctOpen && (
+        <div className="fixed inset-0 z-[130] bg-black/40 flex items-start justify-end p-3" onClick={() => setAcctOpen(false)}>
+          <div className="mt-14 w-72 max-w-[88%] bg-white rounded-2xl shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="bg-gradient-to-br from-orange-400 to-orange-600 text-white px-4 py-4 flex items-center gap-3">
+              <span className="w-12 h-12 rounded-full bg-white text-orange-600 flex items-center justify-center font-bold text-xl">{(user.name || "?").slice(0, 1).toUpperCase()}</span>
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{user.name}</div>
+                <div className="text-xs opacity-90">{roleLabel(user.role)}</div>
+              </div>
+            </div>
+            <div className="p-3 space-y-1">
+              <div className="px-2 py-1.5 text-xs text-slate-400">{user.email}</div>
+              <Link href="/payroll/employees" onClick={() => setAcctOpen(false)}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-slate-700 hover:bg-slate-50">👤 หน้าพนักงาน</Link>
+              <button onClick={async () => { setAcctOpen(false); await logout(); window.location.href = "/login?next=/app/china-pay"; }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm text-red-600 hover:bg-red-50 font-medium">🚪 ออกจากระบบ (Logout)</button>
             </div>
           </div>
         </div>
