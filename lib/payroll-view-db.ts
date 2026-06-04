@@ -64,11 +64,13 @@ export const VIEW_ENTITIES: Record<string, ViewCfg> = {
   },
   recurring: {
     table: "employee_recurring_pay_items",
-    // หมายเหตุ: contract_id ในข้อมูลจริงเป็น null ทั้งหมด — ค่าประจำผูกกับ "พนักงาน" ไม่ใช่ "สัญญา"
     cols: "id, employee_id, contract_id, item_name, item_type, amount_per_period, duration_type, calculation_method, status, start_date, end_date",
     defaultSort: "created_at", defaultDir: "desc",
     sortable: ["created_at", "amount_per_period"],
-    relations: [{ field: "employee_id", as: "employee_name", kind: "employee" }],
+    relations: [
+      { field: "employee_id", as: "employee_name", kind: "employee" },
+      { field: "contract_id", as: "contract_no", kind: "contract" },
+    ],
   },
   requests: {
     table: "employee_portal_requests",

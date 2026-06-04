@@ -4,6 +4,7 @@
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { money, statusBadge, PAY_STATUS } from "@/components/payroll/cells";
+import { ContractBindCell } from "@/components/payroll/contract-bind-cell";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -19,9 +20,19 @@ const CONFIG: MasterCRUDConfig = {
   description: "รายการเงินเพิ่ม/หักประจำ 17 รายการ — อ่านอย่างเดียว",
   readOnly: true, pageLimit: 1000, exportEntityType: "recurring_pay_item",
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
-  defaultShowAllColumns: true, searchKeys: ["employee_name", "item_name"],
+  defaultShowAllColumns: true, searchKeys: ["employee_name", "contract_no", "item_name"],
   fields: [
-    { key: "employee_name",    label: "พนักงาน",    type: "text", colSize: 200, filterable: true },
+    { key: "employee_name",    label: "พนักงาน",    type: "text", colSize: 180, filterable: true },
+    // ผูกสัญญา (แก้ได้เฉพาะ field นี้ — เลือกสัญญาของพนักงานคนนั้น)
+    { key: "contract_id", label: "สัญญา", type: "text", colSize: 150, sortable: false, hideInForm: true,
+      cellRender: (_v, row) => (
+        <ContractBindCell
+          recurringId={String(row?.id ?? "")}
+          employeeId={String(row?.employee_id ?? "")}
+          contractId={(row?.contract_id as string) ?? null}
+          contractNo={(row?.contract_no as string) ?? null}
+        />
+      ) },
     { key: "item_name",        label: "รายการ",     type: "text", colSize: 160 },
     { key: "item_type",        label: "ประเภท",     type: "text", colSize: 90, cellRender: (v) => <span className="text-sm">{ITEM_TYPE[String(v)] ?? String(v)}</span> },
     { key: "amount_per_period", label: "ยอด/งวด",   type: "number", colSize: 110, cellRender: money },
