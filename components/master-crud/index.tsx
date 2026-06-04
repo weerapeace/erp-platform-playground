@@ -1302,9 +1302,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const node = renderDetailValueInner(f);
     const copyable = !!(f.uiStyle as Record<string, unknown> | undefined)?.copyable;
     if (!copyable) return node;
-    const raw = form[f.key];
-    if (raw == null || raw === "") return node;
-    return <span className="inline-flex items-center gap-1">{node}<CopyValueBtn text={String(raw)} /></span>;
+    // ค่าที่จะคัดลอก: computed → ค่าที่คำนวณได้ (ที่แสดงจริง), อื่น ๆ → ค่าที่เก็บ
+    let copyText = "";
+    if (f.type === "computed") {
+      copyText = f.textCompute
+        ? (computedTextValue(f.textCompute, form) ?? "")
+        : formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals);
+    } else {
+      copyText = form[f.key] != null ? String(form[f.key]) : "";
+    }
+    if (!copyText || copyText === "—") return node;
+    return <span className="inline-flex items-start gap-1">{node}<CopyValueBtn text={copyText} /></span>;
   };
 
   const renderDetailValueInner = (f: FieldDef): React.ReactNode => {
