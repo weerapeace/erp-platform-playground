@@ -2375,7 +2375,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const oldestPartner = oldestCtw ? partnerByName[String(oldestCtw.company_name ?? "").trim()] : undefined;
 
   return (
-    <div className="flex flex-col gap-4 min-h-[calc(100dvh-9.5rem)]">
+    <div className="space-y-4 pb-[150px]">
       {/* มุมขวาบน: เรทวันนี้ + ปุ่มขอเรท */}
       <div className="flex justify-end items-center gap-2">
         <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasRate ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
@@ -2497,7 +2497,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
         )}
       </Card>
-      <div className="mt-auto sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+      <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200">
         <button onClick={() => setStep(2)} disabled={sel.size === 0 || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: ยืนยันการโอน →"}
@@ -2602,11 +2602,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
         {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
       </Card>
-      <div className="mt-auto sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
+      <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
-        <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin}
+        <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin || (sel.size > 0 && !hasRate)}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
-          {num(amount) <= 0 || belowMin ? `ใส่ยอดให้ครบ (≥ ฿${fmt(minTransfer)})` : "ถัดไป: เลือกบิล CTW →"}
+          {(sel.size > 0 && !hasRate) ? "ยังไม่มีเรทวันนี้ — ใส่เรทก่อน"
+            : num(amount) <= 0 || belowMin ? `ใส่ยอดให้ครบ (≥ ฿${fmt(minTransfer)})`
+            : "ถัดไป: เลือกบิล CTW →"}
         </button>
       </div>
       </>)}
@@ -2677,7 +2679,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
       )}
 
-      <div className="mt-auto sticky bottom-[72px] z-30 -mx-4 px-4 py-3 bg-slate-50 border-t border-slate-200">
+      <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200">
         <button onClick={save} disabled={saving || ctwOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold disabled:opacity-50 active:scale-[0.99] transition-transform shadow-lg shadow-emerald-500/30">
           {saving ? "กำลังบันทึก…" : "บันทึกการโอน + ตัดบิล"}
