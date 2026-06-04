@@ -18,6 +18,7 @@ import { useState, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
+import { Popover } from "@/components/popover";
 import {
   DndContext, type DragEndEvent, PointerSensor, KeyboardSensor,
   useSensor, useSensors, closestCorners,
@@ -82,49 +83,46 @@ function iconNode(icon?: string) {
 }
 
 function IconPicker({ value, onChange }: { value: string; onChange: (v: string)=>void }) {
-  const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const upload = async (file: File) => {
+  const upload = async (file: File, close: ()=>void) => {
     setUploading(true);
     try {
       const fd = new FormData(); fd.append("file", file); fd.append("folder", "section-icons");
       const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
       const j = await res.json();
       if (j.r2_key) onChange(`r2:${j.r2_key}`);
-    } catch { /* ignore */ } finally { setUploading(false); setOpen(false); }
+    } catch { /* ignore */ } finally { setUploading(false); close(); }
   };
   return (
-    <div className="relative">
-      <button type="button" onClick={()=>setOpen(o=>!o)} title="เปลี่ยนไอคอนหมวด"
-        className="w-7 h-7 rounded hover:bg-slate-100 inline-flex items-center justify-center">{iconNode(value)}</button>
-      {open && (<>
-        <div className="fixed inset-0 z-20" onClick={()=>setOpen(false)} />
-        <div className="absolute z-30 mt-1 left-0 w-64 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
-          <div className="text-[11px] text-slate-400 mb-1">ไอคอนพื้นฐาน</div>
-          <div className="grid grid-cols-8 gap-1 max-h-40 overflow-y-auto">
-            {PRESET_ICONS.map(e=>(
-              <button key={e} type="button" onClick={()=>{ onChange(e); setOpen(false); }}
-                className={`w-7 h-7 rounded hover:bg-slate-100 text-base ${value===e?"bg-orange-100 ring-1 ring-orange-300":""}`}>{e}</button>
-            ))}
-          </div>
-          <div className="border-t border-slate-100 mt-2 pt-2">
-            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
-              onChange={(e)=>{ const f=e.target.files?.[0]; if(f) upload(f); }} />
-            <button type="button" onClick={()=>fileRef.current?.click()} disabled={uploading}
-              className="w-full h-8 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50">
-              {uploading ? "กำลังอัปโหลด..." : "⬆ อัปโหลดไอคอนเอง (รูป)"}
-            </button>
-          </div>
+    <Popover align="left" panelClassName="w-64 p-2"
+      trigger={(toggle)=>(
+        <button type="button" onClick={toggle} title="เปลี่ยนไอคอนหมวด"
+          className="w-7 h-7 rounded hover:bg-slate-100 inline-flex items-center justify-center">{iconNode(value)}</button>
+      )}>
+      {(close)=>(<>
+        <div className="text-[11px] text-slate-400 mb-1">ไอคอนพื้นฐาน</div>
+        <div className="grid grid-cols-8 gap-1 max-h-40 overflow-y-auto">
+          {PRESET_ICONS.map(e=>(
+            <button key={e} type="button" onClick={()=>{ onChange(e); close(); }}
+              className={`w-7 h-7 rounded hover:bg-slate-100 text-base ${value===e?"bg-orange-100 ring-1 ring-orange-300":""}`}>{e}</button>
+          ))}
+        </div>
+        <div className="border-t border-slate-100 mt-2 pt-2">
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+            onChange={(e)=>{ const f=e.target.files?.[0]; if(f) upload(f, close); }} />
+          <button type="button" onClick={()=>fileRef.current?.click()} disabled={uploading}
+            className="w-full h-8 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50">
+            {uploading ? "กำลังอัปโหลด..." : "⬆ อัปโหลดไอคอนเอง (รูป)"}
+          </button>
         </div>
       </>)}
-    </div>
+    </Popover>
   );
 }
 
 // เลือกรายการจริงมาโชว์ใน preview (ค้นหา code/ชื่อ)
 function SamplePicker({ label, searchSample, onPick, onClear }: { label: string; searchSample: (q: string)=>Promise<{id:string;label:string}[]>; onPick: (id: string, label: string)=>void; onClear: ()=>void }) {
-  const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [opts, setOpts] = useState<{id:string;label:string}[]>([]);
   const [loading, setLoading] = useState(false);
@@ -138,33 +136,30 @@ function SamplePicker({ label, searchSample, onPick, onClear }: { label: string;
     }, 250);
   };
   return (
-    <div className="relative">
-      {label ? (
+    <Popover align="right" panelClassName="w-64 p-2"
+      trigger={(toggle)=> label ? (
         <div className="flex items-center gap-1 h-7 px-2 text-xs bg-orange-50 border border-orange-200 rounded">
           <span className="text-orange-700 max-w-[120px] truncate" title={label}>{label}</span>
           <button type="button" onClick={onClear} title="ล้าง" className="text-orange-400 hover:text-red-500">✕</button>
-          <button type="button" onClick={()=>{ setOpen(true); run(""); }} title="เปลี่ยน" className="text-orange-500 hover:text-orange-700">▾</button>
+          <button type="button" onClick={()=>{ run(""); toggle(); }} title="เปลี่ยน" className="text-orange-500 hover:text-orange-700">▾</button>
         </div>
       ) : (
-        <button type="button" onClick={()=>{ setOpen(true); run(""); }}
+        <button type="button" onClick={()=>{ run(""); toggle(); }}
           className="h-7 px-2 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50">🔍 เลือกรายการจริง</button>
-      )}
-      {open && (<>
-        <div className="fixed inset-0 z-20" onClick={()=>setOpen(false)} />
-        <div className="absolute right-0 z-30 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
-          <input autoFocus value={q} onChange={(e)=>run(e.target.value)} placeholder="ค้นหา code/ชื่อ…"
-            className="w-full h-8 px-2 text-xs border border-slate-200 rounded mb-1" />
-          <div className="max-h-56 overflow-y-auto">
-            {loading && <div className="text-xs text-slate-400 py-2 text-center">กำลังค้นหา…</div>}
-            {!loading && opts.length===0 && <div className="text-xs text-slate-300 py-2 text-center">— ไม่พบ —</div>}
-            {opts.map((o)=>(
-              <button key={o.id} type="button" onClick={()=>{ onPick(o.id, o.label); setOpen(false); }}
-                className="block w-full text-left px-2 py-1.5 text-xs rounded hover:bg-orange-50 truncate">{o.label}</button>
-            ))}
-          </div>
+      )}>
+      {(close)=>(<>
+        <input autoFocus value={q} onChange={(e)=>run(e.target.value)} placeholder="ค้นหา code/ชื่อ…"
+          className="w-full h-8 px-2 text-xs border border-slate-200 rounded mb-1" />
+        <div className="max-h-56 overflow-y-auto">
+          {loading && <div className="text-xs text-slate-400 py-2 text-center">กำลังค้นหา…</div>}
+          {!loading && opts.length===0 && <div className="text-xs text-slate-300 py-2 text-center">— ไม่พบ —</div>}
+          {opts.map((o)=>(
+            <button key={o.id} type="button" onClick={()=>{ onPick(o.id, o.label); close(); }}
+              className="block w-full text-left px-2 py-1.5 text-xs rounded hover:bg-orange-50 truncate">{o.label}</button>
+          ))}
         </div>
       </>)}
-    </div>
+    </Popover>
   );
 }
 
