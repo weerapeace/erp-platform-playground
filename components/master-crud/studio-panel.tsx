@@ -14,7 +14,7 @@
  *   - show_in_form   (POST bulk) — field show ในฟอร์ม
  */
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
@@ -73,6 +73,55 @@ function gmeta(k: string) { return GROUP_META[k] ?? { label: k, icon: "📁", or
 type Tab = "table" | "form" | "registry";
 type SectionDef = { key: string; label: string; icon: string; columns: number };
 
+// ไอคอนพื้นฐานให้เลือก + ตัวเรนเดอร์ (รองรับ emoji หรือรูปอัปโหลด "r2:<key>")
+const PRESET_ICONS = ["📋","📦","🔗","📝","📐","🏭","💰","🖼️","🟢","⚙️","🏷️","🧬","🤝","🧩","📊","🗂️","🛒","📍","🧾","🚚","🏗️","✂️","📁","⭐","🔢","🧰","🔀","🧷","📅","🔖","🧮","🏢","🪪","🎨","📒","🔧","📏","🧵","🧑‍💼","🔋"];
+function iconNode(icon?: string) {
+  if (!icon) return <span>📁</span>;
+  if (icon.startsWith("r2:")) return <img src={`/api/r2-image?key=${encodeURIComponent(icon.slice(3))}`} alt="" className="w-4 h-4 object-contain inline-block align-[-2px]" />;
+  return <span>{icon}</span>;
+}
+
+function IconPicker({ value, onChange }: { value: string; onChange: (v: string)=>void }) {
+  const [open, setOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("folder", "section-icons");
+      const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+      const j = await res.json();
+      if (j.r2_key) onChange(`r2:${j.r2_key}`);
+    } catch { /* ignore */ } finally { setUploading(false); setOpen(false); }
+  };
+  return (
+    <div className="relative">
+      <button type="button" onClick={()=>setOpen(o=>!o)} title="เปลี่ยนไอคอนหมวด"
+        className="w-7 h-7 rounded hover:bg-slate-100 inline-flex items-center justify-center">{iconNode(value)}</button>
+      {open && (<>
+        <div className="fixed inset-0 z-20" onClick={()=>setOpen(false)} />
+        <div className="absolute z-30 mt-1 left-0 w-64 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+          <div className="text-[11px] text-slate-400 mb-1">ไอคอนพื้นฐาน</div>
+          <div className="grid grid-cols-8 gap-1 max-h-40 overflow-y-auto">
+            {PRESET_ICONS.map(e=>(
+              <button key={e} type="button" onClick={()=>{ onChange(e); setOpen(false); }}
+                className={`w-7 h-7 rounded hover:bg-slate-100 text-base ${value===e?"bg-orange-100 ring-1 ring-orange-300":""}`}>{e}</button>
+            ))}
+          </div>
+          <div className="border-t border-slate-100 mt-2 pt-2">
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+              onChange={(e)=>{ const f=e.target.files?.[0]; if(f) upload(f); }} />
+            <button type="button" onClick={()=>fileRef.current?.click()} disabled={uploading}
+              className="w-full h-8 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50">
+              {uploading ? "กำลังอัปโหลด..." : "⬆ อัปโหลดไอคอนเอง (รูป)"}
+            </button>
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 export function StudioPanel({
   fields, moduleLabel, moduleKey, layout, onClose, onSaved, sampleRows = [],
 }: {
@@ -99,6 +148,7 @@ export function StudioPanel({
   });
   const setCols = (key: string, n: number) => { setSections((p) => p.map((s) => s.key === key ? { ...s, columns: n } : s)); setDirty(true); };
   const renameSection = (key: string, label: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, label } : s)); setDirty(true); };
+  const setSectionIcon = (key: string, icon: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, icon } : s)); setDirty(true); };
   const moveSection = (key: string, dir: -1 | 1) => setSections((p) => {
     const i = p.findIndex((s) => s.key === key); const j = i + dir;
     if (i < 0 || j < 0 || j >= p.length) return p;
@@ -360,7 +410,7 @@ export function StudioPanel({
               formGroups={formGroups} sectionOptions={sectionOptions} sensors={sensors} onDragEnd={onDragEnd}
               onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
               settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)} onPatch={patchItem}
-              onSetCols={setCols} onRename={renameSection} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
+              onSetCols={setCols} onRename={renameSection} onSetIcon={setSectionIcon} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
             />
           )}
         </div>
@@ -470,7 +520,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onMove, onDelete, onAddSection,
+  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection,
 }: {
   formGroups: [SectionDef, StudioField[]][];
   sectionOptions: { key: string; label: string }[];
@@ -482,6 +532,7 @@ function FormEditor({
   onMoveGroup: (key: string, group: string)=>void;
   onSetCols: (group: string, n: number)=>void;
   onRename: (group: string, label: string)=>void;
+  onSetIcon: (group: string, icon: string)=>void;
   onMove: (group: string, dir: -1 | 1)=>void;
   onDelete: (group: string)=>void;
   onAddSection: ()=>void;
@@ -497,7 +548,7 @@ function FormEditor({
           <div className="space-y-3">
             {formGroups.map(([sec, fs], idx)=>(
               <FormSectionZone key={sec.key} groupKey={sec.key} label={sec.label} icon={sec.icon} count={fs.length}
-                cols={sec.columns} onSetCols={(n)=>onSetCols(sec.key,n)}
+                cols={sec.columns} onSetCols={(n)=>onSetCols(sec.key,n)} onSetIcon={(ic)=>onSetIcon(sec.key,ic)}
                 onRename={(l)=>onRename(sec.key,l)} onUp={idx>0?()=>onMove(sec.key,-1):undefined}
                 onDown={idx<formGroups.length-1?()=>onMove(sec.key,1):undefined}
                 onDelete={()=>onDelete(sec.key)}>
@@ -586,12 +637,12 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
   );
 }
 
-function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, onRename, onUp, onDown, onDelete, children }: { groupKey: string; label: string; icon: string; count: number; cols: number; onSetCols: (n: number)=>void; onRename: (label: string)=>void; onUp?: ()=>void; onDown?: ()=>void; onDelete: ()=>void; children: React.ReactNode }) {
+function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, onSetIcon, onRename, onUp, onDown, onDelete, children }: { groupKey: string; label: string; icon: string; count: number; cols: number; onSetCols: (n: number)=>void; onSetIcon: (icon: string)=>void; onRename: (label: string)=>void; onUp?: ()=>void; onDown?: ()=>void; onDelete: ()=>void; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useSortable({ id: `group:${groupKey}` });
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div ref={setNodeRef} className={`px-3 py-2 flex items-center gap-2 border-b border-slate-100 ${isOver?"bg-orange-50":"bg-slate-50"}`}>
-        <span>{icon}</span>
+        <IconPicker value={icon} onChange={onSetIcon} />
         {/* แก้ชื่อหมวดได้ */}
         <input value={label} onChange={(e)=>onRename(e.target.value)} title="แก้ชื่อหมวด"
           className="text-sm font-semibold text-slate-700 bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 py-0.5 w-40 focus:outline-none" />
@@ -682,7 +733,7 @@ function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, Studio
         return (
           <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden">
             <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5">
-              <span>{sec.icon}</span>{sec.label}
+              {iconNode(sec.icon)}{sec.label}
             </div>
             <div className={`p-3 grid ${sec.columns===1?"grid-cols-1":sec.columns===3?"grid-cols-3":"grid-cols-2"} gap-3`}>
               {fs.map(f=>{

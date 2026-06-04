@@ -1828,6 +1828,13 @@ function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unkno
 // กลุ่ม B: คลาส grid ต่อจำนวน column (static string → Tailwind ไม่ purge)
 const COLS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
 
+// ไอคอนหมวด — รองรับ emoji หรือรูปอัปโหลด "r2:<key>"
+function sectionIconNode(icon?: string | null): React.ReactNode {
+  if (!icon) return null;
+  if (icon.startsWith("r2:")) return <img src={`/api/r2-image?key=${encodeURIComponent(icon.slice(3))}`} alt="" className="w-4 h-4 object-contain inline-block align-[-2px]" />;
+  return <span>{icon}</span>;
+}
+
 // ปุ่มคัดลอกค่า field (เปิดผ่าน ui_style.copyable ใน Studio)
 function CopyValueBtn({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -1885,7 +1892,7 @@ function LayoutTabs({
               className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                 t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
-              {t.icon && <span>{t.icon}</span>}<span>{t.label}</span>
+              {sectionIconNode(t.icon)}<span>{t.label}</span>
             </button>
           ))}
         </div>
