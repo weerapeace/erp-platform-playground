@@ -1499,10 +1499,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           );
           const coreFields = visibleFields.filter(f => (f.groupKey ?? "other") === "core");
           const tabFields  = visibleFields.filter(f => (f.groupKey ?? "other") !== "core");
+          const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
 
-          // กลุ่ม B (ตัวเลือก 3): ถ้าหน้านี้จัด Layout ไว้ → รูปบนสุด + Layout คุมทุก field (รวม core)
+          // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
+          // (โมดูลที่มีรูปปก เช่น Parent SKU/SKU → ใช้เลย์เอาต์ "รูปซ้าย" ด้านล่างเสมอ)
           const hasLayout = !!registryLayout?.tabs?.length;
-          if (hasLayout) {
+          if (hasLayout && !hasCover) {
             const imageField = effectiveFields.find(f => f.key === "cover_image_r2_key");
             return (
               <div className="space-y-4">
@@ -1533,7 +1535,6 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           }
 
           // โมดูลไม่มีรูปปก (ไม่มี cover_image_r2_key) → ฟอร์มเต็มกว้างปกติ (ไม่มีคอลัมน์รูปซ้าย)
-          const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
           if (!hasCover) {
             return (
               <div className="space-y-4">
