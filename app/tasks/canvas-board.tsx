@@ -8,7 +8,7 @@
 // รอบ 2 (ถัดไป): ลูกศรเชื่อมกล่อง + paste รูปขึ้น R2 (+ลบใน R2)
 // ============================================================
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
 import {
   STATUS_META, PRIORITY_META, isOverdue,
   type Task, type TaskStatus, type TaskPriority,
@@ -79,6 +79,8 @@ export function CanvasBoard({
   const [tool, setTool] = useState<Tool>("select");
   const [selId, setSelId] = useState<string | null>(null);
   const [isMax, setIsMax] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barH, setBarH] = useState(44);
 
   // ---- load/save ----
   useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) setBoard(JSON.parse(r)); } catch { /* ignore */ } }, []);
@@ -241,8 +243,16 @@ export function CanvasBoard({
     dragStartRef.current = null;
   };
 
-  // ---- format bar position ----
-  const barPos = sel ? { left: clamp(vp.x + sel.x * vp.scale, 4, 9999), top: Math.max(4, vp.y + sel.y * vp.scale - 46) } : null;
+  // ---- format bar position (วางเหนือวัตถุให้พ้น ถ้าชนขอบบนสลับไปใต้) ----
+  const selH = sel ? ("h" in sel ? (sel as BoardObject).h : 124) : 0;
+  const barPos = (() => {
+    if (!sel) return null;
+    const left = Math.max(4, vp.x + sel.x * vp.scale);
+    let top = vp.y + sel.y * vp.scale - barH - 10;
+    if (top < 4) top = vp.y + (sel.y + selH) * vp.scale + 10;
+    return { left, top };
+  })();
+  useLayoutEffect(() => { if (barRef.current) setBarH(barRef.current.offsetHeight); }, [selId, selKind, board, vp.scale]);
 
   return (
     <div ref={wrapRef} className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "relative"}>
@@ -364,7 +374,7 @@ export function CanvasBoard({
 
         {/* Format bar (ลอยเหนือวัตถุที่เลือก) */}
         {sel && barPos && (
-          <div className="absolute z-30 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-lg p-1 flex-wrap" style={{ left: barPos.left, top: barPos.top, maxWidth: 420 }} onPointerDown={e => e.stopPropagation()}>
+          <div ref={barRef} className="absolute z-30 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-lg p-1 flex-wrap" style={{ left: barPos.left, top: barPos.top, maxWidth: 420 }} onPointerDown={e => e.stopPropagation()}>
             {selKind === "sticky" && sel && "color" in sel && (
               <SwatchRow colors={STICKY_COLORS} value={(sel as Sticky).color} onPick={c => patchSticky(sel.id, { color: c })} />
             )}
