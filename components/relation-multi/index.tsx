@@ -8,6 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
+import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
 
 type RelConfig = {
   kind?: string;
@@ -201,24 +202,68 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   useEffect(() => { load(); }, [load]);
 
-  // ดึง label หัวคอลัมน์ + รายการ field ทั้งหมดจากทะเบียน field ของโมดูลลูก (ของกลาง)
+  // ดึง label หัวคอลัมน์ + รายการ field + config ของฟิลด์เชื่อม (FK) จากทะเบียน field ของโมดูลลูก (ของกลาง)
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [allFields, setAllFields] = useState<{ key: string; label: string }[]>([]);
+  const [relCfgByField, setRelCfgByField] = useState<Record<string, RelationConfig>>({});
   useEffect(() => {
     if (!moduleKey) return;
     apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json())
       .then((j) => {
         const m: Record<string, string> = {};
         const list: { key: string; label: string }[] = [];
+        const rels: Record<string, RelationConfig> = {};
         (j.fields ?? []).forEach((f: Record<string, unknown>) => {
           const k = String(f.column_name ?? f.field_key);
           const lbl = String(f.field_label ?? k);
           m[k] = lbl; list.push({ key: k, label: lbl });
+          // ฟิลด์เชื่อม = มี relation_config ที่ชี้ตารางปลายทาง → ใช้แปลง id→ชื่อ
+          const rc = f.relation_config as RelationConfig | undefined;
+          if (rc && (rc.target_table || rc.lookup_type)) rels[k] = rc;
         });
-        setLabels(m); setAllFields(list);
+        setLabels(m); setAllFields(list); setRelCfgByField(rels);
       }).catch(() => {});
   }, [moduleKey]);
   const labelOf = (k: string) => labels[k] ?? k;
+
+  // แปลง id→ชื่อ ของคอลัมน์ที่เป็นฟิลด์เชื่อม (batch ทีเดียวต่อคอลัมน์) — ของกลาง lib/relation
+  const [relLabels, setRelLabels] = useState<Record<string, Map<string, string>>>({});
+  useEffect(() => {
+    const relCols = subFields.filter((f) => relCfgByField[f]);
+    if (relCols.length === 0 || rows.length === 0) return;
+    let alive = true;
+    (async () => {
+      const out: Record<string, Map<string, string>> = {};
+      for (const f of relCols) {
+        // เก็บเฉพาะ id ที่ยังไม่มี label denormalized ติดมา ({base}_label)
+        const ids = rows
+          .filter((r) => readRelationLabel(r, f) == null && r[f] != null && r[f] !== "")
+          .map((r) => String(r[f]));
+        if (ids.length === 0) continue;
+        try {
+          const map = await resolveRelationLabels(apiFetch, relCfgByField[f], ids);
+          const labelMap = new Map<string, string>();
+          map.forEach((opt, id) => labelMap.set(id, opt.label));
+          out[f] = labelMap;
+        } catch { /* ignore — fallback แสดง id */ }
+      }
+      if (alive) setRelLabels(out);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, subFields, relCfgByField]);
+
+  // ค่าที่จะแสดงในเซลล์ — ถ้าเป็นฟิลด์เชื่อม แปลงเป็นชื่อ ไม่งั้นแสดงค่าปกติ
+  const cellValue = (r: Record<string, unknown>, f: string): string | null => {
+    if (relCfgByField[f]) {
+      const denorm = readRelationLabel(r, f);
+      if (denorm) return denorm;
+      const id = r[f] != null ? String(r[f]) : "";
+      const name = id ? relLabels[f]?.get(id) : undefined;
+      return name ?? (id ? fmtVal(id) : null);
+    }
+    return fmtVal(r[f]);
+  };
 
   // บันทึกคอลัมน์ที่เลือก → ทะเบียน field กลาง (ทุกคนเห็นเหมือนกัน)
   const saveColumns = async (next: string[]) => {
@@ -295,7 +340,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             <tr>
               {imageField && <th className="px-2 py-1.5 w-10" />}
               <th className="px-2 py-1.5 text-left font-medium">{labelOf(titleField)}</th>
-              {subFields.map((f) => <th key={f} className="px-2 py-1.5 text-right font-medium whitespace-nowrap">{labelOf(f)}</th>)}
+              {subFields.map((f) => <th key={f} className={`px-2 py-1.5 font-medium whitespace-nowrap ${relCfgByField[f] ? "text-left" : "text-right"}`}>{labelOf(f)}</th>)}
               <th className="px-2 py-1.5 w-8" />
             </tr>
           </thead>
@@ -312,7 +357,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
                   </td>
                 )}
                 <td className="px-2 py-1.5 text-slate-700">{String(r[titleField] ?? r.name ?? r.id)}</td>
-                {subFields.map((f) => <td key={f} className="px-2 py-1.5 text-right tabular-nums text-slate-600 whitespace-nowrap">{fmtVal(r[f]) ?? "—"}</td>)}
+                {subFields.map((f) => {
+                  const isRel = !!relCfgByField[f];
+                  return <td key={f} className={`px-2 py-1.5 text-slate-600 whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"}`}>{cellValue(r, f) ?? "—"}</td>;
+                })}
                 <td className="px-2 py-1.5 text-right">
                   <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
                     className="w-6 h-6 rounded text-xs text-slate-400 hover:text-blue-600 hover:bg-white opacity-0 group-hover:opacity-100 transition-opacity">✎</button>
