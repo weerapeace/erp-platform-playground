@@ -95,6 +95,29 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
   const [filter,    setFilter]    = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);   // เพิ่ม field จากหน้านี้
+  // ลบ field (+ ลบคอลัมน์ใน Supabase)
+  const [deleteTarget, setDeleteTarget] = useState<RegistryField | null>(null);
+  const [deleteDropCol, setDeleteDropCol] = useState(true);
+  const [deleteText, setDeleteText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const isVirtualField = (f: RegistryField | null) =>
+    !f?.column_name || ["computed", "one2many", "many2many", "related"].includes(String(f?.ui_field_type ?? ""));
+  const doDeleteField = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      const res = await apiFetch("/api/admin/schema/delete-field", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ module_key: moduleKey, field_key: deleteTarget.field_key, drop_column: deleteDropCol && !isVirtualField(deleteTarget) }),
+      });
+      const j = await res.json();
+      if (j.error) { flash("❌ " + j.error); return; }
+      setDeleteTarget(null); setDeleteText(""); setDeleteDropCol(true);
+      flash("✓ ลบ field แล้ว");
+      load();
+    } catch (e) { flash("❌ " + (e instanceof Error ? e.message : "ลบไม่สำเร็จ")); }
+    finally { setDeleting(false); }
+  };
 
   // Sprint 11
   const [selected,    setSelected]    = useState<Set<string>>(new Set());
@@ -472,6 +495,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                       <th className="px-3 py-2 text-left font-medium" title="Default ตอน Create — รองรับ now() today() current_user() uuid()">Default</th>
                       <th className="px-3 py-2 text-center font-medium" title="เงื่อนไขแสดงในฟอร์ม (show_if)">🎯 Cond</th>
                       <th className="px-3 py-2 text-center font-medium">Width</th>
+                      <th className="px-3 py-2 text-center font-medium" title="ลบ field">🗑️</th>
                     </tr>
                   </thead>
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
@@ -521,6 +545,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                                   onToggle={() => toggleOne(f.id)}
                                   onUpdate={(patch) => updateField(f.id, patch)}
                                   onEditCondition={() => setConditionEditing(f)}
+                                  onDelete={() => setDeleteTarget(f)}
                                 />
                               ))}
                             </React.Fragment>
@@ -566,6 +591,47 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
             onCreated={() => { setFieldCreatorOpen(false); load(); }}
           />
         )}
+
+        {/* ลบ field — ยืนยันแบบพิมพ์คำ (ข้อมูลหายถาวรถ้าลบคอลัมน์) */}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4" onClick={() => !deleting && setDeleteTarget(null)}>
+            <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-3 border-b border-slate-200 flex items-center gap-2">
+                <span className="text-xl">🗑️</span>
+                <h3 className="text-sm font-semibold text-red-700">ลบ field: {deleteTarget.field_label}</h3>
+              </div>
+              <div className="px-5 py-4 space-y-3 text-sm">
+                <div className="text-slate-600">
+                  field <code className="text-xs bg-slate-100 px-1 rounded">{deleteTarget.column_name ?? deleteTarget.field_key}</code> จะถูกลบออกจากทะเบียน
+                </div>
+                {isVirtualField(deleteTarget) ? (
+                  <div className="text-xs text-slate-500">(field นี้เป็นแบบ virtual — ไม่มีคอลัมน์จริงให้ลบ)</div>
+                ) : (
+                  <label className="flex items-start gap-2 p-2.5 rounded-lg border border-red-200 bg-red-50">
+                    <input type="checkbox" checked={deleteDropCol} onChange={(e) => setDeleteDropCol(e.target.checked)} className="mt-0.5 accent-red-600" />
+                    <span className="text-xs text-red-700">
+                      ลบ <b>คอลัมน์จริงใน Supabase</b> ด้วย — <b>ข้อมูลทุกแถวในคอลัมน์นี้จะหายถาวร กู้คืนไม่ได้</b><br />
+                      <span className="text-red-500">(ถ้าไม่ติ๊ก = ลบแค่จากทะเบียน ข้อมูลยังอยู่)</span>
+                    </span>
+                  </label>
+                )}
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code> เพื่อยืนยัน</div>
+                  <input value={deleteText} onChange={(e) => setDeleteText(e.target.value)} autoFocus
+                    className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-red-500" />
+                </div>
+              </div>
+              <div className="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+                <button onClick={() => { setDeleteTarget(null); setDeleteText(""); }} disabled={deleting}
+                  className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                <button onClick={doDeleteField} disabled={deleting || deleteText.trim() !== "ลบ"}
+                  className="h-9 px-4 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-40">
+                  {deleting ? "กำลังลบ..." : "ลบถาวร"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
   );
   return embedded ? inner : <PlaygroundShell>{inner}</PlaygroundShell>;
@@ -576,7 +642,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
 // ============================================================
 
 function SortableFieldRow({
-  field, saving, selected, onToggle, onUpdate, onEditCondition,
+  field, saving, selected, onToggle, onUpdate, onEditCondition, onDelete,
 }: {
   field:    RegistryField;
   saving:   boolean;
@@ -584,6 +650,7 @@ function SortableFieldRow({
   onToggle: () => void;
   onUpdate: (patch: Record<string, unknown>) => void | Promise<void>;
   onEditCondition?: () => void;
+  onDelete?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id });
   const style: React.CSSProperties = {
@@ -709,6 +776,10 @@ function SortableFieldRow({
           onBlur={onBlurWidth}
           className="w-16 text-xs px-1.5 py-1 border border-slate-200 rounded text-right tabular-nums"
         />
+      </td>
+      <td className="px-3 py-1.5 text-center">
+        <button type="button" onClick={onDelete} title="ลบ field"
+          className="text-slate-300 hover:text-red-600 text-sm">🗑️</button>
       </td>
     </tr>
   );
