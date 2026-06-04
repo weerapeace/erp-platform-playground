@@ -88,6 +88,7 @@ export function CanvasBoard({
   const [isMax, setIsMax] = useState(false);
   const barRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(44);
+  const [dragging, setDragging] = useState(false);   // ลาก/ย่อขยายอยู่ → ซ่อนแถบจัดรูปแบบ
 
   // ---- load/save ----
   useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) setBoard(JSON.parse(r)); } catch { /* ignore */ } }, []);
@@ -205,14 +206,14 @@ export function CanvasBoard({
     interRef.current = { type: "card", id, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
   };
   const startDrag = (e: RPE, id: string) => {
-    e.stopPropagation(); setSelId(id);
+    e.stopPropagation(); setSelId(id); setDragging(true);
     boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
     dragStartRef.current = clone(board);
     const node = board.objects.find(o => o.id === id) ?? board.stickies.find(s => s.id === id)!;
     interRef.current = { type: "drag", id, sx: e.clientX, sy: e.clientY, ox: node.x, oy: node.y };
   };
   const startResize = (e: RPE, id: string) => {
-    e.stopPropagation();
+    e.stopPropagation(); setDragging(true);
     boardRef.current?.setPointerCapture(e.pointerId);
     dragStartRef.current = clone(board);
     const o = board.objects.find(x => x.id === id); if (!o) return;
@@ -235,6 +236,7 @@ export function CanvasBoard({
   };
   const onBoardPointerUp = (e: RPE) => {
     const it = interRef.current; interRef.current = null;
+    setDragging(false);
     try { boardRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (!it) return;
     if (it.type === "card") {
@@ -379,8 +381,8 @@ export function CanvasBoard({
           })}
         </div>
 
-        {/* Format bar (ลอยเหนือวัตถุที่เลือก) */}
-        {sel && barPos && (
+        {/* Format bar (ลอยเหนือวัตถุที่เลือก) — ซ่อนตอนกำลังลาก */}
+        {sel && barPos && !dragging && (
           <div ref={barRef} className="absolute z-30 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-lg p-1 flex-wrap" style={{ left: barPos.left, top: barPos.top, maxWidth: 420 }} onPointerDown={e => e.stopPropagation()}>
             {selKind === "sticky" && sel && "color" in sel && (
               <SwatchRow colors={STICKY_COLORS} value={(sel as Sticky).color} onPick={c => patchSticky(sel.id, { color: c })} />
