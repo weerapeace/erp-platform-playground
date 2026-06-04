@@ -9,17 +9,17 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 const TABLE = "employee_contracts";
-const SELECT =
-  "id, employee_id, contract_no, contract_type, employment_type, wage_type, " +
-  "base_salary, daily_wage, hourly_wage, payment_cycle, start_date, end_date, " +
-  "is_current, status, company_id, payroll_register_base_salary, created_at, updated_at";
+// ดึงทุกคอลัมน์ (เหมือนแอปเก่า)
+const SELECT = "*";
 
 const WRITABLE = new Set([
   "contract_no", "contract_type", "employment_type", "wage_type",
-  "base_salary", "daily_wage", "hourly_wage", "payment_cycle",
+  "base_salary", "daily_wage", "hourly_wage", "piece_rate_default", "payment_cycle",
   "start_date", "end_date", "is_current", "status", "payroll_register_base_salary",
+  "work_schedule_id", "overtime_policy_id", "leave_policy_id",
+  "include_pnd3_export", "include_payroll_register_export", "attendance_scan_exempt",
 ]);
-const NUMERIC = ["base_salary", "daily_wage", "hourly_wage", "payroll_register_base_salary"];
+const NUMERIC = ["base_salary", "daily_wage", "hourly_wage", "piece_rate_default", "payroll_register_base_salary"];
 
 export type ContractRow = Record<string, unknown> & { id: string };
 

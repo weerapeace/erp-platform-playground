@@ -55,11 +55,14 @@ const CONFIG: MasterCRUDConfig = {
       helpText: "ใช้เฉพาะตอนสร้างสัญญาใหม่ — ระบุรหัสพนักงานที่จะผูก" },
     { key: "company_name",  label: "บริษัท",       type: "select", colSize: 140, options: COMPANY_NAMES, filterable: true, groupKey: "core", order: 30 },
     { key: "contract_type", label: "ประเภทสัญญา", type: "text", colSize: 120, groupKey: "core", order: 40 },
+    { key: "employment_type", label: "ประเภทการจ้าง", type: "text", colSize: 120, groupKey: "core", order: 42 },
     { key: "wage_type",     label: "ประเภทค่าจ้าง", type: "select", colSize: 110, options: WAGE_TYPES, filterable: true, groupKey: "pay", order: 50,
       cellRender: (v) => <span className="text-sm">{WAGE_LABEL[String(v)] ?? String(v)}</span> },
     { key: "base_salary",   label: "เงินเดือน",   type: "number", colSize: 110, groupKey: "pay", order: 60, cellRender: fmtBaht },
     { key: "daily_wage",    label: "ค่าจ้างรายวัน", type: "number", colSize: 100, groupKey: "pay", order: 70, cellRender: fmtBaht },
     { key: "hourly_wage",   label: "ค่าจ้างรายชม.", type: "number", colSize: 100, groupKey: "pay", order: 80, cellRender: fmtBaht },
+    { key: "piece_rate_default", label: "ค่าจ้างรายชิ้น", type: "number", colSize: 100, groupKey: "pay", order: 85, cellRender: fmtBaht },
+    { key: "payroll_register_base_salary", label: "ฐานทะเบียนเงินเดือน", type: "number", colSize: 130, groupKey: "pay", order: 95, cellRender: fmtBaht },
     { key: "payment_cycle", label: "รอบจ่าย",     type: "text", colSize: 90, groupKey: "pay", order: 90 },
     { key: "start_date",    label: "เริ่มสัญญา",  type: "text", colSize: 110, placeholder: "YYYY-MM-DD", groupKey: "term", order: 100 },
     { key: "end_date",      label: "สิ้นสุด",     type: "text", colSize: 110, placeholder: "YYYY-MM-DD", groupKey: "term", order: 110 },
@@ -69,6 +72,13 @@ const CONFIG: MasterCRUDConfig = {
         const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
         return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
       } },
+    // นโยบาย / การส่งออก
+    { key: "work_schedule_id",   label: "ตารางเวลาทำงาน", type: "text", colSize: 130, groupKey: "นโยบาย/ส่งออก", order: 200 },
+    { key: "overtime_policy_id", label: "นโยบาย OT",      type: "text", colSize: 120, groupKey: "นโยบาย/ส่งออก", order: 202 },
+    { key: "leave_policy_id",    label: "นโยบายการลา",    type: "text", colSize: 120, groupKey: "นโยบาย/ส่งออก", order: 204 },
+    { key: "attendance_scan_exempt", label: "ยกเว้นสแกนเวลา", type: "boolean", colSize: 100, groupKey: "นโยบาย/ส่งออก", order: 206 },
+    { key: "include_pnd3_export", label: "รวมใน ภ.ง.ด.3", type: "boolean", colSize: 110, groupKey: "นโยบาย/ส่งออก", order: 208 },
+    { key: "include_payroll_register_export", label: "รวมในทะเบียนเงินเดือน", type: "boolean", colSize: 130, groupKey: "นโยบาย/ส่งออก", order: 210 },
     // เชื่อมความสัมพันธ์: เปิดดูค่าประจำ/เงินเดือนของพนักงานในสัญญานี้ (ผูกผ่าน employee_id)
     { key: "employee_id", label: "เชื่อมโยง", type: "text", colSize: 190, sortable: false, hideInForm: true, order: 140,
       cellRender: (_v, row) => (

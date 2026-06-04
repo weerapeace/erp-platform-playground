@@ -54,7 +54,7 @@ export const PAYROLL_ENTITIES: Record<string, EntityCfg> = {
   },
   periods: {
     table: "payroll_periods",
-    cols: "id, period_name, start_date, end_date, payment_date, status, default_work_days, default_hours_per_day, company_id, created_at, updated_at",
+    cols: "*",
     search: ["period_name"],
     statusField: "status", activeVal: "draft", inactiveVal: "cancelled",
     writable: ["period_name", "start_date", "end_date", "payment_date", "status", "default_work_days", "default_hours_per_day"],

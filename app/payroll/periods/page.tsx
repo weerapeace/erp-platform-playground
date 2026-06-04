@@ -44,6 +44,10 @@ const CONFIG: MasterCRUDConfig = {
         const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
         return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
       } },
+    // เวลา workflow (อ่านอย่างเดียว — ระบบบันทึกตอนล็อก/จ่าย/ซิงก์)
+    { key: "locked_at",        label: "ล็อกเมื่อ",     type: "text", colSize: 150, readonly: true, hideInForm: true, groupKey: "workflow", order: 90 },
+    { key: "paid_at",          label: "จ่ายเมื่อ",     type: "text", colSize: 150, readonly: true, hideInForm: true, groupKey: "workflow", order: 92 },
+    { key: "synced_to_odoo_at", label: "ซิงก์ Odoo เมื่อ", type: "text", colSize: 150, readonly: true, hideInForm: true, groupKey: "workflow", order: 94 },
   ],
 };
 
