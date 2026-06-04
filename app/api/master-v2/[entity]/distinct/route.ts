@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity } from "@/app/api/master-v2/[entity]/route";
+import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,6 +18,8 @@ export async function GET(
   { params }: { params: Promise<{ entity: string }> }
 ): Promise<NextResponse> {
   const { entity } = await params;
+  // ตรวจสิทธิ์ก่อน — endpoint นี้ใช้ service-role อ่านค่าตรง ๆ จึงต้องกันคนไม่ล็อกอิน
+  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ values: [], error: "entity ไม่รองรับ" }, { status: 400 });
 

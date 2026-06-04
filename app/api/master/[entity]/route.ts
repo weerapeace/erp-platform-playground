@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { guardApi } from "@/lib/api-auth";
 
 // ---- Entity config (frontend/backend mapping) ----
 
@@ -89,6 +90,8 @@ export async function GET(
   const { entity } = await params;
   const cfg = ENTITY[entity];
   if (!cfg) return NextResponse.json({ data: [], error: "entity ไม่รองรับ" }, { status: 400 });
+  // ตรวจสิทธิ์อ่านก่อน — กันข้อมูล master หลุดให้คนที่ไม่ได้ล็อกอิน (entity = prefix ของ permission)
+  const denied = await guardApi(request, `${entity}.view`); if (denied) return denied;
 
   const { searchParams } = new URL(request.url);
   const search = searchParams.get("search") ?? "";
@@ -112,6 +115,8 @@ export async function POST(
   const { entity } = await params;
   const cfg = ENTITY[entity];
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
+  // ตรวจสิทธิ์สร้างก่อน — กันคนไม่ล็อกอินยิงสร้างข้อมูลผ่าน RPC
+  const denied = await guardApi(request, `${entity}.create`); if (denied) return denied;
 
   let body: Record<string, unknown>;
   try { body = await request.json(); }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { guardApi } from "@/lib/api-auth";
 
 // ---- Map entity → RPC ----
 
@@ -27,6 +28,8 @@ export async function PATCH(
   const { entity, id } = await params;
   const cfg = ENTITY[entity];
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
+  // ตรวจสิทธิ์แก้ไขก่อน — กันคนไม่ล็อกอินยิงแก้ข้อมูลผ่าน RPC (units/taxes ไม่มีสิทธิ์ .edit แยก จึงใช้ .create)
+  const denied = await guardApi(request, `${entity}.create`); if (denied) return denied;
 
   let body: PatchBody;
   try { body = await request.json(); }
@@ -71,6 +74,8 @@ export async function DELETE(
   const { entity, id } = await params;
   const cfg = ENTITY[entity];
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
+  // ตรวจสิทธิ์ก่อนลบ (soft delete) — กันคนไม่ล็อกอินยิงลบผ่าน RPC
+  const denied = await guardApi(request, `${entity}.create`); if (denied) return denied;
 
   const actor = new URL(request.url).searchParams.get("actor");
   const { data, error } = await supabaseFromRequest(request).rpc(cfg.setActive, {

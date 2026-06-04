@@ -18,6 +18,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, applyListFilters, friendlyDbError, type ColFilter } from "../route";
+import { writeAudit } from "@/lib/audit";
+import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,6 +33,8 @@ export async function POST(
   { params }: { params: Promise<{ entity: string }> },
 ): Promise<NextResponse> {
   const { entity } = await params;
+  // ตรวจสิทธิ์แก้หลายรายการ (bulk edit) ก่อน — ไม่ล็อกอิน/ไม่มีสิทธิ์ → 401
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
@@ -80,10 +84,11 @@ export async function POST(
         affected2 += chunk.length;
       }
     }
-    await admin2.from("erp_audit_logs").insert({
-      actor_name: body.actor ?? user.email ?? "system", action: "master.bulk_update", module: entity,
-      record_label: `${affected2} rows`, new_value: { groups: groups.size, affected: affected2 },
-    }).then(() => {}, () => {});
+    await writeAudit(admin2, {
+      action: "master.bulk_update", entityType: cfg.table,
+      actorId: user.id, actorName: body.actor ?? user.email ?? null,
+      metadata: { entity, mode: "edits", groups: groups.size, affected: affected2 },
+    });
     return NextResponse.json({ ok: true, affected: affected2, error: null });
   }
 
@@ -124,11 +129,12 @@ export async function POST(
     affected += chunk.length;
   }
 
-  // 3) audit (best-effort)
-  await admin.from("erp_audit_logs").insert({
-    actor_name: body.actor ?? user.email ?? "system", action: "master.bulk_update", module: entity,
-    record_label: `${affected} rows`, new_value: { changes, affected },
-  }).then(() => {}, () => {});
+  // 3) audit (ของกลาง — ลง audit_logs, ไม่ throw)
+  await writeAudit(admin, {
+    action: "master.bulk_update", entityType: cfg.table,
+    actorId: user.id, actorName: body.actor ?? user.email ?? null,
+    metadata: { entity, mode: "filter", changes, affected },
+  });
 
   return NextResponse.json({ ok: true, affected, error: null });
 }

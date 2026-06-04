@@ -12,6 +12,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, friendlyDbError } from "../route";
+import { writeAudit } from "@/lib/audit";
+import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,6 +29,8 @@ export async function POST(
   { params }: { params: Promise<{ entity: string }> },
 ): Promise<NextResponse> {
   const { entity } = await params;
+  // ตรวจสิทธิ์นำเข้าข้อมูล (import = สร้าง/แก้หลายรายการ) ก่อน — ไม่ล็อกอิน/ไม่มีสิทธิ์ → 401
+  const denied = await guardApi(request, "products.create"); if (denied) return denied;
   const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
@@ -135,11 +139,12 @@ export async function POST(
     else created += await writeRows(items, null);
   }
 
-  // audit (best-effort)
-  await admin.from("erp_audit_logs").insert({
-    actor_name: actor, action: "import", module: entity,
-    new_value: { total: rows.length, created, updated, failed: failed.length },
-  }).then(() => {}, () => {});
+  // audit (ของกลาง — ลง audit_logs, ไม่ throw)
+  await writeAudit(admin, {
+    action: "import", entityType: cfg.table,
+    actorId: user.id, actorName: actor,
+    metadata: { entity, mode, total: rows.length, created, updated, failed: failed.length },
+  });
 
   return NextResponse.json({
     data: { total: rows.length, created, updated, failed, audit_id: "" },

@@ -13,6 +13,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
+import { guardApi } from "@/lib/api-auth";
 
 // อ่าน/เขียนสดเสมอ — ข้อมูล master + module config เปลี่ยน runtime, ห้าม cache
 export const dynamic = "force-dynamic";
@@ -462,6 +464,8 @@ export async function GET(
   { params }: { params: Promise<{ entity: string }> }
 ): Promise<NextResponse> {
   const { entity } = await params;
+  // ตรวจสิทธิ์ก่อน — กันข้อมูล master หลุดให้คนที่ไม่ได้ล็อกอิน (เรียก URL ตรง ๆ)
+  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ data: [], error: "entity ไม่รองรับ" }, { status: 400 });
 
@@ -538,10 +542,12 @@ export async function POST(
   { params }: { params: Promise<{ entity: string }> }
 ): Promise<NextResponse> {
   const { entity } = await params;
+  // ตรวจสิทธิ์สร้างข้อมูล master ก่อน (ไม่ล็อกอิน/ไม่มีสิทธิ์ → 401)
+  const denied = await guardApi(request, "products.create"); if (denied) return denied;
   const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ error: "entity ไม่รองรับ" }, { status: 400 });
 
-  // ตรวจ user login (authenticated role)
+  // ดึง user object ไว้ใช้ทำ audit (สิทธิ์ตรวจแล้วด้านบน)
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
@@ -551,7 +557,7 @@ export async function POST(
 
   // strip 'actor' (used for audit log, not a column)
   const { actor: _actor, ...fields } = body;
-  void _actor;
+  const actorName = typeof _actor === "string" ? _actor : (user.email ?? null);
 
   // merge with defaults; ตัดค่าว่าง (undefined/null/"") ออก → ให้ DB ใช้ default ของคอลัมน์
   // (กันเคส NOT NULL DEFAULT เช่น tags text[] ที่ส่ง null ไปทับ default แล้วพัง)
@@ -561,13 +567,24 @@ export async function POST(
   }
 
   // ใช้ supabaseAdmin (service-role bypass RLS) — sprint 8 จะใส่ erp_can() check
-  const { data, error } = await supabaseAdmin()
+  const admin = supabaseAdmin();
+  const { data, error } = await admin
     .from(cfg.table)
     .insert(payload)
     .select(cfg.selectColumns)
     .single();
 
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+
+  // audit (ของกลาง — ลง audit_logs, ไม่ throw)
+  const newId = (data as unknown as Record<string, unknown> | null)?.id;
+  await writeAudit(admin, {
+    action: "create", entityType: cfg.table,
+    entityId: typeof newId === "string" ? newId : null,
+    actorId: user.id, actorName,
+    metadata: { entity },
+  });
+
   const row = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : data;
   return NextResponse.json({ data: row, error: null });
 }
