@@ -161,6 +161,16 @@ export function RelationPicker({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  // ---- #A: ล็อก scroll พื้นหลังตอนเปิด popup (มือถือ) — กัน scroll ทะลุไปพื้นหลัง ----
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    const prevTouch = document.body.style.touchAction;
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+    return () => { document.body.style.overflow = prevOverflow; document.body.style.touchAction = prevTouch; };
+  }, [open]);
+
   const select = (opt: PickerOption | null) => {
     onChange(opt?.id ?? null, opt ?? undefined);
     setCurrent(opt);
@@ -264,7 +274,7 @@ export function RelationPicker({
             </div>
 
             {/* options */}
-            <div className="overflow-y-auto flex-1 sm:max-h-64">
+            <div className="overflow-y-auto flex-1 sm:max-h-64 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             {loading ? (
               <div className="px-3 py-4 text-xs text-slate-400 text-center">กำลังโหลด...</div>
             ) : (
@@ -329,6 +339,19 @@ export function RelationPicker({
               </>
             )}
             </div>
+
+            {/* #B: ปุ่มเพิ่มใหม่แบบถาวร (ฟอร์มเต็มของ module จริง เช่น partner) — sticky ล่างสุด เลื่อนถึงเสมอ */}
+            {config.target_module_key && (
+              <div className="flex-shrink-0 border-t border-slate-100 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+                <button
+                  type="button"
+                  onClick={() => { setOpen(false); setShowCreate(search.trim() || ""); }}
+                  className="w-full h-11 sm:h-9 rounded-lg bg-emerald-600 text-white text-sm font-medium flex items-center justify-center gap-1.5 hover:bg-emerald-700"
+                >
+                  <span className="text-base">＋</span> เพิ่มใหม่
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

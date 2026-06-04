@@ -130,6 +130,22 @@ function rateFor(amt: number, r1: number): number {
 
 type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "automation" | "menusettings";
 
+// บันทึกรูปลงเครื่อง — บน iPhone ใช้ share sheet (Save Image เข้า Photos, ไม่เปิดแท็บใหม่)
+// บน desktop ใช้ <a download> ปกติ (โหลดไฟล์ลงเครื่อง ไม่เปิดแท็บใหม่)
+async function downloadOrSaveImage(blob: Blob, filename: string): Promise<void> {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isIOS = /iP(hone|ad|od)/.test(ua) || (typeof navigator !== "undefined" && navigator.platform === "MacIntel" && (navigator as Navigator).maxTouchPoints > 1);
+  const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean };
+  if (isIOS && nav.canShare) {
+    const file = new File([blob], filename, { type: blob.type || "image/png" });
+    if (nav.canShare({ files: [file] })) { await nav.share({ files: [file] }); return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
   "โอนแล้วบางส่วน": "bg-sky-100 text-sky-700", "โอนครบแล้ว": "bg-emerald-100 text-emerald-700",
@@ -181,6 +197,15 @@ export default function ChinaPayApp() {
   const [preselect, setPreselect] = useState<string[]>([]);   // บิลจีนที่เลือกจากหน้า "ทั้งหมด" → ส่งไปหน้าโอน
   const [deepBill, setDeepBill] = useState<Record<string, unknown> | null>(null);   // เปิดบิลจากลิงก์ ?bill=id
   const [deepTransfer, setDeepTransfer] = useState<Record<string, unknown> | null>(null);   // เปิดใบสรุปการโอนจากลิงก์ ?transfer=id
+  const [rateMissing, setRateMissing] = useState(false);   // วันนี้ยังไม่มีเรท → โชว์ badge เตือน
+
+  // เช็คว่าวันนี้มีเรทหรือยัง (badge เตือนบนเมนูเรท)
+  useEffect(() => {
+    const td = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+    apiFetch("/api/master-v2/daily-rates?limit=10&sort_by=rate_date&sort_dir=desc").then(r => r.json())
+      .then(j => setRateMissing(!(j.data ?? []).some((x: Record<string, unknown>) => String(x.rate_date) === td)))
+      .catch(() => {});
+  }, [tab]);
 
   // โหลดสิทธิ์เมนูตาม role
   useEffect(() => {
@@ -254,6 +279,8 @@ export default function ChinaPayApp() {
         .cp-bg .b1{width:200px;height:200px;background:#fdba74;top:18%;left:-50px;animation-delay:0s}
         .cp-bg .b2{width:240px;height:240px;background:#fed7aa;top:45%;right:-70px;animation-delay:-4s}
         .cp-bg .b3{width:180px;height:180px;background:#fcd34d;bottom:8%;left:30%;animation-delay:-8s;opacity:.3}
+        /* กันเครื่อง dark mode ทำให้ตัวอักษรในช่องกรอก/วันที่ขาวจนอ่านไม่ออก */
+        input,textarea,select{color-scheme:light;color:#1e293b}
         /* บันทึกสำเร็จ */
         @keyframes cpokIn{0%{opacity:0;transform:scale(.6)}55%{opacity:1;transform:scale(1.1)}100%{opacity:1;transform:scale(1)}}
         .cpok-card{animation:cpokIn .4s cubic-bezier(.2,.8,.3,1.5) both}
@@ -291,6 +318,14 @@ export default function ChinaPayApp() {
 
         {/* Content */}
         <main key={renderTab} className="cp-anim relative z-10 flex-1 overflow-y-auto p-4 pb-28">
+          {rateMissing && renderTab !== "rate" && (
+            <button onClick={() => go("rate")}
+              className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-sm text-left animate-pulse">
+              <span className="text-lg">⚠️</span>
+              <span className="flex-1">วันนี้ยังไม่ได้ใส่เรท — แตะเพื่อใส่เรทก่อนโอน</span>
+              <span className="text-xs font-semibold">ใส่เรท →</span>
+            </button>
+          )}
           {renderTab === "dashboard" && <Dashboard onGo={go} />}
           {renderTab === "bill" && <BillForm />}
           {renderTab === "all" && <AllList canDelete={isAdmin} />}
@@ -337,7 +372,11 @@ export default function ChinaPayApp() {
               {navMenu.map(m => (
                 <button key={m.k} onClick={() => go(m.k)}
                   className={`w-full flex items-center gap-3 px-4 py-3 text-left ${renderTab === m.k ? "bg-orange-50 text-orange-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
-                  <span className="text-xl w-7 text-center">{m.icon}</span>{m.label}
+                  <span className="text-xl w-7 text-center">{m.icon}</span>
+                  <span className="flex-1">{m.label}</span>
+                  {m.k === "rate" && rateMissing && (
+                    <span className="flex-shrink-0 text-[10px] font-bold text-white bg-red-500 rounded-full px-2 py-0.5 animate-pulse">ยังไม่ใส่เรท</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -703,9 +742,12 @@ function BillForm() {
 
       {/* popup หลังบันทึก: พิมพ์ / ส่งไลน์ */}
       {savedBill && !report && (
-        <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={() => setSavedBill(null)}>
-          <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
-            <div className="text-3xl mb-1">✅</div>
+        <Portal><div className="fixed inset-0 z-[210] bg-black/40 cpok-bg flex items-center justify-center p-4" onClick={() => setSavedBill(null)}>
+          <div className="relative bg-white rounded-2xl w-full max-w-xs p-5 pt-7 text-center cpok-card" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setSavedBill(null)} className="absolute top-2 right-2 w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+            <div className="mx-auto w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center mb-2">
+              <svg viewBox="0 0 52 52" className="w-9 h-9"><path className="cpok-check" d="M14 27l8 8 16-18" /></svg>
+            </div>
             <div className="text-lg font-semibold text-slate-800">บันทึกบิลแล้ว</div>
             <div className="mt-1 text-sm text-slate-500">{String(savedBill.supplier_label ?? "")} · ¥{fmt(num(savedBill.amount_rmb) + num(savedBill.fee_rmb))}</div>
             <div className="mt-4 space-y-2">
@@ -721,12 +763,12 @@ function BillForm() {
 }
 
 // ---------------- บิลจีนทั้งหมด (รวมหน้ารอโอนเดิม) ----------------
-const ALL_FILTERS = ["ทั้งหมด", "รอโอน", "โอนแล้วบางส่วน", "โอนครบแล้ว", "ยกเลิก"] as const;
+const ALL_FILTERS = ["ค้างโอน", "ทั้งหมด", "รอโอน", "โอนแล้วบางส่วน", "โอนครบแล้ว", "ยกเลิก"] as const;
 function AllList({ canDelete }: { canDelete: boolean }) {
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<string>("รอโอน");   // default = รอโอน
+  const [filter, setFilter] = useState<string>("ค้างโอน");   // default = ค้างโอน (รอโอน + บางส่วน)
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());          // เลือกหลายบิล
@@ -741,7 +783,11 @@ function AllList({ canDelete }: { canDelete: boolean }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const shown = useMemo(() => filter === "ทั้งหมด" ? rows : rows.filter(r => billStatus3(r) === filter), [rows, filter]);
+  const shown = useMemo(() => {
+    if (filter === "ทั้งหมด") return rows;
+    if (filter === "ค้างโอน") return rows.filter(r => { const s = billStatus3(r); return s === "รอโอน" || s === "โอนแล้วบางส่วน"; });
+    return rows.filter(r => billStatus3(r) === filter);
+  }, [rows, filter]);
   const total = useMemo(() => shown.reduce((a, r) => a + billTotalRmb(r), 0), [shown]);
   const onPrinted = (id: string, at: string) => setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -1198,6 +1244,7 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [editIdx, setEditIdx] = useState<number | null>(null);   // สลิปที่กำลังแก้ยอด
   const fileRef = useRef<HTMLInputElement>(null);
   const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
@@ -1263,9 +1310,14 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
                       <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
                 <div className="flex-1 min-w-0">
                   <div className="text-[11px] text-slate-400 mb-0.5">ยอดสลิป (¥)</div>
-                  <Num value={s.amount_rmb ? String(s.amount_rmb) : ""} onChange={(v) => setAmt(i, v)} />
+                  {editIdx === i
+                    ? <Num value={s.amount_rmb ? String(s.amount_rmb) : ""} onChange={(v) => setAmt(i, v)} />
+                    : <div className="h-11 flex items-center font-semibold text-slate-800">¥{fmt(num(s.amount_rmb))}</div>}
                 </div>
-                <button type="button" onClick={() => removeAt(i)} className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded-full">✕</button>
+                {editIdx === i
+                  ? <button type="button" onClick={() => setEditIdx(null)} className="h-9 px-3 flex-shrink-0 bg-emerald-600 text-white rounded-lg text-xs font-medium">เสร็จ</button>
+                  : <button type="button" onClick={() => setEditIdx(i)} className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-blue-500 hover:bg-blue-50 rounded-full" title="แก้ยอด">✎</button>}
+                <button type="button" onClick={() => { removeAt(i); setEditIdx(null); }} className="w-8 h-8 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded-full" title="ลบสลิป">🗑</button>
               </div>
             ))}
           </div>
@@ -2805,12 +2857,10 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
     try {
       const cv = canvasRef.current; const blob = await new Promise<Blob | null>(res => cv ? cv.toBlob(res, "image/png") : res(null));
       if (!blob) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `china-transfer-${String(t.transfer_no ?? "")}.png`.replace(/[\\/:*?"<>|]/g, "_");
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      toast.success("โหลดรูปแล้ว");
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+      const name = `china-transfer-${String(t.transfer_no ?? "")}.png`.replace(/[\\/:*?"<>|]/g, "_");
+      await downloadOrSaveImage(blob, name);
+      toast.success("บันทึกรูปแล้ว");
+    } catch (e) { if ((e as Error).name !== "AbortError") toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   };
 
@@ -3127,12 +3177,9 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     setBusy(true);
     try {
       const blob = await getBlob(); if (!blob) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      await downloadOrSaveImage(blob, filename);
       toast.success("บันทึกรูปแล้ว"); await markPrinted();
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    } catch (e) { if ((e as Error).name !== "AbortError") toast.error(String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   };
 
