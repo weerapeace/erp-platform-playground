@@ -1255,7 +1255,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   };
 
   // F11: render ค่าแบบอ่านอย่างเดียว (detail view)
+  // wrapper: เติมปุ่มคัดลอกค่า ถ้า field ตั้ง ui_style.copyable
   const renderDetailValue = (f: FieldDef): React.ReactNode => {
+    const node = renderDetailValueInner(f);
+    const copyable = !!(f.uiStyle as Record<string, unknown> | undefined)?.copyable;
+    if (!copyable) return node;
+    const raw = form[f.key];
+    if (raw == null || raw === "") return node;
+    return <span className="inline-flex items-center gap-1">{node}<CopyValueBtn text={String(raw)} /></span>;
+  };
+
+  const renderDetailValueInner = (f: FieldDef): React.ReactNode => {
     const v = form[f.key];
     const vs = fieldStyleCss(f.uiStyle);   // สไตล์จาก Studio (ใช้กับค่าในหน้า detail)
     // Quick edit: field ที่ตั้ง inline + แก้ได้ + ชนิดง่ายๆ → กดแก้ได้เลยในหน้า detail
@@ -1708,6 +1718,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       {studioOpen && (
         <StudioPanel
           moduleLabel={config.title}
+          moduleKey={config.moduleKey}
+          layout={registryLayout}
           sampleRows={rows.slice(0, 5) as Record<string, unknown>[]}
           fields={effectiveFields
             .filter((f) => f.fieldId)
@@ -1815,6 +1827,18 @@ function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unkno
 // กลุ่ม B: คลาส grid ต่อจำนวน column (static string → Tailwind ไม่ purge)
 const COLS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
 
+// ปุ่มคัดลอกค่า field (เปิดผ่าน ui_style.copyable ใน Studio)
+function CopyValueBtn({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button type="button" title="คัดลอกค่า"
+      onClick={(e) => { e.stopPropagation(); try { navigator.clipboard?.writeText(text); setDone(true); setTimeout(() => setDone(false), 1200); } catch { /* ignore */ } }}
+      className={`text-xs shrink-0 ${done ? "text-emerald-600" : "text-slate-300 hover:text-blue-600"}`}>
+      {done ? "✓" : "⧉"}
+    </button>
+  );
+}
+
 /** จัด field เป็น Map<group_key, FieldDef[]> (sort ตาม order) */
 function groupByKey(fields: FieldDef[]): Map<string, FieldDef[]> {
   const map = new Map<string, FieldDef[]>();
@@ -1836,7 +1860,8 @@ function LayoutTabs({
   byGroup: Map<string, FieldDef[]>;
   renderGrid: (fields: FieldDef[], columns: number) => React.ReactNode;
 }) {
-  const tabs = layout.tabs ?? [];
+  // ซ่อนแท็บที่ไม่มี field จริง (เช่นแท็บ core ฝั่งขวาที่ core ถูกเรนเดอร์แยกซ้ายแล้ว)
+  const tabs = (layout.tabs ?? []).filter((t) => t.sections.some((s) => (byGroup.get(s.key)?.length ?? 0) > 0));
   const [active, setActive] = useState<string>(tabs[0]?.key ?? "");
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some((t) => t.key === active)) setActive(tabs[0].key);

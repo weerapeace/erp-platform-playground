@@ -15,7 +15,9 @@
  */
 
 import { useState, useMemo, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import {
   DndContext, type DragEndEvent, PointerSensor, KeyboardSensor,
   useSensor, useSensors, closestCorners,
@@ -25,6 +27,12 @@ import {
   verticalListSortingStrategy, arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+
+// แท็บ Field Registry (ฝัง) — โหลดเฉพาะตอนเปิดแท็บ
+const SchemaSyncClient = dynamic(
+  () => import("@/app/admin/schema-sync/schema-sync-client").then((m) => m.SchemaSyncClient),
+  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+);
 
 export type StudioField = {
   fieldId?:    string;
@@ -63,18 +71,27 @@ const GROUP_META: Record<string, { label: string; icon: string; order: number }>
 function gmeta(k: string) { return GROUP_META[k] ?? { label: k, icon: "📁", order: 99 }; }
 const ALL_GROUPS = Object.keys(GROUP_META);
 
-type Tab = "table" | "form";
+type Tab = "table" | "form" | "registry";
 
 export function StudioPanel({
-  fields, moduleLabel, onClose, onSaved, sampleRows = [],
+  fields, moduleLabel, moduleKey, layout, onClose, onSaved, sampleRows = [],
 }: {
   fields:      StudioField[];
   moduleLabel: string;
+  moduleKey?:  string;
+  layout?:     FormLayout;
   onClose:     () => void;
   onSaved:     () => void;
   sampleRows?: Record<string, unknown>[];
 }) {
   const [tab, setTab] = useState<Tab>("table");
+  // จำนวนคอลัมน์ต่อหมวด (section) — init จาก layout เดิม ไม่งั้น default 2
+  const [sectionCols, setSectionCols] = useState<Record<string, number>>(() => {
+    const out: Record<string, number> = {};
+    (layout?.tabs ?? []).forEach((t) => t.sections.forEach((s) => { out[s.key] = s.columns || 2; }));
+    return out;
+  });
+  const setCols = (group: string, n: number) => { setSectionCols((p) => ({ ...p, [group]: n })); setDirty(true); };
   const [previewIdx, setPreviewIdx] = useState(0);
   const [items, setItems] = useState<StudioField[]>(() =>
     [...fields].sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
@@ -200,6 +217,21 @@ export function StudioPanel({
         })
       ));
 
+      // 8. layout ฟอร์ม (จำนวนคอลัมน์ต่อ section) → erp_modules.config.layout
+      if (moduleKey) {
+        const order: string[] = [];
+        for (const i of items) { const g = i.groupKey ?? "other"; if (!order.includes(g)) order.push(g); }
+        const tabs = order.map((g) => ({
+          key: g, label: gmeta(g).label, icon: gmeta(g).icon,
+          sections: [{ key: g, label: gmeta(g).label, columns: sectionCols[g] ?? 2 }],
+        }));
+        const r = await apiFetch("/api/admin/module-layout", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ module_key: moduleKey, layout: { tabs } }),
+        });
+        if ((await r.json()).error) throw new Error("layout failed");
+      }
+
       setMsg("✓ บันทึก layout สำเร็จ");
       setDirty(false);
       setTimeout(() => onSaved(), 600);
@@ -254,7 +286,7 @@ export function StudioPanel({
           </div>
           {/* Tabs */}
           <div className="ml-4 flex bg-slate-100 rounded-lg p-0.5">
-            {([["table","📊 ตาราง"],["form","📝 ฟอร์ม"]] as [Tab,string][]).map(([t,l]) => (
+            {([["table","📊 ตาราง"],["form","📝 ฟอร์ม"], ...(moduleKey ? [["registry","🗂️ Field Registry"] as [Tab,string]] : [])] as [Tab,string][]).map(([t,l]) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-3 py-1.5 text-sm rounded-md transition-colors ${tab===t?"bg-white shadow-sm font-medium text-slate-900":"text-slate-500 hover:text-slate-700"}`}>
                 {l}
@@ -273,7 +305,15 @@ export function StudioPanel({
         </div>
       </header>
 
+      {/* แท็บ Field Registry — ฝังหน้าตั้งค่า field เต็มความกว้าง */}
+      {tab === "registry" && moduleKey && (
+        <div className="flex-1 overflow-y-auto">
+          <SchemaSyncClient initialModule={moduleKey} lockModule embedded />
+        </div>
+      )}
+
       {/* Body: ซ้าย = editor / ขวา = preview */}
+      {tab !== "registry" && (
       <div className="flex-1 overflow-hidden flex">
         {/* ---- LEFT: editor ---- */}
         <div className="w-1/2 overflow-y-auto border-r border-slate-200 p-5">
@@ -288,6 +328,7 @@ export function StudioPanel({
               grouped={grouped} sensors={sensors} onDragEnd={onDragEnd}
               items={items} onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
               settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)} onPatch={patchItem}
+              sectionCols={sectionCols} onSetCols={setCols}
             />
           )}
         </div>
@@ -315,6 +356,7 @@ export function StudioPanel({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -396,7 +438,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch,
+  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, sectionCols, onSetCols,
 }: {
   grouped: [string, StudioField[]][];
   sensors: ReturnType<typeof useSensors>;
@@ -406,6 +448,8 @@ function FormEditor({
   onToggleInline: (key: string)=>void;
   onToggleBulk: (key: string)=>void;
   onMoveGroup: (key: string, group: string)=>void;
+  sectionCols: Record<string, number>;
+  onSetCols: (group: string, n: number)=>void;
   settingsKey: string | null;
   onToggleSettings: (key: string)=>void;
   onPatch: (key: string, patch: Partial<StudioField>)=>void;
@@ -419,7 +463,8 @@ function FormEditor({
             {grouped.map(([gk, fs])=>{
               const m = gmeta(gk);
               return (
-                <FormSectionZone key={gk} groupKey={gk} label={m.label} icon={m.icon} count={fs.length}>
+                <FormSectionZone key={gk} groupKey={gk} label={m.label} icon={m.icon} count={fs.length}
+                  cols={sectionCols[gk] ?? 2} onSetCols={(n)=>onSetCols(gk,n)}>
                   {fs.map(f=>(
                     <div key={f.key}>
                       <FormFieldRow field={f} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)}
@@ -486,6 +531,7 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
         ))}
         <span className="ml-1 text-slate-300">|</span>
         <Toggle on={!!us.highlight} label="ไฮไลต์" onClick={()=>setUi("highlight",!us.highlight)} />
+        <Toggle on={!!us.copyable} label="📋 คัดลอกค่า" onClick={()=>setUi("copyable",!us.copyable)} />
       </div>
       {/* แถว 5: สี */}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -500,13 +546,20 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
   );
 }
 
-function FormSectionZone({ groupKey, label, icon, count, children }: { groupKey: string; label: string; icon: string; count: number; children: React.ReactNode }) {
+function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, children }: { groupKey: string; label: string; icon: string; count: number; cols: number; onSetCols: (n: number)=>void; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useSortable({ id: `group:${groupKey}` });
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div ref={setNodeRef} className={`px-3 py-2 flex items-center gap-2 border-b border-slate-100 ${isOver?"bg-orange-50":"bg-slate-50"}`}>
         <span>{icon}</span><span className="text-sm font-semibold text-slate-700">{label}</span>
         <span className="text-xs text-slate-400">({count})</span>
+        <div className="ml-auto flex items-center gap-1" title="จำนวนคอลัมน์ของหมวดนี้">
+          <span className="text-[11px] text-slate-400">คอลัมน์:</span>
+          {[1,2,3].map((n)=>(
+            <button key={n} type="button" onClick={()=>onSetCols(n)}
+              className={`w-6 h-6 text-xs rounded border ${cols===n?"bg-orange-100 border-orange-300 text-orange-700 font-semibold":"bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{n}</button>
+          ))}
+        </div>
       </div>
       <div className="p-2 space-y-1">{children}</div>
     </div>
