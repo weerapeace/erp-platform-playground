@@ -317,6 +317,7 @@ export default function TasksPage() {
           /* Canvas board (แบบ Miro) — ลากการ์ดอิสระ + โซน + sticky note */
           <CanvasBoard
             tasks={tasks}
+            startMaximized
             onCardClick={(id) => setDetailId(id)}
             onMove={(taskId, to) => doTransition(taskId, to, "ลากบน Canvas")}
           />

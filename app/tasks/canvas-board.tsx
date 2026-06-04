@@ -66,11 +66,12 @@ const styleOf = (o: BoardObject): React.CSSProperties => ({
 });
 
 export function CanvasBoard({
-  tasks, onMove, onCardClick,
+  tasks, onMove, onCardClick, startMaximized,
 }: {
   tasks: Task[];
   onMove: (taskId: string, to: TaskStatus) => void;
   onCardClick: (id: string) => void;
+  startMaximized?: boolean;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -85,7 +86,7 @@ export function CanvasBoard({
   const [future, setFuture] = useState<Board[]>([]);
   const [tool, setTool] = useState<Tool>("select");
   const [selId, setSelId] = useState<string | null>(null);
-  const [isMax, setIsMax] = useState(false);
+  const [isMax, setIsMax] = useState(!!startMaximized);
   const barRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(44);
   const [dragging, setDragging] = useState(false);   // ลาก/ย่อขยายอยู่ → ซ่อนแถบจัดรูปแบบ
