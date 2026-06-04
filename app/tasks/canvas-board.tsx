@@ -75,7 +75,7 @@ export function CanvasBoard({
   const [objects, setObjects] = useState<BoardObject[]>([]);
   const [tool, setTool] = useState<Tool>("select");
   const [editingId, setEditingId] = useState<string | null>(null);   // sticky / object ที่กำลังแก้
-  const [isFs, setIsFs] = useState(false);
+  const [isMax, setIsMax] = useState(false);
 
   // ---- load/save layout ----
   useEffect(() => {
@@ -89,16 +89,14 @@ export function CanvasBoard({
   useEffect(() => { try { localStorage.setItem(STICKY_KEY, JSON.stringify(stickies)); } catch { /* ignore */ } }, [stickies]);
   useEffect(() => { try { localStorage.setItem(OBJ_KEY, JSON.stringify(objects)); } catch { /* ignore */ } }, [objects]);
 
-  // ---- fullscreen ----
+  // ---- ขยายเต็มหน้าต่างเบราว์เซอร์ (ไม่ใช่ OS fullscreen) — กด Esc เพื่อย่อกลับ ----
   useEffect(() => {
-    const h = () => setIsFs(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", h);
-    return () => document.removeEventListener("fullscreenchange", h);
-  }, []);
-  const toggleFs = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else wrapRef.current?.requestFullscreen().catch(() => {});
-  };
+    if (!isMax) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setIsMax(false); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [isMax]);
+  const toggleFs = () => setIsMax(m => !m);
 
   // ---- auto layout (เมื่อยังไม่เคยลาก) ----
   const autoPos = useMemo(() => {
@@ -235,9 +233,9 @@ export function CanvasBoard({
   const deleteObject = (id: string) => { setObjects(p => p.filter(o => o.id !== id)); if (editingId === id) setEditingId(null); };
 
   return (
-    <div ref={wrapRef} className={isFs ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "relative"}>
+    <div ref={wrapRef} className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "relative"}>
       {/* Toolbar */}
-      <div className={`${isFs ? "" : "absolute top-3 left-3"} z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit`}>
+      <div className={`${isMax ? "" : "absolute top-3 left-3"} z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit`}>
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
         <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
         <span className="w-px h-6 bg-slate-200 mx-0.5" />
@@ -251,9 +249,9 @@ export function CanvasBoard({
         <span className="w-px h-6 bg-slate-200 mx-0.5" />
         <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
         <ToolBtn onClick={resetLayout} title="จัดเรียงการ์ดใหม่อัตโนมัติ">↺</ToolBtn>
-        <ToolBtn onClick={toggleFs} title={isFs ? "ออกจากเต็มจอ" : "เต็มจอ"}>{isFs ? "🗗" : "⛶"}</ToolBtn>
+        <ToolBtn onClick={toggleFs} title={isMax ? "ย่อกลับ (Esc)" : "ขยายเต็มหน้าต่าง"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
       </div>
-      {!isFs && (
+      {!isMax && (
         <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
           ลากพื้นหลัง = เลื่อน · ล้อเมาส์ = ซูม · ลากการ์ดข้ามโซน = เปลี่ยนสถานะ · คลิกกล่อง/ข้อความ = แก้
         </div>
@@ -265,7 +263,7 @@ export function CanvasBoard({
         onPointerDown={onBoardPointerDown}
         onPointerMove={onBoardPointerMove}
         onPointerUp={onBoardPointerUp}
-        className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isFs ? "flex-1 mt-2" : "h-[calc(100vh-260px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-default" : "cursor-crosshair"}`}
+        className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isMax ? "flex-1 mt-2" : "h-[calc(100vh-260px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : tool === "select" ? "cursor-default" : "cursor-crosshair"}`}
         style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}
       >
         <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
