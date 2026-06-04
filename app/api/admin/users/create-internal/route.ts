@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { internalEmail, isValidUsername, isValidPin } from "@/lib/internal-users";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -70,11 +71,12 @@ export async function POST(request: NextRequest) {
   // 5) เซ็ต username (RPC ไม่ได้ตั้งให้)
   await admin.from("user_profiles").update({ username }).eq("id", uid);
 
-  // 6) audit
-  await admin.from("erp_audit_logs").insert({
-    actor_name: body.actor ?? "system", action: "admin.create_internal_user", module: "admin.users",
-    record_label: username, new_value: { role, internal: true },
-  }).then(() => {}, () => {});
+  // 6) audit (ของกลาง — ลง audit_logs, ไม่ throw)
+  await writeAudit(admin, {
+    action: "admin.create_internal_user", entityType: "user_profiles", entityId: uid,
+    actorName: body.actor ?? "system",
+    metadata: { module: "admin.users", username, role, internal: true },
+  });
 
   return NextResponse.json({ ok: true, data: { id: uid, username, email, role }, error: null });
 }

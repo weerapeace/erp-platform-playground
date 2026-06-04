@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,14 +51,16 @@ export async function POST(request: NextRequest) {
   const { error: delErr } = await admin.from("erp_module_fields").delete().eq("module_id", mod.id).eq("field_key", b.field_key);
   if (delErr) return NextResponse.json({ error: "ลบทะเบียน field ไม่สำเร็จ: " + delErr.message }, { status: 500 });
 
-  // 3) audit log (best-effort)
-  await admin.from("erp_audit_logs").insert({
-    actor_name: b.actor ?? user.email ?? "system",
+  // 3) audit log (ของกลาง — ลง audit_logs, ไม่ throw)
+  await writeAudit(admin, {
     action: b.drop_column && !isVirtual ? "schema.drop_field" : "schema.remove_field",
-    module: b.module_key,
-    record_label: `${mod.table_name}.${b.field_key}`,
-    old_value: { ui_type: field?.ui_field_type ?? null, dropped_column: !!b.drop_column && !isVirtual },
-  }).then(() => {}, () => {});
+    entityType: mod.table_name as string,
+    actorId: user.id, actorName: b.actor ?? user.email ?? null,
+    metadata: {
+      module: b.module_key, field: `${mod.table_name}.${b.field_key}`,
+      ui_type: field?.ui_field_type ?? null, dropped_column: !!b.drop_column && !isVirtual,
+    },
+  });
 
   return NextResponse.json({ ok: true, dropped_column: !!b.drop_column && !isVirtual });
 }

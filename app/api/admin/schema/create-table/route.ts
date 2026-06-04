@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -48,10 +49,12 @@ export async function POST(request: NextRequest) {
     show_in_sidebar: false, show_in_launcher: false, is_active: true, app_keys: [],
   }).then(() => {}, () => {});   // best-effort — ถ้าซ้ำ/พลาด ไม่ให้ล้มการสร้างโมดูล
 
-  // 5) audit (best-effort)
-  await admin.from("erp_audit_logs").insert({
-    actor_name: "system", action: "schema.create_table", module: b.table, record_label: b.table,
-  }).then(() => {}, () => {});
+  // 5) audit (ของกลาง — ลง audit_logs, ไม่ throw)
+  await writeAudit(admin, {
+    action: "schema.create_table", entityType: b.table,
+    actorName: "system",
+    metadata: { table: b.table, label: b.label },
+  });
 
   return NextResponse.json({ ok: true, module_key: b.table });
 }

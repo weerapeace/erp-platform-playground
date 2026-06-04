@@ -13,6 +13,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -155,12 +156,12 @@ export async function POST(request: NextRequest) {
   });
   if (insErr) return NextResponse.json({ error: "ลงทะเบียน field ไม่สำเร็จ: " + insErr.message }, { status: 500 });
 
-  // 4) audit log (best-effort)
-  await admin.from("erp_audit_logs").insert({
-    actor_name: b.actor ?? "system", action: "schema.add_field", module: b.module_key,
-    record_label: `${table}.${b.field_key}`,
-    new_value: { type: b.ui_type, target: b.target_table ?? null },
-  }).then(() => {}, () => {}); // ไม่ให้ audit ล้มแล้วพัง
+  // 4) audit log (ของกลาง — ลง audit_logs, ไม่ throw)
+  await writeAudit(admin, {
+    action: "schema.add_field", entityType: table,
+    actorName: b.actor ?? "system",
+    metadata: { module: b.module_key, field: `${table}.${b.field_key}`, type: b.ui_type, target: b.target_table ?? null },
+  });
 
   return NextResponse.json({ ok: true, field_key: b.field_key });
 }
