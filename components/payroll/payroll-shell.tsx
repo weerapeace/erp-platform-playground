@@ -25,6 +25,7 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
     { href: "/payroll/periods", icon: "🗓️", label: "งวดเงินเดือน" },
     { href: "/payroll/review", icon: "✅", label: "ตรวจสอบเงินเดือน" },
     { href: "/payroll/calc-verify", icon: "🧮", label: "เทียบยอดคำนวณ" },
+    { href: "/payroll/calc-run", icon: "▶️", label: "คำนวณงวด (พรีวิว)" },
     { href: "/payroll/payslips", icon: "🧾", label: "สลิปเงินเดือน" },
     { href: "/payroll/payments", icon: "🏦", label: "รอบจ่ายเงิน" },
     { href: "/payroll/attendance", icon: "⏰", label: "เวลาเข้าออก" },
