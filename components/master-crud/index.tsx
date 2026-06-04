@@ -561,6 +561,27 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [drawerMode,  setDrawerMode]  = useState<"view" | "edit">("view");
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // อัปเดตค่า "related" สด เมื่อเปลี่ยน FK ต้นทางในฟอร์ม (เช่น เลือก size_description_id → size_description/how_to_size อัปเดตตาม)
+  const relViaKey = relatedFields
+    .map((f) => { const rc = (f.relation_config ?? {}) as Record<string, unknown>; return String(rc.via_column ?? rc.via_field ?? ""); })
+    .map((c) => String(form[c] ?? "")).join("|");
+  useEffect(() => {
+    if (!modalOpen || relatedFieldsRef.current.length === 0) return;
+    let alive = true;
+    (async () => {
+      await ensureRelatedMaps([form as Row]);
+      if (!alive) return;
+      const enriched = enrichRelated([form as Row])[0];
+      setForm((prev) => {
+        const patch: Record<string, unknown> = {};
+        for (const f of relatedFieldsRef.current) patch[f.field_key] = enriched[f.field_key] ?? null;
+        return { ...prev, ...patch };
+      });
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [relViaKey, modalOpen]);
+
   // archive (soft) — เก็บไว้เผื่อ flow อื่น
   const [archiveTarget, setArchiveTarget] = useState<Row | null>(null);
   // delete dialog (ลบชั่วคราว / ลบถาวร)
@@ -1767,12 +1788,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               defaultValue: (f.defaultValue as string | null) ?? "",
               uiStyle:     f.uiStyle ?? {},
             }))}
-          onClose={() => setStudioOpen(false)}
-          onSaved={() => {
-            setStudioOpen(false);
-            // reload field registry → layout ใหม่มีผลทันที
-            void refreshRegistry();
-          }}
+          onClose={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}
+          onSaved={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}
         />
       )}
 

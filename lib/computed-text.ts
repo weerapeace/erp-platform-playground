@@ -97,6 +97,17 @@ TEXT_COMPUTES.platform_description = {
   },
 };
 
+// Parent SKU — Name Platform = ชื่อสินค้า + Code  (เช่น "Louis Montini (Burning Sand) กระเป๋า... TTM089")
+TEXT_COMPUTES.name_platform_code = {
+  label: "ชื่อแพลตฟอร์ม + รหัส",
+  describe: "ชื่อสินค้า + รหัส (Code) ต่อท้าย — ใช้ Name Platform ถ้ามี ไม่งั้นใช้ Name Th",
+  fn: (r) => {
+    const base = trim(r.name_platform) || trim(r.name_th);
+    const code = trim(r.code);
+    return [base, code].filter(Boolean).join(" ");
+  },
+};
+
 export function computedTextValue(name: string | undefined | null, row: Record<string, unknown>): string | null {
   if (!name) return null;
   const def = TEXT_COMPUTES[name];
