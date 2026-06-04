@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listEmployees, createEmployee } from "@/lib/payroll-employees-db";
 import { listContracts, createContract } from "@/lib/payroll-contracts-db";
+import { listSettings, createSettings } from "@/lib/payroll-settings-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
@@ -32,6 +33,11 @@ const CORE: Record<string, {
     auditType: "employee_contracts", list: listContracts, create: createContract,
     validateCreate: () => null,
     label: (r) => r.contract_no,
+  },
+  settings: {
+    auditType: "employee_payroll_settings", list: listSettings, create: createSettings,
+    validateCreate: () => null,
+    label: (r) => r.employee_name,
   },
 };
 

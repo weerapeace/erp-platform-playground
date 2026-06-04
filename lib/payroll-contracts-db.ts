@@ -49,13 +49,25 @@ async function codeToEmployeeId(code: string): Promise<string | null> {
   const { data } = await supabaseAdmin().from("employees").select("id").eq("employee_code", code).limit(1);
   return (data?.[0] as { id: string } | undefined)?.id ?? null;
 }
+async function wtpMap(): Promise<Record<string, string>> {
+  const { data } = await supabaseAdmin().from("work_time_profiles").select("id, profile_name");
+  const m: Record<string, string> = {};
+  (data ?? []).forEach((p) => { m[(p as { id: string }).id] = (p as { profile_name: string }).profile_name; });
+  return m;
+}
 
-function decorate(row: Record<string, unknown>, em: Record<string, string>, cm: Record<string, string>): ContractRow {
+async function maps() {
+  const [em, cm, wm] = await Promise.all([empMap(), companyMap(), wtpMap()]);
+  return { em, cm, wm };
+}
+
+function decorate(row: Record<string, unknown>, em: Record<string, string>, cm: Record<string, string>, wm: Record<string, string> = {}): ContractRow {
   return {
     ...row,
     id: row.id as string,
     employee_name: row.employee_id ? (em[row.employee_id as string] ?? "") : "",
     company_name:  row.company_id ? (cm[row.company_id as string] ?? "") : "",
+    work_time_profile_name: row.work_time_profile_id ? (wm[row.work_time_profile_id as string] ?? "") : "",
     active:        row.status === "active",
   };
 }
@@ -66,16 +78,16 @@ export async function listContracts(includeInactive: boolean, employeeId?: strin
   if (employeeId) q = q.eq("employee_id", employeeId);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  const [em, cm] = await Promise.all([empMap(), companyMap()]);
-  return (data ?? []).map((r) => decorate(r as Record<string, unknown>, em, cm));
+  const { em, cm, wm } = await maps();
+  return (data ?? []).map((r) => decorate(r as Record<string, unknown>, em, cm, wm));
 }
 
 export async function getContract(id: string): Promise<ContractRow | null> {
   const { data, error } = await supabaseAdmin().from(TABLE).select(SELECT).eq("id", id).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
-  const [em, cm] = await Promise.all([empMap(), companyMap()]);
-  return decorate(data[0] as Record<string, unknown>, em, cm);
+  const { em, cm, wm } = await maps();
+  return decorate(data[0] as Record<string, unknown>, em, cm, wm);
 }
 
 async function toColumns(body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -109,8 +121,8 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
   };
   const { data, error } = await supabaseAdmin().from(TABLE).insert(insert).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
-  const [em, cm] = await Promise.all([empMap(), companyMap()]);
-  return decorate(data![0] as Record<string, unknown>, em, cm);
+  const { em, cm, wm } = await maps();
+  return decorate(data![0] as Record<string, unknown>, em, cm, wm);
 }
 
 export async function updateContract(id: string, body: Record<string, unknown>): Promise<ContractRow | null> {
@@ -119,8 +131,8 @@ export async function updateContract(id: string, body: Record<string, unknown>):
   const { data, error } = await supabaseAdmin().from(TABLE).update(cols).eq("id", id).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
-  const [em, cm] = await Promise.all([empMap(), companyMap()]);
-  return decorate(data[0] as Record<string, unknown>, em, cm);
+  const { em, cm, wm } = await maps();
+  return decorate(data[0] as Record<string, unknown>, em, cm, wm);
 }
 
 export async function softDeleteContract(id: string): Promise<boolean> {

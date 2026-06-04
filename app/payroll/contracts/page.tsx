@@ -73,6 +73,8 @@ const CONFIG: MasterCRUDConfig = {
         return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
       } },
     // นโยบาย / การส่งออก
+    { key: "work_time_profile_name", label: "เวลาทำงาน (โปรไฟล์)", type: "text", colSize: 160, readonly: true, groupKey: "นโยบาย/ส่งออก", order: 198,
+      helpText: "โปรไฟล์เวลาเข้า-ออก (แก้ที่หน้าโปรไฟล์เวลาทำงาน)" },
     { key: "work_schedule_id",   label: "ตารางเวลาทำงาน", type: "text", colSize: 130, groupKey: "นโยบาย/ส่งออก", order: 200 },
     { key: "overtime_policy_id", label: "นโยบาย OT",      type: "text", colSize: 120, groupKey: "นโยบาย/ส่งออก", order: 202 },
     { key: "leave_policy_id",    label: "นโยบายการลา",    type: "text", colSize: 120, groupKey: "นโยบาย/ส่งออก", order: 204 },

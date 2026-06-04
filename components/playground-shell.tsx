@@ -78,6 +78,7 @@ export const navGroups = [
       { href: "/payroll/departments", icon: "🗂️", labelTH: "แผนก (Payroll)" },
       { href: "/payroll/companies", icon: "🏢", labelTH: "บริษัท (Payroll)" },
       { href: "/payroll/work-time-profiles", icon: "🕐", labelTH: "โปรไฟล์เวลาทำงาน" },
+      { href: "/payroll/employee-settings", icon: "⚙️", labelTH: "ตั้งค่าเงินเดือนรายคน" },
     ],
   },
   {

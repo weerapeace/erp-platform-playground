@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEmployee, updateEmployee, softDeleteEmployee } from "@/lib/payroll-employees-db";
 import { getContract, updateContract, softDeleteContract } from "@/lib/payroll-contracts-db";
+import { getSettings, updateSettings, softDeleteSettings } from "@/lib/payroll-settings-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
@@ -28,6 +29,10 @@ const CORE: Record<string, {
   contracts: {
     auditType: "employee_contracts", get: getContract, update: updateContract, del: softDeleteContract,
     deleteMsg: "ลบสัญญาถาวรไม่ได้ — ระบบจะเปลี่ยนสถานะเป็น 'ยกเลิก' แทน",
+  },
+  settings: {
+    auditType: "employee_payroll_settings", get: getSettings, update: updateSettings, del: softDeleteSettings,
+    deleteMsg: "ตั้งค่าเงินเดือนลบไม่ได้ — แก้ค่าแทน",
   },
 };
 
