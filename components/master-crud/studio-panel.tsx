@@ -122,8 +122,54 @@ function IconPicker({ value, onChange }: { value: string; onChange: (v: string)=
   );
 }
 
+// เลือกรายการจริงมาโชว์ใน preview (ค้นหา code/ชื่อ)
+function SamplePicker({ label, searchSample, onPick, onClear }: { label: string; searchSample: (q: string)=>Promise<{id:string;label:string}[]>; onPick: (id: string, label: string)=>void; onClear: ()=>void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [opts, setOpts] = useState<{id:string;label:string}[]>([]);
+  const [loading, setLoading] = useState(false);
+  const tRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const run = (query: string) => {
+    setQ(query);
+    if (tRef.current) clearTimeout(tRef.current);
+    tRef.current = setTimeout(async () => {
+      setLoading(true);
+      try { setOpts(await searchSample(query)); } catch { setOpts([]); } finally { setLoading(false); }
+    }, 250);
+  };
+  return (
+    <div className="relative">
+      {label ? (
+        <div className="flex items-center gap-1 h-7 px-2 text-xs bg-orange-50 border border-orange-200 rounded">
+          <span className="text-orange-700 max-w-[120px] truncate" title={label}>{label}</span>
+          <button type="button" onClick={onClear} title="ล้าง" className="text-orange-400 hover:text-red-500">✕</button>
+          <button type="button" onClick={()=>{ setOpen(true); run(""); }} title="เปลี่ยน" className="text-orange-500 hover:text-orange-700">▾</button>
+        </div>
+      ) : (
+        <button type="button" onClick={()=>{ setOpen(true); run(""); }}
+          className="h-7 px-2 text-xs border border-slate-200 rounded text-slate-600 hover:bg-slate-50">🔍 เลือกรายการจริง</button>
+      )}
+      {open && (<>
+        <div className="fixed inset-0 z-20" onClick={()=>setOpen(false)} />
+        <div className="absolute right-0 z-30 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg p-2">
+          <input autoFocus value={q} onChange={(e)=>run(e.target.value)} placeholder="ค้นหา code/ชื่อ…"
+            className="w-full h-8 px-2 text-xs border border-slate-200 rounded mb-1" />
+          <div className="max-h-56 overflow-y-auto">
+            {loading && <div className="text-xs text-slate-400 py-2 text-center">กำลังค้นหา…</div>}
+            {!loading && opts.length===0 && <div className="text-xs text-slate-300 py-2 text-center">— ไม่พบ —</div>}
+            {opts.map((o)=>(
+              <button key={o.id} type="button" onClick={()=>{ onPick(o.id, o.label); setOpen(false); }}
+                className="block w-full text-left px-2 py-1.5 text-xs rounded hover:bg-orange-50 truncate">{o.label}</button>
+            ))}
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 export function StudioPanel({
-  fields, moduleLabel, moduleKey, layout, onClose, onSaved, sampleRows = [],
+  fields, moduleLabel, moduleKey, layout, onClose, onSaved, sampleRows = [], searchSample, loadSample,
 }: {
   fields:      StudioField[];
   moduleLabel: string;
@@ -132,7 +178,12 @@ export function StudioPanel({
   onClose:     () => void;
   onSaved:     () => void;
   sampleRows?: Record<string, unknown>[];
+  searchSample?: (q: string) => Promise<{ id: string; label: string }[]>;
+  loadSample?:   (id: string) => Promise<Record<string, unknown> | null>;
 }) {
+  // เลือกรายการจริงมาโชว์ใน preview (pickup)
+  const [pickedRow, setPickedRow] = useState<Record<string, unknown> | null>(null);
+  const [pickedLabel, setPickedLabel] = useState<string>("");
   const [tab, setTab] = useState<Tab>("table");
   // หมวด (section) — แก้ชื่อ/ลบ/สร้าง/เรียง/คอลัมน์ได้ · init จาก layout เดิม ไม่งั้น derive จาก group ของ field
   const [sections, setSections] = useState<SectionDef[]>(() => {
@@ -417,15 +468,25 @@ export function StudioPanel({
 
         {/* ---- RIGHT: live preview ---- */}
         <div className="w-1/2 overflow-y-auto bg-white p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-xs font-semibold text-slate-400 uppercase">👁 Preview สด {tab==="form" && sampleRows.length>0 ? "(ข้อมูลจริง)" : ""}</div>
-            {tab==="form" && sampleRows.length>0 && (
-              <div className="flex items-center gap-1">
-                <span className="text-[11px] text-slate-400 mr-1">ตัวอย่างรายการ:</span>
-                {sampleRows.map((_,i)=>(
-                  <button key={i} onClick={()=>setPreviewIdx(i)}
-                    className={`w-6 h-6 rounded text-xs ${previewIdx===i?"bg-orange-500 text-white":"bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{i+1}</button>
-                ))}
+          <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+            <div className="text-xs font-semibold text-slate-400 uppercase">👁 Preview สด {tab==="form" && (pickedRow || sampleRows.length>0) ? "(ข้อมูลจริง)" : ""}</div>
+            {tab==="form" && (
+              <div className="flex items-center gap-2">
+                {/* เลือกรายการจริงมาโชว์ (pickup) */}
+                {searchSample && loadSample && (
+                  <SamplePicker label={pickedLabel} searchSample={searchSample}
+                    onPick={async (id, lbl)=>{ const row = await loadSample(id); if (row) { setPickedRow(row); setPickedLabel(lbl); } }}
+                    onClear={()=>{ setPickedRow(null); setPickedLabel(""); }} />
+                )}
+                {!pickedRow && sampleRows.length>0 && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] text-slate-400 mr-1">ตัวอย่าง:</span>
+                    {sampleRows.map((_,i)=>(
+                      <button key={i} onClick={()=>setPreviewIdx(i)}
+                        className={`w-6 h-6 rounded text-xs ${previewIdx===i?"bg-orange-500 text-white":"bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>{i+1}</button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -434,7 +495,7 @@ export function StudioPanel({
           ) : (
             <FormPreview
               groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
-              row={sampleRows[previewIdx]} moduleLabel={moduleLabel} />
+              row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel} />
           )}
         </div>
       </div>

@@ -1722,6 +1722,21 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           moduleKey={config.moduleKey}
           layout={registryLayout}
           sampleRows={rows.slice(0, 5) as Record<string, unknown>[]}
+          searchSample={async (q: string) => {
+            try {
+              const url = `${apiBase}${config.apiPath}?limit=10&include_inactive=true${q ? `&search=${encodeURIComponent(q)}` : ""}`;
+              const j = await apiFetch(url).then((r) => r.json());
+              return ((j.data ?? []) as Row[]).map((r) => ({ id: String(r.id), label: String(r.code ?? r.name_th ?? r.name ?? r.id) }));
+            } catch { return []; }
+          }}
+          loadSample={async (id: string) => {
+            try {
+              const j = await apiFetch(`${apiBase}${config.apiPath}/${id}`).then((r) => r.json());
+              if (!j.data) return null;
+              await ensureRelatedMaps([j.data as Row]);
+              return enrichRelated([j.data as Row])[0] as Record<string, unknown>;
+            } catch { return null; }
+          }}
           fields={effectiveFields
             .filter((f) => f.fieldId)
             .map<StudioField>((f) => ({
