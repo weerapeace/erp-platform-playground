@@ -12,6 +12,7 @@ import { ActivityFeed } from "@/components/activity-feed";
 import type { ActivityEntry } from "@/components/activity-feed";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import type { RowAction, BulkEditField } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SandboxProduct, SandboxProductsResponse } from "@/app/api/playground-products/route";
@@ -537,7 +538,7 @@ export default function ProductsCrudPage() {
                   <DF label="แบรนด์" value={row.brand_name} />
                   <DF label="หน่วยนับ" value={row.uom_name} />
                   <DF label="สี" value={row.color} />
-                  <DF label="วันที่อัปเดต" value={row.updated_at?.slice(0, 10)} />
+                  <DF label="วันที่อัปเดต" value={formatDate(row.updated_at)} />
                 </div>
                 <div className="border-t border-slate-100" />
                 <div className="grid grid-cols-3 gap-3">

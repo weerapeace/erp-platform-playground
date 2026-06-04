@@ -9,6 +9,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SkuStockRow } from "@/app/api/inventory/sku-stock/route";
 
@@ -36,7 +37,7 @@ const COLUMNS: ColumnDef<SkuStockRow>[] = [
     accessorKey: "last_movement_at", header: "เคลื่อนไหวล่าสุด", size: 150,
     cell: ({ getValue }) => {
       const v = getValue() as string | null;
-      return <span className="text-xs text-slate-500">{v ? String(v).slice(0, 10) : "—"}</span>;
+      return <span className="text-xs text-slate-500">{v ? formatDate(v) : "—"}</span>;
     },
   },
 ];

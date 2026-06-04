@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api";
 import { ImageThumbnail } from "@/components/image-manager";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { readRelationLabel } from "@/lib/relation";
+import { formatDate } from "@/lib/date";
 import {
   useReactTable,
   getCoreRowModel,
@@ -400,7 +401,7 @@ function buildRegistryCell(uiType: string, fieldKey?: string) {
       return <span className={`text-xs font-medium ${val ? "text-emerald-600" : "text-slate-400"}`}>{val ? "✓" : "—"}</span>;
     }
     if (uiType === "date") {
-      return <span className="text-xs text-slate-500">{String(val).slice(0, 10)}</span>;
+      return <span className="text-xs text-slate-500">{formatDate(val)}</span>;
     }
     return <span className="text-xs text-slate-600 line-clamp-1">{String(val)}</span>;
   };

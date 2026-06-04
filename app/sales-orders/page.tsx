@@ -9,6 +9,7 @@ import { CustomerPicker, WarehousePicker } from "@/components/pickers";
 import type { CustomerPickerValue, WarehousePickerValue } from "@/components/pickers";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
 import { SOLineEditor, emptyLine, type EditorLine } from "./line-editor";
@@ -233,8 +234,14 @@ export default function SalesOrdersPage() {
       cell: ({ getValue }) => <span className="tabular-nums font-mono text-right block">{baht(getValue() as number)}</span>,
     },
     { id: "sale_person_name", accessorKey: "sale_person_name", header: "เซลส์", size: 140 },
-    { id: "order_date", accessorKey: "order_date", header: "วันที่สั่ง", size: 110 },
-    { id: "expected_ship_date", accessorKey: "expected_ship_date", header: "วันที่ส่ง", size: 110 },
+    {
+      id: "order_date", accessorKey: "order_date", header: "วันที่สั่ง", size: 110,
+      cell: ({ getValue }) => <span>{formatDate(getValue())}</span>,
+    },
+    {
+      id: "expected_ship_date", accessorKey: "expected_ship_date", header: "วันที่ส่ง", size: 110,
+      cell: ({ getValue }) => <span>{formatDate(getValue())}</span>,
+    },
     {
       id: "line_count", accessorKey: "line_count", header: "รายการ", size: 80,
       cell: ({ getValue }) => <span className="text-xs text-slate-500">{getValue() as number}</span>,
@@ -355,7 +362,7 @@ export default function SalesOrdersPage() {
               <Info label="ลูกค้า" value={detail.customer_name} />
               <Info label="คลังต้นทาง" value={(detail as unknown as { from_warehouse_code?: string; from_warehouse_name?: string }).from_warehouse_name ?? "—"} />
               <Info label="เซลส์" value={detail.sale_person_name} />
-              <Info label="วันที่สั่ง" value={detail.order_date} />
+              <Info label="วันที่สั่ง" value={formatDate(detail.order_date)} />
             </div>
             {((detail as unknown as { stock_reserved?: boolean }).stock_reserved
               || (detail as unknown as { stock_shipped?: boolean }).stock_shipped) && (

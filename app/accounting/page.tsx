@@ -12,6 +12,7 @@ import { DataTable } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import type { Account } from "@/app/api/accounting/accounts/route";
 import type { Journal, JournalLineInput } from "@/app/api/accounting/journals/route";
 import type { TrialBalanceRow } from "@/app/api/accounting/trial-balance/route";
@@ -167,7 +168,7 @@ export default function AccountingPage() {
     { id: "entry_number", accessorKey: "entry_number", header: "เลขที่", size: 130,
       cell: ({ getValue }) => <span className="font-mono text-xs text-slate-700">{String(getValue() ?? "—")}</span> },
     { id: "entry_date", accessorKey: "entry_date", header: "วันที่", size: 110, meta: { filterType: "text" },
-      cell: ({ getValue }) => <span className="text-xs">{String(getValue() ?? "").slice(0, 10)}</span> },
+      cell: ({ getValue }) => <span className="text-xs">{formatDate(getValue())}</span> },
     { id: "description", accessorKey: "description", header: "คำอธิบาย", size: 240 },
     { id: "total_debit", accessorKey: "total_debit", header: "เดบิต", size: 120,
       cell: ({ getValue }) => <span className="tabular-nums font-mono text-xs">{baht(getValue() as number)}</span> },
@@ -330,7 +331,7 @@ export default function AccountingPage() {
             <div className="flex items-center justify-between text-sm">
               <div>
                 <div className="text-slate-700">{detail.header.description}</div>
-                <div className="text-xs text-slate-400">{String(detail.header.entry_date).slice(0,10)} {detail.header.reference && `· ${detail.header.reference}`}</div>
+                <div className="text-xs text-slate-400">{formatDate(detail.header.entry_date)} {detail.header.reference && `· ${detail.header.reference}`}</div>
               </div>
               <span className={`text-xs px-2 py-0.5 rounded ${detail.header.status === "posted" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                 {detail.header.status === "posted" ? "ผ่านแล้ว" : "ร่าง"}</span>

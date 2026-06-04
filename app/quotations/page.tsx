@@ -9,6 +9,7 @@ import { CustomerPicker } from "@/components/pickers";
 import type { CustomerPickerValue } from "@/components/pickers";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { QuoteListItem, QuoteDetail } from "@/app/api/quotations/route";
 import { SOLineEditor, emptyLine, type EditorLine } from "@/app/sales-orders/line-editor";
@@ -256,14 +257,17 @@ export default function QuotationsPage() {
       cell: ({ getValue }) => <span className="tabular-nums font-mono text-right block">{baht(getValue() as number)}</span>,
     },
     { id: "sale_person_name", accessorKey: "sale_person_name", header: "เซลส์", size: 130 },
-    { id: "quote_date", accessorKey: "quote_date", header: "วันที่เสนอ", size: 110 },
+    {
+      id: "quote_date", accessorKey: "quote_date", header: "วันที่เสนอ", size: 110,
+      cell: ({ getValue }) => <span>{formatDate(getValue())}</span>,
+    },
     {
       id: "valid_until", accessorKey: "valid_until", header: "ยืนราคาถึง", size: 110,
       cell: ({ getValue }) => {
         const v = getValue() as string | null;
         if (!v) return <span className="text-slate-300">—</span>;
         const expired = v < new Date().toISOString().slice(0, 10);
-        return <span className={expired ? "text-red-500" : "text-slate-600"}>{v}{expired ? " ⚠" : ""}</span>;
+        return <span className={expired ? "text-red-500" : "text-slate-600"}>{formatDate(v)}{expired ? " ⚠" : ""}</span>;
       },
     },
     {
@@ -386,8 +390,8 @@ export default function QuotationsPage() {
             <div className="grid grid-cols-4 gap-3 text-sm">
               <Info label="ลูกค้า" value={detail.customer_name} />
               <Info label="เซลส์" value={detail.sale_person_name} />
-              <Info label="วันที่เสนอ" value={detail.quote_date} />
-              <Info label="ยืนราคาถึง" value={detail.valid_until} />
+              <Info label="วันที่เสนอ" value={formatDate(detail.quote_date)} />
+              <Info label="ยืนราคาถึง" value={formatDate(detail.valid_until)} />
             </div>
 
             {detail.status === "converted" && detail.converted_so_id && (

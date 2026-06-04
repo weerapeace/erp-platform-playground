@@ -11,6 +11,7 @@ import { AttachmentPanel } from "@/components/attachment-panel";
 import type { ActivityEntry } from "@/components/activity-feed";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { PRListItem, PRDetail, PRLine } from "@/app/api/purchase-requests/route";
 import type { AuditLogsResponse } from "@/app/api/audit-logs/route";
@@ -68,7 +69,7 @@ const COLUMNS: ColumnDef<PRListItem>[] = [
   },
   {
     accessorKey: "created_at", header: "วันที่สร้าง", size: 110,
-    cell: ({ getValue }) => <span className="text-xs text-slate-500">{String(getValue()).slice(0, 10)}</span>,
+    cell: ({ getValue }) => <span className="text-xs text-slate-500">{formatDate(getValue())}</span>,
   },
 ];
 
@@ -420,8 +421,8 @@ function PRDetailDrawer({
               </div>
               <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                 <Field label="ผู้ขอ" value={detail.requester_name} />
-                <Field label="วันที่สร้าง" value={detail.created_at?.slice(0, 10)} />
-                {detail.submitted_at && <Field label="ส่งเมื่อ" value={detail.submitted_at.slice(0, 10)} />}
+                <Field label="วันที่สร้าง" value={formatDate(detail.created_at)} />
+                {detail.submitted_at && <Field label="ส่งเมื่อ" value={formatDate(detail.submitted_at)} />}
                 {detail.approver_name && <Field label="ผู้อนุมัติ/ดำเนินการ" value={detail.approver_name} />}
               </div>
               {detail.note && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">หมายเหตุ</p>{detail.note}</div>}
