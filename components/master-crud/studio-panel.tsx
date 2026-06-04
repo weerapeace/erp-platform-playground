@@ -789,24 +789,29 @@ function previewVal(row: Record<string, unknown> | undefined, f: StudioField): s
 function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string }) {
   if (groups.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
   return (
-    <div className="space-y-4 max-w-lg">
+    <div className="space-y-4 w-full">
       <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}</div>
       {groups.map(([sec, fs])=>{
+        const cols = sec.columns || 2;
+        const gridCls = cols===1 ? "grid-cols-1" : cols===3 ? "grid-cols-3" : "grid-cols-2";
         return (
           <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden">
             <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5">
               {iconNode(sec.icon)}{sec.label}
             </div>
-            <div className={`p-3 grid ${sec.columns===1?"grid-cols-1":sec.columns===3?"grid-cols-3":"grid-cols-2"} gap-3`}>
+            <div className={`p-3 grid ${gridCls} gap-3`}>
               {fs.map(f=>{
                 const us = (f.uiStyle ?? {}) as Record<string, unknown>;
                 const css = uiStyleCss(us);
                 const hl = !!us.highlight;
                 const val = previewVal(row, f);
+                // ความกว้าง field 1/2/3 (textarea/image กินเต็มถ้าไม่ได้ตั้ง) — ให้ตรงกับฟอร์มจริง
+                const span = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
+                const spanCls = span>=3 ? "col-span-3" : span===2 ? "col-span-2" : "";
                 return (
-                  <div key={f.key} className={`space-y-0.5 ${f.formSpan===2?"col-span-2":""} ${hl?"bg-amber-50 border border-amber-200 rounded p-1.5":""}`}>
+                  <div key={f.key} className={`space-y-0.5 ${spanCls} ${hl?"bg-amber-50 border border-amber-200 rounded p-1.5":""}`}>
                     <div className="text-[11px] text-slate-500" style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}</div>
-                    <div className="text-sm text-slate-800 min-h-[1.25rem] break-words" style={css}>{val || <span className="text-slate-300">—</span>}</div>
+                    <div className="text-sm text-slate-800 min-h-[1.25rem] break-words whitespace-pre-wrap" style={css}>{val || <span className="text-slate-300">—</span>}</div>
                   </div>
                 );
               })}
