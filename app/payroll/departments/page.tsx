@@ -16,6 +16,7 @@ const STATUS = ["active", "inactive"];
 
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/master/", apiPath: "departments", tableId: "payroll-departments",
+  moduleKey: "payroll-departments",
   title: "แผนก (Payroll)", icon: "🗂️",
   description: "แผนกจริง — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
   uniqueKey: "code", activeField: "active", exportEntityType: "payroll_department",

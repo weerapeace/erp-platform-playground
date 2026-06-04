@@ -23,14 +23,23 @@ const STATUS_LABEL: Record<string, { th: string; cls: string }> = {
   cancelled: { th: "ยกเลิก",     cls: "bg-red-100 text-red-700" },
 };
 
+// แสดงสถานะงวดเป็น badge สี — เก็บไว้ที่ cellRenderers เพราะ registry mode อ่านจากตรงนี้
+const renderStatus = (v: unknown) => {
+  const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
+};
+
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/master/", apiPath: "periods", tableId: "payroll-periods-master",
+  moduleKey: "payroll-periods",
   title: "งวดเงินเดือน (Payroll)", icon: "🗓️",
   description: "งวดเงินเดือนจริง 8 งวด — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
   uniqueKey: "period_name", activeField: "active", exportEntityType: "payroll_period",
   searchKeys: ["period_name", "company_name"],
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true,
+  // ของพิเศษ (badge สถานะ) — registry mode merge ตาม field key
+  cellRenderers: { status: renderStatus },
   fields: [
     { key: "period_name",  label: "ชื่องวด",   type: "text", colSize: 200, required: true, formSpan: 2, groupKey: "core", order: 10 },
     { key: "company_name", label: "บริษัท",    type: "select", colSize: 150, options: COMPANY_NAMES, filterable: true, groupKey: "core", order: 20 },

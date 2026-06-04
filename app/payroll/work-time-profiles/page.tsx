@@ -13,6 +13,7 @@ const STATUS = ["active", "inactive"];
 
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/master/", apiPath: "work-time-profiles", tableId: "payroll-wtp",
+  moduleKey: "payroll-wtp",
   title: "โปรไฟล์เวลาทำงาน (Payroll)", icon: "🕐",
   description: "กติกาเวลาเข้า-ออกงาน — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
   uniqueKey: "profile_code", activeField: "active", exportEntityType: "work_time_profile",
