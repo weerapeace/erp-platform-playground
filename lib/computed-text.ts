@@ -36,6 +36,67 @@ export const TEXT_COMPUTES: Record<string, TextComputeDef> = {
   },
 };
 
+const trim = (v: unknown): string => String(v ?? "").trim();
+
+// Parent SKU — รายละเอียดแพลตฟอร์ม (แปลงจากสูตร Odoo x_studio_description_platform)
+TEXT_COMPUTES.platform_description = {
+  label: "รายละเอียดแพลตฟอร์ม",
+  describe: "ประกอบข้อความขายอัตโนมัติ: บทนำ + รายละเอียดสินค้า + คำอธิบายขนาด/วิธีวัด + ขนาด/น้ำหนัก + คำอธิบายพิเศษ + Notes (รับประกัน) + เงื่อนไขการสั่งซื้อ (ใส่ชื่อแบรนด์ให้) — ดึงจากช่องบนใบ + ตารางเชื่อม (คำอธิบายขนาด/พิเศษ/แบรนด์)",
+  fn: (r) => {
+    const intro       = String(r.introduction ?? "");
+    const detail      = String(r.description ?? "");
+    const customSize  = trim(r.custom_size);
+    const productSize = trim(TEXT_COMPUTES.size_summary.fn(r));
+    const warranty    = trim(r.warranty);
+    const relSizeDesc = trim(r.size_description);
+    const howToSize   = trim(r.how_to_size);
+    const specialDesc = trim(r.special_description);
+
+    const weightVal  = Number(r.weight_g) || 0;
+    const weightShow = !!r.show_weight;
+    const weightText = (weightShow && weightVal > 0) ? ` | น้ำหนัก: ${g(weightVal)} กรัม` : "";
+
+    const brand     = trim(r.brand_name) || trim(r.brand_label);
+    const brandText = brand ? `${brand} ` : "";
+
+    const width  = Number(r.size_length_cm) || 0;
+    const height = Number(r.size_height_cm) || 0;
+    const prefix = "\n- ขนาดสินค้า: ";
+
+    let sizeLine = "";
+    if (!(width === 0 && height === 0)) sizeLine = `${prefix}${productSize}${weightText}`;
+    else if (customSize)               sizeLine = `${prefix}${customSize}${weightText}`;
+    else if (weightShow && weightVal > 0) sizeLine = `\n- น้ำหนัก: ${g(weightVal)} กรัม`;
+
+    const warrantyText = (warranty && warranty !== "ไม่มีรับประกัน")
+      ? `\n**ระยะเวลารับประกันสินค้า ${warranty}**` : "";
+
+    let extraDesc = "";
+    if (relSizeDesc) extraDesc += `\n\n${relSizeDesc}`;
+    if (howToSize)   extraDesc += `\n\n${howToSize}`;
+
+    const specialBlock = specialDesc ? `\n\n${specialDesc}` : "";
+
+    return (
+      `  ${intro}\n\n` +
+      `รายละเอียดสินค้า\n${detail}` +
+      `${extraDesc}` +
+      `${sizeLine}` +
+      `${specialBlock}\n` +
+      `\nNotes:` +
+      `${warrantyText}\n` +
+      `ลูกค้าสามารถเปลี่ยนสินค้าได้ ภายใน 7 วัน หากสินค้าเสียหายโดยเกิดจากกระบวนการผลิต โดยไม่เสียค่าใช้จ่ายเพิ่มเติม\n\n` +
+      `.... การสั่งซื้อสินค้าผ่าน ${brandText}Official\n` +
+      `1. การจัดส่งสินค้าจะจัดส่ง ทุกวันจันทร์ - วันเสาร์ โดยทางร้านจะตัดยอด ณ.เวลา 08.00 น.ของทุกวัน (หากสั่งสินค้า หลัง 08.00 น. ทางร้านจะจัดส่งให้ในวันถัดไปค่ะ (ไม่รวมวันอาทิตย์))\n` +
+      `2. หลังจากลูกค้าโอนเงินจะใช้เวลาในการจัดเตรียมสินค้าประมาณ 1-3 วัน และใช้ระยะเวลาจัดส่ง 2-5 วัน ขึ้นอยู่กับแต่ละบริษัทขนส่ง\n` +
+      `3. หากลูกค้ากรอกที่อยู่ผิดหรือเบอร์โทรศัพท์ผิด ทางเราจะไม่สามารถแก้ไขข้อมูลของคุณลูกค้าได้ ต้องรบกวนคุณลูกค้ากดยกเลิกแล้วสั่งเข้ามาใหม่\n` +
+      `4. หากสั่งไซส์ผิด ลูกค้าสามารถเปลี่ยนไซส์ได้ (แต่เปลี่ยนแบบไม่ได้) แต่จะมีค่าขนส่งสินค้ากลับไป 50 บาท (ค่าส่งลูกค้าเป็นคนออกเอง)\n\n` +
+      `....• อย่าลืม! กดติดตามร้านค้าเพื่อรับโปรโมชั่น และเห็นสินค้าใหม่ก่อนใคร\n` +
+      `....• หากมีข้อสงสัยสามารถ ติดต่อสอบถามผ่านช่องทางแชทได้ ทุกวันจันทร์ - เสาร์ ตั้งแต่ 8.00 - 22.00 น. และวันอาทิตย์ 11.00 – 22.00 น.`
+    );
+  },
+};
+
 export function computedTextValue(name: string | undefined | null, row: Record<string, unknown>): string | null {
   if (!name) return null;
   const def = TEXT_COMPUTES[name];
