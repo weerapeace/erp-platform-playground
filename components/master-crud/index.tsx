@@ -28,6 +28,7 @@ import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
+import { computedTextValue, textComputeDescribe } from "@/lib/computed-text";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
 
@@ -88,17 +89,19 @@ function registryToFieldDef(
   const customRender = cellRenderers?.[key];
 
   // computed: อ่านสูตร/รูปแบบจาก relation_config (เก็บไว้ที่นั่นเพื่อเลี่ยง migrate DB)
-  const compCfg = rf.relation_config as { kind?: string; formula?: string; format?: ComputeFormat; decimals?: number; summary?: boolean } | undefined;
+  const compCfg = rf.relation_config as { kind?: string; formula?: string; format?: ComputeFormat; decimals?: number; summary?: boolean; text_compute?: string } | undefined;
   const isComputed = fieldType === "computed";
   const compFormula  = isComputed ? compCfg?.formula : undefined;
   const compFormat   = isComputed ? (compCfg?.format ?? "number") : undefined;
   const compDecimals = isComputed ? (compCfg?.decimals ?? 2) : undefined;
+  const textCompute  = isComputed ? compCfg?.text_compute : undefined;   // computed ที่ให้ผลเป็นข้อความ
 
   // default cellRender
   const effectiveCellRender: ((v: unknown, row?: Record<string, unknown>) => React.ReactNode) | undefined =
     customRender
       ?? (isComputed
           ? (_v: unknown, row?: Record<string, unknown>) => {
+              if (textCompute) return <span className="text-sm text-slate-800">{computedTextValue(textCompute, (row ?? {}) as Record<string, unknown>) ?? "—"}</span>;
               const n = computeField(compFormula, (row ?? {}) as Record<string, unknown>);
               return <span className="text-sm tabular-nums text-slate-800">{formatComputed(n, compFormat, compDecimals)}</span>;
             }
@@ -148,6 +151,7 @@ function registryToFieldDef(
     formula:         compFormula,
     computeFormat:   compFormat,
     computeDecimals: compDecimals,
+    textCompute:     textCompute,
     summarize:       isComputed ? !!compCfg?.summary : undefined,
   };
 }
@@ -238,6 +242,8 @@ export type FieldDef = {
   type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many" | "computed";
   /** computed: สูตรคำนวณ เช่น "qty * price_est" (อ้างชื่อ field ในระเบียนเดียวกัน) */
   formula?:   string;
+  /** computed: สูตรข้อความสำเร็จรูป (lib/computed-text) — ให้ผลเป็นข้อความ */
+  textCompute?: string;
   /** computed: รูปแบบผลลัพธ์ */
   computeFormat?: ComputeFormat;
   /** computed: จำนวนทศนิยม */
@@ -1185,12 +1191,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           {f.label}
           {f.required && <span className="text-red-500 ml-0.5">*</span>}
           {f.readonly && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
+          {fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}
         </span>
         {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
         {f.type === "computed" ? (
-          <div className="h-9 mt-0.5 flex items-center px-3 text-sm tabular-nums text-slate-700 bg-slate-50 border border-slate-200 rounded-md">
-            {formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals)}
-            <span className="ml-2 text-[10px] text-slate-400">∑ คำนวณอัตโนมัติ</span>
+          <div className="min-h-9 mt-0.5 flex items-center px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-md">
+            <span className={f.textCompute ? "" : "tabular-nums"}>
+              {f.textCompute ? (computedTextValue(f.textCompute, form) ?? "—") : formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals)}
+            </span>
+            <span className="ml-2 text-[10px] text-slate-400 shrink-0">∑ คำนวณอัตโนมัติ</span>
           </div>
         ) : f.type === "image" ? (
           <ImageInput
@@ -1286,6 +1295,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       return <QuickEditCell field={f} value={v} onSave={(val) => quickSave(f.key, val)} />;
     }
     if (f.type === "computed") {
+      if (f.textCompute) return <span className="text-sm text-slate-800" style={vs}>{computedTextValue(f.textCompute, form) ?? "—"}</span>;
       const n = computeField(f.formula, form);
       return <span className="text-sm tabular-nums font-medium text-slate-800" style={vs}>{formatComputed(n, f.computeFormat, f.computeDecimals)}</span>;
     }
@@ -1841,6 +1851,19 @@ function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unkno
 // กลุ่ม B: คลาส grid ต่อจำนวน column (static string → Tailwind ไม่ purge)
 const COLS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
 
+// คำอธิบายสูตร/คำนวณ (tooltip ภาษาคน) สำหรับ computed / readonly-ที่มี help text
+function fieldHelpTip(f: FieldDef): string | null {
+  if (f.type === "computed") {
+    if (f.textCompute) return textComputeDescribe(f.textCompute) ?? "ช่องคำนวณอัตโนมัติ";
+    if (f.formula) return `คำนวณอัตโนมัติจากสูตร: ${f.formula}`;
+    return "ช่องคำนวณอัตโนมัติ";
+  }
+  return f.helpText ?? null;
+}
+function InfoTip({ tip }: { tip: string }) {
+  return <span title={tip} className="ml-1 text-[11px] text-slate-300 hover:text-blue-500 cursor-help align-middle">ⓘ</span>;
+}
+
 // ไอคอนหมวด — รองรับ emoji หรือรูปอัปโหลด "r2:<key>"
 function sectionIconNode(icon?: string | null): React.ReactNode {
   if (!icon) return null;
@@ -2055,7 +2078,7 @@ function DetailSections({
         const spanCls = span >= 3 ? "col-span-3" : span === 2 ? "col-span-2" : "";
         return (
           <div key={f.key} className={`${spanCls} ${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
-            <dt className="text-[11px] text-slate-400 mb-0.5" style={css}>{f.label}</dt>
+            <dt className="text-[11px] text-slate-400 mb-0.5" style={css}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
             <dd style={css}>{renderValue(f)}</dd>
           </div>
         );
