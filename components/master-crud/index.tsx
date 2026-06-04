@@ -1216,11 +1216,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         </span>
         {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}
         {f.type === "computed" ? (
-          <div className="min-h-9 mt-0.5 flex items-center px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-md">
-            <span className={f.textCompute ? "" : "tabular-nums"}>
+          <div className="min-h-9 mt-0.5 flex items-start gap-2 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-md">
+            <span className={`flex-1 ${f.textCompute ? "whitespace-pre-wrap break-words" : "tabular-nums"}`}>
               {f.textCompute ? (computedTextValue(f.textCompute, form) ?? "—") : formatComputed(computeField(f.formula, form), f.computeFormat, f.computeDecimals)}
             </span>
-            <span className="ml-2 text-[10px] text-slate-400 shrink-0">∑ คำนวณอัตโนมัติ</span>
+            <span className="text-[10px] text-slate-400 shrink-0 mt-0.5">∑ คำนวณอัตโนมัติ</span>
           </div>
         ) : f.type === "image" ? (
           <ImageInput
@@ -1316,7 +1316,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       return <QuickEditCell field={f} value={v} onSave={(val) => quickSave(f.key, val)} />;
     }
     if (f.type === "computed") {
-      if (f.textCompute) return <span className="text-sm text-slate-800" style={vs}>{computedTextValue(f.textCompute, form) ?? "—"}</span>;
+      if (f.textCompute) return <div className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{computedTextValue(f.textCompute, form) ?? "—"}</div>;
       const n = computeField(f.formula, form);
       return <span className="text-sm tabular-nums font-medium text-slate-800" style={vs}>{formatComputed(n, f.computeFormat, f.computeDecimals)}</span>;
     }
