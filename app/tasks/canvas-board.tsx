@@ -89,6 +89,8 @@ export function CanvasBoard({
   const barRef = useRef<HTMLDivElement>(null);
   const [barH, setBarH] = useState(44);
   const [dragging, setDragging] = useState(false);   // ลาก/ย่อขยายอยู่ → ซ่อนแถบจัดรูปแบบ
+  const [pop, setPop] = useState<null | "text" | "fill" | "more">(null);   // popover ในแถบจัดรูปแบบ
+  useEffect(() => { setPop(null); }, [selId]);
 
   // ---- load/save ----
   useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) setBoard(JSON.parse(r)); } catch { /* ignore */ } }, []);
@@ -381,53 +383,79 @@ export function CanvasBoard({
           })}
         </div>
 
-        {/* Format bar (ลอยเหนือวัตถุที่เลือก) — ซ่อนตอนกำลังลาก */}
-        {sel && barPos && !dragging && (
-          <div ref={barRef} className="absolute z-30 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-lg p-1 flex-wrap" style={{ left: barPos.left, top: barPos.top, maxWidth: 420 }} onPointerDown={e => e.stopPropagation()}>
-            {selKind === "sticky" && sel && "color" in sel && (
-              <SwatchRow colors={STICKY_COLORS} value={(sel as Sticky).color} onPick={c => patchSticky(sel.id, { color: c })} />
-            )}
-            {(selKind === "box" || selKind === "text") && sel && "fontSize" in sel && (() => {
-              const o = sel as BoardObject;
-              const fi = FONT_SIZES.indexOf(o.fontSize);
-              const setSize = (d: number) => patchObject(o.id, { fontSize: FONT_SIZES[clamp((fi < 0 ? 2 : fi) + d, 0, FONT_SIZES.length - 1)] });
-              return (
-                <>
-                  <select value={o.fontFamily} onChange={e => patchObject(o.id, { fontFamily: e.target.value })}
-                    title="ฟอนต์" className="h-7 text-xs border border-slate-200 rounded px-1 bg-white hover:bg-slate-50 outline-none max-w-[96px]"
+        {/* Format bar (minimal) — ซ่อนตอนกำลังลาก */}
+        {sel && barPos && !dragging && (() => {
+          const o = (selKind === "box" || selKind === "text") ? (sel as BoardObject) : null;
+          const fi = o ? FONT_SIZES.indexOf(o.fontSize) : -1;
+          const setSize = (d: number) => { if (o) patchObject(o.id, { fontSize: FONT_SIZES[clamp((fi < 0 ? 2 : fi) + d, 0, FONT_SIZES.length - 1)] }); };
+          const nextAlign: Record<Align, Align> = { left: "center", center: "right", right: "left" };
+          return (
+            <div ref={barRef} className="absolute z-30 flex items-stretch bg-white rounded-xl border border-slate-200 shadow-lg h-11" style={{ left: barPos.left, top: barPos.top }} onPointerDown={e => e.stopPropagation()}>
+              <div className="flex items-center px-3 text-slate-700 font-semibold text-sm">{o?.type === "text" ? "T" : o?.type === "box" ? "▭" : "🟨"}</div>
+
+              {o && <>
+                <BarSep />
+                <div className="relative flex items-center pl-2.5 pr-1 hover:bg-slate-50">
+                  <select value={o.fontFamily} onChange={e => patchObject(o.id, { fontFamily: e.target.value })} title="ฟอนต์"
+                    className="appearance-none bg-transparent text-sm text-slate-700 outline-none cursor-pointer pr-4 max-w-[112px]"
                     style={{ fontFamily: o.fontFamily || undefined }}>
-                    {FONTS.map(f => <option key={f.label} value={f.value} style={{ fontFamily: f.value || undefined }}>{f.label}</option>)}
+                    {FONTS.map(f => <option key={f.label} value={f.value}>{f.label}</option>)}
                   </select>
-                  <Sep />
-                  <FmtBtn onClick={() => setSize(-1)} title="เล็กลง">A−</FmtBtn>
-                  <span className="text-xs text-slate-500 w-6 text-center tabular-nums">{o.fontSize}</span>
-                  <FmtBtn onClick={() => setSize(1)} title="ใหญ่ขึ้น">A+</FmtBtn>
-                  <Sep />
-                  <FmtBtn active={o.bold} onClick={() => patchObject(o.id, { bold: !o.bold })} title="ตัวหนา"><b>B</b></FmtBtn>
-                  <FmtBtn active={o.italic} onClick={() => patchObject(o.id, { italic: !o.italic })} title="ตัวเอียง"><i>I</i></FmtBtn>
-                  <FmtBtn active={o.underline} onClick={() => patchObject(o.id, { underline: !o.underline })} title="ขีดเส้นใต้"><u>U</u></FmtBtn>
-                  <Sep />
-                  <FmtBtn active={o.align === "left"} onClick={() => patchObject(o.id, { align: "left" })} title="ชิดซ้าย">⬅</FmtBtn>
-                  <FmtBtn active={o.align === "center"} onClick={() => patchObject(o.id, { align: "center" })} title="กึ่งกลาง">⬌</FmtBtn>
-                  <FmtBtn active={o.align === "right"} onClick={() => patchObject(o.id, { align: "right" })} title="ชิดขวา">➡</FmtBtn>
-                  <Sep />
-                  <span className="text-[10px] text-slate-400 px-0.5">สี</span>
-                  <SwatchRow colors={TEXT_COLORS} value={o.color} onPick={c => patchObject(o.id, { color: c })} />
-                  <span className="text-[10px] text-slate-400 px-0.5">{o.type === "box" ? "พื้น" : "ไฮไลต์"}</span>
-                  <SwatchRow colors={FILL_COLORS} value={o.type === "box" ? o.fill : o.highlight}
-                    onPick={c => patchObject(o.id, o.type === "box" ? { fill: c } : { highlight: c })} />
-                </>
-              );
-            })()}
-            <Sep />
-            <FmtBtn onClick={duplicateSelected} title="คัดลอก (Ctrl+D)">⧉</FmtBtn>
-            {(selKind === "box" || selKind === "text") && <>
-              <FmtBtn onClick={bringFront} title="ขึ้นหน้าสุด">⬆</FmtBtn>
-              <FmtBtn onClick={sendBack} title="ลงหลังสุด">⬇</FmtBtn>
-            </>}
-            <FmtBtn onClick={deleteSelected} title="ลบ (Del)" danger>🗑</FmtBtn>
-          </div>
-        )}
+                  <span className="pointer-events-none absolute right-1.5 text-slate-400"><IconChevron /></span>
+                </div>
+                <BarSep />
+                <div className="flex items-center pl-2.5 pr-1.5 gap-1.5">
+                  <span className="text-sm text-slate-700 tabular-nums w-5 text-center">{o.fontSize}</span>
+                  <div className="flex flex-col text-slate-400">
+                    <button onClick={() => setSize(1)} title="ใหญ่ขึ้น" className="leading-[0.6] hover:text-slate-700">▲</button>
+                    <button onClick={() => setSize(-1)} title="เล็กลง" className="leading-[0.6] hover:text-slate-700">▼</button>
+                  </div>
+                </div>
+                <BarSep />
+                <BarBtn active={o.bold} onClick={() => patchObject(o.id, { bold: !o.bold })} title="ตัวหนา"><span className="font-bold text-[15px]">B</span></BarBtn>
+                <BarBtn active={o.italic} onClick={() => patchObject(o.id, { italic: !o.italic })} title="ตัวเอียง"><span className="italic font-serif text-[15px]">I</span></BarBtn>
+                <BarBtn active={o.underline} onClick={() => patchObject(o.id, { underline: !o.underline })} title="ขีดเส้นใต้"><span className="underline text-[15px]">U</span></BarBtn>
+                <BarSep />
+                <BarBtn onClick={() => patchObject(o.id, { align: nextAlign[o.align] })} title="จัดชิด (สลับ)"><IconAlign align={o.align} /></BarBtn>
+                <BarSep />
+                <BarBtn active={pop === "text"} onClick={() => setPop(pop === "text" ? null : "text")} title="สีตัวอักษร">
+                  <span className="flex flex-col items-center leading-none gap-0.5"><span className="text-[15px] font-semibold">A</span><span className="block h-1 w-4 rounded-sm" style={{ background: o.color }} /></span>
+                </BarBtn>
+                <BarBtn active={pop === "fill"} onClick={() => setPop(pop === "fill" ? null : "fill")} title={o.type === "box" ? "สีพื้น" : "ไฮไลต์"}>
+                  <Swatch c={o.type === "box" ? o.fill : o.highlight} className="h-5 w-5" />
+                </BarBtn>
+              </>}
+
+              {selKind === "sticky" && <>
+                <BarSep />
+                <BarBtn active={pop === "fill"} onClick={() => setPop(pop === "fill" ? null : "fill")} title="สีโน้ต">
+                  <Swatch c={(sel as Sticky).color} className="h-5 w-5" />
+                </BarBtn>
+              </>}
+
+              <BarSep />
+              <BarBtn active={pop === "more"} onClick={() => setPop(pop === "more" ? null : "more")} title="เพิ่มเติม"><IconMore /></BarBtn>
+
+              {/* popovers */}
+              {pop === "text" && o && <ColorPopover colors={TEXT_COLORS} value={o.color} onPick={c => { patchObject(o.id, { color: c }); setPop(null); }} />}
+              {pop === "fill" && (o ? (
+                <ColorPopover colors={FILL_COLORS} value={o.type === "box" ? o.fill : o.highlight} onPick={c => { patchObject(o.id, o.type === "box" ? { fill: c } : { highlight: c }); setPop(null); }} />
+              ) : selKind === "sticky" ? (
+                <ColorPopover colors={STICKY_COLORS} value={(sel as Sticky).color} onPick={c => { patchSticky(sel.id, { color: c }); setPop(null); }} />
+              ) : null)}
+              {pop === "more" && (
+                <div className="absolute top-full right-0 mt-1.5 bg-white border border-slate-200 rounded-lg shadow-lg py-1 w-40 text-sm">
+                  <MenuItem onClick={() => { duplicateSelected(); setPop(null); }}>⧉ คัดลอก</MenuItem>
+                  {o && <>
+                    <MenuItem onClick={() => { bringFront(); setPop(null); }}>⬆ ขึ้นหน้าสุด</MenuItem>
+                    <MenuItem onClick={() => { sendBack(); setPop(null); }}>⬇ ลงหลังสุด</MenuItem>
+                  </>}
+                  <MenuItem danger onClick={() => { deleteSelected(); setPop(null); }}>🗑 ลบ</MenuItem>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -438,20 +466,35 @@ function ToolBtn({ active, onClick, title, disabled, children }: { active?: bool
   return <button onClick={onClick} title={title} disabled={disabled}
     className={`h-8 min-w-8 px-1.5 flex items-center justify-center rounded-md text-sm transition-colors disabled:opacity-30 ${active ? "bg-violet-100 ring-1 ring-violet-300" : "hover:bg-slate-100"}`}>{children}</button>;
 }
-function FmtBtn({ active, onClick, title, danger, children }: { active?: boolean; onClick: () => void; title: string; danger?: boolean; children: React.ReactNode }) {
+// ---- Format bar (minimal) helpers ----
+function BarSep() { return <span className="w-px self-stretch bg-slate-200" />; }
+function BarBtn({ active, onClick, title, children }: { active?: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
   return <button onClick={onClick} title={title}
-    className={`h-7 min-w-7 px-1.5 flex items-center justify-center rounded text-sm transition-colors ${danger ? "text-red-500 hover:bg-red-50" : active ? "bg-violet-100 ring-1 ring-violet-300" : "hover:bg-slate-100"}`}>{children}</button>;
+    className={`px-2.5 flex items-center justify-center transition-colors first:rounded-l-xl ${active ? "bg-violet-50 text-violet-700" : "text-slate-700 hover:bg-slate-50"}`}>{children}</button>;
 }
-function SwatchRow({ colors, value, onPick }: { colors: string[]; value: string; onPick: (c: string) => void }) {
+function Swatch({ c, className = "" }: { c: string; className?: string }) {
+  return <span className={`rounded border border-slate-300 ${className}`}
+    style={c === "transparent" ? { backgroundImage: "linear-gradient(45deg,#e2e8f0 25%,transparent 25%,transparent 75%,#e2e8f0 75%)", backgroundSize: "8px 8px" } : { background: c }} />;
+}
+function ColorPopover({ colors, value, onPick }: { colors: string[]; value: string; onPick: (c: string) => void }) {
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-white border border-slate-200 rounded-lg shadow-lg p-2 grid grid-cols-5 gap-1.5 z-40">
       {colors.map(c => (
-        <button key={c} onClick={() => onPick(c)} title={c}
-          className={`h-5 w-5 rounded border ${value === c ? "ring-2 ring-violet-400 border-white" : "border-slate-200"}`}
-          style={c === "transparent" ? { backgroundImage: "linear-gradient(45deg,#e2e8f0 25%,transparent 25%,transparent 75%,#e2e8f0 75%)", backgroundSize: "8px 8px" } : { background: c }} />
+        <button key={c} onClick={() => onPick(c)} title={c} className={`h-6 w-6 rounded ${value === c ? "ring-2 ring-violet-400" : "hover:ring-1 hover:ring-slate-300"}`}>
+          <Swatch c={c} className="h-full w-full" />
+        </button>
       ))}
     </div>
   );
+}
+function MenuItem({ onClick, danger, children }: { onClick: () => void; danger?: boolean; children: React.ReactNode }) {
+  return <button onClick={onClick} className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 ${danger ? "text-red-600" : "text-slate-700"}`}>{children}</button>;
+}
+function IconChevron() { return <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>; }
+function IconMore() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" /></svg>; }
+function IconAlign({ align }: { align: Align }) {
+  const lines = align === "center" ? ["M6 7h12", "M8 12h8", "M6 17h12"] : align === "right" ? ["M6 7h12", "M10 12h8", "M6 17h12"] : ["M6 7h12", "M6 12h8", "M6 17h12"];
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">{lines.map((d, i) => <path key={i} d={d} />)}</svg>;
 }
 
 function CanvasCard({ task }: { task: Task }) {
