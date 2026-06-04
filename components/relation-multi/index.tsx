@@ -267,15 +267,21 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   // บันทึกคอลัมน์ที่เลือก → ทะเบียน field กลาง (ทุกคนเห็นเหมือนกัน)
   const saveColumns = async (next: string[]) => {
-    if (!fieldId) return;
-    setSubFields(next);                 // อัปเดตจอทันที
-    setPickerOpen(false);
+    if (!fieldId) { alert("บันทึกไม่ได้ — ไม่พบรหัส field"); return; }
     try {
-      await apiFetch(`/api/admin/field-registry-v2/${fieldId}`, {
+      const res = await apiFetch(`/api/admin/field-registry-v2/${fieldId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ relation_config: { ...config, list_sub_fields: next } }),
       });
-    } catch { /* เงียบไว้ — จอแสดงค่าใหม่แล้ว */ }
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { alert("บันทึกคอลัมน์ไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      setSubFields(next);
+      setPickerOpen(false);
+      // โหลดใหม่ให้ค่าจาก DB มีผลทุกที่ (และยืนยันว่าบันทึกจริง)
+      if (typeof window !== "undefined") window.location.reload();
+    } catch (e) {
+      alert("บันทึกคอลัมน์ไม่สำเร็จ: " + (e instanceof Error ? e.message : "network error"));
+    }
   };
 
   const loadMore = async () => {
