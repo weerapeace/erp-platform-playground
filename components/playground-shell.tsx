@@ -368,6 +368,16 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     return () => { alive = false; };
   }, []);
 
+  // หน้าแรกของโมดูลใหญ่ (App) = เมนูย่อยตัวบนสุดของหมวดนั้น (ตามลำดับใน /admin/menu)
+  const firstHrefForApp = (key: string): string | null => {
+    if (!menuRows) return null;
+    const its = menuRows
+      .filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(key)
+        && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0])))
+      .sort((a, b) => a.sort_order - b.sort_order);
+    return its[0]?.href ?? null;
+  };
+
   // กลุ่มเมนูที่จะแสดง: จากทะเบียน (ถ้ามี) ไม่งั้น default — แล้วกรองตามสิทธิ์ + show_in_sidebar
   const navGroupsToShow = (() => {
     const fromRegistry = menuRows && menuRows.length > 0;
@@ -542,7 +552,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
             {appGroups
               .filter((a) => !a.permission_key || can(a.permission_key as Parameters<typeof can>[0]))
               .map((a) => (
-                <button key={a.key} onClick={() => setActiveApp(a.key)}
+                <button key={a.key} onClick={() => {
+                    setActiveApp(a.key);
+                    const href = firstHrefForApp(a.key);   // เด้งเข้าหน้าแรกของหมวดนั้นเลย
+                    if (href && href !== pathname) router.push(href);
+                  }}
                   className={`flex items-center gap-1.5 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors ${
                     activeApp === a.key
                       ? "border-blue-600 text-blue-700 font-medium"
