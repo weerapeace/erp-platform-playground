@@ -9,7 +9,22 @@ import { apiFetch } from "@/lib/api";
 
 type Period = { id: string; period_name: string; status: string };
 type Row = { id: string; employee_name: string; gross_new: number; gross_old: number | null; net_new: number; net_old: number | null; diff_net: number | null; status: string; ok: boolean };
-type Summary = { total: number; match: number; diff: number; fresh: number };
+type ColumnDiff = { column: string; count: number };
+type Summary = { total: number; match: number; diff: number; fresh: number; columnDiffs: ColumnDiff[] };
+
+// แปลชื่อคอลัมน์เป็นไทยสำหรับหน้าผลเทียบ
+const COL_TH: Record<string, string> = {
+  base_salary: "เงินเดือนฐาน", daily_wage_amount: "ค่าจ้างรายวัน", hourly_wage_amount: "ค่าจ้างรายชม.",
+  piece_rate_amount: "ค่าจ้างรายชิ้น", overtime_amount: "OT", allowance_amount: "เงินเพิ่ม",
+  bonus_amount: "โบนัส", commission_amount: "คอมมิชชั่น", late_deduction: "หักมาสาย",
+  absence_deduction: "หักขาดงาน", unpaid_leave_deduction: "หักลาไม่รับเงิน", advance_deduction: "หักเบิกล่วงหน้า",
+  damage_deduction: "หักค่าเสียหาย", social_security_employee: "ประกันสังคม(ลูกจ้าง)",
+  social_security_employer: "ประกันสังคม(นายจ้าง)", withholding_tax: "ภาษีหัก ณ ที่จ่าย",
+  other_deduction: "หักอื่นๆ", mid_month_paid: "จ่ายกลางเดือน", gross_pay: "รายได้รวm",
+  total_deduction: "หักรวม", net_pay: "สุทธิ", recurring_earning_amount: "ค่าประจำ(เพิ่ม)",
+  recurring_deduction_amount: "ค่าประจำ(หัก)", remaining_to_pay: "คงเหลือจ่าย",
+  attendance_days: "วันทำงาน", attendance_hours: "ชม.ทำงาน", company_cost_total: "ต้นทุนบริษัท",
+};
 
 const baht = (v: unknown) => v == null ? "—" : `฿${Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
 
@@ -21,6 +36,12 @@ export default function PayrollCalcRunPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [onlyDiff, setOnlyDiff] = useState(false);
+  // Phase 3 — บันทึกจริง
+  const [editable, setEditable] = useState(false);
+  const [allMatch, setAllMatch] = useState(false);
+  const [colsCompared, setColsCompared] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
@@ -29,12 +50,35 @@ export default function PayrollCalcRunPage() {
 
   async function run() {
     if (!periodId) return;
-    setLoading(true); setErr(null); setRows(null); setSummary(null);
+    setLoading(true); setErr(null); setRows(null); setSummary(null); setSaveMsg(null);
     try {
       const j = await apiFetch(`/api/payroll/calc-run?period_id=${encodeURIComponent(periodId)}`).then((r) => r.json());
-      if (j.error) setErr(j.error); else { setRows(j.data as Row[]); setSummary(j.summary as Summary); }
+      if (j.error) setErr(j.error);
+      else {
+        setRows(j.data as Row[]); setSummary(j.summary as Summary);
+        setEditable(!!j.editable); setAllMatch(!!j.all_columns_match); setColsCompared(Number(j.columns_compared ?? 0));
+      }
     } catch { setErr("คำนวณไม่ได้"); }
     finally { setLoading(false); }
+  }
+
+  async function save() {
+    if (!periodId) return;
+    const period = periods.find((p) => p.id === periodId);
+    if (!confirm(`ยืนยันบันทึกผลคำนวณงวด "${period?.period_name ?? ""}" ลงระบบ?\n\nระบบจะสร้าง "รอบคำนวณใหม่" (ไม่ลบของเดิม) — ทำได้เฉพาะงวดที่ยังไม่ล็อก`)) return;
+    setSaving(true); setErr(null); setSaveMsg(null);
+    try {
+      const j = await apiFetch("/api/payroll/calc-save", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else {
+        setSaveMsg(`✅ บันทึกสำเร็จ — รอบคำนวณที่ ${j.data.run_no}, ${j.data.line_count} บรรทัด`);
+        await run();   // คำนวณ+เทียบใหม่ (ตอนนี้จะตรงกับที่เพิ่งบันทึก)
+      }
+    } catch { setErr("บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
   }
 
   const shown = rows ? (onlyDiff ? rows.filter((r) => r.status === "ต่าง") : rows) : [];
@@ -68,11 +112,44 @@ export default function PayrollCalcRunPage() {
             <Card label="❌ ต่าง" value={summary.diff} cls={summary.diff ? "bg-red-50 text-red-700 border-red-200" : "bg-slate-50 text-slate-400 border-slate-200"} />
             <Card label="🆕 ใหม่" value={summary.fresh} cls="bg-blue-50 text-blue-700 border-blue-200" />
           </div>
-          {summary.diff === 0 && summary.total > 0 && (
-            <div className="rounded-lg bg-emerald-50 text-emerald-800 px-4 py-2 text-sm mb-3 inline-block">
-              🎉 คำนวณใหม่ตรงกับของเดิมทุกคน — เครื่องคำนวณพร้อมใช้
+          {/* ผลเทียบทีละคอลัมน์ */}
+          {summary.columnDiffs && summary.columnDiffs.length > 0 ? (
+            <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm mb-3">
+              <div className="font-medium text-red-700 mb-1">⚠️ มีคอลัมน์ที่ยังไม่ตรงของเดิม (เทียบ {colsCompared} คอลัมน์):</div>
+              <div className="flex flex-wrap gap-2">
+                {summary.columnDiffs.map((c) => (
+                  <span key={c.column} className="px-2 py-0.5 rounded-full bg-white border border-red-200 text-red-700 text-xs">
+                    {COL_TH[c.column] ?? c.column}: ต่าง {c.count} คน
+                  </span>
+                ))}
+              </div>
             </div>
-          )}
+          ) : allMatch ? (
+            <div className="rounded-lg bg-emerald-50 text-emerald-800 px-4 py-2 text-sm mb-3 inline-block">
+              🎉 คำนวณใหม่ตรงกับของเดิม <b>ครบทุกช่อง</b> ({colsCompared} คอลัมน์, {summary.match} คน) — เครื่องคำนวณพร้อมบันทึก
+            </div>
+          ) : summary.total > 0 ? (
+            <div className="rounded-lg bg-blue-50 text-blue-700 px-4 py-2 text-sm mb-3 inline-block">
+              🆕 งวดนี้ยังไม่มีของเดิมให้เทียบ ({summary.fresh} คนใหม่) — ตรวจยอดด้วยตาก่อนบันทึกได้
+            </div>
+          ) : null}
+
+          {/* ปุ่มบันทึกจริง — ปลอดภัย: เปิดเฉพาะงวดแก้ได้ และยอดตรงครบ (หรือเป็นงวดใหม่ทั้งหมด) */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-slate-600">
+                <b>บันทึกผลคำนวณลงระบบ</b> — สร้างรอบคำนวณใหม่ ไม่ลบของเดิม
+                {!editable && <span className="text-red-600"> · งวดนี้ถูกล็อก/จ่ายแล้ว บันทึกไม่ได้</span>}
+                {editable && summary.diff > 0 && <span className="text-amber-600"> · ยังมีช่องไม่ตรง — แก้ให้ตรงก่อนค่อยบันทึก</span>}
+              </div>
+              <button onClick={save} disabled={saving || !editable || summary.diff > 0 || summary.total === 0}
+                className="h-10 px-5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                {saving ? "กำลังบันทึก..." : "💾 บันทึกผลคำนวณ"}
+              </button>
+            </div>
+          </div>
+          {saveMsg && <div className="rounded-lg bg-emerald-50 text-emerald-800 px-4 py-2 text-sm mb-3">{saveMsg}</div>}
+
           <label className="flex items-center gap-2 text-sm text-slate-600 mb-2">
             <input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} /> แสดงเฉพาะที่ต่าง
           </label>
@@ -110,7 +187,7 @@ export default function PayrollCalcRunPage() {
           </table>
         </div>
       )}
-      <p className="text-xs text-slate-400 mt-4">หมายเหตุ: หน้านี้คำนวณเพื่อ <b>เทียบ/พรีวิว</b> เท่านั้น ยังไม่เขียน payroll_lines จริง — เมื่อยอดตรงครบ ค่อยทำปุ่ม "บันทึกผลคำนวณ" ในขั้นถัดไป</p>
+      <p className="text-xs text-slate-400 mt-4">หมายเหตุ: กด <b>คำนวณ + เทียบ</b> เพื่อตรวจยอดทุกช่องกับของเดิมก่อน เมื่อตรงครบ (หรือเป็นงวดใหม่) ปุ่ม <b>บันทึกผลคำนวณ</b> จะเปิดให้เขียนลงระบบ — สร้างรอบคำนวณใหม่ ไม่ลบของเดิม และบันทึกได้เฉพาะงวดที่ยังไม่ล็อก/จ่าย</p>
     </div>
   );
 }

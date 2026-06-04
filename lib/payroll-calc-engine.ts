@@ -189,12 +189,44 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
 
   const totalDeduction = preTax + money(values.withholding_tax);
   const netPay = roundMoney(grossPay - totalDeduction);
+  // คืน "เต็มทุกคอลัมน์" ตรงกับ worker.js เดิม (1951-1974) — เพื่อบันทึกลง payroll_lines ได้
   return {
-    employee_id: employee.id, employee_code: employee.employee_code,
-    gross_pay: roundMoney(grossPay), total_deduction: roundMoney(totalDeduction), net_pay: netPay,
-    base_salary: money(values.base_salary), overtime_amount: money(values.overtime_amount),
-    social_security_employee: money(values.social_security_employee), withholding_tax: money(values.withholding_tax),
+    employee_id: employee.id,
+    employee_code: employee.employee_code,
+    contract_id: contract.id ?? null,
+    company_id: contract.company_id ?? period.company_id ?? null,
+    contract_type: contract.contract_type ?? null,
+    department_id: employee.department_id ?? null,
+    position_id: employee.position_id ?? null,
+    cost_center_id: employee.cost_center_id ?? null,
+    wage_type: contract.wage_type,
+    base_salary: money(values.base_salary),
+    daily_wage_amount: money(values.daily_wage_amount),
+    hourly_wage_amount: money(values.hourly_wage_amount),
+    piece_rate_amount: money(values.piece_rate_amount),
+    overtime_amount: money(values.overtime_amount),
+    allowance_amount: money(values.allowance_amount),
+    bonus_amount: money(values.bonus_amount),
+    commission_amount: money(values.commission_amount),
+    late_deduction: money(values.late_deduction),
+    absence_deduction: money(values.absence_deduction),
+    unpaid_leave_deduction: money(values.unpaid_leave_deduction),
+    advance_deduction: money(values.advance_deduction),
+    damage_deduction: money(values.damage_deduction),
+    social_security_employee: money(values.social_security_employee),
+    social_security_employer: money(values.social_security_employer),
+    withholding_tax: money(values.withholding_tax),
+    other_deduction: money(values.other_deduction),
+    mid_month_paid: money(values.mid_month_paid),
+    gross_pay: roundMoney(grossPay),
+    total_deduction: roundMoney(totalDeduction),
+    net_pay: netPay,
+    recurring_earning_amount: money(manual.recurring_earning_amount),
+    recurring_deduction_amount: money(manual.recurring_deduction_amount),
+    remaining_to_pay: netPay,
     attendance_days: money(values.attendance_days),
+    attendance_hours: money(values.attendance_hours),
+    company_cost_total: roundMoney(grossPay + money(values.social_security_employer)),
   };
 }
 
@@ -242,8 +274,11 @@ export async function computePeriodPreview(periodId: string): Promise<{ lines: R
     const setting = settingBy.get(String(employee.id)) ?? {};
     const manual = mergeMoney(savedManual.get(String(employee.id)), adjustments.get(String(employee.id)));
     const recItems = recurring.get(String(employee.id)) ?? [];
-    manual.allowance_amount = money(manual.allowance_amount) + sumRecurring(recItems, "earning");
-    manual.other_deduction = money(manual.other_deduction) + sumRecurring(recItems, "deduction");
+    // เก็บยอดค่าประจำแยกคอลัมน์ (recurring_*) แล้วค่อยรวมเข้า allowance/other — ตรงลำดับ worker.js 1830-1833
+    manual.recurring_earning_amount = sumRecurring(recItems, "earning");
+    manual.recurring_deduction_amount = sumRecurring(recItems, "deduction");
+    manual.allowance_amount = money(manual.allowance_amount) + money(manual.recurring_earning_amount);
+    manual.other_deduction = money(manual.other_deduction) + money(manual.recurring_deduction_amount);
     manual.mid_month_paid = money(manual.mid_month_paid) + money(midMonth.get(String(employee.id)));
     lines.push(buildLine(period, employee, contract, setting, manual));
   }
