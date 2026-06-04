@@ -1404,6 +1404,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           views={views}
           rowActions={rowActions}
           bulkActions={bulkActions}
+          selectable
           bulkEditFields={bulkEditFields.length > 0 ? bulkEditFields : undefined}
           onBulkEdit={bulkEditFields.length > 0 ? onBulkEdit : undefined}
           onBulkEditAllMatching={config.serverMode && bulkEditFields.length > 0 ? onBulkEditAllMatching : undefined}

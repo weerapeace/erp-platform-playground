@@ -258,6 +258,8 @@ export interface DataTableProps<T extends Record<string, unknown>> {
   views?: DataTableView[];
   rowActions?: RowAction<T>[];
   bulkActions?: BulkAction<T>[];
+  /** แสดง checkbox เลือกแถวเสมอ (แม้ไม่มี bulk action) — ใช้เลือกเพื่อ export ในหน้าอ่านอย่างเดียว */
+  selectable?: boolean;
   pageSize?: number;
   onRetry?: () => void;
   onRowClick?: (row: T) => void;
@@ -444,6 +446,7 @@ export function DataTable<T extends Record<string, unknown>>({
   views = [],
   rowActions = [],
   bulkActions = [],
+  selectable = false,
   pageSize: initialPageSize = 10,
   onRetry,
   onRowClick,
@@ -967,8 +970,9 @@ export function DataTable<T extends Record<string, unknown>>({
   // ---- Column building ----
   // แสดง checkbox เลือกแถว เมื่อมี bulk actions หรือ bulk edit
   const hasBulk = bulkActions.length > 0 || (bulkEditFields.length > 0 && !!onBulkEdit);
+  const showSelectCol = hasBulk || selectable;
   const withSelectCol = useMemo<ColumnDef<T>[]>(() => {
-    if (!hasBulk) return allDefinedColumns;
+    if (!showSelectCol) return allDefinedColumns;
     return [
       {
         id: "__select__",
@@ -989,7 +993,7 @@ export function DataTable<T extends Record<string, unknown>>({
       },
       ...allDefinedColumns,
     ];
-  }, [allDefinedColumns, hasBulk]);
+  }, [allDefinedColumns, showSelectCol]);
 
   const tableColumns = useMemo<ColumnDef<T>[]>(() => {
     if (rowActions.length === 0) return withSelectCol;
