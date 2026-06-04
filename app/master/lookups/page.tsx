@@ -9,7 +9,7 @@
  */
 
 import { useState } from "react";
-import { PlaygroundShell, ShellPresentContext } from "@/components/playground-shell";
+import { ShellPresentContext } from "@/components/playground-shell";
 import { MasterPage } from "@/components/master-page";
 
 const TABS: { key: string; title: string; icon: string }[] = [
@@ -26,8 +26,8 @@ export default function MasterLookupsPage() {
   const [active, setActive] = useState(TABS[0].key);
   const cur = TABS.find((t) => t.key === active) ?? TABS[0];
 
+  // หมายเหตุ: app/master/layout.tsx ครอบ PlaygroundShell ให้แล้ว → ห้ามครอบซ้ำ (กัน shell ซ้อน)
   return (
-    <PlaygroundShell>
       <div className="min-h-screen bg-slate-50 flex flex-col">
         <div className="bg-white border-b border-slate-200 px-6 pt-4">
           <h1 className="text-xl font-bold text-slate-900">🧱 ข้อมูลตั้งต้น</h1>
@@ -50,6 +50,5 @@ export default function MasterLookupsPage() {
           </ShellPresentContext.Provider>
         </div>
       </div>
-    </PlaygroundShell>
   );
 }
