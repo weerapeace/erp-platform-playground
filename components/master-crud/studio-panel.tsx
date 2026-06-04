@@ -69,9 +69,9 @@ const GROUP_META: Record<string, { label: string; icon: string; order: number }>
   system:    { label: "ระบบ",          icon: "⚙️", order: 90 },
 };
 function gmeta(k: string) { return GROUP_META[k] ?? { label: k, icon: "📁", order: 99 }; }
-const ALL_GROUPS = Object.keys(GROUP_META);
 
 type Tab = "table" | "form" | "registry";
+type SectionDef = { key: string; label: string; icon: string; columns: number };
 
 export function StudioPanel({
   fields, moduleLabel, moduleKey, layout, onClose, onSaved, sampleRows = [],
@@ -85,13 +85,40 @@ export function StudioPanel({
   sampleRows?: Record<string, unknown>[];
 }) {
   const [tab, setTab] = useState<Tab>("table");
-  // จำนวนคอลัมน์ต่อหมวด (section) — init จาก layout เดิม ไม่งั้น default 2
-  const [sectionCols, setSectionCols] = useState<Record<string, number>>(() => {
-    const out: Record<string, number> = {};
-    (layout?.tabs ?? []).forEach((t) => t.sections.forEach((s) => { out[s.key] = s.columns || 2; }));
-    return out;
+  // หมวด (section) — แก้ชื่อ/ลบ/สร้าง/เรียง/คอลัมน์ได้ · init จาก layout เดิม ไม่งั้น derive จาก group ของ field
+  const [sections, setSections] = useState<SectionDef[]>(() => {
+    const fromLayout: SectionDef[] = (layout?.tabs ?? []).map((t) => ({
+      key: t.key, label: t.label, icon: t.icon ?? gmeta(t.key).icon, columns: t.sections[0]?.columns ?? 2,
+    }));
+    const have = new Set(fromLayout.map((s) => s.key));
+    const extra: SectionDef[] = Array.from(new Set(fields.map((f) => f.groupKey ?? "other")))
+      .filter((k) => !have.has(k))
+      .sort((a, b) => gmeta(a).order - gmeta(b).order)
+      .map((k) => ({ key: k, label: gmeta(k).label, icon: gmeta(k).icon, columns: 2 }));
+    return [...fromLayout, ...extra];
   });
-  const setCols = (group: string, n: number) => { setSectionCols((p) => ({ ...p, [group]: n })); setDirty(true); };
+  const setCols = (key: string, n: number) => { setSections((p) => p.map((s) => s.key === key ? { ...s, columns: n } : s)); setDirty(true); };
+  const renameSection = (key: string, label: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, label } : s)); setDirty(true); };
+  const moveSection = (key: string, dir: -1 | 1) => setSections((p) => {
+    const i = p.findIndex((s) => s.key === key); const j = i + dir;
+    if (i < 0 || j < 0 || j >= p.length) return p;
+    const n = [...p]; [n[i], n[j]] = [n[j], n[i]]; setDirty(true); return n;
+  });
+  const addSection = () => {
+    const nums = sections.filter((s) => /^sec_\d+$/.test(s.key)).map((s) => parseInt(s.key.slice(4), 10));
+    const n = (nums.length ? Math.max(...nums) : 0) + 1;
+    setSections((p) => [...p, { key: `sec_${n}`, label: `หมวดใหม่ ${n}`, icon: "📁", columns: 2 }]);
+    setDirty(true);
+  };
+  const deleteSection = (key: string) => {
+    setItems((prev) => prev.map((i) => (i.groupKey ?? "other") === key ? { ...i, groupKey: "other" } : i));
+    setSections((p) => {
+      const next = p.filter((s) => s.key !== key);
+      if (!next.some((s) => s.key === "other")) next.push({ key: "other", label: gmeta("other").label, icon: gmeta("other").icon, columns: 2 });
+      return next;
+    });
+    setDirty(true);
+  };
   const [previewIdx, setPreviewIdx] = useState(0);
   const [items, setItems] = useState<StudioField[]>(() =>
     [...fields].sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
@@ -217,13 +244,11 @@ export function StudioPanel({
         })
       ));
 
-      // 8. layout ฟอร์ม (จำนวนคอลัมน์ต่อ section) → erp_modules.config.layout
+      // 8. layout ฟอร์ม (หมวด: ชื่อ/ไอคอน/ลำดับ/คอลัมน์) → erp_modules.config.layout
       if (moduleKey) {
-        const order: string[] = [];
-        for (const i of items) { const g = i.groupKey ?? "other"; if (!order.includes(g)) order.push(g); }
-        const tabs = order.map((g) => ({
-          key: g, label: gmeta(g).label, icon: gmeta(g).icon,
-          sections: [{ key: g, label: gmeta(g).label, columns: sectionCols[g] ?? 2 }],
+        const tabs = sections.map((s) => ({
+          key: s.key, label: s.label, icon: s.icon,
+          sections: [{ key: s.key, label: s.label, columns: s.columns }],
         }));
         const r = await apiFetch("/api/admin/module-layout", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -269,6 +294,13 @@ export function StudioPanel({
     for (const it of items) { const k = it.groupKey ?? "other"; const l = map.get(k) ?? []; l.push(it); map.set(k, l); }
     return Array.from(map.entries()).sort(([a], [b]) => gmeta(a).order - gmeta(b).order);
   }, [items]);
+
+  // form tab: เรียงตามลำดับ sections (รวมหมวดว่างเป็น drop zone) + ตัวเลือกหมวดสำหรับ dropdown
+  const formGroups = useMemo<[SectionDef, StudioField[]][]>(
+    () => sections.map((s) => [s, items.filter((i) => (i.groupKey ?? "other") === s.key)]),
+    [sections, items],
+  );
+  const sectionOptions = useMemo(() => sections.map((s) => ({ key: s.key, label: s.label })), [sections]);
 
   // preview data
   const visibleCols = items.filter((i) => i.isVisible);
@@ -325,10 +357,10 @@ export function StudioPanel({
             />
           ) : (
             <FormEditor
-              grouped={grouped} sensors={sensors} onDragEnd={onDragEnd}
-              items={items} onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
+              formGroups={formGroups} sectionOptions={sectionOptions} sensors={sensors} onDragEnd={onDragEnd}
+              onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
               settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)} onPatch={patchItem}
-              sectionCols={sectionCols} onSetCols={setCols}
+              onSetCols={setCols} onRename={renameSection} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
             />
           )}
         </div>
@@ -351,7 +383,7 @@ export function StudioPanel({
             <TablePreview cols={visibleCols} />
           ) : (
             <FormPreview
-              grouped={grouped.map(([g,fs])=>[g,fs.filter(f=>f.showInForm)] as [string,StudioField[]]).filter(([,fs])=>fs.length>0)}
+              groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
               row={sampleRows[previewIdx]} moduleLabel={moduleLabel} />
           )}
         </div>
@@ -438,46 +470,54 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  grouped, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, sectionCols, onSetCols,
+  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onMove, onDelete, onAddSection,
 }: {
-  grouped: [string, StudioField[]][];
+  formGroups: [SectionDef, StudioField[]][];
+  sectionOptions: { key: string; label: string }[];
   sensors: ReturnType<typeof useSensors>;
   onDragEnd: (e: DragEndEvent)=>void;
-  items: StudioField[];
   onToggleForm: (key: string)=>void;
   onToggleInline: (key: string)=>void;
   onToggleBulk: (key: string)=>void;
   onMoveGroup: (key: string, group: string)=>void;
-  sectionCols: Record<string, number>;
   onSetCols: (group: string, n: number)=>void;
+  onRename: (group: string, label: string)=>void;
+  onMove: (group: string, dir: -1 | 1)=>void;
+  onDelete: (group: string)=>void;
+  onAddSection: ()=>void;
   settingsKey: string | null;
   onToggleSettings: (key: string)=>void;
   onPatch: (key: string, patch: Partial<StudioField>)=>void;
 }) {
   return (
     <div>
-      <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว • ∑ = bulk • ⚙️ = ตั้งค่า/สไตล์ • ลาก ⋮⋮ เรียง/ย้ายหมวด</p>
+      <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว • ∑ = bulk • ⚙️ = ตั้งค่า/สไตล์ • ลาก ⋮⋮ เรียง/ย้ายหมวด • หัวหมวด: แก้ชื่อ/คอลัมน์/↑↓/ลบ</p>
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
-        <SortableContext items={grouped.flatMap(([,fs])=>fs.map(f=>f.key))} strategy={verticalListSortingStrategy}>
+        <SortableContext items={formGroups.flatMap(([,fs])=>fs.map(f=>f.key))} strategy={verticalListSortingStrategy}>
           <div className="space-y-3">
-            {grouped.map(([gk, fs])=>{
-              const m = gmeta(gk);
-              return (
-                <FormSectionZone key={gk} groupKey={gk} label={m.label} icon={m.icon} count={fs.length}
-                  cols={sectionCols[gk] ?? 2} onSetCols={(n)=>onSetCols(gk,n)}>
-                  {fs.map(f=>(
-                    <div key={f.key}>
-                      <FormFieldRow field={f} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)}
-                        settingsOpen={settingsKey===f.key} onToggleSettings={()=>onToggleSettings(f.key)} />
-                      {settingsKey===f.key && <FieldSettings field={f} onPatch={(patch)=>onPatch(f.key,patch)} />}
-                    </div>
-                  ))}
-                </FormSectionZone>
-              );
-            })}
+            {formGroups.map(([sec, fs], idx)=>(
+              <FormSectionZone key={sec.key} groupKey={sec.key} label={sec.label} icon={sec.icon} count={fs.length}
+                cols={sec.columns} onSetCols={(n)=>onSetCols(sec.key,n)}
+                onRename={(l)=>onRename(sec.key,l)} onUp={idx>0?()=>onMove(sec.key,-1):undefined}
+                onDown={idx<formGroups.length-1?()=>onMove(sec.key,1):undefined}
+                onDelete={()=>onDelete(sec.key)}>
+                {fs.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ลากฟิลด์มาวางที่นี่ —</div>}
+                {fs.map(f=>(
+                  <div key={f.key}>
+                    <FormFieldRow field={f} sectionOptions={sectionOptions} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)}
+                      settingsOpen={settingsKey===f.key} onToggleSettings={()=>onToggleSettings(f.key)} />
+                    {settingsKey===f.key && <FieldSettings field={f} onPatch={(patch)=>onPatch(f.key,patch)} />}
+                  </div>
+                ))}
+              </FormSectionZone>
+            ))}
           </div>
         </SortableContext>
       </DndContext>
+      <button type="button" onClick={onAddSection}
+        className="mt-3 w-full h-9 text-sm border border-dashed border-slate-300 rounded-lg text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50/40">
+        ➕ เพิ่มหมวด
+      </button>
     </div>
   );
 }
@@ -546,27 +586,34 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
   );
 }
 
-function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, children }: { groupKey: string; label: string; icon: string; count: number; cols: number; onSetCols: (n: number)=>void; children: React.ReactNode }) {
+function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, onRename, onUp, onDown, onDelete, children }: { groupKey: string; label: string; icon: string; count: number; cols: number; onSetCols: (n: number)=>void; onRename: (label: string)=>void; onUp?: ()=>void; onDown?: ()=>void; onDelete: ()=>void; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useSortable({ id: `group:${groupKey}` });
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div ref={setNodeRef} className={`px-3 py-2 flex items-center gap-2 border-b border-slate-100 ${isOver?"bg-orange-50":"bg-slate-50"}`}>
-        <span>{icon}</span><span className="text-sm font-semibold text-slate-700">{label}</span>
+        <span>{icon}</span>
+        {/* แก้ชื่อหมวดได้ */}
+        <input value={label} onChange={(e)=>onRename(e.target.value)} title="แก้ชื่อหมวด"
+          className="text-sm font-semibold text-slate-700 bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 py-0.5 w-40 focus:outline-none" />
         <span className="text-xs text-slate-400">({count})</span>
-        <div className="ml-auto flex items-center gap-1" title="จำนวนคอลัมน์ของหมวดนี้">
+        <div className="ml-auto flex items-center gap-1">
           <span className="text-[11px] text-slate-400">คอลัมน์:</span>
           {[1,2,3].map((n)=>(
             <button key={n} type="button" onClick={()=>onSetCols(n)}
               className={`w-6 h-6 text-xs rounded border ${cols===n?"bg-orange-100 border-orange-300 text-orange-700 font-semibold":"bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{n}</button>
           ))}
+          <span className="mx-1 text-slate-200">|</span>
+          <button type="button" onClick={onUp} disabled={!onUp} title="เลื่อนขึ้น" className="w-6 h-6 text-xs rounded text-slate-400 hover:text-slate-700 disabled:opacity-30">▲</button>
+          <button type="button" onClick={onDown} disabled={!onDown} title="เลื่อนลง" className="w-6 h-6 text-xs rounded text-slate-400 hover:text-slate-700 disabled:opacity-30">▼</button>
+          <button type="button" onClick={()=>{ if(confirm(`ลบหมวด "${label}"? ฟิลด์ในหมวดนี้จะย้ายไป "อื่น ๆ"`)) onDelete(); }} title="ลบหมวด" className="w-6 h-6 text-xs rounded text-slate-300 hover:text-red-500">✕</button>
         </div>
       </div>
-      <div className="p-2 space-y-1">{children}</div>
+      <div className="p-2 space-y-1 min-h-[2.5rem]">{children}</div>
     </div>
   );
 }
 
-function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGroup, settingsOpen, onToggleSettings }: { field: StudioField; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void; settingsOpen: boolean; onToggleSettings: ()=>void }) {
+function FormFieldRow({ field, sectionOptions, onToggle, onToggleInline, onToggleBulk, onMoveGroup, settingsOpen, onToggleSettings }: { field: StudioField; sectionOptions: { key: string; label: string }[]; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void; settingsOpen: boolean; onToggleSettings: ()=>void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
   // ชนิดที่ quick-edit ได้ (text/number/boolean/select)
@@ -592,7 +639,7 @@ function FormFieldRow({ field, onToggle, onToggleInline, onToggleBulk, onMoveGro
       )}
       <select value={field.groupKey} onChange={(e)=>onMoveGroup(e.target.value)} onClick={(e)=>e.stopPropagation()}
         className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white" title="ย้ายหมวด">
-        {ALL_GROUPS.map(g=><option key={g} value={g}>{gmeta(g).label}</option>)}
+        {sectionOptions.map(o=><option key={o.key} value={o.key}>{o.label}</option>)}
       </select>
       <button type="button" onClick={(e)=>{ e.stopPropagation(); onToggleSettings(); }}
         title="ตั้งค่า/สไตล์ field"
@@ -626,19 +673,18 @@ function previewVal(row: Record<string, unknown> | undefined, f: StudioField): s
   return String(v);
 }
 
-function FormPreview({ grouped, row, moduleLabel }: { grouped: [string, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string }) {
-  if (grouped.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
+function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string }) {
+  if (groups.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
   return (
     <div className="space-y-4 max-w-lg">
       <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}</div>
-      {grouped.map(([gk, fs])=>{
-        const m = gmeta(gk);
+      {groups.map(([sec, fs])=>{
         return (
-          <div key={gk} className="border border-slate-200 rounded-lg overflow-hidden">
+          <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden">
             <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5">
-              <span>{m.icon}</span>{m.label}
+              <span>{sec.icon}</span>{sec.label}
             </div>
-            <div className="p-3 grid grid-cols-2 gap-3">
+            <div className={`p-3 grid ${sec.columns===1?"grid-cols-1":sec.columns===3?"grid-cols-3":"grid-cols-2"} gap-3`}>
               {fs.map(f=>{
                 const us = (f.uiStyle ?? {}) as Record<string, unknown>;
                 const css = uiStyleCss(us);
