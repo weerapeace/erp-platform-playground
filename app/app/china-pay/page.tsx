@@ -263,7 +263,13 @@ export default function ChinaPayApp() {
         @keyframes cpokDraw{to{stroke-dashoffset:0}}
         @keyframes cpokFall{0%{transform:translateY(-12vh) rotate(0);opacity:1}100%{transform:translateY(112vh) rotate(560deg);opacity:.85}}
         .cpok-confetti{position:absolute;top:0;width:9px;height:14px;border-radius:2px;animation-name:cpokFall;animation-timing-function:linear;animation-fill-mode:forwards}
-        @media print { body * { visibility:hidden !important } #tx-receipt, #tx-receipt * { visibility:visible !important } #tx-receipt { position:absolute; left:0; top:0; width:100% } }
+        @media print {
+          body * { visibility:hidden !important }
+          #tx-receipt, #tx-receipt * { visibility:visible !important }
+          /* เผื่อขอบกระดาษ (เครื่องพิมพ์มี non-printable margin) กันค่าตัวขวาสุดโดนตัด */
+          #tx-receipt { position:absolute; left:0; top:0; width:100%; padding:24px 48px !important; box-sizing:border-box; overflow:visible !important; }
+          @page { margin:10mm; }
+        }
       `}</style>
       <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm relative overflow-hidden">
         <div className="cp-bg" aria-hidden><i className="b1"></i><i className="b2"></i><i className="b3"></i></div>
@@ -2873,10 +2879,10 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
             <div className="text-xs opacity-90">เลขโอน {String(t.transfer_no ?? "—")} · {String(t.date ?? "")}</div>
           </div>
           {!!t.ref_no && <Row label="เลขอ้างอิง" v={String(t.ref_no)} />}
-          {/* แถวค่าเงิน — ห้ามตัดบรรทัด (whitespace-nowrap) ค่าแสดงเต็มเสมอ */}
-          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้</span><span className="font-medium text-slate-800 whitespace-nowrap">{fmt(num(t.rate))}</span></div>
-          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap">฿{fmt(num(t.transferred))}</span></div>
-          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap">¥{fmt(num(t.chinaInRmb))}</span></div>
+          {/* แถวค่าเงิน — ค่าชิดขวาเสมอ (ml-auto text-right) + ห้ามตัดบรรทัด (กันตอนพิมพ์) */}
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">{fmt(num(t.rate))}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">฿{fmt(num(t.transferred))}</span></div>
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(num(t.chinaInRmb))}</span></div>
           {cn.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิลจีน ({cn.length})</div>
@@ -2885,8 +2891,8 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
                 return (
                   <div key={i} className="border-b border-slate-100 py-2">
                     <div className="flex justify-between text-sm">
-                      <span className="font-medium text-slate-800 mr-2">{String(l.label || "—")}</span>
-                      <span className="font-semibold text-slate-800 flex-shrink-0">¥{fmt(num(l.paid_rmb))}</span>
+                      <span className="font-medium text-slate-800 mr-2 min-w-0 truncate">{String(l.label || "—")}</span>
+                      <span className="font-semibold text-slate-800 flex-shrink-0 ml-auto text-right whitespace-nowrap">¥{fmt(num(l.paid_rmb))}</span>
                     </div>
                     {!!sp.name_en && <div className="text-[11px] text-slate-500">{String(sp.name_en)}</div>}
                     <div className="text-[11px] text-slate-500 mt-0.5 space-y-0.5">
