@@ -12,6 +12,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAuth, type Permission } from "@/components/auth";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 
 // ---- Shared types ----
 
@@ -106,11 +107,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
 
     const canCreate = !disableCreate && can(cfg.createPermission);
 
-    useEffect(() => {
-      const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
-      document.addEventListener("mousedown", h);
-      return () => document.removeEventListener("mousedown", h);
-    }, []);
+    // outside-click จัดการโดย FloatingDropdown (รวม dropdown ที่อยู่ใน portal ด้วย)
 
     useEffect(() => {
       if (open) { setRecent(loadRecent<V>(cfg.storageKey)); setFavs(loadFav<V>(cfg.storageKey)); }
@@ -202,8 +199,8 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
           <span className="text-slate-400"><IconChev /></span>
         </button>
 
-        {open && !disabled && (
-          <div className="absolute z-30 left-0 right-0 top-10 bg-white border border-slate-200 rounded-lg shadow-lg">
+        <FloatingDropdown anchorRef={boxRef} open={open && !disabled} onClose={() => setOpen(false)}>
+          <div className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
             <div className="p-2 border-b border-slate-100 relative">
               <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconSearch /></span>
               <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
@@ -238,7 +235,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
               )}
             </div>
           </div>
-        )}
+        </FloatingDropdown>
       </div>
     );
   };
