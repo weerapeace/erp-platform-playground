@@ -14,14 +14,19 @@ const MasterCRUDPage = dynamic(
 
 const STATUS = ["active", "inactive"];
 
+// นำร่อง Field Registry: moduleKey → MasterCRUDPage โหลด field จากทะเบียนกลาง
+// (erp_module_fields ของ payroll-companies) → เปิดปุ่ม "⚙ ปรับแต่ง / แต่งฟอร์ม" ให้เจ้าของแก้เองได้
+// ยังต่อข้อมูลผ่าน /api/payroll/master/companies เหมือนเดิม (registry แค่ให้ field config)
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/master/", apiPath: "companies", tableId: "payroll-companies",
+  moduleKey: "payroll-companies",
   title: "บริษัท (Payroll)", icon: "🏢",
   description: "บริษัทจริง — โมดูลเงินเดือนเวอร์ชันใช้ของกลาง erp",
   uniqueKey: "company_code", activeField: "active", exportEntityType: "payroll_company",
   searchKeys: ["company_code", "name"],
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true,
+  // fields[] = fallback ถ้าโหลดทะเบียนไม่ได้ (registry override เมื่อโหลดสำเร็จ)
   fields: [
     { key: "company_code", label: "รหัส",     type: "text", colSize: 100, groupKey: "core", order: 10 },
     { key: "name",         label: "ชื่อบริษัท", type: "text", colSize: 220, required: true, formSpan: 2, groupKey: "core", order: 20 },
