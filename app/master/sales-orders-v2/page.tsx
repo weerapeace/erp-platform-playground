@@ -1,5 +1,7 @@
-"use client";
-import { MasterPage } from "@/components/master-page";
+import { redirect } from "next/navigation";
+
+// หน้าเดโม่เก่า (MasterPage generic) — เลิกใช้ เปลี่ยนมาใช้ใบสั่งขายตัวจริง /sales-orders
+// ตาราง sales_orders ใน DB ยังอยู่ (ไม่ลบ) — แค่พาผู้ใช้ไปหน้าใหม่ที่มีบรรทัดสินค้า/workflow ครบ
 export default function Page() {
-  return <MasterPage apiPath="sales-orders-v2" moduleKey="sales-orders-v2" title="Sales Orders (v2)" icon="🧾" description="ใบสั่งขาย — ยืนยัน=จอง, ส่ง=ตัด stock (Phase 5)" />;
+  redirect("/sales-orders");
 }
