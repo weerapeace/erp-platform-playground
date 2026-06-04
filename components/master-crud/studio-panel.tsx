@@ -729,8 +729,8 @@ function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, onSetI
 function FormFieldRow({ field, sectionOptions, onToggle, onToggleInline, onToggleBulk, onMoveGroup, settingsOpen, onToggleSettings }: { field: StudioField; sectionOptions: { key: string; label: string }[]; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void; settingsOpen: boolean; onToggleSettings: ()=>void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
-  // ชนิดที่ quick-edit ได้ (text/number/boolean/select)
-  const inlineable = ["text","number","boolean","select"].includes(field.type);
+  // ชนิดที่ quick-edit ได้ (text/number/boolean/select/textarea/relation)
+  const inlineable = ["text","number","boolean","select","textarea","relation"].includes(field.type);
   // ชนิดที่ bulk-edit ได้ (รวม relation ด้วย — เลือกค่าเดียวให้ทุกแถว)
   const bulkable = inlineable || field.type === "relation";
   return (

@@ -1312,8 +1312,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const vs = fieldStyleCss(f.uiStyle);   // สไตล์จาก Studio (ใช้กับค่าในหน้า detail)
     // Quick edit: field ที่ตั้ง inline + แก้ได้ + ชนิดง่ายๆ → กดแก้ได้เลยในหน้า detail
     if (drawerMode === "view" && editingId && canEdit && f.inlineEditable && !f.readonly
-        && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select")) {
-      return <QuickEditCell field={f} value={v} onSave={(val) => quickSave(f.key, val)} />;
+        && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select" || f.type === "textarea" || (f.type === "relation" && !!f.relationConfig))) {
+      return <QuickEditCell field={f} value={v} siblingValues={form} onSave={(val) => quickSave(f.key, val)} />;
     }
     if (f.type === "computed") {
       if (f.textCompute) return <div className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{computedTextValue(f.textCompute, form) ?? "—"}</div>;
@@ -1804,7 +1804,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 // ============================================================
 // QuickEditCell — แก้ค่าเร็วในหน้า detail (view mode) บันทึกทันที
 // ============================================================
-function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unknown; onSave: (v: string) => Promise<string | null> }) {
+function QuickEditCell({ field, value, onSave, siblingValues }: { field: FieldDef; value: unknown; onSave: (v: string) => Promise<string | null>; siblingValues?: Record<string, unknown> }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1817,6 +1817,21 @@ function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unkno
     if (e) { setErr(e); return; }
     setEditing(false);
   };
+
+  // relation: แก้ inline ด้วย picker (เลือกแล้วบันทึกทันที)
+  if (field.type === "relation" && field.relationConfig) {
+    return (
+      <div className="w-full">
+        <RelationPicker
+          value={(value as string) || null}
+          onChange={(val) => commit(val ?? "")}
+          config={field.relationConfig}
+          siblingValues={siblingValues ?? {}}
+        />
+        {err && <span className="text-[10px] text-red-500">{err}</span>}
+      </div>
+    );
+  }
 
   if (field.type === "boolean") {
     return (
@@ -1832,12 +1847,13 @@ function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unkno
 
   if (!editing) {
     const empty = value == null || value === "";
+    const isArea = field.type === "textarea";
     // คลิกได้เต็มความกว้างช่อง (ตาม span) + ถ้าว่างก็ยังกดเพิ่มได้
     return (
       <button type="button" onClick={() => { setVal(value == null ? "" : String(value)); setEditing(true); }}
         className={`block w-full text-left text-sm rounded px-2 py-1 -mx-2 border border-transparent hover:border-blue-200 hover:bg-blue-50/60 group ${empty ? "text-slate-300 italic" : "text-slate-800"}`}>
-        <span className="inline-flex items-center gap-1 max-w-full align-middle">
-          <span className="truncate">{empty ? "คลิกเพื่อเพิ่มข้อมูล" : String(value)}</span>
+        <span className="flex items-start gap-1 max-w-full">
+          <span className={`flex-1 ${isArea ? "whitespace-pre-wrap break-words" : "truncate"}`}>{empty ? "คลิกเพื่อเพิ่มข้อมูล" : String(value)}</span>
           <span className="text-[10px] text-blue-400 opacity-0 group-hover:opacity-100 flex-shrink-0">✎</span>
         </span>
       </button>
@@ -1847,12 +1863,18 @@ function QuickEditCell({ field, value, onSave }: { field: FieldDef; value: unkno
   // ช่องแก้กว้างเต็มช่อง (ตามจำนวนคอลัมน์ที่ตั้งให้ field)
   const inputCls = "w-full h-8 px-2 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
   return (
-    <div className="flex items-center gap-1 w-full">
+    <div className="flex items-start gap-1 w-full">
       {field.type === "select" && field.options ? (
         <select autoFocus value={val} disabled={saving} onChange={(e) => setVal(e.target.value)} onBlur={() => commit(val)} className={`${inputCls} bg-white`}>
           <option value="">—</option>
           {field.options.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
+      ) : field.type === "textarea" ? (
+        <textarea autoFocus value={val} disabled={saving} rows={4}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+          onBlur={() => commit(val)}
+          className="w-full px-2 py-1.5 text-sm border border-blue-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
       ) : (
         <input autoFocus type={field.type === "number" ? "number" : "text"} value={val} disabled={saving}
           onChange={(e) => setVal(e.target.value)}
