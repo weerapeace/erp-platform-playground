@@ -70,6 +70,7 @@ export const navGroups = [
       { href: "/payroll/contracts", icon: "📄", labelTH: "สัญญาจ้าง (Payroll)" },
       { href: "/payroll/periods",   icon: "🗓️", labelTH: "งวดเงินเดือน" },
       { href: "/payroll/review",    icon: "✅", labelTH: "ตรวจสอบเงินเดือน" },
+      { href: "/payroll/calc-verify", icon: "🧮", labelTH: "เทียบยอดคำนวณ" },
       { href: "/payroll/payslips",  icon: "🧾", labelTH: "สลิปเงินเดือน" },
       { href: "/payroll/payments",  icon: "🏦", labelTH: "รอบจ่ายเงิน" },
       { href: "/payroll/attendance", icon: "⏰", labelTH: "เวลาเข้าออก" },
