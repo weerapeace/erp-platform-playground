@@ -47,6 +47,18 @@ export const MOCK_ME = "สมหญิง ใจดี";
 /** วันอ้างอิงของ mock (ตรงกับ today ในระบบ) */
 export const MOCK_TODAY = "2026-06-04";
 
+/** งานเกินกำหนด (ยังไม่เสร็จ/ไม่ยกเลิก และเลยกำหนดส่ง) */
+export function isOverdue(t: Task): boolean {
+  return !!t.due_date && t.due_date < MOCK_TODAY && t.status !== "done" && t.status !== "cancelled";
+}
+
+/** งานที่ครบกำหนดภายใน 7 วันนับจากวันนี้ */
+export function withinThisWeek(t: Task): boolean {
+  if (!t.due_date) return false;
+  const diff = (new Date(t.due_date).getTime() - new Date(MOCK_TODAY).getTime()) / 86400000;
+  return diff >= 0 && diff <= 7 && t.status !== "done" && t.status !== "cancelled";
+}
+
 // ---- ป้ายสถานะ (module config — ไม่ใช่ของกลางตาราง) ----
 export const STATUS_META: Record<TaskStatus, { label: string; cls: string; dot: string }> = {
   new:         { label: "ใหม่",      cls: "bg-blue-50 text-blue-700 border-blue-200",       dot: "bg-blue-500" },

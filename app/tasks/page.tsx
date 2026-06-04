@@ -16,8 +16,10 @@ import { EmployeePicker, ProductPicker } from "@/components/pickers";
 import type { EmployeePickerValue, ProductPickerValue } from "@/components/pickers";
 import { ActivityFeed, type ActivityEntry } from "@/components/activity-feed";
 import type { ColumnDef } from "@tanstack/react-table";
+import { KanbanBoard } from "./kanban-board";
 import {
-  MOCK_TASKS, MOCK_ME, MOCK_TODAY, STATUS_META, PRIORITY_META, TASK_TRANSITIONS,
+  MOCK_TASKS, MOCK_ME, STATUS_META, PRIORITY_META, TASK_TRANSITIONS,
+  isOverdue, withinThisWeek,
   type Task, type TaskStatus, type TaskPriority, type Comment,
 } from "./mock-data";
 
@@ -37,18 +39,6 @@ function TaskStatusBadge({ status }: { status: TaskStatus }) {
 function PriorityBadge({ priority }: { priority: TaskPriority }) {
   const m = PRIORITY_META[priority];
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}>{m.label}</span>;
-}
-
-function isOverdue(t: Task): boolean {
-  return !!t.due_date && t.due_date < MOCK_TODAY && t.status !== "done" && t.status !== "cancelled";
-}
-
-function withinThisWeek(t: Task): boolean {
-  if (!t.due_date) return false;
-  const today = new Date(MOCK_TODAY);
-  const due = new Date(t.due_date);
-  const diff = (due.getTime() - today.getTime()) / 86400000;
-  return diff >= 0 && diff <= 7 && t.status !== "done" && t.status !== "cancelled";
 }
 
 function DueCell({ t }: { t: Task }) {
@@ -154,6 +144,7 @@ const EMPTY_FORM: FormState = {
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
+  const [boardView, setBoardView] = useState<"table" | "kanban">("table");
 
   // create modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -278,27 +269,45 @@ export default function TasksPage() {
           </div>
         </div>
 
-        {/* Table */}
-        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-          <DataTable<Task>
-            data={tasks} columns={COLUMNS}
-            title={`รายการงาน (${tasks.length})`}
-            description="คลิกที่งานเพื่อดูรายละเอียด · ตารางกลางตัวเดียวกับทุกโมดูล"
-            emptyMessage="ยังไม่มีงาน — กดปุ่ม สร้างงาน"
-            searchPlaceholder="ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ..."
-            searchableKeys={["task_no", "title", "assignee_name", "project"]}
-            views={VIEWS} tableId="tasks"
-            exportFilename="งาน"
-            enableCards
-            cardConfig={{
-              primary: "title",
-              subtitle: "task_no",
-              badges: ["status", "priority"],
-              lines: ["assignee_name", "due_date", "project"],
-            }}
-            onRowClick={(row) => setDetailId(row.id)}
-          />
+        {/* View toggle: ตาราง / Kanban */}
+        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+          <ViewToggleBtn active={boardView === "table"} onClick={() => setBoardView("table")} icon="📋" label="ตาราง" />
+          <ViewToggleBtn active={boardView === "kanban"} onClick={() => setBoardView("kanban")} icon="🟦" label="Kanban" />
         </div>
+
+        {boardView === "table" ? (
+          /* Table (ของกลาง) */
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <DataTable<Task>
+              data={tasks} columns={COLUMNS}
+              title={`รายการงาน (${tasks.length})`}
+              description="คลิกที่งานเพื่อดูรายละเอียด · ตารางกลางตัวเดียวกับทุกโมดูล"
+              emptyMessage="ยังไม่มีงาน — กดปุ่ม สร้างงาน"
+              searchPlaceholder="ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ..."
+              searchableKeys={["task_no", "title", "assignee_name", "project"]}
+              views={VIEWS} tableId="tasks"
+              exportFilename="งาน"
+              enableCards
+              cardConfig={{
+                primary: "title",
+                subtitle: "task_no",
+                badges: ["status", "priority"],
+                lines: ["assignee_name", "due_date", "project"],
+              }}
+              onRowClick={(row) => setDetailId(row.id)}
+            />
+          </div>
+        ) : (
+          /* Kanban board — ลากการ์ดข้ามคอลัมน์ = เปลี่ยนสถานะ */
+          <div>
+            <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด</p>
+            <KanbanBoard
+              tasks={tasks}
+              onCardClick={(id) => setDetailId(id)}
+              onMove={(taskId, to) => doTransition(taskId, to, "ลากบนกระดาน")}
+            />
+          </div>
+        )}
       </div>
 
       {/* ============ Create Modal ============ */}
@@ -366,6 +375,15 @@ export default function TasksPage() {
 
       <ToastStack toasts={toasts} onDismiss={id => setToasts(p => p.filter(t => t.id !== id))} />
     </PlaygroundShell>
+  );
+}
+
+function ViewToggleBtn({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: string; label: string }) {
+  return (
+    <button onClick={onClick}
+      className={`h-8 px-3 rounded-md text-sm font-medium transition-colors ${active ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+      {icon} {label}
+    </button>
   );
 }
 
