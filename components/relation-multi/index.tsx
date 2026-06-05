@@ -54,7 +54,6 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
 
   const [opts, setOpts] = useState<Opt[]>([]);
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // แหล่งความจริงเดียว = ค่าในฟอร์ม (value) — ไม่มี state ภายใน widget (กัน diverge/remount ทำค่าหาย)
@@ -115,32 +114,31 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
         ))}
       </div>
       {editable && !loading && (
-        <div className="relative">
-          <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+        <div>
+          {/* ช่องค้นหา (กรองรายการ) — ไม่มี dropdown เปิด/ปิด แล้ว */}
+          <input value={q} onChange={(e) => setQ(e.target.value)}
             placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
             className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
-          {open && (<>
-            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg p-1">
-              {filtered.map((o) => {
-                const on = linked.includes(o.id);
-                return (
-                  <button key={o.id} type="button" onClick={() => toggle(o.id)}
-                    className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50">
-                    <input type="checkbox" readOnly checked={on} className="rounded border-slate-300 pointer-events-none" />
-                    <span className="flex-1 truncate">{o.label}</span>
-                  </button>
-                );
-              })}
-              {filtered.length === 0 && !ql && <div className="text-xs text-slate-300 py-2 text-center">— ไม่มีแท็ก —</div>}
-              {allowCreate && ql && !exact && (
-                <button type="button" onClick={createNew} disabled={busy}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border-t border-slate-100 mt-1">
-                  ➕ สร้างแท็กใหม่ “{q.trim()}”
+          {/* รายการเช็คบ็อกซ์ โชว์ตลอด (เลื่อนได้) → ไม่มีจังหวะ "ปิด" ที่ทำให้ค่าหาย */}
+          <div className="mt-1 max-h-44 overflow-y-auto border border-slate-200 rounded-lg p-1">
+            {filtered.map((o) => {
+              const on = linked.includes(o.id);
+              return (
+                <button key={o.id} type="button" onClick={() => toggle(o.id)}
+                  className={`flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50 ${on ? "bg-blue-50/50" : ""}`}>
+                  <input type="checkbox" readOnly checked={on} className="rounded border-slate-300 pointer-events-none" />
+                  <span className="flex-1 truncate">{o.label}</span>
                 </button>
-              )}
-            </div>
-          </>)}
+              );
+            })}
+            {filtered.length === 0 && !ql && <div className="text-xs text-slate-300 py-2 text-center">— ไม่มีแท็ก —</div>}
+            {allowCreate && ql && !exact && (
+              <button type="button" onClick={createNew} disabled={busy}
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border-t border-slate-100 mt-1">
+                ➕ สร้างแท็กใหม่ “{q.trim()}”
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>
