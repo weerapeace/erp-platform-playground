@@ -814,7 +814,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${r.id}`)
         .then(res => res.json())
         .then(j => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: (j.links ?? []) } : p)))
-        .catch(() => {});
+        .catch(() => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: [] } : p)));   // พลาด → ตั้ง [] กันค้าง "กำลังโหลด"
     });
 
     // fetch full row ใน background (REST mode เท่านั้น)

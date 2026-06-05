@@ -53,6 +53,9 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // โหมดแก้ไข (มี recordId) แต่ value ยังเป็น undefined = ลิงก์เดิมยังโหลดไม่เสร็จจาก master-crud
+  // → ล็อกการคลิกไว้ก่อน (กัน toggle จากฐานว่าง แล้วลบลิงก์เดิมหาย) จนกว่าจะโหลดเสร็จ
+  const loading = !!recordId && value === undefined;
   const linked = value ?? [];
   // อ่านค่าล่าสุดเสมอตอน toggle (กัน stale closure ระหว่าง render)
   const valueRef = useRef<string[]>(linked);
@@ -63,6 +66,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
   const toggle = (id: string) => {
+    if (loading) return;   // ยังโหลดลิงก์เดิมไม่เสร็จ — กันค่าเพี้ยน
     const cur = valueRef.current;
     const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
     onChange?.(next);
@@ -92,9 +96,10 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
 
   return (
     <div className="mt-0.5">
+      {loading && <div className="text-xs text-slate-400 italic py-1">กำลังโหลด…</div>}
       {/* แท็กที่เลือก */}
       <div className="flex flex-wrap gap-1.5 mb-1.5">
-        {linked.length === 0 && <span className="text-xs text-slate-300">— ยังไม่เลือก —</span>}
+        {!loading && linked.length === 0 && <span className="text-xs text-slate-300">— ยังไม่เลือก —</span>}
         {linked.map((id) => (
           <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100">
             {labelOf(id)}
@@ -102,7 +107,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
           </span>
         ))}
       </div>
-      {editable && (
+      {editable && !loading && (
         <div className="relative">
           <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
             placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
