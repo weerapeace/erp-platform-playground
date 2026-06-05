@@ -2429,6 +2429,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const thbToggle = (id: string) => setThbSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [showBills, setShowBills] = useState(true);   // ย่อ/ขยายการ์ด "ยอดที่ต้องโอนรอบนี้" (default ขยาย)
   const [useBalance, setUseBalance] = useState(true);           // สวิตช์ใช้ยอดคงเหลือบัญชีจีน (default เปิด)
+  const [balanceUse, setBalanceUse] = useState("");             // ยอดคงเหลือที่จะใช้ (¥) — เว้นว่าง = ใช้เต็มเท่าที่มี
+  const [balanceEdit, setBalanceEdit] = useState(false);        // เปิดช่องแก้ยอดที่จะใช้
   const [amount, setAmount] = useState("");
   const [refNo, setRefNo] = useState("");                       // หมายเลข/เลขอ้างอิงการโอน
   const [rate, setRate] = useState("");
@@ -2487,6 +2489,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       if (typeof d.refNo === "string") setRefNo(d.refNo);
       if (typeof d.note === "string") setNote(d.note);
       if (typeof d.useBalance === "boolean") setUseBalance(d.useBalance);
+      if (typeof d.balanceUse === "string") setBalanceUse(d.balanceUse);
       if (Array.isArray(d.txSlips)) setTxSlips(d.txSlips as TxSlip[]);
       if (typeof d.step === "number") setStep(Math.min(2, d.step));   // เหลือแค่ 2 ขั้น (เผื่อ draft เก่ามี step 3)
       toast.success("คืนค่างานที่ทำค้างไว้");
@@ -2498,11 +2501,11 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     try {
       if (hasData) localStorage.setItem("china-tx-draft", JSON.stringify({
         sel: [...sel], pay, thbSel: [...thbSel],
-        amount, refNo, note, useBalance, txSlips, step,
+        amount, refNo, note, useBalance, balanceUse, txSlips, step,
       }));
       else localStorage.removeItem("china-tx-draft");
     } catch { /* noop */ }
-  }, [sel, pay, thbSel, amount, refNo, note, useBalance, txSlips, step]);
+  }, [sel, pay, thbSel, amount, refNo, note, useBalance, balanceUse, txSlips, step]);
 
   // โหลดเรท R1 ตาม "วันที่โอน" (ถ้าไม่มีเรทวันนั้น → ว่าง = รอเรทเงิน)
   useEffect(() => {
@@ -2570,7 +2573,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const chinaInRmb = surplusRmb;                              // เข้าบัญชีจีน (¥)
   const chinaIn = surplusRmb * effRate;                       // ฿
   // ★ ขั้นต่ำที่ต้องโอน = ยอดเต็มรอบนี้ − ยอดคงเหลือที่ใช้ได้ (ถ้าเปิด toggle) — ใช้ได้ไม่เกินมูลค่าบิลจีน
-  const chinaCoverRmb = useBalance ? Math.min(balance.rmb, selectedRmb) : 0;   // ยอดคงเหลือที่ใช้หัก (¥) — หัก ¥ ก่อนแปลงบาท
+  // ยอดคงเหลือที่ใช้หัก (¥) — ปกติใช้เต็มเท่าที่มี (ไม่เกินมูลค่าบิลจีน) · ถ้ากรอกเอง ใช้ตามนั้น (ไม่เกินเพดาน)
+  const coverCap = Math.min(balance.rmb, selectedRmb);
+  const chinaCoverRmb = useBalance ? (balanceUse.trim() !== "" ? Math.min(num(balanceUse), coverCap) : coverCap) : 0;
   const chinaCoverThb = chinaCoverRmb * effRate;
   const minTransfer = Math.max(0, roundTotalThb - chinaCoverThb);
   const belowMin = hasRate && (selectedRmb > 0 || thbSelTotal > 0) && transferred < minTransfer - 0.001;
@@ -2836,7 +2841,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         // สรุปการคำนวณ (ย้ายมาจากหน้ายืนยัน → โชว์ในใบพิมพ์)
         breakdown: { thb: thbSelTotal, chinaRemainThb, billsThb: selectedSum, tier: activeTier, chinaYuanBought, shortfallRmb, surplusRmb },
       });
-      setSel(new Set()); setPay({}); setThbSel(new Set()); setUseBalance(true);
+      setSel(new Set()); setPay({}); setThbSel(new Set()); setUseBalance(true); setBalanceUse(""); setBalanceEdit(false);
       setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1);
       try { localStorage.removeItem("china-tx-draft"); } catch { /* noop */ }
       loadAll();
@@ -2948,6 +2953,22 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                 <span className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition peer-checked:translate-x-4" />
               </span>
             </label>
+          )}
+          {balance.rmb > 0 && useBalance && (
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-500">หักจริงรอบนี้ <b className="text-emerald-700">¥{fmt(+chinaCoverRmb.toFixed(2))}</b>{balanceUse.trim() === "" ? " (ใช้เต็ม)" : ""}</span>
+              <button type="button" onClick={() => setBalanceEdit(v => !v)}
+                className="flex-shrink-0 text-[11px] px-2 py-0.5 rounded-md border border-emerald-300 text-emerald-700 active:scale-95 transition">{balanceEdit ? "ปิด" : "✎ แก้ยอด"}</button>
+            </div>
+          )}
+          {balance.rmb > 0 && useBalance && balanceEdit && (
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="text-[11px] text-slate-500 flex-shrink-0">ใช้ (¥)</span>
+              <Money value={balanceUse} onChange={setBalanceUse}
+                className="flex-1 h-9 px-2 text-sm text-right border border-emerald-300 rounded-lg" />
+              <button type="button" onClick={() => setBalanceUse("")}
+                className="flex-shrink-0 text-[11px] px-2 h-9 rounded-md bg-slate-100 text-slate-600">ใช้เต็ม</button>
+            </div>
           )}
         </div>
       )}
