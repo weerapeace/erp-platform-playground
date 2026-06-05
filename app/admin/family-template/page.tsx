@@ -52,6 +52,11 @@ export default function FamilyTemplatePage() {
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
+  // โหมด: ตามแท็ก (เดิม) / ตาม Section (whitelist โชว์เฉพาะแท็ก)
+  const [viewMode, setViewMode] = useState<"tag" | "section">("tag");
+  const [sectionRules, setSectionRules] = useState<Record<string, string[]>>({});
+  const [savingSec, setSavingSec] = useState(false);
+  const [secMsg, setSecMsg] = useState("");
 
   // โหลดแท็ก + field registry ของ Parent SKU
   useEffect(() => {
@@ -72,6 +77,7 @@ export default function FamilyTemplatePage() {
         const secs: Section[] = [];
         for (const t of tabs) for (const s of (t.sections ?? [])) secs.push({ key: s.key, label: s.label });
         setSections(secs);
+        setSectionRules((reg.section_tag_rules as Record<string, string[]>) ?? {});
         // เลือกแท็กแรกที่ "เป็นเทมเพลต" แล้ว (ไม่ใช่แท็กแรกของทั้งหมด)
         const firstTpl = fams.find((f) => hasTpl(f.template));
         if (firstTpl) { setActiveId(firstTpl.id); setTpl(firstTpl.template ?? {}); }
@@ -184,6 +190,27 @@ export default function FamilyTemplatePage() {
     finally { setSaving(false); }
   };
 
+  const toggleSecTag = (secKey: string, tagId: string) => setSectionRules((p) => {
+    const cur = new Set(p[secKey] ?? []);
+    if (cur.has(tagId)) cur.delete(tagId); else cur.add(tagId);
+    const next = { ...p };
+    if (cur.size) next[secKey] = [...cur]; else delete next[secKey];
+    return next;
+  });
+  const saveSectionRules = async () => {
+    setSavingSec(true); setSecMsg("");
+    try {
+      const res = await apiFetch("/api/admin/section-tag-rules", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ module: TARGET_MODULE, rules: sectionRules }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setSecMsg("❌ บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      setSecMsg("✅ บันทึกแล้ว");
+    } catch (e) { setSecMsg("❌ " + (e instanceof Error ? e.message : "network")); }
+    finally { setSavingSec(false); }
+  };
+
   if (loading) return <div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>;
 
   return (
@@ -191,11 +218,19 @@ export default function FamilyTemplatePage() {
       <div className="bg-white border-b border-slate-200 px-6 py-4">
         <h1 className="text-xl font-bold text-slate-900">🧩 เทมเพลตประเภทสินค้า</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          กำหนดว่าเมื่อ Parent SKU ติดแท็กนี้ จะโชว์/ซ่อนฟิลด์ไหน บังคับกรอกอะไร และตั้งค่าตั้งต้นอะไร
-          — ติดหลายแท็กจะรวมกันแบบ union (แท็กไหนสั่งโชว์ก็โชว์)
+          {viewMode === "tag"
+            ? "กำหนดว่าเมื่อ Parent SKU ติดแท็กนี้ จะโชว์/ซ่อนฟิลด์ไหน บังคับกรอกอะไร — ติดหลายแท็กรวมกันแบบ union"
+            : "กำหนดว่าแต่ละ Section จะโชว์เฉพาะ Parent SKU ที่มีแท็กไหน (ไม่เลือก = โชว์ทุกแท็ก)"}
         </p>
+        <div className="mt-3 inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+          <button onClick={() => setViewMode("tag")}
+            className={`px-3 h-8 ${viewMode === "tag" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>ตามแท็ก</button>
+          <button onClick={() => setViewMode("section")}
+            className={`px-3 h-8 border-l border-slate-200 ${viewMode === "section" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>ตาม Section (โชว์เฉพาะแท็ก)</button>
+        </div>
       </div>
 
+      {viewMode === "tag" && (
       <div className="flex gap-4 p-4 max-w-6xl mx-auto">
         {/* รายการแท็กที่เป็นเทมเพลต */}
         <div className="w-60 shrink-0">
@@ -330,6 +365,59 @@ export default function FamilyTemplatePage() {
           )}
         </div>
       </div>
+      )}
+
+      {/* ───────── โหมด: ตาม Section (โชว์เฉพาะแท็ก) ───────── */}
+      {viewMode === "section" && (
+        <div className="p-4 max-w-4xl mx-auto">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-slate-500">เลือกแท็กที่จะให้ section นั้นโชว์ — ไม่เลือกแท็กเลย = โชว์ทุกแท็ก (ปกติ)</p>
+            <div className="flex items-center gap-2">
+              {secMsg && <span className="text-xs">{secMsg}</span>}
+              <button onClick={saveSectionRules} disabled={savingSec}
+                className="h-8 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                {savingSec ? "กำลังบันทึก…" : "บันทึก"}
+              </button>
+            </div>
+          </div>
+          {grouped.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-lg p-6 text-sm text-slate-400">ยังไม่มี section</div>
+          ) : (
+            <div className="space-y-3">
+              {grouped.map((g) => {
+                const sel = sectionRules[g.key] ?? [];
+                return (
+                  <div key={g.key} className="bg-white border border-slate-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-slate-700">{g.label}</span>
+                      <span className={`text-[11px] ${sel.length ? "text-blue-600" : "text-slate-400"}`}>
+                        {sel.length === 0 ? "โชว์ทุกแท็ก" : `โชว์เฉพาะ ${sel.length} แท็ก`}
+                      </span>
+                    </div>
+                    {families.length === 0 ? (
+                      <div className="text-xs text-slate-400">ยังไม่มีแท็ก</div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {families.map((f) => {
+                          const on = sel.includes(f.id);
+                          return (
+                            <button key={f.id} onClick={() => toggleSecTag(g.key, f.id)}
+                              className={`text-[11px] px-2 py-1 rounded-full border ${
+                                on ? "border-blue-400 bg-blue-100 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                              }`}>
+                              {f.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

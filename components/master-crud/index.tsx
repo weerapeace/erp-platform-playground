@@ -417,6 +417,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [registryFields, setRegistryFields] = useState<FormField[] | null>(null);
   const [registryLayout, setRegistryLayout] = useState<FormLayout>(null);  // กลุ่ม B
   const [registryLoading, setRegistryLoading] = useState(!!config.moduleKey);
+  // กฎ section โชว์เฉพาะแท็ก (whitelist): sectionKey → tagId[]
+  const [sectionTagRules, setSectionTagRules] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     if (!config.moduleKey) return;
@@ -425,7 +427,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .then((r) => r.json() as Promise<FieldRegistryV2Response>)
       .then((res) => {
         if (res.error) console.error("Field Registry load error:", res.error);
-        else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); }
+        else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); }
       })
       .catch((e) => console.error("Field Registry load failed:", e))
       .finally(() => setRegistryLoading(false));
@@ -438,7 +440,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     try {
       const r = await apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`);
       const res = (await r.json()) as FieldRegistryV2Response;
-      if (!res.error) { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); }
+      if (!res.error) { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); }
     } finally {
       setRegistryLoading(false);
     }
@@ -675,8 +677,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (mergedTemplate.show.has(f.key)) return false;
     if (mergedTemplate.hide.has(f.key)) return true;
     if (f.groupKey && mergedTemplate.hideSec.has(f.groupKey)) return true;
+    // section whitelist: "โชว์เฉพาะแท็ก…" → มีกฎ + SKU ไม่มีแท็กในรายการ = ซ่อน
+    if (f.groupKey) {
+      const allow = sectionTagRules[f.groupKey];
+      if (allow && allow.length > 0 && !selectedFamilyIds.some((id) => allow.includes(id))) return true;
+    }
     return false;
-  }, [mergedTemplate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mergedTemplate, sectionTagRules, familyKey]);
   const tplRequired = useCallback((f: FieldDef) => !!f.required || mergedTemplate.req.has(f.key), [mergedTemplate]);
 
   // archive (soft) — เก็บไว้เผื่อ flow อื่น

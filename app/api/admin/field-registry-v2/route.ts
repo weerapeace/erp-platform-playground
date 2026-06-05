@@ -65,6 +65,8 @@ export type FieldRegistryV2Response = {
   module_key: string;
   fields:     FormField[];
   layout:     FormLayout;
+  /** กฎ section whitelist ตามแท็ก: sectionKey → tagId[] (ว่าง/ไม่มี = โชว์ทุกแท็ก) */
+  section_tag_rules?: Record<string, string[]>;
   error:      string | null;
 };
 
@@ -92,7 +94,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
       { status: 404 }
     );
   }
-  const layout: FormLayout = ((mod.config as { layout?: FormLayout })?.layout) ?? null;
+  const cfg = (mod.config ?? {}) as { layout?: FormLayout; section_tag_rules?: Record<string, string[]> };
+  const layout: FormLayout = cfg.layout ?? null;
+  const sectionTagRules: Record<string, string[]> = cfg.section_tag_rules ?? {};
 
   const { data, error } = await supabase
     .from("erp_module_fields")
@@ -112,6 +116,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
     module_key: moduleKey,
     fields: (data ?? []) as FormField[],
     layout,
+    section_tag_rules: sectionTagRules,
     error: null,
   });
 }
