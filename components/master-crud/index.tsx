@@ -570,6 +570,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const navRowsRef = useRef<Row[]>([]);
   const onVisibleRowsChange = useCallback((rows: Row[]) => { navRowsRef.current = rows; }, []);
   const [form,        setForm]        = useState<Record<string, unknown>>({});
+  // ref ที่ชี้ค่า form ล่าสุดเสมอ — ใช้ใน save() เพื่อกัน stale closure (โดยเฉพาะ m2m sync)
+  const formRef = useRef<Record<string, unknown>>({});
+  formRef.current = form;
   const [formErr,     setFormErr]     = useState<string | null>(null);
   const [dirty,       setDirty]       = useState(false);
   const [saving,      setSaving]      = useState(false);
@@ -951,7 +954,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
           const junction = String(rc.junction_table ?? "");
           if (!junction) continue;
-          const want = Array.isArray(form[fd.key]) ? (form[fd.key] as string[]).map(String) : [];
+          const want = Array.isArray(formRef.current[fd.key]) ? (formRef.current[fd.key] as string[]).map(String) : [];
           let have: string[] = [];
           try {
             const gr = await apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${srcId}`).then((r) => r.json());
