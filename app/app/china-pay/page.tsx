@@ -174,9 +174,17 @@ const billSlips = (b: Record<string, unknown>): Slip[] =>
   Array.isArray(b.slips) ? (b.slips as Record<string, unknown>[]).map((s) => ({ key: String(s.key ?? ""), amount_rmb: num(s.amount_rmb), at: s.at ? String(s.at) : undefined })) : [];
 const billTotalRmb = (b: Record<string, unknown>) => num(b.amount_rmb) + num(b.fee_rmb);
 const slipSumRmb = (b: Record<string, unknown>) => billSlips(b).reduce((a, s) => a + s.amount_rmb, 0);
+// บิลแบบบาท (ค่าส่ง/VAT) — ยอดเป็น ฿ ตรง ไม่ใช้เรท ไม่มีสลิป ¥
+const isThbBill = (b: Record<string, unknown>): boolean => !!b.is_shipping || !!b.vat_type;
+const billTypeLabel = (b: Record<string, unknown>): string =>
+  b.is_shipping ? "ค่าส่ง" : b.vat_type ? `VAT ${String(b.vat_type)}` : "";
+// ชื่อที่โชว์ในรายการ: ประเภท (ค่าส่ง/VAT) หรือชื่อร้าน
+const billDisplayName = (b: Record<string, unknown>): string =>
+  billTypeLabel(b) || String(b.supplier_label ?? b.supplier_id ?? "—");
 // คืนสถานะ: ยกเลิก / รอโอน / โอนแล้วบางส่วน / โอนครบแล้ว
 function billStatus3(b: Record<string, unknown>): string {
   if (String(b.status ?? "") === "ยกเลิก") return "ยกเลิก";
+  if (isThbBill(b)) return String(b.status ?? "") === "โอนแล้ว" ? "โอนครบแล้ว" : "รอโอน";
   const total = billTotalRmb(b), sum = slipSumRmb(b);
   if (total > 0 && sum >= total - 0.001) return "โอนครบแล้ว";
   if (sum > 0) return "โอนแล้วบางส่วน";
@@ -770,6 +778,9 @@ function BillForm() {
   const celebrate = useCelebrate();
   const [supplierId, setSupplierId] = useState<string | null>(null);
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
+  const [isShipping, setIsShipping] = useState(false);              // บิลค่าส่ง (บาท)
+  const [vatType, setVatType] = useState<"" | "ISG" | "IG">("");    // บิล VAT (บาท)
+  const [amountThb, setAmountThb] = useState("");                   // ยอดบาท (ค่าส่ง/VAT)
   const [amount, setAmount] = useState("");
   const [fee, setFee] = useState("");
   const [transferDate, setTransferDate] = useState(today());
@@ -794,27 +805,43 @@ function BillForm() {
   }, [supplierId]);
 
   const totalRmb = num(amount) + num(fee);
+  const thbMode = isShipping || !!vatType;                      // โหมดบาท (ค่าส่ง/VAT) — กรอกบาทตรง ไม่ใช้เรท
+  const thbLabel = isShipping ? "ค่าส่ง" : vatType ? `VAT ${vatType}` : "";
 
   const save = async () => {
-    if (!supplierId) { toast.error("เลือกร้านค้าก่อน"); return; }
-    if (num(amount) <= 0) { toast.error("กรอกยอดรวม (¥)"); return; }
     setSaving(true);
     try {
-      const res = await apiFetch("/api/master-v2/china-bills", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          supplier_id: supplierId, amount_rmb: num(amount), fee_rmb: num(fee),
+      let payload: Record<string, unknown>;
+      if (thbMode) {
+        if (num(amountThb) <= 0) { toast.error("กรอกยอดรวม (฿)"); setSaving(false); return; }
+        payload = {
+          supplier_id: null, amount_rmb: 0, fee_rmb: 0,
+          is_shipping: isShipping, vat_type: vatType || null, amount_thb: num(amountThb),
           transfer_date: transferDate || null, bill_date: billDate || null, note: note || null,
           attachments: files, status: "รอโอน", actor: "china-app",
-        }),
+        };
+      } else {
+        if (!supplierId) { toast.error("เลือกร้านค้า หรือเลือกประเภทบิล (ค่าส่ง/VAT)"); setSaving(false); return; }
+        if (num(amount) <= 0) { toast.error("กรอกยอดรวม (¥)"); setSaving(false); return; }
+        payload = {
+          supplier_id: supplierId, amount_rmb: num(amount), fee_rmb: num(fee),
+          is_shipping: false, vat_type: null, amount_thb: 0,
+          transfer_date: transferDate || null, bill_date: billDate || null, note: note || null,
+          attachments: files, status: "รอโอน", actor: "china-app",
+        };
+      }
+      const res = await apiFetch("/api/master-v2/china-bills", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
       celebrate("บันทึกบิลแล้ว 🎉", { confetti: true });
-      // เก็บบิลที่เพิ่งบันทึก (พร้อมข้อมูลร้าน) ไว้ทำ popup พิมพ์
-      setSavedBill({ ...(j.data ?? {}), _sup: sup, supplier_label: sup?.name_th ?? sup?.name_en });
+      // เก็บบิลที่เพิ่งบันทึก ไว้ทำ popup พิมพ์ (label = ร้าน หรือ ค่าส่ง/VAT)
+      setSavedBill({ ...(j.data ?? {}), _sup: thbMode ? null : sup, supplier_label: thbMode ? thbLabel : (sup?.name_th ?? sup?.name_en) });
       // reset ฟอร์ม
-      setSupplierId(null); setSup(null); setAmount(""); setFee(""); setTransferDate(today()); setBillDate(today());
+      setSupplierId(null); setSup(null); setIsShipping(false); setVatType(""); setAmountThb("");
+      setAmount(""); setFee(""); setTransferDate(today()); setBillDate(today());
       setFiles([]); setNote("");
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
@@ -823,31 +850,66 @@ function BillForm() {
   return (
     <div className="space-y-4">
       <Card>
-        <Label>ร้านค้า (จีน)</Label>
-        <RelationPicker value={supplierId} onChange={(id) => setSupplierId(id)} config={SUPPLIER_CFG} />
-        {sup && (
-          <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
-            {!!sup.name_en && <div className="text-slate-700 font-medium">{String(sup.name_en)}</div>}
-            <Row label="ธนาคาร" v={sup.bank_name_brief} />
-            <Row label="เลขบัญชี" v={sup.account_number} />
-            <Row label="ชื่อบัญชี" v={sup.bank_account_name} />
-            <Row label="โทร" v={sup.phone} />
+        {/* ร้านค้า (จีน) — ซ่อนเมื่อเลือกค่าส่ง/VAT */}
+        {!isShipping && !vatType && (
+          <>
+            <Label>ร้านค้า (จีน)</Label>
+            <RelationPicker value={supplierId} onChange={(id) => setSupplierId(id)} config={SUPPLIER_CFG} />
+            {sup && (
+              <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
+                {!!sup.name_en && <div className="text-slate-700 font-medium">{String(sup.name_en)}</div>}
+                <Row label="ธนาคาร" v={sup.bank_name_brief} />
+                <Row label="เลขบัญชี" v={sup.account_number} />
+                <Row label="ชื่อบัญชี" v={sup.bank_account_name} />
+                <Row label="โทร" v={sup.phone} />
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ค่าส่ง (เปิด/ปิด) — ซ่อนเมื่อเลือกร้าน/VAT */}
+        {!supplierId && !vatType && (
+          <label className={`flex items-center justify-between ${!isShipping ? "mt-3 pt-3 border-t border-slate-100" : ""}`}>
+            <span className="text-sm font-medium text-slate-700">🚚 บิลค่าส่ง (กรอกเป็นบาท)</span>
+            <input type="checkbox" checked={isShipping} onChange={e => { setIsShipping(e.target.checked); if (e.target.checked) { setSupplierId(null); setVatType(""); } }}
+              className="w-5 h-5 accent-orange-600" />
+          </label>
+        )}
+
+        {/* VAT (เลือก) — ซ่อนเมื่อเลือกร้าน/ค่าส่ง */}
+        {!supplierId && !isShipping && (
+          <div className={!supplierId && !vatType ? "mt-3 pt-3 border-t border-slate-100" : ""}>
+            <Label>VAT (กรอกเป็นบาท)</Label>
+            <select value={vatType} onChange={e => { const v = e.target.value as "" | "ISG" | "IG"; setVatType(v); if (v) { setSupplierId(null); setIsShipping(false); } }}
+              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg bg-white">
+              <option value="">— ไม่ใช่บิล VAT —</option>
+              <option value="ISG">VAT ISG</option>
+              <option value="IG">VAT IG</option>
+            </select>
           </div>
         )}
       </Card>
 
       <Card>
-        <div className="grid grid-cols-2 gap-3">
-          <div><Label>ยอดรวม (¥)</Label><Num value={amount} onChange={setAmount} /></div>
+        {thbMode ? (
+          /* โหมดบาท: ค่าส่ง/VAT — กรอกยอดบาทตรง */
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-medium text-slate-500">ค่าโอน (¥)</span>
-              <button type="button" onClick={() => setFeeInfo(v => !v)} className="text-[11px] text-blue-500">ⓘ ตาราง</button>
-            </div>
-            <Num value={fee} onChange={setFee} />
+            <Label>ยอดรวม ({thbLabel}) (฿)</Label>
+            <Num value={amountThb} onChange={setAmountThb} />
           </div>
-        </div>
-        {feeInfo && (
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>ยอดรวม (¥)</Label><Num value={amount} onChange={setAmount} /></div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-slate-500">ค่าโอน (¥)</span>
+                <button type="button" onClick={() => setFeeInfo(v => !v)} className="text-[11px] text-blue-500">ⓘ ตาราง</button>
+              </div>
+              <Num value={fee} onChange={setFee} />
+            </div>
+          </div>
+        )}
+        {!thbMode && feeInfo && (
           <div className="mt-2 rounded-lg bg-pink-50 border border-pink-200 p-3 text-xs">
             <div className="font-semibold text-slate-700 mb-1">ค่าธรรมเนียมการโอน</div>
             {FEE_TABLE.map(t => <div key={t.label} className="flex justify-between"><span className="text-slate-500">{t.label}</span><span className="text-slate-700">{t.fee} หยวน</span></div>)}
@@ -861,12 +923,16 @@ function BillForm() {
             <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)}
               className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         </div>
-        {/* สรุปยอด ¥ (เรทมาตอนโอน) */}
+        {/* สรุปยอด — บาทตรง (ค่าส่ง/VAT) หรือ ¥ (ร้านค้าจีน เรทมาตอนโอน) */}
         <div className="mt-3 rounded-lg bg-orange-50 border border-orange-100 p-3 flex justify-between items-center">
           <div className="text-sm text-slate-600">ยอดโอนรวม</div>
-          <div className="text-lg font-bold text-orange-600">¥{fmt(totalRmb)}</div>
+          {thbMode
+            ? <div className="text-lg font-bold text-orange-600">฿{fmt(num(amountThb))}</div>
+            : <div className="text-lg font-bold text-orange-600">¥{fmt(totalRmb)}</div>}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400 text-center">* เรท/ยอดเงินบาทจะคำนวณตอน “โอนเข้าจีน”</div>
+        <div className="mt-1 text-[11px] text-slate-400 text-center">
+          {thbMode ? "* บิลค่าส่ง/VAT เป็นยอดบาท ไม่ใช้เรท" : "* เรท/ยอดเงินบาทจะคำนวณตอน “โอนเข้าจีน”"}
+        </div>
       </Card>
 
       <Card>
@@ -890,7 +956,7 @@ function BillForm() {
               <svg viewBox="0 0 52 52" className="w-9 h-9"><path className="cpok-check" d="M14 27l8 8 16-18" /></svg>
             </div>
             <div className="text-lg font-semibold text-slate-800">บันทึกบิลแล้ว</div>
-            <div className="mt-1 text-sm text-slate-500">{String(savedBill.supplier_label ?? "")} · ¥{fmt(num(savedBill.amount_rmb) + num(savedBill.fee_rmb))}</div>
+            <div className="mt-1 text-sm text-slate-500">{String(savedBill.supplier_label ?? "")} · {isThbBill(savedBill) ? `฿${fmt(num(savedBill.amount_thb))}` : `¥${fmt(num(savedBill.amount_rmb) + num(savedBill.fee_rmb))}`}</div>
             <div className="mt-4 space-y-2">
               <button onClick={() => setReport(savedBill)} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์ / ใบสรุป</button>
               <button onClick={() => setSavedBill(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
@@ -933,7 +999,8 @@ function AllList({ canDelete }: { canDelete: boolean }) {
   const onPrinted = (id: string, at: string) => setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selRows = rows.filter(r => sel.has(String(r.id)));
-  const openBills = rows.filter(r => { const s = billStatus3(r); return s === "รอโอน" || s === "โอนแล้วบางส่วน"; });
+  // แนบสลิป ¥ ใช้เฉพาะบิลร้านค้าจีน — ค่าส่ง/VAT (บาท) ไม่มีสลิป ¥
+  const openBills = rows.filter(r => !isThbBill(r) && (() => { const s = billStatus3(r); return s === "รอโอน" || s === "โอนแล้วบางส่วน"; })());
 
   const sendCombined = async () => {
     if (!selRows.length) return;
@@ -1008,13 +1075,22 @@ function AllList({ canDelete }: { canDelete: boolean }) {
                   className={`mt-0.5 w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</button>
                 <button onClick={() => setDetail(r)} className="flex-1 min-w-0 text-left flex justify-between items-start gap-2">
                   <div className="min-w-0">
-                    <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
+                    <div className="font-medium text-slate-800 truncate flex items-center gap-1.5">
+                      {isThbBill(r) && <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${r.is_shipping ? "bg-purple-100 text-purple-700" : "bg-rose-100 text-rose-700"}`}>{billTypeLabel(r)}</span>}
+                      <span className="truncate">{billDisplayName(r)}</span>
+                    </div>
                     <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")}</div>
                     {r.printed_at ? <PrintedBadge /> : null}
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <div className="text-lg font-bold text-orange-600">¥{fmt(remainRmb)}</div>
-                    <div className="text-[11px] text-slate-400">เต็ม ¥{fmt(fullRmb)}{rate > 0 ? ` · ฿${fmt(remainRmb * rate)}` : ""}</div>
+                    {isThbBill(r) ? (
+                      <div className="text-lg font-bold text-orange-600">฿{fmt(num(r.amount_thb))}</div>
+                    ) : (
+                      <>
+                        <div className="text-lg font-bold text-orange-600">¥{fmt(remainRmb)}</div>
+                        <div className="text-[11px] text-slate-400">เต็ม ¥{fmt(fullRmb)}{rate > 0 ? ` · ฿${fmt(remainRmb * rate)}` : ""}</div>
+                      </>
+                    )}
                     <span className={`inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full ${STATUS_STYLE[s3] ?? "bg-slate-100 text-slate-500"}`}>{s3}</span>
                   </div>
                 </button>
@@ -1630,30 +1706,45 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
         </div>
 
         <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-4">
-          {/* ร้านค้า + ธนาคาร */}
-          <div>
-            <div className="font-medium text-slate-800">{String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—")}</div>
-            {!!sup?.name_en && <div className="text-sm text-slate-500">{String(sup.name_en)}</div>}
-            <div className="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
-              <Row label="ธนาคาร" v={sup?.bank_name_brief} />
-              <Row label="เลขบัญชี" v={sup?.account_number} />
-              <Row label="ชื่อบัญชี" v={sup?.bank_account_name} />
-              <Row label="โทร" v={sup?.phone} />
-            </div>
-          </div>
+          {isThbBill(bill) ? (
+            /* บิลค่าส่ง / VAT — ยอดบาทตรง ไม่มีร้าน/เรท/สลิป */
+            <>
+              <div>
+                <span className={`inline-block text-xs px-2 py-0.5 rounded-full ${bill.is_shipping ? "bg-purple-100 text-purple-700" : "bg-rose-100 text-rose-700"}`}>{billTypeLabel(bill)}</span>
+              </div>
+              <div className="rounded-lg bg-orange-50 border border-orange-100 p-3 text-sm">
+                <div className="flex justify-between"><span className="text-slate-500">ยอดโอนรวม</span><span className="font-bold text-orange-600 text-base">฿{fmt(num(bill.amount_thb))}</span></div>
+                <div className="text-[11px] text-slate-400 mt-1">* เป็นยอดบาท ไม่ใช้เรท</div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* ร้านค้า + ธนาคาร */}
+              <div>
+                <div className="font-medium text-slate-800">{String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—")}</div>
+                {!!sup?.name_en && <div className="text-sm text-slate-500">{String(sup.name_en)}</div>}
+                <div className="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
+                  <Row label="ธนาคาร" v={sup?.bank_name_brief} />
+                  <Row label="เลขบัญชี" v={sup?.account_number} />
+                  <Row label="ชื่อบัญชี" v={sup?.bank_account_name} />
+                  <Row label="โทร" v={sup?.phone} />
+                </div>
+              </div>
 
-          {/* ยอดเงิน */}
-          <div className="rounded-lg bg-orange-50 border border-orange-100 p-3 text-sm space-y-1">
-            <Row label="ยอด (¥)" v={fmt(amount)} />
-            <Row label="ค่าโอน (¥)" v={fmt(fee)} />
-            <div className="flex justify-between border-t border-orange-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดโอนรวม</span><span className="font-semibold text-slate-800">¥{fmt(totalRmb)}</span></div>
-            <Row label="เรท" v={rate ? fmt(rate) : "—"} />
-            <div className="flex justify-between"><span className="text-slate-500">เป็นเงินบาท</span>
-              {canPrint
-                ? <span className="font-bold text-orange-600">฿{fmt(thb)}</span>
-                : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
-            </div>
-          </div>
+              {/* ยอดเงิน */}
+              <div className="rounded-lg bg-orange-50 border border-orange-100 p-3 text-sm space-y-1">
+                <Row label="ยอด (¥)" v={fmt(amount)} />
+                <Row label="ค่าโอน (¥)" v={fmt(fee)} />
+                <div className="flex justify-between border-t border-orange-200/60 pt-1 mt-1"><span className="text-slate-500">ยอดโอนรวม</span><span className="font-semibold text-slate-800">¥{fmt(totalRmb)}</span></div>
+                <Row label="เรท" v={rate ? fmt(rate) : "—"} />
+                <div className="flex justify-between"><span className="text-slate-500">เป็นเงินบาท</span>
+                  {canPrint
+                    ? <span className="font-bold text-orange-600">฿{fmt(thb)}</span>
+                    : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
+                </div>
+              </div>
+            </>
+          )}
 
           {/* วันที่ */}
           <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
@@ -1662,7 +1753,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
             {bill.printed_at ? <Row label="พิมพ์เมื่อ" v={String(bill.printed_at).slice(0, 16).replace("T", " ")} /> : null}
           </div>
 
-          <SlipSection bill={bill} onChanged={() => onChanged?.()} />
+          {!isThbBill(bill) && <SlipSection bill={bill} onChanged={() => onChanged?.()} />}
 
           <TransferHistory bill={bill} kind="china" onChanged={() => onChanged?.()} />
 
