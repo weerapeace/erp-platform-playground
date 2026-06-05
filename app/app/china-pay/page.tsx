@@ -2480,7 +2480,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const shortfallRmb = Math.max(0, selectedRmb - chinaYuanBought); // หัก บช ISG (¥) — ส่วนที่ขาด
   const surplusRmb   = Math.max(0, chinaYuanBought - selectedRmb); // เข้าบัญชีจีน ส่วนต่าง (¥) — ส่วนเกิน
   const needBalance  = hasRate && shortfallRmb > 0.0001;     // เงินโอนไม่พอ → ต้องดึงยอดคงเหลือ
-  const balanceShort = needBalance && balance.rmb < shortfallRmb - 0.0001; // ยอดคงเหลือไม่พอปิดส่วนขาด
   // ledger: เปลี่ยนแปลงยอดคงเหลือ = +ส่วนเกิน / −ส่วนขาด (= เป็นเงินจีน − บิลจีน)
   const leftoverRmb = surplusRmb - shortfallRmb;
   const leftover = leftoverRmb * effRate;                     // ฿
@@ -2488,8 +2487,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const balanceUsedThb = shortfallRmb * effRate;
   const chinaInRmb = surplusRmb;                              // เข้าบัญชีจีน (¥)
   const chinaIn = surplusRmb * effRate;                       // ฿
-  // โอนได้ไหม: คงเหลือต้องไม่ติดลบ + ถ้าขาดต้องเปิด toggle และยอดคงเหลือพอ
-  const invalid = chinaRemainThb < -0.001 || (needBalance && (!useBalance || balanceShort));
+  // ★ ขั้นต่ำที่ต้องโอน = ยอดเต็มรอบนี้ − ยอดคงเหลือที่ใช้ได้ (ถ้าเปิด toggle) — ใช้ได้ไม่เกินมูลค่าบิลจีน
+  const balanceThbAvail = balance.rmb * effRate;
+  const chinaCoverThb = useBalance ? Math.min(balanceThbAvail, selectedSum) : 0;
+  const minTransfer = Math.max(0, roundTotalThb - chinaCoverThb);
+  const belowMin = hasRate && (selectedRmb > 0 || thbSelTotal > 0) && transferred < minTransfer - 0.001;
+  // โอนได้ไหม: คงเหลือต้องไม่ติดลบ + ต้องไม่น้อยกว่าขั้นต่ำ
+  const invalid = chinaRemainThb < -0.001 || belowMin;
 
   // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
@@ -2618,8 +2622,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     if (sel.size === 0 && ctwSel.size === 0 && thbSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
     if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
     if (chinaRemainThb < -0.001) { toast.error("ยอดโอนจริงต้องไม่น้อยกว่าค่าส่ง/VAT"); return; }
-    if (needBalance && !useBalance) { toast.error("เงินที่โอนไม่พอจ่ายบิลจีน — เปิด “ใช้ยอดคงเหลือในบัญชีจีน”"); return; }
-    if (needBalance && balanceShort) { toast.error("ยอดคงเหลือในบัญชีจีนไม่พอ — ต้องโอนเพิ่ม"); return; }
+    if (belowMin) { toast.error(`ยอดโอนต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
     if (ctwSel.size > 0 && num(amount) > 0 && [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0) > num(amount) + 0.001) {
       toast.error("ยอดตัดบิล CTW รวมเกิน 'จำนวนเงินที่โอนจริง'"); return;
     }
@@ -2926,10 +2929,11 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               {slipUploading || ocrBusy ? "…" : "📎 สลิป"}
             </button>
           </div>
-          {chinaRemainThb < -0.001 && <div className="mt-1 text-[11px] text-red-500">* ยอดโอนต้องไม่น้อยกว่าค่าส่ง/VAT ฿{fmt(thbSelTotal)}</div>}
-          {needBalance && !useBalance && chinaRemainThb >= -0.001 && <div className="mt-1 text-[11px] text-amber-600">* เงินที่โอนไม่พอจ่ายบิลจีน (ขาด ¥{fmt(+shortfallRmb.toFixed(2))}) — เปิด “ใช้ยอดคงเหลือในบัญชีจีน” ด้านล่าง</div>}
-          {needBalance && useBalance && balanceShort && <div className="mt-1 text-[11px] text-red-500">* ยอดคงเหลือไม่พอ (ขาด ¥{fmt(+shortfallRmb.toFixed(2))} · มี ¥{fmt(balance.rmb)}) — ต้องโอนเพิ่ม</div>}
-          <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
+          {belowMin && <div className="mt-1 text-[11px] text-red-500">* ยอดโอนต้องไม่น้อยกว่า ฿{fmt(minTransfer)}{useBalance && chinaCoverThb > 0 ? " (หักยอดคงเหลือแล้ว)" : ""}</div>}
+          {!useBalance && hasRate && balance.rmb > 0 && transferred > 0 && transferred < roundTotalThb - 0.001 && (
+            <div className="mt-1 text-[11px] text-amber-600">💡 เปิด “ใช้ยอดคงเหลือในบัญชีจีน” ด้านล่าง เพื่อลดยอดขั้นต่ำได้ (มี ¥{fmt(balance.rmb)})</div>
+          )}
+          <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="hidden"
             onChange={e => { const fs = e.target.files; if (fs && fs.length) uploadSlip(fs); }} />
         </div>
         {/* วันที่โอน = วันนี้ (ซ่อน) · เรทไปโชว์ในสรุปข้างล่าง */}
@@ -3023,8 +3027,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {(sel.size > 0 && !hasRate) ? "ยังไม่มีเรทวันนี้ — ใส่เรทก่อน"
             : ((selectedRmb > 0 || thbSelTotal > 0) && num(amount) <= 0) ? "ใส่จำนวนเงินที่โอนจริง"
-            : (needBalance && !useBalance) ? "เปิด “ใช้ยอดคงเหลือ” ก่อน"
-            : (needBalance && balanceShort) ? "ยอดคงเหลือไม่พอ — โอนเพิ่ม"
+            : belowMin ? `ต้องโอน ≥ ฿${fmt(minTransfer)}`
             : "ถัดไป: เลือกบิล CTW →"}
         </button>
       </div>
