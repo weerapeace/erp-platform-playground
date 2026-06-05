@@ -20,6 +20,7 @@ const TABS: { key: string; title: string; icon: string }[] = [
   { key: "parcel_sizes",         title: "ขนาดพัสดุ",                  icon: "📦" },
   { key: "size_descriptions",    title: "คำอธิบายขนาด",               icon: "📐" },
   { key: "special_descriptions", title: "คำอธิบายพิเศษ",              icon: "📝" },
+  { key: "product_families",     title: "ประเภทสินค้า (แท็ก)",        icon: "🏷️" },
 ];
 
 export default function MasterLookupsPage() {
