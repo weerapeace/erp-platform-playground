@@ -2858,6 +2858,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             {hasRate && afterBalanceRmb > 0 && (
               <div className="flex justify-between gap-2"><span className="text-slate-600 font-medium">เรทเงิน (ประมาณ)</span><span className="font-bold text-emerald-700">{fmt(previewRate)} · {previewTier}</span></div>
             )}
+            {hasRate && afterBalanceRmb > 0 && (
+              <div className="flex justify-between gap-2"><span className="text-slate-600 font-medium">รวมบิลจีนหลังหักยอดคงเหลือ (บาท)</span><span className="font-bold text-slate-800">฿{fmt(+(afterBalanceRmb * previewRate).toFixed(2))}</span></div>
+            )}
             {thbSelTotal > 0 && (
               <div className="flex justify-between gap-2"><span className="text-slate-600 font-medium">รวมค่าส่ง/VAT</span><span className="font-bold text-slate-800">฿{fmt(thbSelTotal)}</span></div>
             )}
