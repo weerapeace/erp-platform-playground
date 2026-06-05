@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { DataTable } from "@/components/data-table";
+import { DataTable, type BulkAction, type ServerFetchParams } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 
 type Rec = { id: string; code: string; name: string; image: string | null };
@@ -29,8 +29,7 @@ export default function TagsManagerPage() {
   const [entity, setEntity] = useState<EntityKey>("parent-skus");
   const cfg = ENTITIES[entity];
 
-  const [pool, setPool] = useState<Rec[]>([]);
-  const [loadingPool, setLoadingPool] = useState(false);
+  const [srvRefresh, setSrvRefresh] = useState(0);   // bump → DataTable ดึง server ใหม่
 
   const [cart, setCart] = useState<Rec[]>([]);
   const [cartSearch, setCartSearch] = useState("");
@@ -60,23 +59,29 @@ export default function TagsManagerPage() {
       .catch(() => {});
   }, [cfg.junction]);
 
-  const loadPool = useCallback(() => {
-    setLoadingPool(true);
-    apiFetch(`/api/master-v2/${cfg.api}?limit=500&sort_by=code&sort_dir=asc`).then((r) => r.json())
-      .then((j) => {
-        const recs = ((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({
-          id: String(r.id), code: String(r.code ?? r.id), name: String(r.name_th ?? r.name ?? ""), image: (r.cover_image_r2_key as string) ?? null,
-        }));
-        setPool(recs);
-        loadTagMap(recs.map((r) => r.id));
-      })
-      .catch(() => setPool([]))
-      .finally(() => setLoadingPool(false));
-  }, [cfg.api, loadTagMap]);
-  useEffect(() => { loadPool(); }, [loadPool]);
   useEffect(() => { setCart([]); setTagMap({}); }, [entity]);
+  // โหลดแท็กของรายการในตะกร้า (เผื่อมาจากคนละหน้า)
+  useEffect(() => { loadTagMap(cart.map((c) => c.id)); }, [cart, loadTagMap]);
 
-  const cartIds = useMemo(() => new Set(cart.map((c) => c.id)), [cart]);
+  // server-side fetch (โหลดทีละหน้า) + แนบแท็กปัจจุบันของแต่ละแถว
+  const serverFetch = useCallback(async (params: ServerFetchParams): Promise<{ rows: PoolRow[]; total: number }> => {
+    const offset = (params.page - 1) * params.pageSize;
+    const qs = new URLSearchParams({ limit: String(params.pageSize), offset: String(offset) });
+    if (params.search) qs.set("search", params.search);
+    qs.set("sort_by", params.sortBy ?? "code"); qs.set("sort_dir", params.sortDir ?? "asc");
+    if (params.filters && Object.keys(params.filters).length) qs.set("filters", JSON.stringify(params.filters));
+    const j = await apiFetch(`/api/master-v2/${cfg.api}?${qs}`).then((r) => r.json());
+    const recs: Rec[] = ((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({
+      id: String(r.id), code: String(r.code ?? r.id), name: String(r.name_th ?? r.name ?? ""), image: (r.cover_image_r2_key as string) ?? null,
+    }));
+    let map: Record<string, string[]> = {};
+    if (recs.length) {
+      try { const gr = await apiFetch(`/api/admin/schema/m2m-links?junction=${cfg.junction}&src_ids=${recs.map((r) => r.id).join(",")}`).then((r) => r.json()); map = gr.map ?? {}; } catch { /* ignore */ }
+      setTagMap((m) => ({ ...m, ...map }));
+    }
+    const rows: PoolRow[] = recs.map((r) => ({ ...r, tagsText: (map[r.id] ?? []).map(tagLabel).join(", "), inCart: "" }));
+    return { rows, total: (j.total as number) ?? recs.length };
+  }, [cfg.api, cfg.junction, tagLabel]);
 
   const addToCart = useCallback((r: Rec) => setCart((c) => (c.some((x) => x.id === r.id) ? c : [...c, r])), []);
   const removeFromCart = (id: string) => setCart((c) => c.filter((x) => x.id !== id));
@@ -104,14 +109,13 @@ export default function TagsManagerPage() {
     setApplying(false);
     setResult(`เสร็จแล้ว — ใส่แท็กสำเร็จ ${ok} รายการ${fail ? `, ไม่สำเร็จ ${fail}` : ""}`);
     loadTagMap(cart.map((c) => c.id));
+    setSrvRefresh((n) => n + 1);   // refresh แท็กบนการ์ดในคลัง
   };
 
-  // ---- ข้อมูล + คอลัมน์ สำหรับ DataTable กลาง (กล่องซ้าย) ----
-  const poolRows: PoolRow[] = useMemo(() => pool.map((r) => ({
-    ...r,
-    tagsText: (tagMap[r.id] ?? []).map(tagLabel).join(", "),
-    inCart: cartIds.has(r.id) ? "✓ ในตะกร้า" : "",
-  })), [pool, tagMap, cartIds, tagLabel]);
+  // เลือกหลายแถว (โหมดตาราง) → ใส่ตะกร้าทีเดียว
+  const bulkActions: BulkAction<PoolRow>[] = useMemo(() => [
+    { label: "➕ ใส่ตะกร้าที่เลือก", onClick: (rows) => rows.forEach((r) => addToCart(r)) },
+  ], [addToCart]);
 
   const columns: ColumnDef<PoolRow>[] = useMemo(() => [
     { accessorKey: "image", header: "รูป", enableSorting: false, meta: { type: "image" } },
@@ -190,26 +194,26 @@ export default function TagsManagerPage() {
         {/* ซ้าย: ตารางกลาง (card view + filter กลาง) */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <DataTable<PoolRow>
-            data={poolRows}
+            data={[]}
             columns={columns}
             title={`คลัง ${cfg.label}`}
-            loading={loadingPool}
+            serverFetch={serverFetch}
+            serverRefreshKey={srvRefresh}
             enableCards
             defaultViewMode="cards"
             cardConfig={defaultCardCfg}
             tableId={`tags-mgr-pool-${entity}`}
-            searchableKeys={["code", "name", "tagsText"]}
-            searchPlaceholder="ค้นหา รหัส / ชื่อ / แท็ก…"
+            searchPlaceholder="ค้นหา รหัส / ชื่อ…"
             pageSize={24}
+            selectable
+            bulkActions={bulkActions}
             onRowClick={(row) => addToCart(row)}
             emptyMessage="ไม่พบรายการ"
           />
         </div>
 
         {/* ขวา: ตะกร้า */}
-        <div className="bg-blue-50/30 border border-slate-200 rounded-xl flex flex-col min-h-[55vh]"
-          onDrop={(e) => { e.preventDefault(); const id = dragRef.current; dragRef.current = null; const r = pool.find((x) => x.id === id); if (r) addToCart(r); }}
-          onDragOver={(e) => e.preventDefault()}>
+        <div className="bg-blue-50/30 border border-slate-200 rounded-xl flex flex-col min-h-[55vh]">
           <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2 bg-white rounded-t-xl">
             <span className="text-sm font-semibold text-slate-700">ตะกร้าสินค้า</span>
             <span className="text-xs text-slate-400">({cart.length})</span>
