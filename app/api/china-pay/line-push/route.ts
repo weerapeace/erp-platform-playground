@@ -16,9 +16,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { text?: string; imageUrl?: string; imageUrls?: unknown[]; button?: { label?: string; url?: string } };
+  let body: { text?: string; imageUrl?: string; imageUrls?: unknown[]; button?: { label?: string; url?: string }; purpose?: string; to?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const text = String(body.text ?? "").trim();
+  const purpose = String(body.purpose ?? "").trim();          // test | bills | transfers
+  const explicitTo = String(body.to ?? "").trim();            // ระบุกลุ่มตรง ๆ (ปุ่มทดสอบ)
   const imageUrl = String(body.imageUrl ?? "").trim();
   const imageUrls = Array.isArray(body.imageUrls) ? body.imageUrls.map((u: unknown) => String(u)).filter((u: string) => /^https:\/\//.test(u)) : [];
   const allImages = [imageUrl, ...imageUrls].filter((u) => /^https:\/\//.test(u)).slice(0, 4);   // LINE: รวมข้อความ ≤5
@@ -28,9 +30,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string };
-  if (!cfg.token || !cfg.group_id) {
-    return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า LINE Bot", needConfig: true }, { status: 503 });
+  const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
+  // เลือกกลุ่มปลายทาง: ระบุตรง (ปุ่มทดสอบ) → กลุ่มตามงาน (purpose) → กลุ่มหลัก (group_id) เป็น fallback
+  const target = explicitTo || (purpose && cfg.groups?.[purpose]) || cfg.group_id || "";
+  if (!cfg.token || !target) {
+    return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า LINE Bot / กลุ่มปลายทาง", needConfig: true }, { status: 503 });
   }
 
   // ประกอบข้อความ: รูป (ถ้ามี) → ข้อความธรรมดา (คัดลอกได้) → Flex ปุ่มลิงก์
@@ -61,7 +65,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const res = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ to: cfg.group_id, messages }),
+      body: JSON.stringify({ to: target, messages }),
     });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
