@@ -804,18 +804,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       partial[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
     });
     setForm(partial);
-
-    // โหลดลิงก์ m2m เข้า form ตั้งแต่เปิด (ที่เดียว) → กัน race จาก widget async ทับค่าที่ผู้ใช้เพิ่งเลือก
-    // guard: เขียนเฉพาะตอน field ยังไม่มีค่า (undefined) → ถ้าผู้ใช้แก้ก่อนโหลดเสร็จ จะไม่ถูกทับ
-    effectiveFields.filter(fd => fd.type === "many2many").forEach(fd => {
-      const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
-      const junction = String(rc.junction_table ?? "");
-      if (!junction) return;
-      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${r.id}`)
-        .then(res => res.json())
-        .then(j => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: (j.links ?? []) } : p)))
-        .catch(() => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: [] } : p)));   // พลาด → ตั้ง [] กันค้าง "กำลังโหลด"
-    });
+    // หมายเหตุ: ลิงก์ m2m (โหมดแก้ไข) widget โหลด+บันทึกเองต่อคลิก ไม่ผ่าน form (กัน race/desync)
 
     // fetch full row ใน background (REST mode เท่านั้น)
     if (!isRest) return;
@@ -946,9 +935,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
       setDirty(false);
-      // sync ลิงก์ m2m (junction) ให้ตรงกับที่เลือกในฟอร์ม — ใช้ทั้งสร้างและแก้ไข (diff add/remove)
-      const srcId = String((json.data as Record<string, unknown> | undefined)?.id ?? editingId ?? "");
-      if (srcId) {
+      // ผูกลิงก์ m2m เฉพาะตอน "สร้างใหม่" (โหมดแก้ไข widget จัดการเองต่อคลิกแล้ว)
+      const srcId = String((json.data as Record<string, unknown> | undefined)?.id ?? "");
+      if (!editingId && srcId) {
         for (const fd of effectiveFields) {
           if (fd.type !== "many2many") continue;
           const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;

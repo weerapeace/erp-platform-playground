@@ -36,40 +36,71 @@ async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[
 }
 
 // ---- many2many ---- (ค้นหา + เช็คบ็อกซ์ + สร้างใหม่ + เลือกได้ตั้งแต่ตอนสร้าง)
+//
+// 2 โหมด แยกชัดเพื่อกัน race/desync:
+//  • โหมดสร้าง (ไม่มี recordId): เก็บใน form ผ่าน value/onChange → master-crud ผูกลิงก์หลังสร้าง
+//  • โหมดแก้ไข (มี recordId): widget ถือ state เอง (serverLinked) โหลดจาก DB แล้วผูก/ถอดทันทีต่อคลิก
+//    (แหล่งความจริงเดียว = state ของ widget ↔ DB, ไม่ผ่าน form → ไม่มี lag/ค่าเพี้ยน)
 export function RelationMany2Many({ config, recordId, editable, value, onChange }: {
   config: RelConfig; recordId?: string | null; editable: boolean;
   value?: string[];
-  onChange?: (ids: string[]) => void;        // set ทั้งชุด (parent: updateForm)
+  onChange?: (ids: string[]) => void;        // โหมดสร้างเท่านั้น (parent: updateForm)
 }) {
-  void recordId;
+  const junction = config.junction_table ?? "";
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const labelField = config.target_label_field ?? "name";
   const allowCreate = config.allow_create !== false;
+  const isCreate = !recordId;
 
-  // แหล่งความจริงเดียว = ค่าในฟอร์ม (value)
-  // ลิงก์เดิมถูกโหลดเข้า form ตั้งแต่ openEdit แล้ว (master-crud) → widget ไม่โหลดเอง (กัน async ทับ)
-  // การผูก/ถอดลิงก์จริงในตาราง junction ทำตอนกด "บันทึก" (master-crud diff)
   const [opts, setOpts] = useState<Opt[]>([]);
+  const [serverLinked, setServerLinked] = useState<string[] | null>(isCreate ? [] : null); // null = กำลังโหลด (โหมดแก้ไข)
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  // โหมดแก้ไข (มี recordId) แต่ value ยังเป็น undefined = ลิงก์เดิมยังโหลดไม่เสร็จจาก master-crud
-  // → ล็อกการคลิกไว้ก่อน (กัน toggle จากฐานว่าง แล้วลบลิงก์เดิมหาย) จนกว่าจะโหลดเสร็จ
-  const loading = !!recordId && value === undefined;
-  const linked = value ?? [];
-  // อ่านค่าล่าสุดเสมอตอน toggle (กัน stale closure ระหว่าง render)
-  const valueRef = useRef<string[]>(linked);
-  valueRef.current = linked;
+
+  // แหล่งแสดงผล: สร้าง = form(value), แก้ไข = serverLinked
+  const linked = isCreate ? (value ?? []) : (serverLinked ?? []);
+  const loading = !isCreate && serverLinked === null;
+  // ref ค่าล่าสุด (กัน stale ตอนคลิกถี่)
+  const linkedRef = useRef<string[]>(linked);
+  linkedRef.current = linked;
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
 
+  // โหลดลิงก์เดิม (โหมดแก้ไขเท่านั้น)
+  useEffect(() => {
+    if (isCreate || !junction || !recordId) return;
+    setServerLinked(null);
+    apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`)
+      .then((r) => r.json()).then((j) => setServerLinked((j.links ?? []) as string[]))
+      .catch(() => setServerLinked([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordId, junction]);
+
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
-  const toggle = (id: string) => {
-    if (loading) return;   // ยังโหลดลิงก์เดิมไม่เสร็จ — กันค่าเพี้ยน
-    const cur = valueRef.current;
-    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
-    onChange?.(next);
+  const reloadLinks = () => {
+    if (!junction || !recordId) return;
+    apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`)
+      .then((r) => r.json()).then((j) => setServerLinked((j.links ?? []) as string[])).catch(() => {});
+  };
+
+  const toggle = async (id: string) => {
+    if (loading) return;
+    const cur = linkedRef.current;
+    const has = cur.includes(id);
+    const next = has ? cur.filter((x) => x !== id) : [...cur, id];
+    if (isCreate) { onChange?.(next); return; }   // โหมดสร้าง → เก็บใน form
+    // โหมดแก้ไข → อัปเดตจอทันที + ผูก/ถอดที่ DB (พลาด = โหลดใหม่จาก DB)
+    setServerLinked(next);
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/admin/schema/m2m-links", {
+        method: has ? "DELETE" : "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch { reloadLinks(); } finally { setBusy(false); }
   };
   const createNew = async () => {
     const name = q.trim();
