@@ -38,6 +38,8 @@ export default function PayrollPayslipsPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [genMsg, setGenMsg] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
@@ -70,12 +72,30 @@ export default function PayrollPayslipsPage() {
     a.download = `payslips-${periods.find((p) => p.id === periodId)?.period_name ?? "slip"}.csv`; a.click();
   }
 
+  async function generate() {
+    if (!periodId) return;
+    const p = periods.find((x) => x.id === periodId);
+    if (!confirm(`ออกสลิปงวด "${p?.period_name ?? ""}" จากผลคำนวณล่าสุด?\n\n(สลิปที่มีอยู่จะถูกอัปเดต ไม่สร้างซ้ำ)`)) return;
+    setBusy(true); setErr(null); setGenMsg(null);
+    try {
+      const j = await apiFetch("/api/payroll/payslips/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_id: periodId }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else {
+        setGenMsg(`✅ ออกสลิปสำเร็จ — ใหม่ ${j.data.created} · อัปเดต ${j.data.updated}${j.data.failed?.length ? ` · พลาด ${j.data.failed.length}` : ""} (รอบที่ ${j.data.run_no})`);
+        await load(periodId);
+      }
+    } catch { setErr("ออกสลิปไม่สำเร็จ"); } finally { setBusy(false); }
+  }
+
   const curPeriod = periods.find((p) => p.id === periodId);
+  const canGenerate = curPeriod && curPeriod.status !== "cancelled";
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-xl font-bold text-slate-800">🧾 สลิปเงินเดือน</h1>
-      <p className="text-sm text-slate-500 mb-4">เลือกงวดเพื่อดูสลิปที่ออก + ยอดรวมของงวด (อ่านอย่างเดียว)</p>
+      <p className="text-sm text-slate-500 mb-4">เลือกงวด → ดูสลิป + ยอดรวม หรือกด “ออกสลิปจากผลคำนวณ” เพื่อสร้างสลิปจากรอบคำนวณล่าสุด</p>
 
       <div className="flex flex-wrap items-end gap-3 mb-5">
         <div>
@@ -90,11 +110,15 @@ export default function PayrollPayslipsPage() {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="เลขสลิป / รหัส / ชื่อ"
             className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm" />
         </div>
+        <button onClick={generate} disabled={busy || !canGenerate}
+          className="h-10 px-4 bg-sky-600 text-white rounded-lg text-sm font-medium hover:bg-sky-700 disabled:opacity-40" title="สร้างสลิปจากผลคำนวณล่าสุดของงวด">
+          {busy ? "กำลังออก..." : "🧾 ออกสลิปจากผลคำนวณ"}</button>
         <button onClick={exportCsv} disabled={!slips.length}
           className="h-10 px-4 border border-slate-300 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">⬇ Export CSV</button>
         {curPeriod && <span className="h-10 flex items-center">{badge(periodStatus || curPeriod.status)}</span>}
       </div>
 
+      {genMsg && <div className="rounded-lg bg-emerald-50 text-emerald-800 px-4 py-2 text-sm mb-3">{genMsg}</div>}
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm mb-4">{err}</div>}
 
       {totals && (
