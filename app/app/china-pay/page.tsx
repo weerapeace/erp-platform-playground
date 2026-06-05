@@ -637,13 +637,14 @@ function ChinaBalanceCard() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[120] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !busy && setOpen(false)}>
-          <div className="w-full max-w-md bg-white rounded-t-2xl sm:rounded-2xl max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+        <div className="fixed inset-0 z-[120] bg-black/40 overflow-y-auto overscroll-contain" onClick={() => !busy && setOpen(false)}>
+          <div className="min-h-full flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-md bg-white rounded-t-2xl sm:rounded-2xl" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
               <span className="font-semibold text-slate-800">จัดการยอดเงินที่จีน</span>
               <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
               <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center">
                 <div className="text-xs text-emerald-700">ยอดคงเหลือปัจจุบัน</div>
                 <div className="text-2xl font-bold text-emerald-800">¥{fmt(bal.rmb)}</div>
@@ -690,6 +691,7 @@ function ChinaBalanceCard() {
                 </div>
               )}
             </div>
+          </div>
           </div>
         </div>
       )}
