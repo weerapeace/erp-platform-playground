@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { useBackdropDismiss } from "@/components/modal";
 import { validateFormula } from "@/lib/formula";
+import { useRoleOptions } from "@/lib/use-roles";
 
 const TYPES: { v: string; label: string; hint: string }[] = [
   { v: "text",     label: "ข้อความ (Text)",        hint: "ตัวอักษรสั้น" },
@@ -31,12 +32,6 @@ const TYPES: { v: string; label: string; hint: string }[] = [
 
 const REL_TYPES = ["relation", "many2many", "one2many"];
 
-// สิทธิ์ตามตำแหน่ง (admin เห็น/แก้ได้เสมอ จึงไม่อยู่ในรายการ)
-const PERM_ROLES = [
-  { key: "manager", label: "ผู้จัดการ" },
-  { key: "staff",   label: "พนักงาน" },
-  { key: "viewer",  label: "ผู้ชม" },
-];
 const COND_OPS = [
   { v: "=",        label: "เท่ากับ" },
   { v: "!=",       label: "ไม่เท่ากับ" },
@@ -110,6 +105,7 @@ export function FieldCreatorModal({
   ]);
 
   // ── ตั้งค่าเพิ่มเติม (advanced) ──
+  const roleOptions = useRoleOptions();   // รายชื่อตำแหน่งจากระบบ role กลาง (ไม่ hardcode)
   const [showAdv, setShowAdv] = useState(false);
   const [isRequired, setIsRequired]   = useState(false);
   const [isEditable, setIsEditable]   = useState(true);
@@ -522,22 +518,26 @@ export function FieldCreatorModal({
                 {/* สิทธิ์ตามตำแหน่ง (role) */}
                 <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg space-y-2">
                   <p className="text-[11px] text-slate-500">สิทธิ์ตามตำแหน่ง — ว่าง = ทุกคน · admin เห็น/แก้ได้เสมอ</p>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-medium text-slate-600 w-16">👁 เห็นได้</span>
-                    {PERM_ROLES.map(r => {
-                      const on = viewRoles.includes(r.key);
-                      return <button key={r.key} type="button" onClick={() => setViewRoles(p => on ? p.filter(x => x !== r.key) : [...p, r.key])}
-                        className={`text-[11px] px-2 py-0.5 rounded-full border ${on ? "border-indigo-400 bg-indigo-100 text-indigo-700 font-medium" : "border-slate-200 text-slate-500"}`}>{r.label}</button>;
-                    })}
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-medium text-slate-600 w-16">✏ แก้ได้</span>
-                    {PERM_ROLES.map(r => {
-                      const on = editRoles.includes(r.key);
-                      return <button key={r.key} type="button" onClick={() => setEditRoles(p => on ? p.filter(x => x !== r.key) : [...p, r.key])}
-                        className={`text-[11px] px-2 py-0.5 rounded-full border ${on ? "border-indigo-400 bg-indigo-100 text-indigo-700 font-medium" : "border-slate-200 text-slate-500"}`}>{r.label}</button>;
-                    })}
-                  </div>
+                  {roleOptions.length === 0 ? (
+                    <div className="text-[11px] text-slate-400">กำลังโหลดรายชื่อตำแหน่ง…</div>
+                  ) : <>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-medium text-slate-600 w-16">👁 เห็นได้</span>
+                      {roleOptions.map(r => {
+                        const on = viewRoles.includes(r.key);
+                        return <button key={r.key} type="button" onClick={() => setViewRoles(p => on ? p.filter(x => x !== r.key) : [...p, r.key])}
+                          className={`text-[11px] px-2 py-0.5 rounded-full border ${on ? "border-indigo-400 bg-indigo-100 text-indigo-700 font-medium" : "border-slate-200 text-slate-500"}`}>{r.label}</button>;
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-medium text-slate-600 w-16">✏ แก้ได้</span>
+                      {roleOptions.map(r => {
+                        const on = editRoles.includes(r.key);
+                        return <button key={r.key} type="button" onClick={() => setEditRoles(p => on ? p.filter(x => x !== r.key) : [...p, r.key])}
+                          className={`text-[11px] px-2 py-0.5 rounded-full border ${on ? "border-indigo-400 bg-indigo-100 text-indigo-700 font-medium" : "border-slate-200 text-slate-500"}`}>{r.label}</button>;
+                      })}
+                    </div>
+                  </>}
                 </div>
 
                 {/* ข้อความช่วย / ค่าเริ่มต้น / ความกว้าง */}

@@ -20,6 +20,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useBackdropDismiss } from "@/components/modal";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { apiFetch } from "@/lib/api";
+import { useRoleOptions } from "@/lib/use-roles";
 import type { SchemaSyncResponse, RegistryField } from "@/app/api/admin/schema-sync/route";
 import {
   DndContext, DragEndEvent, PointerSensor, KeyboardSensor,
@@ -758,12 +759,6 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
 // ว่าง = ทุกคน · admin เห็น/แก้ได้เสมอ (จึงไม่ต้องโชว์ในรายการ)
 // ============================================================
 
-const PERM_ROLES: { key: string; label: string }[] = [
-  { key: "manager", label: "ผู้จัดการ" },
-  { key: "staff",   label: "พนักงาน" },
-  { key: "viewer",  label: "ผู้ชม" },
-];
-
 function RoleChip({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick}
@@ -777,6 +772,7 @@ function RoleChip({ on, label, onClick }: { on: boolean; label: string; onClick:
 
 function RolePermissionCell({ field, onUpdate }: { field: RegistryField; onUpdate: (p: Record<string, unknown>) => void | Promise<void> }) {
   const [open, setOpen] = useState(false);
+  const roleOptions = useRoleOptions();   // ดึงจากระบบ role กลาง (ไม่ hardcode)
   const view = field.view_roles ?? [];
   const edit = field.edit_roles ?? [];
   const restricted = view.length > 0 || edit.length > 0;
@@ -800,18 +796,24 @@ function RolePermissionCell({ field, onUpdate }: { field: RegistryField; onUpdat
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute z-50 right-0 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-left">
             <div className="text-[11px] text-slate-400 mb-2 leading-tight">ว่าง = ทุกคนเห็น/แก้ได้ · admin ได้เสมอ</div>
-            <div className="mb-3">
-              <div className="text-xs font-medium text-slate-600 mb-1">👁 เห็นได้</div>
-              <div className="flex flex-wrap gap-1">
-                {PERM_ROLES.map((r) => <RoleChip key={r.key} on={view.includes(r.key)} label={r.label} onClick={() => toggle("view_roles", r.key)} />)}
-              </div>
-            </div>
-            <div>
-              <div className="text-xs font-medium text-slate-600 mb-1">✏ แก้ได้</div>
-              <div className="flex flex-wrap gap-1">
-                {PERM_ROLES.map((r) => <RoleChip key={r.key} on={edit.includes(r.key)} label={r.label} onClick={() => toggle("edit_roles", r.key)} />)}
-              </div>
-            </div>
+            {roleOptions.length === 0 ? (
+              <div className="text-[11px] text-slate-400">กำลังโหลดรายชื่อตำแหน่ง…</div>
+            ) : (
+              <>
+                <div className="mb-3">
+                  <div className="text-xs font-medium text-slate-600 mb-1">👁 เห็นได้</div>
+                  <div className="flex flex-wrap gap-1">
+                    {roleOptions.map((r) => <RoleChip key={r.key} on={view.includes(r.key)} label={r.label} onClick={() => toggle("view_roles", r.key)} />)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-600 mb-1">✏ แก้ได้</div>
+                  <div className="flex flex-wrap gap-1">
+                    {roleOptions.map((r) => <RoleChip key={r.key} on={edit.includes(r.key)} label={r.label} onClick={() => toggle("edit_roles", r.key)} />)}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
