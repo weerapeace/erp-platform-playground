@@ -28,13 +28,14 @@ type RF = {
 };
 
 export function RecordFormModal({
-  moduleKey, title, presetLabelField, presetValue, preset, onClose, onSaved,
+  moduleKey, title, presetLabelField, presetValue, preset, editId, onClose, onSaved,
 }: {
   moduleKey: string;
   title?: string;
   presetLabelField?: string;
   presetValue?: string;
   preset?: Record<string, unknown>;   // เติมค่าตายตัว เช่น FK (group_id) — ส่งเสมอแม้ไม่ได้โชว์เป็น field
+  editId?: string;                     // ถ้ามี = โหมดแก้ไข (โหลดค่าเดิม + PATCH) ไม่งั้น = สร้างใหม่ (POST)
   onClose: () => void;
   onSaved: (id: string, label: string) => void;
 }) {
@@ -59,12 +60,18 @@ export function RecordFormModal({
       setFields(ff);
       const f: Record<string, unknown> = {};
       ff.forEach((fd) => { f[fd.field_key] = fd.ui_field_type === "boolean" ? false : ""; });
+      // โหมดแก้ไข → โหลดค่าเดิมของเรคคอร์ดมาเติม
+      if (editId) {
+        const rec = await apiFetch(`/api/master-v2/${moduleKey}/${editId}`).then((r) => r.json()).catch(() => ({}));
+        const data = (rec.data ?? {}) as Record<string, unknown>;
+        ff.forEach((fd) => { if (data[fd.field_key] !== undefined && data[fd.field_key] !== null) f[fd.field_key] = data[fd.field_key]; });
+      }
       if (presetLabelField && presetValue) f[presetLabelField] = presetValue;  // เติมค่าจากคำที่พิมพ์ค้นหา
       if (preset) Object.assign(f, preset);
       setForm(f);
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setLoading(false); }
-  }, [moduleKey, presetLabelField, presetValue]);
+  }, [moduleKey, presetLabelField, presetValue, editId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -74,15 +81,16 @@ export function RecordFormModal({
       const body: Record<string, unknown> = { actor: user?.name };
       fields.forEach((fd) => { body[fd.field_key] = form[fd.field_key]; });
       if (preset) Object.assign(body, preset);   // FK ตายตัว (เช่น group_id) ต้องถูกส่งเสมอ
-      const res = await apiFetch(`/api/master-v2/${moduleKey}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
+      const res = await apiFetch(
+        editId ? `/api/master-v2/${moduleKey}/${editId}` : `/api/master-v2/${moduleKey}`,
+        { method: editId ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      );
       const j = await res.json();
       if (j.error) { setErr(j.error); return; }
       const row = (j.data ?? {}) as Record<string, unknown>;
       const labelKey = presetLabelField ?? "name";
       const label = String(row[labelKey] ?? presetValue ?? row.code ?? "");
-      onSaved(String(row.id ?? ""), label);
+      onSaved(String(row.id ?? editId ?? ""), label);
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -129,7 +137,7 @@ export function RecordFormModal({
     <div className="fixed inset-0 z-[150] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-800">＋ {title ?? "สร้างใหม่"}</h3>
+          <h3 className="text-lg font-semibold text-slate-800">{editId ? "✎ " : "＋ "}{title ?? (editId ? "แก้ไข" : "สร้างใหม่")}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
         </div>
         <div className="p-5 overflow-auto flex-1">

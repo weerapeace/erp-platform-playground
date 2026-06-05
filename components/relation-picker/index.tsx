@@ -203,7 +203,8 @@ export function RelationPicker({
   // ---- F6: Quick create ----
   const [creating, setCreating] = useState(false);
   const [createErr, setCreateErr] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState<string | null>(null);  // เปิดฟอร์มเต็ม (popup)
+  const [showCreate, setShowCreate] = useState<string | null>(null);  // เปิดฟอร์มเต็ม (popup) สร้างใหม่
+  const [showEdit, setShowEdit] = useState<string | null>(null);      // เปิดฟอร์มแก้ไขเรคคอร์ดที่เลือก (id)
 
   // สร้างใหม่ได้เมื่อ relation ชี้ไป module/lookup จริง — เป็นของกลาง (ไม่ต้องตั้ง allow_create)
   const canCreate = !!config.lookup_type || !!config.target_module_key;
@@ -270,14 +271,20 @@ export function RelationPicker({
             )}
             {options.length === 0 && !canCreate && (<div className="px-3 py-4 text-xs text-slate-400 text-center">ไม่พบ</div>)}
             {options.map((opt) => (
-              <button key={opt.id} type="button" onClick={() => select(opt)}
-                className={`w-full px-3 py-2 text-left text-sm hover:bg-orange-50 ${value === opt.id ? "bg-orange-50 font-medium" : ""} ${opt.active === false ? "opacity-50" : ""}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-slate-800 truncate">{opt.label}</span>
-                  {opt.active === false && (<span className="text-[10px] text-slate-400 flex-shrink-0">ปิดอยู่</span>)}
-                </div>
-                {opt.secondary && (<div className="text-xs text-slate-500 truncate">{opt.secondary}</div>)}
-              </button>
+              <div key={opt.id} className={`flex items-stretch ${value === opt.id ? "bg-orange-50" : ""}`}>
+                <button type="button" onClick={() => select(opt)}
+                  className={`flex-1 min-w-0 px-3 py-2 text-left text-sm hover:bg-orange-50 ${value === opt.id ? "font-medium" : ""} ${opt.active === false ? "opacity-50" : ""}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-800 truncate">{opt.label}</span>
+                    {opt.active === false && (<span className="text-[10px] text-slate-400 flex-shrink-0">ปิดอยู่</span>)}
+                  </div>
+                  {opt.secondary && (<div className="text-xs text-slate-500 truncate">{opt.secondary}</div>)}
+                </button>
+                {config.target_module_key && (
+                  <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setOpen(false); setShowEdit(opt.id); }}
+                    className="flex-shrink-0 px-3 flex items-center text-slate-400 hover:text-blue-600 hover:bg-blue-50">✎</button>
+                )}
+              </div>
             ))}
             {canCreate && search.trim() && !options.some((o) => o.label.toLowerCase() === search.trim().toLowerCase()) && (
               <div className="border-t border-slate-100">
@@ -362,6 +369,23 @@ export function RelationPicker({
           presetValue={showCreate}
           onClose={() => setShowCreate(null)}
           onSaved={(id, label) => { setShowCreate(null); select({ id, label }); }}
+        />
+      )}
+
+      {/* ฟอร์มแก้ไขเรคคอร์ดที่เลือก (✎) — ฟอร์มชุดเดียวกับ partner */}
+      {showEdit !== null && config.target_module_key && (
+        <RecordFormModal
+          moduleKey={config.target_module_key}
+          title={`แก้ไข ${config.target_label_field ?? "รายการ"}`}
+          editId={showEdit}
+          onClose={() => setShowEdit(null)}
+          onSaved={(id, label) => {
+            setShowEdit(null);
+            // ถ้าแก้ตัวที่เลือกอยู่ → อัปเดต label ที่โชว์
+            if (value === id) setCurrent({ id, label });
+            // โหลดรายการใหม่ให้ป้ายอัปเดต
+            if (open) loadOptions(search, value);
+          }}
         />
       )}
     </div>
