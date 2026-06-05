@@ -540,9 +540,9 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                       <th className="px-3 py-2 text-center font-medium" title="ใครเห็น/แก้ฟิลด์นี้ได้ (ตามตำแหน่ง)">🔐 สิทธิ์</th>
                       <th className="px-3 py-2 text-center font-medium" title="ดับเบิ้ลคลิก cell แก้ในตาราง">✎ Inline</th>
                       <th className="px-3 py-2 text-left font-medium" title="Default ตอน Create — รองรับ now() today() current_user() uuid()">Default</th>
-                      <th className="px-3 py-2 text-left font-medium" title="หมายเหตุภายในของแอดมิน (ไม่โชว์ให้ผู้ใช้)">📝 หมายเหตุ</th>
                       <th className="px-3 py-2 text-center font-medium" title="เงื่อนไขแสดงในฟอร์ม (show_if)">🎯 Cond</th>
                       <th className="px-3 py-2 text-center font-medium">Width</th>
+                      <th className="px-3 py-2 text-left font-medium" title="หมายเหตุภายในของแอดมิน (ไม่โชว์ให้ผู้ใช้)">📝 หมายเหตุ</th>
                       <th className="px-3 py-2 text-center font-medium" title="ลบ field">🗑️</th>
                     </tr>
                   </thead>
@@ -956,16 +956,6 @@ function SortableFieldRow({
       <td className="px-3 py-1.5">
         <DefaultValueCell field={field} onUpdate={onUpdate} />
       </td>
-      <td className="px-3 py-1.5">
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onBlur={onBlurNote}
-          placeholder="หมายเหตุภายใน…"
-          title="หมายเหตุภายในของแอดมิน (ไม่โชว์ให้ผู้ใช้)"
-          className="w-40 px-2 py-1 text-xs border border-transparent hover:border-slate-200 focus:border-orange-400 rounded outline-none"
-        />
-      </td>
       <td className="px-3 py-1.5 text-center">
         <ConditionCell rules={field.condition_rules} onClick={onEditCondition} />
       </td>
@@ -976,6 +966,16 @@ function SortableFieldRow({
           onChange={(e) => setWidth(Number(e.target.value))}
           onBlur={onBlurWidth}
           className="w-16 text-xs px-1.5 py-1 border border-slate-200 rounded text-right tabular-nums"
+        />
+      </td>
+      <td className="px-3 py-1.5">
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={onBlurNote}
+          placeholder="หมายเหตุภายใน…"
+          title="หมายเหตุภายในของแอดมิน (ไม่โชว์ให้ผู้ใช้)"
+          className="w-40 px-2 py-1 text-xs border border-transparent hover:border-slate-200 focus:border-orange-400 rounded outline-none"
         />
       </td>
       <td className="px-3 py-1.5 text-center">
