@@ -20,6 +20,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, applyListFilters, friendlyDbError, type ColFilter } from "../route";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { getFieldAccess } from "@/lib/field-permissions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -52,9 +53,13 @@ export async function POST(
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — กันแก้คอลัมน์ที่ role นี้ไม่มีสิทธิ์แก้
+  const { readonlyCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
+  const readonlySet = new Set(readonlyCols);
+
   const sanitize = (obj: Record<string, unknown>) => {
     const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj ?? {})) if (SAFE.test(k) && !BLOCKED_KEYS.has(k)) out[k] = v;
+    for (const [k, v] of Object.entries(obj ?? {})) if (SAFE.test(k) && !BLOCKED_KEYS.has(k) && !readonlySet.has(k)) out[k] = v;
     return out;
   };
 
@@ -92,12 +97,12 @@ export async function POST(
     return NextResponse.json({ ok: true, affected: affected2, error: null });
   }
 
-  // sanitize changes
+  // sanitize changes (กัน key อันตราย + คอลัมน์ที่ไม่มีสิทธิ์แก้)
   const changes: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(body.changes ?? {})) {
-    if (SAFE.test(k) && !BLOCKED_KEYS.has(k)) changes[k] = v;
+    if (SAFE.test(k) && !BLOCKED_KEYS.has(k) && !readonlySet.has(k)) changes[k] = v;
   }
-  if (Object.keys(changes).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลที่จะแก้" }, { status: 400 });
+  if (Object.keys(changes).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลที่จะแก้ (หรือคุณไม่มีสิทธิ์แก้ฟิลด์ที่เลือก)" }, { status: 400 });
 
   const admin = supabaseAdmin();
   const colFilters: Record<string, ColFilter> = { ...(body.base_filter ?? {}), ...(body.filters ?? {}) };

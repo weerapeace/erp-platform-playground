@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, resolveRelationLabels, friendlyDbError } from "../route";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -38,7 +39,10 @@ export async function GET(
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
   const [row] = await resolveRelationLabels(supabase, cfg, [processed]);
-  return NextResponse.json({ data: row, error: null });
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์เห็น
+  const { hiddenCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
+  const [safe] = stripHidden([row as Record<string, unknown>], hiddenCols);
+  return NextResponse.json({ data: safe, error: null });
 }
 
 // ---- PATCH — update ----
@@ -78,9 +82,17 @@ export async function PATCH(
 
   // ใช้ supabaseAdmin (service-role bypass RLS)
   const admin = supabaseAdmin();
+
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
+  const access = await getFieldAccess(request, admin, cfg.table);
+  const { clean: cleanPatch, skipped } = stripReadonly(patch, access.readonlyCols);
+  if (Object.keys(cleanPatch).length === 0) {
+    return NextResponse.json({ error: "คุณไม่มีสิทธิ์แก้ไขฟิลด์ที่ส่งมา" }, { status: 403 });
+  }
+
   const { data, error } = await admin
     .from(cfg.table)
-    .update(patch)
+    .update(cleanPatch)
     .eq("id", id)
     .select(cfg.selectColumns)
     .single();
@@ -91,13 +103,14 @@ export async function PATCH(
   await writeAudit(admin, {
     action: "update", entityType: cfg.table, entityId: id,
     actorId: user.id, actorName,
-    metadata: { entity, changed_fields: Object.keys(patch) },
+    metadata: { entity, changed_fields: Object.keys(cleanPatch), ...(skipped.length ? { skipped_no_permission: skipped } : {}) },
   });
 
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
   // คืนชื่อ relation (label) ด้วย → หน้า detail โชว์ชื่อทันทีหลังบันทึก (ไม่ใช่รหัส)
   const [row] = await resolveRelationLabels(supabaseFromRequest(request), cfg, [processed]);
-  return NextResponse.json({ data: row, error: null });
+  const [safe] = stripHidden([row as Record<string, unknown>], access.hiddenCols);
+  return NextResponse.json({ data: safe, error: null });
 }
 
 // ---- DELETE — soft delete (set is_active=false) ----

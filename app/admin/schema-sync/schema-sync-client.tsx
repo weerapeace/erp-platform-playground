@@ -536,6 +536,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                       <th className="px-3 py-2 text-center font-medium" title="เรียงได้">↕ Sort</th>
                       <th className="px-3 py-2 text-center font-medium" title="บังคับกรอก">⚠ Req</th>
                       <th className="px-3 py-2 text-center font-medium" title="ซ่อนจากคนไม่มี permission">🔒 Sensitive</th>
+                      <th className="px-3 py-2 text-center font-medium" title="ใครเห็น/แก้ฟิลด์นี้ได้ (ตามตำแหน่ง)">🔐 สิทธิ์</th>
                       <th className="px-3 py-2 text-center font-medium" title="ดับเบิ้ลคลิก cell แก้ในตาราง">✎ Inline</th>
                       <th className="px-3 py-2 text-left font-medium" title="Default ตอน Create — รองรับ now() today() current_user() uuid()">Default</th>
                       <th className="px-3 py-2 text-center font-medium" title="เงื่อนไขแสดงในฟอร์ม (show_if)">🎯 Cond</th>
@@ -752,6 +753,72 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
 }
 
 // ============================================================
+// RolePermissionCell — ตั้งสิทธิ์ "เห็น/แก้" ฟิลด์นี้ ตามตำแหน่ง (role)
+// ว่าง = ทุกคน · admin เห็น/แก้ได้เสมอ (จึงไม่ต้องโชว์ในรายการ)
+// ============================================================
+
+const PERM_ROLES: { key: string; label: string }[] = [
+  { key: "manager", label: "ผู้จัดการ" },
+  { key: "staff",   label: "พนักงาน" },
+  { key: "viewer",  label: "ผู้ชม" },
+];
+
+function RoleChip({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${
+        on ? "border-indigo-400 bg-indigo-100 text-indigo-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+      }`}>
+      {label}
+    </button>
+  );
+}
+
+function RolePermissionCell({ field, onUpdate }: { field: RegistryField; onUpdate: (p: Record<string, unknown>) => void | Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const view = field.view_roles ?? [];
+  const edit = field.edit_roles ?? [];
+  const restricted = view.length > 0 || edit.length > 0;
+
+  const toggle = (kind: "view_roles" | "edit_roles", role: string) => {
+    const cur = (kind === "view_roles" ? view : edit);
+    const next = cur.includes(role) ? cur.filter((r) => r !== role) : [...cur, role];
+    onUpdate({ [kind]: next.length ? next : null });
+  };
+
+  return (
+    <div className="relative inline-block">
+      <button type="button" onClick={() => setOpen((o) => !o)} title="ใครเห็น/แก้ฟิลด์นี้ได้"
+        className={`text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap ${
+          restricted ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-400 hover:bg-slate-50"
+        }`}>
+        {restricted ? `👁${view.length || "ทุก"} ✏${edit.length || "ทุก"}` : "ทุกคน"}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute z-50 right-0 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg p-3 text-left">
+            <div className="text-[11px] text-slate-400 mb-2 leading-tight">ว่าง = ทุกคนเห็น/แก้ได้ · admin ได้เสมอ</div>
+            <div className="mb-3">
+              <div className="text-xs font-medium text-slate-600 mb-1">👁 เห็นได้</div>
+              <div className="flex flex-wrap gap-1">
+                {PERM_ROLES.map((r) => <RoleChip key={r.key} on={view.includes(r.key)} label={r.label} onClick={() => toggle("view_roles", r.key)} />)}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs font-medium text-slate-600 mb-1">✏ แก้ได้</div>
+              <div className="flex flex-wrap gap-1">
+                {PERM_ROLES.map((r) => <RoleChip key={r.key} on={edit.includes(r.key)} label={r.label} onClick={() => toggle("edit_roles", r.key)} />)}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // SortableFieldRow — แถวที่ลากเรียงได้
 // ============================================================
 
@@ -867,6 +934,9 @@ function SortableFieldRow({
             />
           )}
         </div>
+      </td>
+      <td className="px-3 py-1.5 text-center">
+        <RolePermissionCell field={field} onUpdate={onUpdate} />
       </td>
       <td className="px-3 py-1.5 text-center">
         <input

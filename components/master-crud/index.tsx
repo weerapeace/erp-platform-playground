@@ -456,19 +456,30 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   // คำนวณ effective fields — Registry มาก่อน, fallback ไป static config.fields
   // Sprint 8: filter sensitive fields ที่ user ไม่มี permission
+  // + สิทธิ์ระดับฟิลด์ตาม role (ของกลาง): ซ่อนฟิลด์ที่ไม่มีสิทธิ์เห็น / ทำ read-only ถ้าแก้ไม่ได้
+  //   ว่าง = ทุกคน · admin เห็น/แก้ได้เสมอ (server ก็บังคับซ้ำอีกชั้น)
+  const roleOk = useCallback((roles: string[] | null | undefined) => {
+    if (!roles || roles.length === 0) return true;
+    const role = user?.role;
+    return role === "admin" || (!!role && roles.includes(role));
+  }, [user]);
+
   const effectiveFields: FieldDef[] = useMemo(() => {
     if (registryFields && registryFields.length > 0) {
       return registryFields
         .filter((rf) => {
-          if (rf.is_sensitive && rf.sensitive_permission) {
-            return can(rf.sensitive_permission as Parameters<typeof can>[0]);
-          }
+          if (rf.is_sensitive && rf.sensitive_permission && !can(rf.sensitive_permission as Parameters<typeof can>[0])) return false;
+          if (!roleOk(rf.view_roles)) return false;   // role นี้ไม่มีสิทธิ์เห็น → ซ่อนคอลัมน์/ฟิลด์
           return true;
         })
-        .map((rf) => registryToFieldDef(rf, config.cellRenderers));
+        .map((rf) => {
+          const fd = registryToFieldDef(rf, config.cellRenderers);
+          if (!roleOk(rf.edit_roles)) fd.readonly = true;   // แก้ไม่ได้ → read-only ในฟอร์ม
+          return fd;
+        });
     }
     return config.fields ?? [];
-  }, [registryFields, config.fields, config.cellRenderers, can]);
+  }, [registryFields, config.fields, config.cellRenderers, can, roleOk]);
 
   // auto-derive searchKeys จาก Registry ถ้ามี
   const effectiveSearchKeys: string[] = useMemo(() => {

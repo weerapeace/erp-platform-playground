@@ -14,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, friendlyDbError } from "../route";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { getFieldAccess } from "@/lib/field-permissions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -46,6 +47,10 @@ export async function POST(
 
   const admin = supabaseAdmin();
   const actor = body.actor ?? user.email ?? "system";
+
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — คอลัมน์ที่ role นี้แก้ไม่ได้ จะถูกตัดออกจากทุกแถวที่นำเข้า
+  const { readonlyCols } = await getFieldAccess(request, admin, cfg.table);
+  const readonlySet = new Set(readonlyCols);
 
   // ---- อ่าน relation fields จากทะเบียน (เพื่อแปลงชื่อ → id) ----
   const { data: mod } = await admin.from("erp_modules").select("id").eq("table_name", cfg.table).maybeSingle();
@@ -94,9 +99,10 @@ export async function POST(
       if (!txt("name_th")) { const alt = txt("display_name") || txt("name_en") || txt("code"); if (alt) out.name_th = alt; }
     }
     // ตัด null/ค่าว่างทิ้ง → ปล่อยให้ค่า default ของ DB ทำงาน (กัน null ทับ NOT NULL เช่น tags/booleans)
+    // + ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์แก้ (field permission)
     for (const k of Object.keys(out)) {
       const v = out[k];
-      if (v === null || v === undefined || (typeof v === "string" && v.trim() === "")) delete out[k];
+      if (v === null || v === undefined || (typeof v === "string" && v.trim() === "") || readonlySet.has(k)) delete out[k];
     }
     resolved.push({ row: i + 1, data: out });
   });

@@ -15,6 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 
 // อ่าน/เขียนสดเสมอ — ข้อมูล master + module config เปลี่ยน runtime, ห้าม cache
 export const dynamic = "force-dynamic";
@@ -553,7 +554,9 @@ export async function GET(
 
   const processed = cfg.postProcess ? allRows.map(cfg.postProcess) : allRows;
   const rows = await resolveRelationLabels(supabase, cfg, processed);
-  return NextResponse.json({ data: rows, total: totalCount || rows.length, error: null });
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์เห็นออกจาก response
+  const { hiddenCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
+  return NextResponse.json({ data: stripHidden(rows, hiddenCols), total: totalCount || rows.length, error: null });
 }
 
 // ---- POST — create ----
@@ -589,9 +592,14 @@ export async function POST(
 
   // ใช้ supabaseAdmin (service-role bypass RLS) — sprint 8 จะใส่ erp_can() check
   const admin = supabaseAdmin();
+
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้แก้ไม่ได้ออกก่อนเขียน
+  const access = await getFieldAccess(request, admin, cfg.table);
+  const { clean: cleanPayload } = stripReadonly(payload, access.readonlyCols);
+
   const { data, error } = await admin
     .from(cfg.table)
-    .insert(payload)
+    .insert(cleanPayload)
     .select(cfg.selectColumns)
     .single();
 
@@ -606,6 +614,7 @@ export async function POST(
     metadata: { entity },
   });
 
-  const row = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : data;
-  return NextResponse.json({ data: row, error: null });
+  const row = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
+  const [safeRow] = stripHidden([row as Record<string, unknown>], access.hiddenCols);
+  return NextResponse.json({ data: safeRow, error: null });
 }

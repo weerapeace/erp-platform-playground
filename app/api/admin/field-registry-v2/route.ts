@@ -32,6 +32,9 @@ export type FormField = {
   is_searchable:     boolean;
   is_sensitive:      boolean;
   sensitive_permission: string | null;
+  // สิทธิ์ระดับฟิลด์ตาม role (ของกลาง) — null/ว่าง = ทุกคน
+  view_roles:        string[] | null;
+  edit_roles:        string[] | null;
   show_in_form:      boolean;
   form_column_span:  number;
   width:             number;
@@ -92,7 +95,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
 
   const { data, error } = await supabase
     .from("erp_module_fields")
-    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, show_in_form, form_column_span, width, display_order, options, relation_config, validation_rules, placeholder, help_text, default_value, default_expression, is_inline_editable, is_bulk_editable, condition_rules, ui_style")
+    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, view_roles, edit_roles, show_in_form, form_column_span, width, display_order, options, relation_config, validation_rules, placeholder, help_text, default_value, default_expression, is_inline_editable, is_bulk_editable, condition_rules, ui_style")
     .eq("module_id", mod.id)
     .eq("is_active", true)
     .order("display_order");

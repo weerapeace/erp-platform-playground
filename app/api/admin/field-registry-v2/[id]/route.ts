@@ -13,6 +13,8 @@ const ALLOWED_FIELDS = [
   "field_label", "group_key", "ui_field_type",
   "is_visible", "is_required", "is_editable", "is_filterable", "is_sortable", "is_pinned", "is_searchable",
   "is_sensitive", "sensitive_permission",
+  // สิทธิ์ระดับฟิลด์ตาม role (ของกลาง) — ว่าง = ทุกคน
+  "view_roles", "edit_roles",
   "show_in_form", "form_column_span", "placeholder", "help_text",
   "width", "min_width", "display_order", "is_active",
   "options", "validation_rules", "relation_config",
