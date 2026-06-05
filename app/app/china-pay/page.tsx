@@ -2403,14 +2403,28 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: s
       if (redo) {
         // เติม draft จากรายการเดิม → เปิดหน้าโอนให้แก้ต่อ
         const china = tl.filter(l => l.kind === "china"), thb = tl.filter(l => l.kind === "thb");
-        const txSlips = Array.isArray(target.tx_slips) ? target.tx_slips : [];
+        const ctwLines = tl.filter(l => l.kind === "ctw" && num(l.paid_thb) > 0);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const txSlips: any[] = Array.isArray(target.tx_slips) ? (target.tx_slips as any[]).map(s => ({ ...s })) : [];
+        // ตัดบิล CTW ที่ยังไม่ได้ผูกกับสลิปไหน → เติมกลับเข้า cuts (กันยอดตัด CTW หาย)
+        const covered = new Set(txSlips.flatMap(s => Object.keys(s.cuts ?? {})));
+        const missing = ctwLines.filter(l => !covered.has(String(l.bill_id)));
+        if (missing.length) {
+          const extra = Object.fromEntries(missing.map(l => [String(l.bill_id), num(l.paid_thb)]));
+          if (txSlips.length) txSlips[0] = { ...txSlips[0], cuts: { ...(txSlips[0].cuts ?? {}), ...extra } };
+          else txSlips.push({ key: "", bank: "", amount: num(target.amount_transferred_thb), at: "", cuts: extra });
+        }
+        // ไม่มีสลิปเลย แต่มียอดโอน → สร้างรายการกรอกเอง 1 อันถือยอด (จะได้กดเลือกบิล CTW ได้)
+        if (txSlips.length === 0 && num(target.amount_transferred_thb) > 0) {
+          txSlips.push({ key: "", bank: "", amount: num(target.amount_transferred_thb), at: "", cuts: {} });
+        }
         const draft = {
           sel: china.map(l => String(l.bill_id)),
           pay: Object.fromEntries(china.map(l => [String(l.bill_id), String(num(l.paid_rmb))])),
           thbSel: thb.map(l => String(l.bill_id)),
           amount: String(num(target.amount_transferred_thb)),
           refNo: String(target.ref_no ?? ""), note: String(target.note ?? ""),
-          useBalance: true, txSlips, step: 1,
+          useBalance: true, txSlips, step: 2,   // เด้งไปหน้าแนบสลิป/เลือกบิล CTW เลย
         };
         try { localStorage.setItem("china-tx-draft", JSON.stringify(draft)); } catch { /* noop */ }
         toast.success("คืนยอดบิลแล้ว — เปิดหน้าโอนให้แก้ต่อ");
