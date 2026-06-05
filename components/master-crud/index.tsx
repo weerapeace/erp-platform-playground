@@ -158,6 +158,15 @@ function registryToFieldDef(
 }
 
 
+// เทมเพลตต่อแท็ก (product_families.template) — ใช้คุมการแสดงฟิลด์ + ค่าตั้งต้น (รวมแบบ union)
+type FamilyTemplate = {
+  show_fields?:     string[];
+  hide_fields?:     string[];
+  hide_sections?:   string[];
+  required_fields?: string[];
+  defaults?:        Record<string, unknown>;
+};
+
 // resolveDefault + evaluateCondition: ย้ายไป @/lib/field-helpers (Sprint 14)
 
 // ---- Group config (Sprint 7) ----
@@ -586,6 +595,72 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relViaKey, modalOpen]);
 
+  // ---- เทมเพลตต่อแท็ก (Product Family Template) ----
+  // หา m2m field ที่ชี้ไปตาราง product_families (ปกติมีตัวเดียว = product_family)
+  const familyM2mFields = useMemo(
+    () => effectiveFields.filter((f) => {
+      if (f.type !== "many2many") return false;
+      const rc = (f.relationConfig ?? {}) as Record<string, unknown>;
+      return rc.target_module_key === "product_families" || rc.target_table === "product_families";
+    }),
+    [effectiveFields],
+  );
+  const [familyTemplates, setFamilyTemplates] = useState<Record<string, FamilyTemplate>>({});
+  useEffect(() => {
+    if (familyM2mFields.length === 0) return;
+    apiFetch(`/api/master-v2/product_families?limit=500&include_inactive=true`)
+      .then((r) => r.json())
+      .then((j) => {
+        const m: Record<string, FamilyTemplate> = {};
+        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) m[String(r.id)] = (r.template as FamilyTemplate) ?? {};
+        setFamilyTemplates(m);
+      })
+      .catch(() => {});
+  }, [familyM2mFields.length]);
+
+  // ids ของแท็กที่เลือกในฟอร์มปัจจุบัน → รวมเทมเพลต union (โชว์ชนะซ่อน)
+  const selectedFamilyIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const f of familyM2mFields) { const v = form[f.key]; if (Array.isArray(v)) ids.push(...v.map(String)); }
+    return ids;
+  }, [familyM2mFields, form]);
+  const familyKey = selectedFamilyIds.join("|");
+  const mergedTemplate = useMemo(() => {
+    const show = new Set<string>(), hide = new Set<string>(), hideSec = new Set<string>(), req = new Set<string>();
+    const defaults: Record<string, unknown> = {};
+    for (const id of selectedFamilyIds) {
+      const t = familyTemplates[id]; if (!t) continue;
+      (t.show_fields ?? []).forEach((k) => show.add(k));
+      (t.hide_fields ?? []).forEach((k) => hide.add(k));
+      (t.hide_sections ?? []).forEach((k) => hideSec.add(k));
+      (t.required_fields ?? []).forEach((k) => req.add(k));
+      for (const [k, vv] of Object.entries(t.defaults ?? {})) if (!(k in defaults)) defaults[k] = vv;
+    }
+    return { show, hide, hideSec, req, defaults };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyKey, familyTemplates]);
+
+  // เติมค่าตั้งต้นจากเทมเพลต เมื่อเลือกแท็ก (เฉพาะ field ที่ยังว่าง + อยู่ในโหมดแก้ไข)
+  useEffect(() => {
+    if (!modalOpen || drawerMode !== "edit") return;
+    const patch: Record<string, unknown> = {};
+    for (const [k, vv] of Object.entries(mergedTemplate.defaults)) {
+      const cur = form[k];
+      if (cur === undefined || cur === null || cur === "") patch[k] = vv;
+    }
+    if (Object.keys(patch).length) setForm((p) => ({ ...p, ...patch }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyKey, modalOpen, drawerMode]);
+
+  // field ถูกซ่อน/บังคับโดยเทมเพลตไหม (โชว์ชนะซ่อน)
+  const tplHidden = useCallback((f: FieldDef) => {
+    if (mergedTemplate.show.has(f.key)) return false;
+    if (mergedTemplate.hide.has(f.key)) return true;
+    if (f.groupKey && mergedTemplate.hideSec.has(f.groupKey)) return true;
+    return false;
+  }, [mergedTemplate]);
+  const tplRequired = useCallback((f: FieldDef) => !!f.required || mergedTemplate.req.has(f.key), [mergedTemplate]);
+
   // archive (soft) — เก็บไว้เผื่อ flow อื่น
   const [archiveTarget, setArchiveTarget] = useState<Row | null>(null);
   // delete dialog (ลบชั่วคราว / ลบถาวร)
@@ -796,10 +871,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const fErr: Record<string, string[]> = {};
     let hasErr = false;
     for (const f of effectiveFields) {
-      // ถ้า condition rule ซ่อนอยู่ → ไม่ต้อง validate (รวม required)
-      if (!evaluateCondition(f.conditionRules, form)) continue;
+      // ถ้า condition rule ซ่อนอยู่ หรือถูกเทมเพลตซ่อน → ไม่ต้อง validate (รวม required)
+      if (!evaluateCondition(f.conditionRules, form) || tplHidden(f)) continue;
       const keys = [
-        ...(f.required ? ["required"] : []),
+        ...(tplRequired(f) ? ["required"] : []),
         ...(f.validations ?? []),
       ];
       if (keys.length === 0) continue;
@@ -1231,7 +1306,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       <label key={f.key} className={`block ${f.formSpan === 3 ? "col-span-3" : f.formSpan === 2 ? "col-span-2" : ""} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
         <span className="text-xs font-medium text-slate-600" style={tStyle}>
           {f.label}
-          {f.required && <span className="text-red-500 ml-0.5">*</span>}
+          {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
           {f.readonly && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
           {fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}
         </span>
@@ -1545,7 +1620,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       {/* F11: Drawer (slide จากขวา) — สลับ view/edit */}
       <Drawer
         open={modalOpen}
-        onClose={tryClose}
+        onClose={discard}
         size="lg"
         hasUnsavedChanges={drawerMode === "edit" && dirty}
         title={
@@ -1599,7 +1674,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         {/* F25: layout 2 คอลัมน์ — ซ้าย=รูป+core, ขวา=tabs (responsive: แคบ→ซ้อนบนล่าง) */}
         {(() => {
           const visibleFields = effectiveFields.filter(f =>
-            !f.hideInForm && f.key !== "cover_image_r2_key" && evaluateCondition(f.conditionRules, form)
+            !f.hideInForm && f.key !== "cover_image_r2_key" && evaluateCondition(f.conditionRules, form) && !tplHidden(f)
           );
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
 

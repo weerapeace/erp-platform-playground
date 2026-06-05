@@ -1,0 +1,262 @@
+"use client";
+
+/**
+ * ตั้งค่าเทมเพลตต่อประเภทสินค้า (Product Family Template) — /admin/family-template
+ *
+ * แต่ละแท็ก (product_family) กำหนดได้ว่า เมื่อ Parent SKU ติดแท็กนี้:
+ *   - field ไหน "โชว์เสมอ" / "ซ่อน" / "ปกติ"
+ *   - section ไหนซ่อน
+ *   - field ไหนบังคับกรอก
+ *   - ค่าตั้งต้น (default) ของแต่ละ field
+ *
+ * เก็บใน product_families.template (jsonb) — รวมแบบ union เมื่อ Parent SKU ติดหลายแท็ก
+ * (logic การรวม + apply อยู่ใน master-crud)
+ */
+
+import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "@/lib/api";
+
+const TARGET_MODULE = "parent-skus-v2";
+
+type FieldMode = "normal" | "show" | "hide";
+
+type Template = {
+  show_fields?: string[];
+  hide_fields?: string[];
+  hide_sections?: string[];
+  required_fields?: string[];
+  defaults?: Record<string, string>;
+};
+
+type Family = { id: string; name: string; template: Template };
+type RegField = { field_key: string; field_label: string; group_key: string; ui_field_type: string };
+type Section = { key: string; label: string };
+
+const VIRTUAL = new Set(["computed", "computed_text", "one2many", "many2many"]);
+
+export default function FamilyTemplatePage() {
+  const [families, setFamilies] = useState<Family[]>([]);
+  const [fields, setFields] = useState<RegField[]>([]);
+  const [sections, setSections] = useState<Section[]>([]);
+  const [activeId, setActiveId] = useState<string>("");
+  const [tpl, setTpl] = useState<Template>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string>("");
+
+  // โหลดแท็ก + field registry ของ Parent SKU
+  useEffect(() => {
+    (async () => {
+      try {
+        const [fr, reg] = await Promise.all([
+          apiFetch(`/api/master-v2/product_families?limit=500&include_inactive=true`).then((r) => r.json()),
+          apiFetch(`/api/admin/field-registry-v2?module=${TARGET_MODULE}`).then((r) => r.json()),
+        ]);
+        const fams: Family[] = (fr.data ?? fr.rows ?? []).map((r: Record<string, unknown>) => ({
+          id: String(r.id), name: String(r.name ?? r.id), template: (r.template as Template) ?? {},
+        }));
+        setFamilies(fams);
+        setFields((reg.fields ?? []).map((f: RegField) => ({
+          field_key: f.field_key, field_label: f.field_label, group_key: f.group_key, ui_field_type: f.ui_field_type,
+        })));
+        const tabs = reg.layout?.tabs ?? [];
+        const secs: Section[] = [];
+        for (const t of tabs) for (const s of (t.sections ?? [])) secs.push({ key: s.key, label: s.label });
+        setSections(secs);
+        if (fams[0]) { setActiveId(fams[0].id); setTpl(fams[0].template ?? {}); }
+      } finally { setLoading(false); }
+    })();
+  }, []);
+
+  const selectFamily = (id: string) => {
+    setActiveId(id);
+    setTpl(families.find((f) => f.id === id)?.template ?? {});
+    setMsg("");
+  };
+
+  // จัดกลุ่ม field ตาม section (group_key) — ที่ไม่มี section ใส่ "อื่นๆ"
+  const grouped = useMemo(() => {
+    const byKey = new Map<string, RegField[]>();
+    for (const f of fields) {
+      const k = f.group_key || "_other";
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k)!.push(f);
+    }
+    const out: { key: string; label: string; fields: RegField[] }[] = [];
+    for (const s of sections) if (byKey.has(s.key)) { out.push({ key: s.key, label: s.label, fields: byKey.get(s.key)! }); byKey.delete(s.key); }
+    for (const [k, fs] of byKey) out.push({ key: k, label: k === "_other" ? "อื่นๆ" : k, fields: fs });
+    return out;
+  }, [fields, sections]);
+
+  // helpers อ่าน/เขียน template
+  const modeOf = (key: string): FieldMode =>
+    (tpl.show_fields ?? []).includes(key) ? "show" : (tpl.hide_fields ?? []).includes(key) ? "hide" : "normal";
+  const setMode = (key: string, mode: FieldMode) => setTpl((p) => {
+    const show = new Set(p.show_fields ?? []); const hide = new Set(p.hide_fields ?? []);
+    show.delete(key); hide.delete(key);
+    if (mode === "show") show.add(key); else if (mode === "hide") hide.add(key);
+    return { ...p, show_fields: [...show], hide_fields: [...hide] };
+  });
+  const sectionHidden = (key: string) => (tpl.hide_sections ?? []).includes(key);
+  const toggleSection = (key: string) => setTpl((p) => {
+    const s = new Set(p.hide_sections ?? []);
+    if (s.has(key)) s.delete(key); else s.add(key);
+    return { ...p, hide_sections: [...s] };
+  });
+  const isRequired = (key: string) => (tpl.required_fields ?? []).includes(key);
+  const toggleRequired = (key: string) => setTpl((p) => {
+    const s = new Set(p.required_fields ?? []);
+    if (s.has(key)) s.delete(key); else s.add(key);
+    return { ...p, required_fields: [...s] };
+  });
+  const defaultOf = (key: string) => (tpl.defaults ?? {})[key] ?? "";
+  const setDefault = (key: string, v: string) => setTpl((p) => {
+    const d = { ...(p.defaults ?? {}) };
+    if (v === "") delete d[key]; else d[key] = v;
+    return { ...p, defaults: d };
+  });
+
+  const save = async () => {
+    if (!activeId) return;
+    setSaving(true); setMsg("");
+    // ทำความสะอาด (ตัด array/obj ว่าง)
+    const clean: Template = {};
+    if (tpl.show_fields?.length) clean.show_fields = tpl.show_fields;
+    if (tpl.hide_fields?.length) clean.hide_fields = tpl.hide_fields;
+    if (tpl.hide_sections?.length) clean.hide_sections = tpl.hide_sections;
+    if (tpl.required_fields?.length) clean.required_fields = tpl.required_fields;
+    if (tpl.defaults && Object.keys(tpl.defaults).length) clean.defaults = tpl.defaults;
+    try {
+      const res = await apiFetch(`/api/master-v2/product_families/${activeId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template: clean }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setMsg("❌ บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      setFamilies((fs) => fs.map((f) => (f.id === activeId ? { ...f, template: clean } : f)));
+      setMsg("✅ บันทึกแล้ว");
+    } catch (e) { setMsg("❌ " + (e instanceof Error ? e.message : "network")); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>;
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="bg-white border-b border-slate-200 px-6 py-4">
+        <h1 className="text-xl font-bold text-slate-900">🧩 เทมเพลตประเภทสินค้า</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          กำหนดว่าเมื่อ Parent SKU ติดแท็กนี้ จะโชว์/ซ่อนฟิลด์ไหน บังคับกรอกอะไร และตั้งค่าตั้งต้นอะไร
+          — ติดหลายแท็กจะรวมกันแบบ union (แท็กไหนสั่งโชว์ก็โชว์)
+        </p>
+      </div>
+
+      <div className="flex gap-4 p-4 max-w-6xl mx-auto">
+        {/* รายการแท็ก */}
+        <div className="w-56 shrink-0">
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            {families.length === 0 && <div className="p-3 text-xs text-slate-400">ยังไม่มีแท็ก</div>}
+            {families.map((f) => (
+              <button key={f.id} onClick={() => selectFamily(f.id)}
+                className={`block w-full text-left px-3 py-2 text-sm border-b border-slate-100 last:border-0 ${
+                  activeId === f.id ? "bg-blue-50 text-blue-700 font-medium" : "hover:bg-slate-50 text-slate-700"
+                }`}>
+                {f.name}
+                {(f.template?.show_fields?.length || f.template?.hide_fields?.length || f.template?.hide_sections?.length ||
+                  f.template?.required_fields?.length || (f.template?.defaults && Object.keys(f.template.defaults).length)) ? (
+                  <span className="ml-1 text-[10px] text-blue-500">●</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ตัวตั้งค่า */}
+        <div className="flex-1 min-w-0">
+          {!activeId ? (
+            <div className="bg-white border border-slate-200 rounded-lg p-6 text-sm text-slate-400">เลือกแท็กทางซ้าย</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm text-slate-500">
+                  กำลังตั้งค่า: <span className="font-semibold text-slate-800">{families.find((f) => f.id === activeId)?.name}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {msg && <span className="text-xs">{msg}</span>}
+                  <button onClick={save} disabled={saving}
+                    className="h-8 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                    {saving ? "กำลังบันทึก…" : "บันทึก"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {grouped.map((g) => {
+                  const hidden = sectionHidden(g.key);
+                  return (
+                    <div key={g.key} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
+                        <span className="text-sm font-medium text-slate-700">{g.label}</span>
+                        <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                          <input type="checkbox" checked={hidden} onChange={() => toggleSection(g.key)}
+                            className="rounded border-slate-300" />
+                          ซ่อนทั้ง section
+                        </label>
+                      </div>
+                      <div className={hidden ? "opacity-40 pointer-events-none" : ""}>
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-[11px] text-slate-400 border-b border-slate-100">
+                              <th className="text-left font-normal px-3 py-1.5">ฟิลด์</th>
+                              <th className="text-left font-normal px-2 py-1.5 w-44">การแสดง</th>
+                              <th className="text-center font-normal px-2 py-1.5 w-20">บังคับ</th>
+                              <th className="text-left font-normal px-3 py-1.5 w-48">ค่าตั้งต้น</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.fields.map((f) => {
+                              const virtual = VIRTUAL.has(f.ui_field_type);
+                              return (
+                                <tr key={f.field_key} className="border-b border-slate-50 last:border-0">
+                                  <td className="px-3 py-1.5 text-slate-700">
+                                    {f.field_label}
+                                    <span className="ml-1.5 text-[10px] text-slate-300">{f.field_key}</span>
+                                  </td>
+                                  <td className="px-2 py-1.5">
+                                    <select value={modeOf(f.field_key)} onChange={(e) => setMode(f.field_key, e.target.value as FieldMode)}
+                                      className="h-7 text-xs border border-slate-200 rounded px-1.5 bg-white">
+                                      <option value="normal">ปกติ (ตาม registry)</option>
+                                      <option value="show">โชว์เสมอ</option>
+                                      <option value="hide">ซ่อน</option>
+                                    </select>
+                                  </td>
+                                  <td className="px-2 py-1.5 text-center">
+                                    <input type="checkbox" checked={isRequired(f.field_key)} onChange={() => toggleRequired(f.field_key)}
+                                      className="rounded border-slate-300" />
+                                  </td>
+                                  <td className="px-3 py-1.5">
+                                    {virtual ? (
+                                      <span className="text-[11px] text-slate-300 italic">— ตั้งค่าไม่ได้ —</span>
+                                    ) : (
+                                      <input value={defaultOf(f.field_key)} onChange={(e) => setDefault(f.field_key, e.target.value)}
+                                        placeholder="(ไม่ตั้ง)"
+                                        className="w-full h-7 text-xs border border-slate-200 rounded px-1.5" />
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

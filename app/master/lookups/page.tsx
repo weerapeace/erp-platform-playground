@@ -44,6 +44,14 @@ export default function MasterLookupsPage() {
             ))}
           </div>
         </div>
+        {active === "product_families" && (
+          <div className="px-6 pt-3">
+            <a href="/admin/family-template"
+              className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100">
+              🧩 ตั้งค่าเทมเพลตต่อแท็ก (โชว์/ซ่อนฟิลด์ + ค่าตั้งต้นใน Parent SKU)
+            </a>
+          </div>
+        )}
         <div className="flex-1">
           {/* MasterPage ไม่เรนเดอร์ shell ซ้อน (อยู่ใต้ shell นี้แล้ว) */}
           <ShellPresentContext.Provider value={true}>
