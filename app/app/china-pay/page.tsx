@@ -3811,18 +3811,25 @@ function Money({ value, onChange, placeholder, className }: { value: string; onC
     onChange={e => handle(e.target.value)} onFocus={e => e.currentTarget.select()}
     className={className ?? "w-full h-11 px-3 text-base text-right border border-slate-200 rounded-lg"} />;
 }
-// ช่องวันที่ — โชว์ วว/ดด/ปปปป (DD/MM/YYYY) · เก็บค่าจริงเป็น ISO (YYYY-MM-DD) · แตะเปิดปฏิทินเครื่อง
+// ช่องวันที่ — โชว์ วว/ดด/ปปปป (DD/MM/YYYY) · เก็บค่าจริงเป็น ISO (YYYY-MM-DD) · กดเปิดปฏิทินเครื่อง
 function DateField({ value, onChange, className }: { value: string; onChange: (iso: string) => void; className?: string }) {
+  const ref = useRef<HTMLInputElement>(null);
   const disp = value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10).split("-").reverse().join("/") : "";
+  // สั่งเปิดปฏิทินเอง (กดที่ช่องเปล่า ๆ บน desktop จะไม่เปิดเองถ้าไม่เรียก showPicker)
+  const open = () => {
+    const el = ref.current; if (!el) return;
+    try { (el as HTMLInputElement & { showPicker?: () => void }).showPicker?.(); }
+    catch { el.focus(); }
+  };
   return (
-    <div className={`relative ${className ?? ""}`}>
-      <div className="w-full h-11 px-3 flex items-center text-base border border-slate-200 rounded-lg bg-white">
+    <div className={`relative cursor-pointer ${className ?? ""}`} onClick={open}>
+      <div className="w-full h-11 px-3 pr-10 flex items-center text-base border border-slate-200 rounded-lg bg-white">
         {disp || <span className="text-slate-400">วว/ดด/ปปปป</span>}
       </div>
       <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">📅</span>
-      {/* native date input ทับด้านบนแบบโปร่งใส — แตะเปิดปฏิทิน แต่ตัวอักษรโชว์ DD/MM/YYYY ด้านหลัง */}
-      <input type="date" value={value} onChange={e => onChange(e.target.value)} aria-label="เลือกวันที่"
-        className="absolute inset-0 w-full h-full opacity-0" />
+      {/* native date input ซ่อนไว้ — สั่งเปิดผ่าน showPicker() เวลาคลิก */}
+      <input ref={ref} type="date" value={value} onChange={e => onChange(e.target.value)} aria-label="เลือกวันที่" tabIndex={-1}
+        className="absolute right-2 bottom-0 w-px h-px opacity-0 pointer-events-none" />
     </div>
   );
 }
