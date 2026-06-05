@@ -2937,7 +2937,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1">
             <span className="text-slate-600 font-medium">เข้าบัญชีจีน (ส่วนต่าง)</span>
             {hasRate
-              ? <span className="font-bold text-emerald-700">฿{fmt(chinaIn)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(chinaInRmb)}</span></span>
+              ? <span className="font-bold text-emerald-700">¥{fmt(+chinaInRmb.toFixed(2))}<span className="text-slate-400 font-normal"> ≈ ฿{fmt(chinaIn)}</span></span>
               : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
           </div>
         </div>
