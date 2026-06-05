@@ -316,20 +316,28 @@ function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
   useEffect(() => { setPage(0); }, [api, search]);
 
   const recById = useMemo(() => { const m: Record<string, Rec> = {}; rows.forEach((r) => { m[r.id] = r; }); return m; }, [rows]);
-  const selectedRecs = useCallback(() => Array.from(selected).map((id) => recById[id]).filter(Boolean), [selected, recById]);
+  // refs ค่าล่าสุด → ให้ handler เป็น stable (การ์ดจะ re-render เฉพาะใบที่ค่า on เปลี่ยน = ลื่น)
+  const selectedRef = useRef(selected); selectedRef.current = selected;
+  const recByIdRef = useRef(recById); recByIdRef.current = recById;
+
+  const selectedRecs = useCallback(() => Array.from(selectedRef.current).map((id) => recByIdRef.current[id]).filter(Boolean), []);
+  const onDragStartSel = useCallback(() => { selDragRef.current = selectedRecs(); }, [selectedRecs, selDragRef]);
+  const onToggle = useCallback((id: string) => {
+    if (movedRef.current) return;
+    setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }, []);
 
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    // เริ่มลากบนการ์ดที่ "เลือกแล้ว" → ปล่อยให้ลากไปตะกร้า (native drag) ไม่เริ่ม marquee
     const card = (e.target as HTMLElement).closest("[data-rec-id]");
-    if (card && selected.has(card.getAttribute("data-rec-id")!)) return;
+    if (card && selectedRef.current.has(card.getAttribute("data-rec-id")!)) return;   // ลากการ์ดที่เลือกแล้ว → ไปตะกร้า
     startRef.current = { x: e.clientX, y: e.clientY };
-    baseSelRef.current = e.shiftKey ? new Set(selected) : new Set();
+    baseSelRef.current = e.shiftKey ? new Set(selectedRef.current) : new Set();
     movedRef.current = false;
   };
   const onMouseMove = (e: React.MouseEvent) => {
     const s = startRef.current; if (!s) return;
-    if (!movedRef.current && Math.abs(e.clientX - s.x) + Math.abs(e.clientY - s.y) < 5) return;  // ยังไม่ถือว่าลาก
+    if (!movedRef.current && Math.abs(e.clientX - s.x) + Math.abs(e.clientY - s.y) < 5) return;
     movedRef.current = true;
     const left = Math.min(s.x, e.clientX), top = Math.min(s.y, e.clientY), right = Math.max(s.x, e.clientX), bottom = Math.max(s.y, e.clientY);
     setMarquee({ x: left, y: top, w: right - left, h: bottom - top });
@@ -338,11 +346,9 @@ function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
       const c = el.getBoundingClientRect();
       if (!(c.right < left || c.left > right || c.bottom < top || c.top > bottom)) sel.add(el.getAttribute("data-rec-id")!);
     });
-    setSelected(sel);
+    setSelected((prev) => (prev.size === sel.size && Array.from(sel).every((x) => prev.has(x)) ? prev : sel));  // ข้ามถ้าเหมือนเดิม → ไม่ re-render เกินจำเป็น
   };
   const endMarquee = () => { startRef.current = null; setMarquee(null); setTimeout(() => { movedRef.current = false; }, 0); };
-
-  const toggleOne = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const pages = Math.max(1, Math.ceil(total / PAGE));
 
@@ -363,35 +369,38 @@ function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
           className="h-7 px-3 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">➕ ใส่ตะกร้าที่เลือก ({selected.size})</button>
       </div>
       <div ref={gridRef} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={endMarquee} onMouseLeave={endMarquee}
-        className="flex-1 overflow-y-auto p-2 grid grid-cols-2 sm:grid-cols-3 gap-2 content-start select-none relative">
+        className="flex-1 overflow-y-auto p-4 grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-5 content-start select-none relative">
         {loading && <div className="col-span-full text-xs text-slate-400 py-4 text-center">กำลังโหลด…</div>}
         {!loading && rows.length === 0 && <div className="col-span-full text-xs text-slate-400 py-4 text-center">ไม่พบรายการ</div>}
-        {rows.map((r) => {
-          const on = selected.has(r.id);
-          const tags = tagMap[r.id] ?? [];
-          return (
-            <div key={r.id} data-rec-id={r.id}
-              draggable={on}
-              onDragStart={() => { selDragRef.current = selectedRecs(); }}
-              onClick={() => { if (movedRef.current) return; toggleOne(r.id); }}
-              className={`rounded-lg border p-2 flex flex-col gap-1.5 cursor-pointer transition-colors ${on ? "bg-slate-300 border-slate-400" : "bg-white border-slate-200 hover:border-blue-300"}`}>
-              <div className="flex gap-2">
-                {r.image
-                  ? <img src={`/api/r2-image?key=${encodeURIComponent(r.image)}`} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0 pointer-events-none" />
-                  : <div className="w-10 h-10 rounded bg-slate-100 shrink-0" />}
-                <div className="flex-1 min-w-0 pointer-events-none">
-                  <div className="font-semibold text-sm text-slate-800 truncate">{r.code}</div>
-                  <div className="text-[11px] text-slate-400 line-clamp-1">{r.name}</div>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1 pointer-events-none">
-                {tags.map((tid) => <span key={tid} className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100">{tagLabel(tid)}</span>)}
-              </div>
-            </div>
-          );
-        })}
+        {rows.map((r) => (
+          <QuickCard key={r.id} r={r} on={selected.has(r.id)} tags={tagMap[r.id]} tagLabel={tagLabel} onToggle={onToggle} onDragStart={onDragStartSel} />
+        ))}
       </div>
       {marquee && <div className="fixed z-50 bg-blue-400/20 border border-blue-400 pointer-events-none" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
     </div>
   );
 }
+
+// การ์ดในโหมดเลือกเร็ว — memo: re-render เฉพาะใบที่ค่า on/tags เปลี่ยน (ลากคลุมลื่นขึ้นมาก)
+const QuickCard = memo(function QuickCard({ r, on, tags, tagLabel, onToggle, onDragStart }: {
+  r: Rec; on: boolean; tags?: string[]; tagLabel: (id: string) => string;
+  onToggle: (id: string) => void; onDragStart: () => void;
+}) {
+  return (
+    <div data-rec-id={r.id} draggable={on} onDragStart={onDragStart} onClick={() => onToggle(r.id)}
+      className={`rounded-lg border p-2 flex flex-col gap-1.5 cursor-pointer transition-colors ${on ? "bg-slate-300 border-slate-400 ring-2 ring-slate-400" : "bg-white border-slate-200 hover:border-blue-300"}`}>
+      <div className="flex gap-2">
+        {r.image
+          ? <img src={`/api/r2-image?key=${encodeURIComponent(r.image)}`} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0 pointer-events-none" />
+          : <div className="w-10 h-10 rounded bg-slate-100 shrink-0" />}
+        <div className="flex-1 min-w-0 pointer-events-none">
+          <div className="font-semibold text-sm text-slate-800 truncate">{r.code}</div>
+          <div className="text-[11px] text-slate-400 line-clamp-1">{r.name}</div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1 pointer-events-none">
+        {(tags ?? []).map((tid) => <span key={tid} className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100">{tagLabel(tid)}</span>)}
+      </div>
+    </div>
+  );
+});
