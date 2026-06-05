@@ -2058,6 +2058,7 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<"list" | "form">("list");
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [editBill, setEditBill] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -2066,7 +2067,9 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  if (mode === "form") return <CtwForm onCancel={() => setMode("list")} onSaved={() => { setMode("list"); load(); }} />;
+  if (mode === "form") return <CtwForm editBill={editBill ?? undefined}
+    onCancel={() => { setMode("list"); setEditBill(null); }}
+    onSaved={() => { setMode("list"); setEditBill(null); load(); }} />;
 
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
   const unpaid = rows.filter(r => !r.cleared_at);
@@ -2074,7 +2077,7 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
 
   return (
     <div className="space-y-3">
-      <button onClick={() => setMode("form")} className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold active:scale-[0.99] transition-transform">+ เพิ่มบิล CTW</button>
+      <button onClick={() => { setEditBill(null); setMode("form"); }} className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold active:scale-[0.99] transition-transform">+ เพิ่มบิล CTW</button>
       {!loading && rows.length > 0 && (
         <div className="rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white p-4 shadow-sm">
           <div className="text-sm opacity-90">ยอดคงเหลือยังไม่ตัด ({unpaid.length} บิล)</div>
@@ -2106,22 +2109,25 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
           );
         })
       )}
-      {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onChanged={load} canDelete={canDelete} onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
+      {detail && <CtwDetail bill={detail} onClose={() => setDetail(null)} onChanged={load} canDelete={canDelete}
+        onEdit={() => { setEditBill(detail); setDetail(null); setMode("form"); }}
+        onDeleted={(id) => { setRows(p => p.filter(r => String(r.id) !== id)); setDetail(null); }} />}
     </div>
   );
 }
 
-function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => void }) {
+function CtwForm({ onCancel, onSaved, editBill }: { onCancel: () => void; onSaved: () => void; editBill?: Record<string, unknown> }) {
   const toast = useToast();
   const celebrate = useCelebrate();
+  const isEdit = !!editBill;
   const [supplierId, setSupplierId] = useState<string | null>(null);
-  const [company, setCompany] = useState("");
-  const [docNo, setDocNo] = useState("");
-  const [docDate, setDocDate] = useState(today());
-  const [beforeTax, setBeforeTax] = useState("");
-  const [net, setNet] = useState("");
-  const [account, setAccount] = useState("");
-  const [files, setFiles] = useState<string[]>([]);
+  const [company, setCompany] = useState(isEdit ? String(editBill!.company_name ?? "") : "");
+  const [docNo, setDocNo] = useState(isEdit ? String(editBill!.doc_number ?? "") : "");
+  const [docDate, setDocDate] = useState(isEdit ? String(editBill!.doc_date ?? today()) : today());
+  const [beforeTax, setBeforeTax] = useState(isEdit && editBill!.amount_before_tax != null ? String(num(editBill!.amount_before_tax)) : "");
+  const [net, setNet] = useState(isEdit && editBill!.net_amount != null ? String(num(editBill!.net_amount)) : "");
+  const [account, setAccount] = useState(isEdit ? String(editBill!.account_number ?? "") : "");
+  const [files, setFiles] = useState<string[]>(isEdit && Array.isArray(editBill!.attachments) ? (editBill!.attachments as unknown[]).map(String) : []);
   const [saving, setSaving] = useState(false);
 
   // เลือกบริษัท → ดึงชื่อ + เลขบัญชีจาก Partners
@@ -2139,20 +2145,21 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
   const onNet = (v: string) => { setNet(v); const n = num(v); setBeforeTax(n > 0 ? String(+(n / (1 + VAT_RATE)).toFixed(2)) : ""); };
 
   const save = async () => {
-    if (!supplierId || !company.trim()) { toast.error("เลือกบริษัทก่อน"); return; }
+    if (!company.trim()) { toast.error("กรอกชื่อบริษัท"); return; }
+    if (!isEdit && !supplierId) { toast.error("เลือกบริษัทก่อน"); return; }
     setSaving(true);
     try {
-      const res = await apiFetch("/api/master-v2/ctw-bills", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          company_name: company, doc_number: docNo || null, doc_date: docDate || null,
-          amount_before_tax: num(beforeTax) || null, net_amount: num(net) || null,
-          account_number: account || null, attachments: files, actor: "china-app",
-        }),
+      const body = {
+        company_name: company, doc_number: docNo || null, doc_date: docDate || null,
+        amount_before_tax: num(beforeTax) || null, net_amount: num(net) || null,
+        account_number: account || null, attachments: files, actor: "china-app",
+      };
+      const res = await apiFetch(isEdit ? `/api/master-v2/ctw-bills/${String(editBill!.id)}` : "/api/master-v2/ctw-bills", {
+        method: isEdit ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      celebrate("บันทึกบิล CTW แล้ว"); onSaved();
+      celebrate(isEdit ? "แก้ไขบิล CTW แล้ว" : "บันทึกบิล CTW แล้ว"); onSaved();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -2193,7 +2200,7 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
   );
 }
 
-function CtwDetail({ bill, onClose, onDeleted, onChanged, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void; onChanged?: () => void; canDelete?: boolean }) {
+function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void; onChanged?: () => void; onEdit?: () => void; canDelete?: boolean }) {
   const toast = useToast();
   const [del, setDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2253,10 +2260,16 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged, canDelete }: { bill: R
               </div>
             </div>
           )}
-          {canDelete && (
-            <button onClick={() => setDel(true)} disabled={busy}
-              className="w-full h-11 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50">🗑 ลบบิลนี้</button>
-          )}
+          <div className="flex gap-2">
+            {onEdit && (
+              <button onClick={onEdit} disabled={busy}
+                className="flex-1 h-11 border border-blue-200 text-blue-600 rounded-lg text-sm font-medium hover:bg-blue-50 disabled:opacity-50">✎ แก้ไขบิล</button>
+            )}
+            {canDelete && (
+              <button onClick={() => setDel(true)} disabled={busy}
+                className="flex-1 h-11 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50">🗑 ลบบิลนี้</button>
+            )}
+          </div>
         </div>
       </div>
       {del && (
