@@ -802,6 +802,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     });
     setForm(partial);
 
+    // โหลดลิงก์ m2m เข้า form ตั้งแต่เปิด (ที่เดียว) → กัน race จาก widget async ทับค่าที่ผู้ใช้เพิ่งเลือก
+    // guard: เขียนเฉพาะตอน field ยังไม่มีค่า (undefined) → ถ้าผู้ใช้แก้ก่อนโหลดเสร็จ จะไม่ถูกทับ
+    effectiveFields.filter(fd => fd.type === "many2many").forEach(fd => {
+      const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
+      const junction = String(rc.junction_table ?? "");
+      if (!junction) return;
+      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${r.id}`)
+        .then(res => res.json())
+        .then(j => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: (j.links ?? []) } : p)))
+        .catch(() => {});
+    });
+
     // fetch full row ใน background (REST mode เท่านั้น)
     if (!isRest) return;
     apiFetch(`${apiBase}${config.apiPath}/${r.id}`)
@@ -1360,6 +1372,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           <div className="mt-0.5">
             <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={!disabled}
               value={Array.isArray(form[f.key]) ? (form[f.key] as string[]) : undefined}
+              onToggle={(id) => { setForm(p => { const cur = Array.isArray(p[f.key]) ? (p[f.key] as string[]) : []; const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]; return { ...p, [f.key]: next }; }); setDirty(true); }}
               onChange={(ids) => updateForm({ [f.key]: ids })} />
           </div>
         ) : f.type === "one2many" ? (

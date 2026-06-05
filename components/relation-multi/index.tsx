@@ -5,7 +5,7 @@
  * - RelationMany2Many: เลือกหลายค่า (จัดการ link ใน junction table ทันที)
  * - RelationOne2Many: แสดงรายการลูกที่ชี้กลับมา (read-only)
  */
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
@@ -36,40 +36,32 @@ async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[
 }
 
 // ---- many2many ---- (ค้นหา + เช็คบ็อกซ์ + สร้างใหม่ + เลือกได้ตั้งแต่ตอนสร้าง)
-export function RelationMany2Many({ config, recordId, editable, value, onChange }: {
+export function RelationMany2Many({ config, recordId, editable, value, onChange, onToggle }: {
   config: RelConfig; recordId?: string | null; editable: boolean;
-  value?: string[]; onChange?: (ids: string[]) => void;   // staged mode (ตอนสร้าง — ยังไม่มี id)
+  value?: string[];
+  onChange?: (ids: string[]) => void;        // set ทั้งชุด (fallback)
+  onToggle?: (id: string) => void;           // สลับทีละตัว — parent คำนวณจาก state ล่าสุด (กัน stale/ลบหาย)
 }) {
-  const junction = config.junction_table ?? "";
+  void recordId;
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const labelField = config.target_label_field ?? "name";
   const allowCreate = config.allow_create !== false;
-  const isStaged = !recordId;   // ยังไม่มี id (โหมดสร้าง) → เก็บไว้ใน form ก่อน
 
-  // แหล่งความจริงเดียว = ค่าในฟอร์ม (value) ทั้งโหมดสร้างและแก้ไข
-  // การผูก/ถอดลิงก์จริงในตาราง junction จะทำตอนกด "บันทึก" (master-crud diff)
-  void isStaged;
+  // แหล่งความจริงเดียว = ค่าในฟอร์ม (value)
+  // ลิงก์เดิมถูกโหลดเข้า form ตั้งแต่ openEdit แล้ว (master-crud) → widget ไม่โหลดเอง (กัน async ทับ)
+  // การผูก/ถอดลิงก์จริงในตาราง junction ทำตอนกด "บันทึก" (master-crud diff)
   const [opts, setOpts] = useState<Opt[]>([]);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const linked = value ?? [];
-  const loadedRef = useRef<string | null>(null);
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
-  // โหลด link เดิมจาก DB ครั้งเดียวต่อ record → เขียนกลับฟอร์มผ่าน onChange
-  useEffect(() => {
-    if (!recordId || !junction) return;
-    if (loadedRef.current === recordId) return;
-    loadedRef.current = recordId;
-    apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`).then((r) => r.json())
-      .then((j) => onChange?.(j.links ?? [])).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordId, junction]);
 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
   const toggle = (id: string) => {
+    if (onToggle) { onToggle(id); return; }   // ทางหลัก — parent อ่าน state ล่าสุดเอง
     const next = linked.includes(id) ? linked.filter((x) => x !== id) : [...linked, id];
     onChange?.(next);
   };
