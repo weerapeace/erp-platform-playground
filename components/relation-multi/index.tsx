@@ -328,13 +328,19 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [loaded, setLoaded] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [peek, setPeek] = useState<{ id: string; edit: boolean } | null>(null);  // กดรายการลูก → ดู/แก้ record นั้น
+  // เรียงลำดับตารางลูก (server-side) — กดหัวคอลัมน์
+  const [sort, setSort] = useState<{ col: string; dir: "asc" | "desc" } | null>(null);
+  const toggleSort = (col: string) =>
+    setSort((p) => (p && p.col === col ? { col, dir: p.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" }));
+  const sortArrow = (col: string) => (sort?.col === col ? (sort.dir === "asc" ? " ▲" : " ▼") : "");
 
   // ดึงทีละหน้า (filter fk ที่ server)
   const fetchPage = useCallback(async (offset: number) => {
     const flt = encodeURIComponent(JSON.stringify({ [fk]: { type: "text", value: recordId } }));
-    const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=${PAGE}&offset=${offset}&filters=${flt}`).then((r) => r.json());
+    const sortQ = sort ? `&sort_by=${encodeURIComponent(sort.col)}&sort_dir=${sort.dir}` : "";
+    const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=${PAGE}&offset=${offset}&filters=${flt}${sortQ}`).then((r) => r.json());
     return { data: (j.data ?? j.rows ?? []) as Record<string, unknown>[], total: Number(j.total ?? 0) };
-  }, [moduleKey, fk, recordId]);
+  }, [moduleKey, fk, recordId, sort]);
 
   const load = useCallback(() => {
     if (!recordId || !fk) return;
@@ -531,11 +537,19 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           <thead className="bg-slate-50 text-xs text-slate-500">
             <tr>
               {imageField && <th className="px-2 py-1.5 w-10" />}
-              <th className="px-2 py-1.5 text-left font-medium">{labelOf(titleField)}</th>
+              <th className="px-2 py-1.5 text-left font-medium">
+                <button type="button" onClick={() => toggleSort(titleField)} title="กดเพื่อเรียง"
+                  className="inline-flex items-center gap-0.5 hover:text-slate-700">
+                  {labelOf(titleField)}<span className="text-blue-500">{sortArrow(titleField)}</span>
+                </button>
+              </th>
               {subFields.map((f) => (
                 <th key={f} className={`px-2 py-1.5 font-medium whitespace-nowrap ${relCfgByField[f] ? "text-left" : "text-right"}`}>
-                  <span className="inline-flex items-center gap-1">
-                    {labelOf(f)}
+                  <span className={`inline-flex items-center gap-1 ${relCfgByField[f] ? "" : "flex-row-reverse"}`}>
+                    <button type="button" onClick={() => toggleSort(f)} title="กดเพื่อเรียง"
+                      className="inline-flex items-center gap-0.5 hover:text-slate-700">
+                      {labelOf(f)}<span className="text-blue-500">{sortArrow(f)}</span>
+                    </button>
                     {isEditableCol(f) && (
                       <button type="button" title="เติมค่าเดียวกันทุกแถว" onClick={(e) => { e.stopPropagation(); fillColumn(f); }}
                         className="text-slate-300 hover:text-blue-600">⤓</button>

@@ -1331,7 +1331,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     [rows, showStatusCards, statusFilter, statusField],
   );
 
-  const renderField = (f: FieldDef) => {
+  const renderField = (f: FieldDef, maxSpan = 3) => {
     const v = form[f.key];
     const errs = fieldErrors[f.key];
     const hasErr = errs && errs.length > 0;
@@ -1358,7 +1358,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // ฟิลด์ที่มี control หลายตัว (m2m/o2m) ห้ามครอบด้วย <label> — เพราะคลิกที่ชื่อ label เบราว์เซอร์จะไปกด control ตัวแรก (แท็กอันแรกหลุด)
     const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many") ? "div" : "label";
     return (
-      <FieldWrap key={f.key} className={`block ${f.formSpan === 3 ? "col-span-3" : f.formSpan === 2 ? "col-span-2" : ""} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
+      <FieldWrap key={f.key} className={`block ${(() => { const s = Math.min(f.formSpan ?? 1, maxSpan); return s === 3 ? "col-span-3" : s === 2 ? "col-span-2" : ""; })()} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
         <span className="text-xs font-medium text-slate-600" style={tStyle}>
           {f.label}
           {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
@@ -2190,7 +2190,7 @@ function FormSections({
   fields, renderField, layout,
 }: {
   fields: FieldDef[];
-  renderField: (f: FieldDef) => React.ReactNode;
+  renderField: (f: FieldDef, maxSpan?: number) => React.ReactNode;
   layout?: FormLayout;
 }) {
   // hooks ทั้งหมดเรียกก่อน return เสมอ (Rules of Hooks)
@@ -2206,7 +2206,7 @@ function FormSections({
   // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
   if (layout?.tabs?.length) {
     return <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={(fs, cols) => (
-      <div className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-3`}>{fs.map(renderField)}</div>
+      <div className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-3`}>{fs.map((f) => renderField(f, cols))}</div>
     )} />;
   }
 
@@ -2218,7 +2218,7 @@ function FormSections({
       {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
       {current && (
         <div className="grid grid-cols-2 gap-3 pt-3">
-          {current[1].map(renderField)}
+          {current[1].map((f) => renderField(f, 2))}
         </div>
       )}
     </div>
@@ -2305,7 +2305,9 @@ function DetailSections({
         const css = fieldStyleCss(f.uiStyle);
         const hl = !!(f.uiStyle ?? {}).highlight;
         // ความกว้าง field ตามที่ตั้ง (1/2/3) — textarea/image กินเต็มถ้าไม่ได้ตั้ง span
-        const span = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type === "textarea" || f.type === "image") && cols > 1 ? 2 : 1);
+        // clamp ไม่ให้เกินจำนวนคอลัมน์ของ section (กัน grid 1 คอลัมน์แตกเป็น 2)
+        const rawSpan = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type === "textarea" || f.type === "image") && cols > 1 ? 2 : 1);
+        const span = Math.min(rawSpan, cols);
         const spanCls = span >= 3 ? "col-span-3" : span === 2 ? "col-span-2" : "";
         return (
           <div key={f.key} className={`${spanCls} ${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>

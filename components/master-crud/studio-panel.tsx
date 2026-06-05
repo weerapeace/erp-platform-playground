@@ -806,7 +806,9 @@ function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, Studio
                 const hl = !!us.highlight;
                 const val = previewVal(row, f);
                 // ความกว้าง field 1/2/3 (textarea/image กินเต็มถ้าไม่ได้ตั้ง) — ให้ตรงกับฟอร์มจริง
-                const span = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
+                // clamp ไม่ให้ span เกินจำนวนคอลัมน์ของ section (กัน grid 1 คอลัมน์แตกเป็น 2)
+                const rawSpan = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
+                const span = Math.min(rawSpan, cols);
                 const spanCls = span>=3 ? "col-span-3" : span===2 ? "col-span-2" : "";
                 return (
                   <div key={f.key} className={`space-y-0.5 ${spanCls} ${hl?"bg-amber-50 border border-amber-200 rounded p-1.5":""}`}>
