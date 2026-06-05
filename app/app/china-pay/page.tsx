@@ -39,6 +39,18 @@ function Portal({ children }: { children: React.ReactNode }) {
   return createPortal(children, el);
 }
 
+// ล็อก scroll พื้นหลัง (เนื้อหาหลักเลื่อนใน <main id="cp-main">) เวลาเปิด popup
+function useScrollLock(active: boolean) {
+  useEffect(() => {
+    if (!active || typeof document === "undefined") return;
+    const el = document.getElementById("cp-main");
+    const prev = el?.style.overflow ?? "";
+    if (el) el.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => { if (el) el.style.overflow = prev; document.body.style.overflow = ""; };
+  }, [active]);
+}
+
 // ---------------- Animation "บันทึกสำเร็จ" (ของกลางใน china-pay) ----------------
 type CelebrateFn = (msg?: string, opts?: { confetti?: boolean }) => void;
 const CelebrateCtx = createContext<CelebrateFn>(() => {});
@@ -353,7 +365,7 @@ export default function ChinaPayApp() {
         </header>
 
         {/* Content */}
-        <main key={renderTab} className="cp-anim relative z-10 flex-1 overflow-y-auto p-4 pb-28">
+        <main id="cp-main" key={renderTab} className="cp-anim relative z-10 flex-1 overflow-y-auto p-4 pb-28">
           {rateMissing && renderTab !== "rate" && (
             <button onClick={() => go("rate")}
               className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-sm text-left animate-pulse">
@@ -1674,6 +1686,7 @@ function EditBillPopup({ bill, sup, onClose, onSaved }: { bill: Record<string, u
 
 // ---------------- รายละเอียดบิล ----------------
 function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onPrinted?: (id: string, at: string) => void; onChanged?: () => void; canDelete?: boolean }) {
+  useScrollLock(true);
   const toast = useToast();
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [report, setReport] = useState(false);
@@ -2223,6 +2236,7 @@ function CtwForm({ onCancel, onSaved, editBill }: { onCancel: () => void; onSave
 }
 
 function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: { bill: Record<string, unknown>; onClose: () => void; onDeleted: (id: string) => void; onChanged?: () => void; onEdit?: () => void; canDelete?: boolean }) {
+  useScrollLock(true);
   const toast = useToast();
   const [del, setDel] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2523,6 +2537,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [saving, setSaving] = useState(false);
   const [balance, setBalance] = useState<{ thb: number; rmb: number }>({ thb: 0, rmb: 0 });
   const [loading, setLoading] = useState(true);
+  useScrollLock(slipLinkIdx !== null || lightbox !== null || savedTransfer !== null);   // ล็อก scroll พื้นหลังเวลาเปิด popup
 
   // CTW ที่ยังไม่ตัด (รองรับตัดบางส่วน) — ยอดตัดเก็บแยกในแต่ละรายการโอน (txSlips[].cuts)
   const [ctw, setCtw] = useState<Record<string, unknown>[]>([]);
@@ -3219,7 +3234,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         const i = slipLinkIdx; const s = txSlips[i];
         return (
         <Portal><div className="fixed inset-0 z-[260] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setSlipLinkIdx(null)}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85dvh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between">
               <span className="font-semibold text-slate-800 truncate">🔗 {s.bank || `รายการ ${i + 1}`} · โอน ฿{fmt(num(s.amount))} ตัดบิลไหน</span>
               <button onClick={() => setSlipLinkIdx(null)} className="w-8 h-8 flex-shrink-0 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
@@ -3233,7 +3248,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                 </button>
               ))}
             </div>
-            <div className="p-3 overflow-y-auto space-y-1.5">
+            <div className="p-3 overflow-y-auto flex-1 min-h-0 space-y-1.5">
               {(() => { const used = Object.values(s.cuts ?? {}).reduce((a, v) => a + num(v), 0); const left = num(s.amount) - used; return (
                 <div className={`text-xs mb-1 ${left < -0.001 ? "text-red-500 font-medium" : "text-slate-400"}`}>
                   ติ๊กบิลที่รายการนี้จ่าย (เลือกได้หลายบิล · บิลซ้ำหลายรายการได้) — ยอดที่ตัดได้อีก ฿{fmt(+Math.max(0, left).toFixed(2))} / โอน ฿{fmt(num(s.amount))}
@@ -3309,6 +3324,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
 // ---------------- ใบสรุปการโอน (โหลดเป็นรูปได้) ----------------
 function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void; onEdit?: () => void }) {
+  useScrollLock(true);
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState(false);
@@ -3468,13 +3484,13 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { 
   return (
     <Portal>
     <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88dvh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
           <div className="font-semibold text-slate-800">ใบสรุปการโอน</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
         </div>
         <canvas ref={canvasRef} className="hidden" />
-        <div id="tx-receipt" className="p-4 overflow-y-auto flex-1">
+        <div id="tx-receipt" className="p-4 overflow-y-auto flex-1 min-h-0">
           <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-xl p-3 mb-3">
             <div className="font-bold">💸 ใบสรุปการโอนเงินจีน</div>
             <div className="text-xs opacity-90">เลขโอน {String(t.transfer_no ?? "—")} · {String(t.date ?? "")}</div>
