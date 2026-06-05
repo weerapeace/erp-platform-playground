@@ -51,6 +51,7 @@ export type RegistryField = {
   // สิทธิ์ระดับฟิลด์ตาม role (ของกลาง) — null/ว่าง = ทุกคน
   view_roles:     string[] | null;
   edit_roles:     string[] | null;
+  description:    string | null;   // หมายเหตุภายใน (admin)
   width:          number;
   min_width:      number;
   display_order:  number;
@@ -118,7 +119,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SchemaSync
   // 3. fetch registry entries
   const { data: reg, error: regErr } = await supabase
     .from("erp_module_fields")
-    .select("id, field_key, column_name, field_label, ui_field_type, data_type, source, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, view_roles, edit_roles, width, min_width, display_order, is_active, options, validation_rules, relation_config, default_value, default_expression, is_inline_editable, condition_rules")
+    .select("id, field_key, column_name, field_label, ui_field_type, data_type, source, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, view_roles, edit_roles, description, width, min_width, display_order, is_active, options, validation_rules, relation_config, default_value, default_expression, is_inline_editable, condition_rules")
     .eq("module_id", mod.id)
     .order("display_order");
 

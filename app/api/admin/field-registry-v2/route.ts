@@ -44,6 +44,7 @@ export type FormField = {
   validation_rules:  Record<string, unknown>;
   placeholder:       string | null;
   help_text:         string | null;
+  description:       string | null;   // หมายเหตุภายใน (admin)
   // Sprint 12
   default_value:        string | null;
   default_expression:   string | null;
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
 
   const { data, error } = await supabase
     .from("erp_module_fields")
-    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, view_roles, edit_roles, show_in_form, form_column_span, width, display_order, options, relation_config, validation_rules, placeholder, help_text, default_value, default_expression, is_inline_editable, is_bulk_editable, condition_rules, ui_style")
+    .select("id, field_key, column_name, field_label, ui_field_type, data_type, group_key, is_visible, is_required, is_editable, is_filterable, is_sortable, is_pinned, is_searchable, is_sensitive, sensitive_permission, view_roles, edit_roles, show_in_form, form_column_span, width, display_order, options, relation_config, validation_rules, placeholder, help_text, description, default_value, default_expression, is_inline_editable, is_bulk_editable, condition_rules, ui_style")
     .eq("module_id", mod.id)
     .eq("is_active", true)
     .order("display_order");

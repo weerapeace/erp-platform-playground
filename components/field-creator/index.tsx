@@ -121,6 +121,7 @@ export function FieldCreatorModal({
   const [viewRoles, setViewRoles] = useState<string[]>([]);
   const [editRoles, setEditRoles] = useState<string[]>([]);
   const [helpText, setHelpText]   = useState("");
+  const [note, setNote]           = useState("");
   const [defaultValue, setDefaultValue] = useState("");
   const [width, setWidth]         = useState(150);
   const [valCatalog, setValCatalog] = useState<{ rule_key: string; label: string }[]>([]);
@@ -250,6 +251,7 @@ export function FieldCreatorModal({
           view_roles: viewRoles.length ? viewRoles : null,
           edit_roles: editRoles.length ? editRoles : null,
           help_text: helpText.trim() || null,
+          description: note.trim() || null,
           default_value: defaultValue.trim() || null,
           width,
           validation_rules: selVal.length ? { rules: selVal } : {},
@@ -542,7 +544,12 @@ export function FieldCreatorModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div>
                     <label className="text-xs font-medium text-slate-600">ข้อความช่วย (help text)</label>
-                    <input value={helpText} onChange={e => setHelpText(e.target.value)} placeholder="คำอธิบายใต้ช่องกรอก"
+                    <input value={helpText} onChange={e => setHelpText(e.target.value)} placeholder="คำอธิบายใต้ช่องกรอก (ผู้ใช้เห็น)"
+                      className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">หมายเหตุภายใน (admin)</label>
+                    <input value={note} onChange={e => setNote(e.target.value)} placeholder="โน้ตของแอดมิน (ผู้ใช้ไม่เห็น)"
                       className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
                   </div>
                   <div>

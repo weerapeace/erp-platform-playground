@@ -539,6 +539,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                       <th className="px-3 py-2 text-center font-medium" title="ใครเห็น/แก้ฟิลด์นี้ได้ (ตามตำแหน่ง)">🔐 สิทธิ์</th>
                       <th className="px-3 py-2 text-center font-medium" title="ดับเบิ้ลคลิก cell แก้ในตาราง">✎ Inline</th>
                       <th className="px-3 py-2 text-left font-medium" title="Default ตอน Create — รองรับ now() today() current_user() uuid()">Default</th>
+                      <th className="px-3 py-2 text-left font-medium" title="หมายเหตุภายในของแอดมิน (ไม่โชว์ให้ผู้ใช้)">📝 หมายเหตุ</th>
                       <th className="px-3 py-2 text-center font-medium" title="เงื่อนไขแสดงในฟอร์ม (show_if)">🎯 Cond</th>
                       <th className="px-3 py-2 text-center font-medium">Width</th>
                       <th className="px-3 py-2 text-center font-medium" title="ลบ field">🗑️</th>
@@ -844,12 +845,15 @@ function SortableFieldRow({
 
   const [label, setLabel] = useState(field.field_label);
   const [width, setWidth] = useState(field.width);
+  const [note, setNote]   = useState(field.description ?? "");
 
   useEffect(() => { setLabel(field.field_label); }, [field.field_label]);
   useEffect(() => { setWidth(field.width); }, [field.width]);
+  useEffect(() => { setNote(field.description ?? ""); }, [field.description]);
 
   const onBlurLabel = () => { if (label !== field.field_label) onUpdate({ field_label: label }); };
   const onBlurWidth = () => { if (width !== field.width)       onUpdate({ width });            };
+  const onBlurNote  = () => { if (note !== (field.description ?? "")) onUpdate({ description: note || null }); };
 
   return (
     <tr
@@ -949,6 +953,16 @@ function SortableFieldRow({
       </td>
       <td className="px-3 py-1.5">
         <DefaultValueCell field={field} onUpdate={onUpdate} />
+      </td>
+      <td className="px-3 py-1.5">
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onBlur={onBlurNote}
+          placeholder="หมายเหตุภายใน…"
+          title="หมายเหตุภายในของแอดมิน (ไม่โชว์ให้ผู้ใช้)"
+          className="w-40 px-2 py-1 text-xs border border-transparent hover:border-slate-200 focus:border-orange-400 rounded outline-none"
+        />
       </td>
       <td className="px-3 py-1.5 text-center">
         <ConditionCell rules={field.condition_rules} onClick={onEditCondition} />

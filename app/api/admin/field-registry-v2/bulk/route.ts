@@ -25,6 +25,7 @@ const ALLOWED_BULK_FIELDS = [
   "is_bulk_editable",
   // สิทธิ์ระดับฟิลด์ตาม role (ของกลาง)
   "view_roles", "edit_roles",
+  "description",
 ];
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

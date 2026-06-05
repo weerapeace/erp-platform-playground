@@ -52,6 +52,7 @@ type Body = {
   view_roles?: string[] | null;   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ว่าง = ทุกคน
   edit_roles?: string[] | null;
   help_text?: string | null;
+  description?: string | null;    // หมายเหตุภายใน (admin)
   default_value?: string | null;
   width?: number;
   validation_rules?: Record<string, unknown>;   // { rules: string[] }
@@ -180,6 +181,7 @@ export async function POST(request: NextRequest) {
     view_roles: cleanRoles(b.view_roles),
     edit_roles: cleanRoles(b.edit_roles),
     help_text: b.help_text || null,
+    description: b.description || null,
     default_value: b.default_value || null,
     validation_rules: b.validation_rules ?? {},
     condition_rules: b.condition_rules ?? {},
