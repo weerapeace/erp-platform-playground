@@ -46,39 +46,40 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const allowCreate = config.allow_create !== false;
   const isStaged = !recordId;   // ยังไม่มี id (โหมดสร้าง) → เก็บไว้ใน form ก่อน
 
-  const [linked, setLinked] = useState<string[]>(value ?? []);
+  // แหล่งความจริงเดียว: โหมดสร้าง = อ่านจาก value (parent form), โหมดแก้ไข = serverLinked (โหลดจาก DB)
+  const [serverLinked, setServerLinked] = useState<string[]>([]);
   const [opts, setOpts] = useState<Opt[]>([]);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const linked = isStaged ? (value ?? []) : serverLinked;
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
-  // โหลด link เดิม (โหมดแก้ไข) / sync ค่า staged (โหมดสร้าง)
+  // โหลด link เดิม (โหมดแก้ไข)
   useEffect(() => {
     if (recordId && junction) {
       apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`).then((r) => r.json())
-        .then((j) => { const ids = j.links ?? []; setLinked(ids); onChange?.(ids); }).catch(() => {});
+        .then((j) => { const ids = j.links ?? []; setServerLinked(ids); onChange?.(ids); }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordId, junction]);
-  useEffect(() => { if (isStaged) setLinked(value ?? []); }, [isStaged, JSON.stringify(value ?? [])]);
 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
-  const setLinks = (next: string[]) => { setLinked(next); onChange?.(next); };
   const toggle = async (id: string) => {
     const has = linked.includes(id);
     const next = has ? linked.filter((x) => x !== id) : [...linked, id];
-    setLinks(next);
-    if (!isStaged && junction && recordId) {   // โหมดแก้ไข → ผูก/ถอดทันที
-      setBusy(true);
-      try {
-        await apiFetch("/api/admin/schema/m2m-links", {
-          method: has ? "DELETE" : "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }),
-        });
-      } catch { /* ignore */ } finally { setBusy(false); }
-    }
+    if (isStaged) { onChange?.(next); return; }   // โหมดสร้าง → ส่งกลับ form (แหล่งเดียว)
+    // โหมดแก้ไข → อัปเดต state + form + ผูก/ถอดที่ DB ทันที (revert ถ้าพลาด)
+    setServerLinked(next); onChange?.(next);
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/admin/schema/m2m-links", {
+        method: has ? "DELETE" : "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch { setServerLinked(linked); onChange?.(linked); } finally { setBusy(false); }
   };
   const createNew = async () => {
     const name = q.trim();
