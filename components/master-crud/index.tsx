@@ -795,6 +795,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // เริ่มด้วยค่าจาก list (compact projection) — กันฟอร์มว่างขณะรอ full row
     const partial: Record<string, unknown> = {};
     effectiveFields.forEach(field => {
+      // m2m/o2m ไม่ใช่คอลัมน์จริง — ปล่อยให้ widget โหลดเอง (อย่า set เป็นค่าว่างทับ)
+      if (field.type === "many2many" || field.type === "one2many") return;
       const v = r[field.key];
       partial[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
     });
@@ -811,6 +813,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         const [full] = enrichRelated([json.data as Row]);
         const f: Record<string, unknown> = {};
         effectiveFields.forEach((field) => {
+          // m2m/o2m ไม่ใช่คอลัมน์จริง — ข้าม (กันเขียนทับค่าที่ widget โหลดมา)
+          if (field.type === "many2many" || field.type === "one2many") return;
           const v = full[field.key];
           f[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
           // เก็บชื่อ (label) ของ relation ไว้โชว์ใน detail (ไม่ใช่รหัส) — รองรับคอลัมน์ที่ไม่ลงท้าย _id ด้วย (เช่น product_group)
@@ -822,7 +826,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             }
           }
         });
-        setForm(f);
+        // merge (ไม่ replace) → ค่า m2m/o2m ที่ widget โหลดไว้ไม่หาย
+        setForm((prev) => ({ ...prev, ...f }));
       })
       .catch(() => { /* keep partial — ดีกว่าค้าง */ });
   };
@@ -926,6 +931,29 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
       setDirty(false);
+      // sync ลิงก์ m2m (junction) ให้ตรงกับที่เลือกในฟอร์ม — ใช้ทั้งสร้างและแก้ไข (diff add/remove)
+      const srcId = String((json.data as Record<string, unknown> | undefined)?.id ?? editingId ?? "");
+      if (srcId) {
+        for (const fd of effectiveFields) {
+          if (fd.type !== "many2many") continue;
+          const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
+          const junction = String(rc.junction_table ?? "");
+          if (!junction) continue;
+          const want = Array.isArray(form[fd.key]) ? (form[fd.key] as string[]).map(String) : [];
+          let have: string[] = [];
+          try {
+            const gr = await apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${srcId}`).then((r) => r.json());
+            have = ((gr.links ?? []) as unknown[]).map(String);
+          } catch { /* ถือว่ายังไม่มีลิงก์ */ }
+          for (const tgt of want.filter((x) => !have.includes(x))) {
+            await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: srcId, tgt_id: tgt }) }).catch(() => {});
+          }
+          for (const tgt of have.filter((x) => !want.includes(x))) {
+            await apiFetch("/api/admin/schema/m2m-links", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: srcId, tgt_id: tgt }) }).catch(() => {});
+          }
+        }
+      }
+
       // F11: แก้ของเดิม → กลับไปโหมดดู (ไม่ปิด) | สร้างใหม่ → ปิด drawer
       if (editingId) {
         // update form จาก response → detail view โชว์ค่าใหม่ทันที
@@ -933,6 +961,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           const full = json.data as Record<string, unknown>;
           const f: Record<string, unknown> = {};
           effectiveFields.forEach((fd) => {
+            if (fd.type === "many2many" || fd.type === "one2many") return;  // m2m/o2m ไม่ใช่คอลัมน์ — กันเขียนทับ
             const v = full[fd.key];
             f[fd.key] = v == null ? (fd.type === "boolean" ? false : "") : v;
             // เก็บชื่อ relation มาโชว์หลังบันทึก (รองรับคอลัมน์ที่ไม่ลงท้าย _id)
@@ -941,27 +970,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               for (const suf of ["_label", "_name"]) { const lk = base + suf; if (lk in full) f[lk] = full[lk]; }
             }
           });
-          setForm(f);
+          setForm((prev) => ({ ...prev, ...f }));
         }
         setDrawerMode("view");
       } else {
-        // สร้างใหม่ → ผูกแท็ก m2m ที่เลือกไว้ (staged) หลังได้ id
-        const newId = (json.data as Record<string, unknown> | undefined)?.id;
-        if (newId) {
-          for (const fd of effectiveFields) {
-            if (fd.type !== "many2many") continue;
-            const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
-            const junction = String(rc.junction_table ?? "");
-            const ids = Array.isArray(form[fd.key]) ? (form[fd.key] as string[]) : [];
-            if (!junction || ids.length === 0) continue;
-            for (const tgt of ids) {
-              await apiFetch("/api/admin/schema/m2m-links", {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ junction, src_id: newId, tgt_id: tgt }),
-              }).catch(() => {});
-            }
-          }
-        }
         setModalOpen(false);
       }
       await refreshData();
@@ -1445,7 +1457,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       return <div className="text-sm text-slate-700 whitespace-pre-wrap break-words" style={vs}>{String(v)}</div>;
     }
     if (f.type === "many2many") {
-      return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={false} />;
+      return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={false}
+        value={Array.isArray(form[f.key]) ? (form[f.key] as string[]) : undefined}
+        onChange={(ids) => updateForm({ [f.key]: ids })} />;
     }
     if (f.type === "one2many") {
       return <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} fieldId={f.fieldId} configurable={canEdit} />;

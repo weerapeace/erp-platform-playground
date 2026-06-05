@@ -5,7 +5,7 @@
  * - RelationMany2Many: เลือกหลายค่า (จัดการ link ใน junction table ทันที)
  * - RelationOne2Many: แสดงรายการลูกที่ชี้กลับมา (read-only)
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
@@ -46,40 +46,32 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const allowCreate = config.allow_create !== false;
   const isStaged = !recordId;   // ยังไม่มี id (โหมดสร้าง) → เก็บไว้ใน form ก่อน
 
-  // แหล่งความจริงเดียว: โหมดสร้าง = อ่านจาก value (parent form), โหมดแก้ไข = serverLinked (โหลดจาก DB)
-  const [serverLinked, setServerLinked] = useState<string[]>([]);
+  // แหล่งความจริงเดียว = ค่าในฟอร์ม (value) ทั้งโหมดสร้างและแก้ไข
+  // การผูก/ถอดลิงก์จริงในตาราง junction จะทำตอนกด "บันทึก" (master-crud diff)
+  void isStaged;
   const [opts, setOpts] = useState<Opt[]>([]);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const linked = isStaged ? (value ?? []) : serverLinked;
+  const linked = value ?? [];
+  const loadedRef = useRef<string | null>(null);
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
-  // โหลด link เดิม (โหมดแก้ไข)
+  // โหลด link เดิมจาก DB ครั้งเดียวต่อ record → เขียนกลับฟอร์มผ่าน onChange
   useEffect(() => {
-    if (recordId && junction) {
-      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`).then((r) => r.json())
-        .then((j) => { const ids = j.links ?? []; setServerLinked(ids); onChange?.(ids); }).catch(() => {});
-    }
+    if (!recordId || !junction) return;
+    if (loadedRef.current === recordId) return;
+    loadedRef.current = recordId;
+    apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`).then((r) => r.json())
+      .then((j) => onChange?.(j.links ?? [])).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordId, junction]);
 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
-  const toggle = async (id: string) => {
-    const has = linked.includes(id);
-    const next = has ? linked.filter((x) => x !== id) : [...linked, id];
-    if (isStaged) { onChange?.(next); return; }   // โหมดสร้าง → ส่งกลับ form (แหล่งเดียว)
-    // โหมดแก้ไข → อัปเดต state + form + ผูก/ถอดที่ DB ทันที (revert ถ้าพลาด)
-    setServerLinked(next); onChange?.(next);
-    setBusy(true);
-    try {
-      const res = await apiFetch("/api/admin/schema/m2m-links", {
-        method: has ? "DELETE" : "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-    } catch { setServerLinked(linked); onChange?.(linked); } finally { setBusy(false); }
+  const toggle = (id: string) => {
+    const next = linked.includes(id) ? linked.filter((x) => x !== id) : [...linked, id];
+    onChange?.(next);
   };
   const createNew = async () => {
     const name = q.trim();
@@ -112,7 +104,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
         {linked.map((id) => (
           <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100">
             {labelOf(id)}
-            {editable && <button type="button" onClick={() => toggle(id)} disabled={busy} className="text-blue-400 hover:text-red-500">✕</button>}
+            {editable && <button type="button" onClick={() => toggle(id)} className="text-blue-400 hover:text-red-500">✕</button>}
           </span>
         ))}
       </div>
@@ -127,7 +119,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
               {filtered.map((o) => {
                 const on = linked.includes(o.id);
                 return (
-                  <button key={o.id} type="button" onClick={() => toggle(o.id)} disabled={busy}
+                  <button key={o.id} type="button" onClick={() => toggle(o.id)}
                     className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50">
                     <input type="checkbox" readOnly checked={on} className="rounded border-slate-300 pointer-events-none" />
                     <span className="flex-1 truncate">{o.label}</span>
