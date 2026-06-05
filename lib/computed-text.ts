@@ -108,6 +108,17 @@ TEXT_COMPUTES.name_platform_code = {
   },
 };
 
+// China bills — ประเภทบิล: ค่าส่ง / VAT (ISG/IG) / บิลร้านจีน
+TEXT_COMPUTES.china_bill_type = {
+  label: "ประเภทบิล",
+  describe: "แสดง “ค่าส่ง” ถ้าเป็นบิลค่าส่ง · “VAT (ISG/IG)” ถ้าเป็นบิล VAT · ไม่งั้น “บิลร้านจีน”",
+  fn: (r) => {
+    if (r.is_shipping) return "ค่าส่ง";
+    if (r.vat_type) return `VAT (${String(r.vat_type)})`;
+    return String(r.supplier_label ?? "บิลร้านจีน");
+  },
+};
+
 export function computedTextValue(name: string | undefined | null, row: Record<string, unknown>): string | null {
   if (!name) return null;
   const def = TEXT_COMPUTES[name];
