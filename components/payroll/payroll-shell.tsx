@@ -36,6 +36,8 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
     { href: "/payroll/employee-settings", icon: "⚙️", label: "ตั้งค่าเงินเดือนรายคน" },
     { href: "/payroll/requests", icon: "📨", label: "คำขอพนักงาน" },
     { href: "/payroll/departments", icon: "🗂️", label: "แผนก" },
+    { href: "/payroll/positions", icon: "🏷️", label: "ตำแหน่งงาน" },
+    { href: "/payroll/cost-centers", icon: "🏦", label: "ศูนย์ต้นทุน" },
     { href: "/payroll/companies", icon: "🏢", label: "บริษัท" },
     { href: "/payroll/work-time-profiles", icon: "🕐", label: "โปรไฟล์เวลาทำงาน" },
   ] },
