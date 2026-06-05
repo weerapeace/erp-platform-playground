@@ -31,6 +31,8 @@ const WRITABLE = new Set([
   // งาน/เงินเดือน
   "employment_status", "start_date", "resign_date", "payroll_register_base_salary",
   "scanner_employee_code", "payslip_language", "notes",
+  // ตำแหน่ง/สังกัด (relation picker → เก็บ FK id ตรง)
+  "position_id", "cost_center_id",
 ]);
 /** คอลัมน์วันที่ที่ต้องแปลง '' → null */
 const DATE_COLS = ["start_date", "resign_date", "birth_date", "work_permit_id_expire_date"];
@@ -46,6 +48,14 @@ async function nameToDeptId(name: string): Promise<string | null> {
   if (!name) return null;
   const { data } = await supabaseAdmin().from("departments").select("id").eq("name", name).limit(1);
   return (data?.[0] as { id: string } | undefined)?.id ?? null;
+}
+
+/** map id → name สำหรับตาราง lookup ทั่วไป (positions / cost_centers) */
+async function idNameMap(table: string): Promise<Record<string, string>> {
+  const { data } = await supabaseAdmin().from(table).select("id, name");
+  const m: Record<string, string> = {};
+  (data ?? []).forEach((d) => { m[(d as { id: string }).id] = (d as { name: string }).name; });
+  return m;
 }
 
 type ContractInfo = { no: string; salary: number };
@@ -94,7 +104,7 @@ async function selfMap(): Promise<Record<string, string>> {
   return m;
 }
 
-function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cmap: Record<string, ContractInfo>, smap: Record<string, string> = {}, bmap: Record<string, BankInfo> = {}): EmployeeRow {
+function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cmap: Record<string, ContractInfo>, smap: Record<string, string> = {}, bmap: Record<string, BankInfo> = {}, pmap: Record<string, string> = {}, ccmap: Record<string, string> = {}): EmployeeRow {
   const first = String(row.first_name ?? "").trim();
   const last  = String(row.last_name ?? "").trim();
   const full  = [first, last].filter((x) => x && x !== "-").join(" ") || String(row.nickname ?? "");
@@ -107,6 +117,8 @@ function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cm
     full_name:       full,
     department_name: deptId ? (dmap[deptId] ?? "") : "",
     supervisor_name: row.supervisor_id ? (smap[row.supervisor_id as string] ?? "") : "",
+    position_name:    row.position_id ? (pmap[row.position_id as string] ?? "") : "",
+    cost_center_name: row.cost_center_id ? (ccmap[row.cost_center_id as string] ?? "") : "",
     current_contract_no:     con?.no ?? "",
     current_contract_salary: con?.salary ?? null,
     bank_name:         bank?.bank ?? "",
@@ -122,16 +134,16 @@ export async function listEmployees(includeInactive: boolean): Promise<EmployeeR
   if (!includeInactive) q = q.eq("employment_status", "active");
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  const [dmap, cmap, smap, bmap] = await Promise.all([deptMap(), contractMap(), selfMap(), bankMap()]);
-  return (data ?? []).map((r) => decorate(r as Record<string, unknown>, dmap, cmap, smap, bmap));
+  const [dmap, cmap, smap, bmap, pmap, ccmap] = await Promise.all([deptMap(), contractMap(), selfMap(), bankMap(), idNameMap("positions"), idNameMap("cost_centers")]);
+  return (data ?? []).map((r) => decorate(r as Record<string, unknown>, dmap, cmap, smap, bmap, pmap, ccmap));
 }
 
 export async function getEmployee(id: string): Promise<EmployeeRow | null> {
   const { data, error } = await supabaseAdmin().from(TABLE).select(SELECT).eq("id", id).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
-  const [dmap, cmap, smap, bmap] = await Promise.all([deptMap(), contractMap(), selfMap(), bankMap()]);
-  return decorate(data[0] as Record<string, unknown>, dmap, cmap, smap, bmap);
+  const [dmap, cmap, smap, bmap, pmap, ccmap] = await Promise.all([deptMap(), contractMap(), selfMap(), bankMap(), idNameMap("positions"), idNameMap("cost_centers")]);
+  return decorate(data[0] as Record<string, unknown>, dmap, cmap, smap, bmap, pmap, ccmap);
 }
 
 /** แปลง body จาก frontend → คอลัมน์จริง (รวม mapping พิเศษ) */
