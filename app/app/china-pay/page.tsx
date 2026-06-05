@@ -170,6 +170,14 @@ const STATUS_STYLE: Record<string, string> = {
 
 // ---- สลิปการโอน (หลายใบ) — เก็บ ธนาคาร/ยอด/เวลา/ผูกบิล CTW ----
 type TxSlip = { key: string; bank: string; amount: number; at: string; bill_id?: string };
+// แปลงข้อความวันเวลาที่ AI อ่านได้ → format ของ <input type="datetime-local"> (YYYY-MM-DDThh:mm) · อ่านไม่ออก = ""
+function toDatetimeLocal(text: string): string {
+  if (!text) return "";
+  const d = new Date(text);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 // ---- สถานะบิลจีน 3 ระดับ (คิดจากยอดรวมสลิปเทียบยอดบิล) ----
 type Slip = { key: string; amount_rmb: number; at?: string };
@@ -2388,6 +2396,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const slipKeys = txSlips.map(s => s.key);
   const slipSum = txSlips.reduce((a, s) => a + num(s.amount), 0);
   const [lightbox, setLightbox] = useState<string | null>(null);   // รูปสลิปกดดูเต็มจอ
+  const [slipProgress, setSlipProgress] = useState<{ done: number; total: number } | null>(null);   // ความคืบหน้าอ่านสลิป
   const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2538,8 +2547,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const uploadSlip = async (files: FileList) => {
     setSlipUploading(true);
     try {
+      const fileArr = Array.from(files);
       const added: TxSlip[] = [];
-      for (const f of Array.from(files)) {
+      let failCount = 0;
+      for (let idx = 0; idx < fileArr.length; idx++) {
+        setSlipProgress({ done: idx, total: fileArr.length });
+        const f = fileArr[idx];
         const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-transfers");
         const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
         const j = await res.json().catch(() => ({}));
@@ -2555,9 +2568,17 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             const oj = await ores.json().catch(() => ({}));
             if (oj.amount) slip.amount = num(oj.amount);
             if (oj.bank) slip.bank = String(oj.bank);
-            if (oj.datetime) slip.at = String(oj.datetime);
+            if (oj.datetime) slip.at = toDatetimeLocal(String(oj.datetime));
+            // อ่านยอดไม่ได้ → ลองอ่านแบบ "ยอดอย่างเดียว" ซ้ำ (แม่นกว่าในบางสลิป)
+            if (!slip.amount) {
+              const o2 = await apiFetch("/api/china-pay/ocr-slip", {
+                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: j.r2_key }),
+              }).then(r => r.json()).catch(() => ({}));
+              if (o2.amount) slip.amount = num(o2.amount);
+            }
           } catch { /* OCR พลาด — ผู้ใช้กรอกเอง */ }
           finally { setOcrBusy(false); }
+          if (!slip.amount) failCount++;
         }
         added.push(slip);
       }
@@ -2567,10 +2588,11 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           setAmount(String(+next.reduce((a, s) => a + num(s.amount), 0).toFixed(2)));   // รวมยอด → ช่องจำนวนเงิน (แก้ทับได้)
           return next;
         });
-        toast.success(`แนบ ${added.length} สลิป — AI อ่านยอดให้แล้ว ตรวจสอบก่อนบันทึก`);
+        if (failCount > 0) toast.error(`อ่านยอดไม่ออก ${failCount} ใบ — กรอกยอดเองในรายการสลิป`);
+        else toast.success(`แนบ ${added.length} สลิป — AI อ่านยอดให้แล้ว ตรวจสอบก่อนบันทึก`);
       }
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
-    finally { setSlipUploading(false); if (slipInputRef.current) slipInputRef.current.value = ""; }
+    finally { setSlipUploading(false); setSlipProgress(null); if (slipInputRef.current) slipInputRef.current.value = ""; }
   };
 
   // แก้ field ของสลิป + ลบ — แล้วรวมยอดใหม่เข้าช่องจำนวนเงิน
@@ -2991,29 +3013,36 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3">
           <div className="flex items-center justify-between mb-1">
             <Label>📎 สลิปการโอน ({txSlips.length})</Label>
-            {txSlips.length > 0 && <span className="text-xs text-slate-500">รวม ฿{fmt(slipSum)}</span>}
+            {txSlips.length > 0 && <span className="text-sm font-bold text-violet-700">รวม ฿{fmt(slipSum)}</span>}
           </div>
           <button type="button" onClick={() => slipInputRef.current?.click()} disabled={slipUploading || ocrBusy}
-            className="w-full h-11 rounded-lg border-2 border-dashed border-violet-300 text-violet-600 text-sm font-medium disabled:opacity-50 active:scale-[0.99] transition">
-            {slipUploading || ocrBusy ? "📷 กำลังอัปโหลด/อ่าน…" : "＋ เพิ่มสลิป (แนบได้หลายใบ)"}
+            className="w-full h-12 rounded-xl border-2 border-dashed border-violet-300 text-violet-600 text-base font-semibold disabled:opacity-50 active:scale-[0.99] transition">
+            ＋ เพิ่มสลิป (แนบได้หลายใบ)
           </button>
+          {/* ตัวโหลดชัด ๆ ระหว่างอัปโหลด+อ่าน AI */}
+          {(slipUploading || ocrBusy) && (
+            <div className="mt-2 flex items-center gap-2 rounded-xl bg-violet-50 border border-violet-200 px-3 py-3 text-sm font-medium text-violet-700">
+              <span className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+              <span>📷 AI กำลังอ่านสลิป{slipProgress ? ` (${slipProgress.done + 1}/${slipProgress.total})` : ""}… อาจใช้เวลาสักครู่</span>
+            </div>
+          )}
           <div className="mt-2 space-y-2">
             {txSlips.map((s, i) => (
               <div key={s.key + i} className="flex gap-2 bg-white border border-slate-200 rounded-lg p-2">
                 {s.key.toLowerCase().endsWith(".pdf")
-                  ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-12 h-12 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
-                  : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
+                  ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-14 h-14 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
+                  : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-14 h-14 flex-shrink-0 rounded overflow-hidden border border-slate-200">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
                 <div className="flex-1 min-w-0 space-y-1">
                   <div className="flex gap-1.5">
                     <input value={s.bank} onChange={e => setSlipField(i, { bank: e.target.value })} placeholder="ธนาคาร"
-                      className="w-1/2 h-8 px-2 text-sm border border-slate-200 rounded" />
+                      className="w-1/2 h-9 px-2 text-sm border border-slate-200 rounded" />
                     <Money value={s.amount ? String(s.amount) : ""} onChange={(v) => setSlipField(i, { amount: num(v) })}
-                      className="w-1/2 h-8 px-2 text-sm text-right border border-slate-200 rounded" />
+                      className="w-1/2 h-9 px-2 text-sm text-right border border-slate-200 rounded" />
                   </div>
-                  <input value={s.at} onChange={e => setSlipField(i, { at: e.target.value })} placeholder="วันที่/เวลาที่โอน"
-                    className="w-full h-8 px-2 text-xs border border-slate-200 rounded text-slate-500" />
+                  <input type="datetime-local" value={s.at} onChange={e => setSlipField(i, { at: e.target.value })}
+                    className="w-full h-9 px-2 text-xs border border-slate-200 rounded text-slate-600" />
                 </div>
                 <button type="button" onClick={() => removeSlip(i)} className="w-7 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded">✕</button>
               </div>
