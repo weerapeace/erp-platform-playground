@@ -34,6 +34,11 @@ type Section = { key: string; label: string };
 
 const VIRTUAL = new Set(["computed", "computed_text", "one2many", "many2many"]);
 
+// แท็กนี้ "เป็นเทมเพลต" ไหม = มีค่าตั้งใน template อย่างน้อย 1 อย่าง
+const hasTpl = (t?: Template): boolean =>
+  !!t && (!!t.show_fields?.length || !!t.hide_fields?.length || !!t.hide_sections?.length ||
+    !!t.required_fields?.length || !!(t.defaults && Object.keys(t.defaults).length));
+
 export default function FamilyTemplatePage() {
   const [families, setFamilies] = useState<Family[]>([]);
   const [fields, setFields] = useState<RegField[]>([]);
@@ -43,6 +48,10 @@ export default function FamilyTemplatePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string>("");
+  // แท็กที่ผู้ใช้ "เพิ่มเป็นเทมเพลต" ในเซสชันนี้ (ยังไม่ได้ตั้งค่า/บันทึก) — ให้ค้างในลิสต์ซ้าย
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
 
   // โหลดแท็ก + field registry ของ Parent SKU
   useEffect(() => {
@@ -63,7 +72,9 @@ export default function FamilyTemplatePage() {
         const secs: Section[] = [];
         for (const t of tabs) for (const s of (t.sections ?? [])) secs.push({ key: s.key, label: s.label });
         setSections(secs);
-        if (fams[0]) { setActiveId(fams[0].id); setTpl(fams[0].template ?? {}); }
+        // เลือกแท็กแรกที่ "เป็นเทมเพลต" แล้ว (ไม่ใช่แท็กแรกของทั้งหมด)
+        const firstTpl = fams.find((f) => hasTpl(f.template));
+        if (firstTpl) { setActiveId(firstTpl.id); setTpl(firstTpl.template ?? {}); }
       } finally { setLoading(false); }
     })();
   }, []);
@@ -72,6 +83,40 @@ export default function FamilyTemplatePage() {
     setActiveId(id);
     setTpl(families.find((f) => f.id === id)?.template ?? {});
     setMsg("");
+  };
+
+  // ลิสต์ซ้าย = เฉพาะแท็กที่ "เป็นเทมเพลต" (มีค่า) + ที่เพิ่งเพิ่มในเซสชันนี้
+  const templateFamilies = useMemo(
+    () => families.filter((f) => hasTpl(f.template) || addedIds.has(f.id)),
+    [families, addedIds],
+  );
+  // แท็กที่ยังเลือกเพิ่มเป็นเทมเพลตได้ (ยังไม่เป็นเทมเพลต)
+  const availableToAdd = useMemo(() => {
+    const s = pickerSearch.trim().toLowerCase();
+    return families
+      .filter((f) => !hasTpl(f.template) && !addedIds.has(f.id))
+      .filter((f) => !s || f.name.toLowerCase().includes(s));
+  }, [families, addedIds, pickerSearch]);
+
+  const addTemplate = (id: string) => {
+    setAddedIds((prev) => new Set(prev).add(id));
+    setPickerOpen(false); setPickerSearch("");
+    selectFamily(id);
+  };
+
+  // เอาแท็กออกจากเทมเพลต = ล้างค่า template แล้วบันทึก
+  const removeTemplate = async (id: string) => {
+    const fam = families.find((f) => f.id === id);
+    if (!confirm(`เอา "${fam?.name ?? id}" ออกจากเทมเพลต? (ค่าที่ตั้งไว้จะถูกล้าง)`)) return;
+    try {
+      await apiFetch(`/api/master-v2/product_families/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template: {} }),
+      });
+    } catch { /* best-effort */ }
+    setFamilies((fs) => fs.map((f) => (f.id === id ? { ...f, template: {} } : f)));
+    setAddedIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+    if (activeId === id) { setActiveId(""); setTpl({}); }
   };
 
   // จัดกลุ่ม field ตาม section (group_key) — ที่ไม่มี section ใส่ "อื่นๆ"
@@ -152,21 +197,49 @@ export default function FamilyTemplatePage() {
       </div>
 
       <div className="flex gap-4 p-4 max-w-6xl mx-auto">
-        {/* รายการแท็ก */}
-        <div className="w-56 shrink-0">
+        {/* รายการแท็กที่เป็นเทมเพลต */}
+        <div className="w-60 shrink-0">
+          {/* ปุ่มเพิ่มเทมเพลต + ตัวเลือก */}
+          <div className="relative mb-2">
+            <button onClick={() => setPickerOpen((o) => !o)}
+              className="w-full h-9 px-3 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 flex items-center justify-center gap-1">
+              ＋ เพิ่มแท็กเป็นเทมเพลต
+            </button>
+            {pickerOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setPickerOpen(false)} />
+                <div className="absolute z-40 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg p-2 max-h-72 overflow-auto">
+                  <input value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} placeholder="ค้นหาแท็ก…" autoFocus
+                    className="w-full h-8 px-2 mb-2 text-sm border border-slate-200 rounded-md" />
+                  {availableToAdd.length === 0 ? (
+                    <div className="px-2 py-3 text-xs text-slate-400 text-center">— ไม่มีแท็กให้เพิ่มแล้ว —</div>
+                  ) : availableToAdd.map((f) => (
+                    <button key={f.id} onClick={() => addTemplate(f.id)}
+                      className="block w-full text-left px-2 py-1.5 text-sm rounded hover:bg-blue-50 text-slate-700">
+                      {f.name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
           <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-            {families.length === 0 && <div className="p-3 text-xs text-slate-400">ยังไม่มีแท็ก</div>}
-            {families.map((f) => (
-              <button key={f.id} onClick={() => selectFamily(f.id)}
-                className={`block w-full text-left px-3 py-2 text-sm border-b border-slate-100 last:border-0 ${
-                  activeId === f.id ? "bg-blue-50 text-blue-700 font-medium" : "hover:bg-slate-50 text-slate-700"
+            {templateFamilies.length === 0 ? (
+              <div className="p-3 text-xs text-slate-400">ยังไม่มีแท็กที่เป็นเทมเพลต — กด “เพิ่มแท็กเป็นเทมเพลต” ด้านบน</div>
+            ) : templateFamilies.map((f) => (
+              <div key={f.id}
+                className={`group flex items-center border-b border-slate-100 last:border-0 ${
+                  activeId === f.id ? "bg-blue-50" : "hover:bg-slate-50"
                 }`}>
-                {f.name}
-                {(f.template?.show_fields?.length || f.template?.hide_fields?.length || f.template?.hide_sections?.length ||
-                  f.template?.required_fields?.length || (f.template?.defaults && Object.keys(f.template.defaults).length)) ? (
-                  <span className="ml-1 text-[10px] text-blue-500">●</span>
-                ) : null}
-              </button>
+                <button onClick={() => selectFamily(f.id)}
+                  className={`flex-1 text-left px-3 py-2 text-sm ${activeId === f.id ? "text-blue-700 font-medium" : "text-slate-700"}`}>
+                  {f.name}
+                  {!hasTpl(f.template) && <span className="ml-1.5 text-[10px] text-amber-500">(ยังไม่ตั้งค่า)</span>}
+                </button>
+                <button onClick={() => removeTemplate(f.id)} title="เอาออกจากเทมเพลต"
+                  className="px-2 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100">✕</button>
+              </div>
             ))}
           </div>
         </div>
