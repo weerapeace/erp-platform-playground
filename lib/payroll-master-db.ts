@@ -130,6 +130,8 @@ async function toColumns(cfg: EntityCfg, body: Record<string, unknown>): Promise
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(body)) { if (cfg.writable.includes(k)) out[k] = v; }
   for (const k of cfg.numeric ?? []) { if (k in out) out[k] = out[k] === "" ? null : Number(out[k]) || 0; }
+  // กันค่าสถานะว่าง '' ลง enum (เลือก "— เลือก —" แล้วบันทึก) — ตัดทิ้งให้ default/ค่าเดิมทำงาน
+  if (cfg.statusField in out && (out[cfg.statusField] == null || out[cfg.statusField] === "")) delete out[cfg.statusField];
   if ("active" in body && !(cfg.statusField in out)) {
     out[cfg.statusField] = body.active === true || body.active === "true" ? cfg.activeVal : cfg.inactiveVal;
   }
@@ -145,6 +147,8 @@ export async function createMaster(cfg: EntityCfg, body: Record<string, unknown>
     if (!body[r] || String(body[r]).trim() === "") throw new Error(`ต้องระบุ ${r}`);
   }
   const cols = await toColumns(cfg, body);
+  // สร้างใหม่: ถ้าไม่ได้เลือกสถานะ → ใช้ค่าเริ่มต้นของ entity (เช่น งวด=draft)
+  if (!(cfg.statusField in cols)) cols[cfg.statusField] = cfg.activeVal;
   const { data, error } = await supabaseAdmin().from(cfg.table).insert(cols).select(cfg.cols).limit(1);
   if (error) throw new Error(error.message);
   const relMap = cfg.relation ? await relationMap(cfg.relation) : null;

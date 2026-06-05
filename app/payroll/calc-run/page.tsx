@@ -169,6 +169,8 @@ export default function PayrollCalcRunPage() {
         </div>
       )}
 
+      {curPeriod && <HolidaysPanel periodId={periodId} editable={["draft", "review"].includes(curPeriod.status)} onChanged={run} />}
+
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm mb-4">{err}</div>}
 
       {summary && (
@@ -255,6 +257,70 @@ export default function PayrollCalcRunPage() {
         </div>
       )}
       <p className="text-xs text-slate-400 mt-4">หมายเหตุ: กด <b>คำนวณ + เทียบ</b> เพื่อตรวจยอดทุกช่องกับของเดิมก่อน เมื่อตรงครบ (หรือเป็นงวดใหม่) ปุ่ม <b>บันทึกผลคำนวณ</b> จะเปิดให้เขียนลงระบบ — สร้างรอบคำนวณใหม่ ไม่ลบของเดิม และบันทึกได้เฉพาะงวดที่ยังไม่ล็อก/จ่าย</p>
+    </div>
+  );
+}
+
+type Holiday = { id: string; holiday_date: string; holiday_name: string | null; is_paid: boolean };
+function HolidaysPanel({ periodId, editable, onChanged }: { periodId: string; editable: boolean; onChanged: () => void }) {
+  const [items, setItems] = useState<Holiday[]>([]);
+  const [date, setDate] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const j = await apiFetch(`/api/payroll/holidays?period_id=${encodeURIComponent(periodId)}`).then((r) => r.json());
+      setItems((j.data ?? []) as Holiday[]);
+    } catch { /* */ }
+  }, [periodId]);
+  useEffect(() => { reload(); }, [reload]);
+
+  async function add() {
+    setErr(null);
+    if (!date) { setErr("เลือกวันที่"); return; }
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/payroll/holidays", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId, holiday_date: date, holiday_name: name.trim() || undefined }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error); else { setDate(""); setName(""); await reload(); onChanged(); }
+    } catch { setErr("บันทึกไม่สำเร็จ"); } finally { setBusy(false); }
+  }
+  async function del(id: string) {
+    setBusy(true); setErr(null);
+    try {
+      const j = await apiFetch(`/api/payroll/holidays/${id}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) setErr(j.error); else { await reload(); onChanged(); }
+    } catch { setErr("ลบไม่สำเร็จ"); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 mb-5">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="text-sm font-medium text-slate-700">📅 วันหยุดของงวดนี้ <span className="text-xs text-slate-400 font-normal">({items.length} วัน)</span></span>
+        <span className="text-xs text-slate-400">พนักงานประจำได้เงินวันหยุด · รายวันไม่ได้</span>
+      </div>
+      {err && <div className="rounded-lg bg-red-50 text-red-700 px-3 py-2 text-xs mb-2">{err}</div>}
+      <div className="flex flex-wrap gap-2 mb-2">
+        {items.length === 0 && <span className="text-xs text-slate-400 py-1">ยังไม่มีวันหยุด</span>}
+        {items.map((h) => (
+          <span key={h.id} className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 border border-rose-200 px-3 py-1 text-xs text-rose-700">
+            {new Date(h.holiday_date).toLocaleDateString("th-TH", { day: "2-digit", month: "short" })}
+            {h.holiday_name ? ` · ${h.holiday_name}` : ""}
+            {editable && <button onClick={() => del(h.id)} disabled={busy} className="text-rose-300 hover:text-rose-600" title="ลบ">✕</button>}
+          </span>
+        ))}
+      </div>
+      {editable && (
+        <div className="flex flex-wrap gap-2">
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9 px-3 border border-slate-300 rounded-lg text-sm" />
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อวันหยุด (ไม่บังคับ)" className="h-9 px-3 border border-slate-300 rounded-lg text-sm flex-1 min-w-[140px]" />
+          <button onClick={add} disabled={busy} className="h-9 px-4 bg-rose-600 text-white rounded-lg text-sm font-medium hover:bg-rose-700 disabled:opacity-50">+ เพิ่มวันหยุด</button>
+        </div>
+      )}
     </div>
   );
 }
