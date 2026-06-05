@@ -488,24 +488,35 @@ export async function GET(
     if (raw) colFilters = JSON.parse(raw) as Record<string, ColFilter>;
   } catch { /* ignore malformed */ }
 
-  // ── ซ่อนแถวตามแท็กใน junction (ของกลาง) ───────────────────────────────
-  // excl_junction = ตารางเชื่อม (ลงท้าย _m2m), excl_tgt_ids = id ของ tag (คั่นด้วย ,)
-  // ใช้กับกฎ "ห้ามขอซื้อ": หา src_id (เช่น sku) ที่ผูกแท็กพวกนี้ แล้วตัดออกจากผลลัพธ์
-  // หมายเหตุ: คาดว่าจำนวนไม่มาก (กรองด้วย NOT IN) — cap 2000 กัน URL ยาวเกิน
+  // ── กรองแถวตามแท็กใน junction (ของกลาง) ───────────────────────────────
+  // excl_junction/excl_tgt_ids = "ซ่อน" แถวที่ผูกแท็กพวกนี้ (เช่นกฎ "ห้ามขอซื้อ")
+  // incl_junction/incl_tgt_ids = "โชว์เฉพาะ" แถวที่ผูกแท็กพวกนี้
+  // วิธี: หา src_id (เช่น sku) ที่ผูกแท็ก แล้ว NOT IN (ซ่อน) / IN (โชว์เฉพาะ)
+  // หมายเหตุ: คาดว่าจำนวนไม่มาก — cap 2000 กัน URL ยาวเกิน
   const JUNC_RE = /^[a-z][a-z0-9_]+_m2m$/;
+  const resolveSrcIds = async (junction: string, tgtIds: string[]): Promise<string[]> => {
+    const admin = supabaseAdmin();
+    const set = new Set<string>();
+    for (let i = 0; i < tgtIds.length && set.size <= 2000; i += 200) {
+      const chunk = tgtIds.slice(i, i + 200);
+      const { data: jr } = await admin.from(junction).select("src_id").in("tgt_id", chunk);
+      for (const r of (jr ?? []) as { src_id: string }[]) if (r.src_id) set.add(String(r.src_id));
+    }
+    if (set.size > 2000) console.warn(`[master-v2] tag filter list capped at 2000 (junction=${junction}, found=${set.size})`);
+    return [...set].slice(0, 2000);
+  };
   const exclJunction = searchParams.get("excl_junction") ?? "";
   const exclTgtIds = (searchParams.get("excl_tgt_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   let excludeIds: string[] = [];
-  if (JUNC_RE.test(exclJunction) && exclTgtIds.length > 0) {
-    const admin = supabaseAdmin();
-    const set = new Set<string>();
-    for (let i = 0; i < exclTgtIds.length && set.size <= 2000; i += 200) {
-      const chunk = exclTgtIds.slice(i, i + 200);
-      const { data: jr } = await admin.from(exclJunction).select("src_id").in("tgt_id", chunk);
-      for (const r of (jr ?? []) as { src_id: string }[]) if (r.src_id) set.add(String(r.src_id));
-    }
-    excludeIds = [...set].slice(0, 2000);
-    if (set.size > 2000) console.warn(`[master-v2] exclude list capped at 2000 (junction=${exclJunction}, found=${set.size})`);
+  if (JUNC_RE.test(exclJunction) && exclTgtIds.length > 0) excludeIds = await resolveSrcIds(exclJunction, exclTgtIds);
+
+  const inclJunction = searchParams.get("incl_junction") ?? "";
+  const inclTgtIds = (searchParams.get("incl_tgt_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  let includeIds: string[] | null = null;
+  if (JUNC_RE.test(inclJunction) && inclTgtIds.length > 0) {
+    includeIds = await resolveSrcIds(inclJunction, inclTgtIds);
+    // ขอ "โชว์เฉพาะ" แต่ไม่มีสินค้าผูกเลย → ต้องได้ 0 แถว (ใส่ id ที่ไม่มีจริง)
+    if (includeIds.length === 0) includeIds = ["00000000-0000-0000-0000-000000000000"];
   }
 
   // F10a: ใช้ listColumns ถ้ามี (เล็กกว่า, กัน JSON truncate)
@@ -538,6 +549,7 @@ export async function GET(
       softDeleteColumn: cfg.softDeleteColumn, includeInactive,
     });
     if (excludeIds.length) q = q.not("id", "in", `(${excludeIds.join(",")})`);
+    if (includeIds) q = q.in("id", includeIds);
 
     const { data, error, count } = await q;
     if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });

@@ -62,6 +62,9 @@ export default function PurchasingShopPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   // กฎกลาง: แท็ก (ประเภทสินค้า) ที่ตั้งว่า "ห้ามขอซื้อ" → ซ่อนสินค้าที่ติดแท็กนี้ทั้งบริษัท
   const [hiddenTagIds, setHiddenTagIds] = useState<string[]>([]);
+  const [tagNames, setTagNames] = useState<Record<string, string>>({});        // id → ชื่อแท็ก (ไว้โชว์บนการ์ด)
+  const [cardTags, setCardTags] = useState<Record<string, string[]>>({});       // sku_id → [tag_id] ของการ์ดที่แสดงอยู่
+  const [m2mMode, setM2mMode] = useState<Record<string, "hide" | "show">>({});  // โหมดตัวกรองแต่ละ field: ซ่อน/โชว์เฉพาะ
 
   // group-mode drill-in
   const [sel, setSel] = useState<Card | null>(null);
@@ -104,30 +107,43 @@ export default function PurchasingShopPage() {
       .catch(() => {});
   }, []);
 
-  // โหลดแท็กที่ตั้ง "ห้ามขอซื้อ" (กฎกลาง) → ใช้ตัดสินค้าออกจากทุกโหมด
+  // โหลดรายชื่อแท็กทั้งหมด (id→ชื่อ) + แท็กที่ตั้ง "ห้ามขอซื้อ" (กฎกลาง) ในครั้งเดียว
   useEffect(() => {
-    const f = encodeURIComponent(JSON.stringify({ hide_in_purchasing: { type: "boolean", value: "true" } }));
-    apiFetch(`/api/master-v2/product_families?limit=500&filters=${f}`).then(r => r.json())
-      .then(j => setHiddenTagIds(((j.data ?? []) as Record<string, unknown>[]).map(t => String(t.id))))
+    apiFetch(`/api/master-v2/product_families?limit=500`).then(r => r.json())
+      .then(j => {
+        const rows = (j.data ?? []) as Record<string, unknown>[];
+        const names: Record<string, string> = {};
+        const hidden: string[] = [];
+        rows.forEach(t => {
+          names[String(t.id)] = String(t.name ?? t.id);
+          if (t.hide_in_purchasing === true) hidden.push(String(t.id));
+        });
+        setTagNames(names); setHiddenTagIds(hidden);
+      })
       .catch(() => {});
   }, []);
-  // รวม "แท็กที่ต้องซ่อน" = กฎกลาง (ห้ามขอซื้อ) + ตัวกรองซ่อนที่ผู้ใช้เลือกในหน้า (negative filter)
-  // ทั้งคู่ใช้ junction เดียวกัน (skus_v2_product_family_m2m) → รวมเป็นชุดเดียว
-  const exclTagIds = useMemo(() => {
-    const set = new Set<string>(hiddenTagIds);
+  // แยกแท็กที่เลือกเป็น 2 กอง ตามโหมดของแต่ละตัวกรอง: ซ่อน (hide) / โชว์เฉพาะ (show)
+  // ซ่อน = กฎกลาง (ห้ามขอซื้อ) + ที่ผู้ใช้เลือกโหมดซ่อน ; โชว์เฉพาะ = ที่ผู้ใช้เลือกโหมดโชว์
+  const { exclTagIds, inclTagIds } = useMemo(() => {
+    const ex = new Set<string>(hiddenTagIds);
+    const inc = new Set<string>();
     for (const k of activeKeys) {
       const fd = filterFields.find(f => f.key === k);
       if (!fd?.m2m || fd.m2m.junction !== "skus_v2_product_family_m2m") continue;
       const v = filterValues[k];
-      if (v && v.type === "select") v.selected.forEach(id => set.add(id));
+      if (!(v && v.type === "select")) continue;
+      const target = (m2mMode[k] ?? "hide") === "show" ? inc : ex;
+      v.selected.forEach(id => target.add(id));
     }
-    return [...set];
-  }, [hiddenTagIds, activeKeys, filterFields, filterValues]);
-  // query fragment สำหรับ "ตัดสินค้าที่ติดแท็กเหล่านี้" (ส่งให้ API skus)
-  const exclParam = useMemo(
-    () => (exclTagIds.length ? `&excl_junction=skus_v2_product_family_m2m&excl_tgt_ids=${exclTagIds.join(",")}` : ""),
-    [exclTagIds],
-  );
+    return { exclTagIds: [...ex], inclTagIds: [...inc] };
+  }, [hiddenTagIds, activeKeys, filterFields, filterValues, m2mMode]);
+  // query fragment ส่งให้ API skus (ซ่อน + โชว์เฉพาะ ใช้ junction เดียวกัน)
+  const exclParam = useMemo(() => {
+    let s = "";
+    if (exclTagIds.length) s += `&excl_junction=skus_v2_product_family_m2m&excl_tgt_ids=${exclTagIds.join(",")}`;
+    if (inclTagIds.length) s += `&incl_junction=skus_v2_product_family_m2m&incl_tgt_ids=${inclTagIds.join(",")}`;
+    return s;
+  }, [exclTagIds, inclTagIds]);
 
   // เรตหยวน→บาท ล่าสุด (ใช้โชว์ราคาบาทประมาณ คู่กับ ¥)
   const [cnyRate, setCnyRate] = useState(0);
@@ -316,6 +332,18 @@ export default function PurchasingShopPage() {
     void fetchCards(0);
   }, [fetchCards, q]);
 
+  // โหลดแท็ก (Product Family) ของการ์ด SKU ที่กำลังแสดง → โชว์เป็นป้ายบนการ์ด
+  useEffect(() => {
+    const ids = cards.filter(c => c.sku).map(c => c.id);
+    if (ids.length === 0) { setCardTags({}); return; }
+    let cancelled = false;
+    apiFetch(`/api/admin/schema/m2m-links?junction=skus_v2_product_family_m2m&src_ids=${ids.join(",")}`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setCardTags((j.map ?? {}) as Record<string, string[]>); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [cards]);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE));
   const goToPage = (pg: number) => {
     const clamped = Math.min(Math.max(0, pg), totalPages - 1);
@@ -492,9 +520,19 @@ export default function PurchasingShopPage() {
                   const cur = filterValues[k];
                   return (
                     <div key={k}>
-                      <div className="text-xs font-medium text-slate-600 mb-1">
-                        {fd.m2m ? `🙈 ${fd.label} — เลือกเพื่อซ่อน` : fd.label}
-                      </div>
+                      {fd.m2m ? (
+                        <div className="flex items-center justify-between mb-1 gap-1">
+                          <span className="text-xs font-medium text-slate-600">{fd.label}</span>
+                          <div className="flex rounded-md border border-slate-200 overflow-hidden text-[10px] flex-shrink-0">
+                            {([["hide", "🙈 ซ่อน"], ["show", "👁 โชว์เฉพาะ"]] as ["hide" | "show", string][]).map(([m, lbl]) => (
+                              <button key={m} type="button" onClick={() => setM2mMode(p => ({ ...p, [k]: m }))}
+                                className={`px-1.5 py-0.5 ${(m2mMode[k] ?? "hide") === m ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>{lbl}</button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs font-medium text-slate-600 mb-1">{fd.label}</div>
+                      )}
                       {fd.m2m ? (
                         <>
                           <FilterCombobox
@@ -504,7 +542,7 @@ export default function PurchasingShopPage() {
                             values={cur && cur.type === "select" ? cur.selected : []}
                             onChange={(vals) => setFV(k, vals.length ? { type: "select", selected: vals } : null)}
                           />
-                          <p className="text-[10px] text-slate-400 mt-1">เลือกแล้วสินค้าที่ติดแท็กนั้นจะไม่แสดง</p>
+                          <p className="text-[10px] text-slate-400 mt-1">{(m2mMode[k] ?? "hide") === "show" ? "โชว์เฉพาะสินค้าที่ติดแท็กที่เลือก" : "เลือกแล้วสินค้าที่ติดแท็กนั้นจะไม่แสดง"}</p>
                         </>
                       ) : fd.type === "boolean" ? (
                         <select value={cur && cur.type === "boolean" ? cur.value : ""} onChange={e => setFV(k, e.target.value ? { type: "boolean", value: e.target.value as "true" | "false" } : null)}
@@ -597,6 +635,17 @@ export default function PurchasingShopPage() {
                         <div className="text-sm font-semibold text-blue-600 mt-1">{c.sku.price.toLocaleString()} {c.sku.currency}<span className="text-xs font-normal text-slate-400"> / {c.sku.uom}</span></div>
                         {c.sku.currency === "YUAN" && cnyRate > 0 && (
                           <div className="text-[11px] text-slate-400">≈ ฿{Math.round(c.sku.price * cnyRate).toLocaleString()}</div>
+                        )}
+                        {/* ป้ายแท็ก Product Family ของสินค้านี้ */}
+                        {(cardTags[c.id]?.length ?? 0) > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {cardTags[c.id].slice(0, 3).map(tid => (
+                              <span key={tid} className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[10px] leading-none border border-indigo-100">
+                                {tagNames[tid] ?? "…"}
+                              </span>
+                            ))}
+                            {cardTags[c.id].length > 3 && <span className="text-[10px] text-slate-400 leading-none self-center">+{cardTags[c.id].length - 3}</span>}
+                          </div>
                         )}
                       </>
                     ) : (
