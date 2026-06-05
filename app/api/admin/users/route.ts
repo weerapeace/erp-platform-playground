@@ -68,8 +68,12 @@ export async function POST(request: NextRequest) {
   }
 
   // 2. invite ผ่าน service role
+  //    redirectTo = หน้า "ตั้งรหัสผ่าน" บนเว็บจริง (origin ของ request นี้) → ผู้ถูกเชิญตั้งรหัสผ่านครั้งแรกได้
+  const origin = request.headers.get("origin") || new URL(request.url).origin;
   const admin = supabaseAdmin();
-  const { data: inv, error: invErr } = await admin.auth.admin.inviteUserByEmail(body.email);
+  const { data: inv, error: invErr } = await admin.auth.admin.inviteUserByEmail(body.email, {
+    redirectTo: `${origin}/auth/set-password`,
+  });
   if (invErr || !inv?.user) {
     return NextResponse.json({ error: invErr?.message ?? "invite ไม่สำเร็จ" }, { status: 500 });
   }

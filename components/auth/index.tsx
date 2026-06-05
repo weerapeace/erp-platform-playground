@@ -139,6 +139,8 @@ type AuthState = {
   login: (email: string, password: string) => Promise<boolean>;
   loginWithMagicLink: (email: string) => Promise<boolean>;
   loginWithGoogle: () => Promise<boolean>;
+  /** ส่งอีเมล "ลืมรหัสผ่าน" → ผู้ใช้คลิกแล้วไปหน้า /auth/set-password เพื่อตั้งรหัสใหม่ */
+  resetPassword: (email: string) => Promise<boolean>;
   logout: () => Promise<void>;
   can: (perm: Permission) => boolean;
   /** โหลดโปรไฟล์ใหม่ (หลังแก้ชื่อ/รูปของตัวเอง) */
@@ -227,6 +229,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, []);
 
+  // ลืมรหัสผ่าน — ส่งลิงก์ไปอีเมล, ปลายทาง = /auth/set-password (ตั้งรหัสใหม่)
+  const resetPassword = useCallback(async (email: string) => {
+    setLoginError(null);
+    const redirectTo = typeof window !== "undefined"
+      ? `${window.location.origin}/auth/set-password`
+      : undefined;
+    const { error } = await supabaseBrowser.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) {
+      setLoginError(error.message);
+      return false;
+    }
+    return true;
+  }, []);
+
   const logout = useCallback(async () => {
     await supabaseBrowser.auth.signOut();
     setUser(null);
@@ -238,7 +254,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, logout, can, refreshProfile }}>
+    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, resetPassword, logout, can, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

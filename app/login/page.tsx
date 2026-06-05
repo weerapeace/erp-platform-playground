@@ -11,7 +11,7 @@ function safeNext(raw: string | null): string {
 }
 
 function LoginInner() {
-  const { login, loginWithMagicLink, loginWithGoogle, loginError, user, ready } = useAuth();
+  const { login, loginWithMagicLink, loginWithGoogle, resetPassword, loginError, user, ready } = useAuth();
   const router = useRouter();
   const params = useSearchParams();
   const nextPath = safeNext(params.get("next"));
@@ -23,6 +23,16 @@ function LoginInner() {
   const [pin,      setPin]      = useState("");
   const [loading,  setLoading]  = useState(false);
   const [magicSent, setMagicSent] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
+  // ลืมรหัสผ่าน — ส่งลิงก์ตั้งรหัสใหม่ไปอีเมล (ใช้ค่าในช่องอีเมล)
+  const handleForgot = async () => {
+    if (!email.trim()) return;
+    setLoading(true);
+    const ok = await resetPassword(email.trim());
+    setLoading(false);
+    if (ok) setResetSent(true);
+  };
 
   const submitPin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -222,6 +232,20 @@ function LoginInner() {
                   >
                     {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
                   </button>
+
+                  {/* ลืมรหัสผ่าน — ส่งลิงก์ตั้งรหัสใหม่ไปอีเมลในช่องด้านบน */}
+                  {resetSent ? (
+                    <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 text-center">
+                      📧 ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่ <strong>{email}</strong> แล้ว เช็คอีเมลได้เลย
+                    </div>
+                  ) : (
+                    <button
+                      type="button" onClick={handleForgot} disabled={loading || !email}
+                      className="w-full text-xs text-orange-600 hover:underline disabled:text-slate-300 disabled:no-underline"
+                    >
+                      ลืมรหัสผ่าน?
+                    </button>
+                  )}
 
                   <button
                     type="button"
