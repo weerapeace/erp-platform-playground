@@ -169,7 +169,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 // ---- สลิปการโอน (หลายใบ) — เก็บ ธนาคาร/ยอด/เวลา/ผูกบิล CTW ----
-type TxSlip = { key: string; bank: string; amount: number; at: string; bill_id?: string };
+type TxSlip = { key: string; bank: string; amount: number; at: string; bill_ids?: string[] };
 // แปลงข้อความวันเวลาที่ AI อ่านได้ → format ของ <input type="datetime-local"> (YYYY-MM-DDThh:mm) · อ่านไม่ออก = ""
 function toDatetimeLocal(text: string): string {
   if (!text) return "";
@@ -2371,7 +2371,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [rate, setRate] = useState("");
   const [transferDate, setTransferDate] = useState(today());
   const [txSlips, setTxSlips] = useState<TxSlip[]>([]);
-  const slipKeys = txSlips.map(s => s.key);
+  const slipKeys = txSlips.map(s => s.key).filter(Boolean);   // เฉพาะที่มีไฟล์จริง (รายการกรอกมือ key ว่าง)
   const slipSum = txSlips.reduce((a, s) => a + num(s.amount), 0);
   const [lightbox, setLightbox] = useState<string | null>(null);   // รูปสลิปกดดูเต็มจอ
   const [slipProgress, setSlipProgress] = useState<{ done: number; total: number } | null>(null);   // ความคืบหน้าอ่านสลิป
@@ -2628,6 +2628,18 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       return next;
     });
   };
+  // เพิ่มรายการโอน "กรอกยอดเอง" (ไม่มีรูปสลิป) — key ว่าง = ไม่มีไฟล์
+  const addManualSlip = () => setTxSlips(prev => [...prev, { key: "", bank: "", amount: 0, at: "" }]);
+  // สลับว่าสลิปใบ i ตัดบิล CTW ใบ billId ไหม (1 สลิปตัดได้หลายบิล / 1 บิลถูกหลายสลิปได้)
+  const toggleSlipBill = (i: number, billId: string) => {
+    setTxSlips(prev => prev.map((s, idx) => {
+      if (idx !== i) return s;
+      const cur = new Set(s.bill_ids ?? []);
+      cur.has(billId) ? cur.delete(billId) : cur.add(billId);
+      return { ...s, bill_ids: [...cur] };
+    }));
+    setCtwSel(cs => new Set(cs).add(billId));   // เลือกบิลนั้นไว้ตัดให้อัตโนมัติ
+  };
 
   // ส่งสรุปการโอนเข้า LINE (อัตโนมัติถ้าตั้ง Bot / ไม่งั้น share) + แนบลิงก์เปิดแอป
   const sendTransferLine = async (t: Record<string, unknown>) => {
@@ -2794,7 +2806,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
       {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ ¥) — sticky ตรึงบน · โชว์ step 1 เท่านั้น */}
       {step === 1 && (
-      <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm sticky top-0 z-20">
+      <div className="rounded-2xl bg-white/95 backdrop-blur border border-slate-200 p-4 shadow-lg shadow-slate-400/30 sticky top-2 z-30">
         <button type="button" onClick={() => setShowBills(v => !v)} className="w-full text-left">
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-500">💸 ยอดที่ต้องโอนรอบนี้</span>
@@ -2938,66 +2950,76 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       {/* STEP 2: กรอกจำนวน + สลิป (ยอด/บัญชี/ยอดคงเหลือ อยู่การ์ดบนแล้ว) */}
       {step === 2 && (<>
       <Card>
-        {/* จำนวนเงินที่โอนจริง (เต็มความกว้าง) */}
-        <div>
-          <Label>จำนวนเงินที่โอนจริง (฿)</Label>
-          <Money value={amount} onChange={setAmount} />
-          {belowMin && <div className="mt-1 text-[11px] text-red-500">* ยอดโอนต้องไม่น้อยกว่า ฿{fmt(+minTransfer.toFixed(2))}{useBalance && chinaCoverThb > 0 ? " (หักยอดคงเหลือแล้ว)" : ""}</div>}
-          {!useBalance && hasRate && balance.rmb > 0 && transferred > 0 && transferred < roundTotalThb - 0.001 && (
-            <div className="mt-1 text-[11px] text-amber-600">💡 เปิด “ใช้ยอดคงเหลือในบัญชีจีน” ด้านล่าง เพื่อลดยอดขั้นต่ำได้ (มี ¥{fmt(balance.rmb)})</div>
-          )}
-          <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="hidden"
-            onChange={e => { const fs = e.target.files; if (fs && fs.length) uploadSlip(fs); }} />
+        <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="hidden"
+          onChange={e => { const fs = e.target.files; if (fs && fs.length) uploadSlip(fs); }} />
+        {/* รายการเงินที่โอนจริง (แนบสลิป AI อ่านยอด หรือกรอกเอง — รวมได้หลายรายการ) */}
+        <div className="flex items-center justify-between mb-1">
+          <Label>💸 รายการเงินที่โอนจริง ({txSlips.length})</Label>
         </div>
-        {!hasRate && <div className="mt-2 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
-        {/* สรุปการคำนวณย้ายไปโชว์ในใบ "พิมพ์รายการโอน" แทน */}
-        {/* รายการสลิป (หลายใบ) — AI อ่านยอด/ธนาคาร/เวลา แก้ได้ทุกช่อง */}
-        <div className="mt-3">
-          <div className="flex items-center justify-between mb-1">
-            <Label>📎 สลิปการโอน ({txSlips.length})</Label>
-            {txSlips.length > 0 && <span className="text-sm font-bold text-violet-700">รวม ฿{fmt(slipSum)}</span>}
-          </div>
+        {/* ปุ่มเพิ่ม: แนบสลิป (AI อ่านยอด) + กรอกยอดเอง */}
+        <div className="flex gap-2">
           <button type="button" onClick={() => slipInputRef.current?.click()} disabled={slipUploading || ocrBusy}
-            className="w-full h-12 rounded-xl border-2 border-dashed border-violet-300 text-violet-600 text-base font-semibold disabled:opacity-50 active:scale-[0.99] transition">
-            ＋ เพิ่มสลิป (แนบได้หลายใบ)
+            className="flex-1 h-12 rounded-xl border-2 border-dashed border-violet-300 text-violet-600 text-base font-semibold disabled:opacity-50 active:scale-[0.99] transition">
+            ＋ เพิ่มสลิป
           </button>
-          {/* ตัวโหลดชัด ๆ ระหว่างอัปโหลด+อ่าน AI */}
-          {(slipUploading || ocrBusy) && (
-            <div className="mt-2 flex items-center gap-2 rounded-xl bg-violet-50 border border-violet-200 px-3 py-3 text-sm font-medium text-violet-700">
-              <span className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              <span>📷 AI กำลังอ่านสลิป{slipProgress ? ` (${slipProgress.done + 1}/${slipProgress.total})` : ""}… อาจใช้เวลาสักครู่</span>
-            </div>
-          )}
-          <div className="mt-2 space-y-2">
-            {txSlips.map((s, i) => (
-              <div key={s.key + i} className="flex gap-2 bg-white border border-slate-200 rounded-lg p-2">
-                {s.key.toLowerCase().endsWith(".pdf")
-                  ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-14 h-14 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
-                  : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-14 h-14 flex-shrink-0 rounded overflow-hidden border border-slate-200">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
-                <div className="flex-1 min-w-0 space-y-1">
-                  <div className="flex gap-1.5">
-                    <input value={s.bank} onChange={e => setSlipField(i, { bank: e.target.value })} placeholder="ธนาคาร"
-                      className="w-1/2 h-9 px-2 text-sm border border-slate-200 rounded" />
-                    <Money value={s.amount ? String(s.amount) : ""} onChange={(v) => setSlipField(i, { amount: num(v) })}
-                      className="w-1/2 h-9 px-2 text-sm text-right border border-slate-200 rounded" />
-                  </div>
-                  <input type="datetime-local" value={s.at} onChange={e => setSlipField(i, { at: e.target.value })}
-                    className="w-full h-9 px-2 text-xs border border-slate-200 rounded text-slate-600" />
-                  {s.bill_id && (() => { const b = ctw.find(x => String(x.id) === s.bill_id); return <div className="text-[10px] text-orange-600">🔗 {String(b?.company_name ?? "บิล CTW")}</div>; })()}
-                </div>
-                <button type="button" onClick={() => removeSlip(i)} className="w-7 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded">✕</button>
-              </div>
-            ))}
+          <button type="button" onClick={addManualSlip} disabled={slipUploading || ocrBusy}
+            className="flex-shrink-0 h-12 px-3 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 text-sm font-medium disabled:opacity-50 active:scale-[0.99] transition">
+            ＋ กรอกเอง
+          </button>
+        </div>
+        {/* ตัวโหลดชัด ๆ ระหว่างอัปโหลด+อ่าน AI */}
+        {(slipUploading || ocrBusy) && (
+          <div className="mt-2 flex items-center gap-2 rounded-xl bg-violet-50 border border-violet-200 px-3 py-3 text-sm font-medium text-violet-700">
+            <span className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <span>📷 AI กำลังอ่านสลิป{slipProgress ? ` (${slipProgress.done + 1}/${slipProgress.total})` : ""}… อาจใช้เวลาสักครู่</span>
           </div>
-          {txSlips.length > 0 && ctw.length > 0 && (
-            <button type="button" onClick={() => setSlipLinkOpen(true)}
-              className="mt-2 w-full h-10 rounded-lg border border-orange-300 text-orange-700 text-sm font-medium active:scale-[0.99] transition">
-              🔗 เชื่อมสลิปกับบิล CTW
-            </button>
+        )}
+        <div className="mt-2 space-y-2">
+          {txSlips.map((s, i) => (
+            <div key={s.key + i} className="flex gap-2 bg-white border border-slate-200 rounded-lg p-2">
+              {!s.key
+                ? <div className="w-14 h-14 flex-shrink-0 rounded bg-slate-50 border border-dashed border-slate-200 flex items-center justify-center text-xl text-slate-300">💵</div>
+                : s.key.toLowerCase().endsWith(".pdf")
+                ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-14 h-14 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
+                : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-14 h-14 flex-shrink-0 rounded overflow-hidden border border-slate-200">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
+              <div className="flex-1 min-w-0 space-y-1">
+                <div className="flex gap-1.5">
+                  <input value={s.bank} onChange={e => setSlipField(i, { bank: e.target.value })} placeholder="ธนาคาร"
+                    className="w-1/2 h-9 px-2 text-sm border border-slate-200 rounded" />
+                  <Money value={s.amount ? String(s.amount) : ""} onChange={(v) => setSlipField(i, { amount: num(v) })}
+                    className="w-1/2 h-9 px-2 text-sm text-right border border-slate-200 rounded" />
+                </div>
+                <input type="datetime-local" value={s.at} onChange={e => setSlipField(i, { at: e.target.value })}
+                  className="w-full h-9 px-2 text-xs border border-slate-200 rounded text-slate-600" />
+                {!!(s.bill_ids && s.bill_ids.length) && (
+                  <div className="text-[10px] text-orange-600 truncate">🔗 {s.bill_ids.map(bid => String(ctw.find(x => String(x.id) === bid)?.company_name ?? "บิล")).join(", ")}</div>
+                )}
+              </div>
+              <button type="button" onClick={() => removeSlip(i)} className="w-7 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded">✕</button>
+            </div>
+          ))}
+          {txSlips.length === 0 && (
+            <div className="text-center text-slate-300 text-sm py-3">— ยังไม่มีรายการ — กดปุ่มด้านบนเพื่อเพิ่ม</div>
           )}
         </div>
+        {/* ยอดรวมโอนจริง (ตัวใหญ่) + validation */}
+        <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 flex items-center justify-between">
+          <span className="text-sm font-medium text-slate-600">รวมโอนจริง</span>
+          <span className={`text-2xl font-extrabold ${belowMin ? "text-red-600" : "text-emerald-600"}`}>฿{fmt(+slipSum.toFixed(2))}</span>
+        </div>
+        {belowMin && <div className="mt-1 text-[11px] text-red-500">* ยอดรวมต้องไม่น้อยกว่า ฿{fmt(+minTransfer.toFixed(2))}{useBalance && chinaCoverThb > 0 ? " (หักยอดคงเหลือแล้ว)" : ""}</div>}
+        {!useBalance && hasRate && balance.rmb > 0 && transferred > 0 && transferred < roundTotalThb - 0.001 && (
+          <div className="mt-1 text-[11px] text-amber-600">💡 เปิด “ใช้ยอดคงเหลือในบัญชีจีน” ด้านล่าง เพื่อลดยอดขั้นต่ำได้ (มี ¥{fmt(balance.rmb)})</div>
+        )}
+        {!hasRate && <div className="mt-2 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
+        {txSlips.length > 0 && ctw.length > 0 && (
+          <button type="button" onClick={() => setSlipLinkOpen(true)}
+            className="mt-2 w-full h-10 rounded-lg border border-orange-300 text-orange-700 text-sm font-medium active:scale-[0.99] transition">
+            🔗 เลือกสลิปไหนตัดบิล CTW ไหน
+          </button>
+        )}
       </Card>
       <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
@@ -3048,6 +3070,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             </div>
           </>
         )}
+        {txSlips.length > 0 && ctw.length > 0 && (
+          <button type="button" onClick={() => setSlipLinkOpen(true)}
+            className="mt-3 w-full h-10 rounded-lg border border-orange-300 text-orange-700 text-sm font-medium active:scale-[0.99] transition">
+            🔗 เลือกสลิปไหนตัดบิลไหน (เลือกได้หลายบิล)
+          </button>
+        )}
       </Card>
 
 
@@ -3067,6 +3095,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               <div key={id} className="rounded-lg bg-white border border-orange-200 p-3">
                 <div className="font-medium text-slate-800 text-sm">{String(b.company_name ?? "—")}</div>
                 <div className="text-[11px] text-slate-400">เลขที่ {String(b.doc_number ?? "—")} · ค้าง ฿{fmt(ctwRemain(b))}</div>
+                {(() => { const linked = txSlips.filter(s => (s.bill_ids ?? []).includes(id)); return linked.length > 0 ? (
+                  <div className="mt-1 text-[10px] text-orange-600 truncate">🔗 จ่ายด้วย: {linked.map((s, k) => `${s.bank || `รายการ ${k + 1}`} ฿${fmt(num(s.amount))}`).join(", ")}</div>
+                ) : null; })()}
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-xs text-slate-500 flex-shrink-0">ยอดที่โอนรอบนี้ (฿)</span>
                   <Money value={ctwPay[id] ?? ""} onChange={(v) => { setCtwEdited(e => new Set(e).add(id)); setCtwPay(p => ({ ...p, [id]: v })); }}
@@ -3092,24 +3123,35 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <Portal><div className="fixed inset-0 z-[260] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setSlipLinkOpen(false)}>
           <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between">
-              <span className="font-semibold text-slate-800">🔗 เชื่อมสลิป → บิล CTW</span>
+              <span className="font-semibold text-slate-800">🔗 สลิปไหนตัดบิล CTW ไหน</span>
               <button onClick={() => setSlipLinkOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
             </div>
-            <div className="p-3 overflow-y-auto space-y-2">
-              <div className="text-xs text-slate-400">เลือกว่าสลิปแต่ละใบใช้ตัดบิล CTW ใบไหน (ไม่บังคับ) — เลือกแล้วบิลนั้นจะถูกเลือกตัดให้</div>
+            <div className="p-3 overflow-y-auto space-y-3">
+              <div className="text-xs text-slate-400">เลือกได้ว่าสลิปแต่ละใบใช้ตัดบิล CTW ใบไหนบ้าง (เลือกได้หลายบิล · สลิปใบเดียวตัดได้หลายบิล) — ไม่บังคับ</div>
               {txSlips.map((s, i) => (
-                <div key={s.key + i} className="flex items-center gap-2 border border-slate-200 rounded-lg p-2">
-                  {s.key.toLowerCase().endsWith(".pdf")
-                    ? <span className="w-10 h-10 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center">📄</span>
-                    // eslint-disable-next-line @next/next/no-img-element
-                    : <img src={r2Url(s.key)} alt="" className="w-10 h-10 flex-shrink-0 rounded object-cover border border-slate-200" />}
-                  <div className="flex-1 min-w-0 text-xs text-slate-600 truncate">{s.bank || "สลิป"} · ฿{fmt(num(s.amount))}</div>
-                  <select value={s.bill_id ?? ""}
-                    onChange={e => { const v = e.target.value || undefined; setSlipField(i, { bill_id: v }); if (v) setCtwSel(cs => new Set(cs).add(v)); }}
-                    className="flex-shrink-0 max-w-[55%] h-9 px-2 text-xs border border-slate-200 rounded-lg bg-white">
-                    <option value="">— ไม่ระบุ —</option>
-                    {ctw.map(b => <option key={String(b.id)} value={String(b.id)}>{String(b.company_name ?? "—")} ({String(b.doc_number ?? "—")}) ฿{fmt(ctwRemain(b))}</option>)}
-                  </select>
+                <div key={s.key + i} className="border border-slate-200 rounded-lg p-2">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {!s.key
+                      ? <span className="w-9 h-9 flex-shrink-0 rounded bg-slate-50 border border-dashed border-slate-200 flex items-center justify-center text-slate-300">💵</span>
+                      : s.key.toLowerCase().endsWith(".pdf")
+                      ? <span className="w-9 h-9 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center">📄</span>
+                      // eslint-disable-next-line @next/next/no-img-element
+                      : <img src={r2Url(s.key)} alt="" className="w-9 h-9 flex-shrink-0 rounded object-cover border border-slate-200" />}
+                    <div className="flex-1 min-w-0 text-sm font-medium text-slate-700 truncate">{s.bank || `รายการ ${i + 1}`} · ฿{fmt(num(s.amount))}</div>
+                  </div>
+                  <div className="space-y-1">
+                    {ctw.map(b => {
+                      const bid = String(b.id), on = (s.bill_ids ?? []).includes(bid);
+                      return (
+                        <label key={bid} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs cursor-pointer border ${on ? "border-orange-400 bg-orange-50" : "border-slate-100"}`}>
+                          <input type="checkbox" checked={on} onChange={() => toggleSlipBill(i, bid)} className="accent-orange-500" />
+                          <span className="flex-1 min-w-0 truncate text-slate-700">{String(b.company_name ?? "—")} <span className="text-slate-400">({String(b.doc_number ?? "—")})</span></span>
+                          <span className="flex-shrink-0 text-slate-500">฿{fmt(ctwRemain(b))}</span>
+                        </label>
+                      );
+                    })}
+                    {ctw.length === 0 && <div className="text-center text-slate-300 text-xs py-2">— ไม่มีบิล CTW ค้าง —</div>}
+                  </div>
                 </div>
               ))}
             </div>
