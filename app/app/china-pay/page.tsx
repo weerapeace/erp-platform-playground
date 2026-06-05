@@ -568,6 +568,127 @@ function Center({ children }: { children: React.ReactNode }) {
 }
 
 // ---------------- Dashboard ----------------
+// ---------------- การ์ดยอดเงินคงเหลือที่จีน (¥) + จัดการ (ตั้งต้น/เติม/ปรับ) ----------------
+type BalAdj = { id: string; kind: string; amount_rmb: number; amount_thb: number; note: string | null; actor: string | null; created_at: string };
+function ChinaBalanceCard() {
+  const toast = useToast();
+  const [bal, setBal] = useState<{ rmb: number; thb: number }>({ rmb: 0, thb: 0 });
+  const [hist, setHist] = useState<BalAdj[]>([]);
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"set" | "topup" | "adjust">("topup");
+  const [amt, setAmt] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [r1, setR1] = useState(0);   // เรทล่าสุด สำหรับคำนวณ ฿ ของรายการปรับมือ
+
+  const load = useCallback(() => {
+    apiFetch("/api/china-pay/balance").then(r => r.json()).then(j => {
+      if (!j.error) { setBal({ rmb: num(j.rmb), thb: num(j.thb) }); setHist(j.adjustments ?? []); }
+    }).catch(() => {});
+    apiFetch("/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc").then(r => r.json())
+      .then(j => setR1(num((j.data ?? [])[0]?.rate))).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const submit = async () => {
+    const x = num(amt);
+    if (mode !== "adjust" && x <= 0) { toast.error("กรอกจำนวนเงิน"); return; }
+    if (mode === "adjust" && x === 0) { toast.error("กรอกจำนวน (+ เพิ่ม / − ลด)"); return; }
+    // คำนวณ delta ¥ ที่จะบันทึก
+    const deltaRmb = mode === "set" ? +(x - bal.rmb).toFixed(2) : x;   // set = ตั้งให้เท่ากับ x
+    const deltaThb = r1 ? +(deltaRmb * r1).toFixed(2) : 0;
+    setBusy(true);
+    try {
+      const res = await apiFetch("/api/china-pay/balance", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: mode, amount_rmb: deltaRmb, amount_thb: deltaThb, note: note.trim() || null, actor: "china-app" }),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error(j.error); return; }
+      setBal({ rmb: num(j.rmb), thb: num(j.thb) });
+      toast.success("อัปเดตยอดแล้ว");
+      setAmt(""); setNote(""); load();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const kindLabel: Record<string, string> = { set: "ตั้งยอด", topup: "เติมเงิน", adjust: "ปรับยอด" };
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)}
+        className="block w-full text-left rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-600 text-white p-4 shadow-sm active:scale-[0.99] transition-transform">
+        <div className="flex items-center justify-between">
+          <div className="text-sm opacity-90">🏦 ยอดเงินคงเหลือที่จีน</div>
+          <span className="text-[11px] opacity-90">กดเพื่อจัดการ ›</span>
+        </div>
+        <div className="flex items-end justify-between mt-1">
+          <div className="text-3xl font-bold">¥{fmt(bal.rmb)}</div>
+          <div className="text-base font-medium opacity-95">≈ ฿{fmt(bal.thb)}</div>
+        </div>
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-[120] bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !busy && setOpen(false)}>
+          <div className="w-full max-w-md bg-white rounded-t-2xl sm:rounded-2xl max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+              <span className="font-semibold text-slate-800">จัดการยอดเงินที่จีน</span>
+              <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center">
+                <div className="text-xs text-emerald-700">ยอดคงเหลือปัจจุบัน</div>
+                <div className="text-2xl font-bold text-emerald-800">¥{fmt(bal.rmb)}</div>
+                <div className="text-xs text-emerald-600">≈ ฿{fmt(bal.thb)}</div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {(["topup", "adjust", "set"] as const).map(m => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className={`h-9 rounded-lg text-xs font-medium border ${mode === m ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-200 text-slate-600"}`}>
+                    {m === "topup" ? "เติมเงิน" : m === "adjust" ? "ปรับ +/−" : "ตั้งยอด"}
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <div className="text-[11px] text-slate-400 mb-1">
+                  {mode === "set" ? "ตั้งยอดให้เท่ากับ (¥)" : mode === "topup" ? "เติมเข้า (¥)" : "ปรับ (ใส่ − เพื่อลด) (¥)"}
+                </div>
+                <Num value={amt} onChange={setAmt} placeholder={mode === "adjust" ? "เช่น -500" : "เช่น 5000"} />
+                {num(amt) !== 0 && r1 > 0 && <div className="text-[11px] text-slate-400 mt-1">≈ ฿{fmt(num(amt) * r1)} (เรท {fmt(r1)})</div>}
+              </div>
+              <div>
+                <div className="text-[11px] text-slate-400 mb-1">หมายเหตุ (ไม่บังคับ)</div>
+                <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น เติมเงินเข้าบัญชีจีน"
+                  className="w-full h-11 px-3 text-sm border border-slate-200 rounded-lg" />
+              </div>
+              <button onClick={submit} disabled={busy}
+                className="w-full h-11 bg-emerald-600 text-white rounded-lg font-semibold disabled:opacity-50">
+                {busy ? "กำลังบันทึก…" : "บันทึก"}
+              </button>
+
+              {hist.length > 0 && (
+                <div className="pt-2 border-t border-slate-100">
+                  <div className="text-xs text-slate-400 mb-1">ประวัติปรับยอดล่าสุด</div>
+                  <div className="space-y-1">
+                    {hist.slice(0, 8).map(h => (
+                      <div key={h.id} className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500">{kindLabel[h.kind] ?? h.kind} · {String(h.created_at).slice(0, 10)}{h.note ? ` · ${h.note}` : ""}</span>
+                        <span className={`font-medium ${num(h.amount_rmb) < 0 ? "text-red-500" : "text-emerald-700"}`}>{num(h.amount_rmb) > 0 ? "+" : ""}¥{fmt(num(h.amount_rmb))}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [doneMonth, setDoneMonth] = useState<{ count: number; thb: number }>({ count: 0, thb: 0 });
@@ -611,6 +732,9 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
           <div className="text-xl font-semibold">¥{fmt(pendingRmb)}</div>
         </div>
       </button>
+
+      {/* ยอดเงินคงเหลือที่จีน (จัดการ/ปรับยอดได้) */}
+      <ChinaBalanceCard />
 
       <div className="grid grid-cols-2 gap-3">
         <StatCard label="โอนแล้วเดือนนี้" main={`${doneMonth.count} บิล`} sub={`฿${fmt(doneMonth.thb)}`} onClick={() => onGo("all")} />
@@ -2185,16 +2309,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     const fPending = encodeURIComponent(JSON.stringify({ status: { type: "text", value: "รอโอน" } }));
     Promise.all([
       apiFetch(`/api/master-v2/china-bills?limit=200&filters=${fPending}&sort_by=bill_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
-      apiFetch(`/api/master-v2/china-transfers?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch(`/api/china-pay/balance`).then(r => r.json()).catch(() => ({ rmb: 0, thb: 0 })),
       apiFetch(`/api/master-v2/ctw-bills?limit=500&sort_by=doc_date&sort_dir=desc`).then(r => r.json()).catch(() => ({ data: [] })),
       apiFetch(`/api/master-v2/partners?limit=500`).then(r => r.json()).catch(() => ({ data: [] })),
-    ]).then(([p, t, c, pn]) => {
+    ]).then(([p, bj, c, pn]) => {
       setPending(p.data ?? []);
-      const tr = t.data ?? [];
-      setBalance({
-        thb: tr.reduce((a: number, r: Record<string, unknown>) => a + num(r.leftover_thb), 0),
-        rmb: tr.reduce((a: number, r: Record<string, unknown>) => a + num(r.leftover_rmb), 0),
-      });
+      // ยอดคงเหลือบัญชีจีน = leftover รวมจากการโอน (auto) + ปรับมือ — มาจาก endpoint เดียวกับ Dashboard
+      setBalance({ thb: num(bj.thb), rmb: num(bj.rmb) });
       setCtw((c.data ?? []).filter((r: Record<string, unknown>) => !r.cleared_at));
       const map: Record<string, Record<string, unknown>> = {};
       (pn.data ?? []).forEach((x: Record<string, unknown>) => { const k = String(x.name_th ?? "").trim(); if (k) map[k] = x; });
