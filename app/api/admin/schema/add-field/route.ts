@@ -41,6 +41,21 @@ type Body = {
   is_filterable?: boolean;
   is_searchable?: boolean;
   group_key?: string;
+  // ── ตั้งค่าเพิ่มเติม (advanced) — ตั้งได้ตั้งแต่ตอนสร้าง field ──
+  is_required?: boolean;
+  is_editable?: boolean;
+  is_inline_editable?: boolean;   // แก้เร็วในตาราง (double-click)
+  is_bulk_editable?: boolean;
+  show_in_form?: boolean;
+  is_sensitive?: boolean;
+  sensitive_permission?: string | null;
+  view_roles?: string[] | null;   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ว่าง = ทุกคน
+  edit_roles?: string[] | null;
+  help_text?: string | null;
+  default_value?: string | null;
+  width?: number;
+  validation_rules?: Record<string, unknown>;   // { rules: string[] }
+  condition_rules?: Record<string, unknown>;     // { show_if: { field, operator, value } }
   actor?: string;
 };
 
@@ -130,6 +145,13 @@ export async function POST(request: NextRequest) {
   const { data: maxRow } = await admin.from("erp_module_fields").select("display_order").eq("module_id", mod.id).order("display_order", { ascending: false }).limit(1).maybeSingle();
   const nextOrder = ((maxRow?.display_order as number) ?? 0) + 10;
 
+  // virtual (related/computed) บังคับ read-only เสมอ — กันตั้งค่าขัดแย้ง
+  const editableDefault = !isRelated && !isComputed;
+  const cleanRoles = (r: unknown): string[] | null => {
+    const arr = Array.isArray(r) ? r.filter((x) => typeof x === "string" && x) : [];
+    return arr.length ? (arr as string[]) : null;
+  };
+
   const { error: insErr } = await admin.from("erp_module_fields").insert({
     module_id: mod.id,
     field_key: b.field_key,
@@ -140,19 +162,27 @@ export async function POST(request: NextRequest) {
     source: "physical",
     group_key: b.group_key || "core",
     is_visible: b.is_visible ?? true,
-    is_required: false,
-    is_editable: !isRelated && !isComputed,           // related/computed = read-only
+    is_required: !isVirtual && (b.is_required ?? false),
+    is_editable: editableDefault && (b.is_editable ?? true),   // related/computed = read-only เสมอ
     is_filterable: (isRelated || isComputed) ? false : (b.is_filterable ?? false),  // ไม่มี column จริง → กรอง/เรียงไม่ได้
     is_sortable: !isRelated && !isComputed,
     is_searchable: (isRelated || isComputed) ? false : (b.is_searchable ?? false),
-    width: 150,
+    width: typeof b.width === "number" ? b.width : 150,
     options: b.ui_type === "select" && b.options ? { options: b.options } : {},
     relation_config: relationConfig,
     display_order: nextOrder,
-    show_in_form: true,
-    is_inline_editable: false,
+    show_in_form: b.show_in_form ?? true,
+    is_inline_editable: editableDefault && (b.is_inline_editable ?? false),
     // ของกลาง: field ใหม่ชนิดปกติ → เปิด bulk edit อัตโนมัติ (virtual/image ไม่เปิด) — ปิดเองได้ที่ Studio
-    is_bulk_editable: ["text", "number", "boolean", "select", "relation", "currency", "date", "textarea"].includes(b.ui_type),
+    is_bulk_editable: b.is_bulk_editable ?? ["text", "number", "boolean", "select", "relation", "currency", "date", "textarea"].includes(b.ui_type),
+    is_sensitive: !isVirtual && (b.is_sensitive ?? false),
+    sensitive_permission: b.is_sensitive ? (b.sensitive_permission || null) : null,
+    view_roles: cleanRoles(b.view_roles),
+    edit_roles: cleanRoles(b.edit_roles),
+    help_text: b.help_text || null,
+    default_value: b.default_value || null,
+    validation_rules: b.validation_rules ?? {},
+    condition_rules: b.condition_rules ?? {},
   });
   if (insErr) return NextResponse.json({ error: "ลงทะเบียน field ไม่สำเร็จ: " + insErr.message }, { status: 500 });
 

@@ -31,6 +31,19 @@ const TYPES: { v: string; label: string; hint: string }[] = [
 
 const REL_TYPES = ["relation", "many2many", "one2many"];
 
+// สิทธิ์ตามตำแหน่ง (admin เห็น/แก้ได้เสมอ จึงไม่อยู่ในรายการ)
+const PERM_ROLES = [
+  { key: "manager", label: "ผู้จัดการ" },
+  { key: "staff",   label: "พนักงาน" },
+  { key: "viewer",  label: "ผู้ชม" },
+];
+const COND_OPS = [
+  { v: "=",        label: "เท่ากับ" },
+  { v: "!=",       label: "ไม่เท่ากับ" },
+  { v: "is_set",   label: "มีค่า (กรอกแล้ว)" },
+  { v: "is_empty", label: "ไม่มีค่า (ว่าง)" },
+];
+
 type TableOpt = { table_name: string; is_module: boolean };
 type RelFieldOpt = { key: string; column: string; label: string; targetTable: string; targetModuleKey: string };
 type TargetFieldOpt = { column: string; label: string };
@@ -95,6 +108,40 @@ export function FieldCreatorModal({
     { kind: "field", value: "", op: "*" },
     { kind: "field", value: "", op: "*" },
   ]);
+
+  // ── ตั้งค่าเพิ่มเติม (advanced) ──
+  const [showAdv, setShowAdv] = useState(false);
+  const [isRequired, setIsRequired]   = useState(false);
+  const [isEditable, setIsEditable]   = useState(true);
+  const [isInline, setIsInline]       = useState(false);
+  const [isBulk, setIsBulk]           = useState(true);
+  const [showInForm, setShowInForm]   = useState(true);
+  const [isSensitive, setIsSensitive] = useState(false);
+  const [sensitivePerm, setSensitivePerm] = useState("products.cost.view");
+  const [viewRoles, setViewRoles] = useState<string[]>([]);
+  const [editRoles, setEditRoles] = useState<string[]>([]);
+  const [helpText, setHelpText]   = useState("");
+  const [defaultValue, setDefaultValue] = useState("");
+  const [width, setWidth]         = useState(150);
+  const [valCatalog, setValCatalog] = useState<{ rule_key: string; label: string }[]>([]);
+  const [selVal, setSelVal]       = useState<string[]>([]);
+  const [advFields, setAdvFields] = useState<{ value: string; label: string }[]>([]);
+  const [condField, setCondField] = useState("");
+  const [condOp, setCondOp]       = useState("=");
+  const [condValue, setCondValue] = useState("");
+
+  // โหลดแคตตาล็อก validation + รายชื่อ field อื่น (สำหรับเงื่อนไขแสดง) ครั้งเดียว
+  useEffect(() => {
+    apiFetch("/api/validation-rules").then((r) => r.json()).then((j) => {
+      const arr = (Array.isArray(j) ? j : j.data ?? []) as Record<string, unknown>[];
+      setValCatalog(arr.filter((x) => x.rule_key).map((x) => ({ rule_key: String(x.rule_key), label: String(x.label ?? x.rule_key) })));
+    }).catch(() => {});
+    apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json()).then((j) => {
+      setAdvFields(((j.fields ?? []) as Record<string, unknown>[])
+        .filter((f) => f.column_name)
+        .map((f) => ({ value: String(f.column_name), label: String(f.field_label ?? f.column_name) })));
+    }).catch(() => {});
+  }, [moduleKey]);
 
   // auto-gen field_key จาก label (snake_case) จนกว่าจะแก้เอง
   useEffect(() => {
@@ -192,6 +239,21 @@ export function FieldCreatorModal({
           compute_summary:  uiType === "computed" ? computeSummary : undefined,
           options: uiType === "select" ? options.map(s => s.trim()).filter(Boolean) : undefined,
           is_visible: isVisible, is_filterable: isFilterable, is_searchable: isSearchable,
+          // ── ตั้งค่าเพิ่มเติม ──
+          is_required: isRequired,
+          is_editable: isEditable,
+          is_inline_editable: isInline,
+          is_bulk_editable: isBulk,
+          show_in_form: showInForm,
+          is_sensitive: isSensitive,
+          sensitive_permission: isSensitive ? (sensitivePerm.trim() || null) : null,
+          view_roles: viewRoles.length ? viewRoles : null,
+          edit_roles: editRoles.length ? editRoles : null,
+          help_text: helpText.trim() || null,
+          default_value: defaultValue.trim() || null,
+          width,
+          validation_rules: selVal.length ? { rules: selVal } : {},
+          condition_rules: condField ? { show_if: { field: condField, operator: condOp, value: condValue } } : {},
         }),
       });
       const json = await res.json();
@@ -422,6 +484,118 @@ export function FieldCreatorModal({
               <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isFilterable} onChange={e => setIsFilterable(e.target.checked)} /> กรองได้</label>
               <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isSearchable} onChange={e => setIsSearchable(e.target.checked)} /> ค้นหาได้</label>
             </>}
+          </div>
+
+          {/* ───────── ตั้งค่าเพิ่มเติม (advanced) ───────── */}
+          <div className="border-t border-slate-100 pt-3">
+            <button type="button" onClick={() => setShowAdv(v => !v)}
+              className="text-sm font-medium text-slate-600 hover:text-slate-800 flex items-center gap-1">
+              <span className="text-xs">{showAdv ? "▾" : "▸"}</span> ตั้งค่าเพิ่มเติม (ไม่บังคับ)
+            </button>
+
+            {showAdv && (
+              <div className="mt-3 space-y-4">
+                {/* คุณสมบัติ */}
+                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                  <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isRequired} onChange={e => setIsRequired(e.target.checked)} /> บังคับกรอก (require)</label>
+                  <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={showInForm} onChange={e => setShowInForm(e.target.checked)} /> แสดงในฟอร์ม</label>
+                  {uiType !== "computed" && uiType !== "related" && <>
+                    <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isEditable} onChange={e => setIsEditable(e.target.checked)} /> แก้ไขได้</label>
+                    <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isInline} onChange={e => setIsInline(e.target.checked)} /> แก้เร็วในตาราง (quick edit)</label>
+                    <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" checked={isBulk} onChange={e => setIsBulk(e.target.checked)} /> แก้หลายรายการ (bulk)</label>
+                  </>}
+                </div>
+
+                {/* ข้อมูลอ่อนไหว */}
+                {uiType !== "computed" && uiType !== "related" && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-1.5 text-sm text-slate-700"><input type="checkbox" className="accent-red-500" checked={isSensitive} onChange={e => setIsSensitive(e.target.checked)} /> 🔒 ข้อมูลอ่อนไหว</label>
+                    {isSensitive && (
+                      <input value={sensitivePerm} onChange={e => setSensitivePerm(e.target.value)} placeholder="permission key เช่น products.cost.view"
+                        className="flex-1 min-w-[180px] h-9 px-3 text-sm font-mono border border-slate-200 rounded-md" />
+                    )}
+                  </div>
+                )}
+
+                {/* สิทธิ์ตามตำแหน่ง (role) */}
+                <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-lg space-y-2">
+                  <p className="text-[11px] text-slate-500">สิทธิ์ตามตำแหน่ง — ว่าง = ทุกคน · admin เห็น/แก้ได้เสมอ</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-slate-600 w-16">👁 เห็นได้</span>
+                    {PERM_ROLES.map(r => {
+                      const on = viewRoles.includes(r.key);
+                      return <button key={r.key} type="button" onClick={() => setViewRoles(p => on ? p.filter(x => x !== r.key) : [...p, r.key])}
+                        className={`text-[11px] px-2 py-0.5 rounded-full border ${on ? "border-indigo-400 bg-indigo-100 text-indigo-700 font-medium" : "border-slate-200 text-slate-500"}`}>{r.label}</button>;
+                    })}
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-medium text-slate-600 w-16">✏ แก้ได้</span>
+                    {PERM_ROLES.map(r => {
+                      const on = editRoles.includes(r.key);
+                      return <button key={r.key} type="button" onClick={() => setEditRoles(p => on ? p.filter(x => x !== r.key) : [...p, r.key])}
+                        className={`text-[11px] px-2 py-0.5 rounded-full border ${on ? "border-indigo-400 bg-indigo-100 text-indigo-700 font-medium" : "border-slate-200 text-slate-500"}`}>{r.label}</button>;
+                    })}
+                  </div>
+                </div>
+
+                {/* ข้อความช่วย / ค่าเริ่มต้น / ความกว้าง */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">ข้อความช่วย (help text)</label>
+                    <input value={helpText} onChange={e => setHelpText(e.target.value)} placeholder="คำอธิบายใต้ช่องกรอก"
+                      className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">ค่าเริ่มต้น (default)</label>
+                    <input value={defaultValue} onChange={e => setDefaultValue(e.target.value)} placeholder="ค่าตั้งต้นตอนสร้างใหม่"
+                      className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">ความกว้างคอลัมน์ (px)</label>
+                    <input type="number" min={60} max={600} value={width} onChange={e => setWidth(Number(e.target.value) || 150)}
+                      className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                  </div>
+                </div>
+
+                {/* Validation */}
+                {valCatalog.length > 0 && uiType !== "computed" && uiType !== "related" && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">ตรวจสอบความถูกต้อง (Validation)</label>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {valCatalog.map(v => {
+                        const on = selVal.includes(v.rule_key);
+                        return <button key={v.rule_key} type="button" onClick={() => setSelVal(p => on ? p.filter(x => x !== v.rule_key) : [...p, v.rule_key])}
+                          className={`text-[11px] px-2 py-1 rounded-md border ${on ? "border-emerald-400 bg-emerald-50 text-emerald-700 font-medium" : "border-slate-200 text-slate-500"}`}
+                          title={v.rule_key}>{v.label}</button>;
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* เงื่อนไขแสดงในฟอร์ม (show_if) */}
+                <div>
+                  <label className="text-xs font-medium text-slate-600">แสดงช่องนี้เมื่อ… (เงื่อนไข)</label>
+                  <div className="mt-1 flex flex-wrap gap-2 items-center">
+                    <select value={condField} onChange={e => setCondField(e.target.value)}
+                      className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                      <option value="">— แสดงเสมอ —</option>
+                      {advFields.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </select>
+                    {condField && <>
+                      <select value={condOp} onChange={e => setCondOp(e.target.value)}
+                        className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                        {COND_OPS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+                      </select>
+                      {condOp !== "is_set" && condOp !== "is_empty" && (
+                        <input value={condValue} onChange={e => setCondValue(e.target.value)} placeholder="ค่า"
+                          className="h-9 px-3 text-sm border border-slate-200 rounded-md w-28" />
+                      )}
+                    </>}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">เช่น แสดงช่อง “เหตุผล” เมื่อ “สถานะ” = ปฏิเสธ</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {err && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">⚠ {err}</div>}
