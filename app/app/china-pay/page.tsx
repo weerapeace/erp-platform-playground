@@ -1865,6 +1865,7 @@ function RateTab() {
   const [editVal, setEditVal] = useState("");
   const [busy, setBusy] = useState(false);
   const [delRow, setDelRow] = useState<Record<string, unknown> | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);   // แถวที่กางดู R1-R4
 
   const load = useCallback(() => {
     apiFetch("/api/master-v2/daily-rates?limit=20&sort_by=rate_date&sort_dir=desc")
@@ -1947,27 +1948,43 @@ function RateTab() {
         {rows.map((r) => {
           const id = String(r.id);
           const editing = editId === id;
+          const open = openId === id;
           return (
-            <div key={id} className="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2 text-sm">
-              <span className="text-slate-500 flex-shrink-0">{String(r.rate_date)}</span>
-              {editing ? (
-                <div className="flex items-center gap-1.5 flex-1 justify-end">
-                  <span className="text-slate-400 text-xs">R1</span>
-                  <input type="number" inputMode="decimal" step="any" value={editVal} autoFocus
-                    onChange={e => setEditVal(e.target.value)}
-                    className="w-24 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
-                  <button onClick={() => saveEdit(id)} disabled={busy}
-                    className="w-9 h-9 rounded-lg bg-emerald-600 text-white disabled:opacity-50">✓</button>
-                  <button onClick={() => setEditId(null)} disabled={busy}
-                    className="w-9 h-9 rounded-lg border border-slate-200 text-slate-500">✕</button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 flex-1 justify-end">
-                  <span className="text-slate-700">R1 <b>{fmt(num(r.rate))}</b> <span className="text-slate-400">· R4 {fmt(+(num(r.rate) - RATE_OFFSET.r4).toFixed(4))}</span></span>
-                  <button onClick={() => { setEditId(id); setEditVal(String(num(r.rate))); }}
-                    className="w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">✎</button>
-                  <button onClick={() => setDelRow(r)}
-                    className="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50">🗑</button>
+            <div key={id} className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-slate-500 flex-shrink-0">{String(r.rate_date)}</span>
+                {editing ? (
+                  <div className="flex items-center gap-1.5 flex-1 justify-end">
+                    <span className="text-slate-400 text-xs">R1</span>
+                    <input type="number" inputMode="decimal" step="any" value={editVal} autoFocus
+                      onChange={e => setEditVal(e.target.value)}
+                      className="w-24 h-9 px-2 text-base text-right border border-orange-300 rounded-lg" />
+                    <button onClick={() => saveEdit(id)} disabled={busy}
+                      className="w-9 h-9 rounded-lg bg-emerald-600 text-white disabled:opacity-50">✓</button>
+                    <button onClick={() => setEditId(null)} disabled={busy}
+                      className="w-9 h-9 rounded-lg border border-slate-200 text-slate-500">✕</button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 flex-1 justify-end">
+                    <button type="button" onClick={() => setOpenId(o => o === id ? null : id)} className="flex items-center gap-1 text-slate-700 active:scale-95 transition">
+                      R1 <b>{fmt(num(r.rate))}</b> <span className="text-slate-400">· R4 {fmt(+(num(r.rate) - RATE_OFFSET.r4).toFixed(4))}</span>
+                      <span className="text-slate-300 text-[10px]">{open ? "▲" : "▼"}</span>
+                    </button>
+                    <button onClick={() => { setEditId(id); setEditVal(String(num(r.rate))); }}
+                      className="w-8 h-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">✎</button>
+                    <button onClick={() => setDelRow(r)}
+                      className="w-8 h-8 rounded-lg border border-slate-200 text-red-600 hover:bg-red-50">🗑</button>
+                  </div>
+                )}
+              </div>
+              {!editing && open && (
+                <div className="mt-2 pt-2 border-t border-slate-100 rounded-lg bg-slate-50 p-2 text-xs space-y-1">
+                  {RATE_TABLE.map(t => (
+                    <div key={t.tier} className="flex justify-between">
+                      <span className="text-slate-500">{t.tier} · {t.label}</span>
+                      <span className="font-semibold text-slate-700">{fmt(+(num(r.rate) - t.off).toFixed(4))}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
