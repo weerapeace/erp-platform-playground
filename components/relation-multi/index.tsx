@@ -206,6 +206,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [allFields, setAllFields] = useState<{ key: string; label: string }[]>([]);
   const [relCfgByField, setRelCfgByField] = useState<Record<string, RelationConfig>>({});
+  const [typeByField, setTypeByField] = useState<Record<string, string>>({});
   useEffect(() => {
     if (!moduleKey) return;
     apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json())
@@ -213,17 +214,60 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         const m: Record<string, string> = {};
         const list: { key: string; label: string }[] = [];
         const rels: Record<string, RelationConfig> = {};
+        const types: Record<string, string> = {};
         (j.fields ?? []).forEach((f: Record<string, unknown>) => {
           const k = String(f.column_name ?? f.field_key);
           const lbl = String(f.field_label ?? k);
           m[k] = lbl; list.push({ key: k, label: lbl });
+          types[k] = String(f.ui_field_type ?? "text");
           // ฟิลด์เชื่อม = มี relation_config ที่ชี้ตารางปลายทาง → ใช้แปลง id→ชื่อ
           const rc = f.relation_config as RelationConfig | undefined;
           if (rc && (rc.target_table || rc.lookup_type)) rels[k] = rc;
         });
-        setLabels(m); setAllFields(list); setRelCfgByField(rels);
+        setLabels(m); setAllFields(list); setRelCfgByField(rels); setTypeByField(types);
       }).catch(() => {});
   }, [moduleKey]);
+
+  // ---- inline edit + flash fill (ตารางลูก) ----
+  const canEditRows = !!configurable;
+  const isEditableCol = (f: string) => canEditRows && !relCfgByField[f] && ["text", "number", "currency"].includes(typeByField[f] ?? "text");
+  const [editCell, setEditCell] = useState<{ rowId: string; field: string } | null>(null);
+  const [editVal, setEditVal] = useState("");
+  const fkCol = config.target_fk_column ?? "";
+  const parseByType = (f: string, raw: string): unknown => {
+    const t = typeByField[f] ?? "text";
+    if (t === "number" || t === "currency") { const n = Number(raw); return raw === "" ? null : (isFinite(n) ? n : null); }
+    return raw === "" ? null : raw;
+  };
+  const saveCell = async (rowId: string, field: string, raw: string) => {
+    const val = parseByType(field, raw);
+    setEditCell(null);
+    setRows((p) => p.map((r) => String(r.id) === rowId ? { ...r, [field]: val } : r));   // อัปเดตจอทันที
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edits: [{ id: rowId, changes: { [field]: val } }] }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { alert("บันทึกไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); load(); }
+    } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); load(); }
+  };
+  const fillColumn = async (field: string) => {
+    if (!recordId || !fkCol) return;
+    const raw = window.prompt(`เติมค่า "${labelOf(field)}" ให้ SKU ลูกทุกตัวของใบนี้:`, "");
+    if (raw == null) return;
+    const val = parseByType(field, raw);
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ changes: { [field]: val }, filters: { [fkCol]: { type: "text", value: recordId } } }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { alert("เติมไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      alert(`เติมค่าให้ ${j.affected ?? 0} รายการแล้ว`);
+      load();
+    } catch (e) { alert("เติมไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+  };
   const labelOf = (k: string) => labels[k] ?? k;
 
   // แปลง id→ชื่อ ของคอลัมน์ที่เป็นฟิลด์เชื่อม (batch ทีเดียวต่อคอลัมน์) — ของกลาง lib/relation
@@ -346,7 +390,17 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             <tr>
               {imageField && <th className="px-2 py-1.5 w-10" />}
               <th className="px-2 py-1.5 text-left font-medium">{labelOf(titleField)}</th>
-              {subFields.map((f) => <th key={f} className={`px-2 py-1.5 font-medium whitespace-nowrap ${relCfgByField[f] ? "text-left" : "text-right"}`}>{labelOf(f)}</th>)}
+              {subFields.map((f) => (
+                <th key={f} className={`px-2 py-1.5 font-medium whitespace-nowrap ${relCfgByField[f] ? "text-left" : "text-right"}`}>
+                  <span className="inline-flex items-center gap-1">
+                    {labelOf(f)}
+                    {isEditableCol(f) && (
+                      <button type="button" title="เติมค่าเดียวกันทุกแถว" onClick={(e) => { e.stopPropagation(); fillColumn(f); }}
+                        className="text-slate-300 hover:text-blue-600">⤓</button>
+                    )}
+                  </span>
+                </th>
+              ))}
               <th className="px-2 py-1.5 w-8" />
             </tr>
           </thead>
@@ -365,7 +419,27 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
                 <td className="px-2 py-1.5 text-slate-700">{String(r[titleField] ?? r.name ?? r.id)}</td>
                 {subFields.map((f) => {
                   const isRel = !!relCfgByField[f];
-                  return <td key={f} className={`px-2 py-1.5 text-slate-600 whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"}`}>{cellValue(r, f) ?? "—"}</td>;
+                  const editable = isEditableCol(f);
+                  const editing = !!editCell && editCell.rowId === String(r.id) && editCell.field === f;
+                  if (editing) {
+                    return (
+                      <td key={f} className="px-2 py-1" onClick={(e) => e.stopPropagation()}>
+                        <input autoFocus
+                          type={["number", "currency"].includes(typeByField[f] ?? "") ? "number" : "text"}
+                          value={editVal} onChange={(e) => setEditVal(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveCell(String(r.id), f, editVal); if (e.key === "Escape") setEditCell(null); }}
+                          onBlur={() => saveCell(String(r.id), f, editVal)}
+                          className="w-full h-7 px-1 text-sm border border-blue-300 rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                      </td>
+                    );
+                  }
+                  return (
+                    <td key={f}
+                      onClick={editable ? (e) => { e.stopPropagation(); setEditCell({ rowId: String(r.id), field: f }); setEditVal(r[f] == null ? "" : String(r[f])); } : undefined}
+                      className={`px-2 py-1.5 text-slate-600 whitespace-nowrap ${isRel ? "text-left" : "text-right tabular-nums"} ${editable ? "cursor-text hover:bg-blue-50/60" : ""}`}>
+                      {cellValue(r, f) ?? "—"}
+                    </td>
+                  );
                 })}
                 <td className="px-2 py-1.5 text-right">
                   <button type="button" title="แก้ไข" onClick={(e) => { e.stopPropagation(); setPeek({ id: String(r.id), edit: true }); }}
