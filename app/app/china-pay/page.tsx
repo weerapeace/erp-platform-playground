@@ -2059,6 +2059,7 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
   const [mode, setMode] = useState<"list" | "form">("list");
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [editBill, setEditBill] = useState<Record<string, unknown> | null>(null);
+  const [groupTab, setGroupTab] = useState<"ISG" | "IG">("ISG");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -2072,24 +2073,35 @@ function CtwList({ canDelete }: { canDelete?: boolean }) {
     onSaved={() => { setMode("list"); setEditBill(null); load(); }} />;
 
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
-  const unpaid = rows.filter(r => !r.cleared_at);
+  const grpOf = (r: Record<string, unknown>) => (String(r.bill_group ?? "ISG") === "IG" ? "IG" : "ISG");
+  const tabRows = rows.filter(r => grpOf(r) === groupTab);   // กรองตามแท็บกลุ่ม
+  const unpaid = tabRows.filter(r => !r.cleared_at);
   const unclearedTotal = unpaid.reduce((a, r) => a + ctwRemain(r), 0);
 
   return (
     <div className="space-y-3">
       <button onClick={() => { setEditBill(null); setMode("form"); }} className="w-full h-12 bg-orange-600 text-white rounded-xl font-semibold active:scale-[0.99] transition-transform">+ เพิ่มบิล CTW</button>
-      {!loading && rows.length > 0 && (
+      {/* แท็บกลุ่มบริษัท */}
+      <div className="grid grid-cols-2 gap-2">
+        {([{ v: "ISG", l: "ISG" }, { v: "IG", l: "IG International" }] as const).map(g => (
+          <button key={g.v} onClick={() => setGroupTab(g.v)}
+            className={`h-10 rounded-lg border text-sm font-semibold transition ${groupTab === g.v ? "border-orange-400 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-400"}`}>
+            {g.l} <span className="text-[11px] font-normal">({rows.filter(r => grpOf(r) === g.v).length})</span>
+          </button>
+        ))}
+      </div>
+      {!loading && tabRows.length > 0 && (
         <div className="rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white p-4 shadow-sm">
-          <div className="text-sm opacity-90">ยอดคงเหลือยังไม่ตัด ({unpaid.length} บิล)</div>
+          <div className="text-sm opacity-90">ยอดคงเหลือยังไม่ตัด · {groupTab === "IG" ? "IG International" : "ISG"} ({unpaid.length} บิล)</div>
           <div className="text-3xl font-bold mt-1">฿{fmt(unclearedTotal)}</div>
         </div>
       )}
       {loading ? (
         <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>
-      ) : rows.length === 0 ? (
-        <div className="text-center text-slate-300 py-10">— ยังไม่มีบิล CTW —</div>
+      ) : tabRows.length === 0 ? (
+        <div className="text-center text-slate-300 py-10">— ยังไม่มีบิล CTW ในกลุ่มนี้ —</div>
       ) : (
-        rows.map((r) => {
+        tabRows.map((r) => {
           const paid = num(r.cleared_amount), cleared = !!r.cleared_at;
           return (
           <Card key={String(r.id)}>
@@ -2128,6 +2140,7 @@ function CtwForm({ onCancel, onSaved, editBill }: { onCancel: () => void; onSave
   const [net, setNet] = useState(isEdit && editBill!.net_amount != null ? String(num(editBill!.net_amount)) : "");
   const [account, setAccount] = useState(isEdit ? String(editBill!.account_number ?? "") : "");
   const [files, setFiles] = useState<string[]>(isEdit && Array.isArray(editBill!.attachments) ? (editBill!.attachments as unknown[]).map(String) : []);
+  const [billGroup, setBillGroup] = useState(isEdit ? String(editBill!.bill_group ?? "ISG") : "ISG");   // ISG | IG
   const [saving, setSaving] = useState(false);
 
   // เลือกบริษัท → ดึงชื่อ + เลขบัญชีจาก Partners
@@ -2152,7 +2165,7 @@ function CtwForm({ onCancel, onSaved, editBill }: { onCancel: () => void; onSave
       const body = {
         company_name: company, doc_number: docNo || null, doc_date: docDate || null,
         amount_before_tax: num(beforeTax) || null, net_amount: num(net) || null,
-        account_number: account || null, attachments: files, actor: "china-app",
+        account_number: account || null, attachments: files, bill_group: billGroup, actor: "china-app",
       };
       const res = await apiFetch(isEdit ? `/api/master-v2/ctw-bills/${String(editBill!.id)}` : "/api/master-v2/ctw-bills", {
         method: isEdit ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -2169,6 +2182,15 @@ function CtwForm({ onCancel, onSaved, editBill }: { onCancel: () => void; onSave
       <Card>
         <Label>ชื่อบริษัท (เลือกจากที่ติ๊ก “ซื้อบิล”)</Label>
         <RelationPicker value={supplierId} onChange={(id) => setSupplierId(id)} config={CTW_PARTNER_CFG} />
+        {/* กลุ่มบริษัทที่วางบิล */}
+        <div className="mt-3"><Label>บริษัท (กลุ่ม)</Label>
+          <div className="grid grid-cols-2 gap-2">
+            {[{ v: "ISG", l: "ISG" }, { v: "IG", l: "IG International" }].map(g => (
+              <button key={g.v} type="button" onClick={() => setBillGroup(g.v)}
+                className={`h-11 rounded-lg border text-sm font-medium transition ${billGroup === g.v ? "border-orange-400 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-500"}`}>{g.l}</button>
+            ))}
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-3 mt-3">
           <div><Label>เลขที่เอกสาร</Label>
             <input value={docNo} onChange={e => setDocNo(e.target.value)} placeholder="เช่น IV260410015"
@@ -2229,7 +2251,10 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: {
         </div>
         <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-4">
           <div>
-            <div className="font-medium text-slate-800 text-lg">{String(bill.company_name ?? "—")}</div>
+            <div className="flex items-center gap-2">
+              <div className="font-medium text-slate-800 text-lg">{String(bill.company_name ?? "—")}</div>
+              <span className="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">{String(bill.bill_group ?? "ISG") === "IG" ? "IG International" : "ISG"}</span>
+            </div>
             <div className="text-sm text-slate-400">เลขที่เอกสาร {String(bill.doc_number ?? "—")}</div>
           </div>
           <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
@@ -2454,6 +2479,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [lightbox, setLightbox] = useState<string | null>(null);   // รูปสลิปกดดูเต็มจอ
   const [slipProgress, setSlipProgress] = useState<{ done: number; total: number } | null>(null);   // ความคืบหน้าอ่านสลิป
   const [slipLinkIdx, setSlipLinkIdx] = useState<number | null>(null);   // index รายการโอนที่กำลังเลือกบิล CTW ให้ตัด
+  const [linkTab, setLinkTab] = useState<"ISG" | "IG">("ISG");           // แท็บกลุ่มบริษัทในป๊อปอัปจับคู่
   const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -3160,13 +3186,22 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               <span className="font-semibold text-slate-800 truncate">🔗 {s.bank || `รายการ ${i + 1}`} · โอน ฿{fmt(num(s.amount))} ตัดบิลไหน</span>
               <button onClick={() => setSlipLinkIdx(null)} className="w-8 h-8 flex-shrink-0 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
             </div>
+            {/* แท็บกลุ่มบริษัท */}
+            <div className="px-3 pt-2 grid grid-cols-2 gap-2">
+              {([{ v: "ISG", l: "ISG" }, { v: "IG", l: "IG International" }] as const).map(g => (
+                <button key={g.v} onClick={() => setLinkTab(g.v)}
+                  className={`h-9 rounded-lg border text-xs font-semibold transition ${linkTab === g.v ? "border-orange-400 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-400"}`}>
+                  {g.l} <span className="font-normal">({ctw.filter(b => (String(b.bill_group ?? "ISG") === "IG" ? "IG" : "ISG") === g.v).length})</span>
+                </button>
+              ))}
+            </div>
             <div className="p-3 overflow-y-auto space-y-1.5">
               {(() => { const used = Object.values(s.cuts ?? {}).reduce((a, v) => a + num(v), 0); const left = num(s.amount) - used; return (
                 <div className={`text-xs mb-1 ${left < -0.001 ? "text-red-500 font-medium" : "text-slate-400"}`}>
                   ติ๊กบิลที่รายการนี้จ่าย (เลือกได้หลายบิล · บิลซ้ำหลายรายการได้) — ยอดที่ตัดได้อีก ฿{fmt(+Math.max(0, left).toFixed(2))} / โอน ฿{fmt(num(s.amount))}
                 </div>
               ); })()}
-              {ctw.map(b => {
+              {ctw.filter(b => (String(b.bill_group ?? "ISG") === "IG" ? "IG" : "ISG") === linkTab).map(b => {
                 const bid = String(b.id), on = (s.cuts ?? {})[bid] !== undefined;
                 const otherCut = otherSlipsCut(i, bid, txSlips);                 // รายการอื่นตัดบิลนี้ไปแล้ว
                 const otherIdxs = txSlips.map((t, j) => ({ t, j })).filter(({ t, j }) => j !== i && num((t.cuts ?? {})[bid]) > 0).map(({ j }) => j + 1);
@@ -3197,7 +3232,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                   </div>
                 );
               })}
-              {ctw.length === 0 && <div className="text-center text-slate-300 text-sm py-3">— ไม่มีบิล CTW ค้าง —</div>}
+              {ctw.filter(b => (String(b.bill_group ?? "ISG") === "IG" ? "IG" : "ISG") === linkTab).length === 0 && <div className="text-center text-slate-300 text-sm py-3">— ไม่มีบิล CTW ในกลุ่มนี้ —</div>}
             </div>
             <div className="border-t border-slate-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
               <button onClick={() => setSlipLinkIdx(null)} className="w-full h-11 bg-emerald-600 text-white rounded-lg font-semibold">เสร็จ</button>
