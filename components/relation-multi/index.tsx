@@ -5,7 +5,7 @@
  * - RelationMany2Many: เลือกหลายค่า (จัดการ link ใน junction table ทันที)
  * - RelationOne2Many: แสดงรายการลูกที่ชี้กลับมา (read-only)
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
@@ -36,11 +36,10 @@ async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[
 }
 
 // ---- many2many ---- (ค้นหา + เช็คบ็อกซ์ + สร้างใหม่ + เลือกได้ตั้งแต่ตอนสร้าง)
-export function RelationMany2Many({ config, recordId, editable, value, onChange, onToggle }: {
+export function RelationMany2Many({ config, recordId, editable, value, onChange }: {
   config: RelConfig; recordId?: string | null; editable: boolean;
   value?: string[];
-  onChange?: (ids: string[]) => void;        // set ทั้งชุด (fallback)
-  onToggle?: (id: string) => void;           // สลับทีละตัว — parent คำนวณจาก state ล่าสุด (กัน stale/ลบหาย)
+  onChange?: (ids: string[]) => void;        // set ทั้งชุด (parent: updateForm)
 }) {
   void recordId;
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
@@ -55,14 +54,17 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange,
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const linked = value ?? [];
+  // อ่านค่าล่าสุดเสมอตอน toggle (กัน stale closure ระหว่าง render)
+  const valueRef = useRef<string[]>(linked);
+  valueRef.current = linked;
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
   const toggle = (id: string) => {
-    if (onToggle) { onToggle(id); return; }   // ทางหลัก — parent อ่าน state ล่าสุดเอง
-    const next = linked.includes(id) ? linked.filter((x) => x !== id) : [...linked, id];
+    const cur = valueRef.current;
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
     onChange?.(next);
   };
   const createNew = async () => {

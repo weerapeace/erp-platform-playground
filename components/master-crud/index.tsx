@@ -1372,7 +1372,6 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           <div className="mt-0.5">
             <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={!disabled}
               value={Array.isArray(form[f.key]) ? (form[f.key] as string[]) : undefined}
-              onToggle={(id) => { setForm(p => { const cur = Array.isArray(p[f.key]) ? (p[f.key] as string[]) : []; const next = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]; return { ...p, [f.key]: next }; }); setDirty(true); }}
               onChange={(ids) => updateForm({ [f.key]: ids })} />
           </div>
         ) : f.type === "one2many" ? (
