@@ -74,6 +74,7 @@ function registryToFieldDef(
   const fieldType: FieldDef["type"] =
     rf.ui_field_type === "boolean" ? "boolean"
     : rf.ui_field_type === "number" ? "number"
+    : rf.ui_field_type === "date" ? "date"
     : rf.ui_field_type === "relation" ? "relation"
     : rf.ui_field_type === "image" ? "image"
     : rf.ui_field_type === "select" ? "select"
@@ -239,7 +240,7 @@ export type FieldDef = {
   /** F11B: erp_module_fields.id — ใช้ตอน Studio บันทึก layout (group/order) */
   fieldId?:   string;
   label:      string;
-  type:       "text" | "number" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many" | "computed";
+  type:       "text" | "number" | "date" | "boolean" | "select" | "textarea" | "relation" | "image" | "many2many" | "one2many" | "computed";
   /** computed: สูตรคำนวณ เช่น "qty * price_est" (อ้างชื่อ field ในระเบียนเดียวกัน) */
   formula?:   string;
   /** computed: สูตรข้อความสำเร็จรูป (lib/computed-text) — ให้ผลเป็นข้อความ */
@@ -552,6 +553,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // form drawer
   const [modalOpen,   setModalOpen]   = useState(false);
   const [editingId,   setEditingId]   = useState<string | null>(null);
+  // แถวที่แสดงในตาราง (ตามลำดับ) — ใช้ปุ่มเลื่อนรายการก่อนหน้า/ถัดไปในป๊อปอัป
+  const navRowsRef = useRef<Row[]>([]);
+  const onVisibleRowsChange = useCallback((rows: Row[]) => { navRowsRef.current = rows; }, []);
   const [form,        setForm]        = useState<Record<string, unknown>>({});
   const [formErr,     setFormErr]     = useState<string | null>(null);
   const [dirty,       setDirty]       = useState(false);
@@ -688,7 +692,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const e: Record<string, unknown> = {};
     effectiveFields.forEach(f => {
       // many2many/one2many/computed ไม่มี default ที่ resolveDefault รองรับ → fallback เป็น text
-      const dtype = (f.type === "many2many" || f.type === "one2many" || f.type === "computed") ? "text" : f.type;
+      const dtype = (f.type === "many2many" || f.type === "one2many" || f.type === "computed" || f.type === "date") ? "text" : f.type;
       e[f.key] = resolveDefault(dtype, f.defaultValue, f.defaultExpression, user?.email ?? null);
     });
     return e;
@@ -1276,6 +1280,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               className="rounded border-slate-300" />
             <span className="ml-2 text-xs text-slate-500">{v ? "เปิด" : "ปิด"}</span>
           </div>
+        ) : f.type === "date" ? (
+          <input
+            type="date"
+            disabled={disabled}
+            value={String((v as string | null | undefined) ?? "").slice(0, 10)}
+            onChange={e => updateForm({ [f.key]: e.target.value })}
+            style={tStyle}
+            className={common}
+          />
         ) : (
           <input
             type={f.type === "number" ? "number" : "text"}
@@ -1495,6 +1508,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           canCheck={(p) => can(p as Parameters<typeof can>[0])}
           pageSize={config.serverMode ? 50 : 20}
           onRowClick={openEdit}
+          onVisibleRowsChange={onVisibleRowsChange}
           serverFetch={config.serverMode ? serverFetch : undefined}
           serverRefreshKey={config.serverMode ? serverRefresh : undefined}
           enableCards={true}
@@ -1523,6 +1537,21 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         footer={
           drawerMode === "view" ? (
             <>
+              {/* เลื่อนรายการก่อนหน้า/ถัดไป (ในรายการที่แสดงอยู่) */}
+              {editingId && (() => {
+                const list = navRowsRef.current;
+                const idx = list.findIndex((r) => String(r.id) === String(editingId));
+                const go = (dir: 1 | -1) => { const nxt = list[idx + dir]; if (nxt) openEdit(nxt); };
+                return (
+                  <div className="mr-auto flex items-center gap-1">
+                    <button onClick={() => go(-1)} disabled={idx <= 0}
+                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title="รายการก่อนหน้า">◀ ก่อนหน้า</button>
+                    <button onClick={() => go(1)} disabled={idx < 0 || idx >= list.length - 1}
+                      className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title="รายการถัดไป">ถัดไป ▶</button>
+                    {idx >= 0 && <span className="text-xs text-slate-400 ml-1">{idx + 1}/{list.length}</span>}
+                  </div>
+                );
+              })()}
               <button onClick={() => setModalOpen(false)}
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">ปิด</button>
               {canEdit && (
