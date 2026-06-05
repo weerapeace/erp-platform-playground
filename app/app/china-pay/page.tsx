@@ -2386,8 +2386,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
   const [thbSel, setThbSel] = useState<Set<string>>(new Set());  // บิลค่าส่ง/VAT (บาท) ที่เลือกตัดรอบนี้
   const thbToggle = (id: string) => setThbSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const [showBills, setShowBills] = useState(false);   // ย่อ/ขยายการ์ด "ยอดรวมที่ตัดรอบนี้"
-  const [useBalance, setUseBalance] = useState(false);          // สวิตช์ใช้ยอดคงเหลือบัญชีจีน
+  const [showBills, setShowBills] = useState(true);   // ย่อ/ขยายการ์ด "ยอดที่ต้องโอนรอบนี้" (default ขยาย)
+  const [useBalance, setUseBalance] = useState(true);           // สวิตช์ใช้ยอดคงเหลือบัญชีจีน (default เปิด)
   const [amount, setAmount] = useState("");
   const [refNo, setRefNo] = useState("");                       // หมายเลข/เลขอ้างอิงการโอน
   const [rate, setRate] = useState("");
@@ -2430,6 +2430,43 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     }).finally(() => setLoading(false));
   }, []);
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // ---- Auto-save draft (localStorage) — เผลอปิดแล้วเปิดใหม่ → คืนค่า ----
+  const draftRestored = useRef(false);
+  useEffect(() => {
+    if (draftRestored.current) return;
+    draftRestored.current = true;
+    if (preselect.length) return;   // มาจาก deep-link "กดโอน" → ไม่ต้องคืน draft
+    try {
+      const raw = localStorage.getItem("china-tx-draft");
+      if (!raw) return;
+      const d = JSON.parse(raw) as Record<string, unknown>;
+      if (Array.isArray(d.sel) && d.sel.length) setSel(new Set(d.sel.map(String)));
+      if (d.pay && typeof d.pay === "object") setPay(d.pay as Record<string, string>);
+      if (Array.isArray(d.thbSel) && d.thbSel.length) setThbSel(new Set(d.thbSel.map(String)));
+      if (Array.isArray(d.ctwSel) && d.ctwSel.length) setCtwSel(new Set(d.ctwSel.map(String)));
+      if (d.ctwPay && typeof d.ctwPay === "object") setCtwPay(d.ctwPay as Record<string, string>);
+      if (Array.isArray(d.ctwEdited) && d.ctwEdited.length) setCtwEdited(new Set(d.ctwEdited.map(String)));
+      if (typeof d.amount === "string") setAmount(d.amount);
+      if (typeof d.refNo === "string") setRefNo(d.refNo);
+      if (typeof d.note === "string") setNote(d.note);
+      if (typeof d.useBalance === "boolean") setUseBalance(d.useBalance);
+      if (Array.isArray(d.txSlips)) setTxSlips(d.txSlips as TxSlip[]);
+      if (typeof d.step === "number") setStep(d.step);
+      toast.success("คืนค่างานที่ทำค้างไว้");
+    } catch { /* draft เสีย — ข้าม */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    const hasData = sel.size > 0 || thbSel.size > 0 || ctwSel.size > 0 || txSlips.length > 0 || num(amount) > 0;
+    try {
+      if (hasData) localStorage.setItem("china-tx-draft", JSON.stringify({
+        sel: [...sel], pay, thbSel: [...thbSel], ctwSel: [...ctwSel], ctwPay, ctwEdited: [...ctwEdited],
+        amount, refNo, note, useBalance, txSlips, step,
+      }));
+      else localStorage.removeItem("china-tx-draft");
+    } catch { /* noop */ }
+  }, [sel, pay, thbSel, ctwSel, ctwPay, ctwEdited, amount, refNo, note, useBalance, txSlips, step]);
 
   // โหลดเรท R1 ตาม "วันที่โอน" (ถ้าไม่มีเรทวันนั้น → ว่าง = รอเรทเงิน)
   useEffect(() => {
@@ -2725,8 +2762,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
         lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum, attachments: slipKeys,
       });
-      setSel(new Set()); setPay({}); setThbSel(new Set()); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(false);
+      setSel(new Set()); setPay({}); setThbSel(new Set()); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(true);
       setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1);
+      try { localStorage.removeItem("china-tx-draft"); } catch { /* noop */ }
       loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
@@ -2740,6 +2778,26 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     .sort((a, b) => String(a.doc_date ?? "").localeCompare(String(b.doc_date ?? "")))[0];
   const oldestPartner = oldestCtw ? partnerByName[String(oldestCtw.company_name ?? "").trim()] : undefined;
 
+  // การ์ดบัญชีปลายทาง (บิล CTW ค้างเก่าสุด) — โชว์ทั้ง step 1 และ step 2
+  const accountCard = oldestCtw ? (
+    <div className="rounded-xl bg-orange-50 border border-orange-200 p-3">
+      <div className="text-xs text-orange-700 font-medium mb-1">🏦 บัญชีที่ต้องโอนไป (บิลค้างเก่าสุด)</div>
+      <div className="font-semibold text-slate-800 text-sm">{String(oldestPartner?.bank_account_name ?? oldestCtw.company_name ?? "—")}</div>
+      {(() => { const bn = String(oldestPartner?.bank_name_label ?? oldestPartner?.bank_name_brief ?? ""); return bn ? <div className="text-xs text-slate-500">{bn}</div> : null; })()}
+      {(() => {
+        const acc = String(oldestPartner?.account_number ?? oldestCtw.account_number ?? "");
+        return acc ? (
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <span className="text-2xl font-bold tracking-wide text-slate-900">{acc}</span>
+            <button type="button" onClick={() => { navigator.clipboard?.writeText(acc); toast.success("คัดลอกเลขบัญชีแล้ว"); }}
+              className="flex-shrink-0 h-9 px-3 rounded-lg bg-orange-600 text-white text-xs font-medium active:scale-95 transition">📋 คัดลอก</button>
+          </div>
+        ) : <div className="mt-1 text-xs text-slate-400">— ไม่พบเลขบัญชีใน Partners —</div>;
+      })()}
+      <div className="mt-1 text-[11px] text-slate-400">เลขที่ {String(oldestCtw.doc_number ?? "—")} · ค้าง ฿{fmt(ctwRemain(oldestCtw))}</div>
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-4 pb-[150px]">
       {/* มุมขวาบน: เรทวันนี้ + ปุ่มขอเรท */}
@@ -2747,21 +2805,22 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasRate ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
           {hasRate ? `เรทวันนี้ ${fmt(r1)}` : "ยังไม่มีเรทวันนี้"}
         </span>
-        <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>
+        {/* ซ่อนปุ่มขอเรท ถ้าวันนี้มีเรทแล้ว */}
+        {!hasRate && <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>}
       </div>
 
-      {/* ยอดรวมที่ตัดรอบนี้ — กดย่อ/ขยายดูรายการบิลได้ */}
+      {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ) — กดย่อ/ขยายดูรายการ */}
       <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
         <button type="button" onClick={() => setShowBills(v => !v)} className="w-full text-left">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-500">🧾 ยอดรวมที่ตัดรอบนี้</span>
+            <span className="text-sm text-slate-500">💸 ยอดที่ต้องโอนรอบนี้</span>
             <span className="text-[11px] text-slate-400">{showBills ? "ย่อ ▲" : "ดูรายการ ▼"}</span>
           </div>
-          <div className="flex justify-between items-baseline mt-1">
-            <span className="text-sm text-slate-500">บิลจีน ({sel.size}){thbSel.size > 0 ? ` + ค่าส่ง/VAT (${thbSel.size})` : ""}</span>
-            <span className="text-3xl font-extrabold text-slate-800">¥{fmt(selectedRmb)}</span>
+          <div className="flex justify-between items-baseline mt-1 gap-2">
+            <span className="text-xs text-slate-500 flex-shrink-0">บิลจีน ({sel.size}){thbSel.size > 0 ? ` + ค่าส่ง/VAT (${thbSel.size})` : ""}</span>
+            <span className="text-3xl font-extrabold text-emerald-700">{minTransfer > 0 ? `฿${fmt(minTransfer)}` : "รอเรท"}</span>
           </div>
-          {hasRate && selectedSum > 0 && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ฿{fmt(selectedSum)}</div>}
+          {hasRate && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ¥{fmt(selectedRmb)}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}{useBalance && chinaCoverThb > 0 ? ` · หักคงเหลือ ฿${fmt(chinaCoverThb)}` : ""}</div>}
         </button>
         {showBills && (
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-sm">
@@ -2781,11 +2840,23 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         )}
       </div>
 
-      {/* ยอดคงเหลือในบัญชีจีน — การ์ดเล็ก (toggle ย้ายไปกล่องสรุปด้านล่าง) */}
-      {step === 2 && (
-        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-2.5 flex items-center justify-between">
-          <span className="text-xs font-medium text-emerald-700">💰 ยอดคงเหลือในบัญชีจีน</span>
-          <span className="text-right"><span className="font-bold text-emerald-800">¥{fmt(balance.rmb)}</span><span className="text-[11px] text-emerald-600 ml-1.5">≈ ฿{fmt(balance.thb)}</span></span>
+      {/* ยอดคงเหลือในบัญชีจีน — การ์ดเล็ก + toggle (default เปิด) · โชว์ step 1+2 */}
+      {(step === 1 || step === 2) && (
+        <div className={`rounded-xl border px-4 py-2.5 ${needBalance ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-emerald-700">💰 ยอดคงเหลือในบัญชีจีน</span>
+            <span className="text-right"><span className="font-bold text-emerald-800">¥{fmt(balance.rmb)}</span><span className="text-[11px] text-emerald-600 ml-1.5">≈ ฿{fmt(balance.rmb * (effRate || r1))}</span></span>
+          </div>
+          {balance.rmb > 0 && (
+            <label className="mt-1.5 flex items-center justify-between gap-2 cursor-pointer">
+              <span className="text-[11px] text-slate-600">ใช้ยอดคงเหลือช่วยจ่าย{needBalance ? " (จำเป็น)" : ""} — หักจากยอดที่ต้องโอน</span>
+              <span className="relative inline-flex flex-shrink-0">
+                <input type="checkbox" checked={useBalance} onChange={e => setUseBalance(e.target.checked)} className="sr-only peer" />
+                <span className="w-9 h-5 bg-slate-300 rounded-full peer-checked:bg-emerald-500 transition" />
+                <span className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition peer-checked:translate-x-4" />
+              </span>
+            </label>
+          )}
         </div>
       )}
 
@@ -2804,10 +2875,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
       {/* STEP 1: เลือกบิลจีน */}
       {step === 1 && (<>
+      {accountCard}
       {/* บิลค่าส่ง / VAT (บาท) — โชว์บนสุด กรอบคนละสี */}
       {pendingThb.length > 0 && (
         <Card>
-          <div className="font-semibold text-slate-800 mb-2">บิลค่าส่ง / VAT (บาท)</div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-semibold text-slate-800">บิลค่าส่ง / VAT (บาท)</span>
+            {thbSel.size > 0 && <span className="text-xs font-bold text-slate-700">รวม ฿{fmt(thbSelTotal)}</span>}
+          </div>
           <div className="space-y-2">
             {pendingThb.map((r) => {
               const id = String(r.id), on = thbSel.has(id);
@@ -2829,17 +2904,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               );
             })}
           </div>
-          {thbSel.size > 0 && (
-            <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
-              {shippingSelTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">ค่าส่ง</span><span className="font-medium text-purple-700">฿{fmt(shippingSelTotal)}</span></div>}
-              {vatSelTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">VAT</span><span className="font-medium text-rose-700">฿{fmt(vatSelTotal)}</span></div>}
-            </div>
-          )}
         </Card>
       )}
 
       <Card>
-        <div className="font-semibold text-slate-800 mb-2">เลือกบิลที่จะตัด (รอโอน)</div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-semibold text-slate-800">เลือกบิลที่จะตัด (รอโอน)</span>
+          {sel.size > 0 && <span className="text-xs font-bold text-slate-700">{sel.size} บิล · ¥{fmt(selectedRmb)}{hasRate ? ` ≈ ฿${fmt(selectedSum)}` : ""}</span>}
+        </div>
         {pendingChina.length === 0 ? (
           <div className="text-center text-slate-300 py-6 text-sm">— ไม่มีบิลจีนรอโอน —</div>
         ) : (
@@ -2850,16 +2922,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               const remainThb = remain * effRate;
               return (
                 <div key={id} className={`rounded-lg border ${on ? "border-emerald-400 bg-emerald-50" : "border-slate-200"}`}>
-                  <button onClick={() => toggle(id, remain)} className="w-full flex items-center gap-3 p-2.5 text-left">
+                  <button onClick={() => toggle(id, remain)} className="w-full flex items-center gap-2 p-2 text-left">
                     <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
-                      <span className="block text-xs text-slate-400">{hasRate ? `฿${fmt(remainThb)}` : "รอเรท"} · {String(r.transfer_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ¥${fmt(paid)}` : ""}</span>
+                      <span className="block text-sm font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
+                      <span className="block text-[10px] text-slate-400 truncate">{hasRate ? `฿${fmt(remainThb)}` : "รอเรท"} · {String(r.transfer_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ¥${fmt(paid)}` : ""}</span>
                     </span>
-                    <span className="text-right flex-shrink-0">
-                      <span className="block font-bold text-slate-800">¥{fmt(remain)}</span>
-                      {paid > 0 && <span className="block text-[10px] text-slate-400">เต็ม ¥{fmt(billTotalRmb(r))}</span>}
-                    </span>
+                    <span className="font-bold text-slate-800 flex-shrink-0">¥{fmt(remain)}</span>
                   </button>
                   {on && (() => {
                     const over = num(pay[id]) > remain + 0.001;
@@ -2877,17 +2946,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                 </div>
               );
             })}
-          </div>
-        )}
-        {sel.size > 0 && (
-          <div className="mt-3 rounded-xl bg-emerald-50 border border-emerald-100 p-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-slate-500">เลือก {sel.size} บิล · ยอดที่ตัดรอบนี้</span>
-              <span className="text-right">
-                <span className="font-bold text-slate-800">¥{fmt(selectedRmb)}</span>
-                {hasRate && <span className="block text-[11px] text-slate-400">≈ ฿{fmt(selectedSum)}</span>}
-              </span>
-            </div>
           </div>
         )}
       </Card>
@@ -2922,25 +2980,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             <div className="flex justify-between border-t border-slate-200 pt-1 mt-1"><span className="text-slate-600 font-medium">รวมรอบนี้</span><span className="font-bold text-emerald-700">฿{fmt(roundTotalThb)}</span></div>
           </div>
         )}
-        {/* บัญชีที่ต้องโอนไป = บริษัท CTW ค้างเก่าสุด */}
-        {oldestCtw && (
-          <div className="mb-3 rounded-xl bg-orange-50 border border-orange-200 p-3">
-            <div className="text-xs text-orange-700 font-medium mb-1">🏦 บัญชีที่ต้องโอนไป (บิลค้างเก่าสุด)</div>
-            <div className="font-semibold text-slate-800 text-sm">{String(oldestPartner?.bank_account_name ?? oldestCtw.company_name ?? "—")}</div>
-            {(() => { const bn = String(oldestPartner?.bank_name_label ?? oldestPartner?.bank_name_brief ?? ""); return bn ? <div className="text-xs text-slate-500">{bn}</div> : null; })()}
-            {(() => {
-              const acc = String(oldestPartner?.account_number ?? oldestCtw.account_number ?? "");
-              return acc ? (
-                <div className="mt-1 flex items-center justify-between gap-2">
-                  <span className="text-2xl font-bold tracking-wide text-slate-900">{acc}</span>
-                  <button type="button" onClick={() => { navigator.clipboard?.writeText(acc); toast.success("คัดลอกเลขบัญชีแล้ว"); }}
-                    className="flex-shrink-0 h-9 px-3 rounded-lg bg-orange-600 text-white text-xs font-medium active:scale-95 transition">📋 คัดลอก</button>
-                </div>
-              ) : <div className="mt-1 text-xs text-slate-400">— ไม่พบเลขบัญชีใน Partners —</div>;
-            })()}
-            <div className="mt-1 text-[11px] text-slate-400">เลขที่ {String(oldestCtw.doc_number ?? "—")} · ค้าง ฿{fmt(ctwRemain(oldestCtw))}</div>
-          </div>
-        )}
+        {/* บัญชีที่ต้องโอนไป */}
+        {accountCard && <div className="mb-3">{accountCard}</div>}
         {/* จำนวนเงินที่โอนจริง (เต็มความกว้าง) + ปุ่มแนบสลิป */}
         <div>
           <Label>จำนวนเงินที่โอนจริง (฿)</Label>
@@ -2979,19 +3020,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             <div className="flex justify-between"><span className="text-slate-500">เป็นเงินจีน</span><span className="text-amber-600">รอเรทเงิน</span></div>
           )}
 
-          {/* Toggle ใช้ยอดคงเหลือในบัญชีจีน */}
-          {hasRate && selectedRmb > 0 && (needBalance || balance.rmb > 0) && (
-            <label className={`flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 my-1 cursor-pointer border ${needBalance ? "bg-amber-50 border-amber-200" : "bg-white border-slate-200"}`}>
-              <span className="text-xs font-medium text-slate-700">ใช้ยอดคงเหลือในบัญชีจีนช่วยจ่าย{needBalance ? " (จำเป็น)" : ""}</span>
-              <span className="relative inline-flex flex-shrink-0">
-                <input type="checkbox" checked={useBalance} onChange={e => setUseBalance(e.target.checked)} className="sr-only peer" />
-                <span className="w-9 h-5 bg-slate-300 rounded-full peer-checked:bg-emerald-500 transition" />
-                <span className="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition peer-checked:translate-x-4" />
-              </span>
-            </label>
-          )}
-
-          {/* หัก บัญชีจีน (ส่วนที่ขาด) — ดึงจากยอดคงเหลือ */}
+          {/* หัก บัญชีจีน (ส่วนที่ขาด) — ดึงจากยอดคงเหลือ (toggle อยู่การ์ดยอดคงเหลือด้านบน) */}
           {hasRate && shortfallRmb > 0.0001 && (
             <div className="flex justify-between"><span className="text-slate-500">หัก ยอดคงเหลือจีน (ส่วนขาด)</span><span className="text-orange-600">¥{fmt(+shortfallRmb.toFixed(2))}</span></div>
           )}
