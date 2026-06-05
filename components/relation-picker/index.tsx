@@ -364,7 +364,7 @@ export function RelationPicker({
       {showCreate !== null && config.target_module_key && (
         <RecordFormModal
           moduleKey={config.target_module_key}
-          title={`สร้าง ${config.target_label_field ?? "รายการ"}`}
+          title="เพิ่มรายการใหม่"
           presetLabelField={config.target_label_field}
           presetValue={showCreate}
           onClose={() => setShowCreate(null)}
@@ -376,7 +376,7 @@ export function RelationPicker({
       {showEdit !== null && config.target_module_key && (
         <RecordFormModal
           moduleKey={config.target_module_key}
-          title={`แก้ไข ${config.target_label_field ?? "รายการ"}`}
+          title="แก้ไขข้อมูล"
           editId={showEdit}
           onClose={() => setShowEdit(null)}
           onSaved={(id, label) => {

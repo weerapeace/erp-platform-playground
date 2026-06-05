@@ -79,7 +79,11 @@ export function RecordFormModal({
     setSaving(true); setErr(null);
     try {
       const body: Record<string, unknown> = { actor: user?.name };
-      fields.forEach((fd) => { body[fd.field_key] = form[fd.field_key]; });
+      fields.forEach((fd) => {
+        const v = form[fd.field_key];
+        // ช่องว่าง "" → null (กัน error ฟิลด์ตัวเลข/วันที่ที่ไม่ได้กรอก: invalid input syntax for type numeric)
+        body[fd.field_key] = v === "" ? null : v;
+      });
       if (preset) Object.assign(body, preset);   // FK ตายตัว (เช่น group_id) ต้องถูกส่งเสมอ
       const res = await apiFetch(
         editId ? `/api/master-v2/${moduleKey}/${editId}` : `/api/master-v2/${moduleKey}`,
