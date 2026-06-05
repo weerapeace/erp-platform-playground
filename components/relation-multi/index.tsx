@@ -46,7 +46,8 @@ function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    apiFetch(`/api/master-v2/${moduleKey}?limit=500&include_inactive=true`).then((r) => r.json())
+    // ไม่เอา include_inactive → แท็กที่ลบแล้ว (is_active=false) จะหายไปจากรายการ (ลบแล้วเห็นว่าหายจริง)
+    apiFetch(`/api/master-v2/${moduleKey}?limit=500`).then((r) => r.json())
       .then((j) => setRows(((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({ id: String(r.id), label: String(r[labelField] ?? r.name ?? r.id) }))))
       .catch(() => {});
   }, [moduleKey, labelField]);
