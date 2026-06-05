@@ -53,55 +53,42 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const isCreate = !recordId;
 
   const [opts, setOpts] = useState<Opt[]>([]);
-  const [serverLinked, setServerLinked] = useState<string[] | null>(isCreate ? [] : null); // null = กำลังโหลด (โหมดแก้ไข)
+  // selected = แหล่งแสดงผล "ของ widget เอง" (ไม่หน่วง, ไม่ผ่าน value/form ที่ lag)
+  //   null = โหมดแก้ไขยังโหลดลิงก์เดิมไม่เสร็จ
+  const [selected, setSelected] = useState<string[] | null>(isCreate ? (value ?? []) : null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // แหล่งแสดงผล: สร้าง = form(value), แก้ไข = serverLinked
-  const linked = isCreate ? (value ?? []) : (serverLinked ?? []);
-  const loading = !isCreate && serverLinked === null;
-  // ref ค่าล่าสุด (กัน stale ตอนคลิกถี่)
+  const loading = !isCreate && selected === null;
+  const linked = selected ?? [];
+  // ref ค่าล่าสุด (อัปเดตทันทีตอน toggle) → คลิกถี่ ๆ ไม่เพี้ยน
   const linkedRef = useRef<string[]>(linked);
   linkedRef.current = linked;
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
 
-  // โหลดลิงก์เดิม (โหมดแก้ไขเท่านั้น)
+  // โหลดลิงก์เดิม (โหมดแก้ไข) → ใส่ใน selected + mirror ไป form (สำหรับบันทึก)
   useEffect(() => {
     if (isCreate || !junction || !recordId) return;
-    setServerLinked(null);
+    setSelected(null);
     apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`)
-      .then((r) => r.json()).then((j) => setServerLinked((j.links ?? []) as string[]))
-      .catch(() => setServerLinked([]));
+      .then((r) => r.json())
+      .then((j) => { const ids = (j.links ?? []) as string[]; setSelected(ids); onChange?.(ids); })
+      .catch(() => { setSelected([]); onChange?.([]); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordId, junction]);
 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
-  const reloadLinks = () => {
-    if (!junction || !recordId) return;
-    apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`)
-      .then((r) => r.json()).then((j) => setServerLinked((j.links ?? []) as string[])).catch(() => {});
-  };
-
-  const toggle = async (id: string) => {
+  // toggle: อัปเดต state ของ widget ทันที (จอไม่เพี้ยน) + mirror ไป form (บันทึกตอนกด "บันทึก")
+  const toggle = (id: string) => {
     if (loading) return;
     const cur = linkedRef.current;
-    const has = cur.includes(id);
-    const next = has ? cur.filter((x) => x !== id) : [...cur, id];
-    linkedRef.current = next;   // อัปเดต ref ทันที → คลิกถี่ ๆ ติดกันใช้ค่าล่าสุดเสมอ (กันแท็กแรกหาย)
-    if (isCreate) { onChange?.(next); return; }   // โหมดสร้าง → เก็บใน form
-    // โหมดแก้ไข → อัปเดตจอทันที + ผูก/ถอดที่ DB (พลาด = โหลดใหม่จาก DB)
-    setServerLinked(next);
-    setBusy(true);
-    try {
-      const res = await apiFetch("/api/admin/schema/m2m-links", {
-        method: has ? "DELETE" : "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-    } catch { reloadLinks(); } finally { setBusy(false); }
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    linkedRef.current = next;
+    setSelected(next);
+    onChange?.(next);
   };
   const createNew = async () => {
     const name = q.trim();

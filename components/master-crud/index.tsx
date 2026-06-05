@@ -937,9 +937,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       if (json.error) throw new Error(json.error);
       flash(editingId ? "บันทึกแล้ว" : "สร้างใหม่แล้ว");
       setDirty(false);
-      // ผูกลิงก์ m2m เฉพาะตอน "สร้างใหม่" (โหมดแก้ไข widget จัดการเองต่อคลิกแล้ว)
-      const srcId = String((json.data as Record<string, unknown> | undefined)?.id ?? "");
-      if (!editingId && srcId) {
+      // ผูก/ถอดลิงก์ m2m ให้ตรงกับที่เลือก (widget mirror ค่าเข้า form แล้ว) — ทั้งสร้างและแก้ไข
+      const srcId = String((json.data as Record<string, unknown> | undefined)?.id ?? editingId ?? "");
+      if (srcId) {
         for (const fd of effectiveFields) {
           if (fd.type !== "many2many") continue;
           const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
