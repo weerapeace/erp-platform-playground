@@ -368,7 +368,7 @@ export default function ChinaPayApp() {
           {renderTab === "rate" && <RateTab />}
           {renderTab === "ctw" && <CtwList canDelete={isAdmin} />}
           {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
-          {renderTab === "transfers" && <TransferList canDelete={isAdmin} />}
+          {renderTab === "transfers" && <TransferList canDelete={isAdmin} onGo={go} />}
           {renderTab === "automation" && <AutomationPage />}
           {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
         </main>
@@ -2358,17 +2358,19 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
 }
 
 // ---------------- รายการที่โอนแล้ว (ประวัติการโอน) ----------------
-function TransferList({ canDelete }: { canDelete?: boolean }) {
+function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: string) => void }) {
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [pmap, setPmap] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
   const [delTarget, setDelTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังยืนยันลบ
+  const [editTarget, setEditTarget] = useState<Record<string, unknown> | null>(null); // การโอนที่กำลังยืนยันแก้ไข (ลบ+เริ่มใหม่)
   const [busy, setBusy] = useState(false);
 
   // ลบรายการโอน + คืนยอดบิลที่เกี่ยวข้อง (paid_rmb / cleared_amount คำนวณใหม่จากการโอนที่เหลือ)
-  const removeTransfer = async (target: Record<string, unknown>) => {
+  // redo=true → หลังคืนยอด เติม draft กลับหน้าโอนให้แก้ต่อ
+  const removeTransfer = async (target: Record<string, unknown>, redo = false) => {
     const id = String(target.id);
     const linesOf = (t: Record<string, unknown>) => (Array.isArray(t.lines) ? (t.lines as Record<string, unknown>[]) : []);
     setBusy(true);
@@ -2398,9 +2400,26 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
       }
 
       setRows(p => p.filter(x => String(x.id) !== id));
-      toast.success("ลบรายการโอน + คืนยอดบิลแล้ว");
+      if (redo) {
+        // เติม draft จากรายการเดิม → เปิดหน้าโอนให้แก้ต่อ
+        const china = tl.filter(l => l.kind === "china"), thb = tl.filter(l => l.kind === "thb");
+        const txSlips = Array.isArray(target.tx_slips) ? target.tx_slips : [];
+        const draft = {
+          sel: china.map(l => String(l.bill_id)),
+          pay: Object.fromEntries(china.map(l => [String(l.bill_id), String(num(l.paid_rmb))])),
+          thbSel: thb.map(l => String(l.bill_id)),
+          amount: String(num(target.amount_transferred_thb)),
+          refNo: String(target.ref_no ?? ""), note: String(target.note ?? ""),
+          useBalance: true, txSlips, step: 1,
+        };
+        try { localStorage.setItem("china-tx-draft", JSON.stringify(draft)); } catch { /* noop */ }
+        toast.success("คืนยอดบิลแล้ว — เปิดหน้าโอนให้แก้ต่อ");
+        onGo?.("transfer");
+      } else {
+        toast.success("ลบรายการโอน + คืนยอดบิลแล้ว");
+      }
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
-    finally { setBusy(false); setDelTarget(null); }
+    finally { setBusy(false); setDelTarget(null); setEditTarget(null); }
   };
 
   useEffect(() => {
@@ -2441,10 +2460,15 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
         );
       })}
       {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)}
+        onEdit={canDelete && onGo ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setEditTarget(raw); setReceipt(null); } } : undefined}
         onDelete={canDelete ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setDelTarget(raw); setReceipt(null); } } : undefined} />}
       {delTarget && (
         <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
           confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
+      )}
+      {editTarget && (
+        <ConfirmPopup title="แก้ไขรายการโอนนี้?" message={`เลขโอน ${String(editTarget.transfer_no ?? "—")} · ฿${fmt(num(editTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลกลับ แล้วเปิดหน้าโอนพร้อมข้อมูลเดิมให้แก้ต่อ`}
+          confirmText="แก้ไข (คืนยอด+เริ่มใหม่)" onCancel={() => setEditTarget(null)} onConfirm={() => removeTransfer(editTarget, true)} />
       )}
     </div>
   );
@@ -3270,7 +3294,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 }
 
 // ---------------- ใบสรุปการโอน (โหลดเป็นรูปได้) ----------------
-function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void }) {
+function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void; onEdit?: () => void }) {
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState(false);
@@ -3524,8 +3548,15 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete }: { t: Recor
           <button onClick={sendLineImage} disabled={busy} className="w-full h-12 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{busy ? "กำลังส่ง…" : "📩 ส่งไลน์ (รูป) + สลิป"}</button>
           <button onClick={async () => { setBusy(true); await pushTransferLine(t, toast); setBusy(false); }} disabled={busy}
             className="w-full h-11 border border-[#06C755] text-[#06C755] rounded-lg text-sm font-medium disabled:opacity-50">📩 ส่งไลน์ (ข้อความ)</button>
-          {onDelete && (
-            <button onClick={onDelete} className="w-full h-11 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100">🗑 ลบรายการโอน (คืนยอดบิล)</button>
+          {(onEdit || onDelete) && (
+            <div className="grid grid-cols-2 gap-2">
+              {onEdit && (
+                <button onClick={onEdit} className="h-11 border border-amber-300 text-amber-700 bg-amber-50 rounded-lg text-sm font-medium hover:bg-amber-100">✏️ แก้ไขรายการนี้</button>
+              )}
+              {onDelete && (
+                <button onClick={onDelete} className="h-11 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100">🗑 ลบ (คืนยอดบิล)</button>
+              )}
+            </div>
           )}
         </div>
       </div>
