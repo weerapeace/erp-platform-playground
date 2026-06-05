@@ -306,6 +306,8 @@ export interface DataTableProps<T extends Record<string, unknown>> {
   serverFetch?: (params: ServerFetchParams) => Promise<{ rows: T[]; total: number }>;
   /** trigger refetch (เปลี่ยนค่า → โหลดใหม่) */
   serverRefreshKey?: number;
+  /** แจ้งแถวที่แสดงอยู่ (ตามลำดับ) ออกไป — ใช้ทำปุ่มเลื่อนรายการก่อนหน้า/ถัดไปในป๊อปอัป */
+  onVisibleRowsChange?: (rows: T[]) => void;
   /** เปิด Card view (toggle table/cards) — ถ้าระบุจะมีปุ่มสลับ */
   enableCards?: boolean;
   /** Card config เริ่มต้น (ถ้าไม่ระบุ — auto-detect จาก columns) */
@@ -465,6 +467,7 @@ export function DataTable<T extends Record<string, unknown>>({
   onInlineEdit,
   serverFetch,
   serverRefreshKey = 0,
+  onVisibleRowsChange,
   enableCards,
   cardConfig,
   defaultViewMode = "table",
@@ -966,6 +969,9 @@ export function DataTable<T extends Record<string, unknown>>({
     }
     return d;
   }, [isServer, srvRows, srvGroupRows, groupBy, data, activeView, views, colFilterValues, filterableFromColumns, globalSearch, searchableKeys]);
+
+  // แจ้งแถวที่แสดงอยู่ออกไป (สำหรับปุ่มเลื่อนรายการในป๊อปอัป)
+  useEffect(() => { onVisibleRowsChange?.(filteredData); }, [filteredData, onVisibleRowsChange]);
 
   // ---- Column building ----
   // แสดง checkbox เลือกแถว เมื่อมี bulk actions หรือ bulk edit
