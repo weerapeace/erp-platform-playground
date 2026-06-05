@@ -2828,6 +2828,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
             {thbSelTotal > 0 && (
               <div className="flex justify-between gap-2"><span className="text-slate-600 font-medium">รวมค่าส่ง/VAT</span><span className="font-bold text-slate-800">฿{fmt(thbSelTotal)}</span></div>
             )}
+            {chinaCoverRmb > 0 && (
+              <div className="flex justify-between gap-2"><span className="text-slate-600 font-medium">หักยอดคงเหลือจีน</span><span className="font-bold text-orange-600">−¥{fmt(+chinaCoverRmb.toFixed(2))}{hasRate ? ` ≈ −฿${fmt(+(chinaCoverRmb * effRate).toFixed(2))}` : ""}</span></div>
+            )}
           </div>
         )}
       </div>
@@ -2852,19 +2855,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           )}
         </div>
       )}
-
-      {/* แถบบอกขั้นตอน 1-2-3 (บิลจีน → ยืนยัน → บิล CTW) */}
-      <div className="flex items-center gap-1">
-        {[{ n: 1, l: "บิลจีน" }, { n: 2, l: "ยืนยัน" }, { n: 3, l: "บิล CTW" }].map((s, i) => (
-          <div key={s.n} className="flex items-center gap-1 flex-1 last:flex-initial">
-            <div className={`flex items-center gap-1.5 ${step === s.n ? "text-emerald-700" : step > s.n ? "text-emerald-500" : "text-slate-400"}`}>
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${step === s.n ? "bg-emerald-600 text-white" : step > s.n ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>{step > s.n ? "✓" : s.n}</span>
-              <span className="text-xs font-medium whitespace-nowrap">{s.l}</span>
-            </div>
-            {i < 2 && <div className={`h-0.5 flex-1 rounded ${step > s.n ? "bg-emerald-400" : "bg-slate-200"}`} />}
-          </div>
-        ))}
-      </div>
 
       {/* STEP 1: เลือกบิลจีน */}
       {step === 1 && (<>
@@ -2948,18 +2938,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       {/* STEP 2: กรอกจำนวน + สลิป (ยอด/บัญชี/ยอดคงเหลือ อยู่การ์ดบนแล้ว) */}
       {step === 2 && (<>
       <Card>
-        {/* บัญชีที่ต้องโอนไป */}
-        {accountCard && <div className="mb-3">{accountCard}</div>}
-        {/* จำนวนเงินที่โอนจริง (เต็มความกว้าง) + ปุ่มแนบสลิป */}
+        {/* จำนวนเงินที่โอนจริง (เต็มความกว้าง) */}
         <div>
           <Label>จำนวนเงินที่โอนจริง (฿)</Label>
-          <div className="flex gap-2">
-            <div className="flex-1"><Money value={amount} onChange={setAmount} /></div>
-            <button type="button" onClick={() => slipInputRef.current?.click()} disabled={slipUploading || ocrBusy}
-              className="flex-shrink-0 h-11 px-3 rounded-lg bg-violet-600 text-white text-sm font-medium disabled:opacity-50 active:scale-95 transition">
-              {slipUploading || ocrBusy ? "…" : "📎 สลิป"}
-            </button>
-          </div>
+          <Money value={amount} onChange={setAmount} />
           {belowMin && <div className="mt-1 text-[11px] text-red-500">* ยอดโอนต้องไม่น้อยกว่า ฿{fmt(+minTransfer.toFixed(2))}{useBalance && chinaCoverThb > 0 ? " (หักยอดคงเหลือแล้ว)" : ""}</div>}
           {!useBalance && hasRate && balance.rmb > 0 && transferred > 0 && transferred < roundTotalThb - 0.001 && (
             <div className="mt-1 text-[11px] text-amber-600">💡 เปิด “ใช้ยอดคงเหลือในบัญชีจีน” ด้านล่าง เพื่อลดยอดขั้นต่ำได้ (มี ¥{fmt(balance.rmb)})</div>
@@ -2969,9 +2951,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         </div>
         {!hasRate && <div className="mt-2 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
         {/* สรุปการคำนวณย้ายไปโชว์ในใบ "พิมพ์รายการโอน" แทน */}
-        <div className="mt-3"><Label>หมายเลขโอน / เลขอ้างอิง</Label>
-          <input value={refNo} onChange={e => setRefNo(e.target.value)} placeholder="เช่น เลขอ้างอิงจากสลิป"
-            className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
         {/* รายการสลิป (หลายใบ) — AI อ่านยอด/ธนาคาร/เวลา แก้ได้ทุกช่อง */}
         <div className="mt-3">
           <div className="flex items-center justify-between mb-1">
@@ -3210,7 +3189,8 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete }: { t: Recor
     ];
     if (cn.length) {
       rows.push({ t: "sep" }, { t: "head", l: `บิลจีน (${cn.length})` });
-      cn.forEach(l => {
+      cn.forEach((l, i) => {
+        if (i > 0) rows.push({ t: "sep" });   // เส้นแบ่งระหว่างร้าน
         const sp = (l.sup ?? {}) as Record<string, unknown>;
         rows.push({ t: "kv", l: String(l.label || "—"), r: "¥" + fmt(num(l.paid_rmb)), bold: true });
         if (sp.name_en) rows.push({ t: "sub", l: String(sp.name_en) });
@@ -3244,10 +3224,12 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete }: { t: Recor
     ctx.fillText(`เลขโอน ${String(t.transfer_no ?? "—")} · ${String(t.date ?? "")}`, padX, 70);
     let y = headerH + padTop;
     const padR = 56;   // ขอบขวากว้างพิเศษ กันค่าชนขอบ/โดนตัด
+    // วาดตัวเลขชิดขวาแบบวัดความกว้างเอง (textAlign:"right" เพี้ยนบน iOS → ค่า ฿ ถูกดันเลยขอบ)
     const fit = (text: string, size: number, bold: boolean, color: string, leftBound: number) => {
-      const maxW = (W - padR) - leftBound; let s = size; ctx.fillStyle = color; ctx.textAlign = "right";
+      const maxW = (W - padR) - leftBound; let s = size; ctx.fillStyle = color; ctx.textAlign = "left";
       do { ctx.font = `${bold ? "bold " : ""}${s}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 9);
-      ctx.fillText(text, W - padR, y);
+      const tw = ctx.measureText(text).width;
+      ctx.fillText(text, (W - padR) - tw, y);
     };
     for (const r of rows) {
       const h = hOf(r);
@@ -3568,9 +3550,11 @@ function ReportPopup({ bill, onClose, onPrinted }: {
     const drawValueFit = (text: string, baseSize: number, bold: boolean, color: string, yy: number, leftBound: number) => {
       const maxW = (W - padR) - leftBound;
       let size = baseSize;
-      ctx.fillStyle = color; ctx.textAlign = "right";
+      // วัดความกว้างแล้ววาดชิดซ้าย (textAlign:"right" เพี้ยนบน iOS → ค่า ฿ ถูกดันเลยขอบ)
+      ctx.fillStyle = color; ctx.textAlign = "left";
       do { ctx.font = `${bold ? "bold " : ""}${size}px ${FONT}`; if (ctx.measureText(text).width <= maxW) break; size -= 1; } while (size > 9);
-      ctx.fillText(text, W - padR, yy);
+      const tw = ctx.measureText(text).width;
+      ctx.fillText(text, (W - padR) - tw, yy);
     };
 
     // body
