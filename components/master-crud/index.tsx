@@ -1336,8 +1336,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       textAlign: (["left", "center", "right"].includes(String(us.align)) ? (us.align as "left" | "center" | "right") : undefined),
     };
     const highlight = !!us.highlight;
+    // ฟิลด์ที่มี control หลายตัว (m2m/o2m) ห้ามครอบด้วย <label> — เพราะคลิกที่ชื่อ label เบราว์เซอร์จะไปกด control ตัวแรก (แท็กอันแรกหลุด)
+    const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many") ? "div" : "label";
     return (
-      <label key={f.key} className={`block ${f.formSpan === 3 ? "col-span-3" : f.formSpan === 2 ? "col-span-2" : ""} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
+      <FieldWrap key={f.key} className={`block ${f.formSpan === 3 ? "col-span-3" : f.formSpan === 2 ? "col-span-2" : ""} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
         <span className="text-xs font-medium text-slate-600" style={tStyle}>
           {f.label}
           {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
@@ -1430,7 +1432,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             {errs.map((m, i) => <span key={i} className="flex items-center gap-1">⚠ <span>{m}</span></span>)}
           </div>
         )}
-      </label>
+      </FieldWrap>
     );
   };
 

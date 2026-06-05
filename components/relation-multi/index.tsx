@@ -187,10 +187,10 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
       {/* แท็กที่เลือก */}
       <div className="flex flex-wrap gap-1.5 mb-1.5">
         {!loading && linked.length === 0 && <span className="text-xs text-slate-300">— ยังไม่เลือก —</span>}
-        {/* chips = แสดงผลอย่างเดียว (เอา/ใส่แท็ก ทำที่รายการเช็คบ็อกซ์ด้านล่าง) → คลิกตรงนี้ไม่ลบ */}
         {linked.map((id) => (
           <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100">
             {labelOf(id)}
+            {editable && <button type="button" onClick={() => toggle(id)} className="text-blue-400 hover:text-red-500">✕</button>}
           </span>
         ))}
       </div>
