@@ -6,6 +6,7 @@
  * - RelationOne2Many: แสดงรายการลูกที่ชี้กลับมา (read-only)
  */
 import { useEffect, useState, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
@@ -35,6 +36,85 @@ async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[
   }));
 }
 
+// ---- Popup จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ แท็กในตารางต้นทาง) ----
+function TagsManagerModal({ moduleKey, labelField, onClose, onChanged }: {
+  moduleKey: string; labelField: string; onClose: () => void; onChanged: () => void;
+}) {
+  const [rows, setRows] = useState<Opt[]>([]);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    apiFetch(`/api/master-v2/${moduleKey}?limit=500&include_inactive=true`).then((r) => r.json())
+      .then((j) => setRows(((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({ id: String(r.id), label: String(r[labelField] ?? r.name ?? r.id) }))))
+      .catch(() => {});
+  }, [moduleKey, labelField]);
+  useEffect(() => { load(); }, [load]);
+
+  const rename = async (id: string, name: string) => {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [labelField]: name.trim() }) });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); alert("แก้ชื่อไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      onChanged(); load();
+    } finally { setBusy(false); }
+  };
+  const del = async (id: string, label: string) => {
+    if (!confirm(`ลบแท็ก “${label}” ?\n(สินค้าที่เคยติดแท็กนี้จะไม่เห็นแท็กนี้แล้ว)`)) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/${id}`, { method: "DELETE" });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); alert("ลบไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      onChanged(); load();
+    } finally { setBusy(false); }
+  };
+  const add = async () => {
+    const n = newName.trim(); if (!n) return;
+    setBusy(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [labelField]: n }) });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); alert("เพิ่มไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      setNewName(""); onChanged(); load();
+    } finally { setBusy(false); }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-[440px] max-w-[92vw] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+          <h3 className="font-semibold text-slate-800">🗂️ จัดการแท็ก (Product Family)</h3>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+          {rows.length === 0 && <div className="text-sm text-slate-400 py-4 text-center">ยังไม่มีแท็ก</div>}
+          {rows.map((r) => (
+            <div key={r.id} className="flex items-center gap-2">
+              <input
+                value={draft[r.id] ?? r.label}
+                onChange={(e) => setDraft((d) => ({ ...d, [r.id]: e.target.value }))}
+                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md" />
+              <button type="button" disabled={busy || (draft[r.id] ?? r.label) === r.label} onClick={() => rename(r.id, draft[r.id] ?? r.label)}
+                className="h-8 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40">บันทึก</button>
+              <button type="button" disabled={busy} onClick={() => del(r.id, r.label)}
+                className="h-8 px-2 text-xs rounded-md text-red-500 hover:bg-red-50">🗑️</button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 px-3 py-3 border-t border-slate-100">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ชื่อแท็กใหม่…"
+            onKeyDown={(e) => { if (e.key === "Enter") add(); }}
+            className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md" />
+          <button type="button" onClick={add} disabled={busy || !newName.trim()}
+            className="h-9 px-4 text-sm rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">+ เพิ่ม</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ---- many2many ---- (ค้นหา + เช็คบ็อกซ์ + สร้างใหม่ + เลือกได้ตั้งแต่ตอนสร้าง)
 //
 // 2 โหมด แยกชัดเพื่อกัน race/desync:
@@ -55,6 +135,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const [opts, setOpts] = useState<Opt[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
+  const [mgrOpen, setMgrOpen] = useState(false);   // popup จัดการแท็ก
 
   // แหล่งความจริงเดียว = ค่าในฟอร์ม (value) — ไม่มี state ภายใน widget (กัน diverge/remount ทำค่าหาย)
   //   โหมดแก้ไข: master-crud โหลดลิงก์เดิมเข้า form ให้ตอน openEdit
@@ -106,19 +187,23 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
       {/* แท็กที่เลือก */}
       <div className="flex flex-wrap gap-1.5 mb-1.5">
         {!loading && linked.length === 0 && <span className="text-xs text-slate-300">— ยังไม่เลือก —</span>}
+        {/* chips = แสดงผลอย่างเดียว (เอา/ใส่แท็ก ทำที่รายการเช็คบ็อกซ์ด้านล่าง) → คลิกตรงนี้ไม่ลบ */}
         {linked.map((id) => (
           <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100">
             {labelOf(id)}
-            {editable && <button type="button" onClick={() => toggle(id)} className="text-blue-400 hover:text-red-500">✕</button>}
           </span>
         ))}
       </div>
       {editable && !loading && (
         <div>
-          {/* ช่องค้นหา (กรองรายการ) — ไม่มี dropdown เปิด/ปิด แล้ว */}
-          <input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
-            className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          {/* ช่องค้นหา + ปุ่มเปิด popup จัดการแท็ก */}
+          <div className="flex gap-1.5">
+            <input value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
+              className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <button type="button" onClick={() => setMgrOpen(true)} title="จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ)"
+              className="h-8 px-2.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 shrink-0">🗂️</button>
+          </div>
           {/* รายการเช็คบ็อกซ์ โชว์ตลอด (เลื่อนได้) → ไม่มีจังหวะ "ปิด" ที่ทำให้ค่าหาย */}
           <div className="mt-1 max-h-44 overflow-y-auto border border-slate-200 rounded-lg p-1">
             {filtered.map((o) => {
@@ -140,6 +225,11 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
             )}
           </div>
         </div>
+      )}
+      {mgrOpen && (
+        <TagsManagerModal moduleKey={moduleKey} labelField={labelField}
+          onClose={() => setMgrOpen(false)}
+          onChanged={() => fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {})} />
       )}
     </div>
   );
