@@ -61,6 +61,15 @@ export const PAYROLL_ENTITIES: Record<string, EntityCfg> = {
     required: ["name"], numeric: ["display_order"],
     defaultSort: "display_order",
   },
+  "public-holidays": {
+    table: "payroll_holidays",
+    cols: "id, holiday_date, holiday_name, status, note, created_at, updated_at",
+    search: ["holiday_name"],
+    statusField: "status", activeVal: "active", inactiveVal: "inactive",
+    writable: ["holiday_date", "holiday_name", "status", "note"],
+    required: ["holiday_date", "holiday_name"],
+    defaultSort: "holiday_date",
+  },
   "work-time-profiles": {
     table: "work_time_profiles",
     cols: "id, profile_code, profile_name, morning_check_in_cutoff, noon_check_in_cutoff, checkout_required_at, early_checkout_grace_minutes, status, sort_order, note, created_at, updated_at",
@@ -138,7 +147,7 @@ async function toColumns(cfg: EntityCfg, body: Record<string, unknown>): Promise
   if (cfg.relation && cfg.relation.as in body) {
     out[cfg.relation.field] = await nameToId(cfg.relation, String(body[cfg.relation.as] ?? ""));
   }
-  for (const k of ["start_date", "end_date", "payment_date"]) { if (out[k] === "") out[k] = null; }
+  for (const k of ["start_date", "end_date", "payment_date", "holiday_date"]) { if (out[k] === "") out[k] = null; }
   return out;
 }
 

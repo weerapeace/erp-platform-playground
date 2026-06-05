@@ -297,12 +297,25 @@ function HolidaysPanel({ periodId, editable, onChanged }: { periodId: string; ed
       if (j.error) setErr(j.error); else { await reload(); onChanged(); }
     } catch { setErr("ลบไม่สำเร็จ"); } finally { setBusy(false); }
   }
+  async function applyStandard() {
+    setBusy(true); setErr(null);
+    try {
+      const j = await apiFetch("/api/payroll/holidays/apply-standard", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_id: periodId }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else { setErr(j.message ? `ℹ️ ${j.message}` : null); await reload(); onChanged(); }
+    } catch { setErr("ดึงไม่สำเร็จ"); } finally { setBusy(false); }
+  }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 mb-5">
       <div className="flex items-center justify-between gap-2 mb-2">
         <span className="text-sm font-medium text-slate-700">📅 วันหยุดของงวดนี้ <span className="text-xs text-slate-400 font-normal">({items.length} วัน)</span></span>
-        <span className="text-xs text-slate-400">พนักงานประจำได้เงินวันหยุด · รายวันไม่ได้</span>
+        <span className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 hidden sm:inline">ประจำได้เงิน · รายวันไม่ได้</span>
+          {editable && <button onClick={applyStandard} disabled={busy} className="h-7 px-2.5 text-xs border border-rose-200 text-rose-700 rounded-lg hover:bg-rose-50 disabled:opacity-50" title="ดึงวันหยุดพิเศษจากคลังที่อยู่ในช่วงงวดนี้">🎌 ดึงวันหยุดมาตรฐาน</button>}
+        </span>
       </div>
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-3 py-2 text-xs mb-2">{err}</div>}
       <div className="flex flex-wrap gap-2 mb-2">

@@ -40,6 +40,7 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
     { href: "/payroll/cost-centers", icon: "🏦", label: "ศูนย์ต้นทุน" },
     { href: "/payroll/companies", icon: "🏢", label: "บริษัท" },
     { href: "/payroll/work-time-profiles", icon: "🕐", label: "โปรไฟล์เวลาทำงาน" },
+    { href: "/payroll/public-holidays", icon: "🎌", label: "วันหยุดพิเศษ" },
   ] },
 ];
 
