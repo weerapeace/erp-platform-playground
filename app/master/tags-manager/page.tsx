@@ -41,7 +41,9 @@ export default function TagsManagerPage() {
 
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  const dragRef = useRef<string | null>(null);
+  const dragRef = useRef<string | null>(null);          // ลากแท็ก
+  const selDragRef = useRef<Rec[]>([]);                  // ลากกลุ่มที่เลือก (โหมดเลือกเร็ว) → ตะกร้า
+  const [poolMode, setPoolMode] = useState<"table" | "quick">("table");
 
   const tagLabel = useCallback((id: string) => allTags.find((t) => t.id === id)?.label ?? id.slice(0, 6), [allTags]);
 
@@ -191,29 +193,46 @@ export default function TagsManagerPage() {
 
       {/* 2 กล่อง */}
       <div className="flex-1 p-4 grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-        {/* ซ้าย: ตารางกลาง (card view + filter กลาง) */}
+        {/* ซ้าย: เลือกโหมด — ตารางกลาง หรือ เลือกเร็ว (ลากคลุม) */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <DataTable<PoolRow>
-            data={[]}
-            columns={columns}
-            title={`คลัง ${cfg.label}`}
-            serverFetch={serverFetch}
-            serverRefreshKey={srvRefresh}
-            enableCards
-            defaultViewMode="cards"
-            cardConfig={defaultCardCfg}
-            tableId={`tags-mgr-pool-${entity}`}
-            searchPlaceholder="ค้นหา รหัส / ชื่อ…"
-            pageSize={24}
-            selectable
-            bulkActions={bulkActions}
-            onRowClick={(row) => addToCart(row)}
-            emptyMessage="ไม่พบรายการ"
-          />
+          <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-slate-700 mr-1">คลัง {cfg.label}</span>
+            <div className="flex-1" />
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+              <button onClick={() => setPoolMode("table")} className={`px-2.5 h-7 ${poolMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>การ์ดกลาง</button>
+              <button onClick={() => setPoolMode("quick")} className={`px-2.5 h-7 ${poolMode === "quick" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>⚡ เลือกเร็ว (ลากคลุม)</button>
+            </div>
+          </div>
+          {poolMode === "table" ? (
+            <DataTable<PoolRow>
+              data={[]}
+              columns={columns}
+              serverFetch={serverFetch}
+              serverRefreshKey={srvRefresh}
+              enableCards
+              defaultViewMode="cards"
+              cardConfig={defaultCardCfg}
+              tableId={`tags-mgr-pool-${entity}`}
+              searchPlaceholder="ค้นหา รหัส / ชื่อ…"
+              pageSize={24}
+              selectable
+              bulkActions={bulkActions}
+              onRowClick={(row) => addToCart(row)}
+              emptyMessage="ไม่พบรายการ"
+            />
+          ) : (
+            <QuickSelectGrid
+              api={cfg.api} junction={cfg.junction} tagLabel={tagLabel}
+              onAddMany={(recs) => recs.forEach((r) => addToCart(r))}
+              selDragRef={selDragRef}
+            />
+          )}
         </div>
 
         {/* ขวา: ตะกร้า */}
-        <div className="bg-blue-50/30 border border-slate-200 rounded-xl flex flex-col min-h-[55vh]">
+        <div className="bg-blue-50/30 border border-slate-200 rounded-xl flex flex-col min-h-[55vh]"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); const recs = selDragRef.current; selDragRef.current = []; recs.forEach((r) => addToCart(r)); }}>
           <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2 bg-white rounded-t-xl">
             <span className="text-sm font-semibold text-slate-700">ตะกร้าสินค้า</span>
             <span className="text-xs text-slate-400">({cart.length})</span>
@@ -249,6 +268,126 @@ export default function TagsManagerPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---- โหมดเลือกเร็ว: ลากคลุมเลือกหลายอัน (เลือก = สีเทา) + ลาก/กดใส่ตะกร้า ----
+function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
+  api: string; junction: string; tagLabel: (id: string) => string;
+  onAddMany: (recs: Rec[]) => void; selDragRef: React.MutableRefObject<Rec[]>;
+}) {
+  const PAGE = 60;
+  const [rows, setRows] = useState<Rec[]>([]);
+  const [tagMap, setTagMap] = useState<Record<string, string[]>>({});
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  const gridRef = useRef<HTMLDivElement>(null);
+  const startRef = useRef<{ x: number; y: number } | null>(null);
+  const baseSelRef = useRef<Set<string>>(new Set());
+
+  // โหลดข้อมูล (server, ทีละหน้า)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLoading(true);
+      const qs = new URLSearchParams({ limit: String(PAGE), offset: String(page * PAGE), sort_by: "code", sort_dir: "asc" });
+      if (search.trim()) qs.set("search", search.trim());
+      apiFetch(`/api/master-v2/${api}?${qs}`).then((r) => r.json())
+        .then(async (j) => {
+          const recs: Rec[] = ((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({
+            id: String(r.id), code: String(r.code ?? r.id), name: String(r.name_th ?? r.name ?? ""), image: (r.cover_image_r2_key as string) ?? null,
+          }));
+          setRows(recs); setTotal((j.total as number) ?? recs.length);
+          if (recs.length) {
+            try { const gr = await apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_ids=${recs.map((r) => r.id).join(",")}`).then((r) => r.json()); setTagMap(gr.map ?? {}); } catch { /* ignore */ }
+          }
+        })
+        .catch(() => setRows([]))
+        .finally(() => setLoading(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [api, junction, page, search]);
+  useEffect(() => { setPage(0); }, [api, search]);
+
+  const recById = useMemo(() => { const m: Record<string, Rec> = {}; rows.forEach((r) => { m[r.id] = r; }); return m; }, [rows]);
+  const selectedRecs = useCallback(() => Array.from(selected).map((id) => recById[id]).filter(Boolean), [selected, recById]);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("[data-rec-id]")) return;   // คลิกการ์ด → ปล่อยให้ click handler ทำ
+    startRef.current = { x: e.clientX, y: e.clientY };
+    baseSelRef.current = e.shiftKey ? new Set(selected) : new Set();
+    setSelected(baseSelRef.current);
+    setMarquee({ x: e.clientX, y: e.clientY, w: 0, h: 0 });
+  };
+  const onMouseMove = (e: React.MouseEvent) => {
+    const s = startRef.current; if (!s) return;
+    const left = Math.min(s.x, e.clientX), top = Math.min(s.y, e.clientY), right = Math.max(s.x, e.clientX), bottom = Math.max(s.y, e.clientY);
+    setMarquee({ x: left, y: top, w: right - left, h: bottom - top });
+    const sel = new Set(baseSelRef.current);
+    gridRef.current?.querySelectorAll("[data-rec-id]").forEach((el) => {
+      const c = el.getBoundingClientRect();
+      if (!(c.right < left || c.left > right || c.bottom < top || c.top > bottom)) sel.add(el.getAttribute("data-rec-id")!);
+    });
+    setSelected(sel);
+  };
+  const endMarquee = () => { startRef.current = null; setMarquee(null); };
+
+  const toggleOne = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const pages = Math.max(1, Math.ceil(total / PAGE));
+
+  return (
+    <div className="flex flex-col" style={{ minHeight: "55vh" }}>
+      <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อ…"
+          className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        <button disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))} className="h-8 px-2 text-xs border border-slate-200 rounded disabled:opacity-40">‹</button>
+        <span className="text-xs text-slate-500">{page + 1}/{pages}</span>
+        <button disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)} className="h-8 px-2 text-xs border border-slate-200 rounded disabled:opacity-40">›</button>
+      </div>
+      <div className="px-3 py-1.5 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
+        <span className="text-xs text-slate-500">ลากคลุมเพื่อเลือก (เลือก = สีเทา) • เลือกแล้ว <b>{selected.size}</b></span>
+        <div className="flex-1" />
+        {selected.size > 0 && <button onClick={() => setSelected(new Set())} className="text-xs text-slate-400 hover:text-red-500">ล้างที่เลือก</button>}
+        <button disabled={selected.size === 0} onClick={() => { onAddMany(selectedRecs()); setSelected(new Set()); }}
+          className="h-7 px-3 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">➕ ใส่ตะกร้าที่เลือก ({selected.size})</button>
+      </div>
+      <div ref={gridRef} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={endMarquee} onMouseLeave={endMarquee}
+        className="flex-1 overflow-y-auto p-2 grid grid-cols-2 sm:grid-cols-3 gap-2 content-start select-none relative">
+        {loading && <div className="col-span-full text-xs text-slate-400 py-4 text-center">กำลังโหลด…</div>}
+        {!loading && rows.length === 0 && <div className="col-span-full text-xs text-slate-400 py-4 text-center">ไม่พบรายการ</div>}
+        {rows.map((r) => {
+          const on = selected.has(r.id);
+          const tags = tagMap[r.id] ?? [];
+          return (
+            <div key={r.id} data-rec-id={r.id}
+              draggable={on}
+              onDragStart={() => { selDragRef.current = selectedRecs(); }}
+              onClick={(e) => { if (e.shiftKey) { toggleOne(r.id); } else { toggleOne(r.id); } }}
+              className={`rounded-lg border p-2 flex flex-col gap-1.5 cursor-pointer transition-colors ${on ? "bg-slate-300 border-slate-400" : "bg-white border-slate-200 hover:border-blue-300"}`}>
+              <div className="flex gap-2">
+                {r.image
+                  ? <img src={`/api/r2-image?key=${encodeURIComponent(r.image)}`} alt="" className="w-10 h-10 rounded object-cover bg-slate-100 shrink-0 pointer-events-none" />
+                  : <div className="w-10 h-10 rounded bg-slate-100 shrink-0" />}
+                <div className="flex-1 min-w-0 pointer-events-none">
+                  <div className="font-semibold text-sm text-slate-800 truncate">{r.code}</div>
+                  <div className="text-[11px] text-slate-400 line-clamp-1">{r.name}</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1 pointer-events-none">
+                {tags.map((tid) => <span key={tid} className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100">{tagLabel(tid)}</span>)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {marquee && <div className="fixed z-50 bg-blue-400/20 border border-blue-400 pointer-events-none" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
     </div>
   );
 }
