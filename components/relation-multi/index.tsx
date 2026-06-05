@@ -17,6 +17,7 @@ type RelConfig = {
   target_module_key?: string;
   target_label_field?: string;
   target_fk_column?: string;
+  allow_create?: boolean;             // m2m: อนุญาตสร้างแท็กใหม่จากกล่องเลือก
   // one2many: แสดงผลแบบครบ (รูป + ชื่อ + ข้อมูลย่อย) — ถ้าไม่ระบุ จะโชว์แค่ label
   list_image_field?: string;          // column ที่เป็น R2 key รูป
   list_title_field?: string;          // column ชื่อหลัก (default = target_label_field)
@@ -34,61 +35,114 @@ async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[
   }));
 }
 
-// ---- many2many ----
-export function RelationMany2Many({ config, recordId, editable }: { config: RelConfig; recordId?: string | null; editable: boolean }) {
+// ---- many2many ---- (ค้นหา + เช็คบ็อกซ์ + สร้างใหม่ + เลือกได้ตั้งแต่ตอนสร้าง)
+export function RelationMany2Many({ config, recordId, editable, value, onChange }: {
+  config: RelConfig; recordId?: string | null; editable: boolean;
+  value?: string[]; onChange?: (ids: string[]) => void;   // staged mode (ตอนสร้าง — ยังไม่มี id)
+}) {
   const junction = config.junction_table ?? "";
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const labelField = config.target_label_field ?? "name";
-  const [linked, setLinked] = useState<string[]>([]);
+  const allowCreate = config.allow_create !== false;
+  const isStaged = !recordId;   // ยังไม่มี id (โหมดสร้าง) → เก็บไว้ใน form ก่อน
+
+  const [linked, setLinked] = useState<string[]>(value ?? []);
   const [opts, setOpts] = useState<Opt[]>([]);
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!recordId || !junction) return;
-    const [lr, os] = await Promise.all([
-      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`).then((r) => r.json()),
-      fetchOptions(moduleKey, labelField),
-    ]);
-    setLinked(lr.links ?? []);
-    setOpts(os);
-  }, [recordId, junction, moduleKey, labelField]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  if (!recordId) return <div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเพิ่มความสัมพันธ์ได้</div>;
+  useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
+  // โหลด link เดิม (โหมดแก้ไข) / sync ค่า staged (โหมดสร้าง)
+  useEffect(() => {
+    if (recordId && junction) {
+      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`).then((r) => r.json())
+        .then((j) => { const ids = j.links ?? []; setLinked(ids); onChange?.(ids); }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordId, junction]);
+  useEffect(() => { if (isStaged) setLinked(value ?? []); }, [isStaged, JSON.stringify(value ?? [])]);
 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
-  const unlinked = opts.filter((o) => !linked.includes(o.id));
 
-  const add = async (id: string) => {
-    if (!id) return;
-    setBusy(true);
-    await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }) });
-    setLinked((p) => [...p, id]); setBusy(false);
+  const setLinks = (next: string[]) => { setLinked(next); onChange?.(next); };
+  const toggle = async (id: string) => {
+    const has = linked.includes(id);
+    const next = has ? linked.filter((x) => x !== id) : [...linked, id];
+    setLinks(next);
+    if (!isStaged && junction && recordId) {   // โหมดแก้ไข → ผูก/ถอดทันที
+      setBusy(true);
+      try {
+        await apiFetch("/api/admin/schema/m2m-links", {
+          method: has ? "DELETE" : "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }),
+        });
+      } catch { /* ignore */ } finally { setBusy(false); }
+    }
   };
-  const remove = async (id: string) => {
+  const createNew = async () => {
+    const name = q.trim();
+    if (!name || !allowCreate) return;
     setBusy(true);
-    await apiFetch("/api/admin/schema/m2m-links", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: recordId, tgt_id: id }) });
-    setLinked((p) => p.filter((x) => x !== id)); setBusy(false);
+    try {
+      const res = await apiFetch(`/api/master-v2/${moduleKey}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [labelField]: name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      const id = (j.data as { id?: string } | undefined)?.id;
+      if (!res.ok || j.error || !id) { alert("สร้างแท็กไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      setOpts((o) => [...o, { id, label: name }]);
+      setQ("");
+      toggle(id);
+    } catch (e) { alert("สร้างแท็กไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    finally { setBusy(false); }
   };
+
+  const ql = q.trim().toLowerCase();
+  const filtered = opts.filter((o) => !ql || o.label.toLowerCase().includes(ql));
+  const exact = opts.some((o) => o.label.trim().toLowerCase() === ql);
 
   return (
-    <div>
-      <div className="flex flex-wrap gap-1.5 mb-2">
-        {linked.length === 0 && <span className="text-xs text-slate-300">— ยังไม่มี —</span>}
+    <div className="mt-0.5">
+      {/* แท็กที่เลือก */}
+      <div className="flex flex-wrap gap-1.5 mb-1.5">
+        {linked.length === 0 && <span className="text-xs text-slate-300">— ยังไม่เลือก —</span>}
         {linked.map((id) => (
           <span key={id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-100">
             {labelOf(id)}
-            {editable && <button type="button" onClick={() => remove(id)} disabled={busy} className="text-blue-400 hover:text-red-500">✕</button>}
+            {editable && <button type="button" onClick={() => toggle(id)} disabled={busy} className="text-blue-400 hover:text-red-500">✕</button>}
           </span>
         ))}
       </div>
       {editable && (
-        <select value="" disabled={busy} onChange={(e) => add(e.target.value)}
-          className="h-8 px-2 text-xs border border-slate-200 rounded-md bg-white max-w-full">
-          <option value="">+ เพิ่ม…</option>
-          {unlinked.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-        </select>
+        <div className="relative">
+          <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+            placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
+            className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          {open && (<>
+            <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+            <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg p-1">
+              {filtered.map((o) => {
+                const on = linked.includes(o.id);
+                return (
+                  <button key={o.id} type="button" onClick={() => toggle(o.id)} disabled={busy}
+                    className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50">
+                    <input type="checkbox" readOnly checked={on} className="rounded border-slate-300 pointer-events-none" />
+                    <span className="flex-1 truncate">{o.label}</span>
+                  </button>
+                );
+              })}
+              {filtered.length === 0 && !ql && <div className="text-xs text-slate-300 py-2 text-center">— ไม่มีแท็ก —</div>}
+              {allowCreate && ql && !exact && (
+                <button type="button" onClick={createNew} disabled={busy}
+                  className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border-t border-slate-100 mt-1">
+                  ➕ สร้างแท็กใหม่ “{q.trim()}”
+                </button>
+              )}
+            </div>
+          </>)}
+        </div>
       )}
     </div>
   );

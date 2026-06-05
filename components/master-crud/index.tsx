@@ -866,6 +866,23 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         }
         setDrawerMode("view");
       } else {
+        // สร้างใหม่ → ผูกแท็ก m2m ที่เลือกไว้ (staged) หลังได้ id
+        const newId = (json.data as Record<string, unknown> | undefined)?.id;
+        if (newId) {
+          for (const fd of effectiveFields) {
+            if (fd.type !== "many2many") continue;
+            const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
+            const junction = String(rc.junction_table ?? "");
+            const ids = Array.isArray(form[fd.key]) ? (form[fd.key] as string[]) : [];
+            if (!junction || ids.length === 0) continue;
+            for (const tgt of ids) {
+              await apiFetch("/api/admin/schema/m2m-links", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ junction, src_id: newId, tgt_id: tgt }),
+              }).catch(() => {});
+            }
+          }
+        }
         setModalOpen(false);
       }
       await refreshData();
@@ -1250,7 +1267,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           </div>
         ) : f.type === "many2many" ? (
           <div className="mt-0.5">
-            <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={!disabled} />
+            <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={!disabled}
+              value={Array.isArray(form[f.key]) ? (form[f.key] as string[]) : undefined}
+              onChange={(ids) => updateForm({ [f.key]: ids })} />
           </div>
         ) : f.type === "one2many" ? (
           <div className="mt-0.5">
