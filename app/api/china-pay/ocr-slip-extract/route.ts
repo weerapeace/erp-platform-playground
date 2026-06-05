@@ -61,8 +61,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const buf = await new Response(obj.body).arrayBuffer();
     const bytes = [...new Uint8Array(buf)];
 
-    const prompt = "นี่คือสลิปโอนเงิน อ่านข้อมูลแล้วตอบกลับเป็น JSON อย่างเดียว รูปแบบ {\"amount\": <จำนวนเงินที่โอนเป็นตัวเลข>, \"account\": \"<เลขบัญชีผู้รับ ตัวเลขล้วนเท่าที่เห็น>\", \"name\": \"<ชื่อผู้รับเงิน>\"} ถ้าหาค่าไหนไม่เจอให้ใส่ค่าว่าง ห้ามมีข้อความอื่นนอก JSON";
-    const runVision = async () => ai.run(MODEL, { image: bytes, prompt, max_tokens: 200 });
+    const prompt = "นี่คือสลิปโอนเงิน อ่านข้อมูลแล้วตอบกลับเป็น JSON อย่างเดียว รูปแบบ {\"amount\": <จำนวนเงินที่โอนเป็นตัวเลข>, \"account\": \"<เลขบัญชีผู้รับ ตัวเลขล้วนเท่าที่เห็น>\", \"name\": \"<ชื่อผู้รับเงิน>\", \"bank\": \"<ชื่อธนาคารผู้โอน เช่น กสิกร/ไทยพาณิชย์/กรุงเทพ>\", \"datetime\": \"<วันที่และเวลาที่โอน>\"} ถ้าหาค่าไหนไม่เจอให้ใส่ค่าว่าง ห้ามมีข้อความอื่นนอก JSON";
+    const runVision = async () => ai.run(MODEL, { image: bytes, prompt, max_tokens: 240 });
     let out: any;
     try { out = await runVision(); }
     catch (e) {
@@ -75,8 +75,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const amount = j && j.amount != null && Number(j.amount) > 0 ? Number(j.amount) : parseAmount(raw);
     const account = j ? String(j.account ?? "").replace(/[^0-9]/g, "") : "";
     const name = j ? String(j.name ?? "").trim() : "";
+    const bank = j ? String(j.bank ?? "").trim() : "";
+    const datetime = j ? String(j.datetime ?? "").trim() : "";
 
-    return NextResponse.json({ amount: amount ?? null, account, name, raw });
+    return NextResponse.json({ amount: amount ?? null, account, name, bank, datetime, raw });
   } catch (e) {
     return NextResponse.json({ error: String((e as Error).message ?? e), amount: null, account: "", name: "" }, { status: 200 });
   }

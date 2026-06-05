@@ -168,6 +168,9 @@ const STATUS_STYLE: Record<string, string> = {
   "โอนแล้วบางส่วน": "bg-sky-100 text-sky-700", "โอนครบแล้ว": "bg-emerald-100 text-emerald-700",
 };
 
+// ---- สลิปการโอน (หลายใบ) — เก็บ ธนาคาร/ยอด/เวลา/ผูกบิล CTW ----
+type TxSlip = { key: string; bank: string; amount: number; at: string; bill_id?: string };
+
 // ---- สถานะบิลจีน 3 ระดับ (คิดจากยอดรวมสลิปเทียบยอดบิล) ----
 type Slip = { key: string; amount_rmb: number; at?: string };
 const billSlips = (b: Record<string, unknown>): Slip[] =>
@@ -2381,7 +2384,11 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [refNo, setRefNo] = useState("");                       // หมายเลข/เลขอ้างอิงการโอน
   const [rate, setRate] = useState("");
   const [transferDate, setTransferDate] = useState(today());
-  const [slip, setSlip] = useState<string[]>([]);
+  const [txSlips, setTxSlips] = useState<TxSlip[]>([]);
+  const slipKeys = txSlips.map(s => s.key);
+  const slipSum = txSlips.reduce((a, s) => a + num(s.amount), 0);
+  const [lightbox, setLightbox] = useState<string | null>(null);   // รูปสลิปกดดูเต็มจอ
+  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [balance, setBalance] = useState<{ thb: number; rmb: number }>({ thb: 0, rmb: 0 });
@@ -2523,36 +2530,59 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const anyChinaOver = [...sel].some(id => { const r = pending.find(p => String(p.id) === id); return !!r && num(pay[id]) > billRemainRmb(r) + 0.001; });
 
   // อัปโหลดสลิป (จากปุ่มข้างช่องจำนวนเงิน) → เพิ่มเข้า slip → effect อ่านยอดอัตโนมัติ
+  // แนบสลิปหลายใบ — อัปโหลด + AI อ่าน (ธนาคาร/ยอด/เวลา) ต่อใบ → เพิ่มเข้ารายการ + รวมยอดเข้าช่อง
   const uploadSlip = async (files: FileList) => {
     setSlipUploading(true);
     try {
-      const added: string[] = [];
+      const added: TxSlip[] = [];
       for (const f of Array.from(files)) {
         const fd = new FormData(); fd.append("file", f); fd.append("folder", "china-transfers");
         const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
         const j = await res.json().catch(() => ({}));
-        if (j.r2_key) added.push(j.r2_key);
+        if (!j.r2_key) continue;
+        const slip: TxSlip = { key: j.r2_key, bank: "", amount: 0, at: "" };
+        // AI อ่าน (เฉพาะรูป ไม่ใช่ PDF)
+        if (!String(j.r2_key).toLowerCase().endsWith(".pdf")) {
+          setOcrBusy(true);
+          try {
+            const ores = await apiFetch("/api/china-pay/ocr-slip-extract", {
+              method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: j.r2_key }),
+            });
+            const oj = await ores.json().catch(() => ({}));
+            if (oj.amount) slip.amount = num(oj.amount);
+            if (oj.bank) slip.bank = String(oj.bank);
+            if (oj.datetime) slip.at = String(oj.datetime);
+          } catch { /* OCR พลาด — ผู้ใช้กรอกเอง */ }
+          finally { setOcrBusy(false); }
+        }
+        added.push(slip);
       }
-      if (added.length) setSlip(s => [...s, ...added]);
+      if (added.length) {
+        setTxSlips(prev => {
+          const next = [...prev, ...added];
+          setAmount(String(+next.reduce((a, s) => a + num(s.amount), 0).toFixed(2)));   // รวมยอด → ช่องจำนวนเงิน (แก้ทับได้)
+          return next;
+        });
+        toast.success(`แนบ ${added.length} สลิป — AI อ่านยอดให้แล้ว ตรวจสอบก่อนบันทึก`);
+      }
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSlipUploading(false); if (slipInputRef.current) slipInputRef.current.value = ""; }
   };
 
-  // อ่าน "ยอดที่โอน" จากรูปสลิปด้วย AI → เติมช่องจำนวนเงิน (ผู้ใช้ตรวจก่อนบันทึก)
-  const readSlip = async () => {
-    const key = slip.find(k => !k.toLowerCase().endsWith(".pdf"));
-    if (!key) { toast.error("แนบรูปสลิป (jpg/png) ก่อน"); return; }
-    setOcrBusy(true);
-    try {
-      const res = await apiFetch("/api/china-pay/ocr-slip", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }),
-      });
-      const j = await res.json();
-      if (j.error) { toast.error(j.error); return; }
-      if (j.amount) { setAmount(String(j.amount)); toast.success(`อ่านยอดได้ ฿${fmt(j.amount)} — ตรวจสอบก่อนบันทึก`); }
-      else { toast.error("อ่านยอดจากสลิปไม่ได้ — กรอกเอง"); }
-    } catch (e) { toast.error(String((e as Error).message ?? e)); }
-    finally { setOcrBusy(false); }
+  // แก้ field ของสลิป + ลบ — แล้วรวมยอดใหม่เข้าช่องจำนวนเงิน
+  const setSlipField = (i: number, patch: Partial<TxSlip>) => {
+    setTxSlips(prev => {
+      const next = prev.map((s, idx) => idx === i ? { ...s, ...patch } : s);
+      if ("amount" in patch) setAmount(String(+next.reduce((a, s) => a + num(s.amount), 0).toFixed(2)));
+      return next;
+    });
+  };
+  const removeSlip = (i: number) => {
+    setTxSlips(prev => {
+      const next = prev.filter((_, idx) => idx !== i);
+      setAmount(next.length ? String(+next.reduce((a, s) => a + num(s.amount), 0).toFixed(2)) : "");
+      return next;
+    });
   };
 
   // ส่งสรุปการโอนเข้า LINE (อัตโนมัติถ้าตั้ง Bot / ไม่งั้น share) + แนบลิงก์เปิดแอป
@@ -2621,7 +2651,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           rate: sel.size > 0 ? effRate : null,
           leftover_thb: sel.size > 0 ? +leftover.toFixed(2) : 0,
           leftover_rmb: sel.size > 0 ? +leftoverRmb.toFixed(2) : 0,
-          ref_no: refNo || null, lines, attachments: slip, note: note || null, actor: "china-app",
+          ref_no: refNo || null, lines, attachments: slipKeys, tx_slips: txSlips, note: note || null, actor: "china-app",
         }),
       });
       const j = await res.json();
@@ -2668,24 +2698,14 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       setSavedTransfer({
         transfer_id: String(j.data?.id ?? ""), transfer_no: String(j.data?.transfer_no ?? ""),
         ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
-        lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum, attachments: slip,
+        lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum, attachments: slipKeys,
       });
       setSel(new Set()); setPay({}); setThbSel(new Set()); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(false);
-      setAmount(""); setRefNo(""); setSlip([]); setNote(""); setStep(1);
+      setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1);
       loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
-
-  // แนบรูปสลิป → อ่านยอดอัตโนมัติ (ครั้งเดียวต่อรูปใหม่)
-  const ocrDoneRef = useRef<string>("");
-  useEffect(() => {
-    const key = slip.find(k => !k.toLowerCase().endsWith(".pdf"));
-    if (!key || ocrDoneRef.current === key || ocrBusy) return;
-    ocrDoneRef.current = key;
-    readSlip();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slip]);
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
 
@@ -2963,8 +2983,39 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="mt-3"><Label>หมายเลขโอน / เลขอ้างอิง</Label>
           <input value={refNo} onChange={e => setRefNo(e.target.value)} placeholder="เช่น เลขอ้างอิงจากสลิป"
             className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
-        <div className="mt-3"><FileMultiInput label="📎 แนบสลิปการโอน (ระบบอ่านยอดให้อัตโนมัติ)" value={slip} onChange={setSlip} folder="china-transfers" /></div>
-        {ocrBusy && <div className="mt-1 text-[11px] text-violet-600">📷 กำลังอ่านยอดจากสลิป…</div>}
+        {/* รายการสลิป (หลายใบ) — AI อ่านยอด/ธนาคาร/เวลา แก้ได้ทุกช่อง */}
+        <div className="mt-3">
+          <div className="flex items-center justify-between mb-1">
+            <Label>📎 สลิปการโอน ({txSlips.length})</Label>
+            {txSlips.length > 0 && <span className="text-xs text-slate-500">รวม ฿{fmt(slipSum)}</span>}
+          </div>
+          <button type="button" onClick={() => slipInputRef.current?.click()} disabled={slipUploading || ocrBusy}
+            className="w-full h-11 rounded-lg border-2 border-dashed border-violet-300 text-violet-600 text-sm font-medium disabled:opacity-50 active:scale-[0.99] transition">
+            {slipUploading || ocrBusy ? "📷 กำลังอัปโหลด/อ่าน…" : "＋ เพิ่มสลิป (แนบได้หลายใบ)"}
+          </button>
+          <div className="mt-2 space-y-2">
+            {txSlips.map((s, i) => (
+              <div key={s.key + i} className="flex gap-2 bg-white border border-slate-200 rounded-lg p-2">
+                {s.key.toLowerCase().endsWith(".pdf")
+                  ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-12 h-12 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
+                  : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex gap-1.5">
+                    <input value={s.bank} onChange={e => setSlipField(i, { bank: e.target.value })} placeholder="ธนาคาร"
+                      className="w-1/2 h-8 px-2 text-sm border border-slate-200 rounded" />
+                    <Money value={s.amount ? String(s.amount) : ""} onChange={(v) => setSlipField(i, { amount: num(v) })}
+                      className="w-1/2 h-8 px-2 text-sm text-right border border-slate-200 rounded" />
+                  </div>
+                  <input value={s.at} onChange={e => setSlipField(i, { at: e.target.value })} placeholder="วันที่/เวลาที่โอน"
+                    className="w-full h-8 px-2 text-xs border border-slate-200 rounded text-slate-500" />
+                </div>
+                <button type="button" onClick={() => removeSlip(i)} className="w-7 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded">✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
       </Card>
       <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
@@ -3018,6 +3069,29 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         )}
       </Card>
 
+      {/* สลิปไหนตัดบิล CTW ใบไหน */}
+      {txSlips.length > 0 && ctwSel.size > 0 && (
+        <Card>
+          <div className="font-semibold text-slate-800 mb-2">📎 สลิปไหนตัดบิล CTW ใบไหน</div>
+          <div className="space-y-2">
+            {txSlips.map((s, i) => (
+              <div key={s.key + i} className="flex items-center gap-2">
+                {s.key.toLowerCase().endsWith(".pdf")
+                  ? <span className="w-9 h-9 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center">📄</span>
+                  // eslint-disable-next-line @next/next/no-img-element
+                  : <img src={r2Url(s.key)} alt="" className="w-9 h-9 flex-shrink-0 rounded object-cover border border-slate-200" />}
+                <div className="flex-1 min-w-0 text-xs text-slate-500 truncate">{s.bank || "สลิป"} · ฿{fmt(num(s.amount))}</div>
+                <select value={s.bill_id ?? ""} onChange={e => setSlipField(i, { bill_id: e.target.value || undefined })}
+                  className="flex-shrink-0 max-w-[55%] h-9 px-2 text-xs border border-slate-200 rounded-lg bg-white">
+                  <option value="">— ไม่ระบุ —</option>
+                  {[...ctwSel].map(id => { const b = ctw.find(x => String(x.id) === id); return <option key={id} value={id}>{String(b?.company_name ?? "—")} ({String(b?.doc_number ?? "—")})</option>; })}
+                </select>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* บิล CTW ที่เลือก + บัญชีปลายทาง + ยอดที่โอน (กระจายจาก "จำนวนเงินที่โอนจริง") */}
       {ctwSel.size > 0 && (
         <div className="rounded-2xl bg-orange-50 border border-orange-100 p-3 space-y-2">
@@ -3053,6 +3127,15 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <button onClick={() => setStep(2)} className="w-full h-9 text-slate-500 text-sm mt-1">← กลับ</button>
       </div>
       </>)}
+
+      {/* ดูสลิปเต็มจอ */}
+      {lightbox && (
+        <Portal><div className="fixed inset-0 z-[300] bg-black/90 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightbox} alt="" className="max-w-full max-h-full object-contain" onClick={e => e.stopPropagation()} />
+          <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 text-white text-2xl leading-none">×</button>
+        </div></Portal>
+      )}
 
       {/* popup หลังโอนสำเร็จ: พิมพ์รายการ / ส่งไลน์ */}
       {savedTransfer && !txReport && (
