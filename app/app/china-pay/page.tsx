@@ -2764,6 +2764,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         transfer_id: String(j.data?.id ?? ""), transfer_no: String(j.data?.transfer_no ?? ""),
         ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
         lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum, attachments: slipKeys,
+        // สรุปการคำนวณ (ย้ายมาจากหน้ายืนยัน → โชว์ในใบพิมพ์)
+        breakdown: { thb: thbSelTotal, chinaRemainThb, billsThb: selectedSum, tier: activeTier, chinaYuanBought, shortfallRmb, surplusRmb },
       });
       setSel(new Set()); setPay({}); setThbSel(new Set()); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(true);
       setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1);
@@ -2812,7 +2814,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         {!hasRate && <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>}
       </div>
 
-      {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ ¥) — sticky ตรึงบน */}
+      {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ ¥) — sticky ตรึงบน · โชว์ step 1 เท่านั้น */}
+      {step === 1 && (
       <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm sticky top-0 z-20">
         <button type="button" onClick={() => setShowBills(v => !v)} className="w-full text-left">
           <div className="flex items-center justify-between">
@@ -2821,36 +2824,39 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
           <div className="flex justify-between items-baseline mt-1 gap-2">
             <span className="text-xs text-slate-500 flex-shrink-0">บิลจีน ({sel.size}){thbSel.size > 0 ? ` + ค่าส่ง/VAT (${thbSel.size})` : ""}</span>
-            <span className="text-3xl font-extrabold text-red-600">{minTransfer > 0 ? `฿${fmt(+minTransfer.toFixed(2))}` : "รอเรท"}</span>
+            <span className="text-3xl font-extrabold text-red-600">{minTransfer > 0 ? `฿${fmt(+minTransfer.toFixed(2))}` : (hasRate ? "รอเลือกบิล" : "รอเรท")}</span>
           </div>
-          {hasRate && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ¥{fmt(+(selectedRmb - chinaCoverRmb).toFixed(2))}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}{chinaCoverRmb > 0 ? ` · หักคงเหลือ ¥${fmt(+chinaCoverRmb.toFixed(2))}` : ""}</div>}
+          {hasRate && minTransfer > 0 && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ¥{fmt(+(selectedRmb - chinaCoverRmb).toFixed(2))}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}{chinaCoverRmb > 0 ? ` · หักคงเหลือ ¥${fmt(+chinaCoverRmb.toFixed(2))}` : ""}</div>}
         </button>
-        {showBills && (
+        {showBills && (sel.size > 0 || thbSel.size > 0) && (
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-sm">
             {[...sel].map(id => { const b = pending.find(p => String(p.id) === id); const v = num(pay[id]); return (
               <div key={id} className="flex justify-between gap-2 items-baseline">
                 <span className="text-slate-500 truncate">{String(b?.supplier_label ?? b?.supplier_id ?? "—")}</span>
                 <span className="text-right flex-shrink-0">
-                  <span className="font-bold text-slate-800">¥{fmt(v)}</span>
+                  <span className="text-slate-700">¥{fmt(v)}</span>
                   {hasRate && <span className="text-[10px] text-slate-400 ml-1">× {fmt(effRate)} ≈ ฿{fmt(+(v * effRate).toFixed(2))}</span>}
                 </span>
               </div>
             ); })}
             {[...thbSel].map(id => { const b = pending.find(p => String(p.id) === id); return (
-              <div key={id} className="flex justify-between gap-2"><span className="text-slate-500 truncate">{b ? billTypeLabel(b) : ""}</span><span className="font-bold text-slate-800 flex-shrink-0">฿{fmt(num(b?.amount_thb))}</span></div>
+              <div key={id} className="flex justify-between gap-2"><span className="text-slate-500 truncate">{b ? billTypeLabel(b) : ""}</span><span className="text-slate-700 flex-shrink-0">฿{fmt(num(b?.amount_thb))}</span></div>
             ); })}
-          </div>
-        )}
-        {step === 3 && (
-          <div className="flex justify-between items-baseline mt-2 pt-2 border-t border-slate-100">
-            <span className="text-sm text-slate-500">จำนวนเงินที่โอนจริง</span>
-            <span className="text-3xl font-extrabold text-emerald-600">฿{fmt(num(amount))}</span>
+            {/* ผลรวมบิล (ตัวหนา) */}
+            <div className="flex justify-between gap-2 border-t border-slate-100 pt-1 mt-1">
+              <span className="text-slate-600 font-medium">รวมบิลจีน</span>
+              <span className="font-bold text-slate-800">¥{fmt(selectedRmb)}{hasRate ? ` ≈ ฿${fmt(+selectedSum.toFixed(2))}` : ""}</span>
+            </div>
+            {thbSelTotal > 0 && (
+              <div className="flex justify-between gap-2"><span className="text-slate-600 font-medium">รวมค่าส่ง/VAT</span><span className="font-bold text-slate-800">฿{fmt(thbSelTotal)}</span></div>
+            )}
           </div>
         )}
       </div>
+      )}
 
-      {/* ยอดคงเหลือในบัญชีจีน — การ์ดเล็ก + toggle (default เปิด) · โชว์ step 1+2 */}
-      {(step === 1 || step === 2) && (
+      {/* ยอดคงเหลือในบัญชีจีน — การ์ดเล็ก + toggle (default เปิด) · โชว์ step 1 เท่านั้น */}
+      {step === 1 && (
         <div className={`rounded-xl border px-4 py-2.5 ${needBalance ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-emerald-700">💰 ยอดคงเหลือในบัญชีจีน</span>
@@ -2983,42 +2989,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="hidden"
             onChange={e => { const fs = e.target.files; if (fs && fs.length) uploadSlip(fs); }} />
         </div>
-        {/* วันที่โอน = วันนี้ (ซ่อน) · เรทไปโชว์ในสรุปข้างล่าง */}
         {!hasRate && <div className="mt-2 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
-        {/* สรุป (เรียงตามชีต): โอนจริง → หักค่าส่ง → คงเหลือ → เรท → เป็นเงินจีน → toggle → หักบช → รวมยอด → ส่วนเกิน */}
-        <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
-          <div className="flex justify-between"><span className="text-slate-500">โอนจริง</span><span className="text-slate-700">฿{fmt(transferred)}</span></div>
-          {thbSelTotal > 0 && (
-            <div className="flex justify-between"><span className="text-slate-500">หัก ค่าส่ง / VAT</span><span className="text-rose-600">−฿{fmt(thbSelTotal)}</span></div>
-          )}
-          <div className="flex justify-between"><span className="text-slate-500">คงเหลือ</span><span className="font-medium text-slate-800">฿{fmt(Math.max(0, chinaRemainThb))}</span></div>
-          {hasRate && transferred > 0 ? (
-            <>
-              <div className="flex justify-between"><span className="text-slate-500">เรทที่ใช้ (ชั้น {activeTier})</span><span className="font-semibold text-emerald-700">{fmt(effRate)}</span></div>
-              {activeTier !== "R1" && tierBasisThb > 0 && (
-                <div className="text-[10px] text-slate-400 -mt-0.5">↳ ไม่ใช่ R1 เพราะคงเหลือ ฿{fmt(tierBasisThb)} เข้าชั้น {activeTier} (R1={fmt(r1)})</div>
-              )}
-              <div className="flex justify-between"><span className="text-slate-500">เป็นเงินจีน</span><span className="font-semibold text-slate-800">¥{fmt(+chinaYuanBought.toFixed(2))}</span></div>
-            </>
-          ) : (
-            <div className="flex justify-between"><span className="text-slate-500">เป็นเงินจีน</span><span className="text-amber-600">รอเรทเงิน</span></div>
-          )}
-
-          {/* หัก บัญชีจีน (ส่วนที่ขาด) — ดึงจากยอดคงเหลือ (toggle อยู่การ์ดยอดคงเหลือด้านบน) */}
-          {hasRate && shortfallRmb > 0.0001 && (
-            <div className="flex justify-between"><span className="text-slate-500">หัก ยอดคงเหลือจีน (ส่วนขาด)</span><span className="text-orange-600">¥{fmt(+shortfallRmb.toFixed(2))}</span></div>
-          )}
-          {hasRate && transferred > 0 && (
-            <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1"><span className="text-slate-600 font-medium">รวมยอด (= บิลจีน)</span><span className="font-bold text-slate-800">¥{fmt(selectedRmb)}</span></div>
-          )}
-          {/* เข้าบัญชีจีน (ส่วนเกิน) */}
-          <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1">
-            <span className="text-slate-600 font-medium">เข้าบัญชีจีน (ส่วนต่าง)</span>
-            {hasRate
-              ? <span className="font-bold text-emerald-700">¥{fmt(+surplusRmb.toFixed(2))}<span className="text-slate-400 font-normal"> ≈ ฿{fmt(chinaIn)}</span></span>
-              : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
-          </div>
-        </div>
+        {/* สรุปการคำนวณย้ายไปโชว์ในใบ "พิมพ์รายการโอน" แทน */}
         <div className="mt-3"><Label>หมายเลขโอน / เลขอ้างอิง</Label>
           <input value={refNo} onChange={e => setRefNo(e.target.value)} placeholder="เช่น เลขอ้างอิงจากสลิป"
             className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
@@ -3247,11 +3219,19 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
   useEffect(() => {
     const cv = canvasRef.current; if (!cv) return;
     type Row = { t: "kv" | "sep" | "head" | "sub"; l?: string; r?: string; bold?: boolean; color?: string };
+    const bd = t.breakdown as Record<string, unknown> | undefined;
     const rows: Row[] = [
       ...(t.ref_no ? [{ t: "kv", l: "เลขอ้างอิง", r: String(t.ref_no) } as Row] : []),
-      { t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) },
       { t: "kv", l: "โอนจริง", r: "฿" + fmt(num(t.transferred)), bold: true },
-      { t: "kv", l: "เข้าบัญชีจีน (ส่วนต่าง)", r: "¥" + fmt(num(t.chinaInRmb)), color: "#059669" },
+      ...(bd ? [
+        ...(num(bd.thb) > 0 ? [{ t: "kv", l: "หัก ค่าส่ง/VAT", r: "−฿" + fmt(num(bd.thb)), color: "#e11d48" } as Row] : []),
+        { t: "kv", l: "คงเหลือ", r: "฿" + fmt(num(bd.chinaRemainThb)) } as Row,
+        { t: "kv", l: `เรทที่ใช้ (ชั้น ${String(bd.tier ?? "")})`, r: fmt(num(t.rate)) } as Row,
+        { t: "kv", l: "เป็นเงินจีน", r: "¥" + fmt(+num(bd.chinaYuanBought).toFixed(2)) } as Row,
+        ...(num(bd.shortfallRmb) > 0 ? [{ t: "kv", l: "หัก ยอดคงเหลือจีน", r: "¥" + fmt(+num(bd.shortfallRmb).toFixed(2)), color: "#ea580c" } as Row] : []),
+        { t: "kv", l: "รวมยอด (บิลจีน)", r: "¥" + fmt(num(t.selectedRmb)), bold: true } as Row,
+      ] : [{ t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) } as Row]),
+      { t: "kv", l: "เข้าบัญชีจีน (ส่วนต่าง)", r: "¥" + fmt(+num(t.chinaInRmb).toFixed(2)), color: "#059669" },
     ];
     if (cn.length) {
       rows.push({ t: "sep" }, { t: "head", l: `บิลจีน (${cn.length})` });
@@ -3384,9 +3364,18 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
           </div>
           {!!t.ref_no && <Row label="เลขอ้างอิง" v={String(t.ref_no)} />}
           {/* แถวค่าเงิน — ค่าชิดขวาเสมอ (ml-auto text-right) + ห้ามตัดบรรทัด (กันตอนพิมพ์) */}
-          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">{fmt(num(t.rate))}</span></div>
           <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">โอนจริง</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">฿{fmt(num(t.transferred))}</span></div>
-          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(num(t.chinaInRmb))}</span></div>
+          {(() => { const bd = t.breakdown as Record<string, unknown> | undefined; if (!bd) return <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">{fmt(num(t.rate))}</span></div>; return (
+            <>
+              {num(bd.thb) > 0 && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">หัก ค่าส่ง/VAT</span><span className="text-rose-600 whitespace-nowrap ml-auto text-right">−฿{fmt(num(bd.thb))}</span></div>}
+              <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">คงเหลือ</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">฿{fmt(num(bd.chinaRemainThb))}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เรทที่ใช้ (ชั้น {String(bd.tier ?? "")})</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">{fmt(num(t.rate))}</span></div>
+              <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เป็นเงินจีน</span><span className="font-medium text-slate-800 whitespace-nowrap ml-auto text-right">¥{fmt(+num(bd.chinaYuanBought).toFixed(2))}</span></div>
+              {num(bd.shortfallRmb) > 0 && <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">หัก ยอดคงเหลือจีน</span><span className="text-orange-600 whitespace-nowrap ml-auto text-right">¥{fmt(+num(bd.shortfallRmb).toFixed(2))}</span></div>}
+              <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">รวมยอด (บิลจีน)</span><span className="font-bold text-slate-900 whitespace-nowrap ml-auto text-right">¥{fmt(num(t.selectedRmb))}</span></div>
+            </>
+          ); })()}
+          <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+num(t.chinaInRmb).toFixed(2))}</span></div>
           {cn.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิลจีน ({cn.length})</div>
