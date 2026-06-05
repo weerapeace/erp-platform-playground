@@ -2375,6 +2375,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [pay, setPay] = useState<Record<string, string>>({});   // จำนวนที่โอนต่อบิล (¥) รอบนี้
+  const [thbSel, setThbSel] = useState<Set<string>>(new Set());  // บิลค่าส่ง/VAT (บาท) ที่เลือกตัดรอบนี้
+  const thbToggle = (id: string) => setThbSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [useBalance, setUseBalance] = useState(false);          // สวิตช์ใช้ยอดคงเหลือบัญชีจีน
   const [amount, setAmount] = useState("");
   const [refNo, setRefNo] = useState("");                       // หมายเลข/เลขอ้างอิงการโอน
@@ -2435,10 +2437,12 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   useEffect(() => {
     if (!preselect.length || pending.length === 0) return;
     const valid = pending.filter(r => preselect.includes(String(r.id)));
-    if (valid.length) {
-      setSel(new Set(valid.map(r => String(r.id))));
-      setPay(Object.fromEntries(valid.map(r => [String(r.id), String(Math.max(0, num(r.amount_rmb) + num(r.fee_rmb) - num(r.paid_rmb)))])));
+    const vChina = valid.filter(r => !isThbBill(r)), vThb = valid.filter(r => isThbBill(r));
+    if (vChina.length) {
+      setSel(new Set(vChina.map(r => String(r.id))));
+      setPay(Object.fromEntries(vChina.map(r => [String(r.id), String(Math.max(0, num(r.amount_rmb) + num(r.fee_rmb) - num(r.paid_rmb)))])));
     }
+    if (vThb.length) setThbSel(new Set(vThb.map(r => String(r.id))));
     onConsumePreselect?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselect, pending]);
@@ -2471,6 +2475,15 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const chinaIn = Math.max(0, transferred + balanceUsedThb - selectedSum);
   const chinaInRmb = effRate ? chinaIn / effRate : 0;
   const activeTier = tierBasis <= 5000 ? "R1" : tierBasis <= 99999 ? "R2" : tierBasis <= 399999 ? "R3" : "R4";
+
+  // ---- บิลค่าส่ง / VAT (บาท) — แยกจากบิลจีน ¥ ไม่ยุ่งกับเรท/ยอดคงเหลือ ----
+  const pendingChina = useMemo(() => pending.filter(r => !isThbBill(r)), [pending]);
+  const pendingThb   = useMemo(() => pending.filter(r => isThbBill(r)), [pending]);
+  const shippingSelTotal = useMemo(() => pendingThb.filter(r => thbSel.has(String(r.id)) && r.is_shipping).reduce((a, r) => a + num(r.amount_thb), 0), [pendingThb, thbSel]);
+  const vatSelTotal      = useMemo(() => pendingThb.filter(r => thbSel.has(String(r.id)) && r.vat_type).reduce((a, r) => a + num(r.amount_thb), 0), [pendingThb, thbSel]);
+  const thbSelTotal = shippingSelTotal + vatSelTotal;
+  // ยอดรวมรอบนี้ (โชว์) = บิลจีน(฿) + ค่าส่ง + VAT
+  const roundTotalThb = selectedSum + thbSelTotal;
 
   // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
@@ -2573,7 +2586,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   // ปุ่มเดียว: ตัดบิลจีน + ตัดบิล CTW พร้อมกัน (+ เก็บประวัติ lines/เลขโอน)
   const save = async () => {
-    if (sel.size === 0 && ctwSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
+    if (sel.size === 0 && ctwSel.size === 0 && thbSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
     if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
     if (sel.size > 0 && belowMin) { toast.error(`จำนวนเงินที่โอนจริงต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
     if (ctwSel.size > 0 && num(amount) > 0 && [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0) > num(amount) + 0.001) {
@@ -2581,13 +2594,17 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     }
     setSaving(true);
     try {
-      const chinaIds = [...sel], ctwIds = [...ctwSel];
+      const chinaIds = [...sel], ctwIds = [...ctwSel], thbIds = [...thbSel];
       // รายการย่อย (เก็บว่าการโอนนี้ตัดบิลอะไร จำนวนเท่าไหร่)
       const lines = [
         ...chinaIds.map(id => {
           const b = pending.find(p => String(p.id) === id);
           const paidRmb = num(pay[id]);
           return { kind: "china", bill_id: id, label: String(b?.supplier_label ?? b?.supplier_id ?? ""), paid_rmb: paidRmb, paid_thb: +(paidRmb * effRate).toFixed(2) };
+        }),
+        ...thbIds.map(id => {
+          const b = pending.find(p => String(p.id) === id);
+          return { kind: "thb", bill_id: id, label: b ? billTypeLabel(b) : "", paid_thb: num(b?.amount_thb) };
         }),
         ...ctwIds.map(id => {
           const r = ctw.find(x => String(x.id) === id);
@@ -2630,6 +2647,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           body: JSON.stringify({ cleared_amount: newCleared, cleared_at: newCleared >= net ? new Date().toISOString() : null, actor: "china-app" }),
         });
       }));
+      // ตัดบิลค่าส่ง/VAT (บาท) → สถานะโอนแล้ว
+      await Promise.all(thbIds.map(id =>
+        apiFetch(`/api/master-v2/china-bills/${id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "โอนแล้ว", transfer_date: transferDate || today(), actor: "china-app" }),
+        })
+      ));
       celebrate("โอนสำเร็จ 🎉", { confetti: true });
       // เก็บสรุปการโอนไว้ทำ popup พิมพ์/ส่งไลน์
       const chinaThbSum = lines.filter(l => l.kind === "china").reduce((a, l) => a + num(l.paid_thb), 0);
@@ -2645,7 +2669,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         ref_no: refNo, date: transferDate || today(), at: new Date().toLocaleString("th-TH"),
         lines: enrichedLines, rate: effRate, selectedRmb, transferred, chinaIn, chinaInRmb, chinaThbSum, ctwThbSum, attachments: slip,
       });
-      setSel(new Set()); setPay({}); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(false);
+      setSel(new Set()); setPay({}); setThbSel(new Set()); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(false);
       setAmount(""); setRefNo(""); setSlip([]); setNote(""); setStep(1);
       loadAll();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
@@ -2740,13 +2764,47 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
       {/* STEP 1: เลือกบิลจีน */}
       {step === 1 && (<>
+      {/* บิลค่าส่ง / VAT (บาท) — โชว์บนสุด กรอบคนละสี */}
+      {pendingThb.length > 0 && (
+        <Card>
+          <div className="font-semibold text-slate-800 mb-2">บิลค่าส่ง / VAT (บาท)</div>
+          <div className="space-y-2">
+            {pendingThb.map((r) => {
+              const id = String(r.id), on = thbSel.has(id);
+              const ship = !!r.is_shipping;
+              return (
+                <button key={id} onClick={() => thbToggle(id)}
+                  className={`w-full flex items-center gap-3 p-2.5 text-left rounded-lg border-2 ${on
+                    ? (ship ? "border-purple-400 bg-purple-50" : "border-rose-400 bg-rose-50")
+                    : (ship ? "border-purple-200" : "border-rose-200")}`}>
+                  <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? (ship ? "bg-purple-600 text-white" : "bg-rose-600 text-white") : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${ship ? "bg-purple-100 text-purple-700" : "bg-rose-100 text-rose-700"}`}>{billTypeLabel(r)}</span>
+                      <span className="block text-xs text-slate-400 truncate">{String(r.bill_date ?? r.transfer_date ?? "—")}</span>
+                    </span>
+                  </span>
+                  <span className="font-bold text-slate-800 flex-shrink-0">฿{fmt(num(r.amount_thb))}</span>
+                </button>
+              );
+            })}
+          </div>
+          {thbSel.size > 0 && (
+            <div className="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
+              {shippingSelTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">ค่าส่ง</span><span className="font-medium text-purple-700">฿{fmt(shippingSelTotal)}</span></div>}
+              {vatSelTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">VAT</span><span className="font-medium text-rose-700">฿{fmt(vatSelTotal)}</span></div>}
+            </div>
+          )}
+        </Card>
+      )}
+
       <Card>
         <div className="font-semibold text-slate-800 mb-2">เลือกบิลที่จะตัด (รอโอน)</div>
-        {pending.length === 0 ? (
-          <div className="text-center text-slate-300 py-6 text-sm">— ไม่มีบิลรอโอน —</div>
+        {pendingChina.length === 0 ? (
+          <div className="text-center text-slate-300 py-6 text-sm">— ไม่มีบิลจีนรอโอน —</div>
         ) : (
           <div className="space-y-2">
-            {pending.map((r) => {
+            {pendingChina.map((r) => {
               const id = String(r.id), on = sel.has(id);
               const remain = billRemainRmb(r), paid = num(r.paid_rmb);
               const remainThb = remain * effRate;
@@ -2794,9 +2852,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         )}
       </Card>
       <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200">
-        <button onClick={() => setStep(2)} disabled={sel.size === 0 || anyChinaOver}
+        <button onClick={() => setStep(2)} disabled={(sel.size === 0 && thbSel.size === 0) || anyChinaOver}
           className="w-full h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
-          {sel.size === 0 ? "เลือกบิลจีนอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: ยืนยันการโอน →"}
+          {(sel.size === 0 && thbSel.size === 0) ? "เลือกบิลอย่างน้อย 1 บิล" : anyChinaOver ? "มีบิลที่ใส่ยอดเกิน" : "ถัดไป: ยืนยันการโอน →"}
         </button>
       </div>
       </>)}
@@ -2808,10 +2866,19 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="rounded-xl bg-emerald-600 text-white p-3 flex justify-between items-center mb-3">
           <span className="text-sm opacity-90">ยอดที่ต้องโอนรอบนี้</span>
           <span className="text-right">
-            <span className="text-2xl font-extrabold">{hasRate ? `฿${fmt(minTransfer)}` : "รอเรท"}</span>
-            {hasRate && <span className="block text-xs opacity-90">≈ ¥{fmt(useBalance ? netRmb : selectedRmb)}</span>}
+            <span className="text-2xl font-extrabold">{hasRate ? `฿${fmt(minTransfer + thbSelTotal)}` : (thbSelTotal > 0 ? `฿${fmt(thbSelTotal)}` : "รอเรท")}</span>
+            {hasRate && <span className="block text-xs opacity-90">≈ ¥{fmt(useBalance ? netRmb : selectedRmb)}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}</span>}
           </span>
         </div>
+        {/* แยกยอด: บิลจีน + ค่าส่ง + VAT (ค่าส่ง/VAT เป็นบาท ไม่คิดเรท) */}
+        {thbSelTotal > 0 && (
+          <div className="mb-3 rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
+            <div className="flex justify-between"><span className="text-slate-500">บิลจีน{hasRate ? "" : " (รอเรท)"}</span><span className="font-medium text-slate-800">฿{fmt(selectedSum)}</span></div>
+            {shippingSelTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">ค่าส่ง</span><span className="font-medium text-purple-700">฿{fmt(shippingSelTotal)}</span></div>}
+            {vatSelTotal > 0 && <div className="flex justify-between"><span className="text-slate-500">VAT</span><span className="font-medium text-rose-700">฿{fmt(vatSelTotal)}</span></div>}
+            <div className="flex justify-between border-t border-slate-200 pt-1 mt-1"><span className="text-slate-600 font-medium">รวมรอบนี้</span><span className="font-bold text-emerald-700">฿{fmt(roundTotalThb)}</span></div>
+          </div>
+        )}
         {/* บัญชีที่ต้องโอนไป = บริษัท CTW ค้างเก่าสุด */}
         {oldestCtw && (
           <div className="mb-3 rounded-xl bg-orange-50 border border-orange-200 p-3">
@@ -2900,10 +2967,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       </Card>
       <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
-        <button onClick={() => setStep(3)} disabled={num(amount) <= 0 || belowMin || (sel.size > 0 && !hasRate)}
+        <button onClick={() => setStep(3)} disabled={sel.size > 0 && (num(amount) <= 0 || belowMin || !hasRate)}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {(sel.size > 0 && !hasRate) ? "ยังไม่มีเรทวันนี้ — ใส่เรทก่อน"
-            : num(amount) <= 0 || belowMin ? `ใส่ยอดให้ครบ (≥ ฿${fmt(minTransfer)})`
+            : (sel.size > 0 && (num(amount) <= 0 || belowMin)) ? `ใส่ยอดให้ครบ (≥ ฿${fmt(minTransfer)})`
             : "ถัดไป: เลือกบิล CTW →"}
         </button>
       </div>
