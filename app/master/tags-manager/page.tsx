@@ -290,6 +290,7 @@ function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
   const gridRef = useRef<HTMLDivElement>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const baseSelRef = useRef<Set<string>>(new Set());
+  const movedRef = useRef(false);   // ลากเกิน threshold แล้ว (= marquee ไม่ใช่ click)
 
   // โหลดข้อมูล (server, ทีละหน้า)
   useEffect(() => {
@@ -319,14 +320,17 @@ function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
 
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest("[data-rec-id]")) return;   // คลิกการ์ด → ปล่อยให้ click handler ทำ
+    // เริ่มลากบนการ์ดที่ "เลือกแล้ว" → ปล่อยให้ลากไปตะกร้า (native drag) ไม่เริ่ม marquee
+    const card = (e.target as HTMLElement).closest("[data-rec-id]");
+    if (card && selected.has(card.getAttribute("data-rec-id")!)) return;
     startRef.current = { x: e.clientX, y: e.clientY };
     baseSelRef.current = e.shiftKey ? new Set(selected) : new Set();
-    setSelected(baseSelRef.current);
-    setMarquee({ x: e.clientX, y: e.clientY, w: 0, h: 0 });
+    movedRef.current = false;
   };
   const onMouseMove = (e: React.MouseEvent) => {
     const s = startRef.current; if (!s) return;
+    if (!movedRef.current && Math.abs(e.clientX - s.x) + Math.abs(e.clientY - s.y) < 5) return;  // ยังไม่ถือว่าลาก
+    movedRef.current = true;
     const left = Math.min(s.x, e.clientX), top = Math.min(s.y, e.clientY), right = Math.max(s.x, e.clientX), bottom = Math.max(s.y, e.clientY);
     setMarquee({ x: left, y: top, w: right - left, h: bottom - top });
     const sel = new Set(baseSelRef.current);
@@ -336,7 +340,7 @@ function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
     });
     setSelected(sel);
   };
-  const endMarquee = () => { startRef.current = null; setMarquee(null); };
+  const endMarquee = () => { startRef.current = null; setMarquee(null); setTimeout(() => { movedRef.current = false; }, 0); };
 
   const toggleOne = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
@@ -369,7 +373,7 @@ function QuickSelectGrid({ api, junction, tagLabel, onAddMany, selDragRef }: {
             <div key={r.id} data-rec-id={r.id}
               draggable={on}
               onDragStart={() => { selDragRef.current = selectedRecs(); }}
-              onClick={(e) => { if (e.shiftKey) { toggleOne(r.id); } else { toggleOne(r.id); } }}
+              onClick={() => { if (movedRef.current) return; toggleOne(r.id); }}
               className={`rounded-lg border p-2 flex flex-col gap-1.5 cursor-pointer transition-colors ${on ? "bg-slate-300 border-slate-400" : "bg-white border-slate-200 hover:border-blue-300"}`}>
               <div className="flex gap-2">
                 {r.image
