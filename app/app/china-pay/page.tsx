@@ -852,42 +852,31 @@ function BillForm() {
   return (
     <div className="space-y-4">
       <Card>
-        {/* ร้านค้า (จีน) — ซ่อนเมื่อเลือกค่าส่ง/VAT */}
-        {!isShipping && !vatType && (
-          <>
-            <Label>ร้านค้า (จีน)</Label>
-            <RelationPicker value={supplierId} onChange={(id) => setSupplierId(id)} config={SUPPLIER_CFG} />
-            {sup && (
-              <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
-                {!!sup.name_en && <div className="text-slate-700 font-medium">{String(sup.name_en)}</div>}
-                <Row label="ธนาคาร" v={sup.bank_name_brief} />
-                <Row label="เลขบัญชี" v={sup.account_number} />
-                <Row label="ชื่อบัญชี" v={sup.bank_account_name} />
-                <Row label="โทร" v={sup.phone} />
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ค่าส่ง (เปิด/ปิด) — ซ่อนเมื่อเลือกร้าน/VAT */}
-        {!supplierId && !vatType && (
-          <label className={`flex items-center justify-between ${!isShipping ? "mt-3 pt-3 border-t border-slate-100" : ""}`}>
-            <span className="text-sm font-medium text-slate-700">🚚 บิลค่าส่ง (กรอกเป็นบาท)</span>
-            <input type="checkbox" checked={isShipping} onChange={e => { setIsShipping(e.target.checked); if (e.target.checked) { setSupplierId(null); setVatType(""); } }}
-              className="w-5 h-5 accent-orange-600" />
-          </label>
-        )}
-
-        {/* VAT (เลือก) — ซ่อนเมื่อเลือกร้าน/ค่าส่ง */}
-        {!supplierId && !isShipping && (
-          <div className={!supplierId && !vatType ? "mt-3 pt-3 border-t border-slate-100" : ""}>
-            <Label>VAT (กรอกเป็นบาท)</Label>
-            <select value={vatType} onChange={e => { const v = e.target.value as "" | "ISG" | "IG"; setVatType(v); if (v) { setSupplierId(null); setIsShipping(false); } }}
-              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg bg-white">
-              <option value="">— ไม่ใช่บิล VAT —</option>
-              <option value="ISG">VAT ISG</option>
-              <option value="IG">VAT IG</option>
-            </select>
+        {/* ร้านค้า (จีน) — มีตัวเลือกพิเศษบนสุด: ค่าส่ง / VAT ISG / VAT IG */}
+        <Label>ร้านค้า (จีน)</Label>
+        <RelationPicker
+          value={isShipping ? "__ship__" : vatType ? `__vat_${vatType}__` : supplierId}
+          onChange={(id) => {
+            if (id === "__ship__") { setIsShipping(true); setVatType(""); setSupplierId(null); }
+            else if (id === "__vat_ISG__") { setVatType("ISG"); setIsShipping(false); setSupplierId(null); }
+            else if (id === "__vat_IG__") { setVatType("IG"); setIsShipping(false); setSupplierId(null); }
+            else { setSupplierId(id); setIsShipping(false); setVatType(""); }
+          }}
+          config={SUPPLIER_CFG}
+          pinnedOptions={[
+            { id: "__ship__", label: "🚚 ค่าส่ง", accentClass: "text-purple-700" },
+            { id: "__vat_ISG__", label: "🧾 VAT ISG", accentClass: "text-rose-700" },
+            { id: "__vat_IG__", label: "🧾 VAT IG", accentClass: "text-rose-700" },
+          ]}
+        />
+        {/* ข้อมูลร้าน (เฉพาะเลือกร้านจริง) */}
+        {supplierId && sup && (
+          <div className="mt-3 rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-1">
+            {!!sup.name_en && <div className="text-slate-700 font-medium">{String(sup.name_en)}</div>}
+            <Row label="ธนาคาร" v={sup.bank_name_brief} />
+            <Row label="เลขบัญชี" v={sup.account_number} />
+            <Row label="ชื่อบัญชี" v={sup.bank_account_name} />
+            <Row label="โทร" v={sup.phone} />
           </div>
         )}
       </Card>

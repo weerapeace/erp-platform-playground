@@ -14,10 +14,17 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { buildRelationFilter, type RelationConfig } from "@/lib/relation";
 import type { PickerOption } from "@/app/api/admin/picker/route";
+
+/** ตัวเลือกพิเศษปักบนสุดของ dropdown (เช่น "ค่าส่ง" / "VAT") — ไม่ใช่ record จาก DB */
+export type PinnedOption = PickerOption & {
+  /** สี tailwind classes เช่น "text-purple-700" สำหรับทำให้เด่น */
+  accentClass?: string;
+};
 
 // lazy เพื่อตัด circular import (RecordFormModal ใช้ RelationPicker ข้างใน)
 const RecordFormModal = dynamic(() => import("@/components/record-form-modal").then((m) => m.RecordFormModal), { ssr: false });
@@ -38,19 +45,32 @@ interface RelationPickerProps {
    * เช่น { warehouse_id: "uuid" } เพื่อกรอง location ตาม warehouse ที่เลือก
    */
   siblingValues?: Record<string, unknown>;
+  /** ตัวเลือกพิเศษปักบนสุด (เด่น/คนละสี) เช่น ค่าส่ง / VAT — id เป็น token พิเศษ ไม่ใช่ uuid */
+  pinnedOptions?: PinnedOption[];
 }
 
 export function RelationPicker({
   value, onChange, config, placeholder = "— เลือก —", disabled, required, hasError,
-  siblingValues = {},
+  siblingValues = {}, pinnedOptions = [],
 }: RelationPickerProps) {
   const [open,    setOpen]    = useState(false);
   const [search,  setSearch]  = useState("");
   const [options, setOptions] = useState<PickerOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [current, setCurrent] = useState<PickerOption | null>(null);
+  const [mounted, setMounted] = useState(false);   // กัน SSR ตอนใช้ Portal
+  const [isMobile, setIsMobile] = useState(false);  // <640px → dropdown เต็มจอ (Portal)
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef     = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setMounted(true);
+    const mq = window.matchMedia("(max-width: 639px)");
+    const upd = () => setIsMobile(mq.matches);
+    upd();
+    mq.addEventListener("change", upd);
+    return () => mq.removeEventListener("change", upd);
+  }, []);
+  const pinned = pinnedOptions.find((p) => p.id === value) ?? null;
 
   // ---- R3: dependent dropdown — คำนวณ filter ที่มีผลจริง (รวม static + dependent) ----
   const effectiveFilter = buildRelationFilter(config, siblingValues);
@@ -117,6 +137,8 @@ export function RelationPicker({
   // ---- resolve current value to label (initial + when value changes) ----
   useEffect(() => {
     if (!value) { setCurrent(null); return; }
+    const pin = pinnedOptions.find((p) => p.id === value);
+    if (pin) { setCurrent(pin); return; }   // token พิเศษ (ค่าส่ง/VAT) — ไม่ต้อง fetch DB
     const inOpts = options.find((o) => o.id === value);
     if (inOpts) { setCurrent(inOpts); return; }
     // fetch this single id — F9 path
@@ -148,9 +170,9 @@ export function RelationPicker({
     if (open) loadOptions(search, value);
   }, [open, search, value, loadOptions]);
 
-  // ---- click outside ----
+  // ---- click outside (เฉพาะ desktop dropdown — มือถือเต็มจอใช้ backdrop ปิด) ----
   useEffect(() => {
-    if (!open) return;
+    if (!open || isMobile) return;
     const handler = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -159,7 +181,7 @@ export function RelationPicker({
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  }, [open, isMobile]);
 
   // ---- #A: ล็อก scroll พื้นหลังตอนเปิด popup (มือถือ) — กัน scroll ทะลุไปพื้นหลัง ----
   useEffect(() => {
@@ -222,6 +244,66 @@ export function RelationPicker({
     ? `เลือก ${config.depends_on.parent_field.replace(/_id$/, "")} ก่อน`
     : null;
 
+  // เนื้อหา dropdown (search + รายการ) ใช้ร่วมทั้งมือถือ(เต็มจอ) และ desktop
+  const panelBody = (
+    <>
+      {/* search */}
+      <div className="p-2 border-b border-slate-100 flex-shrink-0">
+        <input ref={inputRef} type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา..."
+          className="w-full h-11 sm:h-8 px-3 sm:px-2 text-base sm:text-sm border border-slate-200 rounded-lg sm:rounded outline-none focus:border-orange-400" />
+      </div>
+      {/* options */}
+      <div className="overflow-y-auto flex-1 sm:max-h-64 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+        {/* ตัวเลือกพิเศษปักบนสุด (เด่น/คนละสี) เช่น ค่าส่ง / VAT */}
+        {pinnedOptions.map((opt) => (
+          <button key={opt.id} type="button" onClick={() => select(opt)}
+            className={`w-full px-3 py-2.5 text-left text-sm font-semibold border-b border-slate-100 hover:bg-slate-50 ${opt.accentClass ?? "text-slate-800"} ${value === opt.id ? "bg-slate-50" : ""}`}>
+            {opt.label}
+          </button>
+        ))}
+        {loading ? (
+          <div className="px-3 py-4 text-xs text-slate-400 text-center">กำลังโหลด...</div>
+        ) : (
+          <>
+            {value && (
+              <button type="button" onClick={() => select(null)} className="w-full px-3 py-2 text-left text-xs text-red-600 hover:bg-red-50 border-b border-slate-100">✕ ล้างค่า</button>
+            )}
+            {options.length === 0 && !canCreate && (<div className="px-3 py-4 text-xs text-slate-400 text-center">ไม่พบ</div>)}
+            {options.map((opt) => (
+              <button key={opt.id} type="button" onClick={() => select(opt)}
+                className={`w-full px-3 py-2 text-left text-sm hover:bg-orange-50 ${value === opt.id ? "bg-orange-50 font-medium" : ""} ${opt.active === false ? "opacity-50" : ""}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-800 truncate">{opt.label}</span>
+                  {opt.active === false && (<span className="text-[10px] text-slate-400 flex-shrink-0">ปิดอยู่</span>)}
+                </div>
+                {opt.secondary && (<div className="text-xs text-slate-500 truncate">{opt.secondary}</div>)}
+              </button>
+            ))}
+            {canCreate && search.trim() && !options.some((o) => o.label.toLowerCase() === search.trim().toLowerCase()) && (
+              <div className="border-t border-slate-100">
+                <button type="button" onClick={() => { if (config.target_module_key) { setOpen(false); setShowCreate(search.trim()); } else void quickCreate(search); }}
+                  disabled={creating} className="w-full px-3 py-2.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-2">
+                  <span className="text-base">＋</span>
+                  <span>{creating ? "กำลังสร้าง..." : <>สร้างใหม่: <strong>&ldquo;{search.trim()}&rdquo;</strong></>}</span>
+                </button>
+                {createErr && (<div className="px-3 py-1.5 text-[11px] text-red-600 bg-red-50 border-t border-red-100">⚠ {createErr}</div>)}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      {/* เพิ่มใหม่ (ฟอร์มเต็มของ module จริง เช่น partner) */}
+      {config.target_module_key && (
+        <div className="flex-shrink-0 border-t border-slate-100 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <button type="button" onClick={() => { setOpen(false); setShowCreate(search.trim() || ""); }}
+            className="w-full h-11 sm:h-9 rounded-lg bg-emerald-600 text-white text-sm font-medium flex items-center justify-center gap-1.5 hover:bg-emerald-700">
+            <span className="text-base">＋</span> เพิ่มใหม่
+          </button>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div ref={containerRef} className="relative">
       <button
@@ -234,7 +316,7 @@ export function RelationPicker({
       >
         {current ? (
           <span className="truncate">
-            <span className="text-slate-800">{current.label}</span>
+            <span className={pinned ? `font-semibold ${pinned.accentClass ?? "text-slate-800"}` : "text-slate-800"}>{current.label}</span>
             {current.secondary && (
               <span className="ml-1.5 text-xs text-slate-400">{current.secondary}</span>
             )}
@@ -249,111 +331,26 @@ export function RelationPicker({
         </svg>
       </button>
 
-      {open && (
-        <>
-          {/* backdrop — มือถือเปิดเป็น popup เต็มจอ */}
-          <div className="fixed inset-0 z-[55] bg-black/40 sm:hidden" onClick={() => setOpen(false)} />
-          <div className="z-[60] bg-white flex flex-col overflow-hidden
-                          fixed inset-0
-                          sm:absolute sm:inset-auto sm:left-0 sm:right-0 sm:top-full sm:mt-1 sm:max-h-80 sm:rounded-lg sm:border sm:border-slate-200 sm:shadow-lg sm:z-50">
-            {/* หัว (เฉพาะมือถือ) */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 sm:hidden">
-              <span className="font-semibold text-slate-800">เลือกรายการ</span>
-              <button type="button" onClick={() => setOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
-            </div>
-            {/* search */}
-            <div className="p-2 border-b border-slate-100">
-              <input
-                ref={inputRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="ค้นหา..."
-                className="w-full h-10 sm:h-8 px-3 sm:px-2 text-base sm:text-sm border border-slate-200 rounded-lg sm:rounded outline-none focus:border-orange-400"
-              />
-            </div>
-
-            {/* options */}
-            <div className="overflow-y-auto flex-1 sm:max-h-64 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-            {loading ? (
-              <div className="px-3 py-4 text-xs text-slate-400 text-center">กำลังโหลด...</div>
-            ) : (
-              <>
-                {/* clear option */}
-                {value && (
-                  <button
-                    type="button"
-                    onClick={() => select(null)}
-                    className="w-full px-3 py-2 text-left text-xs text-red-600 hover:bg-red-50 border-b border-slate-100"
-                  >
-                    ✕ ล้างค่า
-                  </button>
-                )}
-                {options.length === 0 && !canCreate && (
-                  <div className="px-3 py-4 text-xs text-slate-400 text-center">ไม่พบ</div>
-                )}
-                {options.map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => select(opt)}
-                    className={`w-full px-3 py-2 text-left text-sm hover:bg-orange-50 ${
-                      value === opt.id ? "bg-orange-50 font-medium" : ""
-                    } ${opt.active === false ? "opacity-50" : ""}`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-slate-800 truncate">{opt.label}</span>
-                      {opt.active === false && (
-                        <span className="text-[10px] text-slate-400 flex-shrink-0">ปิดอยู่</span>
-                      )}
-                    </div>
-                    {opt.secondary && (
-                      <div className="text-xs text-slate-500 truncate">{opt.secondary}</div>
-                    )}
-                  </button>
-                ))}
-
-                {/* F6: Quick create button */}
-                {canCreate && search.trim() && !options.some((o) => o.label.toLowerCase() === search.trim().toLowerCase()) && (
-                  <div className="border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // module จริง → เปิดฟอร์มเต็ม (popup) | lookup → สร้างเร็ว (แค่ชื่อ)
-                        if (config.target_module_key) { setOpen(false); setShowCreate(search.trim()); }
-                        else void quickCreate(search);
-                      }}
-                      disabled={creating}
-                      className="w-full px-3 py-2.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-2"
-                    >
-                      <span className="text-base">＋</span>
-                      <span>
-                        {creating ? "กำลังสร้าง..." : <>สร้างใหม่: <strong>&ldquo;{search.trim()}&rdquo;</strong></>}
-                      </span>
-                    </button>
-                    {createErr && (
-                      <div className="px-3 py-1.5 text-[11px] text-red-600 bg-red-50 border-t border-red-100">⚠ {createErr}</div>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-            </div>
-
-            {/* #B: ปุ่มเพิ่มใหม่แบบถาวร (ฟอร์มเต็มของ module จริง เช่น partner) — sticky ล่างสุด เลื่อนถึงเสมอ */}
-            {config.target_module_key && (
-              <div className="flex-shrink-0 border-t border-slate-100 bg-white p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-                <button
-                  type="button"
-                  onClick={() => { setOpen(false); setShowCreate(search.trim() || ""); }}
-                  className="w-full h-11 sm:h-9 rounded-lg bg-emerald-600 text-white text-sm font-medium flex items-center justify-center gap-1.5 hover:bg-emerald-700"
-                >
-                  <span className="text-base">＋</span> เพิ่มใหม่
-                </button>
+      {open && (mounted && isMobile
+        ? createPortal(
+            // มือถือ: เต็มจอ ลอยทับ header/footer (Portal ออกนอกกรอบ) + ปุ่ม × ขวาบน
+            <div className="fixed inset-0 z-[9999] bg-black/50 flex flex-col" onClick={() => setOpen(false)}>
+              <div className="bg-white flex flex-col h-full w-full" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 flex-shrink-0">
+                  <span className="font-semibold text-slate-800">เลือกรายการ</span>
+                  <button type="button" onClick={() => setOpen(false)} className="w-9 h-9 rounded-full text-slate-500 hover:bg-slate-100 text-2xl leading-none">×</button>
+                </div>
+                {panelBody}
               </div>
-            )}
-          </div>
-        </>
+            </div>,
+            document.body
+          )
+        : (
+            // desktop: dropdown ลอยใต้ช่อง
+            <div className="absolute left-0 right-0 top-full mt-1 max-h-80 z-50 bg-white rounded-lg border border-slate-200 shadow-lg flex flex-col overflow-hidden">
+              {panelBody}
+            </div>
+          )
       )}
 
       {/* ฟอร์มสร้างใหม่เต็ม (popup) — เมื่อ relation ชี้ไป module จริง */}
