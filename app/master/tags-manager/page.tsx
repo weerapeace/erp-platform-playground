@@ -49,6 +49,7 @@ export default function TagsManagerPage() {
 
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [includeChildren, setIncludeChildren] = useState(false);   // ใส่แท็กให้ SKU ลูกด้วย (โหมด Parent)
   const dragRef = useRef<{ type: "rec" | "tag"; id: string } | null>(null);
 
   const tagLabel = useCallback((id: string) => allTags.find((t) => t.id === id)?.label ?? id.slice(0, 6), [allTags]);
@@ -120,22 +121,42 @@ export default function TagsManagerPage() {
     setAllTags((t) => [...t, { id, label: name }]); setNewTag(""); addTag(id);
   };
 
+  // ดึง SKU ลูกของ Parent ที่เลือก (skus_v2.parent_sku_id IN parentIds)
+  const fetchChildSkuIds = async (parentIds: string[]): Promise<string[]> => {
+    const ids: string[] = [];
+    for (let i = 0; i < parentIds.length; i += 50) {
+      const chunk = parentIds.slice(i, i + 50);
+      const qs = new URLSearchParams({ limit: "2000" });
+      qs.set("filters", JSON.stringify({ parent_sku_id: { type: "select", selected: chunk } }));
+      try {
+        const j = await apiFetch(`/api/master-v2/skus?${qs}`).then((r) => r.json());
+        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) ids.push(String(r.id));
+      } catch { /* ignore chunk */ }
+    }
+    return ids;
+  };
+
   const apply = async () => {
     if (cart.length === 0 || tagSet.length === 0) return;
-    const total = cart.length * tagSet.length;
-    if (!confirm(`ใส่ ${tagSet.length} แท็ก ให้สินค้า ${cart.length} ตัว (รวม ${total} รายการเชื่อมโยง)?`)) return;
     setApplying(true); setResult(null);
-    let ok = 0, fail = 0;
-    for (const rec of cart) {
-      for (const tag of tagSet) {
-        try {
-          const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction: cfg.junction, src_id: rec.id, tgt_id: tag }) });
-          if (res.ok) ok++; else fail++;
-        } catch { fail++; }
-      }
+    // โหมด Parent + ติ๊ก "ใส่ให้ลูกด้วย" → หา SKU ลูกก่อน
+    let childIds: string[] = [];
+    if (includeChildren && entity === "parent-skus") {
+      setResult("กำลังหา SKU ลูก…");
+      childIds = await fetchChildSkuIds(cart.map((c) => c.id));
+      setResult(null);
     }
+    const totalLinks = (cart.length + childIds.length) * tagSet.length;
+    if (!confirm(`ใส่ ${tagSet.length} แท็ก ให้ Parent ${cart.length} ตัว${childIds.length ? ` + SKU ลูก ${childIds.length} ตัว` : ""}\n(รวม ${totalLinks.toLocaleString()} รายการเชื่อมโยง)?`)) { setApplying(false); return; }
+    let ok = 0, fail = 0;
+    const childJunction = ENTITIES["skus"].junction;
+    const link = async (junction: string, src: string, tgt: string) => {
+      try { const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: src, tgt_id: tgt }) }); if (res.ok) ok++; else fail++; } catch { fail++; }
+    };
+    for (const rec of cart) for (const tag of tagSet) await link(cfg.junction, rec.id, tag);
+    for (const cid of childIds) for (const tag of tagSet) await link(childJunction, cid, tag);
     setApplying(false);
-    setResult(`เสร็จแล้ว — ใส่แท็กสำเร็จ ${ok} รายการ${fail ? `, ไม่สำเร็จ ${fail}` : ""}`);
+    setResult(`เสร็จแล้ว — สำเร็จ ${ok}${fail ? `, ไม่สำเร็จ ${fail}` : ""} รายการ${childIds.length ? ` (รวม SKU ลูก ${childIds.length} ตัว)` : ""}`);
     loadTagMap(cart.map((c) => c.id));   // refresh แท็กบนการ์ด
   };
 
@@ -237,9 +258,15 @@ export default function TagsManagerPage() {
                 </span>
               ))}
             </div>
+            {entity === "parent-skus" && (
+              <label className="flex items-center gap-1.5 text-xs text-slate-600 mb-2 cursor-pointer">
+                <input type="checkbox" checked={includeChildren} onChange={(e) => setIncludeChildren(e.target.checked)} className="rounded border-slate-300" />
+                ใส่แท็กให้ <b>SKU ลูก</b> ของ Parent เหล่านี้ด้วย
+              </label>
+            )}
             <button onClick={apply} disabled={applying || cart.length === 0 || tagSet.length === 0}
               className="w-full h-10 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
-              {applying ? "กำลังใส่แท็ก…" : `💾 ใส่แท็กให้ทั้งหมด (${cart.length} ตัว × ${tagSet.length} แท็ก)`}
+              {applying ? "กำลังใส่แท็ก…" : `💾 ใส่แท็กให้ทั้งหมด (${cart.length} ตัว × ${tagSet.length} แท็ก)${includeChildren && entity === "parent-skus" ? " + ลูก" : ""}`}
             </button>
             {result && <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-md px-2 py-1 mt-2">{result}</div>}
           </div>
