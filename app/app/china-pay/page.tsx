@@ -2452,18 +2452,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   });
   // ยอด ¥ ที่จะตัดรอบนี้ (จากช่องต่อบิล)
   const selectedRmb = useMemo(() => [...sel].reduce((a, id) => a + num(pay[id]), 0), [sel, pay]);
-  // หักยอดคงเหลือบัญชีจีน (ถ้าเปิดสวิตช์) → เหลือ ¥ ที่ต้องโอนจริง
-  const netRmb = Math.max(0, selectedRmb - (useBalance ? balance.rmb : 0));
-  // เรท/ชั้น — เปิดสวิตช์: คิดชั้นจาก "เหลือที่ต้องโอน" / ปิด: คิดจากยอดรวมบิล
-  const tierBasis = useBalance ? netRmb * r1 : selectedRmb * r1;
-  const effRate = hasRate ? rateFor(tierBasis, r1) : 0;
-  const selectedSum = selectedRmb * effRate;          // ยอดบิลที่เลือก (฿)
-  const netThb = netRmb * effRate;                    // เหลือที่ต้องโอนจริง (฿) เมื่อหักยอดคงเหลือ
-  const balanceUsedRmb = useBalance ? balance.rmb : 0;       // ¥ ที่ดึงจากยอดคงเหลือมาช่วย
-  const balanceUsedThb = balanceUsedRmb * effRate;          // แปลงเป็นบาท (สำหรับโชว์)
-  const activeTier = tierBasis <= 5000 ? "R1" : tierBasis <= 99999 ? "R2" : tierBasis <= 399999 ? "R3" : "R4";
 
-  // ---- บิลค่าส่ง / VAT (บาท) — ชั้นเรท (R1-R4) คิดจากบิลจีน ¥ เท่านั้น (ไม่รวมค่าส่ง/VAT) ----
+  // ---- บิลค่าส่ง / VAT (บาท) ----
   const pendingChina = useMemo(() => pending.filter(r => !isThbBill(r)), [pending]);
   const pendingThb   = useMemo(() => pending.filter(r => isThbBill(r)), [pending]);
   const shippingSelTotal = useMemo(() => pendingThb.filter(r => thbSel.has(String(r.id)) && r.is_shipping).reduce((a, r) => a + num(r.amount_thb), 0), [pendingThb, thbSel]);
@@ -2472,11 +2462,22 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   // โอนจริง = กรอกเอง · ยอดโอนเดียวรวม บิลจีน + ค่าส่ง + VAT
   const transferred = num(amount);
+  // ★ ตัวเลขฐานเลือกชั้นเรท R1-R4 = เงินที่โอนเข้าจีนจริง = โอนจริง − (ค่าส่ง + VAT)
+  const chinaTransferThb = Math.max(0, transferred - thbSelTotal);
+  const effRate = hasRate ? rateFor(chinaTransferThb, r1) : 0;
+  const activeTier = chinaTransferThb <= 5000 ? "R1" : chinaTransferThb <= 99999 ? "R2" : chinaTransferThb <= 399999 ? "R3" : "R4";
+
+  const balanceUsedRmb = useBalance ? balance.rmb : 0;       // ¥ ที่ดึงจากยอดคงเหลือมาช่วย
+  const balanceUsedThb = balanceUsedRmb * effRate;          // แปลงเป็นบาท (สำหรับโชว์)
+  const netRmb = Math.max(0, selectedRmb - balanceUsedRmb); // ¥ ที่ต้องโอนจริงหลังหักคงเหลือ
+  const selectedSum = selectedRmb * effRate;               // มูลค่าบิลจีน (฿) ที่เรทนี้
+  const netThb = netRmb * effRate;
+
   const chinaDueThb = useBalance ? netThb : selectedSum;     // ส่วนบิลจีนที่ต้องโอน (฿)
   const roundTotalThb = selectedSum + thbSelTotal;           // ยอดรวมรอบนี้ (โชว์ breakdown)
   const minTransfer = chinaDueThb + thbSelTotal;             // ขั้นต่ำ = บิลจีน(หักคงเหลือ) + ค่าส่ง + VAT
   const belowMin = minTransfer > 0 && transferred < minTransfer - 0.001;
-  // เงินเหลือเข้าบัญชีจีน (ledger) = โอนจริง − ค่าส่ง/VAT − ยอดบิลจีน (หักค่าส่ง/VAT ออกก่อน ไม่ให้ปนยอดคงเหลือจีน)
+  // เงินเหลือเข้าบัญชีจีน (ledger) = โอนจริง − ค่าส่ง/VAT − ยอดบิลจีน
   const leftover = transferred - thbSelTotal - selectedSum;
   const leftoverRmb = effRate ? leftover / effRate : 0;
   // เข้าบัญชีจีน (โชว์) = โอนจริง − ค่าส่ง/VAT + ยอดคงเหลือที่ใช้ − ยอดบิลจีน
