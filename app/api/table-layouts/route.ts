@@ -12,6 +12,26 @@ export type TableLayoutColumn = {
   pinned?: "left" | "right" | null;
 };
 
+// ค่าเริ่มต้นตารางแบบขยายได้ (เก็บใน settings jsonb) — ของกลาง
+export type SortSpec = { column: string; dir: "asc" | "desc" };
+export type SummaryType = "sum" | "count" | "avg";
+export type RowColorOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "empty" | "not_empty";
+export type RowColorRule = {
+  column: string;
+  op:     RowColorOp;
+  value?: string;                 // ไม่ใช้กับ empty/not_empty
+  color:  string;                 // คีย์สี: red|orange|amber|green|blue|purple|slate
+};
+export type TableLayoutSettings = {
+  default_sort?:               SortSpec | null;
+  secondary_sort?:             SortSpec | null;
+  default_filter_active_only?: boolean;            // เปิดมาเห็นเฉพาะที่ใช้งานอยู่ (ซ่อน archived)
+  group_by?:                   string | null;      // คอลัมน์จัดกลุ่มเริ่มต้น
+  summaries?:                  Record<string, SummaryType>;  // column → ชนิดสรุปท้ายตาราง
+  row_color_rules?:            RowColorRule[];      // ระบายสีแถวตามเงื่อนไข (กฎแรกที่เข้าเงื่อนไขชนะ)
+  actions?:                    { export?: boolean; import?: boolean; create?: boolean; bulk?: boolean }; // undefined/true = แสดง
+};
+
 export type TableLayout = {
   table_id:           string;
   label:              string;
@@ -20,6 +40,7 @@ export type TableLayout = {
   default_density:    "normal" | "compact";
   default_page_size:  number;
   default_view_mode:  "table" | "cards";
+  settings:           TableLayoutSettings;
   notes:              string | null;
   created_at:         string;
   updated_at:         string;

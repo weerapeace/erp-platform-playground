@@ -9,6 +9,7 @@ import { ImageThumbnail } from "@/components/image-manager";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { readRelationLabel } from "@/lib/relation";
 import { formatDate } from "@/lib/date";
+import type { TableLayoutSettings, RowColorRule } from "@/app/api/table-layouts/route";
 import {
   useReactTable,
   getCoreRowModel,
@@ -129,6 +130,36 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; 
   completed:        { bg: "bg-purple-50",   text: "text-purple-700",  border: "border-purple-200",  label: "เสร็จสิ้น" },
   done:             { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "เสร็จสิ้น" },
 };
+
+// ระบายสีแถวตามเงื่อนไข (ของกลาง) — กฎแรกที่เข้าเงื่อนไขชนะ
+const ROW_COLOR_BG: Record<string, string> = {
+  red: "#fef2f2", orange: "#fff7ed", amber: "#fffbeb", green: "#f0fdf4",
+  blue: "#eff6ff", purple: "#faf5ff", slate: "#f8fafc",
+};
+const ROW_COLOR_BORDER: Record<string, string> = {
+  red: "#ef4444", orange: "#f97316", amber: "#f59e0b", green: "#22c55e",
+  blue: "#3b82f6", purple: "#a855f7", slate: "#94a3b8",
+};
+function evalRowColor(rules: RowColorRule[] | undefined, rowData: Record<string, unknown>): string | null {
+  if (!rules?.length) return null;
+  for (const r of rules) {
+    if (!r?.column || !r?.color) continue;
+    const v = rowData[r.column];
+    let hit = false;
+    switch (r.op) {
+      case "empty":     hit = v == null || v === ""; break;
+      case "not_empty": hit = v != null && v !== ""; break;
+      case "eq":        hit = String(v ?? "") === String(r.value ?? ""); break;
+      case "ne":        hit = String(v ?? "") !== String(r.value ?? ""); break;
+      case "lt":        hit = Number(v) <  Number(r.value); break;
+      case "lte":       hit = Number(v) <= Number(r.value); break;
+      case "gt":        hit = Number(v) >  Number(r.value); break;
+      case "gte":       hit = Number(v) >= Number(r.value); break;
+    }
+    if (hit) return r.color;
+  }
+  return null;
+}
 
 export function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? { bg: "bg-slate-100", text: "text-slate-600", border: "border-slate-200", label: status };
@@ -511,6 +542,8 @@ export function DataTable<T extends Record<string, unknown>>({
   const layoutAppliedRef = useRef(false);
   const layoutKey = tableId ? `erp-dt-${tableId}-layout-applied` : null;
   const [pendingDefaultPageSize, setPendingDefaultPageSize] = useState<number | null>(null);
+  // ค่าเริ่มต้นตารางแบบขยายได้ (settings jsonb) — ใช้ทำสรุปคอลัมน์/สีแถว ตอน render
+  const [layoutSettings, setLayoutSettings] = useState<TableLayoutSettings | null>(null);
   useEffect(() => {
     if (!tableId || layoutAppliedRef.current) return;
     try {
@@ -529,6 +562,7 @@ export function DataTable<T extends Record<string, unknown>>({
           default_density: "normal" | "compact";
           default_page_size: number;
           default_view_mode: "table" | "cards";
+          settings?: TableLayoutSettings | null;
         } | null;
         if (cancelled || !layout) return;
         const vis: VisibilityState = {};
@@ -550,6 +584,15 @@ export function DataTable<T extends Record<string, unknown>>({
         setDensity(layout.default_density);
         setViewMode(layout.default_view_mode);
         setPendingDefaultPageSize(layout.default_page_size);
+        // ค่าเริ่มต้นแบบขยายได้: เรียง / เรียงรอง / จัดกลุ่ม (ตั้งเฉพาะตอนยังไม่มีค่าเดิม → Saved View override ได้)
+        const s = layout.settings ?? null;
+        setLayoutSettings(s);
+        if (s?.default_sort?.column) {
+          const srt = [{ id: s.default_sort.column, desc: s.default_sort.dir === "desc" }];
+          if (s.secondary_sort?.column) srt.push({ id: s.secondary_sort.column, desc: s.secondary_sort.dir === "desc" });
+          setSorting((prev) => (prev.length ? prev : srt));
+        }
+        if (s?.group_by) setGroupBy((prev) => prev ?? s.group_by ?? null);
         layoutAppliedRef.current = true;
         try { if (layoutKey) localStorage.setItem(layoutKey, "1"); } catch { /* ignore */ }
       } catch { /* silent — fallback to component defaults */ }
@@ -1809,9 +1852,15 @@ export function DataTable<T extends Record<string, unknown>>({
                   </td>
                 </tr>
               ) : (
-                table.getRowModel().rows.map(row => (
+                table.getRowModel().rows.map(row => {
+                  const rc = evalRowColor(layoutSettings?.row_color_rules, row.original as Record<string, unknown>);
+                  const rcStyle: React.CSSProperties | undefined = rc
+                    ? { boxShadow: `inset 3px 0 0 0 ${ROW_COLOR_BORDER[rc] ?? "#94a3b8"}`, ...(row.getIsSelected() ? {} : { backgroundColor: ROW_COLOR_BG[rc] ?? "#f8fafc" }) }
+                    : undefined;
+                  return (
                   <tr key={row.id}
                     onClick={() => isRowClickable && handleRowClick(row.original)}
+                    style={rcStyle}
                     className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable ? "cursor-pointer" : ""}`}>
                     {row.getVisibleCells().map(cell => {
                       const pin = pinnedStyle(cell.column);
@@ -1873,7 +1922,8 @@ export function DataTable<T extends Record<string, unknown>>({
                       );
                     })}
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
             {/* แถวสรุป (Total row) */}

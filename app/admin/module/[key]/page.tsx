@@ -93,7 +93,7 @@ export default function ModuleSettingsPage() {
           <SchemaSyncClient initialModule={moduleKey} lockModule embedded />
         )}
         {tab === "views"  && <SavedViewsPanel tableId={tableId} />}
-        {tab === "layout" && <LayoutPanel tableId={tableId} />}
+        {tab === "layout" && <LayoutPanel tableId={tableId} moduleKey={moduleKey} />}
       </div>
     </PlaygroundShell>
   );
@@ -310,17 +310,184 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
   );
 }
 
-// ---- Table Layout (link to dedicated editor) ----
-function LayoutPanel({ tableId }: { tableId: string }) {
+// ---- Table Layout — ค่าเริ่มต้นตาราง (sort / group / สีแถว) + ลิงก์ตัวจัดคอลัมน์ ----
+type SortDir = "asc" | "desc";
+type SortSpec = { column: string; dir: SortDir };
+type RowColorOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "empty" | "not_empty";
+type RowColorRule = { column: string; op: RowColorOp; value?: string; color: string };
+type LayoutSettings = {
+  default_sort?: SortSpec | null;
+  secondary_sort?: SortSpec | null;
+  group_by?: string | null;
+  row_color_rules?: RowColorRule[];
+};
+type FullLayout = {
+  label?: string; description?: string | null; columns?: unknown[];
+  default_density?: string; default_page_size?: number; default_view_mode?: string;
+  notes?: string | null; settings?: LayoutSettings;
+};
+
+const COLOR_OPTS = [
+  { key: "red", label: "แดง" }, { key: "orange", label: "ส้ม" }, { key: "amber", label: "เหลือง" },
+  { key: "green", label: "เขียว" }, { key: "blue", label: "ฟ้า" }, { key: "purple", label: "ม่วง" }, { key: "slate", label: "เทา" },
+];
+const OP_OPTS: { key: RowColorOp; label: string }[] = [
+  { key: "eq", label: "เท่ากับ" }, { key: "ne", label: "ไม่เท่ากับ" },
+  { key: "lt", label: "น้อยกว่า" }, { key: "lte", label: "น้อยกว่า/เท่ากับ" },
+  { key: "gt", label: "มากกว่า" }, { key: "gte", label: "มากกว่า/เท่ากับ" },
+  { key: "empty", label: "ว่าง" }, { key: "not_empty", label: "ไม่ว่าง" },
+];
+
+function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: string }) {
+  const [fields, setFields] = useState<{ value: string; label: string }[]>([]);
+  const [full, setFull] = useState<FullLayout | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const [sortCol, setSortCol] = useState(""); const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sort2Col, setSort2Col] = useState(""); const [sort2Dir, setSort2Dir] = useState<SortDir>("asc");
+  const [groupBy, setGroupBy] = useState("");
+  const [rules, setRules] = useState<RowColorRule[]>([]);
+
+  useEffect(() => {
+    setLoading(true); setErr(null);
+    Promise.all([
+      apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json()).catch(() => ({})),
+      apiFetch(`/api/table-layouts?table_id=${encodeURIComponent(tableId)}`).then((r) => r.json()).catch(() => ({})),
+    ]).then(([fr, lr]) => {
+      const fl = (fr.fields as { column_name: string | null; field_label: string }[] | undefined) ?? [];
+      setFields(fl.filter((f) => f.column_name).map((f) => ({ value: String(f.column_name), label: f.field_label || String(f.column_name) })));
+      const layout = (lr.data as FullLayout | null) ?? null;
+      setFull(layout);
+      const s = layout?.settings ?? {};
+      setSortCol(s.default_sort?.column ?? ""); setSortDir(s.default_sort?.dir ?? "asc");
+      setSort2Col(s.secondary_sort?.column ?? ""); setSort2Dir(s.secondary_sort?.dir ?? "asc");
+      setGroupBy(s.group_by ?? "");
+      setRules(Array.isArray(s.row_color_rules) ? s.row_color_rules : []);
+    }).finally(() => setLoading(false));
+  }, [tableId, moduleKey]);
+
+  const save = async () => {
+    setSaving(true); setErr(null); setMsg(null);
+    const settings: LayoutSettings = {
+      default_sort: sortCol ? { column: sortCol, dir: sortDir } : null,
+      secondary_sort: sort2Col ? { column: sort2Col, dir: sort2Dir } : null,
+      group_by: groupBy || null,
+      row_color_rules: rules.filter((r) => r.column && r.color),
+    };
+    try {
+      const j = await apiFetch("/api/admin/table-layouts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          table_id: tableId,
+          label: full?.label || tableId,
+          description: full?.description ?? null,
+          columns: full?.columns ?? [],
+          default_density: full?.default_density ?? "normal",
+          default_page_size: full?.default_page_size ?? 20,
+          default_view_mode: full?.default_view_mode ?? "table",
+          notes: full?.notes ?? null,
+          settings,
+        }),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      setMsg("บันทึกแล้ว ✓ (เปิดตารางใหม่จะใช้ค่านี้)");
+      setTimeout(() => setMsg(null), 4000);
+    } catch (e) { setErr(String(e instanceof Error ? e.message : e)); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="text-sm text-slate-400 py-10 text-center">กำลังโหลด…</div>;
+
+  const card = "bg-white border border-slate-200 rounded-xl p-5";
+  const sel = "h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white";
+  const colSelect = (val: string, on: (v: string) => void, allowNone = true) => (
+    <select value={val} onChange={(e) => on(e.target.value)} className={sel}>
+      {allowNone && <option value="">— ไม่กำหนด —</option>}
+      {fields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+    </select>
+  );
+  const dirSelect = (val: SortDir, on: (v: SortDir) => void) => (
+    <select value={val} onChange={(e) => on(e.target.value as SortDir)} className={sel}>
+      <option value="asc">น้อย → มาก (A→Z, เก่า→ใหม่)</option>
+      <option value="desc">มาก → น้อย (Z→A, ใหม่→เก่า)</option>
+    </select>
+  );
+
   return (
-    <div className="max-w-3xl mx-auto px-6 py-6">
-      <div className="bg-white border border-slate-200 rounded-lg p-6 text-center">
-        <div className="text-4xl mb-2 opacity-40">📐</div>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">ค่าเริ่มต้นของตาราง (Table Layout)</h3>
-        <p className="text-sm text-slate-500 mb-4">กำหนดคอลัมน์เริ่มต้น ความหนาแน่น จำนวนต่อหน้า และมุมมองเริ่มต้นของตารางโมดูลนี้</p>
-        <Link href={`/admin/table-layouts?table=${encodeURIComponent(tableId)}`}
-          className="inline-flex h-10 px-5 items-center text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
-          เปิดตัวจัดเลย์เอาต์ของตารางนี้ →
+    <div className="max-w-2xl mx-auto px-6 py-6 space-y-5">
+      {/* การเรียง + จัดกลุ่ม */}
+      <div className={card}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-4">ค่าเริ่มต้นตาราง</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">เรียงเริ่มต้น (Default sort)</label>
+            <div className="flex flex-wrap gap-2">{colSelect(sortCol, setSortCol)} {sortCol && dirSelect(sortDir, setSortDir)}</div>
+          </div>
+          {sortCol && (
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">เรียงรอง (ตัวตัดสินเมื่อค่าหลักเท่ากัน)</label>
+              <div className="flex flex-wrap gap-2">{colSelect(sort2Col, setSort2Col)} {sort2Col && dirSelect(sort2Dir, setSort2Dir)}</div>
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">จัดกลุ่มเริ่มต้น (Group by)</label>
+            {colSelect(groupBy, setGroupBy)}
+          </div>
+        </div>
+      </div>
+
+      {/* สีแถวตามเงื่อนไข */}
+      <div className={card}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-slate-800">ระบายสีแถวตามเงื่อนไข</h3>
+          <button onClick={() => setRules((r) => [...r, { column: fields[0]?.value ?? "", op: "eq", value: "", color: "red" }])}
+            className="text-xs px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">+ เพิ่มกฎ</button>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">เช่น สต๊อก น้อยกว่า 10 → แดง · กฎบนสุดที่เข้าเงื่อนไขชนะ</p>
+        {rules.length === 0 ? (
+          <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3 text-center">— ยังไม่มีกฎ —</div>
+        ) : (
+          <div className="space-y-2">
+            {rules.map((r, i) => {
+              const upd = (p: Partial<RowColorRule>) => setRules((arr) => arr.map((x, j) => j === i ? { ...x, ...p } : x));
+              const noVal = r.op === "empty" || r.op === "not_empty";
+              return (
+                <div key={i} className="flex flex-wrap items-center gap-2 bg-slate-50 rounded-lg p-2">
+                  <select value={r.column} onChange={(e) => upd({ column: e.target.value })} className={sel}>
+                    {fields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  </select>
+                  <select value={r.op} onChange={(e) => upd({ op: e.target.value as RowColorOp })} className={sel}>
+                    {OP_OPTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                  </select>
+                  {!noVal && <input value={r.value ?? ""} onChange={(e) => upd({ value: e.target.value })} placeholder="ค่า" className={`${sel} w-24`} />}
+                  <select value={r.color} onChange={(e) => upd({ color: e.target.value })} className={sel}>
+                    {COLOR_OPTS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                  </select>
+                  <span className="w-6 h-6 rounded border border-slate-300" style={{ backgroundColor: ({ red:"#fecaca",orange:"#fed7aa",amber:"#fde68a",green:"#bbf7d0",blue:"#bfdbfe",purple:"#e9d5ff",slate:"#e2e8f0" } as Record<string,string>)[r.color] }} />
+                  <button onClick={() => setRules((arr) => arr.filter((_, j) => j !== i))} className="ml-auto text-slate-400 hover:text-red-500 text-sm">✕</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* actions */}
+      <div className="flex items-center gap-3">
+        <button onClick={save} disabled={saving} className="h-10 px-6 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          {saving ? "กำลังบันทึก…" : "บันทึกค่าเริ่มต้นตาราง"}
+        </button>
+        {msg && <span className="text-sm text-emerald-600">{msg}</span>}
+        {err && <span className="text-sm text-red-600">⚠️ {err}</span>}
+      </div>
+
+      {/* ลิงก์ตัวจัดคอลัมน์เดิม */}
+      <div className="text-center pt-2">
+        <Link href={`/admin/table-layouts?table=${encodeURIComponent(tableId)}`} className="text-sm text-blue-600 hover:underline">
+          จัดคอลัมน์ / ความหนาแน่น / จำนวนต่อหน้า (ตัวจัดเลย์เอาต์เต็ม) →
         </Link>
       </div>
     </div>

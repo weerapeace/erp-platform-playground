@@ -42,6 +42,7 @@ async function upsert(request: NextRequest) {
     p_default_view_mode: body.default_view_mode ?? "table",
     p_notes:             body.notes ?? null,
     p_actor:             body.actor ?? null,
+    p_settings:          body.settings ?? {},
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ data, error: null });
