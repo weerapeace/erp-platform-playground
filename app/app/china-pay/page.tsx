@@ -1652,7 +1652,12 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
   const sendLine = async () => {
     const total = num(bill.amount_rmb) + num(bill.fee_rmb);
     const link = `${typeof window !== "undefined" ? window.location.origin : ""}/app/china-pay?bill=${String(bill.id)}`;
-    let text = `🧾 บิลจีน\nร้าน: ${String(bill.supplier_label ?? sup?.name_th ?? "—")}\nยอดโอนรวม: ¥${fmt(total)}\nวันที่วางบิล: ${String(bill.transfer_date ?? "—")}\nเลขบัญชี: ${String(sup?.account_number ?? "—")}`;
+    let text: string;
+    if (isThbBill(bill)) {
+      text = `🧾 บิล${billTypeLabel(bill)}\nยอดโอนรวม: ฿${fmt(num(bill.amount_thb))}\nวันที่วางบิล: ${String(bill.transfer_date ?? bill.bill_date ?? "—")}`;
+    } else {
+      text = `🧾 บิลจีน\nร้าน: ${String(bill.supplier_label ?? sup?.name_th ?? "—")}\nยอดโอนรวม: ¥${fmt(total)}\nวันที่วางบิล: ${String(bill.transfer_date ?? "—")}\nเลขบัญชี: ${String(sup?.account_number ?? "—")}`;
+    }
     if (bill.note) text += `\nหมายเหตุ: ${String(bill.note)}`;
     setSendingLine(true);
     try {
@@ -2868,6 +2873,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <span className="text-right">
             <span className="text-2xl font-extrabold">{hasRate ? `฿${fmt(minTransfer + thbSelTotal)}` : (thbSelTotal > 0 ? `฿${fmt(thbSelTotal)}` : "รอเรท")}</span>
             {hasRate && <span className="block text-xs opacity-90">≈ ¥{fmt(useBalance ? netRmb : selectedRmb)}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}</span>}
+            {!hasRate && selectedRmb > 0 && (
+              <span className="block text-[11px] font-medium bg-white/25 rounded px-1.5 py-0.5 mt-1">⏳ ยังไม่รวมบิลจีน ¥{fmt(selectedRmb)} (รอเรท)</span>
+            )}
           </span>
         </div>
         {/* แยกยอด: บิลจีน + ค่าส่ง + VAT (ค่าส่ง/VAT เป็นบาท ไม่คิดเรท) */}
@@ -3386,15 +3394,26 @@ function ReportPopup({ bill, onClose, onPrinted }: {
 
   const amount = num(bill.amount_rmb), fee = num(bill.fee_rmb), totalRmb = amount + fee, rate = num(bill.rate);
   const thb = totalRmb * rate;
+  const thbBill = isThbBill(bill), thbAmt = num(bill.amount_thb);
   const st = String(bill.status ?? "—");
-  const supName = String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—");
+  const supName = thbBill ? billTypeLabel(bill) : String(bill.supplier_label ?? sup?.name_th ?? bill.supplier_id ?? "—");
 
   // วาดใบสรุปลง canvas
   useEffect(() => {
     const cv = canvasRef.current;
     if (!cv) return;
     type Line = { l: string; r: string; bold?: boolean; color?: string; big?: boolean; sep?: boolean };
-    const lines: Line[] = [
+    const lines: Line[] = thbBill ? [
+      // บิลค่าส่ง / VAT — ยอดบาทตรง ไม่มีร้าน/เรท
+      { l: "ประเภท", r: supName, bold: true },
+      { l: "", r: "", sep: true },
+      { l: "ยอดโอนรวม", r: "฿" + fmt(thbAmt), bold: true, color: "#e11d48" },
+      { l: "", r: "", sep: true },
+      { l: "วันที่โอน", r: String(bill.transfer_date ?? "—") },
+      { l: "วันที่ลงบิล", r: String(bill.bill_date ?? "—") },
+      { l: "สถานะ", r: String(bill.status ?? "—") },
+      ...(bill.note ? [{ l: "หมายเหตุ", r: String(bill.note) } as Line] : []),
+    ] : [
       { l: "ร้านค้า", r: supName, bold: true },
       ...(sup?.name_en ? [{ l: "", r: String(sup.name_en) } as Line] : []),
       { l: "ธนาคาร", r: sup?.bank_name_brief ? String(sup.bank_name_brief) : "—" },
