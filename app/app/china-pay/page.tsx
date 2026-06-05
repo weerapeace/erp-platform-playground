@@ -2536,7 +2536,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const chinaIn = surplusRmb * effRate;                       // ฿
   // ★ ขั้นต่ำที่ต้องโอน = ยอดเต็มรอบนี้ − ยอดคงเหลือที่ใช้ได้ (ถ้าเปิด toggle) — ใช้ได้ไม่เกินมูลค่าบิลจีน
   const balanceThbAvail = balance.rmb * effRate;
-  const chinaCoverThb = useBalance ? Math.min(balanceThbAvail, selectedSum) : 0;
+  const chinaCoverRmb = useBalance ? Math.min(balance.rmb, selectedRmb) : 0;   // ยอดคงเหลือที่ใช้หัก (¥) — หัก ¥ ก่อนแปลงบาท
+  const chinaCoverThb = chinaCoverRmb * effRate;
   const minTransfer = Math.max(0, roundTotalThb - chinaCoverThb);
   const belowMin = hasRate && (selectedRmb > 0 || thbSelTotal > 0) && transferred < minTransfer - 0.001;
   // โอนได้ไหม: คงเหลือต้องไม่ติดลบ + ต้องไม่น้อยกว่าขั้นต่ำ
@@ -2811,8 +2812,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         {!hasRate && <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>}
       </div>
 
-      {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ) — กดย่อ/ขยายดูรายการ */}
-      <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm">
+      {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ ¥) — sticky ตรึงบน */}
+      <div className="rounded-2xl bg-white border border-slate-200 p-4 shadow-sm sticky top-0 z-20">
         <button type="button" onClick={() => setShowBills(v => !v)} className="w-full text-left">
           <div className="flex items-center justify-between">
             <span className="text-sm text-slate-500">💸 ยอดที่ต้องโอนรอบนี้</span>
@@ -2820,17 +2821,23 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           </div>
           <div className="flex justify-between items-baseline mt-1 gap-2">
             <span className="text-xs text-slate-500 flex-shrink-0">บิลจีน ({sel.size}){thbSel.size > 0 ? ` + ค่าส่ง/VAT (${thbSel.size})` : ""}</span>
-            <span className="text-3xl font-extrabold text-emerald-700">{minTransfer > 0 ? `฿${fmt(minTransfer)}` : "รอเรท"}</span>
+            <span className="text-3xl font-extrabold text-red-600">{minTransfer > 0 ? `฿${fmt(+minTransfer.toFixed(2))}` : "รอเรท"}</span>
           </div>
-          {hasRate && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ¥{fmt(selectedRmb)}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}{useBalance && chinaCoverThb > 0 ? ` · หักคงเหลือ ฿${fmt(chinaCoverThb)}` : ""}</div>}
+          {hasRate && <div className="text-right text-xs text-slate-400 -mt-0.5">≈ ¥{fmt(+(selectedRmb - chinaCoverRmb).toFixed(2))}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}{chinaCoverRmb > 0 ? ` · หักคงเหลือ ¥${fmt(+chinaCoverRmb.toFixed(2))}` : ""}</div>}
         </button>
         {showBills && (
           <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-sm">
-            {[...sel].map(id => { const b = pending.find(p => String(p.id) === id); return (
-              <div key={id} className="flex justify-between gap-2"><span className="text-slate-500 truncate">{String(b?.supplier_label ?? b?.supplier_id ?? "—")}</span><span className="text-slate-700 flex-shrink-0">¥{fmt(num(pay[id]))}</span></div>
+            {[...sel].map(id => { const b = pending.find(p => String(p.id) === id); const v = num(pay[id]); return (
+              <div key={id} className="flex justify-between gap-2 items-baseline">
+                <span className="text-slate-500 truncate">{String(b?.supplier_label ?? b?.supplier_id ?? "—")}</span>
+                <span className="text-right flex-shrink-0">
+                  <span className="font-bold text-slate-800">¥{fmt(v)}</span>
+                  {hasRate && <span className="text-[10px] text-slate-400 ml-1">× {fmt(effRate)} ≈ ฿{fmt(+(v * effRate).toFixed(2))}</span>}
+                </span>
+              </div>
             ); })}
             {[...thbSel].map(id => { const b = pending.find(p => String(p.id) === id); return (
-              <div key={id} className="flex justify-between gap-2"><span className="text-slate-500 truncate">{b ? billTypeLabel(b) : ""}</span><span className="text-slate-700 flex-shrink-0">฿{fmt(num(b?.amount_thb))}</span></div>
+              <div key={id} className="flex justify-between gap-2"><span className="text-slate-500 truncate">{b ? billTypeLabel(b) : ""}</span><span className="font-bold text-slate-800 flex-shrink-0">฿{fmt(num(b?.amount_thb))}</span></div>
             ); })}
           </div>
         )}
@@ -2847,7 +2854,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className={`rounded-xl border px-4 py-2.5 ${needBalance ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200"}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-emerald-700">💰 ยอดคงเหลือในบัญชีจีน</span>
-            <span className="text-right"><span className="font-bold text-emerald-800">¥{fmt(balance.rmb)}</span><span className="text-[11px] text-emerald-600 ml-1.5">≈ ฿{fmt(balance.rmb * (effRate || r1))}</span></span>
+            <span className="text-right"><span className="font-bold text-emerald-800">¥{fmt(balance.rmb)}</span><span className="text-[11px] text-emerald-600 ml-1.5">≈ ฿{fmt(+(balance.rmb * (effRate || r1)).toFixed(2))}</span></span>
           </div>
           {balance.rmb > 0 && (
             <label className="mt-1.5 flex items-center justify-between gap-2 cursor-pointer">
@@ -2924,27 +2931,22 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               const remainThb = remain * effRate;
               return (
                 <div key={id} className={`rounded-lg border ${on ? "border-emerald-400 bg-emerald-50" : "border-slate-200"}`}>
-                  <button onClick={() => toggle(id, remain)} className="w-full flex items-center gap-2 p-2 text-left">
-                    <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
-                      <span className="block text-[10px] text-slate-400 truncate">{hasRate ? `฿${fmt(remainThb)}` : "รอเรท"} · {String(r.transfer_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ¥${fmt(paid)}` : ""}</span>
-                    </span>
-                    <span className="font-bold text-slate-800 flex-shrink-0">¥{fmt(remain)}</span>
-                  </button>
-                  {on && (() => {
-                    const over = num(pay[id]) > remain + 0.001;
-                    return (
-                      <div className="px-2.5 pb-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500 flex-shrink-0">จำนวนที่โอน (¥)</span>
+                  <div className="flex items-center gap-2 p-2">
+                    <button onClick={() => toggle(id, remain)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+                      <span className={`w-5 h-5 rounded flex items-center justify-center text-xs flex-shrink-0 ${on ? "bg-emerald-600 text-white" : "border border-slate-300"}`}>{on ? "✓" : ""}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</span>
+                        <span className="block text-[10px] text-slate-400 truncate">{hasRate ? `฿${fmt(remainThb)}` : "รอเรท"} · {String(r.transfer_date ?? "—")}{paid > 0 ? ` · จ่ายแล้ว ¥${fmt(paid)}` : ""}</span>
+                      </span>
+                    </button>
+                    {on
+                      ? (() => { const over = num(pay[id]) > remain + 0.001; return (
                           <Money value={pay[id] ?? ""} onChange={(v) => setPay(p => ({ ...p, [id]: v }))}
-                            className={`flex-1 h-9 px-2 text-base text-right border rounded-lg ${over ? "border-red-500 bg-red-50" : "border-emerald-300"}`} />
-                        </div>
-                        <div className={`text-[10px] text-right mt-0.5 ${over ? "text-red-500 font-medium" : "text-slate-400"}`}>{over ? `เกินยอดคงเหลือ! สูงสุด ¥${fmt(remain)}` : `สูงสุด ¥${fmt(remain)}`}</div>
-                      </div>
-                    );
-                  })()}
+                            className={`w-24 flex-shrink-0 h-9 px-2 text-base text-right font-bold border rounded-lg ${over ? "border-red-500 bg-red-50 text-red-600" : "border-emerald-400 bg-white"}`} />
+                        ); })()
+                      : <span className="font-bold text-slate-800 flex-shrink-0">¥{fmt(remain)}</span>}
+                  </div>
+                  {on && <div className={`px-2 pb-1.5 text-[10px] text-right ${num(pay[id]) > remain + 0.001 ? "text-red-500 font-medium" : "text-slate-400"}`}>{num(pay[id]) > remain + 0.001 ? `เกินยอด! สูงสุด ¥${fmt(remain)}` : `สูงสุด ¥${fmt(remain)}`}</div>}
                 </div>
               );
             })}
@@ -2974,7 +2976,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
               {slipUploading || ocrBusy ? "…" : "📎 สลิป"}
             </button>
           </div>
-          {belowMin && <div className="mt-1 text-[11px] text-red-500">* ยอดโอนต้องไม่น้อยกว่า ฿{fmt(minTransfer)}{useBalance && chinaCoverThb > 0 ? " (หักยอดคงเหลือแล้ว)" : ""}</div>}
+          {belowMin && <div className="mt-1 text-[11px] text-red-500">* ยอดโอนต้องไม่น้อยกว่า ฿{fmt(+minTransfer.toFixed(2))}{useBalance && chinaCoverThb > 0 ? " (หักยอดคงเหลือแล้ว)" : ""}</div>}
           {!useBalance && hasRate && balance.rmb > 0 && transferred > 0 && transferred < roundTotalThb - 0.001 && (
             <div className="mt-1 text-[11px] text-amber-600">💡 เปิด “ใช้ยอดคงเหลือในบัญชีจีน” ด้านล่าง เพื่อลดยอดขั้นต่ำได้ (มี ¥{fmt(balance.rmb)})</div>
           )}

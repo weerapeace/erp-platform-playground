@@ -10,7 +10,7 @@
  *   ขวา   = ตะกร้า (card) ค้นหาได้
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { DataTable, type BulkAction, type ServerFetchParams } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
