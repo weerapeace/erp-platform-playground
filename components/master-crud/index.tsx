@@ -11,6 +11,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { Drawer, ConfirmDialog } from "@/components/modal";
+import { DateInput } from "@/components/date-input";
+import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { resolveRelationLabels } from "@/lib/relation";
@@ -110,6 +112,8 @@ function registryToFieldDef(
           ? defaultRelationCellRender(key)
           : fieldType === "image"
             ? (v: unknown) => <ImageCell r2Key={v as string | null} size={40} />
+          : fieldType === "date"
+            ? (v: unknown) => v ? <span className="text-sm tabular-nums text-slate-700">{formatDate(v)}</span> : <span className="text-slate-300">—</span>
             : undefined);
 
   // Sprint 9: validation_rules → validations array
@@ -1375,13 +1379,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             <span className="ml-2 text-xs text-slate-500">{v ? "เปิด" : "ปิด"}</span>
           </div>
         ) : f.type === "date" ? (
-          <input
-            type="date"
+          <DateInput
+            value={(v as string | null | undefined) ?? ""}
+            onChange={(iso) => updateForm({ [f.key]: iso })}
             disabled={disabled}
-            value={String((v as string | null | undefined) ?? "").slice(0, 10)}
-            onChange={e => updateForm({ [f.key]: e.target.value })}
-            style={tStyle}
-            className={common}
           />
         ) : (
           <input

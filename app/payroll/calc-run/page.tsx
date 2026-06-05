@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { DateInput } from "@/components/date-input";
 
 type Period = { id: string; period_name: string; status: string };
 type Row = { id: string; employee_name: string; gross_new: number; gross_old: number | null; net_new: number; net_old: number | null; diff_net: number | null; status: string; ok: boolean };
@@ -316,7 +317,7 @@ function HolidaysPanel({ periodId, editable, onChanged }: { periodId: string; ed
       </div>
       {editable && (
         <div className="flex flex-wrap gap-2">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-9 px-3 border border-slate-300 rounded-lg text-sm" />
+          <div className="w-[150px]"><DateInput value={date} onChange={setDate} /></div>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อวันหยุด (ไม่บังคับ)" className="h-9 px-3 border border-slate-300 rounded-lg text-sm flex-1 min-w-[140px]" />
           <button onClick={add} disabled={busy} className="h-9 px-4 bg-rose-600 text-white rounded-lg text-sm font-medium hover:bg-rose-700 disabled:opacity-50">+ เพิ่มวันหยุด</button>
         </div>
