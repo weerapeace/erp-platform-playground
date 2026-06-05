@@ -90,6 +90,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
     const cur = linkedRef.current;
     const has = cur.includes(id);
     const next = has ? cur.filter((x) => x !== id) : [...cur, id];
+    linkedRef.current = next;   // อัปเดต ref ทันที → คลิกถี่ ๆ ติดกันใช้ค่าล่าสุดเสมอ (กันแท็กแรกหาย)
     if (isCreate) { onChange?.(next); return; }   // โหมดสร้าง → เก็บใน form
     // โหมดแก้ไข → อัปเดตจอทันที + ผูก/ถอดที่ DB (พลาด = โหลดใหม่จาก DB)
     setServerLinked(next);

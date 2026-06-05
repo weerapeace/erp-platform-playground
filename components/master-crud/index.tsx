@@ -884,6 +884,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const fErr: Record<string, string[]> = {};
     let hasErr = false;
     for (const f of effectiveFields) {
+      // m2m/o2m: ค่าไม่ได้อยู่ใน form (จัดการที่ widget/DB) → ข้าม validation (กัน required เด้ง "ห้ามว่าง" ผิด)
+      if (f.type === "many2many" || f.type === "one2many") continue;
       // ถ้า condition rule ซ่อนอยู่ หรือถูกเทมเพลตซ่อน → ไม่ต้อง validate (รวม required)
       if (!evaluateCondition(f.conditionRules, form) || tplHidden(f)) continue;
       const keys = [
