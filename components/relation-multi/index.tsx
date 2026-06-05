@@ -53,46 +53,29 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const isCreate = !recordId;
 
   const [opts, setOpts] = useState<Opt[]>([]);
-  // selected = แหล่งแสดงผล "ของ widget เอง" (ไม่หน่วง, ไม่ผ่าน value/form ที่ lag)
-  //   null = โหมดแก้ไขยังโหลดลิงก์เดิมไม่เสร็จ
-  //   ⚠ init จาก value (form) เผื่อ widget ถูก remount → ใช้ค่าที่เลือกไว้แล้ว (ไม่กลับไปดึง DB เปล่า)
-  const [selected, setSelected] = useState<string[] | null>(
-    isCreate ? (value ?? []) : (value !== undefined ? value : null),
-  );
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const loading = !isCreate && selected === null;
-  const linked = selected ?? [];
-  // ref ค่าล่าสุด (อัปเดตทันทีตอน toggle) → คลิกถี่ ๆ ไม่เพี้ยน
+  // แหล่งความจริงเดียว = ค่าในฟอร์ม (value) — ไม่มี state ภายใน widget (กัน diverge/remount ทำค่าหาย)
+  //   โหมดแก้ไข: master-crud โหลดลิงก์เดิมเข้า form ให้ตอน openEdit
+  //   value===undefined (โหมดแก้ไข) = ยังโหลดไม่เสร็จ → ล็อกคลิกไว้ก่อน
+  const loading = !isCreate && value === undefined;
+  const linked = value ?? [];
+  // ref ค่าล่าสุด → คลิกถี่ ๆ ไม่เพี้ยน
   const linkedRef = useRef<string[]>(linked);
   linkedRef.current = linked;
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
 
-  // โหลดลิงก์เดิม (โหมดแก้ไข) → ใส่ใน selected + mirror ไป form
-  // ⚠ ถ้า form มีค่าอยู่แล้ว (เช่น widget remount หลังเลือกไปแล้ว) → ใช้ค่านั้น ห้ามดึง DB มาทับ (กันค่าหาย)
-  useEffect(() => {
-    if (isCreate || !junction || !recordId) return;
-    if (value !== undefined) { setSelected(value); return; }   // ฟอร์มมีค่าแล้ว → ไม่โหลดทับ
-    setSelected(null);
-    apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`)
-      .then((r) => r.json())
-      .then((j) => { const ids = (j.links ?? []) as string[]; setSelected(ids); onChange?.(ids); })
-      .catch(() => { setSelected([]); onChange?.([]); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordId, junction]);
-
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
-  // toggle: อัปเดต state ของ widget ทันที (จอไม่เพี้ยน) + mirror ไป form (บันทึกตอนกด "บันทึก")
+  // toggle: คำนวณจากค่าล่าสุดแล้วส่งเข้า form (chips + บันทึก อ่านจาก form ที่เดียว → ตรงกันเสมอ)
   const toggle = (id: string) => {
     if (loading) return;
     const cur = linkedRef.current;
     const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
     linkedRef.current = next;
-    setSelected(next);
     onChange?.(next);
   };
   const createNew = async () => {

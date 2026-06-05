@@ -804,7 +804,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       partial[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
     });
     setForm(partial);
-    // หมายเหตุ: ลิงก์ m2m (โหมดแก้ไข) widget โหลด+บันทึกเองต่อคลิก ไม่ผ่าน form (กัน race/desync)
+
+    // โหลดลิงก์ m2m เข้า form ครั้งเดียว (widget คุมด้วย value/form ล้วน — ไม่โหลดเอง กัน remount ดึง DB ทับ)
+    // guard: เขียนเฉพาะตอน field ยังไม่มีค่า → ผู้ใช้แก้ก่อนโหลดเสร็จจะไม่ถูกทับ (widget ล็อกคลิกระหว่างโหลดอยู่แล้ว)
+    effectiveFields.filter(fd => fd.type === "many2many").forEach(fd => {
+      const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
+      const junction = String(rc.junction_table ?? "");
+      if (!junction) return;
+      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${r.id}`)
+        .then(res => res.json())
+        .then(j => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: (j.links ?? []) } : p)))
+        .catch(() => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: [] } : p)));
+    });
 
     // fetch full row ใน background (REST mode เท่านั้น)
     if (!isRest) return;
