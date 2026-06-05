@@ -169,7 +169,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 // ---- สลิปการโอน (หลายใบ) — เก็บ ธนาคาร/ยอด/เวลา/ผูกบิล CTW ----
-type TxSlip = { key: string; bank: string; amount: number; at: string; bill_ids?: string[] };
+type TxSlip = { key: string; bank: string; amount: number; at: string; cuts?: Record<string, number> };   // cuts: billId → ยอดที่รายการนี้ตัดบิลนั้น (฿)
 // แปลงข้อความวันเวลาที่ AI อ่านได้ → format ของ <input type="datetime-local"> (YYYY-MM-DDThh:mm) · อ่านไม่ออก = ""
 function toDatetimeLocal(text: string): string {
   if (!text) return "";
@@ -2382,12 +2382,9 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [balance, setBalance] = useState<{ thb: number; rmb: number }>({ thb: 0, rmb: 0 });
   const [loading, setLoading] = useState(true);
 
-  // CTW ที่ยังไม่ตัด (รองรับตัดบางส่วน)
+  // CTW ที่ยังไม่ตัด (รองรับตัดบางส่วน) — ยอดตัดเก็บแยกในแต่ละรายการโอน (txSlips[].cuts)
   const [ctw, setCtw] = useState<Record<string, unknown>[]>([]);
-  const [ctwSel, setCtwSel] = useState<Set<string>>(new Set());
-  const [ctwPay, setCtwPay] = useState<Record<string, string>>({});
-  const [ctwEdited, setCtwEdited] = useState<Set<string>>(new Set());   // บิล CTW ที่ผู้ใช้พิมพ์ยอดเอง
-  // ข้อมูลบัญชีปลายทาง (partners) แมปด้วยชื่อ name_th → ใช้โชว์ใน step 3
+  // ข้อมูลบัญชีปลายทาง (partners) แมปด้วยชื่อ name_th → ใช้โชว์บัญชีปลายทาง
   const [partnerByName, setPartnerByName] = useState<Record<string, Record<string, unknown>>>({});
 
   const loadAll = useCallback(() => {
@@ -2423,9 +2420,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       if (Array.isArray(d.sel) && d.sel.length) setSel(new Set(d.sel.map(String)));
       if (d.pay && typeof d.pay === "object") setPay(d.pay as Record<string, string>);
       if (Array.isArray(d.thbSel) && d.thbSel.length) setThbSel(new Set(d.thbSel.map(String)));
-      if (Array.isArray(d.ctwSel) && d.ctwSel.length) setCtwSel(new Set(d.ctwSel.map(String)));
-      if (d.ctwPay && typeof d.ctwPay === "object") setCtwPay(d.ctwPay as Record<string, string>);
-      if (Array.isArray(d.ctwEdited) && d.ctwEdited.length) setCtwEdited(new Set(d.ctwEdited.map(String)));
       if (typeof d.amount === "string") setAmount(d.amount);
       if (typeof d.refNo === "string") setRefNo(d.refNo);
       if (typeof d.note === "string") setNote(d.note);
@@ -2437,15 +2431,15 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    const hasData = sel.size > 0 || thbSel.size > 0 || ctwSel.size > 0 || txSlips.length > 0 || num(amount) > 0;
+    const hasData = sel.size > 0 || thbSel.size > 0 || txSlips.length > 0 || num(amount) > 0;
     try {
       if (hasData) localStorage.setItem("china-tx-draft", JSON.stringify({
-        sel: [...sel], pay, thbSel: [...thbSel], ctwSel: [...ctwSel], ctwPay, ctwEdited: [...ctwEdited],
+        sel: [...sel], pay, thbSel: [...thbSel],
         amount, refNo, note, useBalance, txSlips, step,
       }));
       else localStorage.removeItem("china-tx-draft");
     } catch { /* noop */ }
-  }, [sel, pay, thbSel, ctwSel, ctwPay, ctwEdited, amount, refNo, note, useBalance, txSlips, step]);
+  }, [sel, pay, thbSel, amount, refNo, note, useBalance, txSlips, step]);
 
   // โหลดเรท R1 ตาม "วันที่โอน" (ถ้าไม่มีเรทวันนั้น → ว่าง = รอเรทเงิน)
   useEffect(() => {
@@ -2531,6 +2525,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
+  // รวมยอดตัดบิล CTW จากทุกรายการโอน: billId → ยอดรวม (฿)
+  const ctwCutByBill = useMemo(() => {
+    const m: Record<string, number> = {};
+    txSlips.forEach(s => { for (const [bid, v] of Object.entries(s.cuts ?? {})) m[bid] = (m[bid] ?? 0) + num(v); });
+    return m;
+  }, [txSlips]);
+  const ctwSelDerived = Object.keys(ctwCutByBill).filter(bid => ctwCutByBill[bid] > 0.0001);   // บิลที่ถูกตัด (ยอด > 0)
   const anyChinaOver = [...sel].some(id => { const r = pending.find(p => String(p.id) === id); return !!r && num(pay[id]) > billRemainRmb(r) + 0.001; });
 
   // อัปโหลดสลิป (จากปุ่มข้างช่องจำนวนเงิน) → เพิ่มเข้า slip → effect อ่านยอดอัตโนมัติ
@@ -2603,26 +2604,34 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   };
   // เพิ่มรายการโอน "กรอกยอดเอง" (ไม่มีรูปสลิป) — key ว่าง = ไม่มีไฟล์
   const addManualSlip = () => setTxSlips(prev => [...prev, { key: "", bank: "", amount: 0, at: "" }]);
-  // สลับว่าสลิปใบ i ตัดบิล CTW ใบ billId ไหม (1 สลิปตัดได้หลายบิล / 1 บิลถูกหลายสลิปได้)
-  // ติ๊ก → เลือกบิล + ตั้งยอดตัดเริ่มต้น = ยอดค้างเต็ม (แก้ได้) · เอาออก → ถ้าไม่มีสลิปอื่นผูก ให้เลิกเลือกบิล
+  // ยอดตัดบิล CTW ที่ "รายการอื่น" (สลิปอื่น) ตัดไปแล้ว — กันตัดเกินยอดค้าง
+  const otherSlipsCut = (slipIdx: number, billId: string, slips: TxSlip[]) =>
+    slips.reduce((a, t, j) => a + (j === slipIdx ? 0 : num((t.cuts ?? {})[billId])), 0);
+  // เพดานยอดตัดของรายการ i ต่อบิล billId = min(ยอดโอนรายการนี้ − ที่ตัดบิลอื่นในรายการนี้, ยอดค้างบิล − ที่รายการอื่นตัด)
+  const cutCap = (slip: TxSlip, slipIdx: number, billId: string, slips: TxSlip[]) => {
+    const usedOtherBills = Object.entries(slip.cuts ?? {}).reduce((a, [bid, v]) => a + (bid === billId ? 0 : num(v)), 0);
+    const slipLeft = Math.max(0, num(slip.amount) - usedOtherBills);
+    const bill = ctw.find(x => String(x.id) === billId) ?? {};
+    const billLeft = Math.max(0, ctwRemain(bill) - otherSlipsCut(slipIdx, billId, slips));
+    return Math.min(slipLeft, billLeft);
+  };
+  // สลับเลือก/ยกเลิกบิลในรายการ i — ติ๊ก → ตั้งยอดตัด = ยอดโอนรายการนี้ (ไม่เกินยอดค้างที่เหลือ)
   const toggleSlipBill = (i: number, billId: string) => {
-    setTxSlips(prev => {
-      const next = prev.map((s, idx) => {
-        if (idx !== i) return s;
-        const cur = new Set(s.bill_ids ?? []);
-        cur.has(billId) ? cur.delete(billId) : cur.add(billId);
-        return { ...s, bill_ids: [...cur] };
-      });
-      const stillLinked = next.some(s => (s.bill_ids ?? []).includes(billId));
-      if (stillLinked) {
-        setCtwSel(cs => new Set(cs).add(billId));
-        setCtwPay(p => (p[billId] != null && p[billId] !== "") ? p : { ...p, [billId]: String(+ctwRemain(ctw.find(x => String(x.id) === billId) ?? {}).toFixed(2)) });
-      } else {
-        setCtwSel(cs => { const n = new Set(cs); n.delete(billId); return n; });
-        setCtwPay(p => { const q = { ...p }; delete q[billId]; return q; });
-      }
-      return next;
-    });
+    setTxSlips(prev => prev.map((s, idx) => {
+      if (idx !== i) return s;
+      const cuts = { ...(s.cuts ?? {}) };
+      if (billId in cuts) delete cuts[billId];
+      else cuts[billId] = +cutCap(s, i, billId, prev).toFixed(2);
+      return { ...s, cuts };
+    }));
+  };
+  // แก้ยอดตัดของรายการ i ต่อบิล billId (กันเกินเพดาน)
+  const setSlipCut = (i: number, billId: string, raw: string) => {
+    setTxSlips(prev => prev.map((s, idx) => {
+      if (idx !== i) return s;
+      const capped = Math.min(num(raw), cutCap(s, i, billId, prev));
+      return { ...s, cuts: { ...(s.cuts ?? {}), [billId]: +Math.max(0, capped).toFixed(2) } };
+    }));
   };
   // อัปโหลดรูปให้รายการโอนใบ i (ทั้งสลิปและรายการกรอกเอง) → ตั้ง key + AI อ่านยอด/ธนาคารให้
   const uploadSlipImageFor = async (i: number, file: File) => {
@@ -2681,13 +2690,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   // ปุ่มเดียว: ตัดบิลจีน + ตัดบิล CTW พร้อมกัน (+ เก็บประวัติ lines/เลขโอน)
   const save = async () => {
-    if (sel.size === 0 && ctwSel.size === 0 && thbSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
+    if (sel.size === 0 && ctwSelDerived.length === 0 && thbSel.size === 0) { toast.error("เลือกบิลที่จะตัดก่อน"); return; }
     if (sel.size > 0 && !hasRate) { toast.error("รอเรทเงิน — ใส่เรท R1 ก่อน"); return; }
     if (chinaRemainThb < -0.001) { toast.error("ยอดโอนจริงต้องไม่น้อยกว่าค่าส่ง/VAT"); return; }
     if (belowMin) { toast.error(`ยอดโอนต้องไม่น้อยกว่า ฿${fmt(minTransfer)}`); return; }
     setSaving(true);
     try {
-      const chinaIds = [...sel], ctwIds = [...ctwSel], thbIds = [...thbSel];
+      const chinaIds = [...sel], ctwIds = ctwSelDerived, thbIds = [...thbSel];
       // รายการย่อย (เก็บว่าการโอนนี้ตัดบิลอะไร จำนวนเท่าไหร่)
       const lines = [
         ...chinaIds.map(id => {
@@ -2701,7 +2710,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         }),
         ...ctwIds.map(id => {
           const r = ctw.find(x => String(x.id) === id);
-          return { kind: "ctw", bill_id: id, label: String(r?.company_name ?? ""), doc_number: String(r?.doc_number ?? ""), paid_thb: Math.max(0, num(ctwPay[id])) };
+          return { kind: "ctw", bill_id: id, label: String(r?.company_name ?? ""), doc_number: String(r?.doc_number ?? ""), paid_thb: Math.max(0, num(ctwCutByBill[id])) };
         }),
       ];
       // บันทึก transfer 1 รายการ (ครอบทั้งจีน + CTW) เก็บเลขโอน + lines
@@ -2733,7 +2742,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       await Promise.all(ctwIds.map(id => {
         const r = ctw.find(x => String(x.id) === id);
         const net = num(r?.net_amount), already = num(r?.cleared_amount);
-        const p = Math.max(0, num(ctwPay[id]));
+        const p = Math.max(0, num(ctwCutByBill[id]));
         const newCleared = Math.min(net, already + p);
         return apiFetch(`/api/master-v2/ctw-bills/${id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -2764,7 +2773,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         // สรุปการคำนวณ (ย้ายมาจากหน้ายืนยัน → โชว์ในใบพิมพ์)
         breakdown: { thb: thbSelTotal, chinaRemainThb, billsThb: selectedSum, tier: activeTier, chinaYuanBought, shortfallRmb, surplusRmb },
       });
-      setSel(new Set()); setPay({}); setThbSel(new Set()); setCtwSel(new Set()); setCtwPay({}); setCtwEdited(new Set()); setUseBalance(true);
+      setSel(new Set()); setPay({}); setThbSel(new Set()); setUseBalance(true);
       setAmount(""); setRefNo(""); setTxSlips([]); setNote(""); setStep(1);
       try { localStorage.removeItem("china-tx-draft"); } catch { /* noop */ }
       loadAll();
@@ -2774,7 +2783,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
 
-  const ctwSelTotal = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);   // ยอด CTW ที่เลือกตัดรอบนี้ (฿)
   // บริษัท CTW ที่ค้างเก่าสุด (เรียงตามวันที่บิล) → บัญชีที่ควรโอนไป
   const oldestCtw = [...ctw].filter(b => ctwRemain(b) > 0)
     .sort((a, b) => String(a.doc_date ?? "").localeCompare(String(b.doc_date ?? "")))[0];
@@ -3005,13 +3013,13 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                   className="w-24 flex-shrink-0 h-10 px-2 text-sm text-right border border-slate-200 rounded" />
                 <button type="button" onClick={() => removeSlip(i)} className="w-6 flex-shrink-0 flex items-center justify-center text-red-500 hover:bg-red-50 rounded">✕</button>
               </div>
-              {/* บรรทัด 2: ปุ่มเลือกบิล CTW ที่รายการนี้ตัด */}
-              {ctw.length > 0 && (
+              {/* บรรทัด 2: ปุ่มเลือกบิล CTW ที่รายการนี้ตัด (โชว์เลขที่บิล) */}
+              {ctw.length > 0 && (() => { const cutKeys = Object.keys(s.cuts ?? {}); return (
                 <button type="button" onClick={() => setSlipLinkIdx(i)}
-                  className={`mt-1.5 w-full h-9 rounded-lg border text-xs font-medium active:scale-[0.99] transition truncate px-2 ${(s.bill_ids?.length) ? "border-orange-400 bg-orange-50 text-orange-700" : "border-dashed border-slate-300 text-slate-500"}`}>
-                  🔗 {(s.bill_ids?.length) ? `ตัด ${s.bill_ids.length} บิล: ${s.bill_ids.map(bid => String(ctw.find(x => String(x.id) === bid)?.company_name ?? "บิล")).join(", ")}` : "เลือกบิลที่จะตัด"}
+                  className={`mt-1.5 w-full h-9 rounded-lg border text-xs font-medium active:scale-[0.99] transition truncate px-2 ${cutKeys.length ? "border-orange-400 bg-orange-50 text-orange-700" : "border-dashed border-slate-300 text-slate-500"}`}>
+                  🔗 {cutKeys.length ? `ตัด ${cutKeys.length} บิล: ${cutKeys.map(bid => String(ctw.find(x => String(x.id) === bid)?.doc_number ?? "บิล")).join(", ")}` : "เลือกบิลที่จะตัด"}
                 </button>
-              )}
+              ); })()}
             </div>
           ))}
           {txSlips.length === 0 && (
@@ -3049,26 +3057,35 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <Portal><div className="fixed inset-0 z-[260] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setSlipLinkIdx(null)}>
           <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between">
-              <span className="font-semibold text-slate-800 truncate">🔗 {s.bank || `รายการ ${i + 1}`} · ฿{fmt(num(s.amount))} ตัดบิลไหน</span>
+              <span className="font-semibold text-slate-800 truncate">🔗 {s.bank || `รายการ ${i + 1}`} · โอน ฿{fmt(num(s.amount))} ตัดบิลไหน</span>
               <button onClick={() => setSlipLinkIdx(null)} className="w-8 h-8 flex-shrink-0 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
             </div>
             <div className="p-3 overflow-y-auto space-y-1.5">
-              <div className="text-xs text-slate-400 mb-1">ติ๊กบิลที่รายการโอนนี้จ่าย (เลือกได้หลายบิล · บิลเดียวกันหลายรายการก็ได้) — ยอดตัดตั้งเต็มให้ก่อน แก้ได้</div>
+              {(() => { const used = Object.values(s.cuts ?? {}).reduce((a, v) => a + num(v), 0); const left = num(s.amount) - used; return (
+                <div className={`text-xs mb-1 ${left < -0.001 ? "text-red-500 font-medium" : "text-slate-400"}`}>
+                  ติ๊กบิลที่รายการนี้จ่าย (เลือกได้หลายบิล · บิลซ้ำหลายรายการได้) — ยอดที่ตัดได้อีก ฿{fmt(+Math.max(0, left).toFixed(2))} / โอน ฿{fmt(num(s.amount))}
+                </div>
+              ); })()}
               {ctw.map(b => {
-                const bid = String(b.id), on = (s.bill_ids ?? []).includes(bid);
+                const bid = String(b.id), on = (s.cuts ?? {})[bid] !== undefined;
+                const otherCut = otherSlipsCut(i, bid, txSlips);                 // รายการอื่นตัดบิลนี้ไปแล้ว
+                const otherIdxs = txSlips.map((t, j) => ({ t, j })).filter(({ t, j }) => j !== i && num((t.cuts ?? {})[bid]) > 0).map(({ j }) => j + 1);
+                const remainAfterOthers = Math.max(0, ctwRemain(b) - otherCut);
                 return (
                   <div key={bid} className={`rounded-lg border ${on ? "border-orange-400 bg-orange-50" : "border-slate-100"}`}>
                     <label className="flex items-center gap-2 px-2 py-2 cursor-pointer">
                       <input type="checkbox" checked={on} onChange={() => toggleSlipBill(i, bid)} className="accent-orange-500 flex-shrink-0" />
                       <span className="flex-1 min-w-0">
-                        <span className="block text-sm text-slate-700 truncate">{String(b.company_name ?? "—")}</span>
-                        <span className="block text-[10px] text-slate-400">เลขที่ {String(b.doc_number ?? "—")} · ค้าง ฿{fmt(ctwRemain(b))}</span>
+                        {/* เลขที่บิลเป็นตัวเด่น · ชื่อบริษัทเป็นตัวรอง */}
+                        <span className="block text-sm font-semibold text-slate-800 truncate">{String(b.doc_number ?? "—")}</span>
+                        <span className="block text-[11px] text-slate-500 truncate">{String(b.company_name ?? "—")}</span>
+                        <span className="block text-[10px] text-slate-400">ค้าง ฿{fmt(remainAfterOthers)}{otherCut > 0 ? ` · รายการ ${otherIdxs.join(",")} ตัดแล้ว ฿${fmt(+otherCut.toFixed(2))}` : ""}</span>
                       </span>
                     </label>
                     {on && (
                       <div className="flex items-center gap-2 px-2 pb-2 -mt-0.5">
                         <span className="text-[11px] text-slate-500 flex-shrink-0">ยอดตัด (฿)</span>
-                        <Money value={ctwPay[bid] ?? ""} onChange={(v) => setCtwPay(p => ({ ...p, [bid]: v }))}
+                        <Money value={(s.cuts ?? {})[bid] ? String((s.cuts ?? {})[bid]) : ""} onChange={(v) => setSlipCut(i, bid, v)}
                           className="flex-1 h-9 px-2 text-sm text-right border border-orange-300 rounded-lg" />
                       </div>
                     )}
