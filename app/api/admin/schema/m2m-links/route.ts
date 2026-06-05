@@ -15,8 +15,26 @@ const JT_RE = /^[a-z][a-z0-9_]+_m2m$/;   // junction ต้องลงท้า
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const junction = searchParams.get("junction") ?? "";
+  if (!JT_RE.test(junction)) return NextResponse.json({ links: [], error: "param ไม่ถูกต้อง" }, { status: 400 });
+
+  // โหมด bulk: ?src_ids=a,b,c → คืน { map: { src_id: [tgt_id...] } } (ไว้โชว์แท็กของหลายรายการทีเดียว)
+  const srcIds = (searchParams.get("src_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (srcIds.length > 0) {
+    const map: Record<string, string[]> = {};
+    // ดึงเป็น batch ละ 200 id
+    for (let i = 0; i < srcIds.length; i += 200) {
+      const chunk = srcIds.slice(i, i + 200);
+      const { data, error } = await supabaseAdmin().from(junction).select("src_id,tgt_id").in("src_id", chunk);
+      if (error) return NextResponse.json({ map: {}, error: error.message }, { status: 500 });
+      for (const r of (data ?? []) as { src_id: string; tgt_id: string }[]) {
+        (map[r.src_id] ??= []).push(r.tgt_id);
+      }
+    }
+    return NextResponse.json({ map, error: null });
+  }
+
   const srcId = searchParams.get("src_id") ?? "";
-  if (!JT_RE.test(junction) || !srcId) return NextResponse.json({ links: [], error: "param ไม่ถูกต้อง" }, { status: 400 });
+  if (!srcId) return NextResponse.json({ links: [], error: "param ไม่ถูกต้อง" }, { status: 400 });
   const { data, error } = await supabaseAdmin().from(junction).select("tgt_id").eq("src_id", srcId);
   if (error) return NextResponse.json({ links: [], error: error.message }, { status: 500 });
   return NextResponse.json({ links: (data ?? []).map((r) => (r as { tgt_id: string }).tgt_id), error: null });
