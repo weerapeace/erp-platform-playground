@@ -55,7 +55,10 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const [opts, setOpts] = useState<Opt[]>([]);
   // selected = แหล่งแสดงผล "ของ widget เอง" (ไม่หน่วง, ไม่ผ่าน value/form ที่ lag)
   //   null = โหมดแก้ไขยังโหลดลิงก์เดิมไม่เสร็จ
-  const [selected, setSelected] = useState<string[] | null>(isCreate ? (value ?? []) : null);
+  //   ⚠ init จาก value (form) เผื่อ widget ถูก remount → ใช้ค่าที่เลือกไว้แล้ว (ไม่กลับไปดึง DB เปล่า)
+  const [selected, setSelected] = useState<string[] | null>(
+    isCreate ? (value ?? []) : (value !== undefined ? value : null),
+  );
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,9 +71,11 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
 
   useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
 
-  // โหลดลิงก์เดิม (โหมดแก้ไข) → ใส่ใน selected + mirror ไป form (สำหรับบันทึก)
+  // โหลดลิงก์เดิม (โหมดแก้ไข) → ใส่ใน selected + mirror ไป form
+  // ⚠ ถ้า form มีค่าอยู่แล้ว (เช่น widget remount หลังเลือกไปแล้ว) → ใช้ค่านั้น ห้ามดึง DB มาทับ (กันค่าหาย)
   useEffect(() => {
     if (isCreate || !junction || !recordId) return;
+    if (value !== undefined) { setSelected(value); return; }   // ฟอร์มมีค่าแล้ว → ไม่โหลดทับ
     setSelected(null);
     apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${recordId}`)
       .then((r) => r.json())
