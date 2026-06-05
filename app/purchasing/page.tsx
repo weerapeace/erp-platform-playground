@@ -26,7 +26,7 @@ type Source = "sku" | "group" | "favorite" | "frequent";
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
 // relation = field ที่เป็น FK → ต้องโชว์ "ชื่อ" จากตารางปลายทาง แต่กรองด้วย id
-type FilterField = { key: string; column: string; label: string; type: string; relation?: { moduleKey: string; labelField: string } };
+type FilterField = { key: string; column: string; label: string; type: string; relation?: { moduleKey: string; labelField: string }; m2m?: { junction: string; moduleKey: string; labelField: string } };
 type ColFilter =
   | { type: "text"; value: string }
   | { type: "number"; min: string; max: string }
@@ -111,10 +111,22 @@ export default function PurchasingShopPage() {
       .then(j => setHiddenTagIds(((j.data ?? []) as Record<string, unknown>[]).map(t => String(t.id))))
       .catch(() => {});
   }, []);
-  // query fragment สำหรับ "ตัดสินค้าที่ติดแท็กห้ามขอซื้อ" (ส่งให้ API skus)
+  // รวม "แท็กที่ต้องซ่อน" = กฎกลาง (ห้ามขอซื้อ) + ตัวกรองซ่อนที่ผู้ใช้เลือกในหน้า (negative filter)
+  // ทั้งคู่ใช้ junction เดียวกัน (skus_v2_product_family_m2m) → รวมเป็นชุดเดียว
+  const exclTagIds = useMemo(() => {
+    const set = new Set<string>(hiddenTagIds);
+    for (const k of activeKeys) {
+      const fd = filterFields.find(f => f.key === k);
+      if (!fd?.m2m || fd.m2m.junction !== "skus_v2_product_family_m2m") continue;
+      const v = filterValues[k];
+      if (v && v.type === "select") v.selected.forEach(id => set.add(id));
+    }
+    return [...set];
+  }, [hiddenTagIds, activeKeys, filterFields, filterValues]);
+  // query fragment สำหรับ "ตัดสินค้าที่ติดแท็กเหล่านี้" (ส่งให้ API skus)
   const exclParam = useMemo(
-    () => (hiddenTagIds.length ? `&excl_junction=skus_v2_product_family_m2m&excl_tgt_ids=${hiddenTagIds.join(",")}` : ""),
-    [hiddenTagIds],
+    () => (exclTagIds.length ? `&excl_junction=skus_v2_product_family_m2m&excl_tgt_ids=${exclTagIds.join(",")}` : ""),
+    [exclTagIds],
   );
 
   // เรตหยวน→บาท ล่าสุด (ใช้โชว์ราคาบาทประมาณ คู่กับ ¥)
@@ -162,10 +174,13 @@ export default function PurchasingShopPage() {
         .map((f: Record<string, unknown>) => {
           const rc = (f.relation_config ?? {}) as Record<string, unknown>;
           const isRel = f.ui_field_type === "relation" && rc.target_module_key;
+          // many2many (เช่น Product Family) = แท็กในตารางเชื่อม → ใช้เป็น "ตัวกรองซ่อน" (negative)
+          const isM2M = f.ui_field_type === "many2many" && rc.junction_table && rc.target_module_key;
           return {
             key: String(f.field_key), column: String(f.column_name ?? f.field_key),
             label: String(f.field_label ?? f.field_key), type: String(f.ui_field_type ?? "text"),
             relation: isRel ? { moduleKey: String(rc.target_module_key), labelField: String(rc.target_label_field ?? "name") } : undefined,
+            m2m: isM2M ? { junction: String(rc.junction_table), moduleKey: String(rc.target_module_key), labelField: String(rc.target_label_field ?? "name") } : undefined,
           };
         });
       setFilterFields(ff);
@@ -177,6 +192,7 @@ export default function PurchasingShopPage() {
     const out: Record<string, ColFilter> = {};
     for (const k of activeKeys) {
       const fd = filterFields.find(f => f.key === k); if (!fd) continue;
+      if (fd.m2m) continue;   // m2m = ตัวกรองซ่อน (negative) → ไม่ส่งเป็น filter ปกติ
       const v = filterValues[k];
       if (!v) continue;
       if (v.type === "boolean" && (v.value === "true" || v.value === "false")) out[fd.column] = v;
@@ -476,8 +492,21 @@ export default function PurchasingShopPage() {
                   const cur = filterValues[k];
                   return (
                     <div key={k}>
-                      <div className="text-xs font-medium text-slate-600 mb-1">{fd.label}</div>
-                      {fd.type === "boolean" ? (
+                      <div className="text-xs font-medium text-slate-600 mb-1">
+                        {fd.m2m ? `🙈 ${fd.label} — เลือกเพื่อซ่อน` : fd.label}
+                      </div>
+                      {fd.m2m ? (
+                        <>
+                          <FilterCombobox
+                            column={fd.column}
+                            label={fd.label}
+                            allFrom={fd.m2m}
+                            values={cur && cur.type === "select" ? cur.selected : []}
+                            onChange={(vals) => setFV(k, vals.length ? { type: "select", selected: vals } : null)}
+                          />
+                          <p className="text-[10px] text-slate-400 mt-1">เลือกแล้วสินค้าที่ติดแท็กนั้นจะไม่แสดง</p>
+                        </>
+                      ) : fd.type === "boolean" ? (
                         <select value={cur && cur.type === "boolean" ? cur.value : ""} onChange={e => setFV(k, e.target.value ? { type: "boolean", value: e.target.value as "true" | "false" } : null)}
                           className="w-full h-8 px-2 text-xs border border-slate-200 rounded-md bg-white">
                           <option value="">ทั้งหมด</option><option value="true">ใช่</option><option value="false">ไม่ใช่</option>
@@ -900,9 +929,11 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: 
 // FilterCombobox — dropdown เลือก "ค่าจริง" ของ field (ของกลาง ไม่ hardcode)
 // ค่าตัวเลือกดึงจาก /api/master-v2/skus/distinct (distinct ของคอลัมน์นั้น)
 // ============================================================
-function FilterCombobox({ column, label, values, onChange, relation }: {
+function FilterCombobox({ column, label, values, onChange, relation, allFrom }: {
   column: string; label: string; values: string[]; onChange: (vals: string[]) => void;
   relation?: { moduleKey: string; labelField: string };
+  // โหลด "ทุกตัวเลือก" จากตารางปลายทาง (ใช้กับ field many2many เช่น Product Family)
+  allFrom?: { moduleKey: string; labelField: string };
 }) {
   const [open, setOpen] = useState(false);
   const [opts, setOpts] = useState<{ value: string; label: string }[] | null>(null);
@@ -915,6 +946,14 @@ function FilterCombobox({ column, label, values, onChange, relation }: {
     if (opts !== null || loading) return;
     setLoading(true);
     try {
+      if (allFrom) {
+        // many2many: ดึงรายชื่อแท็กทั้งหมดจากตารางปลายทาง (id + ชื่อ)
+        const j = await apiFetch(`/api/master-v2/${allFrom.moduleKey}?limit=500`).then(r => r.json());
+        setOpts(((j.data ?? []) as Record<string, unknown>[])
+          .map(r => ({ value: String(r.id), label: String(r[allFrom.labelField] ?? r.id) }))
+          .sort((a, b) => a.label.localeCompare(b.label, "th")));
+        return;
+      }
       if (relation) {
         // โชว์เฉพาะค่าที่ "มีใช้จริง": 1) หา id ที่ถูกผูกกับสินค้าในคอลัมน์นี้ 2) ดึงชื่อเฉพาะ id เหล่านั้น
         const dj = await apiFetch(`/api/master-v2/skus/distinct?column=${encodeURIComponent(column)}&limit=2000`).then(r => r.json());
@@ -930,10 +969,10 @@ function FilterCombobox({ column, label, values, onChange, relation }: {
         setOpts((Array.isArray(j.values) ? (j.values as string[]) : []).map(v => ({ value: v, label: v })));
       }
     } catch { setOpts([]); } finally { setLoading(false); }
-  }, [opts, loading, relation, column]);
+  }, [opts, loading, relation, allFrom, column]);
 
-  // relation: โหลดทันที (เพื่อโชว์ "ชื่อ" ของค่าที่เลือกไว้) / text: โหลดตอนเปิด
-  useEffect(() => { if (relation) void load(); }, [relation, load]);
+  // relation / m2m: โหลดทันที (เพื่อโชว์ "ชื่อ" ของค่าที่เลือกไว้) / text: โหลดตอนเปิด
+  useEffect(() => { if (relation || allFrom) void load(); }, [relation, allFrom, load]);
 
   useEffect(() => {
     if (!open) return;
