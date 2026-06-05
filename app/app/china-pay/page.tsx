@@ -637,7 +637,8 @@ function ChinaBalanceCard() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-[120] bg-black/40 overflow-y-auto overscroll-contain" onClick={() => !busy && setOpen(false)}>
+        <Portal>
+        <div className="fixed inset-0 z-[9999] bg-black/40 overflow-y-auto overscroll-contain" onClick={() => !busy && setOpen(false)}>
           <div className="min-h-full flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-md bg-white rounded-t-2xl sm:rounded-2xl" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
@@ -694,6 +695,7 @@ function ChinaBalanceCard() {
           </div>
           </div>
         </div>
+        </Portal>
       )}
     </>
   );
@@ -2378,7 +2380,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const [refNo, setRefNo] = useState("");                       // หมายเลข/เลขอ้างอิงการโอน
   const [rate, setRate] = useState("");
   const [transferDate, setTransferDate] = useState(today());
-  const [rateInfo, setRateInfo] = useState(false);
   const [slip, setSlip] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -2460,26 +2461,27 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const netThb = netRmb * effRate;                    // เหลือที่ต้องโอนจริง (฿) เมื่อหักยอดคงเหลือ
   const balanceUsedRmb = useBalance ? balance.rmb : 0;       // ¥ ที่ดึงจากยอดคงเหลือมาช่วย
   const balanceUsedThb = balanceUsedRmb * effRate;          // แปลงเป็นบาท (สำหรับโชว์)
-  // โอนจริง = กรอกเองเสมอ; ขั้นต่ำ = เปิดสวิตช์→netThb / ปิด→ยอดรวม
-  const transferred = num(amount);
-  const minTransfer = useBalance ? netThb : selectedSum;
-  const belowMin = hasRate && selectedSum > 0 && transferred < minTransfer - 0.001;
-  // ส่วนต่างที่บันทึกลงบัญชี (ledger) = โอนจริง − ยอดบิล (ติดลบ = ดึงยอดคงเหลือออก) — ห้ามแก้สูตรนี้
-  const leftover = transferred - selectedSum;
-  const leftoverRmb = effRate ? leftover / effRate : 0;
-  // เข้าบัญชีจีน (โชว์) = โอนจริง + ยอดคงเหลือที่ใช้ − ยอดบิล → ส่วนเกินที่เข้าจริง (ห้ามติดลบ)
-  const chinaIn = Math.max(0, transferred + balanceUsedThb - selectedSum);
-  const chinaInRmb = effRate ? chinaIn / effRate : 0;
   const activeTier = tierBasis <= 5000 ? "R1" : tierBasis <= 99999 ? "R2" : tierBasis <= 399999 ? "R3" : "R4";
 
-  // ---- บิลค่าส่ง / VAT (บาท) — แยกจากบิลจีน ¥ ไม่ยุ่งกับเรท/ยอดคงเหลือ ----
+  // ---- บิลค่าส่ง / VAT (บาท) — ชั้นเรท (R1-R4) คิดจากบิลจีน ¥ เท่านั้น (ไม่รวมค่าส่ง/VAT) ----
   const pendingChina = useMemo(() => pending.filter(r => !isThbBill(r)), [pending]);
   const pendingThb   = useMemo(() => pending.filter(r => isThbBill(r)), [pending]);
   const shippingSelTotal = useMemo(() => pendingThb.filter(r => thbSel.has(String(r.id)) && r.is_shipping).reduce((a, r) => a + num(r.amount_thb), 0), [pendingThb, thbSel]);
   const vatSelTotal      = useMemo(() => pendingThb.filter(r => thbSel.has(String(r.id)) && r.vat_type).reduce((a, r) => a + num(r.amount_thb), 0), [pendingThb, thbSel]);
   const thbSelTotal = shippingSelTotal + vatSelTotal;
-  // ยอดรวมรอบนี้ (โชว์) = บิลจีน(฿) + ค่าส่ง + VAT
-  const roundTotalThb = selectedSum + thbSelTotal;
+
+  // โอนจริง = กรอกเอง · ยอดโอนเดียวรวม บิลจีน + ค่าส่ง + VAT
+  const transferred = num(amount);
+  const chinaDueThb = useBalance ? netThb : selectedSum;     // ส่วนบิลจีนที่ต้องโอน (฿)
+  const roundTotalThb = selectedSum + thbSelTotal;           // ยอดรวมรอบนี้ (โชว์ breakdown)
+  const minTransfer = chinaDueThb + thbSelTotal;             // ขั้นต่ำ = บิลจีน(หักคงเหลือ) + ค่าส่ง + VAT
+  const belowMin = minTransfer > 0 && transferred < minTransfer - 0.001;
+  // เงินเหลือเข้าบัญชีจีน (ledger) = โอนจริง − ค่าส่ง/VAT − ยอดบิลจีน (หักค่าส่ง/VAT ออกก่อน ไม่ให้ปนยอดคงเหลือจีน)
+  const leftover = transferred - thbSelTotal - selectedSum;
+  const leftoverRmb = effRate ? leftover / effRate : 0;
+  // เข้าบัญชีจีน (โชว์) = โอนจริง − ค่าส่ง/VAT + ยอดคงเหลือที่ใช้ − ยอดบิลจีน
+  const chinaIn = Math.max(0, transferred - thbSelTotal + balanceUsedThb - selectedSum);
+  const chinaInRmb = effRate ? chinaIn / effRate : 0;
 
   // ตัด/เคลียร์ บิล CTW (ตัดบางส่วนได้: cleared_amount สะสม)
   const ctwRemain = (r: Record<string, unknown>) => Math.max(0, num(r.net_amount) - num(r.cleared_amount));
@@ -2612,7 +2614,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transfer_date: transferDate || today(), bill_ids: chinaIds, bills_total_thb: +selectedSum.toFixed(2),
-          amount_transferred_thb: sel.size > 0 ? +transferred.toFixed(2) : 0,
+          amount_transferred_thb: +transferred.toFixed(2),
           rate: sel.size > 0 ? effRate : null,
           leftover_thb: sel.size > 0 ? +leftover.toFixed(2) : 0,
           leftover_rmb: sel.size > 0 ? +leftoverRmb.toFixed(2) : 0,
@@ -2862,7 +2864,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <div className="rounded-xl bg-emerald-600 text-white p-3 flex justify-between items-center mb-3">
           <span className="text-sm opacity-90">ยอดที่ต้องโอนรอบนี้</span>
           <span className="text-right">
-            <span className="text-2xl font-extrabold">{hasRate ? `฿${fmt(minTransfer + thbSelTotal)}` : (thbSelTotal > 0 ? `฿${fmt(thbSelTotal)}` : "รอเรท")}</span>
+            <span className="text-2xl font-extrabold">{minTransfer > 0 ? `฿${fmt(minTransfer)}` : "รอเรท"}</span>
             {hasRate && <span className="block text-xs opacity-90">≈ ¥{fmt(useBalance ? netRmb : selectedRmb)}{thbSelTotal > 0 ? " + ค่าส่ง/VAT" : ""}</span>}
             {!hasRate && selectedRmb > 0 && (
               <span className="block text-[11px] font-medium bg-white/25 rounded px-1.5 py-0.5 mt-1">⏳ ยังไม่รวมบิลจีน ¥{fmt(selectedRmb)} (รอเรท)</span>
@@ -2911,41 +2913,22 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           <input ref={slipInputRef} type="file" accept="image/jpeg,image/png,image/webp,application/pdf" className="hidden"
             onChange={e => { const fs = e.target.files; if (fs && fs.length) uploadSlip(fs); }} />
         </div>
-        {/* วันที่โอน + เรท — บรรทัดเดียว สีเทาอ่อน (รอง) */}
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <div>
-            <div className="flex items-center justify-between h-5 mb-1"><span className="text-[11px] font-medium text-slate-400">วันที่โอน</span></div>
-            <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)}
-              className="w-full h-10 px-2 text-sm text-slate-500 border border-slate-200 rounded-lg bg-slate-50" />
-          </div>
-          <div>
-            <div className="flex items-center justify-between h-5 mb-1">
-              <span className="text-[11px] font-medium text-slate-400">เรท R1</span>
-              <button type="button" onClick={() => setRateInfo(v => !v)} className="text-[10px] text-blue-400">ⓘ R1–R4</button>
-            </div>
-            <input inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} placeholder="5.08"
-              className="w-full h-10 px-2 text-sm text-slate-500 text-right border border-slate-200 rounded-lg bg-slate-50" />
-          </div>
-        </div>
-        {!hasRate && <div className="mt-1 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือใส่เอง</div>}
-        {rateInfo && hasRate && (
-          <div className="mt-2 rounded-lg bg-blue-50 border border-blue-200 p-3 text-xs space-y-1">
-            <div className="font-semibold text-slate-700 mb-1">เรตตามชั้นยอด (R1 = {fmt(r1)}) — เลือกตามยอดที่โอน</div>
-            {RATE_TABLE.map(t => {
-              const on = transferred > 0 && t.tier === activeTier;
-              return <div key={t.tier} className={`flex justify-between px-1.5 py-0.5 rounded ${on ? "bg-blue-200/70 font-semibold text-blue-900" : ""}`}>
-                <span className={on ? "" : "text-slate-500"}>{t.tier} · {t.label}{on ? " ✓" : ""}</span>
-                <span className={on ? "" : "font-medium text-slate-700"}>{fmt(+(r1 - t.off).toFixed(4))}</span>
-              </div>;
-            })}
-          </div>
-        )}
+        {/* วันที่โอน = วันนี้ (ซ่อน) · เรทไปโชว์ในสรุปข้างล่าง */}
+        {!hasRate && <div className="mt-2 text-[11px] text-amber-600">* ยังไม่มีเรทของวันนี้ — กด “ขอเรท” มุมขวาบน หรือไปใส่ที่เมนู “เรท”</div>}
         {/* สรุปส่วนต่าง */}
         <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
           {hasRate && transferred > 0 && (
-            <div className="flex justify-between"><span className="text-slate-500">เรทที่ใช้ (ชั้น {activeTier})</span><span className="font-semibold text-emerald-700">{fmt(effRate)}</span></div>
+            <>
+              <div className="flex justify-between"><span className="text-slate-500">เรทที่ใช้ (ชั้น {activeTier})</span><span className="font-semibold text-emerald-700">{fmt(effRate)}</span></div>
+              {activeTier !== "R1" && selectedRmb > 0 && (
+                <div className="text-[10px] text-slate-400 -mt-0.5">↳ ไม่ใช่ R1 เพราะยอดบิลจีน ¥{fmt(selectedRmb)} เข้าชั้น {activeTier} (R1={fmt(r1)})</div>
+              )}
+            </>
           )}
-          <div className="flex justify-between"><span className="text-slate-500">ยอดบิลที่ตัด</span><span className="text-slate-700">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">ยอดบิลที่ตัด (จีน)</span><span className="text-slate-700">{hasRate ? `฿${fmt(selectedSum)}` : "รอเรทเงิน"}</span></div>
+          {thbSelTotal > 0 && (
+            <div className="flex justify-between"><span className="text-slate-500">ค่าส่ง / VAT</span><span className="text-slate-700">฿{fmt(thbSelTotal)}</span></div>
+          )}
           {useBalance && hasRate && balanceUsedRmb > 0 && (
             <div className="flex justify-between"><span className="text-slate-500">ใช้ยอดคงเหลือบัญชีจีน</span>
               <span className="text-orange-600">−฿{fmt(balanceUsedThb)}<span className="text-slate-400 font-normal"> ≈ ¥{fmt(balanceUsedRmb)}</span></span></div>
@@ -2966,10 +2949,10 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       </Card>
       <div className="fixed bottom-[72px] left-1/2 -translate-x-1/2 w-full max-w-md z-30 px-4 py-3 bg-slate-50 border-t border-slate-200 flex gap-2">
         <button onClick={() => setStep(1)} className="h-12 px-4 border border-slate-300 bg-white text-slate-600 rounded-xl font-medium">← กลับ</button>
-        <button onClick={() => setStep(3)} disabled={sel.size > 0 && (num(amount) <= 0 || belowMin || !hasRate)}
+        <button onClick={() => setStep(3)} disabled={(sel.size > 0 && !hasRate) || (minTransfer > 0 && (num(amount) <= 0 || belowMin))}
           className="flex-1 h-12 bg-emerald-600 text-white rounded-xl font-semibold active:scale-[0.99] transition disabled:opacity-40 shadow-lg shadow-emerald-500/30">
           {(sel.size > 0 && !hasRate) ? "ยังไม่มีเรทวันนี้ — ใส่เรทก่อน"
-            : (sel.size > 0 && (num(amount) <= 0 || belowMin)) ? `ใส่ยอดให้ครบ (≥ ฿${fmt(minTransfer)})`
+            : (minTransfer > 0 && (num(amount) <= 0 || belowMin)) ? `ใส่ยอดให้ครบ (≥ ฿${fmt(minTransfer)})`
             : "ถัดไป: เลือกบิล CTW →"}
         </button>
       </div>
