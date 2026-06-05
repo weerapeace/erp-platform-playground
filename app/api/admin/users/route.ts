@@ -11,6 +11,7 @@ export type AdminUser = {
   username:           string | null;
   role:               "admin" | "manager" | "staff" | "viewer";
   active:             boolean;
+  avatar_url:         string | null;
   last_seen_at:       string | null;
   last_sign_in_at:    string | null;
   email_confirmed_at: string | null;
@@ -93,10 +94,12 @@ export async function POST(request: NextRequest) {
 // ---- PATCH /api/admin/users — เปลี่ยน role หรือ active ----
 
 type UpdateBody = {
-  user_id: string;
-  role?:   "admin" | "manager" | "staff" | "viewer";
-  active?: boolean;
-  actor?:  string;
+  user_id:       string;
+  role?:         "admin" | "manager" | "staff" | "viewer";
+  active?:       boolean;
+  display_name?: string;
+  avatar_url?:   string | null;
+  actor?:        string;
 };
 
 export async function PATCH(request: NextRequest) {
@@ -107,6 +110,18 @@ export async function PATCH(request: NextRequest) {
 
   const client = supabaseFromRequest(request);
   let updated;
+
+  // แก้ชื่อ + รูปโปรไฟล์ (ส่งทั้งคู่เสมอ — RPC เซ็ตทั้ง 2 ช่อง) แอดมิน/เจ้าของบัญชี
+  if (body.display_name !== undefined || body.avatar_url !== undefined) {
+    const { data, error } = await client.rpc("erp_admin_users_update_profile", {
+      p_user_id:      body.user_id,
+      p_display_name: body.display_name ?? null,
+      p_avatar_url:   body.avatar_url ?? null,
+      p_actor:        body.actor ?? null,
+    });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    updated = data;
+  }
 
   if (body.role) {
     const { data, error } = await client.rpc("erp_admin_users_update_role", {

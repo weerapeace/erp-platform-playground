@@ -129,6 +129,7 @@ export type AuthUser = {
   email: string;
   name:  string;
   role:  Role;
+  avatar: string | null;
 };
 
 type AuthState = {
@@ -140,6 +141,8 @@ type AuthState = {
   loginWithGoogle: () => Promise<boolean>;
   logout: () => Promise<void>;
   can: (perm: Permission) => boolean;
+  /** โหลดโปรไฟล์ใหม่ (หลังแก้ชื่อ/รูปของตัวเอง) */
+  refreshProfile: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -152,13 +155,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // โหลด profile (role) ผ่าน erp_current_user() — SECURITY DEFINER เลี่ยง RLS
   const loadProfile = useCallback(async (fallbackEmail: string) => {
     const { data } = await supabaseBrowser.rpc("erp_current_user");
-    const p = data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null } | null;
+    const p = data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null; avatar_url: string | null } | null;
     if (p && p.active !== false) {
-      setUser({ id: p.id, email: p.email ?? fallbackEmail, name: p.display_name ?? p.email ?? fallbackEmail, role: (p.role ?? "viewer") as Role });
+      setUser({ id: p.id, email: p.email ?? fallbackEmail, name: p.display_name ?? p.email ?? fallbackEmail, role: (p.role ?? "viewer") as Role, avatar: p.avatar_url ?? null });
     } else {
       setUser(null);
     }
   }, []);
+
+  // โหลดโปรไฟล์ตัวเองใหม่ (หลังแก้ชื่อ/รูป)
+  const refreshProfile = useCallback(async () => {
+    const { data } = await supabaseBrowser.auth.getSession();
+    const s = data.session;
+    if (s?.user) await loadProfile(s.user.email ?? "");
+  }, [loadProfile]);
 
   useEffect(() => {
     supabaseBrowser.auth.getSession().then(({ data }) => {
@@ -228,7 +238,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, logout, can }}>
+    <AuthContext.Provider value={{ user, ready, loginError, login, loginWithMagicLink, loginWithGoogle, logout, can, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

@@ -11,7 +11,7 @@
  *  - row action: เปิด/ปิดบัญชี + เปลี่ยน role (drawer)
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied, roleLabel, roleColor } from "@/components/auth";
@@ -28,6 +28,12 @@ const ROLES: { v: Role; label: string }[] = [
   { v: "staff",   label: "พนักงาน" },
   { v: "viewer",  label: "ผู้ชม (ดูอย่างเดียว)" },
 ];
+
+// สร้าง URL รูปโปรไฟล์จากค่าที่เก็บ (r2_key → ผ่าน proxy กลาง / ถ้าเป็น http ใช้ตรง)
+function avatarSrc(v: string | null | undefined): string | null {
+  if (!v) return null;
+  return v.startsWith("http") ? v : `/api/r2-image?key=${encodeURIComponent(v)}`;
+}
 
 function relTime(iso: string | null) {
   if (!iso) return "ยังไม่เคยเข้าระบบ";
@@ -55,9 +61,60 @@ export default function AdminUsersPage() {
   const [inviteBusy,  setInviteBusy]  = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
-  // edit drawer (row click) — เปลี่ยน role / toggle active
+  // edit drawer (row click) — เปลี่ยน role / toggle active / ชื่อ / รูป
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [editName, setEditName]     = useState("");
+  const [editAvatar, setEditAvatar] = useState<string | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const prevEditId = useRef<string | null>(null);
+
+  // เปิดผู้ใช้คนใหม่ → seed ชื่อ/รูป (ไม่ reset ตอน role/active เปลี่ยนของคนเดิม)
+  useEffect(() => {
+    if (editUser?.id !== prevEditId.current) {
+      prevEditId.current = editUser?.id ?? null;
+      setEditName(editUser?.display_name ?? "");
+      setEditAvatar(editUser?.avatar_url ?? null);
+    }
+  }, [editUser]);
+
+  const uploadAvatar = async (file: File) => {
+    if (!file.type.startsWith("image/")) { setError("ไฟล์ต้องเป็นรูปภาพ"); return; }
+    setUploadBusy(true); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("folder", "avatars");
+      const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setEditAvatar(json.r2_key);
+    } catch (err) { setError(err instanceof Error ? err.message : "อัปโหลดรูปไม่สำเร็จ"); }
+    finally { setUploadBusy(false); }
+  };
+
+  const saveProfile = async () => {
+    if (!editUser) return;
+    setEditBusy(true); setError(null);
+    try {
+      const res = await apiFetch("/api/admin/users", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: editUser.id,
+          display_name: editName.trim(),
+          avatar_url: editAvatar ?? "",
+          actor: me?.name,
+        }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setSavedAt(new Date().toLocaleTimeString("th-TH"));
+      await load();
+      setEditUser(prev => prev ? { ...prev, display_name: editName.trim() || null, avatar_url: editAvatar } : null);
+    } catch (err) { setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
+    finally { setEditBusy(false); }
+  };
 
   // สร้างผู้ใช้ภายใน (username + PIN)
   const [intOpen, setIntOpen] = useState(false);
@@ -172,11 +229,17 @@ export default function AdminUsersPage() {
         const u = row.original;
         const isMe = u.id === me?.id;
         const display = u.display_name ?? u.email.split("@")[0];
+        const src = avatarSrc(u.avatar_url);
         return (
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-semibold shrink-0">
-              {display.charAt(0).toUpperCase()}
-            </div>
+            {src ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={src} alt={display} className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200" />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-semibold shrink-0">
+                {display.charAt(0).toUpperCase()}
+              </div>
+            )}
             <div className="min-w-0">
               <div className="font-medium text-slate-800 truncate">
                 {display}
@@ -396,6 +459,42 @@ export default function AdminUsersPage() {
         title={editUser ? `แก้ไข: ${editUser.display_name ?? editUser.email}` : ""} size="md">
         {editUser && (
           <div className="space-y-4">
+            {/* รูปโปรไฟล์ + ชื่อ */}
+            <div className="flex items-center gap-4 pb-1">
+              <div className="relative shrink-0">
+                {avatarSrc(editAvatar) ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={avatarSrc(editAvatar)!} alt="" className="w-16 h-16 rounded-full object-cover border border-slate-200" />
+                ) : (
+                  <div className="w-16 h-16 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-xl font-semibold">
+                    {(editName || editUser.email).charAt(0).toUpperCase()}
+                  </div>
+                )}
+                {uploadBusy && (
+                  <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center text-white text-[10px]">กำลังโหลด</div>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <input ref={fileRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadAvatar(f); e.target.value = ""; }} />
+                <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadBusy || editBusy}
+                  className="h-8 px-3 text-xs font-medium border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                  {uploadBusy ? "กำลังอัปโหลด..." : avatarSrc(editAvatar) ? "เปลี่ยนรูป" : "＋ อัปโหลดรูป"}
+                </button>
+                {avatarSrc(editAvatar) && (
+                  <button type="button" onClick={() => setEditAvatar(null)} disabled={uploadBusy || editBusy}
+                    className="h-7 px-3 text-xs text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50">ลบรูป</button>
+                )}
+              </div>
+            </div>
+
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">ชื่อแสดงผล</span>
+              <input value={editName} onChange={(e) => setEditName(e.target.value)} disabled={editBusy}
+                placeholder={editUser.email.split("@")[0]}
+                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60" />
+            </label>
+
             <div className="text-xs text-slate-500">
               <div>อีเมล: <span className="text-slate-700">{editUser.email}</span></div>
               <div>เข้าระบบล่าสุด: <span className="text-slate-700">{relTime(editUser.last_sign_in_at)}</span></div>
@@ -408,6 +507,12 @@ export default function AdminUsersPage() {
                 {ROLES.map(r => <option key={r.v} value={r.v}>{r.label}</option>)}
               </select>
             </label>
+            {/* บันทึกชื่อ/รูป */}
+            <button onClick={saveProfile} disabled={editBusy || uploadBusy}
+              className="w-full h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {editBusy ? "กำลังบันทึก..." : "💾 บันทึกชื่อ/รูป"}
+            </button>
+
             <div className="flex gap-2 pt-2 border-t border-slate-100">
               <button onClick={() => toggleActive(editUser)} disabled={editBusy}
                 className={`flex-1 h-9 text-sm font-medium rounded border disabled:opacity-50 ${

@@ -665,13 +665,17 @@ function UserSwitcher() {
   }
 
   const initials = user.name.charAt(0).toUpperCase();
+  const avatar = user.avatar ? (user.avatar.startsWith("http") ? user.avatar : `/api/r2-image?key=${encodeURIComponent(user.avatar)}`) : null;
 
   return (
     <div className="p-3 border-t border-slate-100 relative">
       <div className="flex items-center gap-1">
         <button onClick={() => setOpen(!open)}
           className="flex-1 flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 transition-colors text-left">
-          <span className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold shrink-0">{initials}</span>
+          {avatar
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={avatar} alt={user.name} className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200" />
+            : <span className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-semibold shrink-0">{initials}</span>}
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium text-slate-800 truncate">{user.name}</div>
             <span className={`inline-block text-[10px] px-1.5 rounded-full border ${roleColor(user.role)}`}>{roleLabel(user.role)}</span>
@@ -686,6 +690,8 @@ function UserSwitcher() {
           <div className="px-3 py-2 border-b border-slate-100">
             <div className="text-xs text-slate-500 truncate">{user.email}</div>
           </div>
+          <Link href="/profile" onClick={() => setOpen(false)}
+            className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 โปรไฟล์ของฉัน</Link>
           <button onClick={async () => { setOpen(false); await logout(); router.push("/login"); }}
             className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50">ออกจากระบบ</button>
         </div>
