@@ -16,6 +16,14 @@ type Row = {
   special_add: number; other_deduct: number; net_estimate: number; has_manual: boolean;
 };
 type Adj = { id: string; adjustment_type: string; item_name: string; amount: number };
+type TimeKind = "ot" | "late" | "absence" | "leave";
+type TimeItem = { id: string; kind: TimeKind; value: number; amount: number };
+const TIME_META: Record<TimeKind, { label: string; unit: string; sign: "+" | "-"; cls: string }> = {
+  ot:      { label: "OT",            unit: "ชม.",  sign: "+", cls: "text-emerald-600" },
+  late:    { label: "มาสาย",         unit: "นาที", sign: "-", cls: "text-red-600" },
+  absence: { label: "ขาดงาน",        unit: "วัน",  sign: "-", cls: "text-red-600" },
+  leave:   { label: "ลาไม่รับเงิน",  unit: "วัน",  sign: "-", cls: "text-red-600" },
+};
 
 const baht = (v: number) => v ? `฿${v.toLocaleString("th-TH", { minimumFractionDigits: 2 })}` : "—";
 const dash = (v: number, cls = "") => v ? <span className={`tabular-nums ${cls}`}>{baht(v)}</span> : <span className="text-slate-300">-</span>;
@@ -145,18 +153,26 @@ export default function ManualInputPage() {
 function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
   { row: Row; periodId: string; editable: boolean; onClose: () => void; onChanged: () => void }) {
   const [items, setItems] = useState<Adj[]>([]);
+  const [timeItems, setTimeItems] = useState<TimeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [type, setType] = useState<"earning" | "deduction">("earning");
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
+  const [tKind, setTKind] = useState<TimeKind>("ot");
+  const [tValue, setTValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const j = await apiFetch(`/api/payroll/adjustments?period_id=${encodeURIComponent(periodId)}&employee_id=${encodeURIComponent(row.employee_id)}`).then((r) => r.json());
-      setItems((j.data ?? []) as Adj[]);
+      const qs = `period_id=${encodeURIComponent(periodId)}&employee_id=${encodeURIComponent(row.employee_id)}`;
+      const [adj, tim] = await Promise.all([
+        apiFetch(`/api/payroll/adjustments?${qs}`).then((r) => r.json()),
+        apiFetch(`/api/payroll/time-entry?${qs}`).then((r) => r.json()),
+      ]);
+      setItems((adj.data ?? []) as Adj[]);
+      setTimeItems((tim.data ?? []) as TimeItem[]);
     } catch { /* */ } finally { setLoading(false); }
   }, [periodId, row.employee_id]);
   useEffect(() => { reload(); }, [reload]);
@@ -186,6 +202,31 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
     finally { setBusy(false); }
   }
 
+  async function addTime() {
+    setErr(null);
+    if (!(Number(tValue) > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/payroll/time-entry", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value: Number(tValue) }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else { setTValue(""); await reload(); onChanged(); }
+    } catch { setErr("บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  }
+
+  async function delTime(it: TimeItem) {
+    if (!confirm("ลบรายการนี้?")) return;
+    setBusy(true); setErr(null);
+    try {
+      const j = await apiFetch(`/api/payroll/time-entry/${it.id}?kind=${it.kind}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) setErr(j.error); else { await reload(); onChanged(); }
+    } catch { setErr("ลบไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  }
+
   const earnings = items.filter((i) => i.adjustment_type === "earning");
   const deductions = items.filter((i) => i.adjustment_type === "deduction");
 
@@ -205,12 +246,50 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
           {!editable && <div className="rounded-lg bg-amber-50 text-amber-700 px-3 py-2 text-xs">งวดนี้แก้ไม่ได้ (ดูอย่างเดียว)</div>}
           {err && <div className="rounded-lg bg-red-50 text-red-700 px-3 py-2 text-xs">{err}</div>}
 
+          {/* เวลา: สาย/ขาด/ลา/OT — คิดเงินจากเรทค่าจ้างอัตโนมัติ */}
+          <div>
+            <div className="text-sm font-medium text-slate-700 mb-2">⏱ เวลา (สาย/ขาด/ลา/OT)</div>
+            {timeItems.length === 0 ? (
+              <div className="text-xs text-slate-400 py-1">ยังไม่มีรายการเวลา</div>
+            ) : (
+              <div className="space-y-1.5">
+                {timeItems.map((it) => {
+                  const m = TIME_META[it.kind];
+                  return (
+                    <div key={`${it.kind}-${it.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                      <span className="text-sm text-slate-700">{m.label} <span className="text-slate-400">{it.value} {m.unit}</span></span>
+                      <span className="flex items-center gap-2">
+                        <span className={`text-sm tabular-nums ${m.cls}`}>{m.sign}฿{it.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+                        {editable && <button onClick={() => delTime(it)} disabled={busy} className="text-slate-300 hover:text-red-500 text-sm" title="ลบ">🗑</button>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {editable && (
+              <div className="flex gap-2 mt-2">
+                <select value={tKind} onChange={(e) => setTKind(e.target.value as TimeKind)} className="h-9 px-2 border border-slate-300 rounded-lg text-sm bg-white">
+                  <option value="ot">OT (ชม.)</option>
+                  <option value="late">มาสาย (นาที)</option>
+                  <option value="absence">ขาดงาน (วัน)</option>
+                  <option value="leave">ลาไม่รับเงิน (วัน)</option>
+                </select>
+                <input value={tValue} onChange={(e) => setTValue(e.target.value)} type="number" min="0" step="any" placeholder={`จำนวน ${TIME_META[tKind].unit}`}
+                  className="h-9 flex-1 px-3 border border-slate-300 rounded-lg text-sm tabular-nums" />
+                <button onClick={addTime} disabled={busy} className="h-9 px-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">+</button>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-slate-100" />
+
           <Section title="🟢 เพิ่มพิเศษ" items={earnings} onDel={del} editable={editable} busy={busy} empty="ยังไม่มีรายการเพิ่ม" />
           <Section title="🔴 หักอื่น" items={deductions} onDel={del} editable={editable} busy={busy} empty="ยังไม่มีรายการหัก" />
 
           {editable && (
             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-              <div className="text-sm font-medium text-slate-700">เพิ่มรายการ</div>
+              <div className="text-sm font-medium text-slate-700">เพิ่มเงินเพิ่ม/หัก</div>
               <div className="flex gap-2">
                 <button onClick={() => setType("earning")} className={`flex-1 h-9 rounded-lg text-sm font-medium border ${type === "earning" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-300 text-slate-600"}`}>เพิ่มพิเศษ</button>
                 <button onClick={() => setType("deduction")} className={`flex-1 h-9 rounded-lg text-sm font-medium border ${type === "deduction" ? "bg-red-600 text-white border-red-600" : "border-slate-300 text-slate-600"}`}>หักอื่น</button>
