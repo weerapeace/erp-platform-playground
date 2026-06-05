@@ -39,6 +39,19 @@ const PAGE = 48;
 const COLS_KEY = "pr_shop_cols";
 const FILT_KEY = "pr_shop_filter_keys";
 const CART_KEY = "pr_shop_cart";
+const SORT_KEY = "pr_shop_sort";
+// ตัวเลือกการเรียง (sort by) — by/dir ตรงกับคอลัมน์จริงใน skus_v2 (ส่งให้ API)
+const SORTS: { key: string; label: string; by?: string; dir?: "asc" | "desc" }[] = [
+  { key: "",          label: "ล่าสุด (ค่าเริ่มต้น)" },
+  { key: "code_asc",  label: "รหัส A → Z",        by: "code",       dir: "asc" },
+  { key: "code_desc", label: "รหัส Z → A",        by: "code",       dir: "desc" },
+  { key: "name_asc",  label: "ชื่อ ก → ฮ",        by: "name_th",    dir: "asc" },
+  { key: "name_desc", label: "ชื่อ ฮ → ก",        by: "name_th",    dir: "desc" },
+  { key: "price_asc", label: "ราคา น้อย → มาก",   by: "list_price", dir: "asc" },
+  { key: "price_desc",label: "ราคา มาก → น้อย",   by: "list_price", dir: "desc" },
+  { key: "new",       label: "ใหม่สุดก่อน",        by: "created_at", dir: "desc" },
+  { key: "old",       label: "เก่าสุดก่อน",        by: "created_at", dir: "asc" },
+];
 
 export default function PurchasingShopPage() {
   const { user } = useAuth();
@@ -54,6 +67,7 @@ export default function PurchasingShopPage() {
   const [page, setPage] = useState(0);   // หน้า (0-based)
   const [q, setQ] = useState("");
   const [cols, setCols] = useState(4);
+  const [sortKey, setSortKey] = useState("");   // การเรียง (sort by)
 
   // filter (SKU mode, configurable)
   const [filterFields, setFilterFields] = useState<FilterField[]>([]);
@@ -137,6 +151,13 @@ export default function PurchasingShopPage() {
     }
     return { exclTagIds: [...ex], inclTagIds: [...inc] };
   }, [hiddenTagIds, activeKeys, filterFields, filterValues, m2mMode]);
+  // query fragment การเรียง (sort by) — ส่งให้ API skus
+  const sortParam = useMemo(() => {
+    const s = SORTS.find(x => x.key === sortKey);
+    return s?.by ? `&sort_by=${s.by}&sort_dir=${s.dir}` : "";
+  }, [sortKey]);
+  const changeSort = (k: string) => { setSortKey(k); if (typeof window !== "undefined") localStorage.setItem(SORT_KEY, k); };
+
   // query fragment ส่งให้ API skus (ซ่อน + โชว์เฉพาะ ใช้ junction เดียวกัน)
   const exclParam = useMemo(() => {
     let s = "";
@@ -157,6 +178,7 @@ export default function PurchasingShopPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 10) setCols(c);
+    const sk = localStorage.getItem(SORT_KEY); if (sk && SORTS.some(s => s.key === sk)) setSortKey(sk);
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
     // ข้อ 4: กู้ตะกร้าที่ค้างไว้ (กันหายเมื่อรีเฟรช)
     try { const c2 = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]"); if (Array.isArray(c2) && c2.length) setCart(c2 as Line[]); } catch { /* ignore */ }
@@ -268,10 +290,10 @@ export default function PurchasingShopPage() {
       if (source === "sku") {
         const fp = Object.keys(builtFilters).length ? `&filters=${encodeURIComponent(JSON.stringify(builtFilters))}` : "";
         const sp = q ? `&search=${encodeURIComponent(q)}` : "";
-        const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${fp}${exclParam}`).then(r => r.json());
+        const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${fp}${exclParam}${sortParam}`).then(r => r.json());
         const mapped: Card[] = (j.data ?? []).map(mapSku);
-        // จัดเรียงตามความใกล้เคียงกับคำค้น: ตรงเป๊ะ → ขึ้นต้น → มีอยู่ในโค้ด → มีอยู่ในชื่อ
-        if (q) {
+        // จัดเรียงตามความใกล้เคียงกับคำค้น — เฉพาะตอนค้นหา และยังไม่ได้เลือกการเรียงเอง
+        if (q && !sortParam) {
           const ql = q.trim().toLowerCase();
           const score = (c: Card) => {
             const code = (c.sub ?? "").toLowerCase();
@@ -317,7 +339,7 @@ export default function PurchasingShopPage() {
     } finally {
       if (myId === reqIdRef.current) setLoading(false);
     }
-  }, [source, q, builtFilters, mapSku, fetchSkusByIds, exclParam]);
+  }, [source, q, builtFilters, mapSku, fetchSkusByIds, exclParam, sortParam]);
 
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
   // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
@@ -578,6 +600,15 @@ export default function PurchasingShopPage() {
             {/* ช่องค้นหาด้านบน (ใช้ร่วมกับช่องค้นหาแถบซ้าย) */}
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 ค้นหาสินค้า (ชื่อ/รหัส)..."
               className="flex-1 min-w-[180px] max-w-md h-9 px-3 text-sm border border-slate-200 rounded-md" />
+            {source === "sku" && (
+              <label className="flex items-center gap-1.5 text-xs text-slate-500 flex-shrink-0">
+                <span className="whitespace-nowrap">↕ เรียงตาม</span>
+                <select value={sortKey} onChange={e => changeSort(e.target.value)}
+                  className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white text-slate-700">
+                  {SORTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </label>
+            )}
             {source === "sku" && (
               <button onClick={() => setSkuForm({ mode: "create" })}
                 className="h-9 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
