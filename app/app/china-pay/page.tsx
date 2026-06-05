@@ -3163,10 +3163,15 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                     <label className="flex items-center gap-2 px-2 py-2 cursor-pointer">
                       <input type="checkbox" checked={on} onChange={() => toggleSlipBill(i, bid)} className="accent-orange-500 flex-shrink-0" />
                       <span className="flex-1 min-w-0">
-                        {/* เลขที่บิลเป็นตัวเด่น · ชื่อบริษัทเป็นตัวรอง */}
+                        {/* เลขที่บิลเป็นตัวเด่น · ชื่อบริษัท + วันที่เป็นตัวรอง */}
                         <span className="block text-sm font-semibold text-slate-800 truncate">{String(b.doc_number ?? "—")}</span>
                         <span className="block text-[11px] text-slate-500 truncate">{String(b.company_name ?? "—")}</span>
-                        <span className="block text-[10px] text-slate-400">ค้าง ฿{fmt(remainAfterOthers)}{otherCut > 0 ? ` · รายการ ${otherIdxs.join(",")} ตัดแล้ว ฿${fmt(+otherCut.toFixed(2))}` : ""}</span>
+                        <span className="block text-[10px] text-slate-400">📅 {String(b.doc_date ?? "—")}{otherCut > 0 ? ` · รายการ ${otherIdxs.join(",")} ตัดแล้ว ฿${fmt(+otherCut.toFixed(2))}` : ""}</span>
+                      </span>
+                      {/* ยอดค้าง — ตัวใหญ่ ชิดขวา */}
+                      <span className="text-right flex-shrink-0">
+                        <span className="block text-base font-bold text-orange-600">฿{fmt(remainAfterOthers)}</span>
+                        <span className="block text-[9px] text-slate-400">ค้าง</span>
                       </span>
                     </label>
                     {on && (

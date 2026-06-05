@@ -24,8 +24,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const imageUrl = String(body.imageUrl ?? "").trim();
   const imageUrls = Array.isArray(body.imageUrls) ? body.imageUrls.map((u: unknown) => String(u)).filter((u: string) => /^https:\/\//.test(u)) : [];
   const allImages = [imageUrl, ...imageUrls].filter((u) => /^https:\/\//.test(u)).slice(0, 4);   // LINE: รวมข้อความ ≤5
-  const btnUrl = String(body.button?.url ?? "").trim();
-  const btnLabel = String(body.button?.label ?? "เปิดดู").slice(0, 38) || "เปิดดู";
   if (!text && allImages.length === 0) return NextResponse.json({ error: "ไม่มีข้อความ" }, { status: 400 });
 
   const admin = supabaseAdmin();
@@ -37,28 +35,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า LINE Bot / กลุ่มปลายทาง", needConfig: true }, { status: 503 });
   }
 
-  // ประกอบข้อความ: รูป (ถ้ามี) → ข้อความธรรมดา (คัดลอกได้) → Flex ปุ่มลิงก์
-  // LINE ส่งได้สูงสุด 5 ข้อความ/ครั้ง — เผื่อช่องข้อความ+ปุ่มไว้ 2 → จำกัดรูป ≤3 เมื่อมีปุ่ม
-  const hasButton = !!btnUrl && /^https:\/\//.test(btnUrl);
-  const imgs = hasButton ? allImages.slice(0, 3) : allImages;
+  // ประกอบข้อความ: รูปสรุป (ถ้ามี) + ข้อความธรรมดา (คัดลอกได้) — ไม่ส่งการ์ดปุ่มลิงก์แล้ว
   const messages: Array<Record<string, unknown>> = [];
-  for (const u of imgs) messages.push({ type: "image", originalContentUrl: u, previewImageUrl: u });
-  if (hasButton) {
-    // 1) ข้อความธรรมดา — กดค้างเพื่อ "คัดลอก" ได้ใน LINE (เช่น เลขบัญชี)
-    if (text) messages.push({ type: "text", text: text.slice(0, 4900) });
-    // 2) Flex bubble: ปุ่มลิงก์เปิดใบสรุป (เนื้อหาอยู่ในข้อความด้านบนแล้ว)
-    messages.push({
-      type: "flex",
-      altText: (text || "ใบสรุปการโอน").slice(0, 380),
-      contents: {
-        type: "bubble",
-        body: { type: "box", layout: "vertical", contents: [{ type: "text", text: "กดปุ่มด้านล่างเพื่อเปิดใบสรุปแบบเต็ม", size: "sm", wrap: true, color: "#64748b" }] },
-        footer: { type: "box", layout: "vertical", contents: [{ type: "button", style: "primary", color: "#06C755", height: "sm", action: { type: "uri", label: btnLabel, uri: btnUrl } }] },
-      },
-    });
-  } else if (text) {
-    messages.push({ type: "text", text: text.slice(0, 4900) });
-  }
+  for (const u of allImages) messages.push({ type: "image", originalContentUrl: u, previewImageUrl: u });
+  if (text) messages.push({ type: "text", text: text.slice(0, 4900) });
   if (messages.length === 0) return NextResponse.json({ error: "ไม่มีข้อความ/รูป" }, { status: 400 });
 
   try {
