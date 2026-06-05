@@ -30,11 +30,23 @@ function dateInRange(date: string, start: string, end: string): boolean {
   return !!date && date >= start && date <= end;
 }
 
-function isWorkableDate(date: string, holidays: Set<string>): boolean {
+const SCHEDULES: Record<string, number[]> = {
+  office_5d: [1, 2, 3, 4, 5],
+  factory_6d: [1, 2, 3, 4, 5, 6],
+  shift_a: [1, 2, 3, 4, 5, 6],
+  shift_b: [1, 2, 3, 4, 5, 6],
+  part_time_weekend: [0, 6],
+};
+
+function scheduleWeekdays(id: unknown): number[] {
+  return SCHEDULES[String(id)] ?? SCHEDULES.factory_6d;
+}
+
+function isWorkableDate(date: string, holidays: Set<string>, contract: Row): boolean {
   const d = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return false;
   const dow = d.getUTCDay();
-  return dow >= 1 && dow <= 5 && !holidays.has(date);
+  return scheduleWeekdays(contract.work_schedule_id).includes(dow) && !holidays.has(date);
 }
 
 /** หาวันทำงานจริงวันแรกในงวด (จ-ศ + ไม่ใช่วันหยุด) — กันเครื่องคำนวณข้าม entry ที่ลงวันหยุด */
@@ -113,13 +125,13 @@ export async function POST(req: NextRequest) {
     if (!dateInRange(workDate, startDate, endDate)) {
       return NextResponse.json({ error: "วันที่ต้องอยู่ในช่วงงวดเงินเดือน" }, { status: 400 });
     }
-    if (!isWorkableDate(workDate, holidays)) {
-      return NextResponse.json({ error: "วันที่นี้เป็นวันหยุด/เสาร์-อาทิตย์ ระบบไม่บันทึกรายการเวลาในวันหยุด" }, { status: 400 });
-    }
 
     const { data: cd } = await a.from("employee_contracts").select("*").eq("employee_id", employeeId).eq("is_current", true).eq("status", "active").limit(1);
     const contract = cd?.[0] as Row | undefined;
     if (!contract) return NextResponse.json({ error: "พนักงานนี้ไม่มีสัญญาที่ใช้งานอยู่" }, { status: 400 });
+    if (kind !== "ot" && !isWorkableDate(workDate, holidays, contract)) {
+      return NextResponse.json({ error: "วันที่นี้ไม่ใช่วันทำงานตามสัญญา หรือเป็นวันหยุด จึงลงสาย/ขาด/ลาไม่ได้" }, { status: 400 });
+    }
     const { data: sd } = await a.from("employee_payroll_settings").select("payroll_group_id").eq("employee_id", employeeId).limit(1);
     const setting = (sd?.[0] as Row) ?? {};
 
