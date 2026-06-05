@@ -1521,6 +1521,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                       <button onClick={() => { setToolsOpen(false); setStudioOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">🎨 ออกแบบหน้า</button>
                       <button onClick={() => { setToolsOpen(false); setLayoutEditorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">🗂️ จัด Layout (Tab/Section)</button>
                       <button onClick={() => { setToolsOpen(false); setFieldCreatorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">＋ เพิ่ม Field ใหม่</button>
+                      {familyM2mFields.length > 0 && (
+                        <a href="/admin/family-template" onClick={() => setToolsOpen(false)} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">🧩 เทมเพลตประเภทสินค้า</a>
+                      )}
                     </div>
                   </>
                 )}
