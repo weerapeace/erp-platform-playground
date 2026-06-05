@@ -2213,7 +2213,21 @@ function buildTransferReceipt(row: Record<string, unknown>, pmap: Record<string,
     return { ...l, sup: { name_en: sp.name_en ?? "", phone: sp.phone ?? "", bank_account_name: sp.bank_account_name ?? "", account_number: sp.account_number ?? "", bank_name_brief: sp.bank_name_brief ?? "" } };
   });
   const attachments = Array.isArray(row.attachments) ? (row.attachments as unknown[]).map(String) : [];
-  return { transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, num(row.leftover_rmb)), lines, attachments };
+  // สร้างสรุปการคำนวณ (recompute จาก lines + ฟิลด์ที่เก็บ) → โชว์ในใบสรุป
+  const cnLines = lines.filter((l: Record<string, unknown>) => l.kind === "china");
+  const thbLines = lines.filter((l: Record<string, unknown>) => l.kind === "thb");
+  const selectedRmb = cnLines.reduce((a: number, l: Record<string, unknown>) => a + num(l.paid_rmb), 0);
+  const thbSum = thbLines.reduce((a: number, l: Record<string, unknown>) => a + num(l.paid_thb), 0);
+  const rate = num(row.rate);
+  const transferred = num(row.amount_transferred_thb);
+  const chinaRemainThb = transferred - thbSum;
+  const chinaYuanBought = rate ? chinaRemainThb / rate : 0;
+  const tier = chinaRemainThb <= 5000 ? "R1" : chinaRemainThb <= 99999 ? "R2" : chinaRemainThb <= 399999 ? "R3" : "R4";
+  const breakdown = rate > 0 ? {
+    thb: thbSum, chinaRemainThb, billsThb: selectedRmb * rate, tier, chinaYuanBought,
+    shortfallRmb: Math.max(0, selectedRmb - chinaYuanBought), surplusRmb: Math.max(0, chinaYuanBought - selectedRmb),
+  } : undefined;
+  return { transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, num(row.leftover_rmb)), selectedRmb, lines, attachments, breakdown };
 }
 
 // ส่งสรุปการโอนเข้า LINE (Flex + ปุ่มเปิดใบสรุป) — ใช้ร่วม TransferPage + TransferList
@@ -2249,10 +2263,8 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
   const [pmap, setPmap] = useState<Record<string, Record<string, unknown>>>({});
   const [loading, setLoading] = useState(true);
   const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
-  const [sendingId, setSendingId] = useState("");
   const [delTarget, setDelTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังยืนยันลบ
   const [busy, setBusy] = useState(false);
-  const [detail, setDetail] = useState<Record<string, unknown> | null>(null);   // เปิดหน้ารายละเอียดการโอน
 
   // ลบรายการโอน + คืนยอดบิลที่เกี่ยวข้อง (paid_rmb / cleared_amount คำนวณใหม่จากการโอนที่เหลือ)
   const removeTransfer = async (target: Record<string, unknown>) => {
@@ -2313,7 +2325,7 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
         const id = String(r.id);
         return (
           <Card key={id}>
-            <button onClick={() => setDetail(r)} className="w-full flex justify-between items-start gap-2 text-left">
+            <button onClick={() => setReceipt(buildTransferReceipt(r, pmap))} className="w-full flex justify-between items-start gap-2 text-left">
               <div className="min-w-0">
                 <div className="font-semibold text-slate-800">{String(r.transfer_no ?? "—")}</div>
                 <div className="text-xs text-slate-400">{String(r.transfer_date ?? "—")}{r.ref_no ? ` · ${String(r.ref_no)}` : ""}</div>
@@ -2321,46 +2333,14 @@ function TransferList({ canDelete }: { canDelete?: boolean }) {
               </div>
               <div className="text-right flex-shrink-0">
                 <div className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</div>
-                <div className="text-[11px] text-slate-400 mt-1">แตะดูรายละเอียด ›</div>
+                <div className="text-[11px] text-slate-400 mt-1">แตะดูใบสรุป ›</div>
               </div>
             </button>
           </Card>
         );
       })}
-      {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)} />}
-      {detail && (() => {
-        const r = detail; const id = String(r.id);
-        const ls = Array.isArray(r.lines) ? (r.lines as Record<string, unknown>[]) : [];
-        const cn = ls.filter(l => l.kind === "china").length, cw = ls.filter(l => l.kind === "ctw").length;
-        const t = buildTransferReceipt(r, pmap);
-        return (
-          <Portal><div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setDetail(null)}>
-            <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
-                <div className="font-semibold text-slate-800">รายละเอียดการโอน · {String(r.transfer_no ?? "—")}</div>
-                <button onClick={() => setDetail(null)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
-              </div>
-              <div className="p-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] space-y-4">
-                <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-sm space-y-1">
-                  <Row label="วันที่โอน" v={r.transfer_date} />
-                  {!!r.ref_no && <Row label="เลขอ้างอิงสลิป" v={r.ref_no} />}
-                  <Row label="เรทที่ใช้" v={fmt(num(r.rate))} />
-                  <div className="flex justify-between border-t border-emerald-200/60 pt-1 mt-1"><span className="text-slate-500">โอนจริง</span><span className="font-bold text-emerald-700">฿{fmt(num(r.amount_transferred_thb))}</span></div>
-                  <Row label="เข้าบัญชีจีน (ส่วนต่าง)" v={`¥${fmt(Math.max(0, num(r.leftover_rmb)))}`} />
-                  <Row label="ตัดบิล" v={`บิลจีน ${cn} · CTW ${cw}`} />
-                </div>
-                <button onClick={() => setReceipt(t)} className="w-full h-11 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50">🖨️ ดูใบสรุป / พิมพ์ / ส่งไลน์(รูป)</button>
-                <button onClick={async () => { setSendingId(id); await pushTransferLine(t, toast); setSendingId(""); }} disabled={sendingId === id}
-                  className="w-full h-11 bg-[#06C755] text-white rounded-lg text-sm font-medium disabled:opacity-50">{sendingId === id ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
-                {canDelete && (
-                  <button onClick={() => { setDelTarget(r); setDetail(null); }} disabled={busy}
-                    className="w-full h-11 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100 disabled:opacity-50">🗑 ลบรายการโอน (คืนยอดบิล)</button>
-                )}
-              </div>
-            </div>
-          </div></Portal>
-        );
-      })()}
+      {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)}
+        onDelete={canDelete ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setDelTarget(raw); setReceipt(null); } } : undefined} />}
       {delTarget && (
         <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
           confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
@@ -2378,8 +2358,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   const slipInputRef = useRef<HTMLInputElement>(null);
   const [slipUploading, setSlipUploading] = useState(false);
   const [savedTransfer, setSavedTransfer] = useState<Record<string, unknown> | null>(null);   // หลังโอน → popup พิมพ์/ส่งไลน์
-  const [txReport, setTxReport] = useState<Record<string, unknown> | null>(null);
-  const [txReportAuto, setTxReportAuto] = useState(false);   // เปิดใบสรุปแล้วส่งไลน์(รูป)อัตโนมัติ
   const [sendingTxLine, setSendingTxLine] = useState(false);
   const [pending, setPending] = useState<Record<string, unknown>[]>([]);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -3173,28 +3151,25 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       )}
 
       {/* popup หลังโอนสำเร็จ: พิมพ์รายการ / ส่งไลน์ */}
-      {savedTransfer && !txReport && (
+      {savedTransfer && (
         <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-center justify-center p-4" onClick={() => setSavedTransfer(null)}>
           <div className="bg-white rounded-2xl w-full max-w-xs p-5 text-center" onClick={e => e.stopPropagation()}>
             <div className="text-3xl mb-1">✅</div>
             <div className="text-lg font-semibold text-slate-800">โอนสำเร็จ</div>
             <div className="mt-1 text-sm text-slate-500">เลขโอน {String(savedTransfer.transfer_no ?? "—")} · โอนจริง ฿{fmt(num(savedTransfer.transferred))}</div>
             <div className="mt-4 space-y-2">
-              <button onClick={() => { setTxReportAuto(false); setTxReport(savedTransfer); }} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์ / ใบสรุป</button>
-              <button onClick={() => { setTxReportAuto(true); setTxReport(savedTransfer); }} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium">📩 ส่งไลน์ (รูป) + สลิป</button>
-              <button onClick={() => sendTransferLine(savedTransfer)} disabled={sendingTxLine} className="w-full h-11 border border-[#06C755] text-[#06C755] rounded-lg font-medium disabled:opacity-50">{sendingTxLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
+              <button onClick={() => sendTransferLine(savedTransfer)} disabled={sendingTxLine} className="w-full h-11 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{sendingTxLine ? "กำลังส่ง…" : "📩 ส่งไลน์ (ข้อความ)"}</button>
               <button onClick={() => setSavedTransfer(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
             </div>
           </div>
         </div></Portal>
       )}
-      {txReport && <TransferReceiptPopup t={txReport} autoSendLine={txReportAuto} onClose={() => { setTxReport(null); setTxReportAuto(false); }} />}
     </div>
   );
 }
 
 // ---------------- ใบสรุปการโอน (โหลดเป็นรูปได้) ----------------
-function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean }) {
+function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void }) {
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [busy, setBusy] = useState(false);
@@ -3443,6 +3418,11 @@ function TransferReceiptPopup({ t, onClose, autoSendLine }: { t: Record<string, 
             <button onClick={() => window.print()} className="h-12 border border-slate-300 text-slate-700 rounded-lg font-medium">🖨️ พิมพ์</button>
           </div>
           <button onClick={sendLineImage} disabled={busy} className="w-full h-12 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{busy ? "กำลังส่ง…" : "📩 ส่งไลน์ (รูป) + สลิป"}</button>
+          <button onClick={async () => { setBusy(true); await pushTransferLine(t, toast); setBusy(false); }} disabled={busy}
+            className="w-full h-11 border border-[#06C755] text-[#06C755] rounded-lg text-sm font-medium disabled:opacity-50">📩 ส่งไลน์ (ข้อความ)</button>
+          {onDelete && (
+            <button onClick={onDelete} className="w-full h-11 border border-red-300 text-red-700 bg-red-50 rounded-lg text-sm font-medium hover:bg-red-100">🗑 ลบรายการโอน (คืนยอดบิล)</button>
+          )}
         </div>
       </div>
       {lightbox && (
