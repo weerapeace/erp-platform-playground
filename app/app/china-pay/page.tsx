@@ -146,6 +146,23 @@ async function downloadOrSaveImage(blob: Blob, filename: string): Promise<void> 
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// ขอเรท — ส่งข้อความเข้า LINE กลุ่มอัตโนมัติ (fallback เป็น share ถ้ายังไม่ตั้งค่า LINE)
+async function requestRateViaLine(): Promise<void> {
+  const text = "ขอเรทเงินด้วยค่ะ";
+  try {
+    const res = await apiFetch("/api/china-pay/line-push", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (res.ok) { toast.success("ส่งขอเรทเข้ากลุ่มแล้ว"); return; }
+    const j = await res.json().catch(() => ({} as { needConfig?: boolean; error?: string }));
+    if (j?.needConfig) { window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); return; }
+    toast.error(j?.error ?? "ส่งขอเรทไม่สำเร็จ");
+  } catch {
+    window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
+  }
+}
+
 const STATUS_STYLE: Record<string, string> = {
   "รอโอน": "bg-amber-100 text-amber-700", "โอนแล้ว": "bg-emerald-100 text-emerald-700", "ยกเลิก": "bg-slate-100 text-slate-500",
   "โอนแล้วบางส่วน": "bg-sky-100 text-sky-700", "โอนครบแล้ว": "bg-emerald-100 text-emerald-700",
@@ -168,7 +185,7 @@ function billStatus3(b: Record<string, unknown>): string {
 
 const MENU: { k: Tab; icon: string; label: string }[] = [
   { k: "dashboard", icon: "📊", label: "Dashboard" },
-  { k: "bill", icon: "💴", label: "ลงบิลจีน" },
+  { k: "bill", icon: "💴", label: "ลงบิล" },
   { k: "transfer", icon: "💰", label: "โอนเข้าจีน" },
   { k: "transfers", icon: "🧾", label: "รายการโอน" },
   { k: "all", icon: "📋", label: "บิลจีนทั้งหมด" },
@@ -604,7 +621,7 @@ function Dashboard({ onGo }: { onGo: (k: Tab) => void }) {
 
       {/* ปุ่มลัด */}
       <div className="grid grid-cols-2 gap-3 pt-1">
-        <button onClick={() => onGo("bill")} className="h-12 bg-orange-600 text-white rounded-xl font-semibold">+ ลงบิลจีน</button>
+        <button onClick={() => onGo("bill")} className="h-12 bg-orange-600 text-white rounded-xl font-semibold">+ ลงบิล</button>
         <button onClick={() => onGo("ctw")} className="h-12 border border-slate-300 text-slate-700 rounded-xl font-semibold">+ บิล CTW</button>
       </div>
     </div>
@@ -1675,8 +1692,18 @@ function RateTab() {
     finally { setSaving(false); }
   };
 
+  const todayRate = rows.find(r => String(r.rate_date) === today());
+  const hasToday = !!todayRate;
+
   return (
     <div className="space-y-4">
+      {/* เรทวันนี้ + ปุ่มขอเรท (ส่ง LINE กลุ่ม) */}
+      <div className="flex justify-end items-center gap-2">
+        <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasToday ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
+          {hasToday ? `เรทวันนี้ ${fmt(num(todayRate?.rate))}` : "ยังไม่มีเรทวันนี้"}
+        </span>
+        <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>
+      </div>
       <Card>
         <Label>เพิ่มเรท R1 ของวัน (กรอกแค่ R1 — R2-R4 คำนวณให้)</Label>
         <div className="grid grid-cols-2 gap-3">
@@ -2426,7 +2453,6 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
 
   const ctwSelTotal = [...ctwSel].reduce((a, id) => a + num(ctwPay[id]), 0);   // ยอด CTW ที่เลือกตัดรอบนี้ (฿)
-  const lineRequestRate = () => window.open(`https://line.me/R/share?text=${encodeURIComponent("ขอเรทเงินวันนี้ด้วยค่ะ 🙏")}`, "_blank");
   // บริษัท CTW ที่ค้างเก่าสุด (เรียงตามวันที่บิล) → บัญชีที่ควรโอนไป
   const oldestCtw = [...ctw].filter(b => ctwRemain(b) > 0)
     .sort((a, b) => String(a.doc_date ?? "").localeCompare(String(b.doc_date ?? "")))[0];
@@ -2439,7 +2465,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasRate ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
           {hasRate ? `เรทวันนี้ ${fmt(r1)}` : "ยังไม่มีเรทวันนี้"}
         </span>
-        <button type="button" onClick={lineRequestRate} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>
+        <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>
       </div>
 
       {/* ยอดรวมที่ตัดรอบนี้ — ทุก step (ตัวเลขใหญ่) */}
