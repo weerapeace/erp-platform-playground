@@ -804,18 +804,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       partial[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
     });
     setForm(partial);
-
-    // โหลดลิงก์ m2m เข้า form ครั้งเดียว (widget คุมด้วย value/form ล้วน — ไม่โหลดเอง กัน remount ดึง DB ทับ)
-    // guard: เขียนเฉพาะตอน field ยังไม่มีค่า → ผู้ใช้แก้ก่อนโหลดเสร็จจะไม่ถูกทับ (widget ล็อกคลิกระหว่างโหลดอยู่แล้ว)
-    effectiveFields.filter(fd => fd.type === "many2many").forEach(fd => {
-      const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
-      const junction = String(rc.junction_table ?? "");
-      if (!junction) return;
-      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${r.id}`)
-        .then(res => res.json())
-        .then(j => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: (j.links ?? []) } : p)))
-        .catch(() => setForm(p => (p[fd.key] === undefined ? { ...p, [fd.key]: [] } : p)));
-    });
+    // ลิงก์ m2m โหลดครั้งเดียวต่อ record ผ่าน effect ด้านล่าง (m2mLoadedFor) — กัน loader ยิงซ้ำแล้ว revert ค่าที่ผู้ใช้แก้
 
     // fetch full row ใน background (REST mode เท่านั้น)
     if (!isRest) return;
@@ -846,6 +835,25 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       })
       .catch(() => { /* keep partial — ดีกว่าค้าง */ });
   };
+  // โหลดลิงก์ m2m เข้า form "ครั้งเดียวต่อ record" (กัน loader ยิงซ้ำแล้ว revert ค่าที่ผู้ใช้แก้ระหว่างเปิดอยู่)
+  const m2mLoadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!modalOpen) { m2mLoadedFor.current = null; return; }   // ปิด drawer → รีเซ็ต เพื่อโหลดใหม่ครั้งหน้า
+    if (!editingId) return;                                     // โหมดสร้าง ไม่มีลิงก์เดิม
+    if (m2mLoadedFor.current === editingId) return;             // โหลด record นี้ไปแล้ว → ไม่โหลดซ้ำ
+    m2mLoadedFor.current = editingId;
+    effectiveFields.filter((fd) => fd.type === "many2many").forEach((fd) => {
+      const rc = (fd.relationConfig ?? {}) as Record<string, unknown>;
+      const junction = String(rc.junction_table ?? "");
+      if (!junction) return;
+      apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${editingId}`)
+        .then((res) => res.json())
+        .then((j) => setForm((p) => ({ ...p, [fd.key]: (j.links ?? []) })))
+        .catch(() => setForm((p) => ({ ...p, [fd.key]: (Array.isArray(p[fd.key]) ? p[fd.key] : []) })));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen, editingId]);
+
   // เปิด record อัตโนมัติจาก ?open=<id> (เช่นกด "เปิดหน้าเต็ม" จาก popup relation)
   // อ่านจาก window.location เพื่อเลี่ยง useSearchParams ที่ต้องมี Suspense (พังตอน prerender)
   const autoOpenedRef = useRef<string | null>(null);
