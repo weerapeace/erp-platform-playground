@@ -91,6 +91,22 @@ export default function TagsManagerPage() {
   const cartIds = useMemo(() => new Set(cart.map((c) => c.id)), [cart]);
 
   const addToCart = (r: Rec) => setCart((c) => (c.some((x) => x.id === r.id) ? c : [...c, r]));
+  const addManyToCart = (recs: Rec[]) => setCart((c) => { const have = new Set(c.map((x) => x.id)); const add = recs.filter((r) => !have.has(r.id)); return add.length ? [...c, ...add] : c; });
+  const [selectingAll, setSelectingAll] = useState(false);
+  // เลือกทั้งหมดที่ตรง "คำค้นหา" (ทุกหน้า) → ใส่ตะกร้า
+  const selectAllMatching = async () => {
+    setSelectingAll(true);
+    try {
+      const qs = new URLSearchParams({ limit: "5000", sort_by: "code", sort_dir: sortDir });
+      if (search.trim()) qs.set("search", search.trim());
+      const j = await apiFetch(`/api/master-v2/${cfg.api}?${qs}`).then((r) => r.json());
+      const recs: Rec[] = ((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({
+        id: String(r.id), code: String(r.code ?? r.id), name: String(r.name_th ?? r.name ?? ""), image: (r.cover_image_r2_key as string) ?? null,
+      }));
+      addManyToCart(recs);
+      loadTagMap(recs.map((r) => r.id));
+    } catch { alert("เลือกทั้งหมดไม่สำเร็จ"); } finally { setSelectingAll(false); }
+  };
   const removeFromCart = (id: string) => setCart((c) => c.filter((x) => x.id !== id));
   const addTag = (id: string) => setTagSet((s) => (s.includes(id) ? s : [...s, id]));
   const removeTag = (id: string) => setTagSet((s) => s.filter((x) => x !== id));
@@ -252,9 +268,16 @@ export default function TagsManagerPage() {
               <button disabled={page >= pages - 1} onClick={() => setPage((p) => p + 1)} className="h-7 px-2 text-xs border border-slate-200 rounded bg-white disabled:opacity-40">›</button>
             </div>
           </div>
-          <div className="px-3 py-2 border-b border-slate-100 bg-white">
+          <div className="px-3 py-2 border-b border-slate-100 bg-white space-y-2">
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อ…"
               className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">เลือก:</span>
+              <button onClick={() => addManyToCart(shownPool)} className="h-7 px-2.5 text-xs rounded-md border border-slate-200 text-slate-600 hover:bg-blue-50">+ ทั้งหน้านี้ ({shownPool.length})</button>
+              <button onClick={selectAllMatching} disabled={selectingAll} className="h-7 px-2.5 text-xs rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">
+                {selectingAll ? "กำลังเลือก…" : `✓ เลือกทั้งหมดที่ตรง (${total.toLocaleString()})`}
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
             {loadingPool && <div className="text-xs text-slate-400 py-4 text-center col-span-full">กำลังโหลด…</div>}
