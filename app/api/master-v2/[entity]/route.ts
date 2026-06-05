@@ -487,6 +487,26 @@ export async function GET(
     if (raw) colFilters = JSON.parse(raw) as Record<string, ColFilter>;
   } catch { /* ignore malformed */ }
 
+  // ── ซ่อนแถวตามแท็กใน junction (ของกลาง) ───────────────────────────────
+  // excl_junction = ตารางเชื่อม (ลงท้าย _m2m), excl_tgt_ids = id ของ tag (คั่นด้วย ,)
+  // ใช้กับกฎ "ห้ามขอซื้อ": หา src_id (เช่น sku) ที่ผูกแท็กพวกนี้ แล้วตัดออกจากผลลัพธ์
+  // หมายเหตุ: คาดว่าจำนวนไม่มาก (กรองด้วย NOT IN) — cap 2000 กัน URL ยาวเกิน
+  const JUNC_RE = /^[a-z][a-z0-9_]+_m2m$/;
+  const exclJunction = searchParams.get("excl_junction") ?? "";
+  const exclTgtIds = (searchParams.get("excl_tgt_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  let excludeIds: string[] = [];
+  if (JUNC_RE.test(exclJunction) && exclTgtIds.length > 0) {
+    const admin = supabaseAdmin();
+    const set = new Set<string>();
+    for (let i = 0; i < exclTgtIds.length && set.size <= 2000; i += 200) {
+      const chunk = exclTgtIds.slice(i, i + 200);
+      const { data: jr } = await admin.from(exclJunction).select("src_id").in("tgt_id", chunk);
+      for (const r of (jr ?? []) as { src_id: string }[]) if (r.src_id) set.add(String(r.src_id));
+    }
+    excludeIds = [...set].slice(0, 2000);
+    if (set.size > 2000) console.warn(`[master-v2] exclude list capped at 2000 (junction=${exclJunction}, found=${set.size})`);
+  }
+
   // F10a: ใช้ listColumns ถ้ามี (เล็กกว่า, กัน JSON truncate)
   // F12b: Supabase PostgREST hard-caps ที่ db.max_rows (default 1000)
   //       → loop fetch batch ละ 1000 จน reach limit หรือหมด
@@ -516,6 +536,7 @@ export async function GET(
       searchColumns: cfg.searchColumns, search, colFilters,
       softDeleteColumn: cfg.softDeleteColumn, includeInactive,
     });
+    if (excludeIds.length) q = q.not("id", "in", `(${excludeIds.join(",")})`);
 
     const { data, error, count } = await q;
     if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });

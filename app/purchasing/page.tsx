@@ -60,6 +60,8 @@ export default function PurchasingShopPage() {
   const [activeKeys, setActiveKeys] = useState<string[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, ColFilter>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
+  // กฎกลาง: แท็ก (ประเภทสินค้า) ที่ตั้งว่า "ห้ามขอซื้อ" → ซ่อนสินค้าที่ติดแท็กนี้ทั้งบริษัท
+  const [hiddenTagIds, setHiddenTagIds] = useState<string[]>([]);
 
   // group-mode drill-in
   const [sel, setSel] = useState<Card | null>(null);
@@ -101,6 +103,19 @@ export default function PurchasingShopPage() {
       .then(j => { if (Array.isArray(j.ids)) setFavorites(new Set(j.ids as string[])); })
       .catch(() => {});
   }, []);
+
+  // โหลดแท็กที่ตั้ง "ห้ามขอซื้อ" (กฎกลาง) → ใช้ตัดสินค้าออกจากทุกโหมด
+  useEffect(() => {
+    const f = encodeURIComponent(JSON.stringify({ hide_in_purchasing: { type: "boolean", value: "true" } }));
+    apiFetch(`/api/master-v2/product_families?limit=500&filters=${f}`).then(r => r.json())
+      .then(j => setHiddenTagIds(((j.data ?? []) as Record<string, unknown>[]).map(t => String(t.id))))
+      .catch(() => {});
+  }, []);
+  // query fragment สำหรับ "ตัดสินค้าที่ติดแท็กห้ามขอซื้อ" (ส่งให้ API skus)
+  const exclParam = useMemo(
+    () => (hiddenTagIds.length ? `&excl_junction=skus_v2_product_family_m2m&excl_tgt_ids=${hiddenTagIds.join(",")}` : ""),
+    [hiddenTagIds],
+  );
 
   // เรตหยวน→บาท ล่าสุด (ใช้โชว์ราคาบาทประมาณ คู่กับ ¥)
   const [cnyRate, setCnyRate] = useState(0);
@@ -203,12 +218,12 @@ export default function PurchasingShopPage() {
   const fetchSkusByIds = useCallback(async (ids: string[]): Promise<Card[]> => {
     if (ids.length === 0) return [];
     const f = encodeURIComponent(JSON.stringify({ id: { type: "select", selected: ids } }));
-    const j = await apiFetch(`/api/master-v2/skus?limit=500&filters=${f}`).then(r => r.json());
+    const j = await apiFetch(`/api/master-v2/skus?limit=500&filters=${f}${exclParam}`).then(r => r.json());
     const mapped: Card[] = (j.data ?? []).map(mapSku);
     const order = new Map(ids.map((id, i) => [id, i]));
     mapped.sort((a, b) => (order.get(a.id) ?? 9999) - (order.get(b.id) ?? 9999));
     return mapped;
-  }, [mapSku]);
+  }, [mapSku, exclParam]);
 
   // ข้อ 3: กำกับลำดับคำขอ — แสดงเฉพาะผลของคำค้นล่าสุด (กัน race คำขอเก่ามาทับ)
   const reqIdRef = useRef(0);
@@ -221,7 +236,7 @@ export default function PurchasingShopPage() {
       if (source === "sku") {
         const fp = Object.keys(builtFilters).length ? `&filters=${encodeURIComponent(JSON.stringify(builtFilters))}` : "";
         const sp = q ? `&search=${encodeURIComponent(q)}` : "";
-        const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${fp}`).then(r => r.json());
+        const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${fp}${exclParam}`).then(r => r.json());
         const mapped: Card[] = (j.data ?? []).map(mapSku);
         // จัดเรียงตามความใกล้เคียงกับคำค้น: ตรงเป๊ะ → ขึ้นต้น → มีอยู่ในโค้ด → มีอยู่ในชื่อ
         if (q) {
@@ -270,7 +285,7 @@ export default function PurchasingShopPage() {
     } finally {
       if (myId === reqIdRef.current) setLoading(false);
     }
-  }, [source, q, builtFilters, mapSku, fetchSkusByIds]);
+  }, [source, q, builtFilters, mapSku, fetchSkusByIds, exclParam]);
 
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
   // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
@@ -313,7 +328,7 @@ export default function PurchasingShopPage() {
   // โหลดรายการ SKU ในกลุ่ม (คอลัมน์ product_group) — ใช้ทั้งตอนเปิด popup และตอนผูกสมาชิกเพิ่ม
   const loadGroupVars = async (groupId: string) => {
     const f = encodeURIComponent(JSON.stringify({ product_group: { type: "text", value: groupId } }));
-    const j = await apiFetch(`/api/master-v2/skus?limit=200&filters=${f}`).then(r => r.json());
+    const j = await apiFetch(`/api/master-v2/skus?limit=200&filters=${f}${exclParam}`).then(r => r.json());
     setVars((j.data ?? []).map((s: Record<string, unknown>) => {
       const sid = String(s.seller_partner_id ?? "");
       const country = partnerCountry[sid] ?? "TH";
@@ -439,6 +454,14 @@ export default function PurchasingShopPage() {
           </div>
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาสินค้า..."
             className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md mb-3" />
+
+          {/* กฎกลาง: แจ้งว่ามีการซ่อนสินค้าตามแท็ก "ห้ามขอซื้อ" + ทางไปตั้งค่า */}
+          {hiddenTagIds.length > 0 && (
+            <div className="mb-3 px-2.5 py-2 rounded-md bg-amber-50 border border-amber-100 text-[11px] text-amber-700 leading-relaxed">
+              🙈 ซ่อนสินค้า {hiddenTagIds.length} ประเภท (ตั้งไว้ว่า &quot;ห้ามขอซื้อ&quot;)
+              <a href="/master/lookups" target="_blank" rel="noopener noreferrer" className="ml-1 underline hover:text-amber-900">จัดการ</a>
+            </div>
+          )}
 
           {source === "sku" && (
             <>
