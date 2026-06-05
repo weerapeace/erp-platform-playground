@@ -848,8 +848,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       if (!junction) return;
       apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_id=${editingId}`)
         .then((res) => res.json())
-        .then((j) => setForm((p) => ({ ...p, [fd.key]: (j.links ?? []) })))
-        .catch(() => setForm((p) => ({ ...p, [fd.key]: (Array.isArray(p[fd.key]) ? p[fd.key] : []) })));
+        // ⚠ เขียนเฉพาะตอน form ยังว่าง (undefined) → ถ้า apiFetch resolve ช้าหลังผู้ใช้แก้แล้ว จะไม่ revert ทับ
+        .then((j) => setForm((p) => (p[fd.key] === undefined ? { ...p, [fd.key]: (j.links ?? []) } : p)))
+        .catch(() => setForm((p) => (p[fd.key] === undefined ? { ...p, [fd.key]: [] } : p)));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalOpen, editingId]);
