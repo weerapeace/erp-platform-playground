@@ -42,7 +42,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const b = await request.json().catch(() => ({}));
-  if (!JT_RE.test(b.junction ?? "") || !b.src_id || !b.tgt_id) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
+  if (!JT_RE.test(b.junction ?? "")) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
+
+  // โหมด bulk: { junction, links: [{src_id, tgt_id}, ...] } → upsert ทีละ chunk (เร็วกว่ายิงทีละคู่มาก)
+  if (Array.isArray(b.links)) {
+    const rows = (b.links as { src_id?: string; tgt_id?: string }[])
+      .filter((l) => l && l.src_id && l.tgt_id)
+      .map((l) => ({ src_id: l.src_id, tgt_id: l.tgt_id }));
+    let count = 0;
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const { error } = await supabaseAdmin().from(b.junction).upsert(chunk, { onConflict: "src_id,tgt_id", ignoreDuplicates: true });
+      if (error) return NextResponse.json({ error: error.message, count }, { status: 500 });
+      count += chunk.length;
+    }
+    return NextResponse.json({ ok: true, count });
+  }
+
+  if (!b.src_id || !b.tgt_id) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
   const { error } = await supabaseAdmin().from(b.junction).upsert({ src_id: b.src_id, tgt_id: b.tgt_id }, { onConflict: "src_id,tgt_id", ignoreDuplicates: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

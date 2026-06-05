@@ -148,15 +148,30 @@ export default function TagsManagerPage() {
     }
     const totalLinks = (cart.length + childIds.length) * tagSet.length;
     if (!confirm(`ใส่ ${tagSet.length} แท็ก ให้ Parent ${cart.length} ตัว${childIds.length ? ` + SKU ลูก ${childIds.length} ตัว` : ""}\n(รวม ${totalLinks.toLocaleString()} รายการเชื่อมโยง)?`)) { setApplying(false); return; }
-    let ok = 0, fail = 0;
+
     const childJunction = ENTITIES["skus"].junction;
-    const link = async (junction: string, src: string, tgt: string) => {
-      try { const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, src_id: src, tgt_id: tgt }) }); if (res.ok) ok++; else fail++; } catch { fail++; }
-    };
-    for (const rec of cart) for (const tag of tagSet) await link(cfg.junction, rec.id, tag);
-    for (const cid of childIds) for (const tag of tagSet) await link(childJunction, cid, tag);
+    // สร้างคู่ลิงก์ทั้งหมด แล้วยิงเป็น batch (chunk 500/ครั้ง) + แสดง progress
+    const tasks: { junction: string; links: { src_id: string; tgt_id: string }[] }[] = [
+      { junction: cfg.junction, links: cart.flatMap((r) => tagSet.map((t) => ({ src_id: r.id, tgt_id: t }))) },
+      ...(childIds.length ? [{ junction: childJunction, links: childIds.flatMap((c) => tagSet.map((t) => ({ src_id: c, tgt_id: t }))) }] : []),
+    ];
+    const total = tasks.reduce((s, t) => s + t.links.length, 0);
+    let done = 0, fail = 0;
+    const BATCH = 500;
+    for (const task of tasks) {
+      for (let i = 0; i < task.links.length; i += BATCH) {
+        const chunk = task.links.slice(i, i + BATCH);
+        try {
+          const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction: task.junction, links: chunk }) });
+          if (!res.ok) fail += chunk.length;
+        } catch { fail += chunk.length; }
+        done += chunk.length;
+        setResult(`กำลังใส่แท็ก… ${done.toLocaleString()}/${total.toLocaleString()}`);
+        await new Promise((r) => setTimeout(r, 0));   // ให้ UI อัปเดต progress
+      }
+    }
     setApplying(false);
-    setResult(`เสร็จแล้ว — สำเร็จ ${ok}${fail ? `, ไม่สำเร็จ ${fail}` : ""} รายการ${childIds.length ? ` (รวม SKU ลูก ${childIds.length} ตัว)` : ""}`);
+    setResult(`✅ เสร็จแล้ว — ใส่แท็ก ${(total - fail).toLocaleString()}/${total.toLocaleString()} รายการ${fail ? ` (พลาด ${fail})` : ""}${childIds.length ? ` • รวม SKU ลูก ${childIds.length} ตัว` : ""}`);
     loadTagMap(cart.map((c) => c.id));   // refresh แท็กบนการ์ด
   };
 
