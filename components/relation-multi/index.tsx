@@ -149,16 +149,16 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
             </ul>
           </div>
           <div>
-            <div className="text-xs font-medium text-slate-500 mb-1.5">เพิ่มคอลัมน์ ({available.length})</div>
-            <div className="flex flex-wrap gap-1.5">
-              {available.map((f) => (
-                <button key={f.key} onClick={() => setSelected([...selected, f.key])}
-                  className="px-2 py-1 text-xs rounded-full border border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700">
-                  + {f.label}
-                </button>
-              ))}
-              {available.length === 0 && <span className="text-xs text-slate-300 italic">— เลือกครบทุกคอลัมน์แล้ว —</span>}
-            </div>
+            <div className="text-xs font-medium text-slate-500 mb-1.5">เพิ่มคอลัมน์</div>
+            {available.length === 0 ? (
+              <span className="text-xs text-slate-300 italic">— เลือกครบทุกคอลัมน์แล้ว —</span>
+            ) : (
+              <select value="" onChange={(e) => { if (e.target.value) setSelected([...selected, e.target.value]); }}
+                className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md bg-white">
+                <option value="">+ เลือกคอลัมน์เพิ่ม… ({available.length})</option>
+                {available.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select>
+            )}
           </div>
         </div>
         <div className="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
