@@ -4,7 +4,7 @@
  * Payroll module — คำนวณงวด (พรีวิว/เทียบ) Phase 3 — อ่านอย่างเดียว
  * เลือกงวด → รันเครื่องคำนวณเต็มจาก raw input → เทียบกับ payroll_lines เดิม (ยังไม่เขียนจริง)
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { DateInput } from "@/components/date-input";
 
