@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 
 const TARGET_MODULE = "parent-skus-v2";
@@ -40,6 +41,8 @@ const hasTpl = (t?: Template): boolean =>
     !!t.required_fields?.length || !!(t.defaults && Object.keys(t.defaults).length));
 
 export default function FamilyTemplatePage() {
+  const router = useRouter();
+  const goBack = () => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/apps"); };
   const [families, setFamilies] = useState<Family[]>([]);
   const [fields, setFields] = useState<RegField[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
@@ -216,7 +219,17 @@ export default function FamilyTemplatePage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <div className="bg-white border-b border-slate-200 px-6 py-4">
-        <h1 className="text-xl font-bold text-slate-900">🧩 เทมเพลตประเภทสินค้า</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button onClick={goBack} title="กลับ"
+              className="h-8 w-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">←</button>
+            <h1 className="text-xl font-bold text-slate-900">🧩 เทมเพลตประเภทสินค้า</h1>
+          </div>
+          <button onClick={goBack} title="ปิด"
+            className="h-8 px-3 text-sm flex items-center gap-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">
+            ✕ ปิด
+          </button>
+        </div>
         <p className="text-sm text-slate-500 mt-0.5">
           {viewMode === "tag"
             ? "กำหนดว่าเมื่อ Parent SKU ติดแท็กนี้ จะโชว์/ซ่อนฟิลด์ไหน บังคับกรอกอะไร — ติดหลายแท็กรวมกันแบบ union"
