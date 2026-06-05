@@ -8,6 +8,8 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { Drawer } from "@/components/modal";
+import { DateInput } from "@/components/date-input";
 
 type Period = { id: string; period_name: string; status: string };
 type Row = {
@@ -17,7 +19,21 @@ type Row = {
 };
 type Adj = { id: string; adjustment_type: string; item_name: string; amount: number };
 type TimeKind = "ot" | "late" | "absence" | "leave";
-type TimeItem = { id: string; kind: TimeKind; value: number; amount: number };
+type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; work_date?: string; note?: string };
+type TimePreview = {
+  kind: TimeKind;
+  value: number;
+  work_date: string;
+  amount: number;
+  sign: "+" | "-";
+  rate: number;
+  divisor: number;
+  hours_per_day: number;
+  base_salary: number;
+  quantity_label: string;
+  formula: string;
+  hours?: number;
+};
 const TIME_META: Record<TimeKind, { label: string; unit: string; sign: "+" | "-"; cls: string }> = {
   ot:      { label: "OT",            unit: "ชม.",  sign: "+", cls: "text-emerald-600" },
   late:    { label: "มาสาย",         unit: "นาที", sign: "-", cls: "text-red-600" },
@@ -28,6 +44,7 @@ const TIME_META: Record<TimeKind, { label: string; unit: string; sign: "+" | "-"
 const baht = (v: number) => v ? `฿${v.toLocaleString("th-TH", { minimumFractionDigits: 2 })}` : "—";
 const dash = (v: number, cls = "") => v ? <span className={`tabular-nums ${cls}`}>{baht(v)}</span> : <span className="text-slate-300">-</span>;
 const EDITABLE = (s: string) => s === "draft" || s === "review";
+const todayIso = () => new Date().toISOString().slice(0, 10);
 
 export default function ManualInputPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
@@ -160,6 +177,9 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
   const [amount, setAmount] = useState("");
   const [tKind, setTKind] = useState<TimeKind>("ot");
   const [tValue, setTValue] = useState("");
+  const [tDate, setTDate] = useState(todayIso());
+  const [tNote, setTNote] = useState("");
+  const [preview, setPreview] = useState<TimePreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -176,6 +196,7 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
     } catch { /* */ } finally { setLoading(false); }
   }, [periodId, row.employee_id]);
   useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { setPreview(null); setErr(null); }, [tKind, tValue, tDate]);
 
   async function addItem() {
     setErr(null);
@@ -202,17 +223,34 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
     finally { setBusy(false); }
   }
 
-  async function addTime() {
+  async function previewTime() {
     setErr(null);
     if (!(Number(tValue) > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
+    if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); return; }
     setBusy(true);
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value: Number(tValue) }),
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value: Number(tValue), work_date: tDate, note: tNote, preview_only: true }),
       }).then((r) => r.json());
       if (j.error) setErr(j.error);
-      else { setTValue(""); await reload(); onChanged(); }
+      else setPreview(j.data as TimePreview);
+    } catch { setErr("คำนวณให้ดูไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  }
+
+  async function addTime() {
+    setErr(null);
+    if (!(Number(tValue) > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
+    if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); return; }
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/payroll/time-entry", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value: Number(tValue), work_date: tDate, note: tNote }),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else { setTValue(""); setTNote(""); setPreview(null); await reload(); onChanged(); }
     } catch { setErr("บันทึกไม่สำเร็จ"); }
     finally { setBusy(false); }
   }
@@ -229,20 +267,18 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
 
   const earnings = items.filter((i) => i.adjustment_type === "earning");
   const deductions = items.filter((i) => i.adjustment_type === "deduction");
+  const hasDraftTime = editable && (!!tValue || !!tNote || !!preview);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/30" />
-      <div className="relative w-full max-w-md bg-white h-full shadow-xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="px-5 py-4 border-b border-slate-200 sticky top-0 bg-white flex items-center justify-between">
-          <div>
-            <div className="text-xs text-slate-400 font-mono">{row.employee_code}</div>
-            <div className="font-semibold text-slate-800">{row.employee_name}</div>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
-        </div>
-
-        <div className="p-5 space-y-5">
+    <Drawer
+      open
+      onClose={onClose}
+      size="lg"
+      title={`${row.employee_code} ${row.employee_name}`}
+      description="กรอกสาย / ขาด / ลา / OT แล้วคำนวณให้ดูก่อนบันทึกเงินจริง"
+      hasUnsavedChanges={hasDraftTime}
+    >
+        <div className="space-y-5">
           {!editable && <div className="rounded-lg bg-amber-50 text-amber-700 px-3 py-2 text-xs">งวดนี้แก้ไม่ได้ (ดูอย่างเดียว)</div>}
           {err && <div className="rounded-lg bg-red-50 text-red-700 px-3 py-2 text-xs">{err}</div>}
 
@@ -257,7 +293,14 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
                   const m = TIME_META[it.kind];
                   return (
                     <div key={`${it.kind}-${it.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
-                      <span className="text-sm text-slate-700">{m.label} <span className="text-slate-400">{it.value} {m.unit}</span></span>
+                      <span className="min-w-0">
+                        <span className="text-sm text-slate-700">{m.label} <span className="text-slate-400">{it.value} {m.unit}</span></span>
+                        {(it.work_date || it.note) && (
+                          <span className="block text-[11px] text-slate-400 truncate">
+                            {it.work_date || "ไม่ระบุวันที่"}{it.note ? ` · ${it.note}` : ""}
+                          </span>
+                        )}
+                      </span>
                       <span className="flex items-center gap-2">
                         <span className={`text-sm tabular-nums ${m.cls}`}>{m.sign}฿{it.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
                         {editable && <button onClick={() => delTime(it)} disabled={busy} className="text-slate-300 hover:text-red-500 text-sm" title="ลบ">🗑</button>}
@@ -268,16 +311,66 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
               </div>
             )}
             {editable && (
-              <div className="flex gap-2 mt-2">
-                <select value={tKind} onChange={(e) => setTKind(e.target.value as TimeKind)} className="h-9 px-2 border border-slate-300 rounded-lg text-sm bg-white">
-                  <option value="ot">OT (ชม.)</option>
-                  <option value="late">มาสาย (นาที)</option>
-                  <option value="absence">ขาดงาน (วัน)</option>
-                  <option value="leave">ลาไม่รับเงิน (วัน)</option>
-                </select>
-                <input value={tValue} onChange={(e) => setTValue(e.target.value)} type="number" min="0" step="any" placeholder={`จำนวน ${TIME_META[tKind].unit}`}
-                  className="h-9 flex-1 px-3 border border-slate-300 rounded-lg text-sm tabular-nums" />
-                <button onClick={addTime} disabled={busy} className="h-9 px-3 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">+</button>
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+                <div className="text-sm font-medium text-slate-700">ฟอร์มคำนวณก่อนบันทึก</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="block">
+                    <span className="block text-xs text-slate-500 mb-1">ประเภท</span>
+                    <select value={tKind} onChange={(e) => setTKind(e.target.value as TimeKind)} className="h-9 w-full px-2 border border-slate-300 rounded-lg text-sm bg-white">
+                      <option value="late">มาสาย (นาที)</option>
+                      <option value="absence">ขาดงาน (วัน)</option>
+                      <option value="leave">ลาไม่รับเงิน (วัน)</option>
+                      <option value="ot">OT (ชม.)</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-slate-500 mb-1">วันที่</span>
+                    <DateInput value={tDate} onChange={setTDate} />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="block text-xs text-slate-500 mb-1">จำนวน {TIME_META[tKind].unit}</span>
+                    <input value={tValue} onChange={(e) => setTValue(e.target.value)} type="number" min="0" step="any" placeholder={`เช่น ${tKind === "late" ? "30" : "1"}`}
+                      className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="block text-xs text-slate-500 mb-1">หมายเหตุ</span>
+                    <textarea value={tNote} onChange={(e) => setTNote(e.target.value)} rows={2} placeholder="เช่น มาสายรถติด / ลากิจไม่รับเงิน / ไม่สแกนนิ้ว"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none bg-white" />
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={previewTime} disabled={busy}
+                    className="h-9 px-4 border border-blue-200 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 disabled:opacity-50">
+                    คำนวณให้ดู
+                  </button>
+                  <button onClick={addTime} disabled={busy || !preview}
+                    className="h-9 px-4 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                    บันทึกรายการ
+                  </button>
+                </div>
+
+                {preview && (
+                  <div className={`rounded-xl border p-4 ${preview.sign === "-" ? "border-red-100 bg-red-50/70" : "border-emerald-100 bg-emerald-50/70"}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-medium text-slate-500">ยอดที่จะ{preview.sign === "-" ? "หัก" : "เพิ่ม"}</div>
+                        <div className={`text-2xl font-bold tabular-nums ${preview.sign === "-" ? "text-red-700" : "text-emerald-700"}`}>
+                          {preview.sign}{baht(preview.amount)}
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-slate-500">
+                        <div>อัตรา/ชม. <b className="text-slate-700">{baht(preview.rate)}</b></div>
+                        {preview.divisor ? <div>ตัวหารวัน <b className="text-slate-700">{preview.divisor}</b></div> : null}
+                        <div>ชั่วโมง/วัน <b className="text-slate-700">{preview.hours_per_day}</b></div>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-lg bg-white/80 border border-white px-3 py-2">
+                      <div className="text-xs text-slate-500 mb-1">วิธีคิด</div>
+                      <div className="text-sm text-slate-800 tabular-nums">{preview.formula} = {baht(preview.amount)}</div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -306,8 +399,7 @@ function AdjustDrawer({ row, periodId, editable, onClose, onChanged }:
           )}
           <p className="text-xs text-slate-400">หลังแก้รายการ กลับไปกด “คำนวณ + บันทึก” เพื่อออกผลจริง</p>
         </div>
-      </div>
-    </div>
+    </Drawer>
   );
 }
 

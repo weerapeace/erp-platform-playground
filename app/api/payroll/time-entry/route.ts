@@ -1,7 +1,7 @@
 /**
  * Payroll module — กรอกเวลา/รายการคำนวณ (Phase B Manual Inputs)
  * GET  /api/payroll/time-entry?period_id=&employee_id=  → รายการ ot/late/absence/leave ของพนักงาน
- * POST /api/payroll/time-entry  { period_id, employee_id, kind, value }
+ * POST /api/payroll/time-entry  { period_id, employee_id, kind, value, work_date?, note?, preview_only? }
  *   kind: 'ot' (ชม.) | 'late' (นาที) | 'absence' (วัน) | 'leave' (วัน, ลาไม่รับเงิน)
  *   ระบบคิดเป็นเงินจากเรทค่าจ้างของสัญญาให้อัตโนมัติ (สูตรเดียวกับเครื่องคำนวณ)
  *
@@ -19,6 +19,23 @@ export const revalidate = 0;
 const EDITABLE = new Set(["draft", "review"]);
 
 type Row = Record<string, unknown>;
+type TimeKind = "ot" | "late" | "absence" | "leave";
+
+function isoDate(v: unknown): string {
+  const s = String(v ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : "";
+}
+
+function dateInRange(date: string, start: string, end: string): boolean {
+  return !!date && date >= start && date <= end;
+}
+
+function isWorkableDate(date: string, holidays: Set<string>): boolean {
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return false;
+  const dow = d.getUTCDay();
+  return dow >= 1 && dow <= 5 && !holidays.has(date);
+}
 
 /** หาวันทำงานจริงวันแรกในงวด (จ-ศ + ไม่ใช่วันหยุด) — กันเครื่องคำนวณข้าม entry ที่ลงวันหยุด */
 function workableDate(start: string, end: string, holidays: Set<string>): string {
@@ -56,11 +73,11 @@ export async function GET(req: NextRequest) {
     ]);
     const items: Row[] = [];
     for (const r of (att.data ?? []) as Row[]) {
-      if (money(r.late_minutes) > 0) items.push({ id: r.id, kind: "late", value: money(r.late_minutes), amount: money(r.late_deduction), note: r.note });
-      if (money(r.absence_hours) > 0) items.push({ id: r.id, kind: "absence", value: money(r.absence_hours) / 8, amount: money(r.absence_deduction), note: r.note });
+      if (money(r.late_minutes) > 0) items.push({ id: r.id, kind: "late", value: money(r.late_minutes), amount: money(r.late_deduction), work_date: r.work_date, note: r.note });
+      if (money(r.absence_hours) > 0) items.push({ id: r.id, kind: "absence", value: money(r.absence_hours) / 8, amount: money(r.absence_deduction), work_date: r.work_date, note: r.note });
     }
-    for (const r of (leave.data ?? []) as Row[]) items.push({ id: r.id, kind: "leave", value: money(r.days), amount: money(r.unpaid_leave_deduction), note: r.note });
-    for (const r of (ot.data ?? []) as Row[]) items.push({ id: r.id, kind: "ot", value: money(r.hours), amount: money(r.overtime_amount), note: r.note });
+    for (const r of (leave.data ?? []) as Row[]) items.push({ id: r.id, kind: "leave", value: money(r.days), amount: money(r.unpaid_leave_deduction), work_date: r.leave_date, note: r.note });
+    for (const r of (ot.data ?? []) as Row[]) items.push({ id: r.id, kind: "ot", value: money(r.hours), amount: money(r.overtime_amount), work_date: r.work_date, note: r.note });
     return NextResponse.json({ data: items, error: null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });
@@ -69,10 +86,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;
-  let body: { period_id?: string; employee_id?: string; kind?: string; value?: unknown; actor?: string };
+  let body: { period_id?: string; employee_id?: string; kind?: string; value?: unknown; work_date?: unknown; note?: unknown; preview_only?: boolean; actor?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const periodId = String(body.period_id ?? ""), employeeId = String(body.employee_id ?? "");
-  const kind = String(body.kind ?? ""); const value = money(body.value);
+  const kind = String(body.kind ?? "") as TimeKind; const value = money(body.value);
+  const note = String(body.note ?? "").trim();
+  const previewOnly = body.preview_only === true;
   if (!periodId || !employeeId) return NextResponse.json({ error: "ต้องระบุงวด+พนักงาน" }, { status: 400 });
   if (!["ot", "late", "absence", "leave"].includes(kind)) return NextResponse.json({ error: "kind ไม่ถูกต้อง" }, { status: 400 });
   if (!(value > 0)) return NextResponse.json({ error: "ค่าต้องมากกว่า 0" }, { status: 400 });
@@ -87,6 +106,16 @@ export async function POST(req: NextRequest) {
     if (!period) return NextResponse.json({ error: "ไม่พบงวด" }, { status: 404 });
     if (!EDITABLE.has(String(period.status))) return NextResponse.json({ error: `งวดสถานะ "${period.status}" แก้ไม่ได้` }, { status: 409 });
     const holidays = new Set(((period.payroll_period_holidays as Row[]) ?? []).map((h) => String(h.holiday_date)));
+    const startDate = String(period.start_date);
+    const endDate = String(period.end_date);
+    const requestedDate = isoDate(body.work_date);
+    const workDate = requestedDate || workableDate(startDate, endDate, holidays);
+    if (!dateInRange(workDate, startDate, endDate)) {
+      return NextResponse.json({ error: "วันที่ต้องอยู่ในช่วงงวดเงินเดือน" }, { status: 400 });
+    }
+    if (!isWorkableDate(workDate, holidays)) {
+      return NextResponse.json({ error: "วันที่นี้เป็นวันหยุด/เสาร์-อาทิตย์ ระบบไม่บันทึกรายการเวลาในวันหยุด" }, { status: 400 });
+    }
 
     const { data: cd } = await a.from("employee_contracts").select("*").eq("employee_id", employeeId).eq("is_current", true).eq("status", "active").limit(1);
     const contract = cd?.[0] as Row | undefined;
@@ -96,30 +125,46 @@ export async function POST(req: NextRequest) {
 
     const rate = hourlyRate(contract, period, setting);
     const hoursPerDay = money(period.default_hours_per_day) || 8;
-    const workDate = workableDate(String(period.start_date), String(period.end_date), holidays);
+    const isOffice = String(setting?.payroll_group_id ?? "").trim().toLowerCase() === "office";
+    const divisor = String(contract.wage_type ?? "monthly") === "monthly"
+      ? salaryDayDivisor(isOffice, undefined, money(period.default_work_days))
+      : 0;
     let amount = 0; let inserted: { id: string } | null = null; let table = "";
+    let quantityLabel = ""; let formula = ""; let hours = 0;
 
     if (kind === "ot") {
       amount = overtimeAmount(value, rate, 1.5); table = "overtime_entries";
-      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, hours: value, rate_multiplier: 1.5, overtime_amount: amount, status: "approved", source_type: "manual" }).select("id").limit(1);
+      quantityLabel = `${value} ชม.`;
+      formula = `${value} ชม. × ${roundMoney(rate).toLocaleString("th-TH", { minimumFractionDigits: 2 })} × 1.5`;
+      if (previewOnly) return NextResponse.json({ data: { kind, value, work_date: workDate, amount, sign: "+", rate: roundMoney(rate), divisor, hours_per_day: hoursPerDay, base_salary: money(contract.base_salary), quantity_label: quantityLabel, formula }, error: null });
+      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, hours: value, rate_multiplier: 1.5, overtime_amount: amount, status: "approved", source_type: "manual", note: note || null }).select("id").limit(1);
       if (error) throw new Error(error.message); inserted = data?.[0] as { id: string };
     } else if (kind === "late") {
       amount = lateDeduction(value, rate); table = "attendance_entries";
-      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, late_minutes: value, late_deduction: amount, regular_hours: 0, absence_hours: 0, absence_deduction: 0, status: "approved", source_type: "manual" }).select("id").limit(1);
+      quantityLabel = `${value} นาที`;
+      formula = `${value} นาที ÷ 60 × ${roundMoney(rate).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
+      if (previewOnly) return NextResponse.json({ data: { kind, value, work_date: workDate, amount, sign: "-", rate: roundMoney(rate), divisor, hours_per_day: hoursPerDay, base_salary: money(contract.base_salary), quantity_label: quantityLabel, formula }, error: null });
+      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, late_minutes: value, late_deduction: amount, regular_hours: 0, absence_hours: 0, absence_deduction: 0, status: "approved", source_type: "manual", note: note || null }).select("id").limit(1);
       if (error) throw new Error(error.message); inserted = data?.[0] as { id: string };
     } else if (kind === "absence") {
-      const hours = roundMoney(value * hoursPerDay); amount = absenceDeduction(hours, rate); table = "attendance_entries";
-      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, absence_hours: hours, absence_deduction: amount, late_minutes: 0, late_deduction: 0, regular_hours: 0, status: "approved", source_type: "manual" }).select("id").limit(1);
+      hours = roundMoney(value * hoursPerDay); amount = absenceDeduction(hours, rate); table = "attendance_entries";
+      quantityLabel = `${value} วัน`;
+      formula = `${value} วัน × ${hoursPerDay} ชม. × ${roundMoney(rate).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
+      if (previewOnly) return NextResponse.json({ data: { kind, value, work_date: workDate, amount, sign: "-", rate: roundMoney(rate), divisor, hours_per_day: hoursPerDay, base_salary: money(contract.base_salary), quantity_label: quantityLabel, formula, hours }, error: null });
+      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, work_date: workDate, absence_hours: hours, absence_deduction: amount, late_minutes: 0, late_deduction: 0, regular_hours: 0, status: "approved", source_type: "manual", note: note || null }).select("id").limit(1);
       if (error) throw new Error(error.message); inserted = data?.[0] as { id: string };
     } else { // leave (unpaid)
-      const hours = roundMoney(value * hoursPerDay); amount = absenceDeduction(hours, rate); table = "leave_entries";
-      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, leave_date: workDate, leave_type: "unpaid", days: value, hours, paid: false, unpaid_leave_deduction: amount, status: "approved", source_type: "manual" }).select("id").limit(1);
+      hours = roundMoney(value * hoursPerDay); amount = absenceDeduction(hours, rate); table = "leave_entries";
+      quantityLabel = `${value} วัน`;
+      formula = `${value} วัน × ${hoursPerDay} ชม. × ${roundMoney(rate).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
+      if (previewOnly) return NextResponse.json({ data: { kind, value, work_date: workDate, amount, sign: "-", rate: roundMoney(rate), divisor, hours_per_day: hoursPerDay, base_salary: money(contract.base_salary), quantity_label: quantityLabel, formula, hours }, error: null });
+      const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, leave_date: workDate, leave_type: "unpaid", days: value, hours, paid: false, unpaid_leave_deduction: amount, status: "approved", source_type: "manual", note: note || null }).select("id").limit(1);
       if (error) throw new Error(error.message); inserted = data?.[0] as { id: string };
     }
 
     await writeAudit(a, { action: "create", entityType: table, entityId: inserted?.id, actorId: userId, actorName: body.actor ?? null,
-      metadata: { period_name: period.period_name, kind, value, amount } });
-    return NextResponse.json({ data: { id: inserted?.id, kind, value, amount }, error: null }, { status: 201 });
+      metadata: { period_name: period.period_name, kind, value, work_date: workDate, amount, note: note || null } });
+    return NextResponse.json({ data: { id: inserted?.id, kind, value, work_date: workDate, amount }, error: null }, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "บันทึกไม่สำเร็จ" }, { status: 500 });
   }
