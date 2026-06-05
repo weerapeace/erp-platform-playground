@@ -2085,11 +2085,9 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
     }).catch(() => {});
   }, [supplierId]);
 
-  // ยอดสุทธิ = ยอดก่อนภาษี + 7% (เติมอัตโนมัติ แก้ทับได้)
-  useEffect(() => {
-    const b = num(beforeTax);
-    setNet(b > 0 ? String(+(b * (1 + VAT_RATE)).toFixed(2)) : "");
-  }, [beforeTax]);
+  // คำนวณ 2 ทาง: พิมพ์ยอดก่อนภาษี → คิดสุทธิ (+7%) · พิมพ์สุทธิ → คิดย้อนเป็นก่อนภาษี (÷1.07)
+  const onBeforeTax = (v: string) => { setBeforeTax(v); const b = num(v); setNet(b > 0 ? String(+(b * (1 + VAT_RATE)).toFixed(2)) : ""); };
+  const onNet = (v: string) => { setNet(v); const n = num(v); setBeforeTax(n > 0 ? String(+(n / (1 + VAT_RATE)).toFixed(2)) : ""); };
 
   const save = async () => {
     if (!supplierId || !company.trim()) { toast.error("เลือกบริษัทก่อน"); return; }
@@ -2120,15 +2118,14 @@ function CtwForm({ onCancel, onSaved }: { onCancel: () => void; onSaved: () => v
             <input value={docNo} onChange={e => setDocNo(e.target.value)} placeholder="เช่น IV260410015"
               className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
           <div><Label>วันที่เอกสาร</Label>
-            <input type="date" value={docDate} onChange={e => setDocDate(e.target.value)}
-              className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
+            <DateField value={docDate} onChange={setDocDate} /></div>
         </div>
       </Card>
 
       <Card>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label>ยอดรวมก่อนภาษี</Label><Num value={beforeTax} onChange={setBeforeTax} /></div>
-          <div><Label>ยอดเงินสุทธิ (+7%)</Label><Num value={net} onChange={setNet} /></div>
+          <div><Label>ยอดรวมก่อนภาษี</Label><Money value={beforeTax} onChange={onBeforeTax} /></div>
+          <div><Label>ยอดเงินสุทธิ (+7%)</Label><Money value={net} onChange={onNet} /></div>
         </div>
         <div className="mt-3"><Label>เลขที่บัญชี (ดึงจาก Partners)</Label>
           <input value={account} onChange={e => setAccount(e.target.value)} placeholder="เลือกบริษัทแล้วเติมให้อัตโนมัติ"
@@ -3813,6 +3810,21 @@ function Money({ value, onChange, placeholder, className }: { value: string; onC
   return <input type="text" inputMode="decimal" value={display} placeholder={placeholder}
     onChange={e => handle(e.target.value)} onFocus={e => e.currentTarget.select()}
     className={className ?? "w-full h-11 px-3 text-base text-right border border-slate-200 rounded-lg"} />;
+}
+// ช่องวันที่ — โชว์ วว/ดด/ปปปป (DD/MM/YYYY) · เก็บค่าจริงเป็น ISO (YYYY-MM-DD) · แตะเปิดปฏิทินเครื่อง
+function DateField({ value, onChange, className }: { value: string; onChange: (iso: string) => void; className?: string }) {
+  const disp = value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10).split("-").reverse().join("/") : "";
+  return (
+    <div className={`relative ${className ?? ""}`}>
+      <div className="w-full h-11 px-3 flex items-center text-base border border-slate-200 rounded-lg bg-white">
+        {disp || <span className="text-slate-400">วว/ดด/ปปปป</span>}
+      </div>
+      <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">📅</span>
+      {/* native date input ทับด้านบนแบบโปร่งใส — แตะเปิดปฏิทิน แต่ตัวอักษรโชว์ DD/MM/YYYY ด้านหลัง */}
+      <input type="date" value={value} onChange={e => onChange(e.target.value)} aria-label="เลือกวันที่"
+        className="absolute inset-0 w-full h-full opacity-0" />
+    </div>
+  );
 }
 function Row({ label, v }: { label: string; v: unknown }) {
   if (v == null || v === "") return null;
