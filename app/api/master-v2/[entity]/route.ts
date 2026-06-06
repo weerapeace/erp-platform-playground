@@ -430,9 +430,13 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
   if (cached && Date.now() - cached.at < ENTITY_TTL) return cached.cfg;
   const admin = supabaseAdmin();
 
+  // กัน key ใช้ขีดล่าง/ขีดกลางไม่ตรงกับที่ลงทะเบียน (เช่น task_templates ↔ task-templates)
+  const alt = entity.includes("_") ? entity.replace(/_/g, "-") : entity.replace(/-/g, "_");
+
   // ---- hardcode entity: augment ด้วย relationResolves จากทะเบียน (universal) ----
-  if (ENTITIES[entity]) {
-    const base = ENTITIES[entity];
+  const hardKey = ENTITIES[entity] ? entity : (alt !== entity && ENTITIES[alt] ? alt : null);
+  if (hardKey) {
+    const base = ENTITIES[hardKey];
     const { data: mod } = await admin.from("erp_modules").select("id").eq("table_name", base.table).maybeSingle();
     let relationResolves: RelationResolve[] = [];
     if (mod) {
@@ -445,8 +449,9 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
     return cfg;
   }
 
-  // ---- generic entity: สร้าง config จาก erp_modules ----
-  const { data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", entity).maybeSingle();
+  // ---- generic entity: สร้าง config จาก erp_modules (รองรับ key ขีดล่าง/ขีดกลาง) ----
+  let { data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", entity).maybeSingle();
+  if (!mod && alt !== entity) ({ data: mod } = await admin.from("erp_modules").select("id, table_name").eq("module_key", alt).maybeSingle());
   if (!mod) return null;
   const { data: flds } = await admin.from("erp_module_fields")
     .select("column_name, is_searchable, ui_field_type, relation_config").eq("module_id", mod.id).eq("is_active", true);
