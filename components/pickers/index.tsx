@@ -360,6 +360,152 @@ export function ProductPicker({ value, onChange, placeholder = "เลือก�
 }
 
 // ============================================================
+// SkuPicker — ใช้ module skus ผ่าน master-v2 กลาง
+// ============================================================
+
+export type SkuPickerValue = {
+  id: string;
+  code: string;
+  name: string;
+  uom_name?: string | null;
+  list_price?: number | null;
+  image_url?: string | null;
+  sale_ok?: boolean | null;
+};
+
+export interface SkuPickerProps {
+  value: SkuPickerValue | null;
+  onChange: (v: SkuPickerValue | null) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  error?: boolean;
+  salesOnly?: boolean;
+}
+
+function skuImageUrl(key: unknown): string | null {
+  return key ? `/api/r2-image?key=${encodeURIComponent(String(key))}` : null;
+}
+
+function mapSkuRow(row: Record<string, unknown>): SkuPickerValue {
+  const code = String(row.code ?? "");
+  return {
+    id: String(row.id),
+    code,
+    name: String(row.name_th ?? row.sku_name ?? code),
+    uom_name: row.uom_label != null ? String(row.uom_label) : null,
+    list_price: row.list_price == null ? null : Number(row.list_price),
+    image_url: skuImageUrl(row.cover_image_r2_key),
+    sale_ok: typeof row.sale_ok === "boolean" ? row.sale_ok : null,
+  };
+}
+
+export function SkuPicker({
+  value,
+  onChange,
+  placeholder = "เลือก SKU...",
+  disabled,
+  error,
+  salesOnly = true,
+}: SkuPickerProps) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SkuPickerValue[]>([]);
+  const [loading, setLoading] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({
+          search: query,
+          limit: "30",
+          sort_by: "code",
+          sort_dir: "asc",
+        });
+        if (salesOnly) params.set("filters", JSON.stringify({ sale_ok: { type: "boolean", value: "true" } }));
+        const res = await apiFetch(`/api/master-v2/skus?${params}`);
+        const json = await res.json();
+        const rows = (json.data ?? []) as Record<string, unknown>[];
+        if (active) setResults(rows.map(mapSkuRow));
+      } catch {
+        if (active) setResults([]);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }, 250);
+    return () => { active = false; clearTimeout(t); };
+  }, [open, query, salesOnly]);
+
+  const select = useCallback((sku: SkuPickerValue) => {
+    onChange(sku);
+    setOpen(false);
+    setQuery("");
+  }, [onChange]);
+
+  return (
+    <div className="relative" ref={boxRef}>
+      <button type="button" disabled={disabled} onClick={() => setOpen(o => !o)}
+        className={`w-full h-9 px-3 flex items-center gap-2 text-sm border rounded-lg bg-white text-left transition-colors ${
+          error ? "border-red-300" : "border-slate-200"
+        } ${disabled ? "bg-slate-50 text-slate-400 cursor-not-allowed" : "hover:border-blue-300"}`}>
+        {value && <ImageThumbnail url={value.image_url} size={24} alt={value.name} />}
+        <span className="flex-1 truncate">
+          {value ? <><span className="font-mono text-xs text-slate-400 mr-1">{value.code}</span>{value.name}</>
+                 : <span className="text-slate-400">{placeholder}</span>}
+        </span>
+        {value && !disabled && (
+          <span onClick={e => { e.stopPropagation(); onChange(null); }} className="text-slate-300 hover:text-red-500"><IconX /></span>
+        )}
+        <span className="text-slate-400"><IconChevronDown /></span>
+      </button>
+
+      <FloatingDropdown anchorRef={boxRef} open={open && !disabled} onClose={() => setOpen(false)} minWidth={560} maxWidth={720}>
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
+          <div className="p-2 border-b border-slate-100 relative">
+            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconSearch /></span>
+            <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
+              placeholder="ค้นหา SKU / ชื่อสินค้า..."
+              className="w-full h-8 pl-7 pr-3 text-sm bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </div>
+
+          <div className="max-h-64 overflow-y-auto">
+            {loading ? (
+              <div className="px-3 py-4 flex items-center justify-center text-slate-400"><IconLoader /></div>
+            ) : results.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-slate-400">ไม่พบ SKU</div>
+            ) : (
+              results.map(sku => (
+                <button key={sku.id} type="button" onClick={() => select(sku)}
+                  className={`w-full px-3 py-2 grid grid-cols-[40px_minmax(100px,140px)_minmax(0,1fr)_76px] items-center gap-2 hover:bg-blue-50 transition-colors text-left ${value?.id === sku.id ? "bg-blue-50" : ""}`}>
+                  <ImageThumbnail url={sku.image_url} size={36} alt={sku.name} />
+                  <span className="font-mono text-xs bg-slate-100 px-1.5 py-1 rounded text-slate-600 truncate" title={sku.code}>
+                    {sku.code || "-"}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-sm text-slate-800 truncate" title={sku.name}>{sku.name}</div>
+                    <div className="text-xs text-slate-400 mt-0.5 truncate">
+                      {sku.uom_name ? <>หน่วย: {sku.uom_name}</> : <span>ยังไม่ตั้งหน่วย</span>}
+                      {sku.sale_ok === false && <span className="ml-2 text-amber-600">ไม่เปิดขาย</span>}
+                    </div>
+                  </div>
+                  <div className="text-right text-xs text-slate-700 tabular-nums">
+                    {sku.list_price != null ? `฿${Number(sku.list_price).toLocaleString("th-TH")}` : "-"}
+                    <div className="text-[10px] text-slate-400">ราคาขาย</div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </FloatingDropdown>
+    </div>
+  );
+}
+
+// ============================================================
 // SupplierPicker — ต่อ Supabase จริง (search + recent + create)
 // CLAUDE.md §21 + §34
 // ============================================================

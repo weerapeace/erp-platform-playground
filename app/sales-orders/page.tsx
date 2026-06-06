@@ -13,7 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
-import { SOLineEditor, emptyLine, type EditorLine } from "./line-editor";
+import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "./line-editor";
 
 // ---- helpers ----
 
@@ -259,6 +259,23 @@ export default function SalesOrdersPage() {
   ], []);
 
   const formDirty = useMemo(() => formSnapshot(form) !== formBaseline, [form, formBaseline]);
+
+  const previewTotals = useMemo(() => calculateEditorTotals(form.lines, {
+    vatRate: form.vat_rate,
+    vatIncluded: form.vat_included,
+    whtRate: form.wht_rate,
+    headerDiscountType: form.header_discount_type,
+    headerDiscountValue: form.header_discount_value,
+    shippingFee: form.shipping_fee,
+  }), [
+    form.lines,
+    form.vat_rate,
+    form.vat_included,
+    form.wht_rate,
+    form.header_discount_type,
+    form.header_discount_value,
+    form.shipping_fee,
+  ]);
 
   // ---- Saved Views (มุมมองบันทึกไว้ — ของกลาง §14) ----
   // "ของฉัน" + "เดือนนี้" ต้องอิงค่า dynamic (ชื่อผู้ใช้ / เดือนปัจจุบัน) จึงสร้างใน useMemo
@@ -542,6 +559,8 @@ export default function SalesOrdersPage() {
                 className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
             </label>
           </div>
+
+          <SalesTotalsPreview result={previewTotals} />
         </div>
       </ERPModal>
 
