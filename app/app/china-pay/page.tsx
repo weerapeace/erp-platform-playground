@@ -2488,7 +2488,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: s
         );
       })}
       {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)}
-        onEdit={canDelete && onGo ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setEditTarget(raw); setReceipt(null); } } : undefined}
+        onEdit={onGo ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setEditTarget(raw); setReceipt(null); } } : undefined}
         onDelete={canDelete ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setDelTarget(raw); setReceipt(null); } } : undefined} />}
       {delTarget && (
         <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
