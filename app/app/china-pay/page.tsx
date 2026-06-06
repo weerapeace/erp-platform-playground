@@ -3484,13 +3484,13 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { 
   return (
     <Portal>
     <div className="fixed inset-x-0 top-0 h-[100svh] z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="font-semibold text-slate-800">ใบสรุปการโอน</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
         </div>
         <canvas ref={canvasRef} className="hidden" />
-        <div id="tx-receipt" className="p-4 overflow-y-auto flex-1 min-h-0">
+        <div id="tx-receipt" className="p-4">
           <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white rounded-xl p-3 mb-3">
             <div className="font-bold">💸 ใบสรุปการโอนเงินจีน</div>
             <div className="text-xs opacity-90">เลขโอน {String(t.transfer_no ?? "—")} · {String(t.date ?? "")}</div>
@@ -3570,7 +3570,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { 
             </div>
           )}
         </div>
-        <div className="px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t border-slate-100 bg-white flex-shrink-0 space-y-2 print:hidden">
+        <div className="px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t border-slate-100 bg-white space-y-2 print:hidden">
           <div className="grid grid-cols-2 gap-2">
             <button onClick={saveImage} disabled={busy} className="h-12 bg-slate-700 text-white rounded-lg font-medium disabled:opacity-50">💾 โหลดรูป</button>
             <button onClick={() => window.print()} className="h-12 border border-slate-300 text-slate-700 rounded-lg font-medium">🖨️ พิมพ์</button>
