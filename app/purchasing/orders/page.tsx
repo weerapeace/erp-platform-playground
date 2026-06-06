@@ -13,15 +13,17 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
+import { ERPModal } from "@/components/modal";
+import { ImageInput } from "@/components/image-input";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
-import type { BulkAction } from "@/components/data-table";
+import type { BulkAction, RowAction } from "@/components/data-table";
 
 type Row = {
   id: string; seller_name: string; item_sku_id: string | null; item_name: string; code: string;
   qty: number; uom: string; price_est: number; line_total: number; currency: string;
-  order_date: string | null; requester: string; note: string; status: string; approved: boolean; image_url: string | null;
+  order_date: string | null; requester: string; note: string; status: string; approved: boolean; cover_key: string | null; image_url: string | null;
 };
 
 const money = (v: number, cur: string) => `${v.toLocaleString()} ${cur}`;
@@ -60,6 +62,7 @@ export default function PurchaseOrdersPage() {
   const [cartIds, setCartIds] = useState<string[]>([]);
   const [activeShop, setActiveShop] = useState<string | null>(null);
   const [orderDate, setOrderDate] = useState(today);
+  const [editRow, setEditRow] = useState<Row | null>(null);
 
   useEffect(() => { if (typeof window !== "undefined") { const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "card") setView(v); } }, []);
   const changeView = (v: "table" | "card") => { setView(v); if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, v); };
@@ -147,6 +150,7 @@ export default function PurchaseOrdersPage() {
             emptyMessage="ไม่มีรายการรอสั่งซื้อ" searchPlaceholder="ค้นหา ร้าน / สินค้า / รหัส..."
             searchableKeys={["seller_name", "item_name", "code", "requester"]} tableId="purchase-orders-create" exportFilename="รอสั่งซื้อ"
             selectable bulkActions={bulkActions}
+            rowActions={[{ label: "ดู / แก้ไข", icon: "✎", onClick: (r: Row) => setEditRow(r) } as RowAction<Row>]}
             views={[
               { id: "all", label: "ทั้งหมด" },
               { id: "approved", label: "อนุมัติแล้ว", filter: (r) => (r as Row).approved },
@@ -196,7 +200,9 @@ export default function PurchaseOrdersPage() {
                           return (
                             <div key={r.id} className={`bg-white border rounded-xl overflow-hidden ${on ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200"}`}>
                               <div className="aspect-square bg-slate-50 flex items-center justify-center relative">
-                                {!r.approved && <span className="absolute top-1.5 left-1.5 text-[10px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">ยังไม่อนุมัติ</span>}
+                                {!r.approved && <span className="absolute top-1.5 left-1.5 z-10 text-[10px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">ยังไม่อนุมัติ</span>}
+                                <button onClick={() => setEditRow(r)} title="ดูรายละเอียด / แก้ไข"
+                                  className="absolute top-1.5 right-1.5 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-blue-50 text-slate-600 text-xs">✎</button>
                                 {r.image_url
                                   ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" />
                                   : <span className="text-slate-300 text-3xl">📦</span>}
@@ -260,6 +266,76 @@ export default function PurchaseOrdersPage() {
           )
         )}
       </div>
+
+      {editRow && <CardEditModal row={editRow} onClose={() => setEditRow(null)} onSaved={async () => { setEditRow(null); await fetchRows(); }} />}
     </PlaygroundShell>
+  );
+}
+
+// ── popup ดูรายละเอียด/แก้ไขรายการ (จำนวน/ราคา/หมายเหตุ + รูป SKU จริง) ──
+function CardEditModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void | Promise<void> }) {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [qty, setQty] = useState(String(row.qty));
+  const [price, setPrice] = useState(String(row.price_est));
+  const [note, setNote] = useState(row.note ?? "");
+  const [imgKey, setImgKey] = useState<string | null>(row.cover_key);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${row.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, actor: user?.name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      // เปลี่ยนรูป = แก้รูปปก SKU จริง (มีผลทุกที่)
+      if (imgKey !== row.cover_key && row.item_sku_id) {
+        await apiFetch(`/api/master-v2/skus/${row.item_sku_id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cover_image_r2_key: imgKey, actor: user?.name }),
+        });
+      }
+      toast.success("บันทึกแล้ว");
+      await onSaved();
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} size="md" title="รายละเอียด / แก้ไขรายการ"
+      footer={<>
+        <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
+      </>}>
+      <div className="space-y-3">
+        <div>
+          <div className="text-sm font-medium text-slate-800">{row.item_name}</div>
+          <div className="text-xs text-slate-400">{row.code || "—"} · 🏪 {row.seller_name}</div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">รูปสินค้า (SKU จริง)</label>
+          <ImageInput value={imgKey} onChange={setImgKey} folder="products" />
+          <p className="text-[10px] text-amber-600 mt-1">⚠ เปลี่ยนรูปนี้ = เปลี่ยนรูปปก SKU จริง มีผลทุกที่ที่ใช้สินค้านี้</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({row.uom})</label>
+            <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({row.currency})</label>
+            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+          </div>
+        </div>
+        <div className="text-xs text-slate-500">ราคารวม: <b className="text-blue-600">{money((Number(qty) || 0) * (Number(price) || 0), row.currency)}</b></div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ</label>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="(ถ้ามี)" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        </div>
+      </div>
+    </ERPModal>
   );
 }

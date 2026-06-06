@@ -56,6 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       note: p.note ?? "",
       status: p.status ?? "",
       approved: p.status === "approved",
+      cover_key: key,   // r2 key ดิบ (ไว้แก้รูป SKU)
       image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
     };
   });
