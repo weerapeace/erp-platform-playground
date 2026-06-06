@@ -29,6 +29,13 @@ function scheduleWeekdays(id: unknown): number[] {
   return SCHEDULES[String(id)] ?? SCHEDULES.factory_6d;
 }
 
+function durationLabel(hours: number): string {
+  const totalMinutes = Math.max(0, Math.round(hours * 60));
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}:${String(m).padStart(2, "0")}`;
+}
+
 function eachDay(start: string, end: string): { iso: string; day: number; dow: number }[] {
   const out: { iso: string; day: number; dow: number }[] = [];
   const s = new Date(`${start}T00:00:00Z`);
@@ -155,16 +162,16 @@ export async function GET(req: NextRequest) {
             sublabel = "ไม่สแกน";
           } else if (scheduled) {
             const workHours = Math.max(hoursPerDay - absenceHours - leaveHours - lateMinutes / 60, 0);
-            label = roundMoney(workHours).toFixed(2);
+            label = durationLabel(workHours);
             status = workHours <= 0 ? "zero" : workHours < hoursPerDay ? "partial" : "full";
           }
 
           if (otHours > 0 && !scheduled) {
             status = "ot";
-            label = `OT ${roundMoney(otHours).toFixed(1)}`;
+            label = `OT ${durationLabel(otHours)}`;
           } else if (otHours > 0 && scheduled && !lateMinutes && !absenceHours && !leaveHours) {
             status = "full";
-            sublabel = `+OT ${roundMoney(otHours).toFixed(1)}`;
+            sublabel = `+OT ${durationLabel(otHours)}`;
           }
 
           if (lateMinutes || absenceHours || leaveHours) {

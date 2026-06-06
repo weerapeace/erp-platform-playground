@@ -965,6 +965,38 @@ function cellClass(status: string, hasInput: boolean): string {
   return "bg-slate-50 border-slate-200 text-slate-500";
 }
 
+function minutesText(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h && m) return `${h} ชม. ${m} นาที`;
+  if (h) return `${h} ชม.`;
+  return `${m} นาที`;
+}
+
+function hoursText(hours: number): string {
+  return minutesText(hours * 60);
+}
+
+function clockText(clock: string): string {
+  const match = /^(\d+):(\d{2})$/.exec(clock.trim());
+  if (!match) return clock;
+  return minutesText((Number(match[1]) * 60) + Number(match[2]));
+}
+
+function cellTooltip(cell: GridCell): string {
+  const parts = [formatDate(cell.date)];
+  if (["full", "partial", "zero"].includes(cell.status)) {
+    parts.push(`ทำงานสุทธิ ${clockText(cell.label)}`);
+  }
+  if (cell.late_minutes) parts.push(`หักสาย ${minutesText(cell.late_minutes)}`);
+  if (cell.absence_hours) parts.push(`ขาด ${hoursText(cell.absence_hours)}`);
+  if (cell.leave_days) parts.push(`ลา ${cell.leave_days} วัน`);
+  if (cell.ot_hours) parts.push(`OT ${hoursText(cell.ot_hours)}`);
+  if (cell.note) parts.push(cell.note);
+  return parts.join(" · ");
+}
+
 function AttendanceGrid({
   grid,
   loading,
@@ -999,9 +1031,9 @@ function AttendanceGrid({
           <div className="text-xs text-slate-500">กดช่องวันที่เพื่อแก้สาย/ขาด/ลา/OT ของพนักงานคนนั้น</div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500">
-          <Legend label="8.00" cls="bg-emerald-50 border-emerald-200 text-emerald-700" />
-          <Legend label="7.98" cls="bg-amber-50 border-amber-300 text-amber-700" />
-          <Legend label="0.00" cls="bg-red-50 border-red-200 text-red-600" />
+          <Legend label="8:00" cls="bg-emerald-50 border-emerald-200 text-emerald-700" />
+          <Legend label="7:48" cls="bg-amber-50 border-amber-300 text-amber-700" />
+          <Legend label="0:00" cls="bg-red-50 border-red-200 text-red-600" />
           <Legend label="หยุด" cls="bg-teal-50 border-teal-200 text-teal-700" />
           <Legend label="+ OT" cls="bg-slate-50 border-slate-200 text-slate-500" />
         </div>
@@ -1040,7 +1072,7 @@ function AttendanceGrid({
                         type="button"
                         disabled={disabled}
                         onClick={() => onCellClick(row, cell)}
-                        title={`${formatDate(cell.date)}${cell.note ? ` · ${cell.note}` : ""}`}
+                        title={cellTooltip(cell)}
                         className={`h-[42px] w-[62px] rounded-lg border px-1 text-xs font-semibold tabular-nums leading-tight transition ${
                           cellClass(cell.status, cell.has_input)
                         } ${disabled ? "cursor-default opacity-80" : "hover:ring-2 hover:ring-blue-200"}`}
