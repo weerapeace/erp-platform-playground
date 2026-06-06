@@ -27,11 +27,13 @@ export type SecondaryRender<V> = (item: V) => React.ReactNode;
 
 export type MasterPickerConfig<V extends MasterValue> = {
   apiPath:        string;                  // เช่น 'customers' → /api/master/customers
+  listEndpoint?:  string;                  // optional lightweight API, e.g. /api/pickers/customers
   storageKey:     string;                  // localStorage key สำหรับ recently used
   label:          string;                  // 'ลูกค้า', 'พนักงาน', ...
   emptyLabel:     string;                  // 'ไม่พบลูกค้า'
   searchPlaceholder: string;
   createPermission: Permission;            // 'customers.create'
+  allowCreate?:   boolean;
   /** field ที่จะส่งไป POST ตอนสร้างใหม่ (default แค่ name) */
   buildCreateBody?: (query: string) => Record<string, unknown>;
   /** ส่วน 2 (ใต้ชื่อ) ในแต่ละ row */
@@ -105,7 +107,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
     const [creating, setCreating] = useState(false);
     const boxRef = useRef<HTMLDivElement>(null);
 
-    const canCreate = !disableCreate && can(cfg.createPermission);
+    const canCreate = cfg.allowCreate !== false && !disableCreate && can(cfg.createPermission);
 
     // outside-click จัดการโดย FloatingDropdown (รวม dropdown ที่อยู่ใน portal ด้วย)
 
@@ -124,7 +126,8 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
       setLoading(true);
       const t = setTimeout(async () => {
         try {
-          const res = await apiFetch(`/api/master/${cfg.apiPath}?search=${encodeURIComponent(query)}&limit=10`);
+          const endpoint = cfg.listEndpoint ?? `/api/master/${cfg.apiPath}`;
+          const res = await apiFetch(`${endpoint}?search=${encodeURIComponent(query)}&limit=10`);
           const json = await res.json();
           if (active) setResults((json.data ?? []) as V[]);
         } catch { if (active) setResults([]); }
@@ -250,11 +253,13 @@ export type CustomerPickerValue = MasterValue & {
 };
 export const CustomerPicker = createMasterPicker<CustomerPickerValue>({
   apiPath:    "customers",
+  listEndpoint: "/api/pickers/customers",
   storageKey: "erp-recent-customers",
   label:      "ลูกค้า",
   emptyLabel: "ไม่พบลูกค้า",
   searchPlaceholder: "ค้นหา รหัส / ชื่อ / เบอร์...",
   createPermission: "customers.create",
+  allowCreate: false,
   secondaryRender: v => (
     <>
       {v.payment_terms && <span>💳 {v.payment_terms}</span>}
