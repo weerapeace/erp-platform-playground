@@ -5,7 +5,7 @@
  * เลือกงวด → ตารางพนักงาน + ยอดสรุป (สาย/ขาด/ลา/OT/เพิ่มพิเศษ/หักอื่น) + สุทธิประมาณ (เครื่องจริง)
  * แก้ "เพิ่มพิเศษ/หักอื่น" ต่อคนผ่าน drawer → บันทึก → สุทธิประมาณอัปเดต → ไปคำนวณ+บันทึก
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { Drawer, ERPModal } from "@/components/modal";
@@ -125,7 +125,11 @@ export default function ManualInputPage() {
     try {
       const j = await apiFetch(`/api/payroll/manual-input?period_id=${encodeURIComponent(pid)}`).then((r) => r.json());
       if (j.error) { setErr(j.error); setRows([]); }
-      else { setRows(j.data as Row[]); setPeriodStatus(j.period_status ?? ""); }
+      else {
+        setRows(j.data as Row[]);
+        setRecurringItems((j.recurring_items ?? []) as RecurringItem[]);
+        setPeriodStatus(j.period_status ?? "");
+      }
     } catch { setErr("โหลดไม่ได้"); }
     finally { setLoading(false); }
   }, []);
@@ -136,14 +140,6 @@ export default function ManualInputPage() {
       const j = await apiFetch(`/api/payroll/adjustments?period_id=${encodeURIComponent(pid)}`).then((r) => r.json());
       if (!j.error) setAdjustments((j.data ?? []) as Adj[]);
     } catch { /* keep summary usable even if the list cannot load */ }
-  }, []);
-
-  const loadRecurringItems = useCallback(async (pid: string) => {
-    if (!pid) return;
-    try {
-      const j = await apiFetch(`/api/payroll/recurring-summary?period_id=${encodeURIComponent(pid)}`).then((r) => r.json());
-      if (!j.error) setRecurringItems((j.data ?? []) as RecurringItem[]);
-    } catch { /* keep summary usable even if recurring cannot load */ }
   }, []);
 
   const loadGrid = useCallback(async (pid: string) => {
@@ -157,7 +153,7 @@ export default function ManualInputPage() {
     finally { setGridLoading(false); }
   }, []);
 
-  useEffect(() => { if (periodId) { load(periodId); loadAdjustments(periodId); loadRecurringItems(periodId); } }, [periodId, load, loadAdjustments, loadRecurringItems]);
+  useEffect(() => { if (periodId) { load(periodId); loadAdjustments(periodId); } }, [periodId, load, loadAdjustments]);
   useEffect(() => { if (periodId && activeTab === "attendance") loadGrid(periodId); }, [periodId, activeTab, loadGrid]);
 
   const editable = EDITABLE(periodStatus);
@@ -166,6 +162,24 @@ export default function ManualInputPage() {
     .filter((r) => !q.trim() || `${r.employee_code} ${r.employee_name}`.toLowerCase().includes(q.trim().toLowerCase()));
 
   const totalNet = rows.reduce((t, r) => t + r.net_estimate, 0);
+  const adjustmentsByEmployee = useMemo(() => {
+    const m = new Map<string, Adj[]>();
+    for (const item of adjustments) {
+      const cur = m.get(item.employee_id) ?? [];
+      cur.push(item);
+      m.set(item.employee_id, cur);
+    }
+    return m;
+  }, [adjustments]);
+  const recurringByEmployee = useMemo(() => {
+    const m = new Map<string, RecurringItem[]>();
+    for (const item of recurringItems) {
+      const cur = m.get(item.employee_id) ?? [];
+      cur.push(item);
+      m.set(item.employee_id, cur);
+    }
+    return m;
+  }, [recurringItems]);
   const openRowEditor = (row: Row, date?: string, kind?: TimeKind, adjustMode?: AdjustMode) => {
     setEditRow(row);
     setEditDate(date);
@@ -305,8 +319,8 @@ export default function ManualInputPage() {
             </thead>
             <tbody>
               {shown.map((r) => {
-                const employeeAdjustments = rowAdjustments(adjustments, r.employee_id);
-                const employeeRecurring = rowRecurringItems(recurringItems, r.employee_id);
+                const employeeAdjustments = adjustmentsByEmployee.get(r.employee_id) ?? [];
+                const employeeRecurring = recurringByEmployee.get(r.employee_id) ?? [];
                 const pieceworkItems = employeeAdjustments.filter((item) => matchesMode(item, "piecework"));
                 const earningItems = employeeAdjustments.filter((item) => matchesMode(item, "earning"));
                 const deductionItems = employeeAdjustments.filter((item) => matchesMode(item, "deduction"));
@@ -460,14 +474,6 @@ function matchesMode(item: Adj, mode: AdjustMode) {
   if (mode === "piecework") return isPieceworkItem(item);
   if (mode === "deduction") return item.adjustment_type === "deduction";
   return item.adjustment_type === "earning" && !isPieceworkItem(item);
-}
-
-function rowAdjustments(items: Adj[], employeeId: string) {
-  return items.filter((item) => item.employee_id === employeeId);
-}
-
-function rowRecurringItems(items: RecurringItem[], employeeId: string) {
-  return items.filter((item) => item.employee_id === employeeId);
 }
 
 function totalRecurring(items: RecurringItem[], type: "earning" | "deduction") {

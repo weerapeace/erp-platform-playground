@@ -237,7 +237,7 @@ const mergeMoney = (saved: Row = {}, manual: Row = {}) => {
 };
 
 /** คำนวณงวด (ไม่เขียน DB) — คืนบรรทัดที่คำนวณได้ */
-export async function computePeriodPreview(periodId: string): Promise<{ lines: Row[]; period: Row }> {
+export async function computePeriodPreview(periodId: string): Promise<{ lines: Row[]; period: Row; recurring_items: Row[] }> {
   const a = supabaseAdmin();
   const periodRes = await a.from("payroll_periods").select("*, payroll_period_holidays(*)").eq("id", periodId).limit(1);
   const period = (periodRes.data?.[0] as Row) ?? null;
@@ -282,5 +282,5 @@ export async function computePeriodPreview(periodId: string): Promise<{ lines: R
     manual.mid_month_paid = money(manual.mid_month_paid) + money(midMonth.get(String(employee.id)));
     lines.push(buildLine(period, employee, contract, setting, manual));
   }
-  return { lines, period };
+  return { lines, period, recurring_items: Array.from(recurring.values()).flat() };
 }

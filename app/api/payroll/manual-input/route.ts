@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     if (!period) return NextResponse.json({ error: "ไม่พบงวด" }, { status: 404 });
 
     // เครื่องคำนวณจริง → รายชื่อพนักงานที่เข้าเงื่อนไข + สุทธิประมาณ + วันทำงาน
-    const { lines } = await computePeriodPreview(periodId);
+    const { lines, recurring_items } = await computePeriodPreview(periodId);
 
     // ยอดดิบรายคน (สำหรับคอลัมน์แสดงผล)
     const [attRes, leaveRes, otRes, adjRes] = await Promise.all([
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
       };
     }).sort((x, y) => String(x.employee_code).localeCompare(String(y.employee_code)));
 
-    return NextResponse.json({ period_name: period.period_name, period_status: period.status, count: rows.length, data: rows, error: null });
+    return NextResponse.json({ period_name: period.period_name, period_status: period.status, count: rows.length, data: rows, recurring_items, error: null });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });
   }
