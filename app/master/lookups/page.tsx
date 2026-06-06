@@ -11,6 +11,8 @@
 import { useState } from "react";
 import { ShellPresentContext } from "@/components/playground-shell";
 import { MasterPage } from "@/components/master-page";
+import { CreateModuleWizard } from "@/components/create-module-wizard";
+import { usePermission } from "@/components/auth";
 
 const TABS: { key: string; title: string; icon: string }[] = [
   { key: "brands",               title: "แบรนด์ (Brands)",            icon: "🏷️" },
@@ -25,14 +27,27 @@ const TABS: { key: string; title: string; icon: string }[] = [
 
 export default function MasterLookupsPage() {
   const [active, setActive] = useState(TABS[0].key);
+  const [showWizard, setShowWizard] = useState(false);
+  const canCreate = usePermission("products.create");
   const cur = TABS.find((t) => t.key === active) ?? TABS[0];
 
   // หมายเหตุ: app/master/layout.tsx ครอบ PlaygroundShell ให้แล้ว → ห้ามครอบซ้ำ (กัน shell ซ้อน)
   return (
       <div className="min-h-screen bg-slate-50 flex flex-col">
+        {showWizard && <CreateModuleWizard onClose={() => setShowWizard(false)} />}
         <div className="bg-white border-b border-slate-200 px-6 pt-4">
-          <h1 className="text-xl font-bold text-slate-900">🧱 ข้อมูลตั้งต้น</h1>
-          <p className="text-sm text-slate-500 mt-0.5">จัดการตารางอ้างอิงที่ใช้กับสินค้า — เลือกแท็บด้านล่าง</p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">🧱 ข้อมูลตั้งต้น</h1>
+              <p className="text-sm text-slate-500 mt-0.5">จัดการตารางอ้างอิงที่ใช้กับสินค้า — เลือกแท็บด้านล่าง</p>
+            </div>
+            {canCreate && (
+              <button onClick={() => setShowWizard(true)}
+                className="shrink-0 h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                ➕ เพิ่มโมดูลใหม่
+              </button>
+            )}
+          </div>
           <div className="flex gap-1 mt-3 -mb-px overflow-x-auto">
             {TABS.map((t) => (
               <button key={t.key} onClick={() => setActive(t.key)}
