@@ -370,6 +370,7 @@ export type SkuPickerValue = {
   uom_name?: string | null;
   list_price?: number | null;
   image_url?: string | null;
+  image_key?: string | null;
   sale_ok?: boolean | null;
 };
 
@@ -388,13 +389,15 @@ function skuImageUrl(key: unknown): string | null {
 
 function mapSkuRow(row: Record<string, unknown>): SkuPickerValue {
   const code = String(row.code ?? "");
+  const imageKey = row.image_key ?? row.cover_image_r2_key;
   return {
     id: String(row.id),
     code,
-    name: String(row.name_th ?? row.sku_name ?? code),
-    uom_name: row.uom_label != null ? String(row.uom_label) : null,
+    name: String(row.name ?? row.name_th ?? row.sku_name ?? code),
+    uom_name: row.uom_name != null ? String(row.uom_name) : row.uom_label != null ? String(row.uom_label) : null,
     list_price: row.list_price == null ? null : Number(row.list_price),
-    image_url: skuImageUrl(row.cover_image_r2_key),
+    image_key: imageKey == null ? null : String(imageKey),
+    image_url: skuImageUrl(imageKey),
     sale_ok: typeof row.sale_ok === "boolean" ? row.sale_ok : null,
   };
 }
@@ -419,14 +422,9 @@ export function SkuPicker({
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const params = new URLSearchParams({
-          search: query,
-          limit: "30",
-          sort_by: "code",
-          sort_dir: "asc",
-        });
-        if (salesOnly) params.set("filters", JSON.stringify({ sale_ok: { type: "boolean", value: "true" } }));
-        const res = await apiFetch(`/api/master-v2/skus?${params}`);
+        const params = new URLSearchParams({ search: query, limit: "24" });
+        if (!salesOnly) params.set("sales_only", "false");
+        const res = await apiFetch(`/api/pickers/skus?${params}`);
         const json = await res.json();
         const rows = (json.data ?? []) as Record<string, unknown>[];
         if (active) setResults(rows.map(mapSkuRow));
@@ -462,7 +460,7 @@ export function SkuPicker({
         <span className="text-slate-400"><IconChevronDown /></span>
       </button>
 
-      <FloatingDropdown anchorRef={boxRef} open={open && !disabled} onClose={() => setOpen(false)} minWidth={560} maxWidth={720}>
+      <FloatingDropdown anchorRef={boxRef} open={open && !disabled} onClose={() => setOpen(false)} minWidth={440} maxWidth={560}>
         <div className="bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
           <div className="p-2 border-b border-slate-100 relative">
             <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"><IconSearch /></span>
@@ -473,14 +471,14 @@ export function SkuPicker({
 
           <div className="max-h-64 overflow-y-auto">
             {loading ? (
-              <div className="px-3 py-4 flex items-center justify-center text-slate-400"><IconLoader /></div>
+              <div className="px-3 py-3 flex items-center justify-center gap-2 text-xs text-slate-400"><IconLoader />กำลังค้นหา...</div>
             ) : results.length === 0 ? (
               <div className="px-3 py-4 text-center text-sm text-slate-400">ไม่พบ SKU</div>
             ) : (
               results.map(sku => (
                 <button key={sku.id} type="button" onClick={() => select(sku)}
-                  className={`w-full px-3 py-2 grid grid-cols-[40px_minmax(100px,140px)_minmax(0,1fr)_76px] items-center gap-2 hover:bg-blue-50 transition-colors text-left ${value?.id === sku.id ? "bg-blue-50" : ""}`}>
-                  <ImageThumbnail url={sku.image_url} size={36} alt={sku.name} />
+                  className={`w-full px-3 py-2 grid grid-cols-[34px_minmax(88px,120px)_minmax(0,1fr)_72px] items-center gap-2 hover:bg-blue-50 transition-colors text-left ${value?.id === sku.id ? "bg-blue-50" : ""}`}>
+                  <ImageThumbnail url={sku.image_url} size={30} alt={sku.name} />
                   <span className="font-mono text-xs bg-slate-100 px-1.5 py-1 rounded text-slate-600 truncate" title={sku.code}>
                     {sku.code || "-"}
                   </span>
