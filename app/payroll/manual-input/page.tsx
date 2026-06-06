@@ -21,6 +21,7 @@ type Row = {
 type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
 type TimeKind = "ot" | "late" | "absence" | "leave";
 type AdjustMode = "earning" | "deduction" | "piecework";
+type DrawerTab = "time" | "ot" | "piecework" | "earning" | "deduction";
 type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; work_date?: string; note?: string };
 type TabKey = "summary" | "special" | "piecework" | "timestamp" | "import" | "attendance";
 type TimePreview = {
@@ -69,12 +70,20 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "import", label: "Import" },
   { key: "attendance", label: "ตารางเข้างาน" },
 ];
+const DRAWER_TABS: { key: DrawerTab; label: string }[] = [
+  { key: "time", label: "สาย/ขาด/ลา" },
+  { key: "ot", label: "OT" },
+  { key: "piecework", label: "งานเหมา" },
+  { key: "earning", label: "เพิ่มพิเศษ" },
+  { key: "deduction", label: "หักอื่น" },
+];
 
 export default function ManualInputPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [periodId, setPeriodId] = useState("");
   const [periodStatus, setPeriodStatus] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
+  const [adjustments, setAdjustments] = useState<Adj[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -83,7 +92,7 @@ export default function ManualInputPage() {
   const [editDate, setEditDate] = useState<string | undefined>();
   const [editKind, setEditKind] = useState<TimeKind | undefined>();
   const [editAdjustMode, setEditAdjustMode] = useState<AdjustMode | undefined>();
-  const [quickAdjust, setQuickAdjust] = useState<{ row: Row; mode: AdjustMode } | null>(null);
+  const [quickAdjust, setQuickAdjust] = useState<{ row?: Row; mode: AdjustMode } | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [grid, setGrid] = useState<GridData | null>(null);
   const [gridLoading, setGridLoading] = useState(false);
@@ -110,6 +119,14 @@ export default function ManualInputPage() {
     finally { setLoading(false); }
   }, []);
 
+  const loadAdjustments = useCallback(async (pid: string) => {
+    if (!pid) return;
+    try {
+      const j = await apiFetch(`/api/payroll/adjustments?period_id=${encodeURIComponent(pid)}`).then((r) => r.json());
+      if (!j.error) setAdjustments((j.data ?? []) as Adj[]);
+    } catch { /* keep summary usable even if the list cannot load */ }
+  }, []);
+
   const loadGrid = useCallback(async (pid: string) => {
     if (!pid) return;
     setGridLoading(true); setGridErr(null);
@@ -121,7 +138,7 @@ export default function ManualInputPage() {
     finally { setGridLoading(false); }
   }, []);
 
-  useEffect(() => { if (periodId) load(periodId); }, [periodId, load]);
+  useEffect(() => { if (periodId) { load(periodId); loadAdjustments(periodId); } }, [periodId, load, loadAdjustments]);
   useEffect(() => { if (periodId && activeTab === "attendance") loadGrid(periodId); }, [periodId, activeTab, loadGrid]);
 
   const editable = EDITABLE(periodStatus);
@@ -136,7 +153,7 @@ export default function ManualInputPage() {
     setEditKind(kind);
     setEditAdjustMode(adjustMode);
   };
-  const openQuickAdjust = (row: Row, mode: AdjustMode) => setQuickAdjust({ row, mode });
+  const openQuickAdjust = (row: Row | undefined, mode: AdjustMode) => setQuickAdjust({ row, mode });
   const openGridEditor = (gridRow: GridRow, cell: GridCell) => {
     const row = rows.find((r) => r.employee_id === gridRow.employee_id) ?? {
       id: gridRow.employee_id,
@@ -222,7 +239,25 @@ export default function ManualInputPage() {
           onCellClick={openGridEditor}
         />
       ) : activeTab === "piecework" ? (
-        <PieceworkTable rows={shown} editable={editable} onOpen={(row) => openQuickAdjust(row, "piecework")} />
+        <AdjustmentList
+          title="รายการงานเหมา"
+          modes={["piecework"]}
+          rows={rows}
+          items={adjustments}
+          editable={editable}
+          onAdd={(mode) => openQuickAdjust(undefined, mode)}
+          onOpen={(row, mode) => openQuickAdjust(row, mode)}
+        />
+      ) : activeTab === "special" ? (
+        <AdjustmentList
+          title="รายการเพิ่ม/หักพิเศษ"
+          modes={["earning", "deduction"]}
+          rows={rows}
+          items={adjustments}
+          editable={editable}
+          onAdd={(mode) => openQuickAdjust(undefined, mode)}
+          onOpen={(row, mode) => openQuickAdjust(row, mode)}
+        />
       ) : activeTab !== "summary" ? (
         <TabPlaceholder
           title={TABS.find((tab) => tab.key === activeTab)?.label ?? ""}
@@ -286,10 +321,11 @@ export default function ManualInputPage() {
       {quickAdjust && (
         <QuickAdjustmentModal
           row={quickAdjust.row}
+          rows={rows}
           mode={quickAdjust.mode}
           periodId={periodId}
           onClose={() => setQuickAdjust(null)}
-          onChanged={() => { load(periodId); if (activeTab === "attendance") loadGrid(periodId); }}
+          onChanged={() => { load(periodId); loadAdjustments(periodId); if (activeTab === "attendance") loadGrid(periodId); }}
         />
       )}
     </div>
@@ -352,6 +388,30 @@ function modeMeta(mode: AdjustMode) {
   };
 }
 
+const MODE_TONE: Record<AdjustMode, { accent: string; panel: string; primary: string; field: string; badge: string }> = {
+  deduction: {
+    accent: "bg-red-500",
+    panel: "border-red-100 bg-red-50/60",
+    primary: "bg-red-600 hover:bg-red-700",
+    field: "focus:ring-red-500 focus:border-red-500",
+    badge: "bg-red-50 text-red-700 border-red-100",
+  },
+  earning: {
+    accent: "bg-emerald-500",
+    panel: "border-emerald-100 bg-emerald-50/60",
+    primary: "bg-emerald-600 hover:bg-emerald-700",
+    field: "focus:ring-emerald-500 focus:border-emerald-500",
+    badge: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  },
+  piecework: {
+    accent: "bg-violet-500",
+    panel: "border-violet-100 bg-violet-50/60",
+    primary: "bg-violet-600 hover:bg-violet-700",
+    field: "focus:ring-violet-500 focus:border-violet-500",
+    badge: "bg-violet-50 text-violet-700 border-violet-100",
+  },
+};
+
 function matchesMode(item: Adj, mode: AdjustMode) {
   if (mode === "piecework") return isPieceworkItem(item);
   if (mode === "deduction") return item.adjustment_type === "deduction";
@@ -373,18 +433,22 @@ function uniqueNames(items: Adj[], mode: AdjustMode) {
 
 function QuickAdjustmentModal({
   row,
+  rows,
   mode,
   periodId,
   onClose,
   onChanged,
 }: {
-  row: Row;
+  row?: Row;
+  rows: Row[];
   mode: AdjustMode;
   periodId: string;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const meta = modeMeta(mode);
+  const tone = MODE_TONE[mode];
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState(row?.employee_id ?? rows[0]?.employee_id ?? "");
   const [allItems, setAllItems] = useState<Adj[]>([]);
   const [selectedName, setSelectedName] = useState("");
   const [customName, setCustomName] = useState("");
@@ -412,7 +476,8 @@ function QuickAdjustmentModal({
   useEffect(() => { loadItems(); }, [loadItems]);
 
   const names = uniqueNames(allItems, mode);
-  const employeeItems = allItems.filter((item) => item.employee_id === row.employee_id && matchesMode(item, mode));
+  const selectedRow = row ?? rows.find((r) => r.employee_id === selectedEmployeeId);
+  const employeeItems = allItems.filter((item) => item.employee_id === selectedEmployeeId && matchesMode(item, mode));
   const useCustom = selectedName === "__custom__" || names.length === 0;
   const itemName = (useCustom ? customName : selectedName).trim();
   const hasDraft = !!amount || !!editId || (useCustom && !!customName.trim());
@@ -443,6 +508,7 @@ function QuickAdjustmentModal({
 
   async function save() {
     setErr(null);
+    if (!selectedRow) { setErr("เลือกพนักงานก่อน"); return; }
     if (!itemName) { setErr(`เลือกหรือกรอก${meta.itemLabel}`); return; }
     if (!(Number(amount) > 0)) { setErr("กรอกจำนวนเงินมากกว่า 0"); return; }
     const adjustmentType = mode === "deduction" ? "deduction" : "earning";
@@ -450,7 +516,7 @@ function QuickAdjustmentModal({
     try {
       const payload = {
         period_id: periodId,
-        employee_id: row.employee_id,
+        employee_id: selectedRow.employee_id,
         adjustment_type: adjustmentType,
         item_name: itemName,
         amount: Number(amount),
@@ -500,7 +566,7 @@ function QuickAdjustmentModal({
       open
       onClose={onClose}
       size="md"
-      title={`${meta.title} - ${row.employee_name || row.employee_code}`}
+      title={`${meta.title}${selectedRow ? ` - ${selectedRow.employee_name || selectedRow.employee_code}` : ""}`}
       description="ใส่เฉพาะรายการนี้ ระบบจะนำไปคิดในยอดสุทธิประมาณทันที"
       loading={loading}
       hasUnsavedChanges={hasDraft && !busy}
@@ -528,7 +594,7 @@ function QuickAdjustmentModal({
             type="button"
             onClick={save}
             disabled={busy}
-            className="h-9 px-4 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            className={`h-9 px-4 rounded-lg text-sm font-medium text-white disabled:opacity-50 ${tone.primary}`}
           >
             {busy ? "กำลังบันทึก..." : editId ? "บันทึกการแก้ไข" : meta.button}
           </button>
@@ -536,13 +602,27 @@ function QuickAdjustmentModal({
       }
     >
       <div className="space-y-4">
+        <div className={`h-1.5 rounded-full ${tone.accent}`} />
         {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{err}</div>}
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-          <div className="text-xs text-slate-500">พนักงาน</div>
-          <div className="text-sm font-semibold text-slate-800">
-            <span className="font-mono text-xs text-slate-400">{row.employee_code}</span> {row.employee_name}
+        <div className={`rounded-lg border px-3 py-2 ${tone.panel}`}>
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs text-slate-500">พนักงาน</div>
+            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${tone.badge}`}>{meta.label}</span>
           </div>
+          {row ? (
+            <div className="text-sm font-semibold text-slate-800">
+              <span className="font-mono text-xs text-slate-400">{row.employee_code}</span> {row.employee_name}
+            </div>
+          ) : (
+            <select
+              value={selectedEmployeeId}
+              onChange={(e) => setSelectedEmployeeId(e.target.value)}
+              className={`mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 ${tone.field}`}
+            >
+              {rows.map((r) => <option key={r.employee_id} value={r.employee_id}>{r.employee_code} - {r.employee_name}</option>)}
+            </select>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-3">
@@ -551,7 +631,7 @@ function QuickAdjustmentModal({
             <select
               value={selectedName}
               onChange={(e) => setSelectedName(e.target.value)}
-              className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+              className={`h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm focus:outline-none focus:ring-2 ${tone.field}`}
             >
               {names.map((name) => <option key={name} value={name}>{name}</option>)}
               <option value="__custom__">+ เพิ่มชื่อใหม่</option>
@@ -562,7 +642,7 @@ function QuickAdjustmentModal({
               value={customName}
               onChange={(e) => setCustomName(e.target.value)}
               placeholder={meta.placeholder}
-              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+              className={`h-10 w-full rounded-lg border border-slate-300 px-3 text-sm focus:outline-none focus:ring-2 ${tone.field}`}
               autoFocus
             />
           )}
@@ -575,7 +655,7 @@ function QuickAdjustmentModal({
               min="0"
               step="any"
               placeholder="เช่น 500"
-              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums"
+              className={`h-10 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums focus:outline-none focus:ring-2 ${tone.field}`}
             />
           </label>
         </div>
@@ -626,39 +706,119 @@ function QuickAdjustmentModal({
   );
 }
 
+function AdjustmentList({
+  title,
+  modes,
+  rows,
+  items,
+  editable,
+  onAdd,
+  onOpen,
+}: {
+  title: string;
+  modes: AdjustMode[];
+  rows: Row[];
+  items: Adj[];
+  editable: boolean;
+  onAdd: (mode: AdjustMode) => void;
+  onOpen: (row: Row | undefined, mode: AdjustMode) => void;
+}) {
+  const rowById = new Map(rows.map((row) => [row.employee_id, row]));
+  const filtered = items.filter((item) => modes.some((mode) => matchesMode(item, mode)));
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">{title}</div>
+          <div className="text-xs text-slate-400">รายการที่บันทึกไว้ในงวดนี้ กดปุ่มด้านขวาเพื่อเพิ่มแบบเร็ว</div>
+        </div>
+        {editable && (
+          <div className="flex flex-wrap gap-2">
+            {modes.map((mode) => {
+              const meta = modeMeta(mode);
+              const tone = MODE_TONE[mode];
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => onAdd(mode)}
+                  className={`h-9 rounded-lg px-3 text-sm font-medium text-white ${tone.primary}`}
+                >
+                  {meta.button}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-500 text-xs">
+            <tr>
+              <th className="text-left px-3 py-2">พนักงาน</th>
+              <th className="text-left px-3 py-2">ประเภท</th>
+              <th className="text-left px-3 py-2">รายการ</th>
+              <th className="text-right px-3 py-2">จำนวนเงิน</th>
+              <th className="text-center px-3 py-2">แก้</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((item) => {
+              const mode = isPieceworkItem(item) ? "piecework" : item.adjustment_type === "deduction" ? "deduction" : "earning";
+              const meta = modeMeta(mode);
+              const tone = MODE_TONE[mode];
+              const row = rowById.get(item.employee_id);
+              return (
+                <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-3 py-2">
+                    {row ? (
+                      <>
+                        <span className="font-mono text-xs text-slate-400">{row.employee_code}</span> {row.employee_name}
+                      </>
+                    ) : (
+                      <span className="font-mono text-xs text-slate-400">{item.employee_id}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${tone.badge}`}>{meta.label}</span>
+                  </td>
+                  <td className="px-3 py-2 text-slate-700">{item.item_name}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(Number(item.amount))}</td>
+                  <td className="px-3 py-2 text-center">
+                    {editable ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpen(row, mode)}
+                        className="h-8 rounded-lg border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50"
+                      >
+                        แก้
+                      </button>
+                    ) : (
+                      <span className="text-slate-300">-</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-3 py-10 text-center text-slate-400 text-sm">— ยังไม่มีรายการ —</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function TabPlaceholder({ title, description }: { title: string; description: string }) {
   return (
     <div className="rounded-xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center">
       <div className="text-sm font-semibold text-slate-700">{title}</div>
       <p className="mt-1 text-sm text-slate-500">{description}</p>
-    </div>
-  );
-}
-
-function PieceworkTable({ rows, editable, onOpen }: { rows: Row[]; editable: boolean; onOpen: (row: Row) => void }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-slate-500 text-xs">
-          <tr>
-            <th className="text-left px-3 py-2">พนักงาน</th>
-            <th className="text-right px-3 py-2">งานเหมา</th>
-            <th className="text-right px-3 py-2">สุทธิประมาณ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} className={`border-t border-slate-100 hover:bg-slate-50 ${r.piecework_baht ? "bg-violet-50/30" : ""}`}>
-              <td className="px-3 py-2"><span className="font-mono text-xs text-slate-400">{r.employee_code}</span> {r.employee_name}</td>
-              <td className="px-3 py-2 text-right">
-                <AdjustmentCell value={r.piecework_baht} mode="piecework" editable={editable} onClick={() => onOpen(r)} />
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(r.net_estimate)}</td>
-            </tr>
-          ))}
-          {rows.length === 0 && <tr><td colSpan={3} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -779,10 +939,12 @@ function Legend({ label, cls }: { label: string; cls: string }) {
 
 function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initialAdjustMode, onClose, onChanged }:
   { row: Row; periodId: string; editable: boolean; initialDate?: string; initialKind?: TimeKind; initialAdjustMode?: AdjustMode; onClose: () => void; onChanged: () => void }) {
+  const initialDrawerTab: DrawerTab = initialAdjustMode ?? (initialKind === "ot" ? "ot" : "time");
   const [items, setItems] = useState<Adj[]>([]);
   const [timeItems, setTimeItems] = useState<TimeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<AdjustMode>(initialAdjustMode ?? "earning");
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>(initialDrawerTab);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [tKind, setTKind] = useState<TimeKind>(initialKind ?? "ot");
@@ -810,12 +972,18 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setTKind(initialKind ?? "ot");
     setTDate(initialDate ?? todayIso());
     setMode(initialAdjustMode ?? "earning");
+    setDrawerTab(initialAdjustMode ?? (initialKind === "ot" ? "ot" : "time"));
     setTValue("");
     setTNote("");
     setName("");
     setAmount("");
     setPreview(null);
   }, [initialDate, initialKind, initialAdjustMode, row.employee_id]);
+  useEffect(() => {
+    if (drawerTab === "ot") setTKind("ot");
+    else if (drawerTab === "time" && tKind === "ot") setTKind("late");
+    else if (drawerTab === "piecework" || drawerTab === "earning" || drawerTab === "deduction") setMode(drawerTab);
+  }, [drawerTab, tKind]);
   useEffect(() => { setPreview(null); setErr(null); }, [tKind, tValue, tDate]);
 
   async function addItem() {
@@ -898,6 +1066,13 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const earnings = items.filter((i) => i.adjustment_type === "earning" && !isPieceworkItem(i));
   const deductions = items.filter((i) => i.adjustment_type === "deduction");
   const hasDraftTime = editable && (!!tValue || !!tNote || !!preview);
+  const visibleTimeItems = timeItems.filter((it) => drawerTab === "ot" ? it.kind === "ot" : it.kind !== "ot");
+  const timeKinds: TimeKind[] = drawerTab === "ot" ? ["ot"] : ["late", "absence", "leave"];
+  const adjustItems = drawerTab === "piecework" ? pieceworks : drawerTab === "deduction" ? deductions : earnings;
+  const adjustTitle = drawerTab === "piecework" ? "🟣 งานเหมา" : drawerTab === "deduction" ? "🔴 หักอื่น" : "🟢 เพิ่มพิเศษ";
+  const adjustEmpty = drawerTab === "piecework" ? "ยังไม่มีรายการงานเหมา" : drawerTab === "deduction" ? "ยังไม่มีรายการหัก" : "ยังไม่มีรายการเพิ่ม";
+  const isTimeTab = drawerTab === "time" || drawerTab === "ot";
+  const isAdjustTab = drawerTab === "piecework" || drawerTab === "earning" || drawerTab === "deduction";
 
   return (
     <Drawer
@@ -912,14 +1087,40 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
           {!editable && <div className="rounded-lg bg-amber-50 text-amber-700 px-3 py-2 text-xs">งวดนี้แก้ไม่ได้ (ดูอย่างเดียว)</div>}
           {err && <div className="rounded-lg bg-red-50 text-red-700 px-3 py-2 text-xs">{err}</div>}
 
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
+            <div className="flex min-w-max gap-1">
+              {DRAWER_TABS.map((tab) => {
+                const active = drawerTab === tab.key;
+                const tone = tab.key === "deduction" ? MODE_TONE.deduction : tab.key === "earning" ? MODE_TONE.earning : tab.key === "piecework" ? MODE_TONE.piecework : null;
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setDrawerTab(tab.key)}
+                    className={`h-9 rounded-lg px-3 text-sm font-medium transition-colors ${
+                      active
+                        ? tone
+                          ? `${tone.primary} text-white`
+                          : "bg-slate-900 text-white"
+                        : "text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* เวลา: สาย/ขาด/ลา/OT — คิดเงินจากเรทค่าจ้างอัตโนมัติ */}
+          {isTimeTab && (
           <div>
-            <div className="text-sm font-medium text-slate-700 mb-2">⏱ เวลา (สาย/ขาด/ลา/OT)</div>
-            {timeItems.length === 0 ? (
+            <div className="text-sm font-medium text-slate-700 mb-2">{drawerTab === "ot" ? "⏱ OT" : "⏱ เวลา (สาย/ขาด/ลา)"}</div>
+            {visibleTimeItems.length === 0 ? (
               <div className="text-xs text-slate-400 py-1">ยังไม่มีรายการเวลา</div>
             ) : (
               <div className="space-y-1.5">
-                {timeItems.map((it) => {
+                {visibleTimeItems.map((it) => {
                   const m = TIME_META[it.kind];
                   return (
                     <div key={`${it.kind}-${it.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
@@ -947,10 +1148,10 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                   <label className="block">
                     <span className="block text-xs text-slate-500 mb-1">ประเภท</span>
                     <select value={tKind} onChange={(e) => setTKind(e.target.value as TimeKind)} className="h-9 w-full px-2 border border-slate-300 rounded-lg text-sm bg-white">
-                      <option value="late">มาสาย (นาที)</option>
-                      <option value="absence">ขาดงาน (วัน)</option>
-                      <option value="leave">ลาไม่รับเงิน (วัน)</option>
-                      <option value="ot">OT (ชม.)</option>
+                      {timeKinds.includes("late") && <option value="late">มาสาย (นาที)</option>}
+                      {timeKinds.includes("absence") && <option value="absence">ขาดงาน (วัน)</option>}
+                      {timeKinds.includes("leave") && <option value="leave">ลาไม่รับเงิน (วัน)</option>}
+                      {timeKinds.includes("ot") && <option value="ot">OT (ชม.)</option>}
                     </select>
                   </label>
                   <label className="block">
@@ -1004,30 +1205,26 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
               </div>
             )}
           </div>
+          )}
 
-          <div className="border-t border-slate-100" />
-
-          <Section title="🟣 งานเหมา" items={pieceworks} onDel={del} editable={editable} busy={busy} empty="ยังไม่มีรายการงานเหมา" />
-          <Section title="🟢 เพิ่มพิเศษ" items={earnings} onDel={del} editable={editable} busy={busy} empty="ยังไม่มีรายการเพิ่ม" />
-          <Section title="🔴 หักอื่น" items={deductions} onDel={del} editable={editable} busy={busy} empty="ยังไม่มีรายการหัก" />
+          {isAdjustTab && (
+          <>
+          <Section title={adjustTitle} items={adjustItems} onDel={del} editable={editable} busy={busy} empty={adjustEmpty} />
 
           {editable && (
             <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-              <div className="text-sm font-medium text-slate-700">เพิ่มเงินเพิ่ม/หัก</div>
-              <div className="flex gap-2">
-                <button onClick={() => setMode("piecework")} className={`flex-1 h-9 rounded-lg text-sm font-medium border ${mode === "piecework" ? "bg-violet-600 text-white border-violet-600" : "border-slate-300 text-slate-600"}`}>งานเหมา</button>
-                <button onClick={() => setMode("earning")} className={`flex-1 h-9 rounded-lg text-sm font-medium border ${mode === "earning" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-300 text-slate-600"}`}>เพิ่มพิเศษ</button>
-                <button onClick={() => setMode("deduction")} className={`flex-1 h-9 rounded-lg text-sm font-medium border ${mode === "deduction" ? "bg-red-600 text-white border-red-600" : "border-slate-300 text-slate-600"}`}>หักอื่น</button>
-              </div>
+              <div className="text-sm font-medium text-slate-700">เพิ่ม{modeMeta(mode).label}</div>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder={mode === "piecework" ? "ชื่องาน เช่น เหมาแพ็คสินค้า / เหมาติดป้าย" : mode === "earning" ? "ชื่อรายการ เช่น เบี้ยขยัน / โบนัสพิเศษ" : "ชื่อรายการ เช่น หักของเสีย / หักเบิกล่วงหน้า"}
                 className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm" />
               <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" placeholder="จำนวนเงิน (บาท)"
                 className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums" />
               <button onClick={addItem} disabled={busy}
-                className="h-10 w-full bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                className={`h-10 w-full text-white rounded-lg text-sm font-medium disabled:opacity-50 ${MODE_TONE[mode].primary}`}>
                 {busy ? "กำลังบันทึก..." : mode === "piecework" ? "+ เพิ่มงานเหมา" : "+ เพิ่มรายการ"}
               </button>
             </div>
+          )}
+          </>
           )}
           <p className="text-xs text-slate-400">หลังแก้รายการ กลับไปกด “คำนวณ + บันทึก” เพื่อออกผลจริง</p>
         </div>
