@@ -170,6 +170,13 @@ type FamilyTemplate = {
   required_fields?: string[];
   defaults?:        Record<string, unknown>;
 };
+// template ใน DB อาจเป็นแบบใหม่ { parent_sku, sku } หรือแบบเก่า (flat = ของ Parent SKU)
+type FamilyTemplateRaw = FamilyTemplate & { parent_sku?: FamilyTemplate; sku?: FamilyTemplate };
+function scopedTpl(raw: FamilyTemplateRaw | undefined | null, scope: "parent_sku" | "sku"): FamilyTemplate {
+  if (!raw) return {};
+  if (raw.parent_sku !== undefined || raw.sku !== undefined) return (raw[scope] ?? {}) as FamilyTemplate;
+  return scope === "parent_sku" ? (raw as FamilyTemplate) : {};   // legacy flat = Parent SKU
+}
 
 // resolveDefault + evaluateCondition: ย้ายไป @/lib/field-helpers (Sprint 14)
 
@@ -625,6 +632,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     }),
     [effectiveFields],
   );
+  // scope ของฟอร์มนี้ (parent_sku / sku) — เลือก sub-template ที่ถูกตัว (ของเก่า flat = parent)
+  const tplScope: "parent_sku" | "sku" = useMemo(() => {
+    const k = (config.moduleKey ?? config.apiPath ?? "").toLowerCase();
+    return k.includes("sku") && !k.includes("parent") ? "sku" : "parent_sku";
+  }, [config.moduleKey, config.apiPath]);
   const [familyTemplates, setFamilyTemplates] = useState<Record<string, FamilyTemplate>>({});
   useEffect(() => {
     if (familyM2mFields.length === 0) return;
@@ -632,11 +644,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .then((r) => r.json())
       .then((j) => {
         const m: Record<string, FamilyTemplate> = {};
-        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) m[String(r.id)] = (r.template as FamilyTemplate) ?? {};
+        for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
         setFamilyTemplates(m);
       })
       .catch(() => {});
-  }, [familyM2mFields.length]);
+  }, [familyM2mFields.length, tplScope]);
 
   // ids ของแท็กที่เลือกในฟอร์มปัจจุบัน → รวมเทมเพลต union (โชว์ชนะซ่อน)
   const selectedFamilyIds = useMemo(() => {
