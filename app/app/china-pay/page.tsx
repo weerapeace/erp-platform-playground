@@ -3234,7 +3234,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
         const i = slipLinkIdx; const s = txSlips[i];
         return (
         <Portal><div className="fixed inset-0 z-[260] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setSlipLinkIdx(null)}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85svh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between">
               <span className="font-semibold text-slate-800 truncate">🔗 {s.bank || `รายการ ${i + 1}`} · โอน ฿{fmt(num(s.amount))} ตัดบิลไหน</span>
               <button onClick={() => setSlipLinkIdx(null)} className="w-8 h-8 flex-shrink-0 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
@@ -3484,7 +3484,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { 
   return (
     <Portal>
     <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88dvh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85svh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
           <div className="font-semibold text-slate-800">ใบสรุปการโอน</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
