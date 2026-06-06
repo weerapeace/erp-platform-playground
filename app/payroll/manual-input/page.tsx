@@ -21,7 +21,10 @@ type Row = {
 type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
 type TimeKind = "ot" | "late" | "absence" | "leave";
 type AdjustMode = "earning" | "deduction" | "piecework";
-type DrawerTab = "time" | "ot" | "piecework" | "earning" | "deduction";
+type DrawerTab = TimeKind;
+type DurationPreset = "full" | "half" | "custom";
+type LateUnit = "minutes" | "hours";
+type LeaveReason = "medical_certificate" | "sick_paid" | "sick_unpaid" | "unpaid";
 type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; work_date?: string; note?: string };
 type TabKey = "summary" | "special" | "piecework" | "timestamp" | "import" | "attendance";
 type TimePreview = {
@@ -71,12 +74,18 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "attendance", label: "ตารางเข้างาน" },
 ];
 const DRAWER_TABS: { key: DrawerTab; label: string }[] = [
-  { key: "time", label: "สาย/ขาด/ลา" },
+  { key: "late", label: "สาย" },
+  { key: "absence", label: "ขาด" },
+  { key: "leave", label: "ลา" },
   { key: "ot", label: "OT" },
-  { key: "piecework", label: "งานเหมา" },
-  { key: "earning", label: "เพิ่มพิเศษ" },
-  { key: "deduction", label: "หักอื่น" },
 ];
+const STANDARD_HOURS_PER_DAY = 8;
+const LEAVE_REASON_LABEL: Record<LeaveReason, string> = {
+  medical_certificate: "ลาแบบมีใบรับรองแพทย์",
+  sick_paid: "ลาป่วยรับเงิน",
+  sick_unpaid: "ลาป่วยไม่รับเงิน",
+  unpaid: "ลาไม่รับเงิน",
+};
 
 export default function ManualInputPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
@@ -276,6 +285,7 @@ export default function ManualInputPage() {
                 <th className="text-right px-3 py-2">ขาด</th>
                 <th className="text-right px-3 py-2">ลา</th>
                 <th className="text-right px-3 py-2">OT</th>
+                <th className="text-right px-3 py-2">รายการประจำ</th>
                 <th className="text-right px-3 py-2">งานเหมา</th>
                 <th className="text-right px-3 py-2">เพิ่มพิเศษ</th>
                 <th className="text-right px-3 py-2">หักอื่น</th>
@@ -284,30 +294,52 @@ export default function ManualInputPage() {
               </tr>
             </thead>
             <tbody>
-              {shown.map((r) => (
-                <tr key={r.id} className={`border-t border-slate-100 hover:bg-slate-50 ${r.has_manual ? "bg-amber-50/30" : ""}`}>
-                  <td className="px-3 py-2"><span className="font-mono text-xs text-slate-400">{r.employee_code}</span> {r.employee_name}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{r.work_days || "—"}</td>
-                  <td className="px-3 py-2 text-right">{dash(r.late_baht, "text-red-600")}</td>
-                  <td className="px-3 py-2 text-right">{dash(r.absence_baht, "text-red-600")}</td>
-                  <td className="px-3 py-2 text-right">{dash(r.leave_baht, "text-red-600")}</td>
-                  <td className="px-3 py-2 text-right">{dash(r.ot_baht, "text-emerald-600")}</td>
-                  <td className="px-3 py-2 text-right">
-                    <AdjustmentCell value={r.piecework_baht} mode="piecework" editable={editable} onClick={() => openQuickAdjust(r, "piecework")} />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <AdjustmentCell value={r.special_add} mode="earning" editable={editable} onClick={() => openQuickAdjust(r, "earning")} />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openQuickAdjust(r, "deduction")} />
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(r.net_estimate)}</td>
-                  <td className="px-3 py-2 text-center">
-                    <button onClick={() => openRowEditor(r)} className="px-2 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100" title="แก้เพิ่มพิเศษ/หักอื่น">✏️</button>
-                  </td>
-                </tr>
-              ))}
-              {shown.length === 0 && <tr><td colSpan={11} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
+              {shown.map((r) => {
+                const employeeAdjustments = rowAdjustments(adjustments, r.employee_id);
+                const pieceworkItems = employeeAdjustments.filter((item) => matchesMode(item, "piecework"));
+                const earningItems = employeeAdjustments.filter((item) => matchesMode(item, "earning"));
+                const deductionItems = employeeAdjustments.filter((item) => matchesMode(item, "deduction"));
+                return (
+                  <tr key={r.id} className={`border-t border-slate-100 hover:bg-slate-50 ${r.has_manual ? "bg-amber-50/30" : ""}`}>
+                    <td className="px-3 py-2"><span className="font-mono text-xs text-slate-400">{r.employee_code}</span> {r.employee_name}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-500">{r.work_days || "-"}</td>
+                    <td className="px-3 py-2 text-right">
+                      <AmountWithTooltip value={r.late_baht} className="text-red-600" prefix="-" title="สาย/ออกก่อน: คิดจากนาทีที่บันทึกไว้" />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <AmountWithTooltip value={r.absence_baht} className="text-red-600" prefix="-" title="ขาดงาน: คิดจากวัน/ชั่วโมงที่บันทึกไว้" />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <AmountWithTooltip value={r.leave_baht} className="text-red-600" prefix="-" title="ลา: คิดจากรายการลาที่ไม่รับเงิน/รายการที่ตั้งไว้" />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <AmountWithTooltip value={r.ot_baht} className="text-emerald-600" prefix="+" title="OT: คิดจากชั่วโมง OT ที่บันทึกไว้" />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <RecurringCell items={employeeAdjustments} editable={editable} onClick={() => openRowEditor(r)} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <AdjustmentCell value={r.piecework_baht} mode="piecework" editable={editable} onClick={() => openQuickAdjust(r, "piecework")} tooltip={adjustmentTooltip("งานเหมา", pieceworkItems, "+")} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <AdjustmentCell value={r.special_add} mode="earning" editable={editable} onClick={() => openQuickAdjust(r, "earning")} tooltip={adjustmentTooltip("เพิ่มพิเศษ", earningItems, "+")} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openQuickAdjust(r, "deduction")} tooltip={adjustmentTooltip("หักอื่น", deductionItems, "-")} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <span className="inline-flex items-center justify-end gap-1 tabular-nums font-medium" title={netTooltip(r, employeeAdjustments)}>
+                        {baht(r.net_estimate)}
+                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <button onClick={() => openRowEditor(r)} className="px-2 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100" title="แก้รายการรายคน">✏️</button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {shown.length === 0 && <tr><td colSpan={12} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
             </tbody>
           </table>
         </div>
@@ -332,7 +364,7 @@ export default function ManualInputPage() {
   );
 }
 
-function AdjustmentCell({ value, mode, editable, onClick }: { value: number; mode: AdjustMode; editable: boolean; onClick: () => void }) {
+function AdjustmentCell({ value, mode, editable, onClick, tooltip }: { value: number; mode: AdjustMode; editable: boolean; onClick: () => void; tooltip?: string }) {
   const hasValue = Number(value) > 0;
   const isDeduction = mode === "deduction";
   const isPiecework = mode === "piecework";
@@ -354,9 +386,10 @@ function AdjustmentCell({ value, mode, editable, onClick }: { value: number; mod
               ? "border-violet-100 text-violet-600 hover:bg-violet-50"
               : "border-emerald-100 text-emerald-600 hover:bg-emerald-50"
       }`}
-      title={isDeduction ? "เพิ่ม/ดูรายการหักอื่น" : isPiecework ? "เพิ่ม/ดูรายการงานเหมา" : "เพิ่ม/ดูรายการเพิ่มพิเศษ"}
+      title={tooltip ?? (isDeduction ? "เพิ่ม/ดูรายการหักอื่น" : isPiecework ? "เพิ่ม/ดูรายการงานเหมา" : "เพิ่ม/ดูรายการเพิ่มพิเศษ")}
     >
       {hasValue ? baht(value) : isDeduction ? "+ หัก" : isPiecework ? "+ งานเหมา" : "+ เพิ่ม"}
+      {hasValue ? <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-white/70 text-[10px] cursor-help">?</span> : null}
     </button>
   );
 }
@@ -416,6 +449,81 @@ function matchesMode(item: Adj, mode: AdjustMode) {
   if (mode === "piecework") return isPieceworkItem(item);
   if (mode === "deduction") return item.adjustment_type === "deduction";
   return item.adjustment_type === "earning" && !isPieceworkItem(item);
+}
+
+function isRecurringItem(item: Adj) {
+  const source = String(item.source_type ?? "").toLowerCase();
+  const code = String(item.item_code ?? "").toUpperCase();
+  return source === "recurring" || source === "regular" || code.startsWith("RECURRING") || code.startsWith("REGULAR");
+}
+
+function rowAdjustments(items: Adj[], employeeId: string) {
+  return items.filter((item) => item.employee_id === employeeId);
+}
+
+function totalAdjustments(items: Adj[], predicate: (item: Adj) => boolean) {
+  return items.filter(predicate).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+}
+
+function adjustmentTooltip(title: string, items: Adj[], sign: "+" | "-" = "+") {
+  if (items.length === 0) return `${title}: ยังไม่มีรายการ`;
+  const lines = items.map((item) => `${sign} ${item.item_name}: ${baht(Number(item.amount || 0))}`);
+  return [title, ...lines].join("\n");
+}
+
+function netTooltip(row: Row, items: Adj[]) {
+  const lines = [
+    `สุทธิประมาณ: ${baht(row.net_estimate)}`,
+    `สาย/ออกก่อน: -${baht(row.late_baht)}`,
+    `ขาด: -${baht(row.absence_baht)}`,
+    `ลา: -${baht(row.leave_baht)}`,
+    `OT: +${baht(row.ot_baht)}`,
+    `งานเหมา: +${baht(row.piecework_baht)}`,
+    `เพิ่มพิเศษ: +${baht(row.special_add)}`,
+    `หักอื่น: -${baht(row.other_deduct)}`,
+  ];
+  const recurring = totalAdjustments(items, isRecurringItem);
+  if (recurring) lines.push(`รายการประจำ: ${baht(recurring)}`);
+  return lines.join("\n");
+}
+
+function AmountWithTooltip({ value, className = "", title, prefix = "" }: { value: number; className?: string; title: string; prefix?: string }) {
+  const hasValue = Number(value) !== 0;
+  return (
+    <span className={`inline-flex items-center justify-end gap-1 tabular-nums ${className}`} title={title}>
+      {hasValue ? `${prefix}${baht(Math.abs(value))}` : <span className="text-slate-300">-</span>}
+      {hasValue && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>}
+    </span>
+  );
+}
+
+function RecurringCell({ items, editable, onClick }: { items: Adj[]; editable: boolean; onClick: () => void }) {
+  const earnings = items.filter((item) => isRecurringItem(item) && item.adjustment_type === "earning");
+  const deductions = items.filter((item) => isRecurringItem(item) && item.adjustment_type === "deduction");
+  const total = totalAdjustments(earnings, () => true) - totalAdjustments(deductions, () => true);
+  const title = [
+    adjustmentTooltip("รายการประจำเพิ่ม", earnings, "+"),
+    adjustmentTooltip("รายการประจำหัก", deductions, "-"),
+  ].join("\n\n");
+
+  if (!total && !editable) return <span className="text-slate-300">-</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex h-8 min-w-[84px] items-center justify-end gap-1 rounded-lg border px-2 text-xs font-medium tabular-nums transition ${
+        total > 0
+          ? "border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+          : total < 0
+            ? "border-red-100 bg-red-50 text-red-700 hover:bg-red-100"
+            : "border-slate-200 text-slate-400 hover:bg-slate-50"
+      }`}
+      title={title}
+    >
+      {total ? `${total > 0 ? "+" : "-"} ${baht(Math.abs(total))}` : "-"}
+      {total ? <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-white/70 text-[10px] cursor-help">?</span> : null}
+    </button>
+  );
 }
 
 function uniqueNames(items: Adj[], mode: AdjustMode) {
@@ -939,7 +1047,7 @@ function Legend({ label, cls }: { label: string; cls: string }) {
 
 function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initialAdjustMode, onClose, onChanged }:
   { row: Row; periodId: string; editable: boolean; initialDate?: string; initialKind?: TimeKind; initialAdjustMode?: AdjustMode; onClose: () => void; onChanged: () => void }) {
-  const initialDrawerTab: DrawerTab = initialAdjustMode ?? (initialKind === "ot" ? "ot" : "time");
+  const initialDrawerTab: DrawerTab = initialKind ?? "late";
   const [items, setItems] = useState<Adj[]>([]);
   const [timeItems, setTimeItems] = useState<TimeItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -947,11 +1055,17 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(initialDrawerTab);
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
-  const [tKind, setTKind] = useState<TimeKind>(initialKind ?? "ot");
+  const [tKind, setTKind] = useState<TimeKind>(initialKind ?? initialDrawerTab);
   const [tValue, setTValue] = useState("");
+  const [lateUnit, setLateUnit] = useState<LateUnit>("minutes");
+  const [durationPreset, setDurationPreset] = useState<DurationPreset>("custom");
+  const [customHours, setCustomHours] = useState("");
+  const [customMinutes, setCustomMinutes] = useState("");
+  const [leaveReason, setLeaveReason] = useState<LeaveReason>("unpaid");
   const [tDate, setTDate] = useState(initialDate ?? todayIso());
   const [tNote, setTNote] = useState("");
   const [preview, setPreview] = useState<TimePreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -969,22 +1083,28 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   }, [periodId, row.employee_id]);
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => {
-    setTKind(initialKind ?? "ot");
+    setTKind(initialKind ?? "late");
     setTDate(initialDate ?? todayIso());
     setMode(initialAdjustMode ?? "earning");
-    setDrawerTab(initialAdjustMode ?? (initialKind === "ot" ? "ot" : "time"));
+    setDrawerTab(initialKind ?? "late");
     setTValue("");
+    setLateUnit("minutes");
+    setDurationPreset("custom");
+    setCustomHours("");
+    setCustomMinutes("");
+    setLeaveReason("unpaid");
     setTNote("");
     setName("");
     setAmount("");
     setPreview(null);
   }, [initialDate, initialKind, initialAdjustMode, row.employee_id]);
   useEffect(() => {
-    if (drawerTab === "ot") setTKind("ot");
-    else if (drawerTab === "time" && tKind === "ot") setTKind("late");
-    else if (drawerTab === "piecework" || drawerTab === "earning" || drawerTab === "deduction") setMode(drawerTab);
-  }, [drawerTab, tKind]);
-  useEffect(() => { setPreview(null); setErr(null); }, [tKind, tValue, tDate]);
+    setTKind(drawerTab);
+    setPreview(null);
+    setErr(null);
+    if (drawerTab === "absence" || drawerTab === "leave") setDurationPreset("full");
+    if (drawerTab === "ot") setDurationPreset("custom");
+  }, [drawerTab]);
 
   async function addItem() {
     setErr(null);
@@ -1020,34 +1140,70 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     finally { setBusy(false); }
   }
 
-  async function previewTime() {
+  function computedTimeValue() {
+    if (tKind === "late") {
+      const raw = Number(tValue);
+      if (!(raw > 0)) return 0;
+      return lateUnit === "hours" ? raw * 60 : raw;
+    }
+    if (durationPreset === "full") return tKind === "ot" ? STANDARD_HOURS_PER_DAY : 1;
+    if (durationPreset === "half") return tKind === "ot" ? STANDARD_HOURS_PER_DAY / 2 : 0.5;
+    const hours = Number(customHours || 0);
+    const minutes = Number(customMinutes || 0);
+    const totalHours = hours + (minutes / 60);
+    if (!(totalHours > 0)) return 0;
+    return tKind === "ot" ? totalHours : totalHours / STANDARD_HOURS_PER_DAY;
+  }
+
+  function timeNote() {
+    const note = tNote.trim();
+    if (tKind !== "leave") return note;
+    const reason = LEAVE_REASON_LABEL[leaveReason];
+    return note ? `${reason} - ${note}` : reason;
+  }
+
+  function timeQuantityLabel() {
+    if (tKind === "late") return lateUnit === "hours" ? "จำนวนชั่วโมงที่สาย" : "จำนวนนาทีที่สาย";
+    if (durationPreset === "full") return `เต็มวัน (${STANDARD_HOURS_PER_DAY} ชั่วโมง)`;
+    if (durationPreset === "half") return `ครึ่งวัน (${STANDARD_HOURS_PER_DAY / 2} ชั่วโมง)`;
+    return tKind === "ot" ? "ใส่ชั่วโมง OT เอง" : "ใส่ชั่วโมง/นาทีเอง";
+  }
+
+  async function loadPreview(value: number) {
     setErr(null);
-    if (!(Number(tValue) > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
-    if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); return; }
-    setBusy(true);
+    if (!(value > 0)) { setPreview(null); return; }
+    if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); setPreview(null); return; }
+    setPreviewing(true);
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value: Number(tValue), work_date: tDate, note: tNote, preview_only: true }),
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), preview_only: true }),
       }).then((r) => r.json());
-      if (j.error) setErr(j.error);
+      if (j.error) { setErr(j.error); setPreview(null); }
       else setPreview(j.data as TimePreview);
-    } catch { setErr("คำนวณให้ดูไม่สำเร็จ"); }
-    finally { setBusy(false); }
+    } catch { setErr("คำนวณตัวอย่างไม่สำเร็จ"); setPreview(null); }
+    finally { setPreviewing(false); }
+  }
+
+  async function previewTime() {
+    const value = computedTimeValue();
+    if (!(value > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
+    await loadPreview(value);
   }
 
   async function addTime() {
     setErr(null);
-    if (!(Number(tValue) > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
+    const value = computedTimeValue();
+    if (!(value > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
     if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); return; }
     setBusy(true);
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value: Number(tValue), work_date: tDate, note: tNote }),
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote() }),
       }).then((r) => r.json());
       if (j.error) setErr(j.error);
-      else { setTValue(""); setTNote(""); setPreview(null); await reload(); onChanged(); }
+      else { setTValue(""); setCustomHours(""); setCustomMinutes(""); setTNote(""); setPreview(null); await reload(); onChanged(); }
     } catch { setErr("บันทึกไม่สำเร็จ"); }
     finally { setBusy(false); }
   }
@@ -1062,17 +1218,24 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     finally { setBusy(false); }
   }
 
+  useEffect(() => {
+    const value = computedTimeValue();
+    setPreview(null);
+    setErr(null);
+    if (!editable || !(value > 0) || !tDate) return;
+    const timer = window.setTimeout(() => { void loadPreview(value); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [editable, tKind, tValue, lateUnit, durationPreset, customHours, customMinutes, tDate, tNote, leaveReason, periodId, row.employee_id]);
+
   const pieceworks = items.filter(isPieceworkItem);
   const earnings = items.filter((i) => i.adjustment_type === "earning" && !isPieceworkItem(i));
   const deductions = items.filter((i) => i.adjustment_type === "deduction");
-  const hasDraftTime = editable && (!!tValue || !!tNote || !!preview);
-  const visibleTimeItems = timeItems.filter((it) => drawerTab === "ot" ? it.kind === "ot" : it.kind !== "ot");
-  const timeKinds: TimeKind[] = drawerTab === "ot" ? ["ot"] : ["late", "absence", "leave"];
-  const adjustItems = drawerTab === "piecework" ? pieceworks : drawerTab === "deduction" ? deductions : earnings;
-  const adjustTitle = drawerTab === "piecework" ? "🟣 งานเหมา" : drawerTab === "deduction" ? "🔴 หักอื่น" : "🟢 เพิ่มพิเศษ";
-  const adjustEmpty = drawerTab === "piecework" ? "ยังไม่มีรายการงานเหมา" : drawerTab === "deduction" ? "ยังไม่มีรายการหัก" : "ยังไม่มีรายการเพิ่ม";
-  const isTimeTab = drawerTab === "time" || drawerTab === "ot";
-  const isAdjustTab = drawerTab === "piecework" || drawerTab === "earning" || drawerTab === "deduction";
+  const hasDraftTime = editable && (!!tValue || !!customHours || !!customMinutes || !!tNote || !!preview);
+  const visibleTimeItems = timeItems.filter((it) => it.kind === drawerTab);
+  const computedValue = computedTimeValue();
+  const adjustItems = mode === "piecework" ? pieceworks : mode === "deduction" ? deductions : earnings;
+  const adjustTitle = mode === "piecework" ? "งานเหมา" : mode === "deduction" ? "หักอื่น" : "เพิ่มพิเศษ";
+  const adjustEmpty = mode === "piecework" ? "ยังไม่มีรายการงานเหมา" : mode === "deduction" ? "ยังไม่มีรายการหัก" : "ยังไม่มีรายการเพิ่ม";
 
   return (
     <Drawer
@@ -1091,7 +1254,6 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
             <div className="flex min-w-max gap-1">
               {DRAWER_TABS.map((tab) => {
                 const active = drawerTab === tab.key;
-                const tone = tab.key === "deduction" ? MODE_TONE.deduction : tab.key === "earning" ? MODE_TONE.earning : tab.key === "piecework" ? MODE_TONE.piecework : null;
                 return (
                   <button
                     key={tab.key}
@@ -1099,9 +1261,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                     onClick={() => setDrawerTab(tab.key)}
                     className={`h-9 rounded-lg px-3 text-sm font-medium transition-colors ${
                       active
-                        ? tone
-                          ? `${tone.primary} text-white`
-                          : "bg-slate-900 text-white"
+                        ? "bg-slate-900 text-white"
                         : "text-slate-600 hover:bg-slate-50"
                     }`}
                   >
@@ -1113,9 +1273,8 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
           </div>
 
           {/* เวลา: สาย/ขาด/ลา/OT — คิดเงินจากเรทค่าจ้างอัตโนมัติ */}
-          {isTimeTab && (
           <div>
-            <div className="text-sm font-medium text-slate-700 mb-2">{drawerTab === "ot" ? "⏱ OT" : "⏱ เวลา (สาย/ขาด/ลา)"}</div>
+            <div className="text-sm font-medium text-slate-700 mb-2">เวลา: {TIME_META[drawerTab].label}</div>
             {visibleTimeItems.length === 0 ? (
               <div className="text-xs text-slate-400 py-1">ยังไม่มีรายการเวลา</div>
             ) : (
@@ -1143,26 +1302,68 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
             )}
             {editable && (
               <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
-                <div className="text-sm font-medium text-slate-700">ฟอร์มคำนวณก่อนบันทึก</div>
+                <div>
+                  <div className="text-sm font-medium text-slate-700">ฟอร์ม {TIME_META[drawerTab].label}</div>
+                  <p className="mt-0.5 text-xs text-slate-400">กรอกข้อมูลแล้วระบบจะคำนวณตัวอย่างให้ทันที ก่อนกดบันทึกรายการ</p>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="block">
-                    <span className="block text-xs text-slate-500 mb-1">ประเภท</span>
-                    <select value={tKind} onChange={(e) => setTKind(e.target.value as TimeKind)} className="h-9 w-full px-2 border border-slate-300 rounded-lg text-sm bg-white">
-                      {timeKinds.includes("late") && <option value="late">มาสาย (นาที)</option>}
-                      {timeKinds.includes("absence") && <option value="absence">ขาดงาน (วัน)</option>}
-                      {timeKinds.includes("leave") && <option value="leave">ลาไม่รับเงิน (วัน)</option>}
-                      {timeKinds.includes("ot") && <option value="ot">OT (ชม.)</option>}
-                    </select>
-                  </label>
                   <label className="block">
                     <span className="block text-xs text-slate-500 mb-1">วันที่</span>
                     <DateInput value={tDate} onChange={setTDate} />
                   </label>
-                  <label className="block sm:col-span-2">
-                    <span className="block text-xs text-slate-500 mb-1">จำนวน {TIME_META[tKind].unit}</span>
-                    <input value={tValue} onChange={(e) => setTValue(e.target.value)} type="number" min="0" step="any" placeholder={`เช่น ${tKind === "late" ? "30" : "1"}`}
-                      className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
-                  </label>
+                  {drawerTab === "leave" && (
+                    <label className="block">
+                      <span className="block text-xs text-slate-500 mb-1">ชนิดลา</span>
+                      <select value={leaveReason} onChange={(e) => setLeaveReason(e.target.value as LeaveReason)} className="h-9 w-full px-2 border border-slate-300 rounded-lg text-sm bg-white">
+                        <option value="medical_certificate">มีใบรับรองแพทย์</option>
+                        <option value="sick_paid">ลาป่วยรับเงิน</option>
+                        <option value="sick_unpaid">ลาป่วยไม่รับเงิน</option>
+                        <option value="unpaid">ลาไม่รับเงิน</option>
+                      </select>
+                    </label>
+                  )}
+                  {drawerTab === "late" ? (
+                    <>
+                      <label className="block">
+                        <span className="block text-xs text-slate-500 mb-1">หน่วย</span>
+                        <select value={lateUnit} onChange={(e) => setLateUnit(e.target.value as LateUnit)} className="h-9 w-full px-2 border border-slate-300 rounded-lg text-sm bg-white">
+                          <option value="minutes">นาที</option>
+                          <option value="hours">ชั่วโมง</option>
+                        </select>
+                      </label>
+                      <label className="block sm:col-span-2">
+                        <span className="block text-xs text-slate-500 mb-1">{timeQuantityLabel()}</span>
+                        <input value={tValue} onChange={(e) => setTValue(e.target.value)} type="number" min="0" step="any" placeholder={lateUnit === "minutes" ? "เช่น 30" : "เช่น 1.5"}
+                          className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                      </label>
+                    </>
+                  ) : (
+                    <div className="sm:col-span-2 space-y-3">
+                      <div>
+                        <span className="block text-xs text-slate-500 mb-1">ช่วงเวลา</span>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button type="button" onClick={() => setDurationPreset("full")} className={`h-9 rounded-lg border text-sm font-medium ${durationPreset === "full" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>เต็มวัน</button>
+                          <button type="button" onClick={() => setDurationPreset("half")} className={`h-9 rounded-lg border text-sm font-medium ${durationPreset === "half" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>ครึ่งวัน</button>
+                          <button type="button" onClick={() => setDurationPreset("custom")} className={`h-9 rounded-lg border text-sm font-medium ${durationPreset === "custom" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>กำหนดเอง</button>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">{timeQuantityLabel()}</p>
+                      </div>
+                      {durationPreset === "custom" && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block">
+                            <span className="block text-xs text-slate-500 mb-1">ชั่วโมง</span>
+                            <input value={customHours} onChange={(e) => setCustomHours(e.target.value)} type="number" min="0" step="any" placeholder="เช่น 2"
+                              className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                          </label>
+                          <label className="block">
+                            <span className="block text-xs text-slate-500 mb-1">นาที</span>
+                            <input value={customMinutes} onChange={(e) => setCustomMinutes(e.target.value)} type="number" min="0" step="1" placeholder="เช่น 30"
+                              className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <label className="block sm:col-span-2">
                     <span className="block text-xs text-slate-500 mb-1">หมายเหตุ</span>
                     <textarea value={tNote} onChange={(e) => setTNote(e.target.value)} rows={2} placeholder="เช่น มาสายรถติด / ลากิจไม่รับเงิน / ไม่สแกนนิ้ว"
@@ -1171,14 +1372,11 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={previewTime} disabled={busy}
-                    className="h-9 px-4 border border-blue-200 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 disabled:opacity-50">
-                    คำนวณให้ดู
-                  </button>
-                  <button onClick={addTime} disabled={busy || !preview}
+                  <button onClick={addTime} disabled={busy || previewing || !(computedValue > 0)}
                     className="h-9 px-4 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-                    บันทึกรายการ
+                    {busy ? "กำลังบันทึก..." : "บันทึกรายการ"}
                   </button>
+                  {previewing && <span className="inline-flex h-9 items-center text-xs text-slate-400">กำลังคำนวณตัวอย่าง...</span>}
                 </div>
 
                 {preview && (
@@ -1205,27 +1403,46 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
               </div>
             )}
           </div>
-          )}
 
-          {isAdjustTab && (
-          <>
-          <Section title={adjustTitle} items={adjustItems} onDel={del} editable={editable} busy={busy} empty={adjustEmpty} />
-
-          {editable && (
-            <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-              <div className="text-sm font-medium text-slate-700">เพิ่ม{modeMeta(mode).label}</div>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={mode === "piecework" ? "ชื่องาน เช่น เหมาแพ็คสินค้า / เหมาติดป้าย" : mode === "earning" ? "ชื่อรายการ เช่น เบี้ยขยัน / โบนัสพิเศษ" : "ชื่อรายการ เช่น หักของเสีย / หักเบิกล่วงหน้า"}
-                className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm" />
-              <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" placeholder="จำนวนเงิน (บาท)"
-                className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums" />
-              <button onClick={addItem} disabled={busy}
-                className={`h-10 w-full text-white rounded-lg text-sm font-medium disabled:opacity-50 ${MODE_TONE[mode].primary}`}>
-                {busy ? "กำลังบันทึก..." : mode === "piecework" ? "+ เพิ่มงานเหมา" : "+ เพิ่มรายการ"}
-              </button>
+          <div className="border-t border-slate-100 pt-4 space-y-3">
+            <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
+              <div className="flex min-w-max gap-1">
+                {(["piecework", "earning", "deduction"] as AdjustMode[]).map((m) => {
+                  const active = mode === m;
+                  const meta = modeMeta(m);
+                  const tone = MODE_TONE[m];
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMode(m)}
+                      className={`h-9 rounded-lg px-3 text-sm font-medium transition-colors ${
+                        active ? `${tone.primary} text-white` : "text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {meta.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          )}
-          </>
-          )}
+
+            <Section title={adjustTitle} items={adjustItems} onDel={del} editable={editable} busy={busy} empty={adjustEmpty} />
+
+            {editable && (
+              <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                <div className="text-sm font-medium text-slate-700">เพิ่ม{modeMeta(mode).label}</div>
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder={mode === "piecework" ? "ชื่องาน เช่น เหมาแพ็คสินค้า / เหมาติดป้าย" : mode === "earning" ? "ชื่อรายการ เช่น เบี้ยขยัน / โบนัสพิเศษ" : "ชื่อรายการ เช่น หักของเสีย / หักเบิกล่วงหน้า"}
+                  className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm" />
+                <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" placeholder="จำนวนเงิน (บาท)"
+                  className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums" />
+                <button onClick={addItem} disabled={busy}
+                  className={`h-10 w-full text-white rounded-lg text-sm font-medium disabled:opacity-50 ${MODE_TONE[mode].primary}`}>
+                  {busy ? "กำลังบันทึก..." : mode === "piecework" ? "+ เพิ่มงานเหมา" : mode === "deduction" ? "+ เพิ่มรายการหัก" : "+ เพิ่มพิเศษ"}
+                </button>
+              </div>
+            )}
+          </div>
           <p className="text-xs text-slate-400">หลังแก้รายการ กลับไปกด “คำนวณ + บันทึก” เพื่อออกผลจริง</p>
         </div>
     </Drawer>
