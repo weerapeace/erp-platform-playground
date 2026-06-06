@@ -320,6 +320,7 @@ type LayoutSettings = {
   secondary_sort?: SortSpec | null;
   group_by?: string | null;
   row_color_rules?: RowColorRule[];
+  summaries?: Record<string, "sum" | "count" | "avg">;
 };
 type FullLayout = {
   label?: string; description?: string | null; columns?: unknown[];
@@ -350,6 +351,7 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
   const [sort2Col, setSort2Col] = useState(""); const [sort2Dir, setSort2Dir] = useState<SortDir>("asc");
   const [groupBy, setGroupBy] = useState("");
   const [rules, setRules] = useState<RowColorRule[]>([]);
+  const [summaries, setSummaries] = useState<Record<string, "sum" | "count" | "avg">>({});
 
   useEffect(() => {
     setLoading(true); setErr(null);
@@ -366,6 +368,7 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       setSort2Col(s.secondary_sort?.column ?? ""); setSort2Dir(s.secondary_sort?.dir ?? "asc");
       setGroupBy(s.group_by ?? "");
       setRules(Array.isArray(s.row_color_rules) ? s.row_color_rules : []);
+      setSummaries((s.summaries as Record<string, "sum" | "count" | "avg">) ?? {});
     }).finally(() => setLoading(false));
   }, [tableId, moduleKey]);
 
@@ -376,6 +379,7 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       secondary_sort: sort2Col ? { column: sort2Col, dir: sort2Dir } : null,
       group_by: groupBy || null,
       row_color_rules: rules.filter((r) => r.column && r.color),
+      summaries: Object.keys(summaries).length ? summaries : undefined,
     };
     try {
       const j = await apiFetch("/api/admin/table-layouts", {
@@ -473,6 +477,34 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
             })}
           </div>
         )}
+      </div>
+
+      {/* สรุปท้ายคอลัมน์ */}
+      <div className={card}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">สรุปท้ายคอลัมน์ (Total row)</h3>
+        <p className="text-xs text-slate-500 mb-3">แสดงแถวสรุปท้ายตาราง เช่น รวมยอด/นับจำนวน/เฉลี่ย ของคอลัมน์ที่เลือก</p>
+        <div className="space-y-2">
+          {fields.map((f) => {
+            const cur = summaries[f.value] ?? "";
+            return (
+              <div key={f.value} className="flex items-center gap-3">
+                <span className="flex-1 text-sm text-slate-700 truncate">{f.label}</span>
+                <select value={cur}
+                  onChange={(e) => setSummaries((p) => {
+                    const n = { ...p }; const v = e.target.value;
+                    if (v) n[f.value] = v as "sum" | "count" | "avg"; else delete n[f.value];
+                    return n;
+                  })}
+                  className={sel}>
+                  <option value="">— ไม่สรุป —</option>
+                  <option value="sum">รวมยอด (sum)</option>
+                  <option value="count">นับจำนวน (count)</option>
+                  <option value="avg">เฉลี่ย (avg)</option>
+                </select>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* actions */}

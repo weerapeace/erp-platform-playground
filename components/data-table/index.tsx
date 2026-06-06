@@ -1045,9 +1045,27 @@ export function DataTable<T extends Record<string, unknown>>({
   }, [allDefinedColumns, showSelectCol]);
 
   const tableColumns = useMemo<ColumnDef<T>[]>(() => {
-    if (rowActions.length === 0) return withSelectCol;
+    // สรุปท้ายคอลัมน์ (ของกลาง) — ฉีด meta.summary จาก settings.summaries (sum/count/avg)
+    const summaries = layoutSettings?.summaries ?? {};
+    const injectSummary = (cols: ColumnDef<T>[]): ColumnDef<T>[] => {
+      if (Object.keys(summaries).length === 0) return cols;
+      return cols.map((c) => {
+        const id = String((c as unknown as { accessorKey?: string }).accessorKey ?? c.id ?? "");
+        const st = summaries[id];
+        if (!st) return c;
+        const summary: NonNullable<ColumnDef<T>["meta"]>["summary"] = st === "avg"
+          ? (rows: unknown[]) => {
+              const nums = (rows as Record<string, unknown>[]).map((r) => Number(r[id])).filter((n) => isFinite(n));
+              return nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length).toLocaleString("th-TH", { maximumFractionDigits: 2 }) : "—";
+            }
+          : st;
+        return { ...c, meta: { ...(c.meta ?? {}), summary } };
+      });
+    };
+    const base = injectSummary(withSelectCol);
+    if (rowActions.length === 0) return base;
     return [
-      ...withSelectCol,
+      ...base,
       {
         id: "__actions__",
         size: 48,
@@ -1070,7 +1088,7 @@ export function DataTable<T extends Record<string, unknown>>({
         enableSorting: false, enableHiding: false,
       },
     ];
-  }, [withSelectCol, rowActions]);
+  }, [withSelectCol, rowActions, layoutSettings]);
 
   // ---- TanStack Table instance ----
   const table = useReactTable({
@@ -1926,8 +1944,8 @@ export function DataTable<T extends Record<string, unknown>>({
                 })
               )}
             </tbody>
-            {/* แถวสรุป (Total row) */}
-            {columns.some(c => c.meta?.summary) && table.getRowModel().rows.length > 0 && (
+            {/* แถวสรุป (Total row) — จาก meta.summary หรือ settings.summaries */}
+            {(columns.some(c => c.meta?.summary) || Object.keys(layoutSettings?.summaries ?? {}).length > 0) && table.getRowModel().rows.length > 0 && (
               <tfoot className="bg-slate-50 border-t-2 border-slate-200 sticky bottom-0">
                 <tr>
                   {table.getVisibleLeafColumns().map((col, i) => {
