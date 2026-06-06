@@ -15,6 +15,7 @@
  */
 import { useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { ERPModal } from "@/components/modal";
 
 /** นิยามช่องในคลัง (ของกลาง) */
 type CatalogField = {
@@ -120,7 +121,18 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
 
   const selectedList = useMemo(() => CATALOG.filter((f) => selected.has(f.key)), [selected]);
 
-  const step1Valid = !!label.trim() && /^[a-z][a-z0-9_]{1,62}$/.test(table);
+  // ไปขั้นถัดไป — validate แบบมีข้อความบอก (ไม่ปิดปุ่มเฉยๆ ให้กดแล้วรู้สาเหตุ)
+  const goNext = () => {
+    setErr(null);
+    if (step === 1) {
+      if (!label.trim()) { setErr("กรอกชื่อโมดูลก่อน"); return; }
+      if (!/^[a-z][a-z0-9_]{1,62}$/.test(table)) {
+        setErr("ชื่อ table ต้องเป็นภาษาอังกฤษ (a-z, 0-9, _) อย่างน้อย 2 ตัว — ถ้าชื่อโมดูลเป็นภาษาไทย ให้พิมพ์ชื่อ table เองในช่องที่สอง");
+        return;
+      }
+    }
+    setStep((s) => (s + 1) as 1 | 2 | 3);
+  };
 
   const create = async () => {
     setErr(null); setSaving(true);
@@ -168,20 +180,40 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center bg-black/40 p-4 overflow-y-auto" onClick={saving ? undefined : onClose}>
-      <div className="w-full max-w-2xl my-8 bg-white rounded-2xl shadow-xl" onClick={(e) => e.stopPropagation()}>
-        {/* header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800">➕ สร้างโมดูลใหม่</h2>
-            <p className="text-xs text-slate-400 mt-0.5">สร้างตารางจริง + ได้หน้าจัดการทันที</p>
-          </div>
-          <button onClick={onClose} disabled={saving} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100 disabled:opacity-40">✕</button>
-        </div>
+  // popup กลาง: dirty = มีการกรอก/เลือก หรือกำลังสร้าง → ใช้กฎ "เตือนก่อนปิด"
+  const dirty = !done && (saving || !!label.trim() || !!table.trim() || selected.size > 0);
+  const guardedClose = () => { if (saving) return; onClose(); };   // ห้ามปิดระหว่างกำลังสร้าง
 
+  const footer = done ? (
+    <>
+      <a href={`/m/${done.key}`} className="h-9 px-4 leading-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">เปิดหน้าโมดูล →</a>
+      <button onClick={onClose} className="h-9 px-4 text-sm font-medium bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">ปิด</button>
+    </>
+  ) : (
+    <div className="flex w-full items-center justify-between">
+      <button onClick={() => (step === 1 ? onClose() : setStep((s) => (s - 1) as 1 | 2 | 3))} disabled={saving}
+        className="h-9 px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-40">
+        {step === 1 ? "ยกเลิก" : "← ย้อนกลับ"}
+      </button>
+      {step < 3 ? (
+        <button onClick={goNext}
+          className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          ถัดไป →
+        </button>
+      ) : (
+        <button onClick={create} disabled={saving}
+          className="h-9 px-5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+          {saving ? "กำลังสร้าง…" : `สร้างโมดูล (${selected.size} ช่อง)`}
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <ERPModal open onClose={guardedClose} size="lg" hasUnsavedChanges={dirty}
+      title="➕ สร้างโมดูลใหม่" description="สร้างตารางจริง + ได้หน้าจัดการทันที" footer={footer}>
         {done ? (
-          <div className="p-6 text-center">
+          <div className="py-2 text-center">
             <div className="text-4xl mb-2">✅</div>
             <p className="text-emerald-800 font-medium">สร้างโมดูล “{label}” แล้ว!</p>
             {done.warnings.length > 0 && (
@@ -190,15 +222,11 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
                 <ul className="list-disc pl-4 space-y-0.5">{done.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
               </div>
             )}
-            <div className="flex gap-2 justify-center mt-4">
-              <a href={`/m/${done.key}`} className="h-9 px-4 leading-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">เปิดหน้าโมดูล →</a>
-              <button onClick={onClose} className="h-9 px-4 text-sm font-medium bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200">ปิด</button>
-            </div>
           </div>
         ) : (
           <>
             {/* stepper */}
-            <div className="flex items-center gap-2 px-6 pt-4 text-xs">
+            <div className="flex items-center gap-2 pb-4 text-xs">
               {[{ n: 1, t: "ข้อมูลโมดูล" }, { n: 2, t: "เลือกแม่แบบ" }, { n: 3, t: "ปรับช่อง" }].map((s, i) => (
                 <div key={s.n} className="flex items-center gap-2">
                   <span className={`h-6 w-6 rounded-full grid place-items-center font-semibold ${step >= (s.n as 1 | 2 | 3) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>{s.n}</span>
@@ -208,7 +236,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
               ))}
             </div>
 
-            <div className="px-6 py-5 max-h-[60vh] overflow-y-auto">
+            <div>
               {/* ── ขั้น 1 ── */}
               {step === 1 && (
                 <div className="space-y-4">
@@ -298,28 +326,8 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
                 </div>
               )}
             </div>
-
-            {/* footer */}
-            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100">
-              <button onClick={() => (step === 1 ? onClose() : setStep((s) => (s - 1) as 1 | 2 | 3))} disabled={saving}
-                className="h-9 px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-40">
-                {step === 1 ? "ยกเลิก" : "← ย้อนกลับ"}
-              </button>
-              {step < 3 ? (
-                <button onClick={() => setStep((s) => (s + 1) as 1 | 2 | 3)} disabled={step === 1 && !step1Valid}
-                  className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                  ถัดไป →
-                </button>
-              ) : (
-                <button onClick={create} disabled={saving}
-                  className="h-9 px-5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-                  {saving ? "กำลังสร้าง…" : `สร้างโมดูล (${selected.size} ช่อง)`}
-                </button>
-              )}
-            </div>
           </>
         )}
-      </div>
-    </div>
+    </ERPModal>
   );
 }
