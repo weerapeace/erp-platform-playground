@@ -346,16 +346,15 @@ export const ENTITIES: Record<string, EntityConfig> = {
     searchColumns: ["name", "display_name"],
   },
   // กลุ่มแท็ก (Product Family Groups) — รองรับกลุ่มย่อยผ่าน parent_group_id
+  // หมายเหตุ: ไม่ embed parent แบบ self-join (PostgREST ตีความ self-FK สลับข้าง) —
+  // หน้าเพจประกอบ tree จาก parent_group_id ดิบเอง
   product_family_groups: {
     table: "product_family_groups",
-    selectColumns: `*, parent:product_family_groups!parent_group_id ( name )`,
+    selectColumns: `*`,
     searchColumns: ["name"],
     softDeleteColumn: "is_active",
     defaults: { is_active: true, single_select: false, sort_order: 100 },
     orderColumn: "sort_order",
-    postProcess: (r) => flattenRelations(r, [
-      { alias: "parent", labelField: "name", resultKey: "parent_group_label" },
-    ]),
   },
   platform_categories: {
     table: "platform_categories",
