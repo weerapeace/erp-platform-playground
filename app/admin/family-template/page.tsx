@@ -85,7 +85,7 @@ const hasTpl = (t?: Template): boolean =>
   !!t && (!!t.show_fields?.length || !!t.hide_fields?.length || !!t.hide_sections?.length ||
     !!t.required_fields?.length || !!(t.defaults && Object.keys(t.defaults).length));
 
-export default function FamilyTemplatePage() {
+export default function FamilyTemplatePage({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const goBack = () => { if (typeof window !== "undefined" && window.history.length > 1) router.back(); else router.push("/master/lookups"); };
 
@@ -304,15 +304,17 @@ export default function FamilyTemplatePage() {
   if (loading) return <div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="bg-white border-b border-slate-200 px-6 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <button onClick={goBack} title="กลับ" className="h-8 w-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">←</button>
-            <h1 className="text-xl font-bold text-slate-900">🧩 เทมเพลตประเภทสินค้า</h1>
+    <div className={embedded ? "" : "min-h-screen bg-slate-50"}>
+      <div className={embedded ? "px-1 pb-3" : "bg-white border-b border-slate-200 px-6 py-4"}>
+        {!embedded && (
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <button onClick={goBack} title="กลับ" className="h-8 w-8 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">←</button>
+              <h1 className="text-xl font-bold text-slate-900">🧩 เทมเพลตประเภทสินค้า</h1>
+            </div>
+            <button onClick={goBack} className="h-8 px-3 text-sm flex items-center gap-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">✕ ปิด</button>
           </div>
-          <button onClick={goBack} className="h-8 px-3 text-sm flex items-center gap-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">✕ ปิด</button>
-        </div>
+        )}
         {/* แท็บ scope: Parent SKU / SKU */}
         <div className="mt-3 inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
           {SCOPES.map((s) => (
