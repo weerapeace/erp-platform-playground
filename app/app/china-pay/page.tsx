@@ -2352,16 +2352,45 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
   const cn = ls.filter(l => l.kind === "china"), cw = ls.filter(l => l.kind === "ctw");
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const link = t.transfer_id ? `${origin}/app/china-pay?transfer=${String(t.transfer_id)}` : `${origin}/app/china-pay`;
+  // ดึงข้อมูลเพิ่ม (ยอดคงเหลือ + ค่าโอนบิลจีน + วันที่บิล CTW) ให้ข้อความครบเหมือนใบสรุป
+  let balanceRmb = 0; const feeByBill: Record<string, number> = {}; const ctwDateByBill: Record<string, string> = {};
+  try {
+    const [bal, cb, cbw] = await Promise.all([
+      apiFetch("/api/china-pay/balance").then(r => r.json()).catch(() => ({ rmb: 0 })),
+      apiFetch("/api/master-v2/china-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
+      apiFetch("/api/master-v2/ctw-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
+    ]);
+    balanceRmb = num(bal.rmb);
+    (cb.data ?? []).forEach((b: Record<string, unknown>) => { feeByBill[String(b.id)] = num(b.fee_rmb); });
+    (cbw.data ?? []).forEach((b: Record<string, unknown>) => { ctwDateByBill[String(b.id)] = String(b.doc_date ?? ""); });
+  } catch { /* best-effort */ }
+  const bd = t.breakdown as Record<string, unknown> | undefined;
   let text = `💸 โอนเงินจีนสำเร็จ\nเลขโอน: ${String(t.transfer_no ?? "—")}\nวันที่: ${String(t.date ?? "")} ${String(t.at ?? "")}\n`;
   if (t.ref_no) text += `เลขอ้างอิง: ${String(t.ref_no)}\n`;
   text += `โอนจริง: ฿${fmt(num(t.transferred))}`;
+  if (bd) {
+    if (num(bd.thb) > 0) text += `\nหัก ค่าส่ง/VAT: −฿${fmt(num(bd.thb))}`;
+    text += `\nคงเหลือ: ฿${fmt(num(bd.chinaRemainThb))}`;
+    text += `\nเรท (ชั้น ${String(bd.tier ?? "")}): ${fmt(num(t.rate))}`;
+    text += `\nเป็นเงินจีน: ¥${fmt(+num(bd.chinaYuanBought).toFixed(2))}`;
+    if (num(bd.shortfallRmb) > 0) text += `\nหัก ยอดคงเหลือจีน: ¥${fmt(+num(bd.shortfallRmb).toFixed(2))}`;
+    text += `\nรวมยอด (บิลจีน): ¥${fmt(num(t.selectedRmb))}`;
+  }
+  text += `\nเข้าบัญชีจีน (ส่วนต่าง): ¥${fmt(+num(t.chinaInRmb).toFixed(2))}`;
+  text += `\nยอดคงเหลือบัญชีจีน: ¥${fmt(+balanceRmb.toFixed(2))}`;
   if (cn.length) text += `\n\nบิลจีน:\n` + cn.map(l => {
     const sp = (l.sup ?? {}) as Record<string, unknown>;
-    const acc = sp.account_number ? `\n   บัญชี ${String(sp.account_number)}` : "";
-    const bn = sp.bank_name_brief ? ` · ${String(sp.bank_name_brief)}` : "";
-    return `• ${String(l.label)} ¥${fmt(num(l.paid_rmb))}${acc}${bn}`;
+    const fee = feeByBill[String(l.bill_id)] ?? 0; const base = num(l.paid_rmb) - fee;
+    let s = `• ${String(l.label)} ¥${fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb))}${fee > 0 ? ` (+ค่าโอน ¥${fmt(fee)})` : ""}`;
+    if (sp.bank_account_name) s += `\n   ชื่อบัญชี: ${String(sp.bank_account_name)}`;
+    if (sp.account_number) s += `\n   เลขบัญชี: ${String(sp.account_number)}`;
+    if (sp.bank_name_brief) s += `\n   ธนาคาร: ${String(sp.bank_name_brief)}`;
+    return s;
   }).join("\n");
-  if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label)} ฿${fmt(num(l.paid_thb))}`).join("\n");
+  if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => {
+    const d = ctwDateByBill[String(l.bill_id)];
+    return `• ${String(l.doc_number || "—")} ฿${fmt(num(l.paid_thb))} — ${String(l.label || "—")}${d ? ` · ${d}` : ""}`;
+  }).join("\n");
   try {
     const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "transfers", button: { label: "เปิดใบสรุปการโอน", url: link } }) });
     const j = await res.json().catch(() => ({}));
@@ -3523,6 +3552,25 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
   const atts = Array.isArray(t.attachments) ? (t.attachments as unknown[]).map(String) : [];
   const r2Url = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
   const isPdf = (k: string) => k.toLowerCase().endsWith(".pdf");
+  // ดึงข้อมูลเพิ่ม: ยอดคงเหลือบัญชีจีน + ค่าโอน(fee)บิลจีน + วันที่บิล CTW (ใช้ได้ทั้งรายการเก่า/ใหม่)
+  const [extras, setExtras] = useState<{ balanceRmb: number; feeByBill: Record<string, number>; ctwDateByBill: Record<string, string> } | null>(null);
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const [bal, cb, cbw] = await Promise.all([
+        apiFetch("/api/china-pay/balance").then(r => r.json()).catch(() => ({ rmb: 0 })),
+        apiFetch("/api/master-v2/china-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
+        apiFetch("/api/master-v2/ctw-bills?limit=500").then(r => r.json()).catch(() => ({ data: [] })),
+      ]);
+      if (cancel) return;
+      const feeByBill: Record<string, number> = {}; (cb.data ?? []).forEach((b: Record<string, unknown>) => { feeByBill[String(b.id)] = num(b.fee_rmb); });
+      const ctwDateByBill: Record<string, string> = {}; (cbw.data ?? []).forEach((b: Record<string, unknown>) => { ctwDateByBill[String(b.id)] = String(b.doc_date ?? ""); });
+      setExtras({ balanceRmb: num(bal.rmb), feeByBill, ctwDateByBill });
+    })();
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const feeOf = (l: Record<string, unknown>) => extras?.feeByBill[String(l.bill_id)] ?? 0;
 
   // วาดใบสรุปการโอนลง canvas (สำหรับโหลดเป็นรูป)
   useEffect(() => {
@@ -3541,13 +3589,15 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
         { t: "kv", l: "รวมยอด (บิลจีน)", r: "¥" + fmt(num(t.selectedRmb)), bold: true } as Row,
       ] : [{ t: "kv", l: "เรทที่ใช้", r: fmt(num(t.rate)) } as Row]),
       { t: "kv", l: "เข้าบัญชีจีน (ส่วนต่าง)", r: "¥" + fmt(+num(t.chinaInRmb).toFixed(2)), color: "#059669" },
+      ...(extras ? [{ t: "kv", l: "ยอดคงเหลือบัญชีจีน", r: "¥" + fmt(+extras.balanceRmb.toFixed(2)), bold: true, color: "#059669" } as Row] : []),
     ];
     if (cn.length) {
       rows.push({ t: "sep" }, { t: "head", l: `บิลจีน (${cn.length})` });
       cn.forEach((l, i) => {
         if (i > 0) rows.push({ t: "sep" });   // เส้นแบ่งระหว่างร้าน
         const sp = (l.sup ?? {}) as Record<string, unknown>;
-        rows.push({ t: "kv", l: String(l.label || "—"), r: "¥" + fmt(num(l.paid_rmb)), bold: true });
+        const fee = feeOf(l); const base = num(l.paid_rmb) - fee;
+        rows.push({ t: "kv", l: String(l.label || "—") + (fee > 0 ? ` (ค่าโอน ¥${fmt(fee)})` : ""), r: "¥" + fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb)), bold: true });
         if (sp.name_en) rows.push({ t: "sub", l: String(sp.name_en) });
         if (sp.phone) rows.push({ t: "sub", l: "โทร: " + String(sp.phone) });
         if (sp.bank_account_name) rows.push({ t: "sub", l: "ชื่อบัญชี: " + String(sp.bank_account_name) });
@@ -3558,8 +3608,9 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
     if (cw.length) {
       rows.push({ t: "sep" }, { t: "head", l: `บิล CTW (${cw.length})` });
       cw.forEach(l => {
-        rows.push({ t: "kv", l: String(l.label || "—"), r: "฿" + fmt(num(l.paid_thb)) });
-        if (l.doc_number) rows.push({ t: "sub", l: "เลขที่บิล: " + String(l.doc_number) });
+        rows.push({ t: "kv", l: String(l.doc_number || "—"), r: "฿" + fmt(num(l.paid_thb)), bold: true });
+        const d = extras?.ctwDateByBill[String(l.bill_id)];
+        rows.push({ t: "sub", l: String(l.label || "—") + (d ? ` · ${d}` : "") });
       });
     }
     const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -3596,7 +3647,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
       else { ctx.textAlign = "left"; ctx.fillStyle = "#64748b"; ctx.font = `17px ${FONT}`; const lw = r.l ? ctx.measureText(r.l).width : 0; if (r.l) ctx.fillText(r.l, padX, my); fit(r.r ?? "", r.bold ? 20 : 18, !!r.bold, r.color ?? "#1e293b", padX + lw + 16); }
       y = oldY + h;
     }
-  }, [t, cn, cw, fontsReady]);
+  }, [t, cn, cw, fontsReady, extras]);
 
   const saveImage = async () => {
     setBusy(true);
@@ -3688,16 +3739,18 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
             </>
           ); })()}
           <div className="flex justify-between gap-3"><span className="text-slate-500 flex-shrink-0">เข้าบัญชีจีน (ส่วนต่าง)</span><span className="font-medium text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+num(t.chinaInRmb).toFixed(2))}</span></div>
+          {extras && <div className="flex justify-between gap-3 border-t border-slate-100 pt-1 mt-1"><span className="text-slate-500 flex-shrink-0">ยอดคงเหลือบัญชีจีน</span><span className="font-bold text-emerald-700 whitespace-nowrap ml-auto text-right">¥{fmt(+extras.balanceRmb.toFixed(2))}</span></div>}
           {cn.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิลจีน ({cn.length})</div>
               {cn.map((l, i) => {
                 const sp = (l.sup ?? {}) as Record<string, unknown>;
+                const fee = feeOf(l); const base = num(l.paid_rmb) - fee;
                 return (
                   <div key={i} className="border-b border-slate-100 py-2">
                     <div className="flex justify-between text-sm">
-                      <span className="font-medium text-slate-800 mr-2 min-w-0 truncate">{String(l.label || "—")}</span>
-                      <span className="font-semibold text-slate-800 flex-shrink-0 ml-auto text-right whitespace-nowrap">¥{fmt(num(l.paid_rmb))}</span>
+                      <span className="font-medium text-slate-800 mr-2 min-w-0 truncate">{String(l.label || "—")}{fee > 0 ? <span className="text-[10px] text-slate-400 ml-1">(ค่าโอน ¥{fmt(fee)})</span> : null}</span>
+                      <span className="font-semibold text-slate-800 flex-shrink-0 ml-auto text-right whitespace-nowrap">¥{fmt(fee > 0 ? +base.toFixed(2) : num(l.paid_rmb))}</span>
                     </div>
                     {!!sp.name_en && <div className="text-[11px] text-slate-500">{String(sp.name_en)}</div>}
                     <div className="text-[11px] text-slate-500 mt-0.5 space-y-0.5">
@@ -3714,15 +3767,15 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
           {cw.length > 0 && (
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-500 mb-1">บิล CTW ({cw.length})</div>
-              {cw.map((l, i) => (
+              {cw.map((l, i) => { const d = extras?.ctwDateByBill[String(l.bill_id)]; return (
                 <div key={i} className="border-b border-slate-100 py-1.5">
                   <div className="flex justify-between text-sm">
-                    <span className="text-slate-700 truncate mr-2">{String(l.label || "—")}</span>
-                    <span className="text-slate-800 flex-shrink-0">฿{fmt(num(l.paid_thb))}</span>
+                    <span className="font-semibold text-slate-800 truncate mr-2">{String(l.doc_number || "—")}</span>
+                    <span className="text-slate-800 flex-shrink-0 font-semibold">฿{fmt(num(l.paid_thb))}</span>
                   </div>
-                  {!!l.doc_number && <div className="text-[11px] text-slate-500 mt-0.5">เลขที่บิล: {String(l.doc_number)}</div>}
+                  <div className="text-[11px] text-slate-500 mt-0.5 truncate">{String(l.label || "—")}{d ? ` · ${d}` : ""}</div>
                 </div>
-              ))}
+              ); })}
             </div>
           )}
           {/* สลิป/รูปที่แนบกับการโอน — แตะดูเต็มจอ */}
