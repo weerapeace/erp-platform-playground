@@ -2,7 +2,7 @@
  * Payroll module — สรุปข้อมูลคำนวณรายคนต่องวด (Phase A — Manual Inputs)
  * GET /api/payroll/manual-input?period_id=...
  *
- * คืนรายชื่อพนักงานที่เข้าเงื่อนไขของงวด + ยอดสรุปรายคน (สาย/ขาด/ลา/OT/เพิ่มพิเศษ/หักอื่น)
+ * คืนรายชื่อพนักงานที่เข้าเงื่อนไขของงวด + ยอดสรุปรายคน (สาย/ขาด/ลา/OT/งานเหมา/เพิ่มพิเศษ/หักอื่น)
  * + "สุทธิประมาณ" ที่คิดด้วยเครื่องคำนวณตัวจริง (computePeriodPreview) → ประมาณ = ของจริง
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -35,11 +35,11 @@ export async function GET(req: NextRequest) {
       a.from("attendance_entries").select("employee_id, late_deduction, absence_deduction, status").eq("payroll_period_id", periodId),
       a.from("leave_entries").select("employee_id, unpaid_leave_deduction, status").eq("payroll_period_id", periodId),
       a.from("overtime_entries").select("employee_id, overtime_amount, status").eq("payroll_period_id", periodId),
-      a.from("payroll_adjustments").select("employee_id, adjustment_type, amount, status").eq("payroll_period_id", periodId).eq("status", "approved"),
+      a.from("payroll_adjustments").select("employee_id, adjustment_type, amount, status, source_type, item_code").eq("payroll_period_id", periodId).eq("status", "approved"),
     ]);
     const add = (m: Map<string, number>, id: string, v: unknown) => m.set(id, (m.get(id) ?? 0) + money(v));
     const lateBy = new Map<string, number>(), absBy = new Map<string, number>(), leaveBy = new Map<string, number>();
-    const otBy = new Map<string, number>(), addBy = new Map<string, number>(), dedBy = new Map<string, number>();
+    const otBy = new Map<string, number>(), pieceBy = new Map<string, number>(), addBy = new Map<string, number>(), dedBy = new Map<string, number>();
     const cntBy = new Map<string, number>();
     for (const r of (attRes.data ?? []) as Record<string, unknown>[]) if (MANUAL.has(String(r.status))) {
       add(lateBy, String(r.employee_id), r.late_deduction); add(absBy, String(r.employee_id), r.absence_deduction);
@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
     for (const r of (otRes.data ?? []) as Record<string, unknown>[]) if (MANUAL.has(String(r.status))) add(otBy, String(r.employee_id), r.overtime_amount);
     for (const r of (adjRes.data ?? []) as Record<string, unknown>[]) {
       if (String(r.adjustment_type) === "deduction") add(dedBy, String(r.employee_id), r.amount);
+      else if (String(r.source_type) === "piecework" || String(r.item_code) === "PIECEWORK") add(pieceBy, String(r.employee_id), r.amount);
       else if (String(r.adjustment_type) === "earning") add(addBy, String(r.employee_id), r.amount);
     }
 
@@ -66,8 +67,8 @@ export async function GET(req: NextRequest) {
     const rows = lines.map((l) => {
       const id = String(l.employee_id);
       const late = lateBy.get(id) ?? 0, absence = absBy.get(id) ?? 0, leave = leaveBy.get(id) ?? 0;
-      const ot = otBy.get(id) ?? 0, special = addBy.get(id) ?? 0, other = dedBy.get(id) ?? 0;
-      const hasManual = late || absence || leave || ot || special || other;
+      const ot = otBy.get(id) ?? 0, piecework = pieceBy.get(id) ?? 0, special = addBy.get(id) ?? 0, other = dedBy.get(id) ?? 0;
+      const hasManual = late || absence || leave || ot || piecework || special || other;
       return {
         id, employee_id: id, employee_code: l.employee_code, employee_name: nameBy[id] ?? "",
         work_days: money(l.attendance_days),
@@ -75,6 +76,7 @@ export async function GET(req: NextRequest) {
         absence_baht: Math.round(absence * 100) / 100,
         leave_baht: Math.round(leave * 100) / 100,
         ot_baht: Math.round(ot * 100) / 100,
+        piecework_baht: Math.round(piecework * 100) / 100,
         special_add: Math.round(special * 100) / 100,
         other_deduct: Math.round(other * 100) / 100,
         net_estimate: money(l.net_pay),

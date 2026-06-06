@@ -1,7 +1,7 @@
 /**
  * Payroll module — เพิ่มพิเศษ/หักอื่น (payroll_adjustments) — Phase A Manual Inputs
  * GET  /api/payroll/adjustments?period_id=&employee_id=   → list รายการของพนักงานในงวด
- * POST /api/payroll/adjustments  { period_id, employee_id, adjustment_type, item_name, amount, taxable? }
+ * POST /api/payroll/adjustments  { period_id, employee_id, adjustment_type, item_name, amount, taxable?, source_type? }
  *   adjustment_type: earning (เพิ่มพิเศษ) | deduction (หักอื่น)
  *
  * ความปลอดภัย: ต้อง employees.edit, งวดต้อง draft/review (กันแก้งวดที่ล็อก/จ่าย), audit log
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   if (!periodId) return NextResponse.json({ error: "ต้องระบุ period_id" }, { status: 400 });
   try {
     let q = supabaseAdmin().from("payroll_adjustments")
-      .select("id, employee_id, adjustment_type, item_name, amount, taxable, status, created_at")
+      .select("id, employee_id, adjustment_type, item_name, amount, taxable, status, source_type, item_code, created_at")
       .eq("payroll_period_id", periodId).eq("status", "approved").order("created_at", { ascending: true });
     if (employeeId) q = q.eq("employee_id", employeeId);
     const { data, error } = await q;
@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
   const type = String(body.adjustment_type ?? "");
   const itemName = String(body.item_name ?? "").trim();
   const amount = money(body.amount);
+  const isPiecework = String(body.source_type) === "piecework" || String(body.item_code) === "PIECEWORK";
   if (!periodId || !employeeId) return NextResponse.json({ error: "ต้องระบุงวดและพนักงาน" }, { status: 400 });
   if (type !== "earning" && type !== "deduction") return NextResponse.json({ error: "ประเภทต้องเป็น earning หรือ deduction" }, { status: 400 });
   if (!itemName) return NextResponse.json({ error: "ต้องระบุชื่อรายการ" }, { status: 400 });
@@ -61,16 +62,16 @@ export async function POST(req: NextRequest) {
 
     const { data: ins, error } = await a.from("payroll_adjustments").insert({
       payroll_period_id: periodId, employee_id: employeeId, adjustment_type: type,
-      item_code: type === "earning" ? "MANUAL_ADD" : "MANUAL_DED", item_name: itemName,
+      item_code: isPiecework ? "PIECEWORK" : type === "earning" ? "MANUAL_ADD" : "MANUAL_DED", item_name: itemName,
       amount, taxable: body.taxable === false ? false : type === "earning",
-      source_type: "manual", status: "approved", created_by: userId,
+      source_type: isPiecework ? "piecework" : "manual", status: "approved", created_by: userId,
     }).select("id").limit(1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
     await writeAudit(a, {
       action: "create", entityType: "payroll_adjustments", entityId: (ins?.[0] as { id: string })?.id, actorId: userId,
       actorName: (body.actor as string) ?? null,
-      metadata: { period_name: period.period_name, type, item_name: itemName, amount },
+      metadata: { period_name: period.period_name, type, item_name: itemName, amount, source_type: isPiecework ? "piecework" : "manual" },
     });
     return NextResponse.json({ data: ins?.[0], error: null }, { status: 201 });
   } catch (e) {
