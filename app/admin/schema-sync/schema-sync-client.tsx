@@ -174,6 +174,9 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [conditionEditing, setConditionEditing] = useState<RegistryField | null>(null);
 
+  // ฟิลด์ "ชื่อหลัก (display)" ของโมดูล — sync จาก module.primary_field
+  const [displayField, setDisplayField] = useState<string>("");
+
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
   const load = useCallback(async () => {
@@ -187,6 +190,25 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
   }, [moduleKey]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setDisplayField(String(data?.module?.primary_field ?? "")); }, [data?.module]);
+
+  // ตั้ง/ยกเลิก "ชื่อหลัก (display)" — บันทึก primary_field + propagate ไป relation ที่ชี้มาที่โมดูลนี้
+  const setDisplay = async (colName: string) => {
+    const prev = displayField;
+    const next = displayField === colName ? "" : colName;   // กดซ้ำ = ยกเลิก
+    setDisplayField(next);
+    try {
+      const res = await apiFetch("/api/admin/module-display-field", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ module_key: moduleKey, field: next }),
+      });
+      const j = await res.json();
+      if (j.error) { flash("❌ " + j.error); setDisplayField(prev); return; }
+      flash(next
+        ? `✓ ตั้ง “${colName}” เป็นชื่อหลัก${j.relations_updated ? ` · อัปเดต dropdown ${j.relations_updated} จุด` : ""}`
+        : "✓ ยกเลิกชื่อหลักแล้ว");
+    } catch (e) { flash("❌ " + (e instanceof Error ? e.message : "ไม่สำเร็จ")); setDisplayField(prev); }
+  };
 
   const sync = async () => {
     setSyncing(true);
@@ -590,6 +612,8 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                                   field={f}
                                   saving={savingId === f.id}
                                   selected={selected.has(f.id)}
+                                  isDisplay={!!f.column_name && displayField === f.column_name}
+                                  onSetDisplay={f.column_name ? () => setDisplay(String(f.column_name)) : undefined}
                                   onToggle={() => toggleOne(f.id)}
                                   onUpdate={(patch) => updateField(f.id, patch)}
                                   onEditCondition={() => setConditionEditing(f)}
@@ -826,11 +850,13 @@ function RolePermissionCell({ field, onUpdate }: { field: RegistryField; onUpdat
 // ============================================================
 
 function SortableFieldRow({
-  field, saving, selected, onToggle, onUpdate, onEditCondition, onDelete, onChangeType,
+  field, saving, selected, isDisplay, onSetDisplay, onToggle, onUpdate, onEditCondition, onDelete, onChangeType,
 }: {
   field:    RegistryField;
   saving:   boolean;
   selected: boolean;
+  isDisplay?: boolean;
+  onSetDisplay?: () => void;
   onToggle: () => void;
   onUpdate: (patch: Record<string, unknown>) => void | Promise<void>;
   onEditCondition?: () => void;
@@ -874,7 +900,16 @@ function SortableFieldRow({
       >⋮⋮</td>
       <td className="px-3 py-1.5 text-xs text-slate-400 tabular-nums">{field.display_order}</td>
       <td className="px-3 py-1.5">
-        <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{field.column_name ?? field.field_key}</code>
+        <div className="flex items-center gap-1.5">
+          {onSetDisplay && (
+            <button type="button" onClick={onSetDisplay}
+              title={isDisplay ? "ฟิลด์ชื่อหลัก (display) — กดเพื่อยกเลิก" : "ตั้งเป็นฟิลด์ชื่อหลัก (display) — โมดูลอื่นจะโชว์ฟิลด์นี้เวลาอ้างถึง"}
+              className={`text-sm leading-none ${isDisplay ? "text-amber-500" : "text-slate-300 hover:text-amber-400"}`}>
+              {isDisplay ? "🎯" : "◎"}
+            </button>
+          )}
+          <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">{field.column_name ?? field.field_key}</code>
+        </div>
       </td>
       <td className="px-3 py-1.5">
         <input

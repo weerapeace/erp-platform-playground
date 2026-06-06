@@ -12,12 +12,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export type SchemaSyncModule = {
-  id:          string;
-  module_key:  string;
-  table_name:  string;
-  label:       string;
-  description: string | null;
-  config:      Record<string, unknown>;
+  id:           string;
+  module_key:   string;
+  table_name:   string;
+  label:        string;
+  description:  string | null;
+  primary_field: string | null;   // ฟิลด์ "ชื่อหลัก" (display) ของโมดูล
+  config:       Record<string, unknown>;
 };
 
 export type DBColumn = {
@@ -95,7 +96,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<SchemaSync
   // 1. fetch module
   const { data: mod, error: modErr } = await supabase
     .from("erp_modules")
-    .select("id, module_key, table_name, label, description, config")
+    .select("id, module_key, table_name, label, description, primary_field, config")
     .eq("module_key", moduleKey)
     .maybeSingle();
 

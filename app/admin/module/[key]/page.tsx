@@ -322,8 +322,9 @@ type LayoutSettings = {
   row_color_rules?: RowColorRule[];
   summaries?: Record<string, "sum" | "count" | "avg">;
 };
+type LayoutColumn = { key: string; label: string; visible: boolean; order: number; width?: number; pinned?: "left" | "right" | null };
 type FullLayout = {
-  label?: string; description?: string | null; columns?: unknown[];
+  label?: string; description?: string | null; columns?: LayoutColumn[];
   default_density?: string; default_page_size?: number; default_view_mode?: string;
   notes?: string | null; settings?: LayoutSettings;
 };
@@ -340,7 +341,7 @@ const OP_OPTS: { key: RowColorOp; label: string }[] = [
 ];
 
 function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: string }) {
-  const [fields, setFields] = useState<{ value: string; label: string }[]>([]);
+  const [fields, setFields] = useState<{ value: string; label: string; visible: boolean }[]>([]);
   const [full, setFull] = useState<FullLayout | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -352,6 +353,8 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
   const [groupBy, setGroupBy] = useState("");
   const [rules, setRules] = useState<RowColorRule[]>([]);
   const [summaries, setSummaries] = useState<Record<string, "sum" | "count" | "avg">>({});
+  // คอลัมน์ที่โชว์เริ่มต้น (View default) — column_name → โชว์ไหม
+  const [colVis, setColVis] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setLoading(true); setErr(null);
@@ -359,8 +362,9 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json()).catch(() => ({})),
       apiFetch(`/api/table-layouts?table_id=${encodeURIComponent(tableId)}`).then((r) => r.json()).catch(() => ({})),
     ]).then(([fr, lr]) => {
-      const fl = (fr.fields as { column_name: string | null; field_label: string }[] | undefined) ?? [];
-      setFields(fl.filter((f) => f.column_name).map((f) => ({ value: String(f.column_name), label: f.field_label || String(f.column_name) })));
+      const fl = (fr.fields as { column_name: string | null; field_label: string; is_visible?: boolean }[] | undefined) ?? [];
+      const flClean = fl.filter((f) => f.column_name).map((f) => ({ value: String(f.column_name), label: f.field_label || String(f.column_name), visible: !!f.is_visible }));
+      setFields(flClean);
       const layout = (lr.data as FullLayout | null) ?? null;
       setFull(layout);
       const s = layout?.settings ?? {};
@@ -369,6 +373,12 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       setGroupBy(s.group_by ?? "");
       setRules(Array.isArray(s.row_color_rules) ? s.row_color_rules : []);
       setSummaries((s.summaries as Record<string, "sum" | "count" | "avg">) ?? {});
+      // init โชว์คอลัมน์: ใช้ค่าจาก layout เดิมถ้ามี ไม่งั้น fallback เป็น is_visible ของทะเบียน field
+      const existing = Array.isArray(layout?.columns) ? (layout!.columns as LayoutColumn[]) : [];
+      const exByKey: Record<string, LayoutColumn> = Object.fromEntries(existing.map((c) => [c.key, c]));
+      const vis: Record<string, boolean> = {};
+      flClean.forEach((f) => { const ex = exByKey[f.value]; vis[f.value] = ex ? !!ex.visible : f.visible; });
+      setColVis(vis);
     }).finally(() => setLoading(false));
   }, [tableId, moduleKey]);
 
@@ -381,6 +391,15 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       row_color_rules: rules.filter((r) => r.column && r.color),
       summaries: Object.keys(summaries).length ? summaries : undefined,
     };
+    // ประกอบ columns: เก็บ order/width/pinned เดิมไว้ เปลี่ยนเฉพาะ visible ตามที่ติ๊ก
+    const existing = (full?.columns as LayoutColumn[] | undefined) ?? [];
+    const exByKey: Record<string, LayoutColumn> = Object.fromEntries(existing.map((c) => [c.key, c]));
+    const columns: LayoutColumn[] = fields.map((f, i) => {
+      const ex = exByKey[f.value];
+      return { key: f.value, label: f.label, visible: colVis[f.value] ?? true, order: ex?.order ?? (i + 1) * 10, width: ex?.width, pinned: ex?.pinned ?? null };
+    });
+    // คงคอลัมน์เดิมที่ไม่อยู่ในทะเบียนแล้ว (กันข้อมูล layout หาย)
+    for (const ex of existing) if (!fields.some((f) => f.value === ex.key)) columns.push(ex);
     try {
       const j = await apiFetch("/api/admin/table-layouts", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -388,7 +407,7 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
           table_id: tableId,
           label: full?.label || tableId,
           description: full?.description ?? null,
-          columns: full?.columns ?? [],
+          columns,
           default_density: full?.default_density ?? "normal",
           default_page_size: full?.default_page_size ?? 20,
           default_view_mode: full?.default_view_mode ?? "table",
@@ -441,6 +460,36 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
             {colSelect(groupBy, setGroupBy)}
           </div>
         </div>
+      </div>
+
+      {/* คอลัมน์ที่โชว์เริ่มต้น (View default) */}
+      <div className={card}>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-slate-800">คอลัมน์ที่โชว์เริ่มต้น (View default)</h3>
+          <div className="flex gap-2 text-xs">
+            <button onClick={() => setColVis(Object.fromEntries(fields.map((f) => [f.value, true])))}
+              className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">เลือกทั้งหมด</button>
+            <button onClick={() => setColVis(Object.fromEntries(fields.map((f) => [f.value, false])))}
+              className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">ไม่เลือก</button>
+          </div>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">เปิดตารางครั้งแรกจะโชว์คอลัมน์ที่ติ๊กไว้ · ผู้ใช้ปรับเองได้ภายหลัง (จัดลำดับ/ความกว้างที่ “ตัวจัดเลย์เอาต์เต็ม” ด้านล่าง)</p>
+        {fields.length === 0 ? (
+          <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3 text-center">— ไม่มีคอลัมน์ —</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+            {fields.map((f) => (
+              <label key={f.value} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none py-1">
+                <input type="checkbox" checked={colVis[f.value] ?? true}
+                  onChange={(e) => setColVis((p) => ({ ...p, [f.value]: e.target.checked }))}
+                  className="rounded border-slate-300 w-4 h-4" />
+                <span className="flex-1 min-w-0 truncate">{f.label}</span>
+                <code className="text-[10px] text-slate-400 shrink-0">{f.value}</code>
+              </label>
+            ))}
+          </div>
+        )}
+        <p className="text-[11px] text-amber-600 mt-3">หมายเหตุ: คนที่เคยเปิดตารางนี้แล้วอาจต้องกด “รีเซ็ตเป็นค่าเริ่มต้น” ในตารางถึงจะเห็นการเปลี่ยน (ระบบจำการปรับแต่งรายคนไว้)</p>
       </div>
 
       {/* สีแถวตามเงื่อนไข */}
