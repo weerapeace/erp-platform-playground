@@ -2,11 +2,8 @@
 
 /**
  * หน้าสั่งซื้อ (Purchase Order) — /purchasing/orders
- * แสดง "ขอซื้อ (PR)" ที่รอออกใบสั่งซื้อ (po_id ว่าง) → เลือก → สร้าง PO (แยกใบตามร้านอัตโนมัติ)
- * 2 view:
- *   - ตาราง: Universal DataTable + เลือกหลายแถว → สร้าง PO
- *   - การ์ด: ซ้าย=ร้าน (ซื้อทั้งร้านได้) / กลาง=การ์ดแบ่ง section ตามร้าน / ขวา=ตะกร้า + วันที่
- * สร้าง PO ผ่าน /api/purchasing/create-po
+ * แสดง PR ที่รอออกใบสั่งซื้อ → เลือก → สร้าง PO (แยกใบตามร้านอัตโนมัติ)
+ * 2 view: ตาราง (DataTable) / การ์ด (ร้าน + การ์ดแบ่ง section + ตะกร้า)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
@@ -25,10 +22,13 @@ type Row = {
   qty: number; uom: string; price_est: number; line_total: number; currency: string;
   order_date: string | null; requester: string; note: string; status: string; approved: boolean; cover_key: string | null; image_url: string | null;
 };
+type CartLine = { qty: number; partial: boolean };
 
-const money = (v: number, cur: string) => `${v.toLocaleString()} ${cur}`;
+const money = (v: number, cur: string) => `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${cur}`;
 const today = () => new Date().toISOString().slice(0, 10);
-const VIEW_KEY = "po_create_view";
+const isCNY = (c: string) => c === "RMB" || c === "YUAN" || c === "CNY";
+const noShop = (r: Row) => !r.seller_name || r.seller_name === "—" || r.seller_name === "ไม่ระบุร้าน";
+const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate";
 
 const COLUMNS: ColumnDef<Row>[] = [
   { accessorKey: "image_url", header: "รูป", size: 56, enableSorting: false, meta: { type: "image" } },
@@ -59,13 +59,23 @@ export default function PurchaseOrdersPage() {
   const [busy, setBusy] = useState(false);
 
   const [view, setView] = useState<"table" | "card">("card");
-  const [cartIds, setCartIds] = useState<string[]>([]);
+  const [cols, setCols] = useState(5);
+  const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [activeShop, setActiveShop] = useState<string | null>(null);
   const [orderDate, setOrderDate] = useState(today);
+  const [rate, setRate] = useState(5.2);
+  const [cartWidth, setCartWidth] = useState(340);
   const [editRow, setEditRow] = useState<Row | null>(null);
 
-  useEffect(() => { if (typeof window !== "undefined") { const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "card") setView(v); } }, []);
-  const changeView = (v: "table" | "card") => { setView(v); if (typeof window !== "undefined") localStorage.setItem(VIEW_KEY, v); };
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "card") setView(v);
+    const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 12) setCols(c);
+    const r = Number(localStorage.getItem(RATE_KEY)); if (r > 0) setRate(r);
+  }, []);
+  const changeView = (v: "table" | "card") => { setView(v); localStorage.setItem(VIEW_KEY, v); };
+  const changeCols = (n: number) => { setCols(n); localStorage.setItem(COLS_KEY, String(n)); };
+  const changeRate = (n: number) => { setRate(n); if (n > 0) localStorage.setItem(RATE_KEY, String(n)); };
 
   const fetchRows = useCallback(async () => {
     setLoading(true); setError(null);
@@ -78,52 +88,79 @@ export default function PurchaseOrdersPage() {
   }, []);
   useEffect(() => { void fetchRows(); }, [fetchRows]);
 
-  // สร้าง PO จากรายการที่เลือก (ใช้ทั้งตาราง/ตะกร้า/ซื้อทั้งร้าน)
-  const createPO = useCallback(async (sel: Row[], dateOverride?: string) => {
-    if (sel.length === 0) return;
-    const shops = [...new Set(sel.map((r) => r.seller_name))];
-    const unapproved = sel.filter((r) => !r.approved).length;
-    if (!confirm(`สร้างใบสั่งซื้อจาก ${sel.length} รายการ → ${shops.length} ร้าน (1 ใบ/ร้าน)?${unapproved ? `\n\n(มี ${unapproved} รายการยังไม่อนุมัติ → ระบบจะบันทึกอนุมัติให้อัตโนมัติ)` : ""}`)) return;
+  // ── submit PO (ใช้ร่วม: ตาราง/ตะกร้า/ซื้อทั้งร้าน) ──
+  const submitPO = useCallback(async (body: Record<string, unknown>, orderedIds: string[]) => {
     setBusy(true);
     try {
-      const res = await apiFetch("/api/purchasing/create-po", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pr_ids: sel.map((r) => r.id), actor: user?.name, order_date: dateOverride }),
-      });
+      const res = await apiFetch("/api/purchasing/create-po", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, actor: user?.name }) });
       const j = await res.json();
       if (j.error) throw new Error(j.error);
       toast.success(`สร้างใบสั่งซื้อ ${(j.created ?? []).length} ใบแล้ว`);
-      const orderedIds = new Set(sel.map((r) => r.id));
-      setCartIds((c) => c.filter((id) => !orderedIds.has(id)));
+      setCart((c) => { const n = { ...c }; orderedIds.forEach((id) => delete n[id]); return n; });
       await fetchRows();
     } catch (e) { toast.error("สร้างใบสั่งซื้อไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setBusy(false); }
   }, [user?.name, toast, fetchRows]);
 
-  const bulkActions: BulkAction<Row>[] = [{ label: busy ? "กำลังสร้าง…" : "🧾 สร้างใบสั่งซื้อ (ตามร้าน)", onClick: (r) => void createPO(r) }];
+  // สร้าง PO แบบเต็มจำนวน (ตาราง bulk / ซื้อทั้งร้าน)
+  const createPOByRows = useCallback(async (sel: Row[]) => {
+    const valid = sel.filter((r) => !noShop(r));
+    if (valid.length === 0) { toast.error("ไม่มีรายการที่มีร้าน (ตั้งร้านให้สินค้าก่อน)"); return; }
+    const shops = [...new Set(valid.map((r) => r.seller_name))];
+    const unapproved = valid.filter((r) => !r.approved).length;
+    if (!confirm(`สร้างใบสั่งซื้อจาก ${valid.length} รายการ → ${shops.length} ร้าน (1 ใบ/ร้าน)?${unapproved ? `\n(มี ${unapproved} รายการยังไม่อนุมัติ → บันทึกอนุมัติให้อัตโนมัติ)` : ""}`)) return;
+    await submitPO({ pr_ids: valid.map((r) => r.id) }, valid.map((r) => r.id));
+  }, [submitPO, toast]);
 
-  // ── ข้อมูลสำหรับ view การ์ด ──
+  const bulkActions: BulkAction<Row>[] = [{ label: busy ? "กำลังสร้าง…" : "🧾 สร้างใบสั่งซื้อ (ตามร้าน)", onClick: (r) => void createPOByRows(r) }];
+
+  // ── ตะกร้า ──
+  const inCart = (id: string) => id in cart;
+  const addToCart = (r: Row) => {
+    if (noShop(r)) { toast.error("สินค้านี้ยังไม่มีร้าน — กด ✎ ตั้งร้านก่อน"); return; }
+    setCart((c) => ({ ...c, [r.id]: { qty: r.qty, partial: false } }));
+  };
+  const toggleCart = (r: Row) => { if (inCart(r.id)) setCart((c) => { const n = { ...c }; delete n[r.id]; return n; }); else addToCart(r); };
+  const setCartQty = (id: string, qty: number) => setCart((c) => ({ ...c, [id]: { ...c[id], qty } }));
+  const setCartPartial = (id: string, partial: boolean) => setCart((c) => ({ ...c, [id]: { ...c[id], partial } }));
+
+  const cartRows = useMemo(() => rows.filter((r) => inCart(r.id)), [rows, cart]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // group ตะกร้าตามร้าน + ยอดต่อร้าน
+  const cartByShop = useMemo(() => {
+    const m = new Map<string, Row[]>();
+    for (const r of cartRows) { const a = m.get(r.seller_name) ?? []; a.push(r); m.set(r.seller_name, a); }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0], "th"));
+  }, [cartRows]);
+  const lineTotal = (r: Row) => (cart[r.id]?.qty ?? r.qty) * r.price_est;
+  const grandByCur = useMemo(() => { const t: Record<string, number> = {}; for (const r of cartRows) t[r.currency] = (t[r.currency] ?? 0) + lineTotal(r); return t; }, [cartRows, cart]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const createPOFromCart = useCallback(async () => {
+    if (cartRows.length === 0) return;
+    const items = cartRows.map((r) => ({ pr_id: r.id, qty: cart[r.id]?.qty ?? r.qty, keep_remainder: cart[r.id]?.partial ?? false }));
+    const shops = [...new Set(cartRows.map((r) => r.seller_name))];
+    const partials = items.filter((it) => it.keep_remainder).length;
+    if (!confirm(`สร้างใบสั่งซื้อ ${cartRows.length} รายการ → ${shops.length} ร้าน (1 ใบ/ร้าน)?${partials ? `\n(มี ${partials} รายการสั่งไม่ครบ → ส่วนที่เหลือจะเปิดเป็นใบขอซื้อใหม่)` : ""}`)) return;
+    await submitPO({ items, order_date: orderDate }, cartRows.map((r) => r.id));
+  }, [cartRows, cart, orderDate, submitPO]);
+
+  // ── ข้อมูล view การ์ด ──
   const shops = useMemo(() => {
     const m = new Map<string, { name: string; count: number; total: number; currency: string }>();
-    for (const r of rows) {
-      const s = m.get(r.seller_name) ?? { name: r.seller_name, count: 0, total: 0, currency: r.currency };
-      s.count += 1; s.total += r.line_total; m.set(r.seller_name, s);
-    }
+    for (const r of rows) { const s = m.get(r.seller_name) ?? { name: r.seller_name, count: 0, total: 0, currency: r.currency }; s.count += 1; s.total += r.line_total; m.set(r.seller_name, s); }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, "th"));
   }, [rows]);
-
   const shopNames = useMemo(() => (activeShop ? [activeShop] : shops.map((s) => s.name)), [activeShop, shops]);
   const rowsOfShop = useCallback((name: string) => rows.filter((r) => r.seller_name === name), [rows]);
-  const cartRows = useMemo(() => rows.filter((r) => cartIds.includes(r.id)), [rows, cartIds]);
-  const inCart = (id: string) => cartIds.includes(id);
-  const toggleCart = (id: string) => setCartIds((c) => c.includes(id) ? c.filter((x) => x !== id) : [...c, id]);
 
-  // ยอดรวมตะกร้าแยกตามสกุลเงิน
-  const cartTotals = useMemo(() => {
-    const t: Record<string, number> = {};
-    for (const r of cartRows) t[r.currency] = (t[r.currency] ?? 0) + r.line_total;
-    return t;
-  }, [cartRows]);
+  // resize ตะกร้า (ลากขอบซ้าย)
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX, startW = cartWidth;
+    const move = (ev: MouseEvent) => setCartWidth(Math.min(680, Math.max(300, startW + (startX - ev.clientX))));
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  };
 
   if (!canView) return <PlaygroundShell><AccessDenied message="ต้องมีสิทธิ์ products.view" /></PlaygroundShell>;
 
@@ -136,6 +173,11 @@ export default function PurchaseOrdersPage() {
             <p className="text-sm text-slate-500 mt-0.5">เลือกรายการ → สร้างใบสั่งซื้อ (ระบบแยกใบตามร้านให้อัตโนมัติ • 1 ใบ/ร้าน)</p>
           </div>
           <div className="flex items-center gap-2">
+            {view === "card" && (
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
+                <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+              </label>
+            )}
             <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
               <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
               <button onClick={() => changeView("table")} className={`h-9 px-3 border-l border-slate-200 ${view === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
@@ -151,11 +193,7 @@ export default function PurchaseOrdersPage() {
             searchableKeys={["seller_name", "item_name", "code", "requester"]} tableId="purchase-orders-create" exportFilename="รอสั่งซื้อ"
             selectable bulkActions={bulkActions}
             rowActions={[{ label: "ดู / แก้ไข", icon: "✎", onClick: (r: Row) => setEditRow(r) } as RowAction<Row>]}
-            views={[
-              { id: "all", label: "ทั้งหมด" },
-              { id: "approved", label: "อนุมัติแล้ว", filter: (r) => (r as Row).approved },
-              { id: "pending", label: "ยังไม่อนุมัติ", filter: (r) => !(r as Row).approved },
-            ]}
+            views={[{ id: "all", label: "ทั้งหมด" }, { id: "approved", label: "อนุมัติแล้ว", filter: (r) => (r as Row).approved }, { id: "pending", label: "ยังไม่อนุมัติ", filter: (r) => !(r as Row).approved }]}
           />
         )}
 
@@ -165,20 +203,16 @@ export default function PurchaseOrdersPage() {
           : rows.length === 0 ? <div className="text-center text-slate-300 py-16">ไม่มีรายการรอสั่งซื้อ</div>
           : (
             <div className="flex flex-col lg:flex-row gap-4">
-              {/* ซ้าย: ร้าน */}
+              {/* ซ้าย: ร้าน (คลิกเลือกร้าน) */}
               <aside className="w-full lg:w-56 shrink-0">
                 <div className="text-xs font-medium text-slate-500 mb-1.5">ร้านที่มีของรอสั่ง ({shops.length})</div>
                 <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                   <button onClick={() => setActiveShop(null)} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${!activeShop ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({rows.length})</button>
                   {shops.map((s) => (
-                    <div key={s.name} className={`group border-b border-slate-100 last:border-0 ${activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                      <button onClick={() => setActiveShop(s.name)} className={`w-full text-left px-3 pt-2 text-sm ${activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>
-                        🏪 {s.name}
-                        <div className="text-[11px] text-slate-400 font-normal">{s.count} รายการ · {money(s.total, s.currency)}</div>
-                      </button>
-                      <button onClick={() => createPO(rowsOfShop(s.name))} disabled={busy}
-                        className="mx-3 mb-2 mt-1 h-7 px-2 text-[11px] font-medium rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">🛒 ซื้อทั้งหมดของร้านนี้</button>
-                    </div>
+                    <button key={s.name} onClick={() => setActiveShop(s.name)} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                      <div className={`text-sm ${activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
+                      <div className="text-[11px] text-slate-400">{s.count} รายการ · {money(s.total, s.currency)}</div>
+                    </button>
                   ))}
                 </div>
               </aside>
@@ -188,35 +222,35 @@ export default function PurchaseOrdersPage() {
                 {shopNames.map((name) => {
                   const list = rowsOfShop(name);
                   if (list.length === 0) return null;
+                  const sectionNoShop = noShop(list[0]);
                   return (
                     <section key={name}>
                       <div className="flex items-center justify-between mb-2">
                         <h2 className="text-sm font-semibold text-slate-800">🏪 {name} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
-                        <button onClick={() => createPO(list)} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>
+                        {!sectionNoShop && <button onClick={() => createPOByRows(list)} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
                       </div>
-                      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" }}>
+                      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                         {list.map((r) => {
                           const on = inCart(r.id);
+                          const blocked = noShop(r);
                           return (
-                            <div key={r.id} className={`bg-white border rounded-xl overflow-hidden ${on ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200"}`}>
+                            <div key={r.id} onClick={() => (blocked ? toast.error("สินค้านี้ยังไม่มีร้าน — กด ✎ ตั้งร้านก่อน") : toggleCart(r))}
+                              className={`bg-white border rounded-xl overflow-hidden cursor-pointer transition-all ${on ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}>
                               <div className="aspect-square bg-slate-50 flex items-center justify-center relative">
                                 {!r.approved && <span className="absolute top-1.5 left-1.5 z-10 text-[10px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">ยังไม่อนุมัติ</span>}
-                                <button onClick={() => setEditRow(r)} title="ดูรายละเอียด / แก้ไข"
+                                <button onClick={(e) => { e.stopPropagation(); setEditRow(r); }} title="ดูรายละเอียด / แก้ไข"
                                   className="absolute top-1.5 right-1.5 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-blue-50 text-slate-600 text-xs">✎</button>
-                                {r.image_url
-                                  ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" />
-                                  : <span className="text-slate-300 text-3xl">📦</span>}
+                                {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
                               </div>
                               <div className="p-2.5">
                                 <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug">{r.item_name}</div>
                                 {r.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{r.code}</div>}
                                 <div className="text-xs text-slate-500 mt-1">ขอซื้อ <b className="text-slate-700">{r.qty.toLocaleString()}</b> {r.uom}</div>
-                                <div className="text-sm font-semibold text-blue-600 mt-0.5">{money(r.line_total, r.currency)}</div>
+                                <div className="text-sm font-semibold text-blue-600 mt-0.5">{money(r.line_total, r.currency)}{isCNY(r.currency) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(r.line_total * rate).toLocaleString()}</span>}</div>
                                 <div className="text-[11px] text-slate-400">@ {money(r.price_est, r.currency)} · {r.order_date ? formatDate(r.order_date) : "—"}</div>
-                                <button onClick={() => toggleCart(r.id)}
-                                  className={`w-full mt-2 h-8 text-xs font-medium rounded-md ${on ? "bg-blue-100 text-blue-700 border border-blue-200" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
-                                  {on ? "✓ อยู่ในตะกร้า" : "+ ใส่ตะกร้า"}
-                                </button>
+                                <div className={`w-full mt-2 h-8 text-xs font-medium rounded-md flex items-center justify-center ${blocked ? "bg-slate-100 text-slate-400" : on ? "bg-blue-100 text-blue-700 border border-blue-200" : "bg-blue-600 text-white"}`}>
+                                  {blocked ? "ไม่มีร้าน" : on ? "✓ อยู่ในตะกร้า" : "+ ใส่ตะกร้า"}
+                                </div>
                               </div>
                             </div>
                           );
@@ -227,37 +261,68 @@ export default function PurchaseOrdersPage() {
                 })}
               </main>
 
-              {/* ขวา: ตะกร้า */}
-              <aside className="w-full lg:w-80 shrink-0">
+              {/* ขวา: ตะกร้า (ขยายได้) */}
+              <aside className="w-full shrink-0 relative" style={{ width: typeof window !== "undefined" && window.innerWidth >= 1024 ? cartWidth : undefined }}>
+                <div onMouseDown={startResize} title="ลากเพื่อขยาย/ย่อ" className="hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 -ml-2 cursor-col-resize hover:bg-blue-200 rounded" />
                 <div className="bg-white border border-slate-200 rounded-lg sticky top-4">
-                  <div className="px-4 py-3 border-b border-slate-100 font-semibold text-slate-800">ตะกร้าสั่งซื้อ ({cartRows.length})</div>
-                  <div className="max-h-[50vh] overflow-auto p-3 space-y-2">
-                    {cartRows.length === 0 && <div className="text-sm text-slate-300 text-center py-8">ยังไม่มีรายการ<br />กด “ใส่ตะกร้า” ที่การ์ด</div>}
-                    {cartRows.map((r) => (
-                      <div key={r.id} className="border border-slate-200 rounded-lg p-2">
-                        <div className="flex justify-between gap-2">
-                          <div className="text-sm text-slate-700 flex-1 min-w-0 line-clamp-2">{r.item_name}</div>
-                          <button onClick={() => toggleCart(r.id)} className="text-slate-400 hover:text-red-500 text-xs">✕</button>
+                  <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                    <span className="font-semibold text-slate-800">ตะกร้าสั่งซื้อ ({cartRows.length})</span>
+                    <label className="flex items-center gap-1 text-[11px] text-slate-400">¥→฿
+                      <input type="number" value={rate} step="0.1" onChange={(e) => changeRate(Number(e.target.value))} className="w-14 h-6 px-1 text-xs border border-slate-200 rounded text-right" />
+                    </label>
+                  </div>
+                  <div className="max-h-[55vh] overflow-auto p-3 space-y-3">
+                    {cartRows.length === 0 && <div className="text-sm text-slate-300 text-center py-8">ยังไม่มีรายการ<br />คลิกการ์ดเพื่อใส่ตะกร้า</div>}
+                    {cartByShop.map(([shop, items]) => {
+                      const subtotal = items.reduce((a, r) => a + lineTotal(r), 0);
+                      const cur = items[0]?.currency ?? "THB";
+                      return (
+                        <div key={shop}>
+                          <div className="text-xs font-medium text-slate-500 mb-1 flex items-center justify-between">
+                            <span>🏪 {shop}</span>
+                            <span className="text-slate-600">{money(subtotal, cur)}{isCNY(cur) && rate > 0 && <span className="text-slate-400"> ≈ ฿{Math.round(subtotal * rate).toLocaleString()}</span>}</span>
+                          </div>
+                          <div className="space-y-2">
+                            {items.map((r) => {
+                              const cl = cart[r.id]; const remain = r.qty - (cl?.qty ?? r.qty);
+                              return (
+                                <div key={r.id} className="border border-slate-200 rounded-lg p-2">
+                                  <div className="flex gap-2">
+                                    <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden border border-slate-100">
+                                      {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm text-slate-700 line-clamp-2 leading-snug">{r.item_name}</div>
+                                      <div className="text-[11px] text-slate-400">{r.code}</div>
+                                    </div>
+                                    <button onClick={() => toggleCart(r)} className="text-slate-400 hover:text-red-500 text-xs self-start">✕</button>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1.5 text-xs">
+                                    <input type="number" min={1} value={cl?.qty ?? r.qty} onChange={(e) => setCartQty(r.id, Number(e.target.value))} className="w-16 h-7 px-1.5 border border-slate-200 rounded text-right" />
+                                    <span className="text-slate-400">{r.uom}</span>
+                                    <span className="ml-auto font-semibold text-slate-700">{money(lineTotal(r), r.currency)}</span>
+                                  </div>
+                                  <label className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-500">
+                                    <input type="checkbox" checked={cl?.partial ?? false} onChange={(e) => setCartPartial(r.id, e.target.checked)} className="rounded border-slate-300" />
+                                    ยังซื้อไม่ครบ {remain > 0 && cl?.partial && <span className="text-amber-600">(เหลือ {remain.toLocaleString()} {r.uom} → เปิดใบใหม่)</span>}
+                                  </label>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between mt-1 text-xs text-slate-500">
-                          <span>🏪 {r.seller_name}</span>
-                          <span className="font-semibold text-slate-700">{r.qty.toLocaleString()} {r.uom} · {money(r.line_total, r.currency)}</span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   <div className="p-3 border-t border-slate-100 space-y-2">
-                    {cartRows.length > 0 && Object.entries(cartTotals).map(([cur, sum]) => (
-                      <div key={cur} className="flex justify-between text-sm"><span className="text-slate-500">ยอดรวม ({cur})</span><span className="font-bold text-blue-600">{money(sum, cur)}</span></div>
+                    {Object.entries(grandByCur).map(([cur, sum]) => (
+                      <div key={cur} className="flex justify-between text-sm"><span className="text-slate-500">ยอดรวม ({cur})</span><span className="font-bold text-blue-600">{money(sum, cur)}{isCNY(cur) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(sum * rate).toLocaleString()}</span>}</span></div>
                     ))}
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">📅 วันที่สั่ง (ใช้กับทุกใบ)</label>
                       <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
                     </div>
-                    <button onClick={() => createPO(cartRows, orderDate)} disabled={busy || cartRows.length === 0}
-                      className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                      {busy ? "กำลังสร้าง…" : "สร้างใบสั่งซื้อ →"}
-                    </button>
+                    <button onClick={createPOFromCart} disabled={busy || cartRows.length === 0} className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังสร้าง…" : "สร้างใบสั่งซื้อ →"}</button>
                     <p className="text-[10px] text-slate-400 text-center">รายการต่างร้านจะแยกเป็นคนละใบให้อัตโนมัติ</p>
                   </div>
                 </div>
@@ -291,7 +356,6 @@ function CardEditModal({ row, onClose, onSaved }: { row: Row; onClose: () => voi
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
-      // เปลี่ยนรูป = แก้รูปปก SKU จริง (มีผลทุกที่)
       if (imgKey !== row.cover_key && row.item_sku_id) {
         await apiFetch(`/api/master-v2/skus/${row.item_sku_id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -321,20 +385,14 @@ function CardEditModal({ row, onClose, onSaved }: { row: Row; onClose: () => voi
           <p className="text-[10px] text-amber-600 mt-1">⚠ เปลี่ยนรูปนี้ = เปลี่ยนรูปปก SKU จริง มีผลทุกที่ที่ใช้สินค้านี้</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({row.uom})</label>
-            <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({row.currency})</label>
-            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
-          </div>
+          <div><label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({row.uom})</label>
+            <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
+          <div><label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({row.currency})</label>
+            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
         </div>
         <div className="text-xs text-slate-500">ราคารวม: <b className="text-blue-600">{money((Number(qty) || 0) * (Number(price) || 0), row.currency)}</b></div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ</label>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="(ถ้ามี)" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
-        </div>
+        <div><label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ</label>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="(ถ้ามี)" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
       </div>
     </ERPModal>
   );

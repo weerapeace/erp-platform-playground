@@ -20,6 +20,7 @@ export const revalidate = 0;
 
 type PR = {
   id: string;
+  pr_no: string | null;
   item_sku_id: string | null;
   item_name: string | null;
   qty: number | null;
@@ -32,6 +33,9 @@ type PR = {
   requester: string | null;
   status: string | null;
   po_id: string | null;
+  image_key: string | null;
+  used_for_sku_id: string | null;
+  used_for_label: string | null;
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -41,17 +45,32 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { pr_ids?: unknown; actor?: string; order_date?: string };
+  let body: { pr_ids?: unknown; actor?: string; order_date?: string; items?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
-  const prIds = Array.isArray(body.pr_ids) ? body.pr_ids.filter((x): x is string => typeof x === "string") : [];
+
+  // รองรับ 2 รูปแบบ: items:[{pr_id, qty, keep_remainder}] (ใหม่ — แก้จำนวน/สั่งไม่ครบ) หรือ pr_ids:[] (เดิม)
+  const overrides = new Map<string, { qty?: number; keep: boolean }>();
+  let prIds: string[] = [];
+  if (Array.isArray(body.items)) {
+    for (const it of body.items as Array<Record<string, unknown>>) {
+      const id = typeof it?.pr_id === "string" ? it.pr_id : null;
+      if (!id) continue;
+      prIds.push(id);
+      const q = Number(it.qty);
+      overrides.set(id, { qty: isFinite(q) && q > 0 ? q : undefined, keep: it.keep_remainder === true });
+    }
+  } else {
+    prIds = Array.isArray(body.pr_ids) ? body.pr_ids.filter((x): x is string => typeof x === "string") : [];
+  }
   if (prIds.length === 0) return NextResponse.json({ error: "ไม่ได้เลือกรายการ" }, { status: 400 });
+  const ordQty = (p: PR) => overrides.get(p.id)?.qty ?? num(p.qty);
 
   const admin = supabaseAdmin();
 
   // โหลด PR ที่เลือก (เฉพาะที่ยังไม่ถูกแปลงเป็น PO)
   const { data: prs, error: prErr } = await admin
     .from("purchase_requests_v2")
-    .select("id, item_sku_id, item_name, qty, uom, seller_name, price_est, currency, note, order_date, requester, status, po_id")
+    .select("id, pr_no, item_sku_id, item_name, qty, uom, seller_name, price_est, currency, note, order_date, requester, status, po_id, image_key, used_for_sku_id, used_for_label")
     .in("id", prIds);
   if (prErr) return NextResponse.json({ error: prErr.message }, { status: 500 });
 
@@ -79,7 +98,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const [seller, currency] = key.split("|||");
     const { data: poNo, error: numErr } = await admin.rpc("erp_next_number", { p_key: "po" });
     if (numErr || !poNo) return NextResponse.json({ error: "ออกเลข PO ไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
-    const grandTotal = items.reduce((a, p) => a + num(p.qty) * num(p.price_est), 0);
+    const grandTotal = items.reduce((a, p) => a + ordQty(p) * num(p.price_est), 0);
     const orderDate = (typeof body.order_date === "string" && body.order_date)
       ? body.order_date
       : (items.find((p) => p.order_date)?.order_date ?? now.toISOString().slice(0, 10));
@@ -99,10 +118,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       pr_id: p.id,
       item_sku_id: p.item_sku_id,
       item_name: p.item_name,
-      qty: num(p.qty),
+      qty: ordQty(p),
       uom: p.uom,
       price_est: num(p.price_est),
-      line_total: num(p.qty) * num(p.price_est),
+      line_total: ordQty(p) * num(p.price_est),
       currency,
       note: p.note,
       sort_order: i,
@@ -110,17 +129,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const { error: lineErr } = await admin.from("purchase_order_lines_v2").insert(lines);
     if (lineErr) return NextResponse.json({ error: "สร้างรายการ PO ไม่สำเร็จ: " + lineErr.message }, { status: 500 });
 
-    // อัปเดต PR → rfq_created + ผูก po
-    const { error: updErr } = await admin
-      .from("purchase_requests_v2")
-      .update({ status: "rfq_created", po_id: po.id })
-      .in("id", items.map((p) => p.id));
-    if (updErr) return NextResponse.json({ error: "อัปเดตสถานะ PR ไม่สำเร็จ: " + updErr.message }, { status: 500 });
+    // อัปเดต PR → rfq_created + ผูก po + ตั้ง qty = จำนวนที่สั่งจริง (ต่อรายการ เพราะจำนวนต่างกันได้)
+    for (const p of items) {
+      const { error: updErr } = await admin
+        .from("purchase_requests_v2")
+        .update({ status: "rfq_created", po_id: po.id, qty: ordQty(p) })
+        .eq("id", p.id);
+      if (updErr) return NextResponse.json({ error: "อัปเดตสถานะ PR ไม่สำเร็จ: " + updErr.message }, { status: 500 });
+    }
 
     // บันทึก "อนุมัติแล้วสั่งเลย" เฉพาะใบที่ยังไม่เคยอนุมัติ (เก็บผู้อนุมัติ+เวลา)
     await admin.from("purchase_requests_v2")
       .update({ approved_by: actor, approved_at: now.toISOString() })
       .in("id", items.map((p) => p.id)).is("approved_at", null);
+
+    // "รอซื้ออีก": สั่งไม่ครบ + ติ๊กเก็บส่วนที่เหลือ → สร้างใบขอซื้อใหม่ (เปิดอยู่) เป็นจำนวนที่เหลือ
+    const remainders = items
+      .map((p) => ({ p, rem: num(p.qty) - ordQty(p) }))
+      .filter(({ p, rem }) => overrides.get(p.id)?.keep && rem > 0)
+      .map(({ p, rem }) => ({
+        pr_no: p.pr_no, item_sku_id: p.item_sku_id, item_name: p.item_name, qty: rem, uom: p.uom,
+        seller_name: p.seller_name, price_est: p.price_est, currency: p.currency, note: p.note,
+        order_date: p.order_date, requester: p.requester, status: "approved", is_active: true,
+        image_key: p.image_key, used_for_sku_id: p.used_for_sku_id, used_for_label: p.used_for_label,
+        approved_by: actor, approved_at: now.toISOString(),
+      }));
+    if (remainders.length > 0) {
+      const { error: remErr } = await admin.from("purchase_requests_v2").insert(remainders);
+      if (remErr) return NextResponse.json({ error: "สร้างใบขอซื้อส่วนที่เหลือไม่สำเร็จ: " + remErr.message }, { status: 500 });
+    }
 
     // audit — 1 แถวต่อ 1 ใบสั่งซื้อ (ของกลาง, เขียนลงตาราง audit_logs จริง)
     await writeAudit(admin, {
