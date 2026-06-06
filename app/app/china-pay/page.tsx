@@ -2381,6 +2381,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: s
   const [receipt, setReceipt] = useState<Record<string, unknown> | null>(null);
   const [delTarget, setDelTarget] = useState<Record<string, unknown> | null>(null);   // การโอนที่กำลังยืนยันลบ
   const [editTarget, setEditTarget] = useState<Record<string, unknown> | null>(null); // การโอนที่กำลังยืนยันแก้ไข (ลบ+เริ่มใหม่)
+  const [linkTarget, setLinkTarget] = useState<Record<string, unknown> | null>(null); // การโอนที่กำลังจับคู่สลิป↔บิล CTW
   const [busy, setBusy] = useState(false);
 
   // ลบรายการโอน + คืนยอดบิลที่เกี่ยวข้อง (paid_rmb / cleared_amount คำนวณใหม่จากการโอนที่เหลือ)
@@ -2451,7 +2452,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: s
     finally { setBusy(false); setDelTarget(null); setEditTarget(null); }
   };
 
-  useEffect(() => {
+  const loadList = useCallback(() => {
     setLoading(true);
     Promise.all([
       apiFetch("/api/master-v2/china-transfers?limit=200&sort_by=transfer_date&sort_dir=desc").then(r => r.json()).catch(() => ({ data: [] })),
@@ -2463,6 +2464,7 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: s
       setPmap(m);
     }).finally(() => setLoading(false));
   }, []);
+  useEffect(() => { loadList(); }, [loadList]);
 
   if (loading) return <div className="text-center text-slate-400 py-10">กำลังโหลด…</div>;
   if (rows.length === 0) return <div className="text-center text-slate-300 py-10">— ยังไม่มีรายการโอน —</div>;
@@ -2489,8 +2491,10 @@ function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: s
         );
       })}
       {receipt && <TransferReceiptPopup t={receipt} onClose={() => setReceipt(null)}
+        onLinkSlips={() => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setLinkTarget(raw); setReceipt(null); } }}
         onEdit={onGo ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setEditTarget(raw); setReceipt(null); } } : undefined}
         onDelete={canDelete ? () => { const raw = rows.find(x => String(x.id) === String(receipt.transfer_id)); if (raw) { setDelTarget(raw); setReceipt(null); } } : undefined} />}
+      {linkTarget && <LinkSlipsPopup transfer={linkTarget} onClose={() => setLinkTarget(null)} onSaved={() => { setLinkTarget(null); loadList(); }} />}
       {delTarget && (
         <ConfirmPopup title="ลบรายการโอนนี้?" message={`เลขโอน ${String(delTarget.transfer_no ?? "—")} · ฿${fmt(num(delTarget.amount_transferred_thb))} — ระบบจะคืนยอดบิลที่ตัดในรอบนี้กลับให้`}
           confirmText="ลบ + คืนยอด" tone="rose" onCancel={() => setDelTarget(null)} onConfirm={() => removeTransfer(delTarget)} />
@@ -3323,8 +3327,182 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
   );
 }
 
+// ---------------- จับคู่สลิป ↔ บิล CTW (แก้เฉพาะการเชื่อม ไม่แตะบิลจีน/ยอดโอน) ----------------
+function LinkSlipsPopup({ transfer, onClose, onSaved }: { transfer: Record<string, unknown>; onClose: () => void; onSaved: () => void }) {
+  useScrollLock(true);
+  const toast = useToast();
+  const r2Url = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+  const [ctw, setCtw] = useState<Record<string, unknown>[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"ISG" | "IG">("ISG");
+  // ยอดที่ transfer นี้ตัดบิล CTW ไว้เดิม (จาก lines) — ใช้คิดส่วนต่างตอนบันทึก + เพดาน
+  const oldCutByBill = useMemo(() => {
+    const m: Record<string, number> = {};
+    (Array.isArray(transfer.lines) ? (transfer.lines as Record<string, unknown>[]) : []).filter(l => l.kind === "ctw")
+      .forEach(l => { const b = String(l.bill_id); m[b] = (m[b] ?? 0) + num(l.paid_thb); });
+    return m;
+  }, [transfer]);
+  // รายการสลิป (แก้ cuts ได้) — เติมบิลที่ตัดไว้แต่ยังไม่ผูกสลิป + ถ้าไม่มีสลิปสร้างให้ 1
+  const [slips, setSlips] = useState<TxSlip[]>(() => {
+    const base: TxSlip[] = Array.isArray(transfer.tx_slips) ? (transfer.tx_slips as TxSlip[]).map(s => ({ ...s, cuts: { ...(s.cuts ?? {}) } })) : [];
+    const covered = new Set(base.flatMap(s => Object.keys(s.cuts ?? {})));
+    const missing = Object.entries(oldCutByBill).filter(([b, v]) => v > 0 && !covered.has(b));
+    if (missing.length) {
+      const extra = Object.fromEntries(missing);
+      if (base.length) base[0] = { ...base[0], cuts: { ...(base[0].cuts ?? {}), ...extra } };
+      else base.push({ key: "", bank: "", amount: num(transfer.amount_transferred_thb), at: "", cuts: extra });
+    }
+    if (base.length === 0 && num(transfer.amount_transferred_thb) > 0) base.push({ key: "", bank: "", amount: num(transfer.amount_transferred_thb), at: "", cuts: {} });
+    return base;
+  });
+  const [openIdx, setOpenIdx] = useState<number | null>(slips.length === 1 ? 0 : null);
+
+  useEffect(() => {
+    apiFetch("/api/master-v2/ctw-bills?limit=500&sort_by=doc_date&sort_dir=desc").then(r => r.json())
+      .then(j => setCtw((j.data ?? []) as Record<string, unknown>[])).catch(() => {});
+  }, []);
+
+  const grpOf = (r: Record<string, unknown>) => (String(r.bill_group ?? "ISG") === "IG" ? "IG" : "ISG");
+  // เพดานยอดตัดต่อบิล = min(ยอดสลิปคงเหลือ, net − คนอื่นตัด − สลิปอื่นในรายการนี้ตัด)
+  const cap = (slip: TxSlip, idx: number, billId: string, all: TxSlip[]) => {
+    const usedOther = Object.entries(slip.cuts ?? {}).reduce((a, [bid, v]) => a + (bid === billId ? 0 : num(v)), 0);
+    const slipLeft = Math.max(0, num(slip.amount) - usedOther);
+    const b = ctw.find(x => String(x.id) === billId) ?? {};
+    const net = num(b.net_amount);
+    const clearedOthers = Math.max(0, num(b.cleared_amount) - (oldCutByBill[billId] ?? 0));
+    const otherSlips = all.reduce((a, t, j) => a + (j === idx ? 0 : num((t.cuts ?? {})[billId])), 0);
+    return Math.max(0, Math.min(slipLeft, net - clearedOthers - otherSlips));
+  };
+  const toggle = (i: number, billId: string) => setSlips(prev => prev.map((s, idx) => {
+    if (idx !== i) return s;
+    const cuts = { ...(s.cuts ?? {}) };
+    if (billId in cuts) delete cuts[billId];
+    else cuts[billId] = +cap(s, i, billId, prev).toFixed(2);
+    return { ...s, cuts };
+  }));
+  const setCut = (i: number, billId: string, raw: string) => setSlips(prev => prev.map((s, idx) => {
+    if (idx !== i) return s;
+    const capped = Math.min(num(raw), cap(s, i, billId, prev));
+    return { ...s, cuts: { ...(s.cuts ?? {}), [billId]: +Math.max(0, capped).toFixed(2) } };
+  }));
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const newByBill: Record<string, number> = {};
+      slips.forEach(s => { for (const [b, v] of Object.entries(s.cuts ?? {})) newByBill[b] = (newByBill[b] ?? 0) + num(v); });
+      const ids = new Set([...Object.keys(newByBill), ...Object.keys(oldCutByBill)]);
+      // อัปเดตยอดค้างบิล CTW เฉพาะส่วนต่าง
+      for (const bid of ids) {
+        const delta = (newByBill[bid] ?? 0) - (oldCutByBill[bid] ?? 0);
+        if (Math.abs(delta) < 0.001) continue;
+        const c = ctw.find(x => String(x.id) === bid);
+        if (!c) continue;
+        const net = num(c.net_amount);
+        const newCleared = Math.min(net, Math.max(0, num(c.cleared_amount) + delta));
+        await apiFetch(`/api/master-v2/ctw-bills/${bid}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cleared_amount: +newCleared.toFixed(2), cleared_at: net > 0 && newCleared >= net - 0.001 ? new Date().toISOString() : null, actor: "china-app" }) });
+      }
+      // อัปเดต transfer: tx_slips + เปลี่ยนเฉพาะ ctw lines
+      const tl = Array.isArray(transfer.lines) ? (transfer.lines as Record<string, unknown>[]) : [];
+      const nonCtw = tl.filter(l => l.kind !== "ctw");
+      const ctwLines = Object.entries(newByBill).filter(([, v]) => v > 0.001).map(([bid, v]) => {
+        const c = ctw.find(x => String(x.id) === bid);
+        return { kind: "ctw", bill_id: bid, label: String(c?.company_name ?? ""), doc_number: String(c?.doc_number ?? ""), paid_thb: +v.toFixed(2) };
+      });
+      await apiFetch(`/api/master-v2/china-transfers/${String(transfer.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tx_slips: slips, lines: [...nonCtw, ...ctwLines], actor: "china-app" }) });
+      toast.success("จับคู่สลิป + อัปเดตบิล CTW แล้ว");
+      onSaved();
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Portal>
+    <div className="fixed inset-x-0 top-0 h-[100svh] z-[230] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
+          <div className="font-semibold text-slate-800">🔗 จับคู่สลิป ↔ บิล CTW</div>
+          <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
+        </div>
+        <div className="p-3 space-y-2">
+          <div className="text-xs text-slate-400">เลือกว่าสลิปแต่ละใบตัดบิล CTW ใบไหน — แก้แค่การจับคู่ ไม่กระทบบิลจีน/ยอดโอน</div>
+          {slips.map((s, i) => {
+            const cutKeys = Object.keys(s.cuts ?? {}); const open = openIdx === i;
+            return (
+              <div key={i} className="border border-slate-200 rounded-lg p-2">
+                <div className="flex gap-2 items-center">
+                  {s.key
+                    ? (s.key.toLowerCase().endsWith(".pdf")
+                      ? <span className="w-11 h-11 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-lg">📄</span>
+                      // eslint-disable-next-line @next/next/no-img-element
+                      : <img src={r2Url(s.key)} alt="" className="w-11 h-11 flex-shrink-0 rounded object-cover border border-slate-200" />)
+                    : <span className="w-11 h-11 flex-shrink-0 rounded bg-slate-50 border border-dashed border-slate-200 flex items-center justify-center text-slate-300">💵</span>}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-slate-700 truncate">{s.bank || `รายการ ${i + 1}`}</div>
+                    <div className="text-[11px] text-slate-400">โอน ฿{fmt(num(s.amount))}</div>
+                  </div>
+                  <button onClick={() => setOpenIdx(open ? null : i)}
+                    className={`flex-shrink-0 h-9 px-2 rounded-lg border text-xs font-medium ${cutKeys.length ? "border-orange-400 bg-orange-50 text-orange-700" : "border-dashed border-slate-300 text-slate-500"}`}>
+                    🔗 {cutKeys.length ? `${cutKeys.length} บิล` : "เลือกบิล"} {open ? "▲" : "▼"}
+                  </button>
+                </div>
+                {open && (
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      {([{ v: "ISG", l: "ISG" }, { v: "IG", l: "IG International" }] as const).map(g => (
+                        <button key={g.v} onClick={() => setTab(g.v)}
+                          className={`h-8 rounded-lg border text-xs font-semibold ${tab === g.v ? "border-orange-400 bg-orange-50 text-orange-700" : "border-slate-200 text-slate-400"}`}>
+                          {g.l} <span className="font-normal">({ctw.filter(b => grpOf(b) === g.v).length})</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="space-y-1">
+                      {ctw.filter(b => grpOf(b) === tab).map(b => {
+                        const bid = String(b.id), on = (s.cuts ?? {})[bid] !== undefined;
+                        const clearedOthers = Math.max(0, num(b.cleared_amount) - (oldCutByBill[bid] ?? 0));
+                        const otherSlips = slips.reduce((a, t, j) => a + (j === i ? 0 : num((t.cuts ?? {})[bid])), 0);
+                        const remain = Math.max(0, num(b.net_amount) - clearedOthers - otherSlips);
+                        return (
+                          <div key={bid} className={`rounded-lg border ${on ? "border-orange-400 bg-orange-50" : "border-slate-100"}`}>
+                            <label className="flex items-center gap-2 px-2 py-1.5 cursor-pointer">
+                              <input type="checkbox" checked={on} onChange={() => toggle(i, bid)} className="accent-orange-500 flex-shrink-0" />
+                              <span className="flex-1 min-w-0">
+                                <span className="block text-sm font-semibold text-slate-800 truncate">{String(b.doc_number ?? "—")}</span>
+                                <span className="block text-[10px] text-slate-400 truncate">{String(b.company_name ?? "")} · {String(b.doc_date ?? "—")}</span>
+                              </span>
+                              <span className="text-right flex-shrink-0"><span className="block text-sm font-bold text-orange-600">฿{fmt(remain)}</span><span className="block text-[9px] text-slate-400">ค้าง</span></span>
+                            </label>
+                            {on && (
+                              <div className="flex items-center gap-2 px-2 pb-1.5">
+                                <span className="text-[11px] text-slate-500 flex-shrink-0">ยอดตัด (฿)</span>
+                                <Money value={(s.cuts ?? {})[bid] ? String((s.cuts ?? {})[bid]) : ""} onChange={(v) => setCut(i, bid, v)}
+                                  className="flex-1 h-9 px-2 text-sm text-right border border-orange-300 rounded-lg" />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {ctw.filter(b => grpOf(b) === tab).length === 0 && <div className="text-center text-slate-300 text-xs py-2">— ไม่มีบิล CTW ในกลุ่มนี้ —</div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className="border-t border-slate-100 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+          <button onClick={save} disabled={busy} className="w-full h-12 bg-emerald-600 text-white rounded-lg font-semibold disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึกการจับคู่"}</button>
+        </div>
+      </div>
+    </div>
+    </Portal>
+  );
+}
+
 // ---------------- ใบสรุปการโอน (โหลดเป็นรูปได้) ----------------
-function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void; onEdit?: () => void }) {
+function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLinkSlips }: { t: Record<string, unknown>; onClose: () => void; autoSendLine?: boolean; onDelete?: () => void; onEdit?: () => void; onLinkSlips?: () => void }) {
   useScrollLock(true);
   const toast = useToast();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -3579,6 +3757,9 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { 
           <button onClick={sendLineImage} disabled={busy} className="w-full h-12 bg-[#06C755] text-white rounded-lg font-medium disabled:opacity-50">{busy ? "กำลังส่ง…" : "📩 ส่งไลน์ (รูป) + สลิป"}</button>
           <button onClick={async () => { setBusy(true); await pushTransferLine(t, toast); setBusy(false); }} disabled={busy}
             className="w-full h-11 border border-[#06C755] text-[#06C755] rounded-lg text-sm font-medium disabled:opacity-50">📩 ส่งไลน์ (ข้อความ)</button>
+          {onLinkSlips && (
+            <button onClick={onLinkSlips} className="w-full h-11 border border-orange-300 text-orange-700 bg-orange-50 rounded-lg text-sm font-medium hover:bg-orange-100">🔗 จับคู่สลิป ↔ บิล CTW</button>
+          )}
           {(onEdit || onDelete) && (
             <div className="grid grid-cols-2 gap-2">
               {onEdit && (
