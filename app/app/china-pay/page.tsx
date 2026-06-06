@@ -158,21 +158,43 @@ async function downloadOrSaveImage(blob: Blob, filename: string): Promise<void> 
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// ขอเรท — ส่งข้อความเข้า LINE กลุ่มอัตโนมัติ (fallback เป็น share ถ้ายังไม่ตั้งค่า LINE)
-async function requestRateViaLine(): Promise<void> {
+// ขอเรท — ส่งข้อความเข้า LINE กลุ่มอัตโนมัติ (ไม่เด้ง share แล้ว) คืน true ถ้าส่งสำเร็จ
+async function requestRateViaLine(): Promise<boolean> {
   const text = "ขอเรทเงินด้วยค่ะ";
   try {
     const res = await apiFetch("/api/china-pay/line-push", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, purpose: "rate" }),
     });
-    if (res.ok) { toast.success("ส่งขอเรทเข้ากลุ่มแล้ว"); return; }
+    if (res.ok) { toast.success("ส่งขอเรทเข้ากลุ่มแล้ว"); return true; }
     const j = await res.json().catch(() => ({} as { needConfig?: boolean; error?: string }));
-    if (j?.needConfig) { window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank"); return; }
-    toast.error(j?.error ?? "ส่งขอเรทไม่สำเร็จ");
+    toast.error(j?.needConfig ? "ยังไม่ได้ตั้งค่า LINE — ไปที่เมนูตั้งค่า" : (j?.error ?? "ส่งขอเรทไม่สำเร็จ"));
+    return false;
   } catch {
-    window.open(`https://line.me/R/share?text=${encodeURIComponent(text)}`, "_blank");
+    toast.error("ส่งขอเรทไม่สำเร็จ ลองใหม่อีกครั้ง");
+    return false;
   }
+}
+
+// ปุ่มขอเรท (ของกลาง) — กดแล้วส่ง LINE, สำเร็จแล้วโชว์ "✓ ขอแล้ว" เล็ก ๆ ชั่วครู่
+function RateRequestButton() {
+  const [state, setState] = useState<"idle" | "sending" | "done">("idle");
+  const click = async () => {
+    if (state === "sending") return;
+    setState("sending");
+    const ok = await requestRateViaLine();
+    if (ok) { setState("done"); setTimeout(() => setState("idle"), 8000); }
+    else setState("idle");
+  };
+  if (state === "done") {
+    return <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-full px-2.5 py-1.5">✓ ขอแล้ว</span>;
+  }
+  return (
+    <button type="button" onClick={() => void click()} disabled={state === "sending"}
+      className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition disabled:opacity-60">
+      {state === "sending" ? "กำลังส่ง…" : "📩 ขอเรท"}
+    </button>
+  );
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -2022,7 +2044,7 @@ function RateTab() {
         <span className={`text-xs font-medium rounded-full px-2.5 py-1 border ${hasToday ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>
           {hasToday ? `เรทวันนี้ ${fmt(num(todayRate?.rate))}` : "ยังไม่มีเรทวันนี้"}
         </span>
-        <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>
+        <RateRequestButton />
       </div>
       <Card>
         <Label>เพิ่มเรท R1 ของวัน (กรอกแค่ R1 — R2-R4 คำนวณให้)</Label>
@@ -3042,7 +3064,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
           {hasRate ? `เรทวันนี้ ${fmt(r1)}` : "ยังไม่มีเรทวันนี้"}
         </span>
         {/* ซ่อนปุ่มขอเรท ถ้าวันนี้มีเรทแล้ว */}
-        {!hasRate && <button type="button" onClick={() => void requestRateViaLine()} className="text-xs font-semibold text-white bg-[#06C755] rounded-full px-2.5 py-1.5 active:scale-95 transition">📩 ขอเรท</button>}
+        {!hasRate && <RateRequestButton />}
       </div>
 
       {/* ยอดที่ต้องโอนรอบนี้ (฿ นำ · หักยอดคงเหลือ ¥) — sticky ตรึงบน · โชว์ step 1 เท่านั้น */}
