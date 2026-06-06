@@ -300,6 +300,7 @@ export default function ChinaPayApp() {
   );
 
   const isAdmin = user.role === "admin";
+  const canManage = isAdmin || user.role === "manager";   // admin + ผู้จัดการ = แก้/ลบได้
   const allowed = isAdmin ? ALL_TAB_KEYS : (menuCfg[user.role] ?? ALL_TAB_KEYS);
   const navMenu: { k: Tab; icon: string; label: string }[] = MENU.filter(m => allowed.includes(m.k));
   if (isAdmin) navMenu.push({ k: "menusettings", icon: "⚙️", label: "ตั้งค่าเมนู" });
@@ -376,11 +377,11 @@ export default function ChinaPayApp() {
           )}
           {renderTab === "dashboard" && <Dashboard onGo={go} />}
           {renderTab === "bill" && <BillForm />}
-          {renderTab === "all" && <AllList canDelete={isAdmin} />}
+          {renderTab === "all" && <AllList canDelete={canManage} />}
           {renderTab === "rate" && <RateTab />}
-          {renderTab === "ctw" && <CtwList canDelete={isAdmin} />}
+          {renderTab === "ctw" && <CtwList canDelete={canManage} />}
           {renderTab === "transfer" && <TransferPage preselect={preselect} onConsumePreselect={() => setPreselect([])} />}
-          {renderTab === "transfers" && <TransferList canDelete={isAdmin} onGo={go} />}
+          {renderTab === "transfers" && <TransferList canDelete={canManage} onGo={go} />}
           {renderTab === "automation" && <AutomationPage />}
           {renderTab === "menusettings" && isAdmin && <MenuSettings onSaved={setMenuCfg} />}
         </main>
