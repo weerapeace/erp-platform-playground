@@ -5,7 +5,7 @@
  * - RelationMany2Many: เลือกหลายค่า (จัดการ link ใน junction table ทันที)
  * - RelationOne2Many: แสดงรายการลูกที่ชี้กลับมา (read-only)
  */
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
@@ -25,7 +25,8 @@ type RelConfig = {
   list_sub_fields?: string[];         // columns ข้อมูลย่อย แสดงต่อท้าย คั่นด้วย ·
 };
 
-type Opt = { id: string; label: string };
+type Opt = { id: string; label: string; group_id?: string | null };
+type Grp = { id: string; name: string; parent_group_id: string | null; single_select: boolean; sort_order: number };
 
 async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[]> {
   const r = await apiFetch(`/api/master-v2/${moduleKey}?limit=500`);
@@ -33,6 +34,18 @@ async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[
   return (j.data ?? j.rows ?? []).map((row: Record<string, unknown>) => ({
     id: String(row.id),
     label: String(row[labelField] ?? row.name ?? row.id),
+    group_id: row.group_id ? String(row.group_id) : null,
+  }));
+}
+
+// โหลดรายชื่อกลุ่มแท็ก (ใช้กับ product_families เท่านั้น)
+async function fetchGroups(): Promise<Grp[]> {
+  const r = await apiFetch(`/api/master-v2/product_family_groups?limit=500`);
+  const j = await r.json();
+  return ((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
+    id: String(g.id), name: String(g.name ?? ""),
+    parent_group_id: g.parent_group_id ? String(g.parent_group_id) : null,
+    single_select: g.single_select === true, sort_order: Number(g.sort_order ?? 100),
   }));
 }
 
@@ -127,35 +140,54 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   value?: string[];
   onChange?: (ids: string[]) => void;        // โหมดสร้างเท่านั้น (parent: updateForm)
 }) {
-  const junction = config.junction_table ?? "";
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const labelField = config.target_label_field ?? "name";
   const allowCreate = config.allow_create !== false;
   const isCreate = !recordId;
+  const usesGroups = moduleKey === "product_families";   // แท็กที่มีระบบกลุ่ม
 
   const [opts, setOpts] = useState<Opt[]>([]);
+  const [groups, setGroups] = useState<Grp[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mgrOpen, setMgrOpen] = useState(false);   // popup จัดการแท็ก
+  const [mgrOpen, setMgrOpen] = useState(false);       // popup จัดการแท็ก
+  const [pickerOpen, setPickerOpen] = useState(false); // popup เลือกแท็ก (แบ่งกลุ่ม)
 
   // แหล่งความจริงเดียว = ค่าในฟอร์ม (value) — ไม่มี state ภายใน widget (กัน diverge/remount ทำค่าหาย)
-  //   โหมดแก้ไข: master-crud โหลดลิงก์เดิมเข้า form ให้ตอน openEdit
-  //   value===undefined (โหมดแก้ไข) = ยังโหลดไม่เสร็จ → ล็อกคลิกไว้ก่อน
   const loading = !isCreate && value === undefined;
   const linked = value ?? [];
-  // ref ค่าล่าสุด → คลิกถี่ ๆ ไม่เพี้ยน
   const linkedRef = useRef<string[]>(linked);
   linkedRef.current = linked;
 
-  useEffect(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
+  const reloadOpts = useCallback(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
+  useEffect(() => { reloadOpts(); }, [reloadOpts]);
+  useEffect(() => { if (usesGroups) fetchGroups().then(setGroups).catch(() => {}); }, [usesGroups]);
 
   const labelOf = (id: string) => opts.find((o) => o.id === id)?.label ?? id.slice(0, 8);
 
-  // toggle: คำนวณจากค่าล่าสุดแล้วส่งเข้า form (chips + บันทึก อ่านจาก form ที่เดียว → ตรงกันเสมอ)
+  // ── ระบบกลุ่ม + "เลือกได้แค่ 1" ──
+  const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  // scope การบังคับเลือกเดียว = ancestor ที่ single_select สูงสุดในสายโซ่กลุ่มของแท็ก
+  const scopeOfGroup = useCallback((gid: string | null): string | null => {
+    let cur = gid, found: string | null = null; const seen = new Set<string>();
+    while (cur && !seen.has(cur)) { seen.add(cur); const n = groupById.get(cur); if (!n) break; if (n.single_select) found = cur; cur = n.parent_group_id; }
+    return found;
+  }, [groupById]);
+  const scopeOfTag = useCallback((id: string): string | null => {
+    const o = opts.find((x) => x.id === id); return o ? scopeOfGroup(o.group_id ?? null) : null;
+  }, [opts, scopeOfGroup]);
+
+  // toggle: ถ้าแท็กอยู่ในกลุ่ม "เลือกได้แค่ 1" → เอาแท็กอื่นใน scope เดียวกันออกก่อน
   const toggle = (id: string) => {
     if (loading) return;
     const cur = linkedRef.current;
-    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    let next: string[];
+    if (cur.includes(id)) next = cur.filter((x) => x !== id);
+    else {
+      const sc = scopeOfTag(id);
+      const base = sc ? cur.filter((x) => scopeOfTag(x) !== sc) : cur;
+      next = [...base, id];
+    }
     linkedRef.current = next;
     onChange?.(next);
   };
@@ -171,7 +203,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
       const j = await res.json().catch(() => ({}));
       const id = (j.data as { id?: string } | undefined)?.id;
       if (!res.ok || j.error || !id) { alert("สร้างแท็กไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
-      setOpts((o) => [...o, { id, label: name }]);
+      setOpts((o) => [...o, { id, label: name, group_id: null }]);
       setQ("");
       toggle(id);
     } catch (e) { alert("สร้างแท็กไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
@@ -179,8 +211,30 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   };
 
   const ql = q.trim().toLowerCase();
-  const filtered = opts.filter((o) => !ql || o.label.toLowerCase().includes(ql));
+  const filteredOpts = opts.filter((o) => !ql || o.label.toLowerCase().includes(ql));
   const exact = opts.some((o) => o.label.trim().toLowerCase() === ql);
+
+  // จัดโครงสร้างกลุ่มสำหรับ popup (กลุ่ม → กลุ่มย่อย → แท็ก)
+  const byOrder = (a: Grp, b: Grp) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "th");
+  const topGroups = groups.filter((g) => !g.parent_group_id).sort(byOrder);
+  const subsOf = (gid: string) => groups.filter((g) => g.parent_group_id === gid).sort(byOrder);
+  const tagsOf = (gid: string) => filteredOpts.filter((o) => o.group_id === gid);
+  const ungrouped = filteredOpts.filter((o) => !o.group_id || !groupById.has(o.group_id));
+
+  // แถวแท็ก 1 อันใน popup (single = อยู่ในกลุ่มเลือกเดียว → วงกลม, ปกติ → ติ๊กถูก)
+  const tagRow = (o: Opt) => {
+    const on = linked.includes(o.id);
+    const single = scopeOfTag(o.id) != null;
+    return (
+      <button key={o.id} type="button" onClick={() => toggle(o.id)}
+        className={`flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50 ${on ? "bg-blue-50/60" : ""}`}>
+        <span className={`inline-flex items-center justify-center w-4 h-4 ${single ? "rounded-full" : "rounded"} border text-[10px] leading-none ${on ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 text-transparent"}`}>
+          {single ? "●" : "✓"}
+        </span>
+        <span className="flex-1 truncate">{o.label}</span>
+      </button>
+    );
+  };
 
   return (
     <div className="mt-0.5">
@@ -196,41 +250,80 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
         ))}
       </div>
       {editable && !loading && (
-        <div>
-          {/* ช่องค้นหา + ปุ่มเปิด popup จัดการแท็ก */}
-          <div className="flex gap-1.5">
-            <input value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
-              className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
-            <button type="button" onClick={() => setMgrOpen(true)} title="จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ)"
-              className="h-8 px-2.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 shrink-0">🗂️</button>
-          </div>
-          {/* รายการเช็คบ็อกซ์ โชว์ตลอด (เลื่อนได้) → ไม่มีจังหวะ "ปิด" ที่ทำให้ค่าหาย */}
-          <div className="mt-1 max-h-44 overflow-y-auto border border-slate-200 rounded-lg p-1">
-            {filtered.map((o) => {
-              const on = linked.includes(o.id);
-              return (
-                <button key={o.id} type="button" onClick={() => toggle(o.id)}
-                  className={`flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded hover:bg-slate-50 ${on ? "bg-blue-50/50" : ""}`}>
-                  <input type="checkbox" readOnly checked={on} className="rounded border-slate-300 pointer-events-none" />
-                  <span className="flex-1 truncate">{o.label}</span>
-                </button>
-              );
-            })}
-            {filtered.length === 0 && !ql && <div className="text-xs text-slate-300 py-2 text-center">— ไม่มีแท็ก —</div>}
-            {allowCreate && ql && !exact && (
-              <button type="button" onClick={createNew} disabled={busy}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border-t border-slate-100 mt-1">
-                ➕ สร้างแท็กใหม่ “{q.trim()}”
-              </button>
-            )}
-          </div>
+        <div className="flex gap-1.5">
+          <button type="button" onClick={() => { setPickerOpen(true); setQ(""); }}
+            className="h-8 px-3 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">＋ เลือก/แก้ไขแท็ก</button>
+          <button type="button" onClick={() => setMgrOpen(true)} title="จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ)"
+            className="h-8 px-2.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️</button>
         </div>
       )}
+
+      {/* POPUP เลือกแท็ก แบ่งกลุ่ม → กลุ่มย่อย */}
+      {pickerOpen && createPortal(
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4" onClick={() => setPickerOpen(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-[480px] max-w-[94vw] max-h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <h3 className="font-semibold text-slate-800">เลือกแท็ก (Product Family)</h3>
+              <button type="button" onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
+            </div>
+            <div className="px-3 pt-3">
+              <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="ค้นหา / พิมพ์เพื่อเพิ่ม…"
+                className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {usesGroups && topGroups.map((g) => {
+                const direct = tagsOf(g.id);
+                const subs = subsOf(g.id).map((s) => ({ s, tags: tagsOf(s.id) }));
+                const anySub = subs.some((x) => x.tags.length > 0);
+                if (direct.length === 0 && !anySub) return null;
+                return (
+                  <div key={g.id} className="border border-slate-100 rounded-lg">
+                    <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                      <span className="text-sm font-medium text-slate-700">{g.name}</span>
+                      {g.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">เลือกได้ 1</span>}
+                    </div>
+                    <div className="p-1">
+                      {direct.map((o) => tagRow(o))}
+                      {subs.filter((x) => x.tags.length > 0).map(({ s, tags }) => (
+                        <div key={s.id} className="mt-1">
+                          <div className="px-2 py-1 flex items-center gap-2">
+                            <span className="text-xs font-medium text-slate-500">↳ {s.name}</span>
+                            {s.single_select && <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">เลือกได้ 1</span>}
+                          </div>
+                          {tags.map((o) => tagRow(o))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {ungrouped.length > 0 && (
+                <div className="border border-slate-100 rounded-lg">
+                  <div className="px-2 py-1.5 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-500">{usesGroups ? "ไม่มีกลุ่ม" : "แท็กทั้งหมด"}</div>
+                  <div className="p-1">{ungrouped.map((o) => tagRow(o))}</div>
+                </div>
+              )}
+              {filteredOpts.length === 0 && !ql && <div className="text-xs text-slate-300 py-4 text-center">— ยังไม่มีแท็ก —</div>}
+              {allowCreate && ql && !exact && (
+                <button type="button" onClick={createNew} disabled={busy}
+                  className="flex items-center gap-2 w-full px-2 py-2 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border border-dashed border-blue-200">
+                  ➕ สร้างแท็กใหม่ “{q.trim()}”
+                </button>
+              )}
+            </div>
+            <div className="flex items-center justify-between px-3 py-3 border-t border-slate-100">
+              <button type="button" onClick={() => setMgrOpen(true)} className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️ จัดการแท็ก</button>
+              <button type="button" onClick={() => setPickerOpen(false)} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">เสร็จ ({linked.length})</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
       {mgrOpen && (
         <TagsManagerModal moduleKey={moduleKey} labelField={labelField}
           onClose={() => setMgrOpen(false)}
-          onChanged={() => fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {})} />
+          onChanged={() => { reloadOpts(); if (usesGroups) fetchGroups().then(setGroups).catch(() => {}); }} />
       )}
     </div>
   );

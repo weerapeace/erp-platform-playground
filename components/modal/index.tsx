@@ -95,10 +95,12 @@ export interface DrawerProps {
   onClose: () => void;
   title: string;
   description?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
   children?: React.ReactNode;
   footer?: React.ReactNode;
   hasUnsavedChanges?: boolean;
+  storageKey?: string;
+  defaultWidth?: number;
 }
 
 // ---- Size map ----
@@ -388,22 +390,24 @@ export function Drawer({
   children,
   footer,
   hasUnsavedChanges = false,
+  storageKey = "erp-drawer-width",
+  defaultWidth,
 }: DrawerProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   // F22: resizable width — ลากขอบซ้าย, จำค่าใน localStorage
-  const defaultW = size === "sm" ? 360 : size === "lg" ? 560 : 440;
+  const defaultW = defaultWidth ?? (size === "sm" ? 360 : size === "lg" ? 560 : size === "xl" ? 760 : 440);
   const [width, setWidth] = useState(defaultW);
   const resizing = useRef(false);
 
   useEffect(() => {
     setMounted(true);
     try {
-      const saved = localStorage.getItem("erp-drawer-width");
+      const saved = localStorage.getItem(storageKey);
       if (saved) setWidth(Math.max(320, Math.min(Number(saved), 1200)));
     } catch { /* ignore */ }
-  }, []);
+  }, [storageKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -416,12 +420,12 @@ export function Drawer({
       resizing.current = false;
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
-      try { localStorage.setItem("erp-drawer-width", String(width)); } catch { /* ignore */ }
+      try { localStorage.setItem(storageKey, String(width)); } catch { /* ignore */ }
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
     return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
-  }, [open, width]);
+  }, [open, width, storageKey]);
 
   const handleClose = useCallback(() => {
     if (hasUnsavedChanges) {

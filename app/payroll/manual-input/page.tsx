@@ -26,14 +26,14 @@ type DrawerTab = TimeKind;
 type DurationPreset = "full" | "half" | "custom";
 type LateUnit = "minutes" | "hours";
 type LeaveReason = "medical_certificate" | "sick_paid" | "sick_unpaid" | "unpaid";
-type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; work_date?: string; note?: string };
+type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; paid_leave?: boolean; work_date?: string; note?: string };
 type TabKey = "summary" | "special" | "piecework" | "timestamp" | "import" | "attendance";
 type TimePreview = {
   kind: TimeKind;
   value: number;
   work_date: string;
   amount: number;
-  sign: "+" | "-";
+  sign: "+" | "-" | "0";
   rate: number;
   divisor: number;
   hours_per_day: number;
@@ -41,6 +41,7 @@ type TimePreview = {
   quantity_label: string;
   formula: string;
   hours?: number;
+  paid_leave?: boolean;
 };
 type GridDay = { iso: string; day: number; dow: number; is_holiday: boolean };
 type GridCell = {
@@ -1086,6 +1087,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const [customHours, setCustomHours] = useState("");
   const [customMinutes, setCustomMinutes] = useState("");
   const [leaveReason, setLeaveReason] = useState<LeaveReason>("unpaid");
+  const [hasMedicalCertificate, setHasMedicalCertificate] = useState(false);
   const [tDate, setTDate] = useState(initialDate ?? todayIso());
   const [tNote, setTNote] = useState("");
   const [preview, setPreview] = useState<TimePreview | null>(null);
@@ -1117,6 +1119,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setCustomHours("");
     setCustomMinutes("");
     setLeaveReason("unpaid");
+    setHasMedicalCertificate(false);
     setTNote("");
     setName("");
     setAmount("");
@@ -1182,8 +1185,13 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   function timeNote() {
     const note = tNote.trim();
     if (tKind !== "leave") return note;
-    const reason = LEAVE_REASON_LABEL[leaveReason];
+    const cert = hasMedicalCertificate ? "มีใบรับรองแพทย์" : "";
+    const reason = [LEAVE_REASON_LABEL[leaveReason], cert].filter(Boolean).join(" / ");
     return note ? `${reason} - ${note}` : reason;
+  }
+
+  function isPaidLeaveSelected() {
+    return tKind === "leave" && leaveReason === "sick_paid" && hasMedicalCertificate;
   }
 
   function timeQuantityLabel() {
@@ -1196,23 +1204,17 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   async function loadPreview(value: number) {
     setErr(null);
     if (!(value > 0)) { setPreview(null); return; }
-    if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); setPreview(null); return; }
+    if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); return; }
     setPreviewing(true);
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), preview_only: true }),
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), paid_leave: isPaidLeaveSelected(), preview_only: true }),
       }).then((r) => r.json());
-      if (j.error) { setErr(j.error); setPreview(null); }
+      if (j.error) { setErr(j.error); }
       else setPreview(j.data as TimePreview);
-    } catch { setErr("คำนวณตัวอย่างไม่สำเร็จ"); setPreview(null); }
+    } catch { setErr("คำนวณตัวอย่างไม่สำเร็จ"); }
     finally { setPreviewing(false); }
-  }
-
-  async function previewTime() {
-    const value = computedTimeValue();
-    if (!(value > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
-    await loadPreview(value);
   }
 
   async function addTime() {
@@ -1224,7 +1226,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote() }),
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), paid_leave: isPaidLeaveSelected() }),
       }).then((r) => r.json());
       if (j.error) setErr(j.error);
       else { setTValue(""); setCustomHours(""); setCustomMinutes(""); setTNote(""); setPreview(null); await reload(); onChanged(); }
@@ -1244,12 +1246,11 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
 
   useEffect(() => {
     const value = computedTimeValue();
-    setPreview(null);
     setErr(null);
     if (!editable || !(value > 0) || !tDate) return;
     const timer = window.setTimeout(() => { void loadPreview(value); }, 350);
     return () => window.clearTimeout(timer);
-  }, [editable, tKind, tValue, lateUnit, durationPreset, customHours, customMinutes, tDate, tNote, leaveReason, periodId, row.employee_id]);
+  }, [editable, tKind, tValue, lateUnit, durationPreset, customHours, customMinutes, tDate, tNote, leaveReason, hasMedicalCertificate, periodId, row.employee_id]);
 
   const pieceworks = items.filter(isPieceworkItem);
   const earnings = items.filter((i) => i.adjustment_type === "earning" && !isPieceworkItem(i));
@@ -1265,7 +1266,9 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     <Drawer
       open
       onClose={onClose}
-      size="lg"
+      size="xl"
+      defaultWidth={780}
+      storageKey="payroll-manual-input-drawer-width"
       title={`${row.employee_code} ${row.employee_name}`}
       description="กรอกสาย / ขาด / ลา / OT แล้วคำนวณให้ดูก่อนบันทึกเงินจริง"
       hasUnsavedChanges={hasDraftTime}
@@ -1305,6 +1308,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
               <div className="space-y-1.5">
                 {visibleTimeItems.map((it) => {
                   const m = TIME_META[it.kind];
+                  const paidLeaveItem = it.kind === "leave" && it.paid_leave === true;
                   return (
                     <div key={`${it.kind}-${it.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
                       <span className="min-w-0">
@@ -1316,7 +1320,9 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                         )}
                       </span>
                       <span className="flex items-center gap-2">
-                        <span className={`text-sm tabular-nums ${m.cls}`}>{m.sign}฿{it.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+                        <span className={`text-sm tabular-nums ${paidLeaveItem ? "text-blue-600" : m.cls}`}>
+                          {paidLeaveItem ? "ไม่หักเงิน" : `${m.sign}฿${it.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}`}
+                        </span>
                         {editable && <button onClick={() => delTime(it)} disabled={busy} className="text-slate-300 hover:text-red-500 text-sm" title="ลบ">🗑</button>}
                       </span>
                     </div>
@@ -1336,15 +1342,34 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                     <DateInput value={tDate} onChange={setTDate} />
                   </label>
                   {drawerTab === "leave" && (
-                    <label className="block">
+                    <div className="block">
                       <span className="block text-xs text-slate-500 mb-1">ชนิดลา</span>
-                      <select value={leaveReason} onChange={(e) => setLeaveReason(e.target.value as LeaveReason)} className="h-9 w-full px-2 border border-slate-300 rounded-lg text-sm bg-white">
-                        <option value="medical_certificate">มีใบรับรองแพทย์</option>
-                        <option value="sick_paid">ลาป่วยรับเงิน</option>
-                        <option value="sick_unpaid">ลาป่วยไม่รับเงิน</option>
-                        <option value="unpaid">ลาไม่รับเงิน</option>
-                      </select>
-                    </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setLeaveReason("sick_paid")}
+                          className={`h-9 rounded-lg border text-sm font-medium ${leaveReason === "sick_paid" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}
+                        >
+                          ลาป่วย
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setLeaveReason("unpaid"); setHasMedicalCertificate(false); }}
+                          className={`h-9 rounded-lg border text-sm font-medium ${leaveReason === "unpaid" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}
+                        >
+                          ลาไม่รับเงิน
+                        </button>
+                      </div>
+                      <label className={`mt-2 flex h-9 items-center gap-2 rounded-lg border px-3 text-sm ${leaveReason === "sick_paid" ? "border-slate-200 bg-white text-slate-600" : "border-slate-100 bg-slate-50 text-slate-300"}`}>
+                        <input
+                          type="checkbox"
+                          checked={hasMedicalCertificate}
+                          disabled={leaveReason !== "sick_paid"}
+                          onChange={(e) => setHasMedicalCertificate(e.target.checked)}
+                        />
+                        มีใบรับรองแพทย์
+                      </label>
+                    </div>
                   )}
                   {drawerTab === "late" ? (
                     <>
@@ -1396,23 +1421,23 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={addTime} disabled={busy || previewing || !(computedValue > 0)}
+                  <button onClick={addTime} disabled={busy || !(computedValue > 0)}
                     className="h-9 px-4 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
                     {busy ? "กำลังบันทึก..." : "บันทึกรายการ"}
                   </button>
-                  {previewing && <span className="inline-flex h-9 items-center text-xs text-slate-400">กำลังคำนวณตัวอย่าง...</span>}
                 </div>
 
                 {preview && (
-                  <div className={`rounded-xl border p-4 ${preview.sign === "-" ? "border-red-100 bg-red-50/70" : "border-emerald-100 bg-emerald-50/70"}`}>
+                  <div className={`rounded-xl border p-4 transition-opacity ${previewing ? "opacity-75" : "opacity-100"} ${preview.sign === "-" ? "border-red-100 bg-red-50/70" : preview.sign === "0" ? "border-blue-100 bg-blue-50/70" : "border-emerald-100 bg-emerald-50/70"}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="text-xs font-medium text-slate-500">ยอดที่จะ{preview.sign === "-" ? "หัก" : "เพิ่ม"}</div>
-                        <div className={`text-2xl font-bold tabular-nums ${preview.sign === "-" ? "text-red-700" : "text-emerald-700"}`}>
-                          {preview.sign}{baht(preview.amount)}
+                        <div className="text-xs font-medium text-slate-500">{preview.sign === "0" ? "ผลการลา" : `ยอดที่จะ${preview.sign === "-" ? "หัก" : "เพิ่ม"}`}</div>
+                        <div className={`text-2xl font-bold tabular-nums ${preview.sign === "-" ? "text-red-700" : preview.sign === "0" ? "text-blue-700" : "text-emerald-700"}`}>
+                          {preview.sign === "0" ? "ไม่โดนหักเงิน" : `${preview.sign}${baht(preview.amount)}`}
                         </div>
                       </div>
                       <div className="text-right text-xs text-slate-500">
+                        {previewing && <div className="mb-1 text-[11px] text-slate-400">อัปเดตอยู่</div>}
                         <div>อัตรา/ชม. <b className="text-slate-700">{baht(preview.rate)}</b></div>
                         {preview.divisor ? <div>ตัวหารวัน <b className="text-slate-700">{preview.divisor}</b></div> : null}
                         <div>ชั่วโมง/วัน <b className="text-slate-700">{preview.hours_per_day}</b></div>
@@ -1420,7 +1445,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                     </div>
                     <div className="mt-3 rounded-lg bg-white/80 border border-white px-3 py-2">
                       <div className="text-xs text-slate-500 mb-1">วิธีคิด</div>
-                      <div className="text-sm text-slate-800 tabular-nums">{preview.formula} = {baht(preview.amount)}</div>
+                      <div className="text-sm text-slate-800 tabular-nums">{preview.formula} = {preview.sign === "0" ? "ไม่หักเงิน" : baht(preview.amount)}</div>
                     </div>
                   </div>
                 )}
