@@ -88,6 +88,14 @@ const LEAVE_REASON_LABEL: Record<LeaveReason, string> = {
   unpaid: "ลาไม่รับเงิน",
 };
 
+function timeKindFromCell(cell: GridCell): TimeKind {
+  if (cell.absence_hours > 0 || cell.status === "zero") return "absence";
+  if (cell.leave_days > 0) return "leave";
+  if (cell.late_minutes > 0) return "late";
+  if (cell.ot_hours > 0 || ["off", "ot", "paid_holiday"].includes(cell.status)) return "ot";
+  return "late";
+}
+
 export default function ManualInputPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [periodId, setPeriodId] = useState("");
@@ -206,7 +214,7 @@ export default function ManualInputPage() {
       net_estimate: gridRow.net_estimate,
       has_manual: gridRow.manual_days > 0,
     };
-    const kind: TimeKind = ["off", "ot", "paid_holiday"].includes(cell.status) ? "ot" : "late";
+    const kind = timeKindFromCell(cell);
     openRowEditor(row, cell.date, kind, undefined, true);
   };
 
@@ -1328,7 +1336,9 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const earnings = items.filter((i) => i.adjustment_type === "earning" && !isPieceworkItem(i));
   const deductions = items.filter((i) => i.adjustment_type === "deduction");
   const hasDraftTime = editable && (!!lateHours || !!lateMinutes || !!customHours || !!customMinutes || !!tNote || !!certificateDate || !!certificateProvider || !!certificateNo || !!certificateFileRef || !!preview);
-  const visibleTimeItems = timeItems.filter((it) => it.kind === drawerTab);
+  const visibleTimeItems = timeItems
+    .filter((it) => timeOnly && tDate ? it.work_date === tDate : it.kind === drawerTab)
+    .sort((a, b) => DRAWER_TABS.findIndex((tab) => tab.key === a.kind) - DRAWER_TABS.findIndex((tab) => tab.key === b.kind));
   const computedValue = computedTimeValue();
   const adjustItems = mode === "piecework" ? pieceworks : mode === "deduction" ? deductions : earnings;
   const adjustTitle = mode === "piecework" ? "งานเหมา" : mode === "deduction" ? "หักอื่น" : "เพิ่มพิเศษ";
@@ -1374,6 +1384,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
           {/* เวลา: สาย/ขาด/ลา/OT — คิดเงินจากเรทค่าจ้างอัตโนมัติ */}
           <div>
             <div className="text-sm font-medium text-slate-700 mb-2">เวลา: {TIME_META[drawerTab].label}</div>
+            {timeOnly && <div className="mb-2 text-xs text-slate-500">รายการของวันที่ {formatDate(tDate)}</div>}
             {visibleTimeItems.length === 0 ? (
               <div className="text-xs text-slate-400 py-1">ยังไม่มีรายการเวลา</div>
             ) : (
