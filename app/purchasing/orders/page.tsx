@@ -328,10 +328,13 @@ export default function PurchaseOrdersPage() {
                                   <div className="flex items-center gap-2 mt-1.5 text-xs flex-wrap">
                                     <input type="number" min={1} value={cl?.qty ?? r.qty} onChange={(e) => setCartQty(r.id, Number(e.target.value))} className="w-16 h-7 px-1.5 border border-slate-200 rounded text-right" />
                                     <span className="text-slate-400">{r.uom}</span>
-                                    <label className="flex items-center gap-1 text-[11px] text-slate-500">
-                                      <input type="checkbox" checked={cl?.partial ?? false} onChange={(e) => setCartPartial(r.id, e.target.checked)} className="rounded border-slate-300" />
-                                      รอซื้ออีก
-                                    </label>
+                                    <span className="text-[11px] text-slate-400">/ ขอซื้อ {r.qty.toLocaleString()}</span>
+                                    {remain > 0 && (
+                                      <label className="flex items-center gap-1 text-[11px] text-amber-600">
+                                        <input type="checkbox" checked={cl?.partial ?? false} onChange={(e) => setCartPartial(r.id, e.target.checked)} className="rounded border-slate-300" />
+                                        รอซื้ออีก
+                                      </label>
+                                    )}
                                     <span className="ml-auto font-semibold text-slate-700">{money(lineTotal(r), r.currency)}</span>
                                   </div>
                                   {remain > 0 && cl?.partial && <div className="text-[10px] text-amber-600 mt-0.5">เหลือ {remain.toLocaleString()} {r.uom} → เปิดใบขอซื้อใหม่</div>}
@@ -406,8 +409,8 @@ function BuyAllModal({ shop, rows, rate, onClose, onConfirm }: {
               <input type="number" min={1} value={l?.qty ?? r.qty}
                 onChange={(e) => setLines((p) => ({ ...p, [r.id]: { ...p[r.id], qty: Number(e.target.value) } }))}
                 className="w-16 h-8 px-1.5 text-sm border border-slate-200 rounded text-right" />
-              <span className="text-xs text-slate-400 w-10">{r.uom}</span>
-              <label className="flex items-center gap-1 text-[11px] text-slate-500 w-20">
+              <span className="text-[11px] text-slate-400 w-20">{r.uom} <span className="block leading-tight">/ ขอซื้อ {r.qty.toLocaleString()}</span></span>
+              <label className={`flex items-center gap-1 text-[11px] w-20 ${remain > 0 ? "text-amber-600" : "invisible"}`}>
                 <input type="checkbox" checked={l?.partial ?? false} onChange={(e) => setLines((p) => ({ ...p, [r.id]: { ...p[r.id], partial: e.target.checked } }))} className="rounded border-slate-300" />
                 รอซื้ออีก
               </label>
