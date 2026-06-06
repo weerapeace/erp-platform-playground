@@ -20,6 +20,7 @@ type Row = {
 };
 type Adj = { id: string; adjustment_type: string; item_name: string; amount: number };
 type TimeKind = "ot" | "late" | "absence" | "leave";
+type AdjustType = "earning" | "deduction";
 type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; work_date?: string; note?: string };
 type TabKey = "summary" | "special" | "piecework" | "timestamp" | "import" | "attendance";
 type TimePreview = {
@@ -79,6 +80,7 @@ export default function ManualInputPage() {
   const [editRow, setEditRow] = useState<Row | null>(null);
   const [editDate, setEditDate] = useState<string | undefined>();
   const [editKind, setEditKind] = useState<TimeKind | undefined>();
+  const [editAdjustType, setEditAdjustType] = useState<AdjustType | undefined>();
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [grid, setGrid] = useState<GridData | null>(null);
   const [gridLoading, setGridLoading] = useState(false);
@@ -120,10 +122,11 @@ export default function ManualInputPage() {
     .filter((r) => !q.trim() || `${r.employee_code} ${r.employee_name}`.toLowerCase().includes(q.trim().toLowerCase()));
 
   const totalNet = rows.reduce((t, r) => t + r.net_estimate, 0);
-  const openRowEditor = (row: Row, date?: string, kind?: TimeKind) => {
+  const openRowEditor = (row: Row, date?: string, kind?: TimeKind, adjustType?: AdjustType) => {
     setEditRow(row);
     setEditDate(date);
     setEditKind(kind);
+    setEditAdjustType(adjustType);
   };
   const openGridEditor = (gridRow: GridRow, cell: GridCell) => {
     const row = rows.find((r) => r.employee_id === gridRow.employee_id) ?? {
@@ -241,8 +244,12 @@ export default function ManualInputPage() {
                   <td className="px-3 py-2 text-right">{dash(r.absence_baht, "text-red-600")}</td>
                   <td className="px-3 py-2 text-right">{dash(r.leave_baht, "text-red-600")}</td>
                   <td className="px-3 py-2 text-right">{dash(r.ot_baht, "text-emerald-600")}</td>
-                  <td className="px-3 py-2 text-right">{dash(r.special_add, "text-emerald-600")}</td>
-                  <td className="px-3 py-2 text-right">{dash(r.other_deduct, "text-red-600")}</td>
+                  <td className="px-3 py-2 text-right">
+                    <AdjustmentCell value={r.special_add} type="earning" editable={editable} onClick={() => openRowEditor(r, undefined, undefined, "earning")} />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <AdjustmentCell value={r.other_deduct} type="deduction" editable={editable} onClick={() => openRowEditor(r, undefined, undefined, "deduction")} />
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(r.net_estimate)}</td>
                   <td className="px-3 py-2 text-center">
                     <button onClick={() => openRowEditor(r)} className="px-2 py-1 text-xs border border-slate-200 rounded-lg hover:bg-slate-100" title="แก้เพิ่มพิเศษ/หักอื่น">✏️</button>
@@ -256,11 +263,35 @@ export default function ManualInputPage() {
       )}
 
       {editRow && (
-        <AdjustDrawer row={editRow} periodId={periodId} editable={editable} initialDate={editDate} initialKind={editKind}
-          onClose={() => { setEditRow(null); setEditDate(undefined); setEditKind(undefined); }}
+        <AdjustDrawer row={editRow} periodId={periodId} editable={editable} initialDate={editDate} initialKind={editKind} initialAdjustType={editAdjustType}
+          onClose={() => { setEditRow(null); setEditDate(undefined); setEditKind(undefined); setEditAdjustType(undefined); }}
           onChanged={() => { load(periodId); if (activeTab === "attendance") loadGrid(periodId); }} />
       )}
     </div>
+  );
+}
+
+function AdjustmentCell({ value, type, editable, onClick }: { value: number; type: AdjustType; editable: boolean; onClick: () => void }) {
+  const hasValue = Number(value) > 0;
+  const isEarning = type === "earning";
+  if (!hasValue && !editable) return <span className="text-slate-300">-</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex h-8 min-w-[76px] items-center justify-end rounded-lg border px-2 text-xs font-medium tabular-nums transition ${
+        hasValue
+          ? isEarning
+            ? "border-emerald-100 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+            : "border-red-100 bg-red-50 text-red-700 hover:bg-red-100"
+          : isEarning
+            ? "border-emerald-100 text-emerald-600 hover:bg-emerald-50"
+            : "border-red-100 text-red-600 hover:bg-red-50"
+      }`}
+      title={isEarning ? "เพิ่ม/ดูรายการเพิ่มพิเศษ" : "เพิ่ม/ดูรายการหักอื่น"}
+    >
+      {hasValue ? baht(value) : isEarning ? "+ เพิ่ม" : "+ หัก"}
+    </button>
   );
 }
 
@@ -387,12 +418,12 @@ function Legend({ label, cls }: { label: string; cls: string }) {
   return <span className={`inline-flex h-7 items-center rounded-lg border px-2 font-semibold ${cls}`}>{label}</span>;
 }
 
-function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, onClose, onChanged }:
-  { row: Row; periodId: string; editable: boolean; initialDate?: string; initialKind?: TimeKind; onClose: () => void; onChanged: () => void }) {
+function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initialAdjustType, onClose, onChanged }:
+  { row: Row; periodId: string; editable: boolean; initialDate?: string; initialKind?: TimeKind; initialAdjustType?: AdjustType; onClose: () => void; onChanged: () => void }) {
   const [items, setItems] = useState<Adj[]>([]);
   const [timeItems, setTimeItems] = useState<TimeItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [type, setType] = useState<"earning" | "deduction">("earning");
+  const [type, setType] = useState<AdjustType>(initialAdjustType ?? "earning");
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [tKind, setTKind] = useState<TimeKind>(initialKind ?? "ot");
@@ -419,10 +450,13 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, onClo
   useEffect(() => {
     setTKind(initialKind ?? "ot");
     setTDate(initialDate ?? todayIso());
+    setType(initialAdjustType ?? "earning");
     setTValue("");
     setTNote("");
+    setName("");
+    setAmount("");
     setPreview(null);
-  }, [initialDate, initialKind, row.employee_id]);
+  }, [initialDate, initialKind, initialAdjustType, row.employee_id]);
   useEffect(() => { setPreview(null); setErr(null); }, [tKind, tValue, tDate]);
 
   async function addItem() {
@@ -614,7 +648,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, onClo
                 <button onClick={() => setType("earning")} className={`flex-1 h-9 rounded-lg text-sm font-medium border ${type === "earning" ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-300 text-slate-600"}`}>เพิ่มพิเศษ</button>
                 <button onClick={() => setType("deduction")} className={`flex-1 h-9 rounded-lg text-sm font-medium border ${type === "deduction" ? "bg-red-600 text-white border-red-600" : "border-slate-300 text-slate-600"}`}>หักอื่น</button>
               </div>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="ชื่อรายการ เช่น เบี้ยขยัน / หักของเสีย"
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder={type === "earning" ? "ชื่อรายการ เช่น เบี้ยขยัน / โบนัสพิเศษ" : "ชื่อรายการ เช่น หักของเสีย / หักเบิกล่วงหน้า"}
                 className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm" />
               <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" placeholder="จำนวนเงิน (บาท)"
                 className="h-10 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums" />
