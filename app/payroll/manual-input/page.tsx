@@ -8,7 +8,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
-import { Drawer } from "@/components/modal";
+import { Drawer, ERPModal } from "@/components/modal";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 
@@ -18,7 +18,7 @@ type Row = {
   late_baht: number; absence_baht: number; leave_baht: number; ot_baht: number;
   piecework_baht: number; special_add: number; other_deduct: number; net_estimate: number; has_manual: boolean;
 };
-type Adj = { id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
+type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
 type TimeKind = "ot" | "late" | "absence" | "leave";
 type AdjustMode = "earning" | "deduction" | "piecework";
 type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; work_date?: string; note?: string };
@@ -83,6 +83,7 @@ export default function ManualInputPage() {
   const [editDate, setEditDate] = useState<string | undefined>();
   const [editKind, setEditKind] = useState<TimeKind | undefined>();
   const [editAdjustMode, setEditAdjustMode] = useState<AdjustMode | undefined>();
+  const [quickAdjust, setQuickAdjust] = useState<{ row: Row; mode: AdjustMode } | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [grid, setGrid] = useState<GridData | null>(null);
   const [gridLoading, setGridLoading] = useState(false);
@@ -135,6 +136,7 @@ export default function ManualInputPage() {
     setEditKind(kind);
     setEditAdjustMode(adjustMode);
   };
+  const openQuickAdjust = (row: Row, mode: AdjustMode) => setQuickAdjust({ row, mode });
   const openGridEditor = (gridRow: GridRow, cell: GridCell) => {
     const row = rows.find((r) => r.employee_id === gridRow.employee_id) ?? {
       id: gridRow.employee_id,
@@ -220,7 +222,7 @@ export default function ManualInputPage() {
           onCellClick={openGridEditor}
         />
       ) : activeTab === "piecework" ? (
-        <PieceworkTable rows={shown} editable={editable} onOpen={(row) => openRowEditor(row, undefined, undefined, "piecework")} />
+        <PieceworkTable rows={shown} editable={editable} onOpen={(row) => openQuickAdjust(row, "piecework")} />
       ) : activeTab !== "summary" ? (
         <TabPlaceholder
           title={TABS.find((tab) => tab.key === activeTab)?.label ?? ""}
@@ -256,13 +258,13 @@ export default function ManualInputPage() {
                   <td className="px-3 py-2 text-right">{dash(r.leave_baht, "text-red-600")}</td>
                   <td className="px-3 py-2 text-right">{dash(r.ot_baht, "text-emerald-600")}</td>
                   <td className="px-3 py-2 text-right">
-                    <AdjustmentCell value={r.piecework_baht} mode="piecework" editable={editable} onClick={() => openRowEditor(r, undefined, undefined, "piecework")} />
+                    <AdjustmentCell value={r.piecework_baht} mode="piecework" editable={editable} onClick={() => openQuickAdjust(r, "piecework")} />
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <AdjustmentCell value={r.special_add} mode="earning" editable={editable} onClick={() => openRowEditor(r, undefined, undefined, "earning")} />
+                    <AdjustmentCell value={r.special_add} mode="earning" editable={editable} onClick={() => openQuickAdjust(r, "earning")} />
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openRowEditor(r, undefined, undefined, "deduction")} />
+                    <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openQuickAdjust(r, "deduction")} />
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-medium">{baht(r.net_estimate)}</td>
                   <td className="px-3 py-2 text-center">
@@ -280,6 +282,15 @@ export default function ManualInputPage() {
         <AdjustDrawer row={editRow} periodId={periodId} editable={editable} initialDate={editDate} initialKind={editKind} initialAdjustMode={editAdjustMode}
           onClose={() => { setEditRow(null); setEditDate(undefined); setEditKind(undefined); setEditAdjustMode(undefined); }}
           onChanged={() => { load(periodId); if (activeTab === "attendance") loadGrid(periodId); }} />
+      )}
+      {quickAdjust && (
+        <QuickAdjustmentModal
+          row={quickAdjust.row}
+          mode={quickAdjust.mode}
+          periodId={periodId}
+          onClose={() => setQuickAdjust(null)}
+          onChanged={() => { load(periodId); if (activeTab === "attendance") loadGrid(periodId); }}
+        />
       )}
     </div>
   );
@@ -311,6 +322,307 @@ function AdjustmentCell({ value, mode, editable, onClick }: { value: number; mod
     >
       {hasValue ? baht(value) : isDeduction ? "+ หัก" : isPiecework ? "+ งานเหมา" : "+ เพิ่ม"}
     </button>
+  );
+}
+
+function modeMeta(mode: AdjustMode) {
+  if (mode === "piecework") return {
+    title: "เพิ่มงานเหมา",
+    label: "งานเหมา",
+    itemLabel: "ชื่องาน",
+    placeholder: "ชื่องาน เช่น เหมาแพ็คสินค้า / เหมาติดป้าย",
+    button: "+ เพิ่มงานเหมา",
+    tone: "violet",
+  };
+  if (mode === "deduction") return {
+    title: "เพิ่มหักอื่น",
+    label: "หักอื่น",
+    itemLabel: "ชื่อรายการหัก",
+    placeholder: "ชื่อรายการ เช่น หักของเสีย / หักเบิกล่วงหน้า",
+    button: "+ เพิ่มรายการหัก",
+    tone: "red",
+  };
+  return {
+    title: "เพิ่มพิเศษ",
+    label: "เพิ่มพิเศษ",
+    itemLabel: "ชื่อรายการเพิ่ม",
+    placeholder: "ชื่อรายการ เช่น เบี้ยขยัน / โบนัสพิเศษ",
+    button: "+ เพิ่มพิเศษ",
+    tone: "emerald",
+  };
+}
+
+function matchesMode(item: Adj, mode: AdjustMode) {
+  if (mode === "piecework") return isPieceworkItem(item);
+  if (mode === "deduction") return item.adjustment_type === "deduction";
+  return item.adjustment_type === "earning" && !isPieceworkItem(item);
+}
+
+function uniqueNames(items: Adj[], mode: AdjustMode) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    if (!matchesMode(item, mode)) continue;
+    const name = item.item_name.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+function QuickAdjustmentModal({
+  row,
+  mode,
+  periodId,
+  onClose,
+  onChanged,
+}: {
+  row: Row;
+  mode: AdjustMode;
+  periodId: string;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const meta = modeMeta(mode);
+  const [allItems, setAllItems] = useState<Adj[]>([]);
+  const [selectedName, setSelectedName] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [editId, setEditId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  const loadItems = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const qs = `period_id=${encodeURIComponent(periodId)}`;
+      const j = await apiFetch(`/api/payroll/adjustments?${qs}`).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else setAllItems((j.data ?? []) as Adj[]);
+    } catch {
+      setErr("โหลดชื่อรายการไม่ได้");
+    } finally {
+      setLoading(false);
+    }
+  }, [periodId]);
+
+  useEffect(() => { loadItems(); }, [loadItems]);
+
+  const names = uniqueNames(allItems, mode);
+  const employeeItems = allItems.filter((item) => item.employee_id === row.employee_id && matchesMode(item, mode));
+  const useCustom = selectedName === "__custom__" || names.length === 0;
+  const itemName = (useCustom ? customName : selectedName).trim();
+  const hasDraft = !!amount || !!editId || (useCustom && !!customName.trim());
+
+  useEffect(() => {
+    if (names.length && !selectedName) setSelectedName(names[0]);
+    if (!names.length) setSelectedName("__custom__");
+  }, [names, selectedName]);
+
+  function resetForm() {
+    setEditId(null);
+    setAmount("");
+    setCustomName("");
+    setSelectedName(names[0] ?? "__custom__");
+  }
+
+  function startEdit(item: Adj) {
+    setEditId(item.id);
+    setAmount(String(Number(item.amount) || ""));
+    if (names.includes(item.item_name)) {
+      setSelectedName(item.item_name);
+      setCustomName("");
+    } else {
+      setSelectedName("__custom__");
+      setCustomName(item.item_name);
+    }
+  }
+
+  async function save() {
+    setErr(null);
+    if (!itemName) { setErr(`เลือกหรือกรอก${meta.itemLabel}`); return; }
+    if (!(Number(amount) > 0)) { setErr("กรอกจำนวนเงินมากกว่า 0"); return; }
+    const adjustmentType = mode === "deduction" ? "deduction" : "earning";
+    setBusy(true);
+    try {
+      const payload = {
+        period_id: periodId,
+        employee_id: row.employee_id,
+        adjustment_type: adjustmentType,
+        item_name: itemName,
+        amount: Number(amount),
+        source_type: mode === "piecework" ? "piecework" : "manual",
+        item_code: mode === "piecework" ? "PIECEWORK" : undefined,
+      };
+      const url = editId ? `/api/payroll/adjustments/${editId}` : "/api/payroll/adjustments";
+      const j = await apiFetch(url, {
+        method: editId ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else {
+        resetForm();
+        await loadItems();
+        onChanged();
+      }
+    } catch {
+      setErr("บันทึกไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function del(item: Adj) {
+    if (!confirm(`ลบ "${item.item_name}"?`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const j = await apiFetch(`/api/payroll/adjustments/${item.id}`, { method: "DELETE" }).then((r) => r.json());
+      if (j.error) setErr(j.error);
+      else {
+        if (editId === item.id) resetForm();
+        await loadItems();
+        onChanged();
+      }
+    } catch {
+      setErr("ลบไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ERPModal
+      open
+      onClose={onClose}
+      size="md"
+      title={`${meta.title} - ${row.employee_name || row.employee_code}`}
+      description="ใส่เฉพาะรายการนี้ ระบบจะนำไปคิดในยอดสุทธิประมาณทันที"
+      loading={loading}
+      hasUnsavedChanges={hasDraft && !busy}
+      footer={
+        <>
+          {editId && (
+            <button
+              type="button"
+              onClick={resetForm}
+              disabled={busy}
+              className="h-9 px-3 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              ยกเลิกแก้ไข
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="h-9 px-3 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            ปิด
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy}
+            className="h-9 px-4 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {busy ? "กำลังบันทึก..." : editId ? "บันทึกการแก้ไข" : meta.button}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{err}</div>}
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="text-xs text-slate-500">พนักงาน</div>
+          <div className="text-sm font-semibold text-slate-800">
+            <span className="font-mono text-xs text-slate-400">{row.employee_code}</span> {row.employee_name}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3">
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-600 mb-1">{meta.itemLabel}</span>
+            <select
+              value={selectedName}
+              onChange={(e) => setSelectedName(e.target.value)}
+              className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+            >
+              {names.map((name) => <option key={name} value={name}>{name}</option>)}
+              <option value="__custom__">+ เพิ่มชื่อใหม่</option>
+            </select>
+          </label>
+          {useCustom && (
+            <input
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              placeholder={meta.placeholder}
+              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
+              autoFocus
+            />
+          )}
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-600 mb-1">จำนวนเงิน (บาท)</span>
+            <input
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              type="number"
+              min="0"
+              step="any"
+              placeholder="เช่น 500"
+              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums"
+            />
+          </label>
+        </div>
+
+        <div className="border-t border-slate-100 pt-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <div className="text-sm font-medium text-slate-700">รายการ{meta.label}ของคนนี้</div>
+              <div className="text-xs text-slate-400">แก้หรือลบเฉพาะรายการในหมวดนี้</div>
+            </div>
+            <div className="text-xs tabular-nums text-slate-500">{employeeItems.length} รายการ</div>
+          </div>
+          {employeeItems.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-200 py-4 text-center text-xs text-slate-400">ยังไม่มีรายการ</div>
+          ) : (
+            <div className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
+              {employeeItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-slate-700">{item.item_name}</div>
+                    <div className="text-xs tabular-nums text-slate-400">{baht(Number(item.amount))}</div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(item)}
+                      disabled={busy}
+                      className="h-8 px-2 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      แก้
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => del(item)}
+                      disabled={busy}
+                      className="h-8 px-2 rounded-md border border-red-100 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      ลบ
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </ERPModal>
   );
 }
 
