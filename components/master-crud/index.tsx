@@ -1146,7 +1146,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           { id: "active",   label: "เปิดอยู่",  filter: (r) => r[activeField] === true,
             serverFilter: { [activeField]: { type: "boolean", value: "true" } } },
           { id: "all",      label: "ทั้งหมด",   filter: () => true },
-          { id: "inactive", label: "ปิดอยู่",   filter: (r) => r[activeField] === false,
+          { id: "inactive", label: "🗑 ถังขยะ", filter: (r) => r[activeField] === false,
             serverFilter: { [activeField]: { type: "boolean", value: "false" } } },
         ]
   ), [activeField, config.hideActiveStatus]);
@@ -1182,6 +1182,23 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           await refreshData();
         },
       },
+      // ถังขยะ: กู้คืนหลายรายการพร้อมกัน (เฉพาะที่ถูกลบ/ปิดอยู่ — รายการที่เปิดอยู่อยู่แล้วข้าม)
+      {
+        label: "↩ กู้คืนที่เลือก",
+        onClick: async (selected: Row[]) => {
+          const targets = selected.filter((r) => !r[activeField]);
+          if (targets.length === 0) { fail("ไม่มีรายการที่ถูกลบในรายการที่เลือก"); return; }
+          if (!confirm(`กู้คืน ${targets.length} ราย กลับมาใช้งาน?`)) return;
+          for (const r of targets) {
+            await apiFetch(`${apiBase}${config.apiPath}/${r.id}`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ [activeField]: isRest ? true : "true", actor: user?.name }),
+            });
+          }
+          flash(`กู้คืน ${targets.length} ราย`);
+          await refreshData();
+        },
+      },
       {
         label: "🔴 ลบถาวรที่เลือก",
         variant: "danger",
@@ -1203,8 +1220,39 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         },
       },
     ] : [];
-    return [...extra, ...base];
-  }, [canEdit, user?.name, apiBase, config.apiPath, config.extraBulkActions, refreshData]);
+
+    // ล้างถังขยะ — ลบถาวร "ทุกใบที่อยู่ในถัง" (ปิดอยู่) ทีเดียว · เฉพาะตารางที่มี soft-delete
+    const emptyTrash: BulkAction<Row>[] = (canEdit && !config.hideActiveStatus) ? [{
+      label: "🧹 ล้างถังขยะ (ลบถาวรทุกใบในถัง)",
+      variant: "danger",
+      onClick: async () => {
+        const flt = encodeURIComponent(JSON.stringify({ [activeField]: { type: "boolean", value: "false" } }));
+        let ids: string[] = [];
+        try {
+          const j = await apiFetch(`${apiBase}${config.apiPath}?include_inactive=true&limit=2000&filters=${flt}`).then((r) => r.json());
+          ids = ((j.data ?? j.rows ?? []) as Row[]).map((r) => String(r.id));
+        } catch { fail("โหลดรายการในถังไม่สำเร็จ"); return; }
+        if (ids.length === 0) { flash("ถังขยะว่างอยู่แล้ว"); return; }
+        const ans = window.prompt(`⚠ ล้างถังขยะ — ลบถาวร ${ids.length} ใบที่อยู่ในถังทั้งหมด กู้คืนไม่ได้!\n\nพิมพ์ "ลบ" เพื่อยืนยัน:`);
+        if (ans == null) return;
+        if (ans.trim() !== "ลบ") { setError('ยกเลิก: ต้องพิมพ์ "ลบ" ให้ตรงเพื่อยืนยัน'); return; }
+        let ok = 0; const fails: string[] = [];
+        for (const id of ids) {
+          try {
+            const res = await apiFetch(`${apiBase}${config.apiPath}/${id}?hard=1&actor=${encodeURIComponent(user?.name ?? "")}`, { method: "DELETE" });
+            const j = await res.json();
+            if (j.error) fails.push(j.error); else ok++;
+          } catch (e) { fails.push(String((e as Error).message ?? e)); }
+        }
+        flash(`ล้างถังขยะ — ลบถาวร ${ok} ใบ${fails.length ? ` · ล้มเหลว ${fails.length}` : ""}`);
+        if (fails.length) fail(`ลบไม่สำเร็จ ${fails.length} ใบ: ${fails[0]}`);
+        await refreshData();
+      },
+    }] : [];
+
+    return [...extra, ...base, ...emptyTrash];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, user?.name, apiBase, config.apiPath, config.extraBulkActions, refreshData, activeField, isRest, config.hideActiveStatus]);
 
   // ---- Sprint 12: Inline editing ----
   // เปิดเฉพาะ field ที่ admin tick is_inline_editable + user มีสิทธิ์ edit + ไม่ใช่ sensitive
