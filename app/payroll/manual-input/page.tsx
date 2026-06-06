@@ -19,6 +19,7 @@ type Row = {
   piecework_baht: number; special_add: number; other_deduct: number; net_estimate: number; has_manual: boolean;
 };
 type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
+type RecurringItem = { id: string; employee_id: string; item_name: string; item_type: string; applied_amount: number; amount_per_period?: number; duration_type?: string | null; start_date?: string | null; end_date?: string | null };
 type TimeKind = "ot" | "late" | "absence" | "leave";
 type AdjustMode = "earning" | "deduction" | "piecework";
 type DrawerTab = TimeKind;
@@ -93,6 +94,7 @@ export default function ManualInputPage() {
   const [periodStatus, setPeriodStatus] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [adjustments, setAdjustments] = useState<Adj[]>([]);
+  const [recurringItems, setRecurringItems] = useState<RecurringItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -136,6 +138,14 @@ export default function ManualInputPage() {
     } catch { /* keep summary usable even if the list cannot load */ }
   }, []);
 
+  const loadRecurringItems = useCallback(async (pid: string) => {
+    if (!pid) return;
+    try {
+      const j = await apiFetch(`/api/payroll/recurring-summary?period_id=${encodeURIComponent(pid)}`).then((r) => r.json());
+      if (!j.error) setRecurringItems((j.data ?? []) as RecurringItem[]);
+    } catch { /* keep summary usable even if recurring cannot load */ }
+  }, []);
+
   const loadGrid = useCallback(async (pid: string) => {
     if (!pid) return;
     setGridLoading(true); setGridErr(null);
@@ -147,7 +157,7 @@ export default function ManualInputPage() {
     finally { setGridLoading(false); }
   }, []);
 
-  useEffect(() => { if (periodId) { load(periodId); loadAdjustments(periodId); } }, [periodId, load, loadAdjustments]);
+  useEffect(() => { if (periodId) { load(periodId); loadAdjustments(periodId); loadRecurringItems(periodId); } }, [periodId, load, loadAdjustments, loadRecurringItems]);
   useEffect(() => { if (periodId && activeTab === "attendance") loadGrid(periodId); }, [periodId, activeTab, loadGrid]);
 
   const editable = EDITABLE(periodStatus);
@@ -296,6 +306,7 @@ export default function ManualInputPage() {
             <tbody>
               {shown.map((r) => {
                 const employeeAdjustments = rowAdjustments(adjustments, r.employee_id);
+                const employeeRecurring = rowRecurringItems(recurringItems, r.employee_id);
                 const pieceworkItems = employeeAdjustments.filter((item) => matchesMode(item, "piecework"));
                 const earningItems = employeeAdjustments.filter((item) => matchesMode(item, "earning"));
                 const deductionItems = employeeAdjustments.filter((item) => matchesMode(item, "deduction"));
@@ -316,7 +327,7 @@ export default function ManualInputPage() {
                       <AmountWithTooltip value={r.ot_baht} className="text-emerald-600" prefix="+" title="OT: คิดจากชั่วโมง OT ที่บันทึกไว้" />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <RecurringCell items={employeeAdjustments} editable={editable} onClick={() => openRowEditor(r)} />
+                      <RecurringCell items={employeeRecurring} editable={editable} onClick={() => { window.location.href = "/payroll/recurring"; }} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <AdjustmentCell value={r.piecework_baht} mode="piecework" editable={editable} onClick={() => openQuickAdjust(r, "piecework")} tooltip={adjustmentTooltip("งานเหมา", pieceworkItems, "+")} />
@@ -328,7 +339,7 @@ export default function ManualInputPage() {
                       <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openQuickAdjust(r, "deduction")} tooltip={adjustmentTooltip("หักอื่น", deductionItems, "-")} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <span className="inline-flex items-center justify-end gap-1 tabular-nums font-medium" title={netTooltip(r, employeeAdjustments)}>
+                      <span className="inline-flex items-center justify-end gap-1 tabular-nums font-medium" title={netTooltip(r, employeeRecurring)}>
                         {baht(r.net_estimate)}
                         <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>
                       </span>
@@ -451,18 +462,16 @@ function matchesMode(item: Adj, mode: AdjustMode) {
   return item.adjustment_type === "earning" && !isPieceworkItem(item);
 }
 
-function isRecurringItem(item: Adj) {
-  const source = String(item.source_type ?? "").toLowerCase();
-  const code = String(item.item_code ?? "").toUpperCase();
-  return source === "recurring" || source === "regular" || code.startsWith("RECURRING") || code.startsWith("REGULAR");
-}
-
 function rowAdjustments(items: Adj[], employeeId: string) {
   return items.filter((item) => item.employee_id === employeeId);
 }
 
-function totalAdjustments(items: Adj[], predicate: (item: Adj) => boolean) {
-  return items.filter(predicate).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+function rowRecurringItems(items: RecurringItem[], employeeId: string) {
+  return items.filter((item) => item.employee_id === employeeId);
+}
+
+function totalRecurring(items: RecurringItem[], type: "earning" | "deduction") {
+  return items.filter((item) => item.item_type === type).reduce((sum, item) => sum + Number(item.applied_amount || 0), 0);
 }
 
 function adjustmentTooltip(title: string, items: Adj[], sign: "+" | "-" = "+") {
@@ -471,7 +480,18 @@ function adjustmentTooltip(title: string, items: Adj[], sign: "+" | "-" = "+") {
   return [title, ...lines].join("\n");
 }
 
-function netTooltip(row: Row, items: Adj[]) {
+function recurringTooltip(title: string, items: RecurringItem[], type: "earning" | "deduction") {
+  const sign = type === "deduction" ? "-" : "+";
+  const filtered = items.filter((item) => item.item_type === type);
+  if (filtered.length === 0) return `${title}: ยังไม่มีรายการ`;
+  const lines = filtered.map((item) => {
+    const range = item.end_date ? `${item.start_date ?? "-"} ถึง ${item.end_date}` : `${item.start_date ?? "-"} ถึงไม่จำกัด`;
+    return `${sign} ${item.item_name}: ${baht(Number(item.applied_amount || 0))} (${range})`;
+  });
+  return [title, ...lines].join("\n");
+}
+
+function netTooltip(row: Row, recurring: RecurringItem[]) {
   const lines = [
     `สุทธิประมาณ: ${baht(row.net_estimate)}`,
     `สาย/ออกก่อน: -${baht(row.late_baht)}`,
@@ -482,8 +502,8 @@ function netTooltip(row: Row, items: Adj[]) {
     `เพิ่มพิเศษ: +${baht(row.special_add)}`,
     `หักอื่น: -${baht(row.other_deduct)}`,
   ];
-  const recurring = totalAdjustments(items, isRecurringItem);
-  if (recurring) lines.push(`รายการประจำ: ${baht(recurring)}`);
+  const recurringNet = totalRecurring(recurring, "earning") - totalRecurring(recurring, "deduction");
+  if (recurringNet) lines.push(`รายการประจำ: ${recurringNet > 0 ? "+" : "-"}${baht(Math.abs(recurringNet))}`);
   return lines.join("\n");
 }
 
@@ -497,13 +517,11 @@ function AmountWithTooltip({ value, className = "", title, prefix = "" }: { valu
   );
 }
 
-function RecurringCell({ items, editable, onClick }: { items: Adj[]; editable: boolean; onClick: () => void }) {
-  const earnings = items.filter((item) => isRecurringItem(item) && item.adjustment_type === "earning");
-  const deductions = items.filter((item) => isRecurringItem(item) && item.adjustment_type === "deduction");
-  const total = totalAdjustments(earnings, () => true) - totalAdjustments(deductions, () => true);
+function RecurringCell({ items, editable, onClick }: { items: RecurringItem[]; editable: boolean; onClick: () => void }) {
+  const total = totalRecurring(items, "earning") - totalRecurring(items, "deduction");
   const title = [
-    adjustmentTooltip("รายการประจำเพิ่ม", earnings, "+"),
-    adjustmentTooltip("รายการประจำหัก", deductions, "-"),
+    recurringTooltip("รายการประจำเพิ่ม", items, "earning"),
+    recurringTooltip("รายการประจำหัก", items, "deduction"),
   ].join("\n\n");
 
   if (!total && !editable) return <span className="text-slate-300">-</span>;
