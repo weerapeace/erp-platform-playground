@@ -84,7 +84,9 @@ export function SupplierWizard({ onClose, onCreated }: {
                 เป็นร้าน Taobao (ติ๊กแล้วตั้งประเทศ = จีน, สกุลเงิน = RMB)
               </label>
               <div><label className={lbl}>ประเทศร้าน</label>
-                <select value={shopCountry} onChange={(e) => setShopCountry(e.target.value)} className={cls + " bg-white"}>
+                <select value={shopCountry}
+                  onChange={(e) => { const c = e.target.value; setShopCountry(c); if (c === "ไทย") setCurrency("THB"); else if (c === "จีน") setCurrency("RMB"); }}
+                  className={cls + " bg-white"}>
                   <option value="">— เลือก —</option>
                   {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select></div>
