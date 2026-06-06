@@ -164,7 +164,7 @@ async function requestRateViaLine(): Promise<void> {
   try {
     const res = await apiFetch("/api/china-pay/line-push", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, purpose: "transfers" }),
+      body: JSON.stringify({ text, purpose: "rate" }),
     });
     if (res.ok) { toast.success("ส่งขอเรทเข้ากลุ่มแล้ว"); return; }
     const j = await res.json().catch(() => ({} as { needConfig?: boolean; error?: string }));
@@ -463,6 +463,9 @@ export default function ChinaPayApp() {
   );
 }
 
+// ตารางจับคู่ "เหตุการณ์ → กลุ่ม LINE" ค่าเริ่มต้น (ตั้งเองได้ในหน้าตั้งค่า)
+const LINE_DEFAULT_ROUTING: Record<string, string> = { rate: "transfers", china_bill: "bills", transfer: "transfers" };
+
 // ---------------- ตั้งค่าเมนูตาม role (เฉพาะแอดมิน) ----------------
 function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => void }) {
   const toast = useToast();
@@ -474,6 +477,8 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
   const [lineToken, setLineToken] = useState("");
   const [lineCaptured, setLineCaptured] = useState("");     // Group ID ที่ webhook จับได้ล่าสุด (scratch)
   const [lineGroups, setLineGroups] = useState<{ test: string; bills: string; transfers: string }>({ test: "", bills: "", transfers: "" });
+  // ตารางจับคู่ "เหตุการณ์ → กลุ่ม" (rate/china_bill/transfer → test|bills|transfers|off)
+  const [lineRouting, setLineRouting] = useState<Record<string, string>>(LINE_DEFAULT_ROUTING);
   const [lineShareBase, setLineShareBase] = useState("");   // R2 public base URL (สำหรับส่งรูปเข้า LINE)
   const [lineSaving, setLineSaving] = useState(false);
   const [lineTesting, setLineTesting] = useState("");       // กำลังทดสอบส่งกลุ่มไหน
@@ -490,6 +495,8 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
         setLineToken(String(v.token ?? "")); setLineCaptured(String(v.group_id ?? "")); setLineShareBase(String(v.share_base ?? ""));
         const g = (v.groups ?? {}) as Record<string, string>;
         setLineGroups({ test: String(g.test ?? ""), bills: String(g.bills ?? ""), transfers: String(g.transfers ?? "") });
+        const rt = (v.routing ?? {}) as Record<string, string>;
+        setLineRouting({ ...LINE_DEFAULT_ROUTING, ...rt });
       }
     }).catch(() => {});
   }, []);
@@ -500,6 +507,7 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
       const sval = {
         token: lineToken.trim(), group_id: lineCaptured.trim(), share_base: lineShareBase.trim().replace(/\/$/, ""),
         groups: { test: lineGroups.test.trim(), bills: lineGroups.bills.trim(), transfers: lineGroups.transfers.trim() },
+        routing: lineRouting,
       };
       const res = lineRowId
         ? await apiFetch(`/api/master-v2/china-app-settings/${lineRowId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sval, actor: "china-app" }) })
@@ -620,6 +628,30 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
               </div>
             </div>
           ))}
+        </div>
+        {/* ตารางจับคู่: เหตุการณ์ → กลุ่ม (ตั้งเองได้) */}
+        <div className="mt-4">
+          <Label>เหตุการณ์ไหน → ยิงเข้ากลุ่มไหน</Label>
+          <div className="space-y-1.5 mt-1">
+            {([
+              { key: "rate", icon: "📩", label: "ขอเรท" },
+              { key: "china_bill", icon: "📦", label: "ส่งบิลจีน / ใบสรุปบิล" },
+              { key: "transfer", icon: "💸", label: "ส่งยอดโอน / ใบสรุปการโอน" },
+            ] as const).map(ev => (
+              <div key={ev.key} className="flex items-center gap-2">
+                <span className="flex-1 min-w-0 text-sm text-slate-600 truncate">{ev.icon} {ev.label}</span>
+                <span className="text-slate-300 text-xs">→</span>
+                <select value={lineRouting[ev.key] ?? "transfers"} onChange={e => setLineRouting(p => ({ ...p, [ev.key]: e.target.value }))}
+                  className="flex-shrink-0 w-36 h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                  <option value="test">🧪 กลุ่มทดสอบ</option>
+                  <option value="bills">📦 กลุ่มส่งบิล</option>
+                  <option value="transfers">💸 กลุ่มส่งยอดโอน</option>
+                  <option value="off">🚫 ไม่ส่ง</option>
+                </select>
+              </div>
+            ))}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1">เลือกได้ว่าแต่ละเหตุการณ์จะยิงเข้ากลุ่มไหน หรือ “ไม่ส่ง”</div>
         </div>
         <div className="mt-3"><Label>R2 Public URL (สำหรับส่งรูปเข้า LINE)</Label>
           <input value={lineShareBase} onChange={e => setLineShareBase(e.target.value)} placeholder="https://pub-xxxx.r2.dev"
@@ -1075,7 +1107,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
       let tot = 0;
       const lines = selRows.map(r => { const rem = Math.max(0, billTotalRmb(r) - slipSumRmb(r)); tot += rem; return `• ${String(r.supplier_label ?? r.supplier_id ?? "—")} · ค้าง ¥${fmt(rem)} · ${billStatus3(r)}`; });
       const text = `🧾 บิลจีน (${selRows.length} รายการ)\n` + lines.join("\n") + `\n\nรวมค้าง ¥${fmt(tot)}`;
-      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "bills" }) });
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "china_bill" }) });
       const j = await res.json().catch(() => ({}));
       if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); setSel(new Set()); }
       else if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot");
@@ -1728,7 +1760,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
     if (bill.note) text += `\nหมายเหตุ: ${String(bill.note)}`;
     setSendingLine(true);
     try {
-      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "bills", button: { label: "เปิดใบสรุปบิลจีน", url: link } }) });
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "china_bill", button: { label: "เปิดใบสรุปบิลจีน", url: link } }) });
       const j = await res.json().catch(() => ({}));
       if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
       if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง");
@@ -2392,7 +2424,7 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
     return `• ${String(l.doc_number || "—")} ฿${fmt(num(l.paid_thb))} — ${String(l.label || "—")}${d ? ` · ${d}` : ""}`;
   }).join("\n");
   try {
-    const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "transfers", button: { label: "เปิดใบสรุปการโอน", url: link } }) });
+    const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "transfer", button: { label: "เปิดใบสรุปการโอน", url: link } }) });
     const j = await res.json().catch(() => ({}));
     if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
     if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง");
@@ -2872,7 +2904,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
     if (cw.length) text += `\n\nบิล CTW:\n` + cw.map(l => `• ${String(l.label)} ฿${fmt(num(l.paid_thb))}`).join("\n");
     setSendingTxLine(true);
     try {
-      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "transfers", button: { label: "เปิดใบสรุปการโอน", url: link } }) });
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "transfer", button: { label: "เปิดใบสรุปการโอน", url: link } }) });
       const j = await res.json().catch(() => ({}));
       if (res.ok) { toast.success("ส่งเข้า LINE กลุ่มแล้ว"); return; }
       if (j.needConfig) toast.error("ยังไม่ได้ตั้งค่า LINE Bot — เปิดให้เลือกกลุ่มเอง");
@@ -3691,7 +3723,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
         const imgs = atts.filter(k => !isPdf(k)).slice(0, 3);   // LINE: รูปสรุป + สลิป ≤4 รูป/ครั้ง
         for (const k of imgs) { const du = await keyToDataUrl(k); if (du) { const u = await toPublic(du, "slip"); if (u) slipUrls.push(u); } }
       }
-      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "transfers", imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปการโอน", url: link } }) });
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "transfer", imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปการโอน", url: link } }) });
       const j = await res.json().catch(() => ({}));
       if (res.ok) { setSendState("sent"); setTimeout(() => setSendState(""), 1600); toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); return; }
       setSendState("");
@@ -4067,7 +4099,7 @@ function ReportPopup({ bill, onClose, onPrinted }: {
         const imgs = atts.filter(k => !k.toLowerCase().endsWith(".pdf")).slice(0, 3);
         for (const k of imgs) { const du = await keyToDataUrl(k); if (du) { const u = await toPublic(du, "slip"); if (u) slipUrls.push(u); } }
       }
-      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "bills", imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปบิลจีน", url: link } }) });
+      const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "china_bill", imageUrl, imageUrls: slipUrls, button: { label: "เปิดใบสรุปบิลจีน", url: link } }) });
       const j = await res.json().catch(() => ({}));
       if (res.ok) { setSendState("sent"); setTimeout(() => setSendState(""), 1600); toast.success(imageUrl ? `ส่งรูปเข้า LINE แล้ว${slipUrls.length ? ` (+สลิป ${slipUrls.length})` : ""}` : "ส่งข้อความเข้า LINE แล้ว (ยังไม่ได้ตั้ง R2 public)"); await markPrinted(); return; }
       setSendState("");

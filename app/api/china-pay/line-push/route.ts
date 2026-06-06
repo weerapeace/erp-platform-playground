@@ -28,9 +28,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
-  // เลือกกลุ่มปลายทาง: ระบุตรง (ปุ่มทดสอบ) → กลุ่มตามงาน (purpose) → กลุ่มหลัก (group_id) เป็น fallback
-  const target = explicitTo || (purpose && cfg.groups?.[purpose]) || cfg.group_id || "";
+  const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; routing?: Record<string, string> };
+
+  // ตารางจับคู่ "เหตุการณ์ → กลุ่ม" (ตั้งเองได้ในหน้าตั้งค่า) — ค่าเริ่มต้นตามที่เคยฟิกซ์ไว้
+  const DEFAULT_ROUTING: Record<string, string> = { rate: "transfers", china_bill: "bills", transfer: "transfers", test: "test" };
+  const routing = { ...DEFAULT_ROUTING, ...(cfg.routing ?? {}) };
+  const slot = purpose ? (routing[purpose] ?? purpose) : "";   // event → group slot
+  if (!explicitTo && slot === "off") {
+    return NextResponse.json({ ok: true, skipped: true });      // เหตุการณ์นี้ตั้งเป็น "ไม่ส่ง"
+  }
+  // เลือกกลุ่มปลายทาง: ระบุตรง (ปุ่มทดสอบ) → กลุ่มตาม slot → กลุ่มหลัก (group_id) เป็น fallback
+  const target = explicitTo || (slot && cfg.groups?.[slot]) || cfg.group_id || "";
   if (!cfg.token || !target) {
     return NextResponse.json({ error: "ยังไม่ได้ตั้งค่า LINE Bot / กลุ่มปลายทาง", needConfig: true }, { status: 503 });
   }
