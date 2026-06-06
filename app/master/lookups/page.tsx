@@ -26,7 +26,20 @@ const TABS: { key: string; title: string; icon: string }[] = [
 ];
 
 export default function MasterLookupsPage() {
-  const [active, setActive] = useState(TABS[0].key);
+  // จำแท็บที่เลือกผ่าน URL (?tab=) → กดตั้งค่าฟิลด์แล้วย้อนกลับ ไม่เด้งกลับแท็บแรก
+  const [active, setActive] = useState<string>(() => {
+    if (typeof window === "undefined") return TABS[0].key;
+    const t = new URLSearchParams(window.location.search).get("tab");
+    return t && TABS.some((x) => x.key === t) ? t : TABS[0].key;
+  });
+  const selectTab = (k: string) => {
+    setActive(k);
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", k);
+      window.history.replaceState(null, "", u.toString());
+    }
+  };
   const [showWizard, setShowWizard] = useState(false);
   const canCreate = usePermission("products.create");
   const cur = TABS.find((t) => t.key === active) ?? TABS[0];
@@ -50,7 +63,7 @@ export default function MasterLookupsPage() {
           </div>
           <div className="flex gap-1 mt-3 -mb-px overflow-x-auto">
             {TABS.map((t) => (
-              <button key={t.key} onClick={() => setActive(t.key)}
+              <button key={t.key} onClick={() => selectTab(t.key)}
                 className={`h-10 px-4 text-sm whitespace-nowrap border-b-2 transition-colors ${
                   active === t.key ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
                 }`}>

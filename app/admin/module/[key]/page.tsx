@@ -355,6 +355,8 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
   const [summaries, setSummaries] = useState<Record<string, "sum" | "count" | "avg">>({});
   // คอลัมน์ที่โชว์เริ่มต้น (View default) — column_name → โชว์ไหม
   const [colVis, setColVis] = useState<Record<string, boolean>>({});
+  // จำนวนแถวต่อหน้าเริ่มต้น
+  const [pageSize, setPageSize] = useState(20);
 
   useEffect(() => {
     setLoading(true); setErr(null);
@@ -373,6 +375,7 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       setGroupBy(s.group_by ?? "");
       setRules(Array.isArray(s.row_color_rules) ? s.row_color_rules : []);
       setSummaries((s.summaries as Record<string, "sum" | "count" | "avg">) ?? {});
+      setPageSize(Number(layout?.default_page_size) || 20);
       // init โชว์คอลัมน์: ใช้ค่าจาก layout เดิมถ้ามี ไม่งั้น fallback เป็น is_visible ของทะเบียน field
       const existing = Array.isArray(layout?.columns) ? (layout!.columns as LayoutColumn[]) : [];
       const exByKey: Record<string, LayoutColumn> = Object.fromEntries(existing.map((c) => [c.key, c]));
@@ -409,7 +412,7 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
           description: full?.description ?? null,
           columns,
           default_density: full?.default_density ?? "normal",
-          default_page_size: full?.default_page_size ?? 20,
+          default_page_size: pageSize,
           default_view_mode: full?.default_view_mode ?? "table",
           notes: full?.notes ?? null,
           settings,
@@ -458,6 +461,12 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1.5">จัดกลุ่มเริ่มต้น (Group by)</label>
             {colSelect(groupBy, setGroupBy)}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">จำนวนแถวต่อหน้าเริ่มต้น</label>
+            <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} className={sel}>
+              {[10, 20, 50, 100, 200].map((n) => <option key={n} value={n}>{n} แถว/หน้า</option>)}
+            </select>
           </div>
         </div>
       </div>
