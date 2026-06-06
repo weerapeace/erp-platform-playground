@@ -41,5 +41,6 @@ export async function GET(request: NextRequest) {
       image_field: "cover_image_r2_key",
     });
   }
-  return NextResponse.json({ data: out, error: null });
+  // Phase 3a — cache 5 นาที (โครงสร้าง relation แทบไม่เปลี่ยน)
+  return NextResponse.json({ data: out, error: null }, { headers: { "Cache-Control": "private, max-age=300" } });
 }

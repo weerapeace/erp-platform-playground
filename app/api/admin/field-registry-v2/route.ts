@@ -112,11 +112,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
     );
   }
 
+  // Phase 3a — cache ทะเบียน field 5 นาที (เปลี่ยนเฉพาะตอน admin แก้ใน Studio) → สลับ table ไม่ดึงใหม่
   return NextResponse.json({
     module_key: moduleKey,
     fields: (data ?? []) as FormField[],
     layout,
     section_tag_rules: sectionTagRules,
     error: null,
-  });
+  }, { headers: { "Cache-Control": "private, max-age=300" } });
 }

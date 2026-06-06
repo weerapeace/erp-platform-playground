@@ -15,6 +15,7 @@ import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { cachedJson, primeCache } from "@/lib/client-cache";
 import { resolveRelationLabels } from "@/lib/relation";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -430,8 +431,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   useEffect(() => {
     if (!config.moduleKey) return;
     setRegistryLoading(true);
-    apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`)
-      .then((r) => r.json() as Promise<FieldRegistryV2Response>)
+    // Phase 3a — ใช้ cache (สลับ module ไปมาไม่ดึงใหม่)
+    cachedJson<FieldRegistryV2Response>(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`)
       .then((res) => {
         if (res.error) console.error("Field Registry load error:", res.error);
         else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); }
@@ -440,14 +441,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       .finally(() => setRegistryLoading(false));
   }, [config.moduleKey]);
 
-  // F30: โหลดทะเบียน field ใหม่ (ใช้ซ้ำ — Studio save + toggle filterable)
+  // F30: โหลดทะเบียน field ใหม่ (ใช้ซ้ำ — Studio save + toggle filterable) — ต้องสด + อัปเดต cache
   const refreshRegistry = useCallback(async () => {
     if (!config.moduleKey) return;
     setRegistryLoading(true);
     try {
-      const r = await apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`);
+      const url = `/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`;
+      const r = await apiFetch(url);
       const res = (await r.json()) as FieldRegistryV2Response;
-      if (!res.error) { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); }
+      if (!res.error) {
+        setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {});
+        primeCache(url, res);   // อัปเดต cache ให้ตรงกับของใหม่
+      }
     } finally {
       setRegistryLoading(false);
     }
@@ -640,8 +645,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [familyTemplates, setFamilyTemplates] = useState<Record<string, FamilyTemplate>>({});
   useEffect(() => {
     if (familyM2mFields.length === 0) return;
-    apiFetch(`/api/master-v2/product_families?limit=500&include_inactive=true`)
-      .then((r) => r.json())
+    cachedJson<{ data?: Record<string, unknown>[]; rows?: Record<string, unknown>[] }>(`/api/master-v2/product_families?limit=500&include_inactive=true`)
       .then((j) => {
         const m: Record<string, FamilyTemplate> = {};
         for (const r of (j.data ?? j.rows ?? []) as Record<string, unknown>[]) m[String(r.id)] = scopedTpl(r.template as FamilyTemplateRaw, tplScope);
@@ -727,7 +731,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   useEffect(() => {
     if (!config.moduleKey) { setReverseRels([]); return; }
     let alive = true;
-    apiFetch(`/api/admin/reverse-relations?module=${config.moduleKey}`).then((r) => r.json()).then((j) => {
+    cachedJson<{ data?: ReverseRel[] }>(`/api/admin/reverse-relations?module=${config.moduleKey}`).then((j) => {
       if (alive && Array.isArray(j.data)) setReverseRels(j.data as ReverseRel[]);
     }).catch(() => {});
     return () => { alive = false; };
