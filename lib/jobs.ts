@@ -18,6 +18,18 @@ export async function updateJob(id: string, patch: Record<string, unknown>): Pro
   await supabaseAdmin().from("erp_jobs").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
 }
 
+/** ส่งงานเข้า Cloudflare Queue (binding JOB_QUEUE) — คืน true ถ้าส่งสำเร็จ
+ *  ถ้ายังไม่มี binding (queue ยังไม่ถูกตั้ง) คืน false → ฝั่งเรียกจะ fallback ไป waitUntil */
+export async function sendToQueue(msg: Record<string, unknown>): Promise<boolean> {
+  try {
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const mod: any = await import(/* webpackIgnore: true */ ("@opennextjs/cloudflare" as string));
+    const env = mod.getCloudflareContext ? mod.getCloudflareContext()?.env : null;
+    if (env?.JOB_QUEUE?.send) { await env.JOB_QUEUE.send(msg); return true; }
+  } catch { /* ไม่มี binding / ไม่ใช่ CF */ }
+  return false;
+}
+
 /** ดึง ctx.waitUntil ของ Cloudflare (รันงานต่อหลังส่ง response) — คืน null ถ้าไม่ใช่ CF runtime */
 export async function getWaitUntil(): Promise<((p: Promise<unknown>) => void) | null> {
   try {

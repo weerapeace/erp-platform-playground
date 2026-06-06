@@ -1,0 +1,33 @@
+/**
+ * Cloudflare Queue consumer worker — แยกจาก worker หลัก (OpenNext) เพื่อความปลอดภัย
+ * ทำหน้าที่: หยิบงานจากคิว erp-jobs → เรียก /api/jobs/run ของแอปหลักให้ประมวลผล
+ *
+ * Deploy (ครั้งเดียว): cd workers/job-consumer && npx wrangler deploy
+ *   + ตั้ง secret: npx wrangler secret put JOB_RUNNER_SECRET
+ * หรือให้ GitHub Actions deploy ให้ (ดู README.md)
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "erp-job-consumer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-31",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // ⚠️ ต้องสร้าง queue 'erp-jobs' ก่อน (npx wrangler queues create erp-jobs หรือใน Dashboard)
+  "queues": {
+    "consumers": [
+      {
+        "queue": "erp-jobs",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3
+      }
+    ]
+  },
+
+  // APP_URL = โดเมนแอปหลัก (เช่น https://erp-platform-playground.<subdomain>.workers.dev หรือ custom domain)
+  "vars": {
+    "APP_URL": "https://REPLACE-WITH-APP-URL"
+  }
+  // JOB_RUNNER_SECRET → ตั้งเป็น secret (npx wrangler secret put JOB_RUNNER_SECRET) ให้ตรงกับฝั่งแอปหลัก
+}
