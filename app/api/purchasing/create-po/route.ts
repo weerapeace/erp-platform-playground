@@ -41,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { pr_ids?: unknown; actor?: string };
+  let body: { pr_ids?: unknown; actor?: string; order_date?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const prIds = Array.isArray(body.pr_ids) ? body.pr_ids.filter((x): x is string => typeof x === "string") : [];
   if (prIds.length === 0) return NextResponse.json({ error: "ไม่ได้เลือกรายการ" }, { status: 400 });
@@ -80,7 +80,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const { data: poNo, error: numErr } = await admin.rpc("erp_next_number", { p_key: "po" });
     if (numErr || !poNo) return NextResponse.json({ error: "ออกเลข PO ไม่สำเร็จ: " + (numErr?.message ?? "") }, { status: 500 });
     const grandTotal = items.reduce((a, p) => a + num(p.qty) * num(p.price_est), 0);
-    const orderDate = items.find((p) => p.order_date)?.order_date ?? now.toISOString().slice(0, 10);
+    const orderDate = (typeof body.order_date === "string" && body.order_date)
+      ? body.order_date
+      : (items.find((p) => p.order_date)?.order_date ?? now.toISOString().slice(0, 10));
     const requester = items.find((p) => p.requester)?.requester ?? actor;
 
     // header
