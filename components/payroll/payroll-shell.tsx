@@ -19,7 +19,9 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
   ] },
   { group: "ข้อมูลพนักงาน", items: [
     { href: "/payroll/employees", icon: "🪪", label: "พนักงาน" },
+    { href: "/payroll/board", icon: "🗂️", label: "ผังพนักงาน (บอร์ด)" },
     { href: "/payroll/contracts", icon: "📄", label: "สัญญาจ้าง" },
+    { href: "/payroll/warnings", icon: "⚠️", label: "ใบเตือนพนักงาน" },
   ] },
   { group: "คำนวณเงินเดือน", items: [
     { href: "/payroll/periods", icon: "🗓️", label: "งวดเงินเดือน" },

@@ -9,7 +9,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-type Relation = { field: string; table: string; as: string };
+type Relation = { field: string; table: string; as: string; select?: string; labelOf?: (r: Record<string, unknown>) => string };
 type EntityCfg = {
   table:       string;
   cols:        string;
@@ -61,6 +61,20 @@ export const PAYROLL_ENTITIES: Record<string, EntityCfg> = {
     required: ["name"], numeric: ["display_order"],
     defaultSort: "display_order",
   },
+  warnings: {
+    table: "employee_warnings",
+    cols: "id, employee_id, warning_date, title, detail, severity, status, created_at, updated_at",
+    search: ["title"],
+    statusField: "status", activeVal: "active", inactiveVal: "revoked",
+    writable: ["employee_id", "warning_date", "title", "detail", "severity", "status"],
+    required: ["employee_id", "title"],
+    relation: {
+      field: "employee_id", table: "employees", as: "employee_name",
+      select: "id, employee_code, first_name, nickname",
+      labelOf: (r) => `${r.employee_code ?? ""} · ${String(r.first_name ?? "").trim()}${r.nickname ? ` (${r.nickname})` : ""}`,
+    },
+    defaultSort: "warning_date",
+  },
   "public-holidays": {
     table: "payroll_holidays",
     cols: "id, holiday_date, holiday_name, status, note, created_at, updated_at",
@@ -99,9 +113,12 @@ export function getEntityCfg(entity: string): EntityCfg | null {
 }
 
 async function relationMap(rel: Relation): Promise<Record<string, string>> {
-  const { data } = await supabaseAdmin().from(rel.table).select("id, name");
+  const { data } = await supabaseAdmin().from(rel.table).select(rel.select ?? "id, name");
   const m: Record<string, string> = {};
-  (data ?? []).forEach((r) => { m[(r as { id: string }).id] = (r as { name: string }).name; });
+  (data ?? []).forEach((r) => {
+    const row = r as Record<string, unknown>;
+    m[String(row.id)] = rel.labelOf ? rel.labelOf(row) : String(row.name ?? "");
+  });
   return m;
 }
 async function nameToId(rel: Relation, name: string): Promise<string | null> {
@@ -147,7 +164,7 @@ async function toColumns(cfg: EntityCfg, body: Record<string, unknown>): Promise
   if (cfg.relation && cfg.relation.as in body) {
     out[cfg.relation.field] = await nameToId(cfg.relation, String(body[cfg.relation.as] ?? ""));
   }
-  for (const k of ["start_date", "end_date", "payment_date", "holiday_date"]) { if (out[k] === "") out[k] = null; }
+  for (const k of ["start_date", "end_date", "payment_date", "holiday_date", "warning_date"]) { if (out[k] === "") out[k] = null; }
   return out;
 }
 
