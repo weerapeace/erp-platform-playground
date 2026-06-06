@@ -67,6 +67,7 @@ export default function PayrollCalcRunPage() {
   const [colsCompared, setColsCompared] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);   // Phase 2 — สถานะคำนวณเบื้องหลัง
 
   async function loadPeriods(keepSelected = false) {
     try {
@@ -94,18 +95,33 @@ export default function PayrollCalcRunPage() {
     } catch { setErr("เปลี่ยนสถานะไม่สำเร็จ"); }
   }
 
+  // Phase 2 — คำนวณแบบเบื้องหลัง: สร้าง job → poll สถานะ → แสดงผลเมื่อเสร็จ (ไม่บล็อกหน้าจอ/ไม่ timeout)
   async function run() {
     if (!periodId) return;
-    setLoading(true); setErr(null); setRows(null); setSummary(null); setSaveMsg(null);
+    setLoading(true); setErr(null); setRows(null); setSummary(null); setSaveMsg(null); setProgress("กำลังส่งงานคำนวณ…");
     try {
-      const j = await apiFetch(`/api/payroll/calc-run?period_id=${encodeURIComponent(periodId)}`).then((r) => r.json());
-      if (j.error) setErr(j.error);
-      else {
-        setRows(j.data as Row[]); setSummary(j.summary as Summary);
-        setEditable(!!j.editable); setAllMatch(!!j.all_columns_match); setColsCompared(Number(j.columns_compared ?? 0));
+      const enq = await apiFetch("/api/payroll/calc-enqueue", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_id: periodId }),
+      }).then((r) => r.json());
+      if (enq.error || !enq.job_id) { setErr(enq.error ?? "สร้างงานไม่สำเร็จ"); setProgress(null); setLoading(false); return; }
+      const jobId = enq.job_id as string;
+      setProgress("กำลังคำนวณเบื้องหลัง… (อาจใช้เวลาสักครู่)");
+      const started = Date.now();
+      while (Date.now() - started < 5 * 60 * 1000) {   // กันค้างเกิน 5 นาที
+        await new Promise((res) => setTimeout(res, 1500));
+        const job = await apiFetch(`/api/jobs/${jobId}`).then((r) => r.json()).then((j) => j.data).catch(() => null);
+        if (!job) continue;
+        if (job.status === "done") {
+          const res = (job.result ?? {}) as { data?: Row[]; summary?: Summary; editable?: boolean; all_columns_match?: boolean; columns_compared?: number };
+          setRows((res.data ?? []) as Row[]); setSummary((res.summary ?? null) as Summary | null);
+          setEditable(!!res.editable); setAllMatch(!!res.all_columns_match); setColsCompared(Number(res.columns_compared ?? 0));
+          setProgress(null); setLoading(false); return;
+        }
+        if (job.status === "error") { setErr(job.error ?? "คำนวณไม่สำเร็จ"); setProgress(null); setLoading(false); return; }
+        if (job.progress_total > 0) setProgress(`กำลังคำนวณ… ${job.progress_done}/${job.progress_total} คน`);
       }
-    } catch { setErr("คำนวณไม่ได้"); }
-    finally { setLoading(false); }
+      setErr("คำนวณนานเกินไป — ลองใหม่"); setProgress(null); setLoading(false);
+    } catch { setErr("คำนวณไม่ได้"); setProgress(null); setLoading(false); }
   }
 
   async function save() {
@@ -146,6 +162,12 @@ export default function PayrollCalcRunPage() {
           className="h-10 px-5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
           {loading ? "กำลังคำนวณ..." : "▶ คำนวณ + เทียบ"}
         </button>
+        {progress && (
+          <span className="flex items-center gap-2 text-sm text-blue-700">
+            <span className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+            {progress}
+          </span>
+        )}
       </div>
 
       {/* สถานะงวด + เปลี่ยนสถานะ (workflow) */}
