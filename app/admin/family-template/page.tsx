@@ -17,6 +17,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { RelationPicker } from "@/components/relation-picker";
+import { resolveRelationLabels, type RelationConfig } from "@/lib/relation";
 
 type FieldMode = "normal" | "show" | "hide";
 
@@ -30,7 +32,7 @@ type Template = {
 type RawTemplate = Template & { parent_sku?: Template; sku?: Template };
 
 type Family = { id: string; name: string; template: RawTemplate };
-type RegField = { field_key: string; field_label: string; group_key: string; ui_field_type: string };
+type RegField = { field_key: string; field_label: string; group_key: string; ui_field_type: string; column_name?: string; relation_config?: RelationConfig; options?: string[] };
 type Section = { key: string; label: string };
 type Scope = "parent_sku" | "sku";
 
@@ -52,6 +54,32 @@ const normNested = (raw: RawTemplate | undefined): { parent_sku: Template; sku: 
   if (raw && (raw.parent_sku !== undefined || raw.sku !== undefined)) return { parent_sku: raw.parent_sku ?? {}, sku: raw.sku ?? {} };
   return { parent_sku: (raw as Template) ?? {}, sku: {} };
 };
+// ช่อง "ค่าตั้งต้น" ที่เปลี่ยนรูปแบบตามชนิด field (เลข/ใช่-ไม่ใช่/dropdown/relation/วันที่/ข้อความ)
+function DefaultValueInput({ f, value, onChange }: { f: RegField; value: string; onChange: (v: string) => void }) {
+  const cls = "w-full h-7 text-xs border border-slate-200 rounded px-1.5";
+  const t = f.ui_field_type;
+  if (t === "number" || t === "currency")
+    return <input type="number" value={value} onChange={(e) => onChange(e.target.value)} placeholder="(ไม่ตั้ง)" className={cls} />;
+  if (t === "boolean")
+    return (
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={cls + " bg-white"}>
+        <option value="">(ไม่ตั้ง)</option><option value="true">ใช่</option><option value="false">ไม่ใช่</option>
+      </select>
+    );
+  if (t === "date")
+    return <input type="date" value={value} onChange={(e) => onChange(e.target.value)} className={cls} />;
+  if (t === "select" && (f.options?.length ?? 0) > 0)
+    return (
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={cls + " bg-white"}>
+        <option value="">(ไม่ตั้ง)</option>
+        {f.options!.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  if (t === "relation" && f.relation_config?.target_table)
+    return <RelationPicker value={value || null} onChange={(v) => onChange(v ?? "")} config={f.relation_config} placeholder="(ไม่ตั้ง)" />;
+  return <input value={value} onChange={(e) => onChange(e.target.value)} placeholder="(ไม่ตั้ง)" className={cls} />;
+}
+
 // แท็กนี้ "เป็นเทมเพลต" ใน scope นี้ไหม
 const hasTpl = (t?: Template): boolean =>
   !!t && (!!t.show_fields?.length || !!t.hide_fields?.length || !!t.hide_sections?.length ||
@@ -95,8 +123,12 @@ export default function FamilyTemplatePage() {
   // โหลด field registry + section ตาม scope (เปลี่ยนแท็บ → โหลดใหม่)
   useEffect(() => {
     apiFetch(`/api/admin/field-registry-v2?module=${scopeModule}`).then((r) => r.json()).then((reg) => {
-      setFields((reg.fields ?? []).map((f: RegField) => ({
-        field_key: f.field_key, field_label: f.field_label, group_key: f.group_key, ui_field_type: f.ui_field_type,
+      setFields((reg.fields ?? []).map((f: Record<string, unknown>) => ({
+        field_key: String(f.field_key), field_label: String(f.field_label ?? f.field_key),
+        group_key: String(f.group_key ?? ""), ui_field_type: String(f.ui_field_type ?? "text"),
+        column_name: f.column_name ? String(f.column_name) : undefined,
+        relation_config: (f.relation_config as RelationConfig) ?? undefined,
+        options: (f.options as { options?: string[] })?.options ?? undefined,
       })));
       const secs: Section[] = [];
       for (const t of (reg.layout?.tabs ?? [])) for (const s of (t.sections ?? [])) secs.push({ key: s.key, label: s.label });
@@ -244,6 +276,31 @@ export default function FamilyTemplatePage() {
   }, [tpl, fields, sections]);
   const defaultEntries = Object.entries(tpl.defaults ?? {});
 
+  // โหมดดีเทล: แปลง id ของ default ที่เป็น relation → ชื่อ (อ่านง่าย)
+  const [defLabels, setDefLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (editing) return;
+    let alive = true;
+    (async () => {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(tpl.defaults ?? {})) {
+        const f = fields.find((x) => x.field_key === k);
+        if (f?.ui_field_type === "relation" && f.relation_config?.target_table && v) {
+          try { const m = await resolveRelationLabels(apiFetch, f.relation_config, [String(v)]); const opt = m.get(String(v)); if (opt) out[k] = opt.label; } catch { /* ignore */ }
+        }
+      }
+      if (alive) setDefLabels(out);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, scope, editing, fields]);
+  const renderDefaultVal = (k: string, v: string): string => {
+    const f = fields.find((x) => x.field_key === k);
+    if (f?.ui_field_type === "boolean") return v === "true" ? "ใช่" : v === "false" ? "ไม่ใช่" : String(v);
+    if (f?.ui_field_type === "relation") return defLabels[k] ?? String(v);
+    return String(v);
+  };
+
   if (loading) return <div className="p-6 text-sm text-slate-500">กำลังโหลด…</div>;
 
   return (
@@ -352,7 +409,7 @@ export default function FamilyTemplatePage() {
                               {defaultEntries.map(([k, v]) => (
                                 <tr key={k} className="border-b border-slate-50 last:border-0">
                                   <td className="px-3 py-1.5 text-slate-600 w-1/2">{labelOfField(k)}</td>
-                                  <td className="px-3 py-1.5 font-medium text-slate-800">{String(v)}</td>
+                                  <td className="px-3 py-1.5 font-medium text-slate-800">{renderDefaultVal(k, v)}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -415,7 +472,7 @@ export default function FamilyTemplatePage() {
                                       </td>
                                       <td className="px-3 py-1.5">
                                         {virtual ? <span className="text-[11px] text-slate-300 italic">— ตั้งค่าไม่ได้ —</span>
-                                          : <input value={defaultOf(f.field_key)} onChange={(e) => setDefault(f.field_key, e.target.value)} placeholder="(ไม่ตั้ง)" className="w-full h-7 text-xs border border-slate-200 rounded px-1.5" />}
+                                          : <DefaultValueInput f={f} value={defaultOf(f.field_key)} onChange={(v) => setDefault(f.field_key, v)} />}
                                       </td>
                                     </tr>
                                   );
