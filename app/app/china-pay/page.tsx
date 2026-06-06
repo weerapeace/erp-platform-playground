@@ -705,7 +705,7 @@ function ChinaBalanceCard() {
         </div>
         <div className="flex items-end justify-between mt-1">
           <div className="text-3xl font-bold">¥{fmt(bal.rmb)}</div>
-          <div className="text-base font-medium opacity-95">≈ ฿{fmt(bal.thb)}</div>
+          {r1 > 0 && <div className="text-base font-medium opacity-95">≈ ฿{fmt(+(bal.rmb * r1).toFixed(2))}</div>}
         </div>
       </button>
 
@@ -722,7 +722,7 @@ function ChinaBalanceCard() {
               <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center">
                 <div className="text-xs text-emerald-700">ยอดคงเหลือปัจจุบัน</div>
                 <div className="text-2xl font-bold text-emerald-800">¥{fmt(bal.rmb)}</div>
-                <div className="text-xs text-emerald-600">≈ ฿{fmt(bal.thb)}</div>
+                {r1 > 0 && <div className="text-xs text-emerald-600">≈ ฿{fmt(+(bal.rmb * r1).toFixed(2))} (เรท {fmt(r1)})</div>}
               </div>
 
               <div className="grid grid-cols-3 gap-2">
