@@ -1135,6 +1135,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const [certificateFileRef, setCertificateFileRef] = useState("");
   const [tDate, setTDate] = useState(initialDate ?? todayIso());
   const [tNote, setTNote] = useState("");
+  const [editingTimeItem, setEditingTimeItem] = useState<TimeItem | null>(null);
   const [preview, setPreview] = useState<TimePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1170,6 +1171,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setCertificateNo("");
     setCertificateFileRef("");
     setTNote("");
+    setEditingTimeItem(null);
     setName("");
     setAmount("");
     setPreview(null);
@@ -1178,9 +1180,77 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setTKind(drawerTab);
     setPreview(null);
     setErr(null);
+    if (editingTimeItem) return;
     if (drawerTab === "absence" || drawerTab === "leave") setDurationPreset("full");
     if (drawerTab === "ot") setDurationPreset("custom");
-  }, [drawerTab]);
+  }, [drawerTab, editingTimeItem]);
+
+  function resetTimeForm() {
+    setLateHours("");
+    setLateMinutes("");
+    setDurationPreset("custom");
+    setCustomHours("");
+    setCustomMinutes("");
+    setLeaveReason("unpaid");
+    setHasMedicalCertificate(false);
+    setCertificateDate("");
+    setCertificateProvider("");
+    setCertificateNo("");
+    setCertificateFileRef("");
+    setTNote("");
+    setPreview(null);
+    setEditingTimeItem(null);
+  }
+
+  function setDurationFromValue(kind: TimeKind, value: number) {
+    if (kind === "late") {
+      const totalMinutes = Math.max(0, Math.round(value));
+      setLateHours(totalMinutes >= 60 ? String(Math.floor(totalMinutes / 60)) : "");
+      setLateMinutes(totalMinutes % 60 ? String(totalMinutes % 60) : totalMinutes ? "0" : "");
+      setDurationPreset("custom");
+      setCustomHours("");
+      setCustomMinutes("");
+      return;
+    }
+
+    const fullValue = kind === "ot" ? STANDARD_HOURS_PER_DAY : 1;
+    const halfValue = kind === "ot" ? STANDARD_HOURS_PER_DAY / 2 : 0.5;
+    if (Math.abs(value - fullValue) < 0.001) {
+      setDurationPreset("full");
+      setCustomHours("");
+      setCustomMinutes("");
+      return;
+    }
+    if (Math.abs(value - halfValue) < 0.001) {
+      setDurationPreset("half");
+      setCustomHours("");
+      setCustomMinutes("");
+      return;
+    }
+
+    const hours = kind === "ot" ? value : value * STANDARD_HOURS_PER_DAY;
+    const totalMinutes = Math.max(0, Math.round(hours * 60));
+    setDurationPreset("custom");
+    setCustomHours(totalMinutes >= 60 ? String(Math.floor(totalMinutes / 60)) : "");
+    setCustomMinutes(totalMinutes % 60 ? String(totalMinutes % 60) : totalMinutes ? "0" : "");
+  }
+
+  function startEditTime(it: TimeItem) {
+    setErr(null);
+    setEditingTimeItem(it);
+    setDrawerTab(it.kind);
+    setTKind(it.kind);
+    setTDate(it.work_date ?? todayIso());
+    setTNote(it.note ?? "");
+    setDurationFromValue(it.kind, Number(it.value));
+    setLeaveReason(it.kind === "leave" && it.paid_leave ? "sick_paid" : "unpaid");
+    setHasMedicalCertificate(it.kind === "leave" && it.paid_leave === true);
+    setCertificateDate("");
+    setCertificateProvider("");
+    setCertificateNo("");
+    setCertificateFileRef("");
+    setPreview(null);
+  }
 
   async function addItem() {
     setErr(null);
@@ -1289,6 +1359,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     const value = computedTimeValue();
     if (!(value > 0)) { setErr(`กรอกจำนวน ${TIME_META[tKind].unit} (> 0)`); return; }
     if (!tDate) { setErr("เลือกวันที่ของรายการก่อน"); return; }
+    const itemBeingEdited = editingTimeItem;
     setBusy(true);
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
@@ -1297,16 +1368,17 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
       }).then((r) => r.json());
       if (j.error) setErr(j.error);
       else {
-        setLateHours("");
-        setLateMinutes("");
-        setCustomHours("");
-        setCustomMinutes("");
-        setTNote("");
-        setCertificateDate("");
-        setCertificateProvider("");
-        setCertificateNo("");
-        setCertificateFileRef("");
-        setPreview(null);
+        if (itemBeingEdited) {
+          const old = await apiFetch(`/api/payroll/time-entry/${itemBeingEdited.id}?kind=${itemBeingEdited.kind}`, { method: "DELETE" }).then((r) => r.json());
+          if (old.error) {
+            setErr(`บันทึกใหม่แล้ว แต่ลบรายการเดิมไม่สำเร็จ: ${old.error}`);
+            setEditingTimeItem(null);
+            await reload();
+            onChanged();
+            return;
+          }
+        }
+        resetTimeForm();
         await reload();
         onChanged();
       }
@@ -1335,7 +1407,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const pieceworks = items.filter(isPieceworkItem);
   const earnings = items.filter((i) => i.adjustment_type === "earning" && !isPieceworkItem(i));
   const deductions = items.filter((i) => i.adjustment_type === "deduction");
-  const hasDraftTime = editable && (!!lateHours || !!lateMinutes || !!customHours || !!customMinutes || !!tNote || !!certificateDate || !!certificateProvider || !!certificateNo || !!certificateFileRef || !!preview);
+  const hasDraftTime = editable && (!!editingTimeItem || !!lateHours || !!lateMinutes || !!customHours || !!customMinutes || !!tNote || !!certificateDate || !!certificateProvider || !!certificateNo || !!certificateFileRef || !!preview);
   const visibleTimeItems = timeItems
     .filter((it) => timeOnly && tDate ? it.work_date === tDate : it.kind === drawerTab)
     .sort((a, b) => DRAWER_TABS.findIndex((tab) => tab.key === a.kind) - DRAWER_TABS.findIndex((tab) => tab.key === b.kind));
@@ -1367,7 +1439,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                   <button
                     key={tab.key}
                     type="button"
-                    onClick={() => setDrawerTab(tab.key)}
+                    onClick={() => { setEditingTimeItem(null); setDrawerTab(tab.key); }}
                     className={`h-9 rounded-lg px-3 text-sm font-medium transition-colors ${
                       active
                         ? "bg-slate-900 text-white"
@@ -1392,16 +1464,18 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                 {visibleTimeItems.map((it) => {
                   const m = TIME_META[it.kind];
                   const paidLeaveItem = it.kind === "leave" && it.paid_leave === true;
+                  const activeEdit = editingTimeItem?.id === it.id && editingTimeItem?.kind === it.kind;
                   return (
-                    <div key={`${it.kind}-${it.id}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
-                      <span className="min-w-0">
+                    <div key={`${it.kind}-${it.id}`} className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${activeEdit ? "border-blue-200 bg-blue-50/60" : "border-slate-200 bg-white"}`}>
+                      <button type="button" onClick={() => editable && startEditTime(it)} disabled={!editable || busy} className="min-w-0 flex-1 text-left disabled:cursor-default">
                         <span className="text-sm text-slate-700">{m.label} <span className="text-slate-400">{it.value} {m.unit}</span></span>
+                        {activeEdit && <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">กำลังแก้</span>}
                         {(it.work_date || it.note) && (
                           <span className="block text-[11px] text-slate-400 truncate">
                             {it.work_date || "ไม่ระบุวันที่"}{it.note ? ` · ${it.note}` : ""}
                           </span>
                         )}
-                      </span>
+                      </button>
                       <span className="flex items-center gap-2">
                         <span className={`text-sm tabular-nums ${paidLeaveItem ? "text-blue-600" : m.cls}`}>
                           {paidLeaveItem ? "ไม่หักเงิน" : `${m.sign}฿${it.amount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}`}
@@ -1419,6 +1493,12 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                   <div className="text-sm font-medium text-slate-700">ฟอร์ม {TIME_META[drawerTab].label}</div>
                   <p className="mt-0.5 text-xs text-slate-400">กรอกข้อมูลแล้วระบบจะคำนวณตัวอย่างให้ทันที ก่อนกดบันทึกรายการ</p>
                 </div>
+                {editingTimeItem && (
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-full bg-blue-100 px-2 py-1 font-medium text-blue-700">กำลังแก้รายการเดิม</span>
+                    <button type="button" onClick={resetTimeForm} disabled={busy} className="text-slate-500 underline underline-offset-2 hover:text-slate-800 disabled:opacity-50">ยกเลิกแก้</button>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label className="block">
                     <span className="block text-xs text-slate-500 mb-1">วันที่</span>
@@ -1552,7 +1632,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                 <div className="flex flex-wrap gap-2">
                   <button onClick={addTime} disabled={busy || !(computedValue > 0)}
                     className="h-9 px-4 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-                    {busy ? "กำลังบันทึก..." : "บันทึกรายการ"}
+                    {busy ? "กำลังบันทึก..." : editingTimeItem ? "บันทึกการแก้ไข" : "บันทึกรายการ"}
                   </button>
                 </div>
 
