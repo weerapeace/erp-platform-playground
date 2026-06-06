@@ -13,9 +13,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 
 type Rec = { id: string; code: string; name: string; image: string | null };
-type Tag = { id: string; label: string };
+type Tag = { id: string; label: string; group_id: string | null };
+type Grp = { id: string; name: string; parent_group_id: string | null; sort_order: number; icon: string | null };
 
 const ENTITIES = {
   "parent-skus": { label: "Parent SKU", api: "parent-skus", junction: "parent_skus_v2_product_family_m2m" },
@@ -34,7 +36,8 @@ export default function TagsManagerPage() {
   const [pool, setPool] = useState<Rec[]>([]);
   const [search, setSearch] = useState("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [filterTag, setFilterTag] = useState<string>("");   // "" | "__none__" | tagId
+  const [filterSel, setFilterSel] = useState<TagFilterValue>({ tagIds: [], none: false });
+  const [groups, setGroups] = useState<Grp[]>([]);
   const [loadingPool, setLoadingPool] = useState(false);
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
@@ -56,10 +59,18 @@ export default function TagsManagerPage() {
 
   const loadTags = useCallback(() => {
     apiFetch(`/api/master-v2/${TAG_MODULE}?limit=500`).then((r) => r.json())
-      .then((j) => setAllTags(((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({ id: String(r.id), label: String(r.name ?? r.id) }))))
+      .then((j) => setAllTags(((j.data ?? j.rows ?? []) as Record<string, unknown>[]).map((r) => ({ id: String(r.id), label: String(r.name ?? r.id), group_id: r.group_id ? String(r.group_id) : null }))))
       .catch(() => {});
   }, []);
   useEffect(() => { loadTags(); }, [loadTags]);
+  // โหลดกลุ่มแท็ก (จัด palette + filter ตามกลุ่ม)
+  useEffect(() => {
+    apiFetch(`/api/master-v2/product_family_groups?limit=500`).then((r) => r.json())
+      .then((j) => setGroups(((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
+        id: String(g.id), name: String(g.name ?? ""), parent_group_id: g.parent_group_id ? String(g.parent_group_id) : null,
+        sort_order: Number(g.sort_order ?? 100), icon: g.icon ? String(g.icon) : null,
+      })))).catch(() => {});
+  }, []);
 
   // ดึงแท็กปัจจุบันของหลายรายการทีเดียว (bulk) → โชว์บนการ์ด
   const loadTagMap = useCallback((ids: string[]) => {
@@ -118,7 +129,7 @@ export default function TagsManagerPage() {
     const j = await res.json().catch(() => ({}));
     if (!res.ok || j.error || !j.data?.id) { alert("สร้างแท็กไม่สำเร็จ: " + (j.error ?? res.status)); return; }
     const id = String(j.data.id);
-    setAllTags((t) => [...t, { id, label: name }]); setNewTag(""); addTag(id);
+    setAllTags((t) => [...t, { id, label: name, group_id: null }]); setNewTag(""); addTag(id);
   };
 
   // ดึง SKU ลูกของ Parent ที่เลือก (skus_v2.parent_sku_id IN parentIds)
@@ -184,13 +195,62 @@ export default function TagsManagerPage() {
   };
   const allowDrop = (e: React.DragEvent) => e.preventDefault();
 
-  // pool หลังกรอง (client-side บนรายการที่โหลดมา)
+  // pool หลังกรอง (client-side) — OR: มีอย่างน้อย 1 แท็กที่ติ๊ก / หรือ "ยังไม่มีแท็ก"
   const shownPool = useMemo(() => pool.filter((r) => {
-    if (filterTag === "") return true;
+    const { tagIds, none } = filterSel;
+    if (tagIds.length === 0 && !none) return true;
     const tags = tagMap[r.id] ?? [];
-    if (filterTag === "__none__") return tags.length === 0;
-    return tags.includes(filterTag);
-  }), [pool, filterTag, tagMap]);
+    return (none && tags.length === 0) || (tagIds.length > 0 && tags.some((t) => tagIds.includes(t)));
+  }), [pool, filterSel, tagMap]);
+
+  // โหลดแท็กของสินค้าในตะกร้าที่ยังไม่มีใน tagMap (ไว้รวม + ลบแท็ก)
+  useEffect(() => {
+    const missing = cart.map((c) => c.id).filter((id) => !(id in tagMap));
+    if (missing.length) loadTagMap(missing);
+  }, [cart, tagMap, loadTagMap]);
+
+  // รวมแท็กทั้งหมดที่อยู่ในตะกร้า (+ จำนวนสินค้าที่มีแท็กนั้น)
+  const cartTagCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of cart) for (const t of (tagMap[c.id] ?? [])) m.set(t, (m.get(t) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [cart, tagMap]);
+
+  // ลบแท็ก 1 อัน ออกจากสินค้าทุกตัวในตะกร้าที่มีแท็กนั้น (bulk)
+  const [removingTag, setRemovingTag] = useState(false);
+  const removeTagFromCart = async (tagId: string) => {
+    const targets = cart.filter((c) => (tagMap[c.id] ?? []).includes(tagId));
+    if (targets.length === 0) return;
+    if (!confirm(`ลบแท็ก "${tagLabel(tagId)}" ออกจากสินค้า ${targets.length} ตัวในตะกร้า?`)) return;
+    setRemovingTag(true); setResult(null);
+    try {
+      const links = targets.map((c) => ({ src_id: c.id, tgt_id: tagId }));
+      const res = await apiFetch("/api/admin/schema/m2m-links", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction: cfg.junction, links }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setResult("❌ ลบแท็กไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      setTagMap((m) => { const n = { ...m }; for (const c of targets) n[c.id] = (n[c.id] ?? []).filter((t) => t !== tagId); return n; });
+      setResult(`✅ ลบแท็ก "${tagLabel(tagId)}" ออกจาก ${targets.length} ตัวแล้ว`);
+    } catch (e) { setResult("❌ " + (e instanceof Error ? e.message : "network")); }
+    finally { setRemovingTag(false); }
+  };
+
+  // จัด palette แท็กตามกลุ่ม (กลุ่ม → กลุ่มย่อย → แท็ก + ไม่มีกลุ่ม)
+  const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  const byOrder = (a: Grp, b: Grp) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "th");
+  const topGroups = useMemo(() => groups.filter((g) => !g.parent_group_id).sort(byOrder), [groups]);
+  const subOfGrp = (id: string) => groups.filter((g) => g.parent_group_id === id).sort(byOrder);
+  const tagsOfGrp = (gid: string) => allTags.filter((t) => t.group_id === gid);
+  const ungroupedTags = useMemo(() => allTags.filter((t) => !t.group_id || !groupById.has(t.group_id)), [allTags, groupById]);
+  const tagChip = (t: Tag) => {
+    const inSet = tagSet.includes(t.id);
+    return (
+      <button key={t.id} draggable onDragStart={() => { dragRef.current = { type: "tag", id: t.id }; }}
+        onClick={() => addTag(t.id)} disabled={inSet}
+        className={`px-2.5 py-1 rounded-full text-xs border cursor-grab active:cursor-grabbing ${inSet ? "bg-amber-100 text-amber-700 border-amber-200 opacity-50" : "bg-white text-slate-600 border-slate-200 hover:bg-amber-50"}`}>
+        {t.label}{inSet ? " ✓" : ""}
+      </button>
+    );
+  };
 
   const shownCart = useMemo(() => {
     const q = cartSearch.trim().toLowerCase();
@@ -231,6 +291,8 @@ export default function TagsManagerPage() {
           <h1 className="text-xl font-bold text-slate-900">🏷️ Tags Manager</h1>
           <p className="text-sm text-slate-500 mt-0.5">ใส่แท็ก (Product Family) ให้สินค้าหลายตัวพร้อมกัน — กดหรือลากเพื่อเลือก</p>
         </div>
+        <div className="flex items-center gap-2">
+        <span className="text-xs text-slate-500">จัดแท็กให้:</span>
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
           {(Object.keys(ENTITIES) as EntityKey[]).map((k) => (
             <button key={k} onClick={() => setEntity(k)}
@@ -239,6 +301,7 @@ export default function TagsManagerPage() {
             </button>
           ))}
         </div>
+        </div>
       </div>
 
       {/* บนสุด: คลังแท็ก + ชุดแท็กที่จะใส่ + ปุ่ม Save */}
@@ -246,20 +309,36 @@ export default function TagsManagerPage() {
         <div className="flex items-start gap-3 flex-wrap">
           <div className="flex-1 min-w-[280px]">
             <div className="text-xs text-slate-500 mb-1">คลังแท็ก — กดหรือลากเพื่อเพิ่มเข้าชุดแท็ก</div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {allTags.map((t) => {
-                const inSet = tagSet.includes(t.id);
+            <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+              {topGroups.map((g) => {
+                const direct = tagsOfGrp(g.id);
+                const subs = subOfGrp(g.id).map((s) => ({ s, t: tagsOfGrp(s.id) }));
+                if (direct.length === 0 && subs.every((x) => x.t.length === 0)) return null;
                 return (
-                  <button key={t.id} draggable onDragStart={() => { dragRef.current = { type: "tag", id: t.id }; }}
-                    onClick={() => addTag(t.id)} disabled={inSet}
-                    className={`px-2.5 py-1 rounded-full text-xs border cursor-grab active:cursor-grabbing ${inSet ? "bg-amber-100 text-amber-700 border-amber-200 opacity-50" : "bg-white text-slate-600 border-slate-200 hover:bg-amber-50"}`}>
-                    {t.label}{inSet ? " ✓" : ""}
-                  </button>
+                  <div key={g.id}>
+                    <div className="text-[11px] font-medium text-slate-500">{g.icon ? g.icon + " " : ""}{g.name}</div>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                      {direct.map(tagChip)}
+                      {subs.filter((x) => x.t.length > 0).map(({ s, t }) => (
+                        <span key={s.id} className="inline-flex items-center gap-1 flex-wrap">
+                          <span className="text-[10px] text-slate-400">↳{s.name}:</span>{t.map(tagChip)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 );
               })}
-              <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createTag(); }}
-                placeholder="แท็กใหม่…" className="h-7 w-28 px-2 text-xs border border-slate-200 rounded-md" />
-              <button onClick={createTag} disabled={!newTag.trim()} className="h-7 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40">+ สร้าง</button>
+              {ungroupedTags.length > 0 && (
+                <div>
+                  <div className="text-[11px] font-medium text-slate-400">ไม่มีกลุ่ม</div>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">{ungroupedTags.map(tagChip)}</div>
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 pt-1">
+                <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createTag(); }}
+                  placeholder="แท็กใหม่…" className="h-7 w-28 px-2 text-xs border border-slate-200 rounded-md" />
+                <button onClick={createTag} disabled={!newTag.trim()} className="h-7 px-2 text-xs rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-40">+ สร้าง</button>
+              </div>
             </div>
           </div>
           <div className="w-px self-stretch bg-slate-100 hidden md:block" />
@@ -296,11 +375,7 @@ export default function TagsManagerPage() {
             <span className="text-sm font-semibold text-slate-700">คลัง{cfg.label}</span>
             <span className="text-xs text-slate-400">({total.toLocaleString()})</span>
             <div className="flex-1" />
-            <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} className="h-7 text-xs border border-slate-200 rounded px-1.5 bg-white">
-              <option value="">กรอง: ทั้งหมด</option>
-              <option value="__none__">ยังไม่มีแท็ก</option>
-              {allTags.map((t) => <option key={t.id} value={t.id}>มีแท็ก: {t.label}</option>)}
-            </select>
+            <TagGroupFilter value={filterSel} onChange={setFilterSel} />
             <button onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))} className="text-xs px-2 h-7 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 bg-white">
               รหัส {sortDir === "asc" ? "↑" : "↓"}
             </button>
@@ -347,6 +422,19 @@ export default function TagsManagerPage() {
             <input value={cartSearch} onChange={(e) => setCartSearch(e.target.value)} placeholder="ค้นหาในตะกร้า…"
               className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
+          {cartTagCounts.length > 0 && (
+            <div className="px-3 py-2 border-b border-slate-100 bg-white">
+              <div className="text-[11px] text-slate-500 mb-1">🏷️ แท็กในตะกร้า — กด ✕ เพื่อลบออกจากทุกตัวในตะกร้า</div>
+              <div className="flex flex-wrap gap-1.5">
+                {cartTagCounts.map(([tid, c]) => (
+                  <span key={tid} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-100">
+                    {tagLabel(tid)} <span className="text-emerald-500">×{c}</span>
+                    <button onClick={() => removeTagFromCart(tid)} disabled={removingTag} title="ลบแท็กนี้ออกจากทุกตัวในตะกร้า" className="text-emerald-400 hover:text-red-500 disabled:opacity-40">✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
             {cart.length === 0 && <div className="text-xs text-slate-400 py-6 text-center col-span-full">ลาก หรือกด “+ ใส่ตะกร้า” จากคลังด้านซ้าย</div>}
             {shownCart.map((r) => (

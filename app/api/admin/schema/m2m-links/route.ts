@@ -67,7 +67,27 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const b = await request.json().catch(() => ({}));
-  if (!JT_RE.test(b.junction ?? "") || !b.src_id || !b.tgt_id) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
+  if (!JT_RE.test(b.junction ?? "")) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
+
+  // โหมด bulk: { junction, links:[{src_id,tgt_id}] } → group ตาม tgt_id แล้ว .in(src_id) (เร็วกว่ายิงทีละคู่)
+  if (Array.isArray(b.links)) {
+    const byTgt = new Map<string, string[]>();
+    for (const l of b.links as { src_id?: string; tgt_id?: string }[]) {
+      if (l?.src_id && l?.tgt_id) { const a = byTgt.get(l.tgt_id) ?? []; a.push(l.src_id); byTgt.set(l.tgt_id, a); }
+    }
+    let count = 0;
+    for (const [tgt, srcs] of byTgt) {
+      for (let i = 0; i < srcs.length; i += 500) {
+        const chunk = srcs.slice(i, i + 500);
+        const { error } = await supabaseAdmin().from(b.junction).delete().eq("tgt_id", tgt).in("src_id", chunk);
+        if (error) return NextResponse.json({ error: error.message, count }, { status: 500 });
+        count += chunk.length;
+      }
+    }
+    return NextResponse.json({ ok: true, count });
+  }
+
+  if (!b.src_id || !b.tgt_id) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
   const { error } = await supabaseAdmin().from(b.junction).delete().eq("src_id", b.src_id).eq("tgt_id", b.tgt_id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
