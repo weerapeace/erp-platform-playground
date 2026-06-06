@@ -66,6 +66,18 @@ export default function PurchaseOrdersPage() {
   const [rate, setRate] = useState(5.2);
   const [cartWidth, setCartWidth] = useState(340);
   const [editRow, setEditRow] = useState<Row | null>(null);
+  const [buyAllShop, setBuyAllShop] = useState<{ name: string; rows: Row[] } | null>(null);
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+
+  // โหลดรายชื่อผู้จำหน่าย (m2o สำหรับแก้ร้าน — เลือกได้จากลิสต์เท่านั้น)
+  useEffect(() => {
+    const f = encodeURIComponent(JSON.stringify({ is_supplier: { type: "boolean", value: "true" } }));
+    apiFetch(`/api/master-v2/partners?limit=1000&filters=${f}`).then((r) => r.json())
+      .then((j) => setSuppliers(((j.data ?? []) as Record<string, unknown>[])
+        .map((p) => ({ id: String(p.id), name: String(p.name_th ?? p.display_name ?? p.code ?? "") }))
+        .filter((s) => s.name).sort((a, b) => a.name.localeCompare(b.name, "th"))))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -227,7 +239,7 @@ export default function PurchaseOrdersPage() {
                     <section key={name}>
                       <div className="flex items-center justify-between mb-2">
                         <h2 className="text-sm font-semibold text-slate-800">🏪 {name} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
-                        {!sectionNoShop && <button onClick={() => createPOByRows(list)} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
+                        {!sectionNoShop && <button onClick={() => setBuyAllShop({ name, rows: list })} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
                       </div>
                       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                         {list.map((r) => {
@@ -243,7 +255,7 @@ export default function PurchaseOrdersPage() {
                                 {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
                               </div>
                               <div className="p-2.5">
-                                <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug">{r.item_name}</div>
+                                <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug" title={r.item_name}>{r.item_name}</div>
                                 {r.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{r.code}</div>}
                                 <div className="text-xs text-slate-500 mt-1">ขอซื้อ <b className="text-slate-700">{r.qty.toLocaleString()}</b> {r.uom}</div>
                                 <div className="text-sm font-semibold text-blue-600 mt-0.5">{money(r.line_total, r.currency)}{isCNY(r.currency) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(r.line_total * rate).toLocaleString()}</span>}</div>
@@ -297,15 +309,16 @@ export default function PurchaseOrdersPage() {
                                     </div>
                                     <button onClick={() => toggleCart(r)} className="text-slate-400 hover:text-red-500 text-xs self-start">✕</button>
                                   </div>
-                                  <div className="flex items-center gap-2 mt-1.5 text-xs">
+                                  <div className="flex items-center gap-2 mt-1.5 text-xs flex-wrap">
                                     <input type="number" min={1} value={cl?.qty ?? r.qty} onChange={(e) => setCartQty(r.id, Number(e.target.value))} className="w-16 h-7 px-1.5 border border-slate-200 rounded text-right" />
                                     <span className="text-slate-400">{r.uom}</span>
+                                    <label className="flex items-center gap-1 text-[11px] text-slate-500">
+                                      <input type="checkbox" checked={cl?.partial ?? false} onChange={(e) => setCartPartial(r.id, e.target.checked)} className="rounded border-slate-300" />
+                                      รอซื้ออีก
+                                    </label>
                                     <span className="ml-auto font-semibold text-slate-700">{money(lineTotal(r), r.currency)}</span>
                                   </div>
-                                  <label className="flex items-center gap-1.5 mt-1 text-[11px] text-slate-500">
-                                    <input type="checkbox" checked={cl?.partial ?? false} onChange={(e) => setCartPartial(r.id, e.target.checked)} className="rounded border-slate-300" />
-                                    ยังซื้อไม่ครบ {remain > 0 && cl?.partial && <span className="text-amber-600">(เหลือ {remain.toLocaleString()} {r.uom} → เปิดใบใหม่)</span>}
-                                  </label>
+                                  {remain > 0 && cl?.partial && <div className="text-[10px] text-amber-600 mt-0.5">เหลือ {remain.toLocaleString()} {r.uom} → เปิดใบขอซื้อใหม่</div>}
                                 </div>
                               );
                             })}
@@ -332,18 +345,79 @@ export default function PurchaseOrdersPage() {
         )}
       </div>
 
-      {editRow && <CardEditModal row={editRow} onClose={() => setEditRow(null)} onSaved={async () => { setEditRow(null); await fetchRows(); }} />}
+      {editRow && <CardEditModal row={editRow} suppliers={suppliers} onClose={() => setEditRow(null)} onSaved={async () => { setEditRow(null); await fetchRows(); }} />}
+      {buyAllShop && <BuyAllModal shop={buyAllShop.name} rows={buyAllShop.rows} rate={rate}
+        onClose={() => setBuyAllShop(null)}
+        onConfirm={async (items) => { await submitPO({ items, order_date: orderDate }, items.map((i) => i.pr_id)); setBuyAllShop(null); }} />}
     </PlaygroundShell>
   );
 }
 
+// ── popup "ซื้อทั้งร้าน" — ใส่จำนวน (ตั้งต้น=ขอซื้อ) + รอซื้ออีก ต่อรายการ → ยืนยันออก PO ──
+function BuyAllModal({ shop, rows, rate, onClose, onConfirm }: {
+  shop: string; rows: Row[]; rate: number;
+  onClose: () => void; onConfirm: (items: { pr_id: string; qty: number; keep_remainder: boolean }[]) => void | Promise<void>;
+}) {
+  const [lines, setLines] = useState<Record<string, { qty: number; partial: boolean }>>(() =>
+    Object.fromEntries(rows.map((r) => [r.id, { qty: r.qty, partial: false }])));
+  const [saving, setSaving] = useState(false);
+  const cur = rows[0]?.currency ?? "THB";
+  const total = rows.reduce((a, r) => a + (lines[r.id]?.qty ?? r.qty) * r.price_est, 0);
+  const submit = async () => {
+    setSaving(true);
+    await onConfirm(rows.map((r) => ({ pr_id: r.id, qty: lines[r.id]?.qty ?? r.qty, keep_remainder: lines[r.id]?.partial ?? false })));
+    setSaving(false);
+  };
+  return (
+    <ERPModal open onClose={onClose} size="lg" title={`🛒 ซื้อทั้งร้าน: ${shop}`}
+      description="ปรับจำนวนได้ (ตั้งต้น = จำนวนที่ขอซื้อ) • ติ๊ก 'รอซื้ออีก' ถ้าสั่งไม่ครบ • ยืนยันแล้วอนุมัติ+ออกใบสั่งซื้อทันที"
+      footer={<>
+        <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={submit} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังสร้าง…" : `ยืนยันออกใบสั่งซื้อ (${rows.length})`}</button>
+      </>}>
+      <div className="space-y-1.5 max-h-[55vh] overflow-auto">
+        {rows.map((r) => {
+          const l = lines[r.id]; const remain = r.qty - (l?.qty ?? r.qty);
+          return (
+            <div key={r.id} className="flex items-center gap-2 border border-slate-100 rounded-lg p-2">
+              <div className="w-9 h-9 rounded bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden border border-slate-100">
+                {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-slate-700 line-clamp-1" title={r.item_name}>{r.item_name}</div>
+                <div className="text-[11px] text-slate-400">{r.code} · @ {money(r.price_est, r.currency)}</div>
+              </div>
+              <input type="number" min={1} value={l?.qty ?? r.qty}
+                onChange={(e) => setLines((p) => ({ ...p, [r.id]: { ...p[r.id], qty: Number(e.target.value) } }))}
+                className="w-16 h-8 px-1.5 text-sm border border-slate-200 rounded text-right" />
+              <span className="text-xs text-slate-400 w-10">{r.uom}</span>
+              <label className="flex items-center gap-1 text-[11px] text-slate-500 w-20">
+                <input type="checkbox" checked={l?.partial ?? false} onChange={(e) => setLines((p) => ({ ...p, [r.id]: { ...p[r.id], partial: e.target.checked } }))} className="rounded border-slate-300" />
+                รอซื้ออีก
+              </label>
+              <span className="text-sm font-semibold text-slate-700 w-28 text-right">
+                {money((l?.qty ?? r.qty) * r.price_est, r.currency)}
+                {remain > 0 && l?.partial && <span className="block text-[10px] text-amber-600 font-normal">เหลือ {remain.toLocaleString()}</span>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex justify-end mt-3 text-sm font-bold text-blue-600">
+        ยอดรวม: {money(total, cur)}{isCNY(cur) && rate > 0 && <span className="text-xs font-normal text-slate-400 ml-1">≈ ฿{Math.round(total * rate).toLocaleString()}</span>}
+      </div>
+    </ERPModal>
+  );
+}
+
 // ── popup ดูรายละเอียด/แก้ไขรายการ (จำนวน/ราคา/หมายเหตุ + รูป SKU จริง) ──
-function CardEditModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: () => void | Promise<void> }) {
+function CardEditModal({ row, suppliers, onClose, onSaved }: { row: Row; suppliers: { id: string; name: string }[]; onClose: () => void; onSaved: () => void | Promise<void> }) {
   const { user } = useAuth();
   const toast = useToast();
   const [qty, setQty] = useState(String(row.qty));
   const [price, setPrice] = useState(String(row.price_est));
   const [note, setNote] = useState(row.note ?? "");
+  const [seller, setSeller] = useState(row.seller_name && row.seller_name !== "—" ? row.seller_name : "");
   const [imgKey, setImgKey] = useState<string | null>(row.cover_key);
   const [saving, setSaving] = useState(false);
 
@@ -352,7 +426,7 @@ function CardEditModal({ row, onClose, onSaved }: { row: Row; onClose: () => voi
     try {
       const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${row.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, actor: user?.name }),
+        body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, seller_name: seller || null, actor: user?.name }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
@@ -377,7 +451,15 @@ function CardEditModal({ row, onClose, onSaved }: { row: Row; onClose: () => voi
       <div className="space-y-3">
         <div>
           <div className="text-sm font-medium text-slate-800">{row.item_name}</div>
-          <div className="text-xs text-slate-400">{row.code || "—"} · 🏪 {row.seller_name}</div>
+          <div className="text-xs text-slate-400">{row.code || "—"}</div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย)</label>
+          <select value={seller} onChange={(e) => setSeller(e.target.value)} className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+            <option value="">— เลือกผู้จำหน่าย —</option>
+            {seller && !suppliers.some((s) => s.name === seller) && <option value={seller}>{seller} (ปัจจุบัน · ไม่ใช่ผู้จำหน่าย)</option>}
+            {suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+          </select>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">รูปสินค้า (SKU จริง)</label>
