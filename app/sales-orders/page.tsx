@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { AttachmentPanel } from "@/components/attachment-panel";
-import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { ERPModal } from "@/components/modal";
 import { CustomerPicker, WarehousePicker, EmployeePicker } from "@/components/pickers";
 import type { CustomerPickerValue, WarehousePickerValue, EmployeePickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
@@ -51,6 +51,11 @@ const EMPTY: FormState = {
   note: "", lines: [emptyLine()],
 };
 
+const formSnapshot = (form: FormState) => JSON.stringify({
+  ...form,
+  lines: form.lines.map(({ tempId: _tempId, ...line }) => line),
+});
+
 // ============================================================
 // Page
 // ============================================================
@@ -72,6 +77,7 @@ export default function SalesOrdersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form,      setForm]      = useState<FormState>(EMPTY);
+  const [formBaseline, setFormBaseline] = useState(formSnapshot(EMPTY));
   const [formErr,   setFormErr]   = useState<string | null>(null);
   const [saving,    setSaving]    = useState(false);
 
@@ -119,7 +125,7 @@ export default function SalesOrdersPage() {
   // ---- Open edit (draft only) ----
   const openEdit = (so: SODetail) => {
     setEditingId(so.id);
-    setForm({
+    const nextForm: FormState = {
       customer: so.customer_id ? {
         id: so.customer_id, code: so.customer_code, name: so.customer_name ?? "",
       } as CustomerPickerValue : null,
@@ -143,12 +149,15 @@ export default function SalesOrdersPage() {
         discount_value: l.discount_value ?? 0,
         tax_code: l.tax_code ?? null, note: l.note ?? "",
       })),
-    });
+    };
+    setForm(nextForm);
+    setFormBaseline(formSnapshot(nextForm));
     setFormErr(null); setDetailOpen(false); setModalOpen(true);
   };
 
   const openCreate = () => {
-    setEditingId(null); setForm(EMPTY); setFormErr(null); setModalOpen(true);
+    const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", lines: [emptyLine()] };
+    setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setFormErr(null); setModalOpen(true);
   };
 
   // ---- Save ----
@@ -249,6 +258,8 @@ export default function SalesOrdersPage() {
     },
   ], []);
 
+  const formDirty = useMemo(() => formSnapshot(form) !== formBaseline, [form, formBaseline]);
+
   // ---- Saved Views (มุมมองบันทึกไว้ — ของกลาง §14) ----
   // "ของฉัน" + "เดือนนี้" ต้องอิงค่า dynamic (ชื่อผู้ใช้ / เดือนปัจจุบัน) จึงสร้างใน useMemo
   const views = useMemo(() => {
@@ -267,8 +278,6 @@ export default function SalesOrdersPage() {
 
   // F14 fix: early return หลัง hooks ทั้งหมด (กัน React #310)
   if (!canView) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
-
-  const isDraft = detail?.status === "draft";
 
   return (
     <PlaygroundShell>
@@ -420,6 +429,7 @@ export default function SalesOrdersPage() {
 
       {/* Create / Edit modal */}
       <ERPModal open={modalOpen} onClose={() => !saving && setModalOpen(false)} size="xl"
+        hasUnsavedChanges={formDirty && !saving}
         title={editingId ? "แก้ SO" : "สร้าง SO ใหม่"}
         footer={
           <>
@@ -440,6 +450,18 @@ export default function SalesOrdersPage() {
               <div className="mt-0.5">
                 <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
               </div>
+              {form.customer && (
+                <a
+                  href={`/admin/customers?search=${encodeURIComponent(form.customer.code || form.customer.name)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                  title="เปิดหน้าลูกค้า"
+                >
+                  <span className="truncate">{form.customer.code ? `${form.customer.code} - ${form.customer.name}` : form.customer.name}</span>
+                  <span className="shrink-0">↗</span>
+                </a>
+              )}
             </div>
             <div>
               <span className="text-xs font-medium text-slate-600">คลังต้นทาง <span className="text-amber-600">(สำหรับ inventory)</span></span>
@@ -455,6 +477,11 @@ export default function SalesOrdersPage() {
                   onChange={(v: EmployeePickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
                 />
               </div>
+              {user?.name && (
+                <p className="mt-1 text-[11px] text-slate-400">
+                  ค่าเริ่มต้นคือ user ที่ login: {user.name}
+                </p>
+              )}
             </div>
             <div>
               <span className="text-xs font-medium text-slate-600">วันที่สั่ง</span>

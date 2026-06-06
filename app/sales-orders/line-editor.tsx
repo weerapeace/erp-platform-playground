@@ -29,6 +29,11 @@ export const emptyLine = (): EditorLine => ({
   tax_code: null,
 });
 
+const productLink = (line: EditorLine) => {
+  const search = line.sku || line.product_name;
+  return search ? `/products-crud?search=${encodeURIComponent(search)}` : "/products-crud";
+};
+
 // ============================================================
 // SO Line Editor (table-style)
 // ============================================================
@@ -67,23 +72,24 @@ export function SOLineEditor({
         )}
       </div>
 
-      <table className="w-full text-xs">
-        <thead className="bg-slate-50 border-b border-slate-100 text-slate-500 uppercase">
-          <tr>
-            <th className="text-left px-2 py-1.5 w-8">#</th>
-            <th className="text-left px-2 py-1.5 min-w-[200px]">สินค้า</th>
-            <th className="text-right px-2 py-1.5 w-16">จำนวน</th>
-            <th className="text-left px-2 py-1.5 w-20">หน่วย</th>
-            <th className="text-right px-2 py-1.5 w-24">ราคา/หน่วย</th>
-            <th className="text-right px-2 py-1.5 w-20">ส่วนลด</th>
-            <th className="text-left px-2 py-1.5 w-20">ภาษี</th>
-            <th className="text-right px-2 py-1.5 w-24">รวม<span className="font-normal text-[10px] text-slate-400"> (ก่อนภาษี)</span></th>
-            <th className="w-8" />
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((l, i) => (
-            <tr key={l.tempId} className="border-b border-slate-100">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] text-xs">
+          <thead className="bg-slate-50 border-b border-slate-100 text-slate-500 uppercase">
+            <tr>
+              <th className="text-left px-2 py-1.5 w-8">#</th>
+              <th className="text-left px-2 py-1.5 min-w-[220px]">สินค้า</th>
+              <th className="text-right px-2 py-1.5 w-20">จำนวน</th>
+              <th className="text-left px-2 py-1.5 w-24">หน่วย</th>
+              <th className="text-right px-2 py-1.5 w-28">ราคา/หน่วย</th>
+              <th className="text-right px-2 py-1.5 w-28">ส่วนลด</th>
+              <th className="text-left px-2 py-1.5 w-24">ภาษี</th>
+              <th className="text-right px-2 py-1.5 w-28">รวม<span className="font-normal text-[10px] text-slate-400"> (ก่อนภาษี)</span></th>
+              <th className="w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => (
+              <tr key={l.tempId} className="border-b border-slate-100">
               <td className="px-2 py-1 text-slate-400 font-mono">{i + 1}</td>
               <td className="px-2 py-1">
                 <ProductPicker
@@ -102,6 +108,18 @@ export function SOLineEditor({
                   disabled={readonly}
                   placeholder="เลือกสินค้า..."
                 />
+                {(l.sku || l.product_name) && (
+                  <a
+                    href={productLink(l)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1 inline-flex max-w-full items-center gap-1 text-[11px] font-mono text-blue-600 hover:text-blue-700 hover:underline"
+                    title="เปิดหน้า SKU / สินค้า"
+                  >
+                    <span className="truncate">{l.sku || l.product_name}</span>
+                    <span className="shrink-0">↗</span>
+                  </a>
+                )}
               </td>
               <td className="px-2 py-1">
                 <input type="number" value={l.qty} onChange={e => update(i, { qty: parseFloat(e.target.value) || 0 })}
@@ -147,17 +165,18 @@ export function SOLineEditor({
                   <button onClick={() => remove(i)} className="text-red-400 hover:text-red-600">×</button>
                 )}
               </td>
-            </tr>
-          ))}
-          {lines.length === 0 && (
-            <tr>
-              <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
-                {readonly ? "ไม่มีรายการ" : 'คลิก "+ เพิ่มรายการ" เพื่อเริ่ม'}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+              </tr>
+            ))}
+            {lines.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
+                  {readonly ? "ไม่มีรายการ" : 'คลิก "+ เพิ่มรายการ" เพื่อเริ่ม'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

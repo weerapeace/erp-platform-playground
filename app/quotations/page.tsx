@@ -53,10 +53,10 @@ type FormState = {
   lines: EditorLine[];
 };
 
-const makeEmpty = (): FormState => {
+const makeEmpty = (salePersonName = ""): FormState => {
   const today = new Date().toISOString().slice(0, 10);
   return {
-    customer: null, sale_person_name: "",
+    customer: null, sale_person_name: salePersonName,
     quote_date: today, valid_until: addDays(today, 30),
     vat_rate: 7, vat_included: false, wht_rate: 0,
     header_discount_type: "percent", header_discount_value: 0, shipping_fee: 0,
@@ -156,7 +156,7 @@ export default function QuotationsPage() {
   };
 
   const openCreate = () => {
-    setEditingId(null); setForm(makeEmpty()); setFormErr(null); setModalOpen(true);
+    setEditingId(null); setForm(makeEmpty(user?.name ?? "")); setFormErr(null); setModalOpen(true);
   };
 
   // ---- Save ----
@@ -464,6 +464,18 @@ export default function QuotationsPage() {
               <div className="mt-0.5">
                 <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
               </div>
+              {form.customer && (
+                <a
+                  href={`/admin/customers?search=${encodeURIComponent(form.customer.code || form.customer.name)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                  title="เปิดหน้าลูกค้า"
+                >
+                  <span className="truncate">{form.customer.code ? `${form.customer.code} - ${form.customer.name}` : form.customer.name}</span>
+                  <span className="shrink-0">↗</span>
+                </a>
+              )}
             </div>
             <div>
               <span className="text-xs font-medium text-slate-600">เซลส์ <span className="text-slate-400">(พนักงาน — ไม่บังคับ)</span></span>
@@ -473,6 +485,11 @@ export default function QuotationsPage() {
                   onChange={(v: EmployeePickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
                 />
               </div>
+              {user?.name && (
+                <p className="mt-1 text-[11px] text-slate-400">
+                  ค่าเริ่มต้นคือ user ที่ login: {user.name}
+                </p>
+              )}
             </div>
             <div>
               <span className="text-xs font-medium text-slate-600">วันที่เสนอราคา</span>

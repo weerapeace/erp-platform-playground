@@ -13,12 +13,14 @@ import { createPortal } from "react-dom";
 // ============================================================
 
 export function FloatingDropdown({
-  anchorRef, open, onClose, children,
+  anchorRef, open, onClose, children, minWidth, maxWidth,
 }: {
   anchorRef: RefObject<HTMLElement | null>;
   open: boolean;
   onClose: () => void;
   children: ReactNode;
+  minWidth?: number;
+  maxWidth?: number;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<{ left: number; width: number; top: number; bottom: number } | null>(null);
@@ -57,12 +59,16 @@ export function FloatingDropdown({
   if (!open || !box || typeof document === "undefined") return null;
 
   const GAP = 4;
+  const VIEWPORT_GAP = 8;
   const spaceBelow = window.innerHeight - box.bottom;
   const openUp = spaceBelow < 280 && box.top > spaceBelow;
+  const desiredWidth = Math.max(box.width, minWidth ?? box.width);
+  const width = Math.min(desiredWidth, maxWidth ?? desiredWidth, window.innerWidth - VIEWPORT_GAP * 2);
+  const left = Math.max(VIEWPORT_GAP, Math.min(box.left, window.innerWidth - width - VIEWPORT_GAP));
   const style: CSSProperties = {
     position: "fixed",
-    left: box.left,
-    width: box.width,
+    left,
+    width,
     zIndex: 1000,
     ...(openUp
       ? { bottom: Math.round(window.innerHeight - box.top + GAP) }
