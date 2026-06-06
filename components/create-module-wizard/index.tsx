@@ -13,7 +13,7 @@
  *
  * ใช้ซ้ำได้ทุกที่ (modal overlay) — ส่ง onClose + onCreated เข้ามา
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 
@@ -78,7 +78,105 @@ const TEMPLATES: Template[] = [
   { key: "blank", icon: "⬜", label: "เริ่มจากว่าง", desc: "มีแค่ ชื่อ + สถานะ", fields: [] },
 ];
 
+// ช่องที่ผู้ใช้เพิ่มเอง (นอกเหนือคลัง)
+type CustomField = {
+  key: string; label: string; ui: string;
+  required: boolean; searchable: boolean; sensitive: boolean;
+  options?: string[];            // select
+  target_table?: string;         // relation
+  target_label?: string;         // relation
+};
+const CF_TYPES = [
+  { v: "text", l: "ข้อความ" },
+  { v: "textarea", l: "ข้อความยาว" },
+  { v: "number", l: "ตัวเลข" },
+  { v: "date", l: "วันที่" },
+  { v: "boolean", l: "ใช่/ไม่ใช่" },
+  { v: "select", l: "ตัวเลือก (dropdown)" },
+  { v: "image", l: "รูปภาพ" },
+  { v: "relation", l: "เชื่อมตารางอื่น" },
+];
+const CF_TYPE_LABEL: Record<string, string> = Object.fromEntries(CF_TYPES.map((t) => [t.v, t.l]));
+const CF_RESERVED = ["id", "name", "is_active", "created_at", "updated_at"];
+
 type Progress = { total: number; done: number; current: string } | null;
+
+// ฟอร์มตั้งช่องเอง — ครบทุกอย่างที่จำเป็น (ชนิด/บังคับ/ค้นหา/ลับ/ตัวเลือก/เชื่อมตาราง)
+function CustomFieldEditor({ existingKeys, onAdd, onCancel }: {
+  existingKeys: string[]; onAdd: (f: CustomField) => void; onCancel: () => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [key, setKey] = useState(""); const [keyEdited, setKeyEdited] = useState(false);
+  const [type, setType] = useState("text");
+  const [req, setReq] = useState(false); const [search, setSearch] = useState(false); const [sensitive, setSensitive] = useState(false);
+  const [opts, setOpts] = useState("");
+  const [target, setTarget] = useState(""); const [targetLabel, setTargetLabel] = useState("name");
+  const [modules, setModules] = useState<{ key: string; label: string; table?: string }[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => { if (Array.isArray(j.data)) setModules(j.data as { key: string; label: string; table?: string }[]); }).catch(() => {});
+  }, []);
+
+  const onLabel = (v: string) => {
+    setLabel(v);
+    if (!keyEdited) setKey(v.trim().toLowerCase().replace(/[^a-z0-9\s_]/g, "").replace(/\s+/g, "_").replace(/^[^a-z]+/, ""));
+  };
+
+  const add = () => {
+    setErr(null);
+    if (!label.trim()) { setErr("กรอกชื่อช่อง"); return; }
+    if (!/^[a-z][a-z0-9_]{0,62}$/.test(key)) { setErr("ชื่อ field (อังกฤษ) ไม่ถูกต้อง — a-z, 0-9, _ เริ่มด้วยตัวอักษร"); return; }
+    if (CF_RESERVED.includes(key) || existingKeys.includes(key)) { setErr("ชื่อ field ซ้ำกับช่องที่มีอยู่"); return; }
+    if (type === "select" && !opts.split(/[\n,]/).some((s) => s.trim())) { setErr("ใส่ตัวเลือกอย่างน้อย 1 ค่า"); return; }
+    if (type === "relation" && !target) { setErr("เลือกตารางปลายทาง"); return; }
+    onAdd({
+      key, label: label.trim(), ui: type, required: req, searchable: search, sensitive,
+      options: type === "select" ? opts.split(/[\n,]/).map((s) => s.trim()).filter(Boolean) : undefined,
+      target_table: type === "relation" ? target : undefined,
+      target_label: type === "relation" ? (targetLabel || "name") : undefined,
+    });
+  };
+
+  const inp = "w-full h-9 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500";
+  return (
+    <div className="mt-3 rounded-lg border border-blue-200 bg-white p-3 space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div><label className="text-[11px] text-slate-500">ชื่อช่อง (ภาษาคน) *</label><input value={label} onChange={(e) => onLabel(e.target.value)} placeholder="เช่น สี" className={inp} /></div>
+        <div><label className="text-[11px] text-slate-500">ชื่อ field (อังกฤษ)</label><input value={key} onChange={(e) => { setKeyEdited(true); setKey(e.target.value); }} placeholder="color" className={`${inp} font-mono`} /></div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div><label className="text-[11px] text-slate-500">ชนิดข้อมูล</label>
+          <select value={type} onChange={(e) => setType(e.target.value)} className={inp}>{CF_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}</select>
+        </div>
+        <div className="flex items-end gap-3 text-xs text-slate-600 flex-wrap pb-1">
+          <label className="flex items-center gap-1"><input type="checkbox" checked={req} onChange={(e) => setReq(e.target.checked)} className="accent-rose-500" />บังคับกรอก</label>
+          <label className="flex items-center gap-1"><input type="checkbox" checked={search} onChange={(e) => setSearch(e.target.checked)} className="accent-pink-500" />ค้นหาได้</label>
+          <label className="flex items-center gap-1"><input type="checkbox" checked={sensitive} onChange={(e) => setSensitive(e.target.checked)} className="accent-red-500" />ข้อมูลลับ</label>
+        </div>
+      </div>
+      {type === "select" && (
+        <div><label className="text-[11px] text-slate-500">ตัวเลือก (บรรทัดละ 1 ค่า)</label>
+          <textarea value={opts} onChange={(e) => setOpts(e.target.value)} rows={3} placeholder={"ตัวเลือก 1\nตัวเลือก 2"} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-md" /></div>
+      )}
+      {type === "relation" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div><label className="text-[11px] text-slate-500">ตารางปลายทาง</label>
+            <select value={target} onChange={(e) => setTarget(e.target.value)} className={inp}>
+              <option value="">— เลือก —</option>
+              {modules.filter((m) => m.table).map((m) => <option key={m.key} value={m.table}>{m.label}</option>)}
+            </select></div>
+          <div><label className="text-[11px] text-slate-500">field ที่ใช้แสดงชื่อ</label><input value={targetLabel} onChange={(e) => setTargetLabel(e.target.value)} placeholder="name" className={inp} /></div>
+        </div>
+      )}
+      {err && <div className="text-xs text-red-600">⚠ {err}</div>}
+      <div className="flex justify-end gap-2 pt-1">
+        <button onClick={onCancel} className="h-8 px-3 text-xs text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={add} className="h-8 px-3 text-xs font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700">เพิ่มช่องนี้</button>
+      </div>
+    </div>
+  );
+}
 
 export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void; onCreated?: (moduleKey: string) => void }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -91,6 +189,8 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
   const [template, setTemplate] = useState<string>("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reqKeys, setReqKeys] = useState<Set<string>>(new Set());
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
   // สถานะ
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<Progress>(null);
@@ -136,7 +236,12 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
 
   const create = async () => {
     setErr(null); setSaving(true);
-    setProgress({ total: selectedList.length + 1, done: 0, current: "สร้างตาราง…" });
+    // รวมช่องจากคลัง + ช่องที่เพิ่มเอง เป็น payload เดียว
+    const toCreate: { field_key: string; label: string; ui_type: string; is_searchable: boolean; is_required: boolean; is_sensitive: boolean; options?: string[]; target_table?: string; target_label_field?: string }[] = [
+      ...selectedList.map((f) => ({ field_key: f.key, label: f.label, ui_type: f.ui, is_searchable: !!f.searchable, is_required: reqKeys.has(f.key), is_sensitive: !!f.sensitive, options: f.ui === "select" ? f.options : undefined })),
+      ...customFields.map((c) => ({ field_key: c.key, label: c.label, ui_type: c.ui, is_searchable: c.searchable, is_required: c.required, is_sensitive: c.sensitive, options: c.ui === "select" ? c.options : undefined, target_table: c.target_table, target_label_field: c.target_label })),
+    ];
+    setProgress({ total: toCreate.length + 1, done: 0, current: "สร้างตาราง…" });
     try {
       // 1) สร้าง table (จะได้ field "ชื่อ" + สถานะ มาให้)
       const r = await apiFetch("/api/admin/schema/create-table", {
@@ -150,17 +255,16 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
       // 2) เพิ่มแต่ละช่อง — เรียงทีละช่อง (display_order อิงค่ามากสุดเดิม จึงห้ามยิงพร้อมกัน)
       const warnings: string[] = [];
       let doneCount = 1;
-      for (const f of selectedList) {
-        setProgress({ total: selectedList.length + 1, done: doneCount, current: `เพิ่มช่อง “${f.label}”…` });
+      for (const f of toCreate) {
+        setProgress({ total: toCreate.length + 1, done: doneCount, current: `เพิ่มช่อง “${f.label}”…` });
         try {
           const fr = await apiFetch("/api/admin/schema/add-field", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              module_key: moduleKey, field_key: f.key, label: f.label, ui_type: f.ui,
+              module_key: moduleKey, field_key: f.field_key, label: f.label, ui_type: f.ui_type,
               group_key: "core", is_visible: true, show_in_form: true,
-              is_searchable: !!f.searchable, is_required: reqKeys.has(f.key),
-              is_sensitive: !!f.sensitive,
-              options: f.ui === "select" ? f.options : undefined,
+              is_searchable: f.is_searchable, is_required: f.is_required, is_sensitive: f.is_sensitive,
+              options: f.options, target_table: f.target_table, target_label_field: f.target_label_field,
             }),
           });
           const fj = await fr.json().catch(() => ({} as { error?: string }));
@@ -181,7 +285,8 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
   };
 
   // popup กลาง: dirty = มีการกรอก/เลือก หรือกำลังสร้าง → ใช้กฎ "เตือนก่อนปิด"
-  const dirty = !done && (saving || !!label.trim() || !!table.trim() || selected.size > 0);
+  const dirty = !done && (saving || !!label.trim() || !!table.trim() || selected.size > 0 || customFields.length > 0);
+  const totalFields = selected.size + customFields.length;
   const guardedClose = () => { if (saving) return; onClose(); };   // ห้ามปิดระหว่างกำลังสร้าง
 
   const footer = done ? (
@@ -203,7 +308,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
       ) : (
         <button onClick={create} disabled={saving}
           className="h-9 px-5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-          {saving ? "กำลังสร้าง…" : `สร้างโมดูล (${selected.size} ช่อง)`}
+          {saving ? "กำลังสร้าง…" : `สร้างโมดูล (${totalFields} ช่อง)`}
         </button>
       )}
     </div>
@@ -282,7 +387,36 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
               {/* ── ขั้น 3 ── */}
               {step === 3 && (
                 <div className="space-y-4">
-                  <p className="text-xs text-slate-500">ติ๊กช่องที่ต้องการ (แม่แบบเลือกให้แล้ว ปรับเพิ่ม/ลดได้) — เลือก {selected.size} ช่อง</p>
+                  <p className="text-xs text-slate-500">ติ๊กช่องที่ต้องการ (แม่แบบเลือกให้แล้ว ปรับเพิ่ม/ลดได้) — รวม {totalFields} ช่อง</p>
+
+                  {/* ช่องที่เพิ่มเอง */}
+                  <div className="rounded-lg border border-dashed border-blue-300 bg-blue-50/40 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-slate-600">➕ ช่องที่เพิ่มเอง{customFields.length > 0 ? ` (${customFields.length})` : ""}</span>
+                      {!showAdd && (
+                        <button onClick={() => setShowAdd(true)}
+                          className="text-xs px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700">+ เพิ่มช่องเอง</button>
+                      )}
+                    </div>
+                    {customFields.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {customFields.map((c) => (
+                          <div key={c.key} className="flex items-center gap-2 text-sm bg-white rounded-md border border-slate-200 px-2 py-1.5">
+                            <span className="flex-1 min-w-0 truncate">{c.label} <code className="text-[10px] text-slate-400">{c.key}</code></span>
+                            <span className="text-[10px] text-slate-400 shrink-0">{CF_TYPE_LABEL[c.ui] ?? c.ui}{c.required ? " · บังคับ" : ""}{c.sensitive ? " · ลับ" : ""}</span>
+                            <button onClick={() => setCustomFields((p) => p.filter((x) => x.key !== c.key))} className="text-slate-300 hover:text-red-500 shrink-0">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {showAdd && (
+                      <CustomFieldEditor
+                        existingKeys={[...CATALOG.map((f) => f.key), ...customFields.map((c) => c.key)]}
+                        onAdd={(f) => { setCustomFields((p) => [...p, f]); setShowAdd(false); }}
+                        onCancel={() => setShowAdd(false)}
+                      />
+                    )}
+                  </div>
                   {GROUP_ORDER.map((g) => {
                     const items = CATALOG.filter((f) => f.group === g);
                     if (!items.length) return null;
