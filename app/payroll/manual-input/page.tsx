@@ -24,7 +24,6 @@ type TimeKind = "ot" | "late" | "absence" | "leave";
 type AdjustMode = "earning" | "deduction" | "piecework";
 type DrawerTab = TimeKind;
 type DurationPreset = "full" | "half" | "custom";
-type LateUnit = "minutes" | "hours";
 type LeaveReason = "medical_certificate" | "sick_paid" | "sick_unpaid" | "unpaid";
 type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; paid_leave?: boolean; work_date?: string; note?: string };
 type TabKey = "summary" | "special" | "piecework" | "timestamp" | "import" | "attendance";
@@ -1081,13 +1080,17 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [tKind, setTKind] = useState<TimeKind>(initialKind ?? initialDrawerTab);
-  const [tValue, setTValue] = useState("");
-  const [lateUnit, setLateUnit] = useState<LateUnit>("minutes");
+  const [lateHours, setLateHours] = useState("");
+  const [lateMinutes, setLateMinutes] = useState("");
   const [durationPreset, setDurationPreset] = useState<DurationPreset>("custom");
   const [customHours, setCustomHours] = useState("");
   const [customMinutes, setCustomMinutes] = useState("");
   const [leaveReason, setLeaveReason] = useState<LeaveReason>("unpaid");
   const [hasMedicalCertificate, setHasMedicalCertificate] = useState(false);
+  const [certificateDate, setCertificateDate] = useState("");
+  const [certificateProvider, setCertificateProvider] = useState("");
+  const [certificateNo, setCertificateNo] = useState("");
+  const [certificateFileRef, setCertificateFileRef] = useState("");
   const [tDate, setTDate] = useState(initialDate ?? todayIso());
   const [tNote, setTNote] = useState("");
   const [preview, setPreview] = useState<TimePreview | null>(null);
@@ -1113,13 +1116,17 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setTDate(initialDate ?? todayIso());
     setMode(initialAdjustMode ?? "earning");
     setDrawerTab(initialKind ?? "late");
-    setTValue("");
-    setLateUnit("minutes");
+    setLateHours("");
+    setLateMinutes("");
     setDurationPreset("custom");
     setCustomHours("");
     setCustomMinutes("");
     setLeaveReason("unpaid");
     setHasMedicalCertificate(false);
+    setCertificateDate("");
+    setCertificateProvider("");
+    setCertificateNo("");
+    setCertificateFileRef("");
     setTNote("");
     setName("");
     setAmount("");
@@ -1169,9 +1176,10 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
 
   function computedTimeValue() {
     if (tKind === "late") {
-      const raw = Number(tValue);
-      if (!(raw > 0)) return 0;
-      return lateUnit === "hours" ? raw * 60 : raw;
+      const hours = Math.max(0, Number(lateHours || 0));
+      const minutes = Math.max(0, Number(lateMinutes || 0));
+      const totalMinutes = (hours * 60) + minutes;
+      return totalMinutes > 0 ? totalMinutes : 0;
     }
     if (durationPreset === "full") return tKind === "ot" ? STANDARD_HOURS_PER_DAY : 1;
     if (durationPreset === "half") return tKind === "ot" ? STANDARD_HOURS_PER_DAY / 2 : 0.5;
@@ -1186,16 +1194,33 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     const note = tNote.trim();
     if (tKind !== "leave") return note;
     const cert = hasMedicalCertificate ? "มีใบรับรองแพทย์" : "";
+    const certDetails = hasMedicalCertificate ? [
+      certificateDate ? `วันที่ใบรับรอง ${certificateDate}` : "",
+      certificateProvider.trim() ? `สถานพยาบาล/แพทย์ ${certificateProvider.trim()}` : "",
+      certificateNo.trim() ? `เลขที่เอกสาร ${certificateNo.trim()}` : "",
+      certificateFileRef.trim() ? `ไฟล์/ลิงก์ ${certificateFileRef.trim()}` : "",
+    ].filter(Boolean).join(" / ") : "";
     const reason = [LEAVE_REASON_LABEL[leaveReason], cert].filter(Boolean).join(" / ");
-    return note ? `${reason} - ${note}` : reason;
+    const parts = [reason, certDetails, note].filter(Boolean);
+    return parts.join(" - ");
   }
 
   function isPaidLeaveSelected() {
     return tKind === "leave" && leaveReason === "sick_paid" && hasMedicalCertificate;
   }
 
+  function medicalCertificatePayload() {
+    if (!isPaidLeaveSelected()) return undefined;
+    return {
+      certificate_date: certificateDate || null,
+      provider: certificateProvider.trim() || null,
+      document_no: certificateNo.trim() || null,
+      file_ref: certificateFileRef.trim() || null,
+    };
+  }
+
   function timeQuantityLabel() {
-    if (tKind === "late") return lateUnit === "hours" ? "จำนวนชั่วโมงที่สาย" : "จำนวนนาทีที่สาย";
+    if (tKind === "late") return "กรอกเวลาที่สายเป็นชั่วโมงและนาที";
     if (durationPreset === "full") return `เต็มวัน (${STANDARD_HOURS_PER_DAY} ชั่วโมง)`;
     if (durationPreset === "half") return `ครึ่งวัน (${STANDARD_HOURS_PER_DAY / 2} ชั่วโมง)`;
     return tKind === "ot" ? "ใส่ชั่วโมง OT เอง" : "ใส่ชั่วโมง/นาทีเอง";
@@ -1209,7 +1234,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), paid_leave: isPaidLeaveSelected(), preview_only: true }),
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), paid_leave: isPaidLeaveSelected(), medical_certificate: medicalCertificatePayload(), preview_only: true }),
       }).then((r) => r.json());
       if (j.error) { setErr(j.error); }
       else setPreview(j.data as TimePreview);
@@ -1226,10 +1251,23 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     try {
       const j = await apiFetch("/api/payroll/time-entry", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), paid_leave: isPaidLeaveSelected() }),
+        body: JSON.stringify({ period_id: periodId, employee_id: row.employee_id, kind: tKind, value, work_date: tDate, note: timeNote(), paid_leave: isPaidLeaveSelected(), medical_certificate: medicalCertificatePayload() }),
       }).then((r) => r.json());
       if (j.error) setErr(j.error);
-      else { setTValue(""); setCustomHours(""); setCustomMinutes(""); setTNote(""); setPreview(null); await reload(); onChanged(); }
+      else {
+        setLateHours("");
+        setLateMinutes("");
+        setCustomHours("");
+        setCustomMinutes("");
+        setTNote("");
+        setCertificateDate("");
+        setCertificateProvider("");
+        setCertificateNo("");
+        setCertificateFileRef("");
+        setPreview(null);
+        await reload();
+        onChanged();
+      }
     } catch { setErr("บันทึกไม่สำเร็จ"); }
     finally { setBusy(false); }
   }
@@ -1250,12 +1288,12 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     if (!editable || !(value > 0) || !tDate) return;
     const timer = window.setTimeout(() => { void loadPreview(value); }, 350);
     return () => window.clearTimeout(timer);
-  }, [editable, tKind, tValue, lateUnit, durationPreset, customHours, customMinutes, tDate, tNote, leaveReason, hasMedicalCertificate, periodId, row.employee_id]);
+  }, [editable, tKind, lateHours, lateMinutes, durationPreset, customHours, customMinutes, tDate, tNote, leaveReason, hasMedicalCertificate, certificateDate, certificateProvider, certificateNo, certificateFileRef, periodId, row.employee_id]);
 
   const pieceworks = items.filter(isPieceworkItem);
   const earnings = items.filter((i) => i.adjustment_type === "earning" && !isPieceworkItem(i));
   const deductions = items.filter((i) => i.adjustment_type === "deduction");
-  const hasDraftTime = editable && (!!tValue || !!customHours || !!customMinutes || !!tNote || !!preview);
+  const hasDraftTime = editable && (!!lateHours || !!lateMinutes || !!customHours || !!customMinutes || !!tNote || !!certificateDate || !!certificateProvider || !!certificateNo || !!certificateFileRef || !!preview);
   const visibleTimeItems = timeItems.filter((it) => it.kind === drawerTab);
   const computedValue = computedTimeValue();
   const adjustItems = mode === "piecework" ? pieceworks : mode === "deduction" ? deductions : earnings;
@@ -1354,7 +1392,14 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setLeaveReason("unpaid"); setHasMedicalCertificate(false); }}
+                          onClick={() => {
+                            setLeaveReason("unpaid");
+                            setHasMedicalCertificate(false);
+                            setCertificateDate("");
+                            setCertificateProvider("");
+                            setCertificateNo("");
+                            setCertificateFileRef("");
+                          }}
                           className={`h-9 rounded-lg border text-sm font-medium ${leaveReason === "unpaid" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}
                         >
                           ลาไม่รับเงิน
@@ -1365,26 +1410,65 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                           type="checkbox"
                           checked={hasMedicalCertificate}
                           disabled={leaveReason !== "sick_paid"}
-                          onChange={(e) => setHasMedicalCertificate(e.target.checked)}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setHasMedicalCertificate(checked);
+                            if (!checked) {
+                              setCertificateDate("");
+                              setCertificateProvider("");
+                              setCertificateNo("");
+                              setCertificateFileRef("");
+                            }
+                          }}
                         />
                         มีใบรับรองแพทย์
                       </label>
                     </div>
                   )}
+                  {drawerTab === "leave" && hasMedicalCertificate && (
+                    <div className="sm:col-span-2 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-blue-900">ข้อมูลใบรับรองแพทย์</div>
+                          <p className="text-xs text-blue-700/70">กรอกไว้เพื่อให้ตรวจย้อนหลังได้ ระบบจะใส่รายละเอียดนี้ในรายการลาและ audit</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="block">
+                          <span className="block text-xs text-slate-500 mb-1">วันที่ในใบรับรอง</span>
+                          <DateInput value={certificateDate} onChange={setCertificateDate} />
+                        </label>
+                        <label className="block">
+                          <span className="block text-xs text-slate-500 mb-1">สถานพยาบาล / แพทย์</span>
+                          <input value={certificateProvider} onChange={(e) => setCertificateProvider(e.target.value)} placeholder="เช่น โรงพยาบาล / คลินิก / ชื่อแพทย์"
+                            className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm bg-white" />
+                        </label>
+                        <label className="block">
+                          <span className="block text-xs text-slate-500 mb-1">เลขที่เอกสาร</span>
+                          <input value={certificateNo} onChange={(e) => setCertificateNo(e.target.value)} placeholder="ถ้ามี"
+                            className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm bg-white" />
+                        </label>
+                        <label className="block">
+                          <span className="block text-xs text-slate-500 mb-1">ไฟล์ / ลิงก์ใบรับรอง</span>
+                          <input value={certificateFileRef} onChange={(e) => setCertificateFileRef(e.target.value)} placeholder="ชื่อไฟล์หรือลิงก์แนบเอกสาร"
+                            className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm bg-white" />
+                        </label>
+                      </div>
+                    </div>
+                  )}
                   {drawerTab === "late" ? (
                     <>
                       <label className="block">
-                        <span className="block text-xs text-slate-500 mb-1">หน่วย</span>
-                        <select value={lateUnit} onChange={(e) => setLateUnit(e.target.value as LateUnit)} className="h-9 w-full px-2 border border-slate-300 rounded-lg text-sm bg-white">
-                          <option value="minutes">นาที</option>
-                          <option value="hours">ชั่วโมง</option>
-                        </select>
-                      </label>
-                      <label className="block sm:col-span-2">
-                        <span className="block text-xs text-slate-500 mb-1">{timeQuantityLabel()}</span>
-                        <input value={tValue} onChange={(e) => setTValue(e.target.value)} type="number" min="0" step="any" placeholder={lateUnit === "minutes" ? "เช่น 30" : "เช่น 1.5"}
+                        <span className="block text-xs text-slate-500 mb-1">ชั่วโมงที่สาย</span>
+                        <input value={lateHours} onChange={(e) => setLateHours(e.target.value)} type="number" min="0" step="1" placeholder="เช่น 1"
                           className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
                       </label>
+                      <label className="block">
+                        <span className="block text-xs text-slate-500 mb-1">นาทีที่สาย</span>
+                        <input value={lateMinutes} onChange={(e) => setLateMinutes(e.target.value)} type="number" min="0" step="1" placeholder="เช่น 30"
+                          className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                      </label>
+                      <p className="sm:col-span-2 text-xs text-slate-400">{timeQuantityLabel()}</p>
                     </>
                   ) : (
                     <div className="sm:col-span-2 space-y-3">

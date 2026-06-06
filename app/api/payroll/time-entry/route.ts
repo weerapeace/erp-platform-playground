@@ -20,6 +20,12 @@ const EDITABLE = new Set(["draft", "review"]);
 
 type Row = Record<string, unknown>;
 type TimeKind = "ot" | "late" | "absence" | "leave";
+type MedicalCertificateInput = {
+  certificate_date?: unknown;
+  provider?: unknown;
+  document_no?: unknown;
+  file_ref?: unknown;
+} | null;
 
 function isoDate(v: unknown): string {
   const s = String(v ?? "").trim();
@@ -98,12 +104,20 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;
-  let body: { period_id?: string; employee_id?: string; kind?: string; value?: unknown; work_date?: unknown; note?: unknown; preview_only?: boolean; paid_leave?: boolean; actor?: string };
+  let body: { period_id?: string; employee_id?: string; kind?: string; value?: unknown; work_date?: unknown; note?: unknown; preview_only?: boolean; paid_leave?: boolean; medical_certificate?: MedicalCertificateInput; actor?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const periodId = String(body.period_id ?? ""), employeeId = String(body.employee_id ?? "");
   const kind = String(body.kind ?? "") as TimeKind; const value = money(body.value);
   const note = String(body.note ?? "").trim();
   const paidLeave = kind === "leave" && body.paid_leave === true;
+  const medicalCertificate = paidLeave && body.medical_certificate && typeof body.medical_certificate === "object"
+    ? {
+        certificate_date: isoDate(body.medical_certificate.certificate_date) || null,
+        provider: String(body.medical_certificate.provider ?? "").trim() || null,
+        document_no: String(body.medical_certificate.document_no ?? "").trim() || null,
+        file_ref: String(body.medical_certificate.file_ref ?? "").trim() || null,
+      }
+    : null;
   const previewOnly = body.preview_only === true;
   if (!periodId || !employeeId) return NextResponse.json({ error: "ต้องระบุงวด+พนักงาน" }, { status: 400 });
   if (!["ot", "late", "absence", "leave"].includes(kind)) return NextResponse.json({ error: "kind ไม่ถูกต้อง" }, { status: 400 });
@@ -170,13 +184,13 @@ export async function POST(req: NextRequest) {
       hours = roundMoney(value * hoursPerDay); amount = paidLeave ? 0 : absenceDeduction(hours, rate); table = "leave_entries";
       quantityLabel = `${value} วัน`;
       formula = paidLeave ? "ลาป่วย + มีใบรับรองแพทย์: ไม่หักเงิน" : `${value} วัน × ${hoursPerDay} ชม. × ${roundMoney(rate).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
-      if (previewOnly) return NextResponse.json({ data: { kind, value, work_date: workDate, amount, sign: paidLeave ? "0" : "-", rate: roundMoney(rate), divisor, hours_per_day: hoursPerDay, base_salary: money(contract.base_salary), quantity_label: quantityLabel, formula, hours, paid_leave: paidLeave }, error: null });
+      if (previewOnly) return NextResponse.json({ data: { kind, value, work_date: workDate, amount, sign: paidLeave ? "0" : "-", rate: roundMoney(rate), divisor, hours_per_day: hoursPerDay, base_salary: money(contract.base_salary), quantity_label: quantityLabel, formula, hours, paid_leave: paidLeave, medical_certificate: medicalCertificate }, error: null });
       const { data, error } = await a.from(table).insert({ payroll_period_id: periodId, employee_id: employeeId, leave_date: workDate, leave_type: paidLeave ? "sick_paid" : "unpaid", days: value, hours, paid: paidLeave, unpaid_leave_deduction: amount, status: "approved", source_type: "manual", note: note || null }).select("id").limit(1);
       if (error) throw new Error(error.message); inserted = data?.[0] as { id: string };
     }
 
     await writeAudit(a, { action: "create", entityType: table, entityId: inserted?.id, actorId: userId, actorName: body.actor ?? null,
-      metadata: { period_name: period.period_name, kind, value, work_date: workDate, amount, paid_leave: paidLeave, note: note || null } });
+      metadata: { period_name: period.period_name, kind, value, work_date: workDate, amount, paid_leave: paidLeave, medical_certificate: medicalCertificate, note: note || null } });
     return NextResponse.json({ data: { id: inserted?.id, kind, value, work_date: workDate, amount }, error: null }, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "บันทึกไม่สำเร็จ" }, { status: 500 });
