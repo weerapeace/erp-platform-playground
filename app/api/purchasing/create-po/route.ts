@@ -55,9 +55,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .in("id", prIds);
   if (prErr) return NextResponse.json({ error: prErr.message }, { status: 500 });
 
-  // ขั้น 2: สร้าง PO ได้เฉพาะใบที่ "อนุมัติแล้ว" (approved) และยังไม่ถูกแปลงเป็น PO
-  const usable = (prs ?? []).filter((p) => (p as PR).status === "approved" && !(p as PR).po_id) as PR[];
-  if (usable.length === 0) return NextResponse.json({ error: "ต้องเป็นใบที่ 'อนุมัติแล้ว' และยังไม่ถูกสั่งซื้อ" }, { status: 400 });
+  // หน้าสั่งซื้อ: สั่งได้ทุกใบที่ "ยังไม่ถูกสั่ง (po_id ว่าง) + ไม่ถูกปฏิเสธ/ยกเลิก"
+  // ใบที่ยังไม่อนุมัติ → จะบันทึกอนุมัติให้อัตโนมัติตอนสั่ง (เก็บร่องรอยผู้อนุมัติ)
+  const usable = (prs ?? []).filter((p) => !(p as PR).po_id && !["rejected", "cancelled"].includes(String((p as PR).status ?? ""))) as PR[];
+  if (usable.length === 0) return NextResponse.json({ error: "ไม่มีรายการที่สั่งได้ (ต้องยังไม่ถูกสั่งซื้อ และไม่ถูกปฏิเสธ)" }, { status: 400 });
 
   // จัดกลุ่มตามร้าน + สกุลเงิน
   const groups = new Map<string, PR[]>();
@@ -113,6 +114,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .update({ status: "rfq_created", po_id: po.id })
       .in("id", items.map((p) => p.id));
     if (updErr) return NextResponse.json({ error: "อัปเดตสถานะ PR ไม่สำเร็จ: " + updErr.message }, { status: 500 });
+
+    // บันทึก "อนุมัติแล้วสั่งเลย" เฉพาะใบที่ยังไม่เคยอนุมัติ (เก็บผู้อนุมัติ+เวลา)
+    await admin.from("purchase_requests_v2")
+      .update({ approved_by: actor, approved_at: now.toISOString() })
+      .in("id", items.map((p) => p.id)).is("approved_at", null);
 
     // audit — 1 แถวต่อ 1 ใบสั่งซื้อ (ของกลาง, เขียนลงตาราง audit_logs จริง)
     await writeAudit(admin, {
