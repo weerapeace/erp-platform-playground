@@ -45,7 +45,11 @@ export default function MasterLookupsPage() {
           </div>
         </div>
         {active === "product_families" && (
-          <div className="px-6 pt-3">
+          <div className="px-6 pt-3 flex flex-wrap gap-2">
+            <a href="/admin/family-groups"
+              className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-md bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-100">
+              🗂️ จัดการกลุ่มแท็ก (กลุ่ม → กลุ่มย่อย → แท็ก)
+            </a>
             <a href="/admin/family-template"
               className="inline-flex items-center gap-1.5 text-sm px-3 h-8 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100">
               🧩 ตั้งค่าเทมเพลตต่อแท็ก (โชว์/ซ่อนฟิลด์ + ค่าตั้งต้นใน Parent SKU)
