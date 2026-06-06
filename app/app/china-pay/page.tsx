@@ -1170,7 +1170,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
 
       {/* popup เลือกบิลเพื่อแนบสลิป (แมนนวล) */}
       {attachOpen && (
-        <Portal><div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setAttachOpen(false)}>
+        <Portal><div className="fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setAttachOpen(false)}>
           <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
               <div className="font-semibold text-slate-800">เลือกบิลที่จะแนบสลิป</div>
@@ -1287,8 +1287,8 @@ function SlipWizard({ openBills, onClose, onDone }: { openBills: Record<string, 
   };
 
   return (
-    <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !working && onClose()}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <Portal><div className="fixed inset-x-0 top-0 h-[100svh] z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !working && onClose()}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-800">🤖 แนบสลิป + AI จับคู่บิล</div>
           <button onClick={() => !working && onClose()} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
@@ -1654,8 +1654,8 @@ function EditBillPopup({ bill, sup, onClose, onSaved }: { bill: Record<string, u
   };
 
   return (
-    <Portal><div className="fixed inset-0 z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !saving && onClose()}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <Portal><div className="fixed inset-x-0 top-0 h-[100svh] z-[210] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => !saving && onClose()}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-800">✎ แก้ไขบิล</div>
           <button onClick={() => !saving && onClose()} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
@@ -1765,8 +1765,8 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
 
   return (
     <Portal>
-    <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* header */}
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-800">รายละเอียดบิล</div>
@@ -2257,8 +2257,8 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: {
 
   return (
     <Portal>
-    <div className="fixed inset-0 z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-slate-800">บิลจาก CTW</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
@@ -3233,8 +3233,8 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
       {slipLinkIdx !== null && txSlips[slipLinkIdx] && (() => {
         const i = slipLinkIdx; const s = txSlips[i];
         return (
-        <Portal><div className="fixed inset-0 z-[260] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setSlipLinkIdx(null)}>
-          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85svh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <Portal><div className="fixed inset-x-0 top-0 h-[100svh] z-[260] bg-black/40 flex items-end sm:items-center justify-center" onClick={() => setSlipLinkIdx(null)}>
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="border-b border-slate-100 px-4 py-3 flex items-center justify-between">
               <span className="font-semibold text-slate-800 truncate">🔗 {s.bank || `รายการ ${i + 1}`} · โอน ฿{fmt(num(s.amount))} ตัดบิลไหน</span>
               <button onClick={() => setSlipLinkIdx(null)} className="w-8 h-8 flex-shrink-0 rounded-full text-slate-400 hover:bg-slate-100 text-xl leading-none">×</button>
@@ -3483,8 +3483,8 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit }: { 
 
   return (
     <Portal>
-    <div className="fixed inset-0 z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[85svh] flex flex-col" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-x-0 top-0 h-[100svh] z-[220] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between flex-shrink-0">
           <div className="font-semibold text-slate-800">ใบสรุปการโอน</div>
           <button onClick={onClose} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
