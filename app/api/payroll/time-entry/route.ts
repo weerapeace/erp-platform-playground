@@ -84,15 +84,17 @@ export async function GET(req: NextRequest) {
   if (!periodId || !employeeId) return NextResponse.json({ error: "ต้องระบุ period_id + employee_id" }, { status: 400 });
   try {
     const a = supabaseAdmin();
-    const [att, leave, ot] = await Promise.all([
+    const [periodRes, att, leave, ot] = await Promise.all([
+      a.from("payroll_periods").select("default_hours_per_day").eq("id", periodId).limit(1),
       a.from("attendance_entries").select("id, late_minutes, late_deduction, absence_hours, absence_deduction, work_date, note").eq("payroll_period_id", periodId).eq("employee_id", employeeId),
       a.from("leave_entries").select("id, days, unpaid_leave_deduction, leave_type, paid, leave_date, note").eq("payroll_period_id", periodId).eq("employee_id", employeeId),
       a.from("overtime_entries").select("id, hours, overtime_amount, work_date, note").eq("payroll_period_id", periodId).eq("employee_id", employeeId),
     ]);
+    const hoursPerDay = money((periodRes.data?.[0] as Row | undefined)?.default_hours_per_day) || 8;
     const items: Row[] = [];
     for (const r of (att.data ?? []) as Row[]) {
       if (money(r.late_minutes) > 0) items.push({ id: r.id, kind: "late", value: money(r.late_minutes), amount: money(r.late_deduction), work_date: r.work_date, note: r.note });
-      if (money(r.absence_hours) > 0) items.push({ id: r.id, kind: "absence", value: money(r.absence_hours) / 8, amount: money(r.absence_deduction), work_date: r.work_date, note: r.note });
+      if (money(r.absence_hours) > 0) items.push({ id: r.id, kind: "absence", value: money(r.absence_hours) / hoursPerDay, amount: money(r.absence_deduction), work_date: r.work_date, note: r.note });
     }
     for (const r of (leave.data ?? []) as Row[]) items.push({ id: r.id, kind: "leave", value: money(r.days), amount: money(r.unpaid_leave_deduction), paid_leave: r.paid === true, work_date: r.leave_date, note: r.note });
     for (const r of (ot.data ?? []) as Row[]) items.push({ id: r.id, kind: "ot", value: money(r.hours), amount: money(r.overtime_amount), work_date: r.work_date, note: r.note });

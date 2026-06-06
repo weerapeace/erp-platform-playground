@@ -15,7 +15,8 @@ import { formatDate } from "@/lib/date";
 type Period = { id: string; period_name: string; status: string };
 type Row = {
   id: string; employee_id: string; employee_code: string; employee_name: string; work_days: number;
-  late_baht: number; absence_baht: number; leave_baht: number; ot_baht: number;
+  late_baht: number; late_minutes: number; absence_baht: number; absence_days: number; absence_hours: number;
+  leave_baht: number; leave_days: number; leave_hours: number; ot_baht: number; ot_hours: number;
   piecework_baht: number; special_add: number; other_deduct: number; net_estimate: number; has_manual: boolean;
 };
 type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
@@ -27,6 +28,7 @@ type DurationPreset = "full" | "half" | "custom";
 type LeaveReason = "medical_certificate" | "sick_paid" | "sick_unpaid" | "unpaid";
 type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; paid_leave?: boolean; work_date?: string; note?: string };
 type TabKey = "summary" | "special" | "piecework" | "timestamp" | "import" | "attendance";
+type TimeSummarySelection = { row: Row; kind: TimeKind };
 type TimePreview = {
   kind: TimeKind;
   value: number;
@@ -113,6 +115,7 @@ export default function ManualInputPage() {
   const [editAdjustMode, setEditAdjustMode] = useState<AdjustMode | undefined>();
   const [editTimeOnly, setEditTimeOnly] = useState(false);
   const [quickAdjust, setQuickAdjust] = useState<{ row?: Row; mode: AdjustMode } | null>(null);
+  const [timeSummary, setTimeSummary] = useState<TimeSummarySelection | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [grid, setGrid] = useState<GridData | null>(null);
   const [gridLoading, setGridLoading] = useState(false);
@@ -205,9 +208,15 @@ export default function ManualInputPage() {
       employee_name: gridRow.employee_name,
       work_days: 0,
       late_baht: 0,
+      late_minutes: 0,
       absence_baht: 0,
+      absence_days: 0,
+      absence_hours: 0,
       leave_baht: 0,
+      leave_days: 0,
+      leave_hours: 0,
       ot_baht: 0,
+      ot_hours: 0,
       piecework_baht: 0,
       special_add: 0,
       other_deduct: 0,
@@ -339,16 +348,16 @@ export default function ManualInputPage() {
                     <td className="px-3 py-2"><span className="font-mono text-xs text-slate-400">{r.employee_code}</span> {r.employee_name}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-500">{r.work_days || "-"}</td>
                     <td className="px-3 py-2 text-right">
-                      <AmountWithTooltip value={r.late_baht} className="text-red-600" prefix="-" title="สาย/ออกก่อน: คิดจากนาทีที่บันทึกไว้" />
+                      <TimeSummaryCell row={r} kind="late" tone="text-red-600" onClick={() => setTimeSummary({ row: r, kind: "late" })} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <AmountWithTooltip value={r.absence_baht} className="text-red-600" prefix="-" title="ขาดงาน: คิดจากวัน/ชั่วโมงที่บันทึกไว้" />
+                      <TimeSummaryCell row={r} kind="absence" tone="text-red-600" onClick={() => setTimeSummary({ row: r, kind: "absence" })} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <AmountWithTooltip value={r.leave_baht} className="text-red-600" prefix="-" title="ลา: คิดจากรายการลาที่ไม่รับเงิน/รายการที่ตั้งไว้" />
+                      <TimeSummaryCell row={r} kind="leave" tone="text-blue-600" onClick={() => setTimeSummary({ row: r, kind: "leave" })} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <AmountWithTooltip value={r.ot_baht} className="text-emerald-600" prefix="+" title="OT: คิดจากชั่วโมง OT ที่บันทึกไว้" />
+                      <TimeSummaryCell row={r} kind="ot" tone="text-emerald-600" onClick={() => setTimeSummary({ row: r, kind: "ot" })} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <RecurringCell items={employeeRecurring} editable={editable} onClick={() => { window.location.href = "/payroll/recurring"; }} />
@@ -384,6 +393,19 @@ export default function ManualInputPage() {
         <AdjustDrawer row={editRow} periodId={periodId} editable={editable} initialDate={editDate} initialKind={editKind} initialAdjustMode={editAdjustMode} timeOnly={editTimeOnly}
           onClose={() => { setEditRow(null); setEditDate(undefined); setEditKind(undefined); setEditAdjustMode(undefined); setEditTimeOnly(false); }}
           onChanged={() => { load(periodId); if (activeTab === "attendance") loadGrid(periodId); }} />
+      )}
+      {timeSummary && (
+        <TimeSummaryModal
+          row={timeSummary.row}
+          kind={timeSummary.kind}
+          periodId={periodId}
+          editable={editable}
+          onClose={() => setTimeSummary(null)}
+          onEdit={(item) => {
+            setTimeSummary(null);
+            openRowEditor(timeSummary.row, item?.work_date, item?.kind ?? timeSummary.kind, undefined, true);
+          }}
+        />
       )}
       {quickAdjust && (
         <QuickAdjustmentModal
@@ -523,13 +545,163 @@ function netTooltip(row: Row, recurring: RecurringItem[]) {
   return lines.join("\n");
 }
 
-function AmountWithTooltip({ value, className = "", title, prefix = "" }: { value: number; className?: string; title: string; prefix?: string }) {
-  const hasValue = Number(value) !== 0;
+function formatQty(value: number, unit: string) {
+  const n = Math.round(Number(value || 0) * 100) / 100;
+  if (!n) return "";
+  return `${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })} ${unit}`;
+}
+
+function minutesQty(minutes: number) {
+  const total = Math.max(0, Math.round(Number(minutes || 0)));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h && m) return `${h} ชม. ${m} นาที`;
+  if (h) return `${h} ชม.`;
+  return total ? `${total} นาที` : "";
+}
+
+function rowTimeQuantity(row: Row, kind: TimeKind) {
+  if (kind === "late") return minutesQty(row.late_minutes);
+  if (kind === "absence") return formatQty(row.absence_days, "วัน");
+  if (kind === "leave") return row.leave_days ? formatQty(row.leave_days, "วัน") : formatQty(row.leave_hours, "ชม.");
+  return formatQty(row.ot_hours, "ชม.");
+}
+
+function rowTimeAmount(row: Row, kind: TimeKind) {
+  if (kind === "late") return row.late_baht;
+  if (kind === "absence") return row.absence_baht;
+  if (kind === "leave") return row.leave_baht;
+  return row.ot_baht;
+}
+
+function TimeSummaryCell({ row, kind, tone, onClick }: { row: Row; kind: TimeKind; tone: string; onClick: () => void }) {
+  const amount = rowTimeAmount(row, kind);
+  const quantity = rowTimeQuantity(row, kind);
+  if (!amount && !quantity) return <span className="text-slate-300">-</span>;
   return (
-    <span className={`inline-flex items-center justify-end gap-1 tabular-nums ${className}`} title={title}>
-      {hasValue ? `${prefix}${baht(Math.abs(value))}` : <span className="text-slate-300">-</span>}
-      {hasValue && <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>}
-    </span>
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex min-w-[82px] flex-col items-end rounded-lg px-2 py-1 text-right tabular-nums hover:bg-slate-50"
+      title="กดเพื่อดูรายละเอียด"
+    >
+      <span className={`font-semibold ${tone}`}>{quantity || "-"}</span>
+      <span className="text-xs font-semibold text-slate-500">{baht(Math.abs(amount))}</span>
+    </button>
+  );
+}
+
+function TimeSummaryModal({
+  row,
+  kind,
+  periodId,
+  editable,
+  onClose,
+  onEdit,
+}: {
+  row: Row;
+  kind: TimeKind;
+  periodId: string;
+  editable: boolean;
+  onClose: () => void;
+  onEdit: (item?: TimeItem) => void;
+}) {
+  const [items, setItems] = useState<TimeItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const m = TIME_META[kind];
+  const tone = kind === "ot" ? "text-emerald-600" : kind === "leave" ? "text-blue-600" : "text-red-600";
+  const panelTone = kind === "ot" ? "bg-emerald-50 border-emerald-100" : kind === "leave" ? "bg-blue-50 border-blue-100" : "bg-red-50 border-red-100";
+  const summaryQuantity = rowTimeQuantity(row, kind);
+  const summaryAmount = rowTimeAmount(row, kind);
+  const filtered = items.filter((item) => item.kind === kind);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setErr(null);
+    const qs = `period_id=${encodeURIComponent(periodId)}&employee_id=${encodeURIComponent(row.employee_id)}`;
+    apiFetch(`/api/payroll/time-entry?${qs}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!alive) return;
+        if (j.error) setErr(j.error);
+        else setItems((j.data ?? []) as TimeItem[]);
+      })
+      .catch(() => { if (alive) setErr("โหลดรายละเอียดไม่ได้"); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [periodId, row.employee_id]);
+
+  return (
+    <ERPModal
+      open
+      onClose={onClose}
+      size="md"
+      title={`${m.label} - ${row.employee_name || row.employee_code}`}
+      description="สรุปรายการของพนักงานคนนี้ กดแก้เพื่อเปิดฟอร์มเดิม"
+      loading={loading}
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            ปิด
+          </button>
+          {editable && (
+            <button type="button" onClick={() => onEdit()} className="h-9 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800">
+              เปิดฟอร์มแก้
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{err}</div>}
+        <div className={`rounded-xl border px-4 py-3 ${panelTone}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className={`text-lg font-bold tabular-nums ${tone}`}>{summaryQuantity || "-"}</div>
+              <div className="text-xs text-slate-500">{row.employee_code} {row.employee_name}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-slate-500">รวมเงิน</div>
+              <div className={`text-lg font-bold tabular-nums ${tone}`}>{baht(Math.abs(summaryAmount))}</div>
+            </div>
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">ยังไม่มีรายละเอียดในหมวดนี้</div>
+        ) : (
+          <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+            {filtered.map((item) => {
+              const paidLeaveItem = item.kind === "leave" && item.paid_leave === true;
+              const itemQty = item.kind === "late" ? minutesQty(item.value) : item.kind === "ot" ? formatQty(item.value, "ชม.") : formatQty(item.value, "วัน");
+              return (
+                <div key={`${item.kind}-${item.id}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className={`font-semibold tabular-nums ${tone}`}>{itemQty}</div>
+                      <div className="text-xs text-slate-400">{item.work_date ? formatDate(item.work_date) : "ไม่ระบุวันที่"}</div>
+                      {item.note && <div className="mt-1 truncate text-xs text-slate-500">{item.note}</div>}
+                    </div>
+                    <div className="text-right">
+                      <div className={`font-semibold tabular-nums ${paidLeaveItem ? "text-blue-600" : tone}`}>
+                        {paidLeaveItem ? "ไม่หักเงิน" : baht(Math.abs(item.amount))}
+                      </div>
+                      {editable && (
+                        <button type="button" onClick={() => onEdit(item)} className="mt-1 text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-900">
+                          แก้
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }
 

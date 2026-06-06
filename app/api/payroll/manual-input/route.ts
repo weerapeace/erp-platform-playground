@@ -23,8 +23,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const a = supabaseAdmin();
-    const { data: pdata } = await a.from("payroll_periods").select("id, period_name, status").eq("id", periodId).limit(1);
-    const period = pdata?.[0] as { id: string; period_name: string; status: string } | undefined;
+    const { data: pdata } = await a.from("payroll_periods").select("id, period_name, status, default_hours_per_day").eq("id", periodId).limit(1);
+    const period = pdata?.[0] as { id: string; period_name: string; status: string; default_hours_per_day?: number | null } | undefined;
     if (!period) return NextResponse.json({ error: "ไม่พบงวด" }, { status: 404 });
 
     // เครื่องคำนวณจริง → รายชื่อพนักงานที่เข้าเงื่อนไข + สุทธิประมาณ + วันทำงาน
@@ -32,21 +32,33 @@ export async function GET(req: NextRequest) {
 
     // ยอดดิบรายคน (สำหรับคอลัมน์แสดงผล)
     const [attRes, leaveRes, otRes, adjRes] = await Promise.all([
-      a.from("attendance_entries").select("employee_id, late_deduction, absence_deduction, status").eq("payroll_period_id", periodId),
-      a.from("leave_entries").select("employee_id, unpaid_leave_deduction, status").eq("payroll_period_id", periodId),
-      a.from("overtime_entries").select("employee_id, overtime_amount, status").eq("payroll_period_id", periodId),
+      a.from("attendance_entries").select("employee_id, late_minutes, late_deduction, absence_hours, absence_deduction, status").eq("payroll_period_id", periodId),
+      a.from("leave_entries").select("employee_id, days, hours, unpaid_leave_deduction, status").eq("payroll_period_id", periodId),
+      a.from("overtime_entries").select("employee_id, hours, overtime_amount, status").eq("payroll_period_id", periodId),
       a.from("payroll_adjustments").select("employee_id, adjustment_type, amount, status, source_type, item_code").eq("payroll_period_id", periodId).eq("status", "approved"),
     ]);
     const add = (m: Map<string, number>, id: string, v: unknown) => m.set(id, (m.get(id) ?? 0) + money(v));
+    const hoursPerDay = money(period.default_hours_per_day) || 8;
     const lateBy = new Map<string, number>(), absBy = new Map<string, number>(), leaveBy = new Map<string, number>();
     const otBy = new Map<string, number>(), pieceBy = new Map<string, number>(), addBy = new Map<string, number>(), dedBy = new Map<string, number>();
+    const lateMinBy = new Map<string, number>(), absHoursBy = new Map<string, number>(), leaveDaysBy = new Map<string, number>(), leaveHoursBy = new Map<string, number>(), otHoursBy = new Map<string, number>();
     const cntBy = new Map<string, number>();
     for (const r of (attRes.data ?? []) as Record<string, unknown>[]) if (MANUAL.has(String(r.status))) {
       add(lateBy, String(r.employee_id), r.late_deduction); add(absBy, String(r.employee_id), r.absence_deduction);
+      add(lateMinBy, String(r.employee_id), r.late_minutes); add(absHoursBy, String(r.employee_id), r.absence_hours);
       cntBy.set(String(r.employee_id), (cntBy.get(String(r.employee_id)) ?? 0) + 1);
     }
-    for (const r of (leaveRes.data ?? []) as Record<string, unknown>[]) if (MANUAL.has(String(r.status))) add(leaveBy, String(r.employee_id), r.unpaid_leave_deduction);
-    for (const r of (otRes.data ?? []) as Record<string, unknown>[]) if (MANUAL.has(String(r.status))) add(otBy, String(r.employee_id), r.overtime_amount);
+    for (const r of (leaveRes.data ?? []) as Record<string, unknown>[]) if (MANUAL.has(String(r.status))) {
+      add(leaveBy, String(r.employee_id), r.unpaid_leave_deduction);
+      add(leaveDaysBy, String(r.employee_id), r.days);
+      add(leaveHoursBy, String(r.employee_id), r.hours);
+      cntBy.set(String(r.employee_id), (cntBy.get(String(r.employee_id)) ?? 0) + 1);
+    }
+    for (const r of (otRes.data ?? []) as Record<string, unknown>[]) if (MANUAL.has(String(r.status))) {
+      add(otBy, String(r.employee_id), r.overtime_amount);
+      add(otHoursBy, String(r.employee_id), r.hours);
+      cntBy.set(String(r.employee_id), (cntBy.get(String(r.employee_id)) ?? 0) + 1);
+    }
     for (const r of (adjRes.data ?? []) as Record<string, unknown>[]) {
       if (String(r.adjustment_type) === "deduction") add(dedBy, String(r.employee_id), r.amount);
       else if (String(r.source_type) === "piecework" || String(r.item_code) === "PIECEWORK") add(pieceBy, String(r.employee_id), r.amount);
@@ -73,9 +85,15 @@ export async function GET(req: NextRequest) {
         id, employee_id: id, employee_code: l.employee_code, employee_name: nameBy[id] ?? "",
         work_days: money(l.attendance_days),
         late_baht: Math.round(late * 100) / 100,
+        late_minutes: Math.round((lateMinBy.get(id) ?? 0) * 100) / 100,
         absence_baht: Math.round(absence * 100) / 100,
+        absence_days: Math.round((((absHoursBy.get(id) ?? 0) / hoursPerDay) || 0) * 100) / 100,
+        absence_hours: Math.round((absHoursBy.get(id) ?? 0) * 100) / 100,
         leave_baht: Math.round(leave * 100) / 100,
+        leave_days: Math.round((leaveDaysBy.get(id) ?? 0) * 100) / 100,
+        leave_hours: Math.round((leaveHoursBy.get(id) ?? 0) * 100) / 100,
         ot_baht: Math.round(ot * 100) / 100,
+        ot_hours: Math.round((otHoursBy.get(id) ?? 0) * 100) / 100,
         piecework_baht: Math.round(piecework * 100) / 100,
         special_add: Math.round(special * 100) / 100,
         other_deduct: Math.round(other * 100) / 100,
