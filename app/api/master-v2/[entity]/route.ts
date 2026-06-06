@@ -15,6 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 
 // อ่าน/เขียนสดเสมอ — ข้อมูล master + module config เปลี่ยน runtime, ห้าม cache
@@ -476,7 +477,7 @@ export async function resolveEntity(entity: string): Promise<EntityConfig | null
 
 // ---- GET — list ----
 
-export async function GET(
+async function _GET(
   request: NextRequest,
   { params }: { params: Promise<{ entity: string }> }
 ): Promise<NextResponse> {
@@ -584,12 +585,12 @@ export async function GET(
   const rows = await resolveRelationLabels(supabase, cfg, processed);
   // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์เห็นออกจาก response
   const { hiddenCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
-  return NextResponse.json({ data: stripHidden(rows, hiddenCols), total: totalCount || rows.length, error: null });
+  return NextResponse.json({ data: stripHidden(rows, hiddenCols), total: totalCount || rows.length, error: null }, { headers: { "x-row-count": String(rows.length) } });
 }
 
 // ---- POST — create ----
 
-export async function POST(
+async function _POST(
   request: NextRequest,
   { params }: { params: Promise<{ entity: string }> }
 ): Promise<NextResponse> {
@@ -646,3 +647,8 @@ export async function POST(
   const [safeRow] = stripHidden([row as Record<string, unknown>], access.hiddenCols);
   return NextResponse.json({ data: safeRow, error: null });
 }
+
+// Phase 0 — ครอบ timing log (ดูเวลาแต่ละ request ใน Cloudflare logs เมื่อ >500ms)
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export const GET = timeRoute("master-v2:list", _GET as any) as any;
+export const POST = timeRoute("master-v2:create", _POST as any) as any;

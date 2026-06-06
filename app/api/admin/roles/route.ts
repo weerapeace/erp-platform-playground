@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
     permissions: (r2.data as PermissionDef[]) ?? [],
     matrix:      (r3.data as { role_key: string; permission_key: string }[]) ?? [],
     error:       null,
-  } satisfies RolesPermissionsResponse);
+  } satisfies RolesPermissionsResponse, { headers: { "Cache-Control": "private, max-age=600" } });
 }
 
 // ---- PATCH — toggle / upsert role ----

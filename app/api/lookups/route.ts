@@ -73,7 +73,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  return NextResponse.json({ data: rows, error: null });
+  return NextResponse.json({ data: rows, error: null }, { headers: { "Cache-Control": "private, max-age=600" } });
 }
 
 // ---- POST ----

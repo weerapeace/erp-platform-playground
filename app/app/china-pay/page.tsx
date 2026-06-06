@@ -1312,7 +1312,7 @@ function SlipWizard({ openBills, onClose, onDone }: { openBills: Record<string, 
               {rows.map((r, i) => (
                 <div key={r.key} className="rounded-lg border border-slate-200 p-2.5 flex gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={r2Url(r.key)} alt="" className="w-14 h-14 rounded object-cover flex-shrink-0 border border-slate-200" />
+                  <img loading="lazy" src={r2Url(r.key)} alt="" className="w-14 h-14 rounded object-cover flex-shrink-0 border border-slate-200" />
                   <div className="flex-1 min-w-0 space-y-1.5">
                     <div className="text-[11px] text-slate-400">
                       AI อ่าน: ยอด {r.ex.amount != null ? `¥${fmt(r.ex.amount)}` : "—"} · บัญชี {r.ex.account || "—"} · {r.ex.name || "—"}
@@ -1487,7 +1487,7 @@ function TransferHistory({ bill, kind, onChanged }: { bill: Record<string, unkno
                           {isPdf(k)
                             ? <div className="flex flex-col items-center justify-center h-20 text-slate-600"><span className="text-2xl">📄</span><span className="text-[9px] truncate w-full px-1 text-center">{k.split("/").pop()}</span></div>
                             /* eslint-disable-next-line @next/next/no-img-element */
-                            : <img src={r2Url(k)} alt="" className="w-full h-20 object-cover" />}
+                            : <img loading="lazy" src={r2Url(k)} alt="" className="w-full h-20 object-cover" />}
                         </a>
                       ))}
                     </div>
@@ -1590,7 +1590,7 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
                   ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-12 h-12 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
                   : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
+                      <img loading="lazy" src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
                 <div className="flex-1 min-w-0">
                   <div className="text-[11px] text-slate-400 mb-0.5">ยอดสลิป (¥)</div>
                   {editIdx === i
@@ -1866,7 +1866,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
                     <button key={k} type="button" onClick={() => setLightbox(r2Url(k))}
                       className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
+                      <img loading="lazy" src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
                     </button>
                   )
                 ))}
@@ -2293,7 +2293,7 @@ function CtwDetail({ bill, onClose, onDeleted, onChanged, onEdit, canDelete }: {
                       <div className="flex flex-col items-center justify-center h-24 text-slate-600"><span className="text-3xl">📄</span><span className="text-[10px] truncate w-full px-1 text-center">{k.split("/").pop()}</span></div>
                     ) : (
                       /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
+                      <img loading="lazy" src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
                     )}
                   </a>
                 ))}
@@ -3219,7 +3219,7 @@ function TransferPage({ preselect = [], onConsumePreselect }: { preselect?: stri
                   ? <a href={r2Url(s.key)} target="_blank" rel="noreferrer" className="w-12 h-12 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-xl">📄</a>
                   : <button type="button" onClick={() => setLightbox(r2Url(s.key))} className="w-12 h-12 flex-shrink-0 rounded overflow-hidden border border-slate-200">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
+                      <img loading="lazy" src={r2Url(s.key)} alt="" className="w-full h-full object-cover" /></button>}
                 <input value={s.bank} onChange={e => setSlipField(i, { bank: e.target.value })} placeholder="ธนาคาร"
                   className="flex-1 min-w-0 h-10 px-2 text-sm border border-slate-200 rounded" />
                 <Money value={s.amount ? String(s.amount) : ""} onChange={(v) => setSlipField(i, { amount: num(v) })}
@@ -3466,7 +3466,7 @@ function LinkSlipsPopup({ transfer, onClose, onSaved }: { transfer: Record<strin
                     ? (s.key.toLowerCase().endsWith(".pdf")
                       ? <span className="w-11 h-11 flex-shrink-0 rounded bg-slate-50 border border-slate-200 flex items-center justify-center text-lg">📄</span>
                       // eslint-disable-next-line @next/next/no-img-element
-                      : <img src={r2Url(s.key)} alt="" className="w-11 h-11 flex-shrink-0 rounded object-cover border border-slate-200" />)
+                      : <img loading="lazy" src={r2Url(s.key)} alt="" className="w-11 h-11 flex-shrink-0 rounded object-cover border border-slate-200" />)
                     : <span className="w-11 h-11 flex-shrink-0 rounded bg-slate-50 border border-dashed border-slate-200 flex items-center justify-center text-slate-300">💵</span>}
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-slate-700 truncate">{s.bank || `รายการ ${i + 1}`}</div>
@@ -3794,7 +3794,7 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
                     <button key={k} type="button" onClick={() => setLightbox(r2Url(k))}
                       className="block rounded-md border border-slate-200 overflow-hidden bg-slate-50">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
+                      <img loading="lazy" src={r2Url(k)} alt="" className="w-full h-24 object-cover" />
                     </button>
                   )
                 ))}

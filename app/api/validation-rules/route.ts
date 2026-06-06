@@ -11,7 +11,7 @@ export type ValidationRulesResponse = {
 export async function GET(request: NextRequest) {
   const { data, error } = await supabaseFromRequest(request).rpc("erp_validation_rules_list");
   if (error) return NextResponse.json({ data: [], error: error.message } satisfies ValidationRulesResponse, { status: 500 });
-  return NextResponse.json({ data: (data as ValidationRule[]) ?? [], error: null } satisfies ValidationRulesResponse);
+  return NextResponse.json({ data: (data as ValidationRule[]) ?? [], error: null } satisfies ValidationRulesResponse, { headers: { "Cache-Control": "private, max-age=600" } });
 }
 
 // ---- POST/PATCH ----

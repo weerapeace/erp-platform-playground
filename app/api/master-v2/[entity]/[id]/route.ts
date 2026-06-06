@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, resolveRelationLabels, friendlyDbError } from "../route";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export const revalidate = 0;
 
 // ---- GET — single ----
 
-export async function GET(
+async function _GET(
   request: NextRequest,
   { params }: { params: Promise<{ entity: string; id: string }> }
 ): Promise<NextResponse> {
@@ -47,7 +48,7 @@ export async function GET(
 
 // ---- PATCH — update ----
 
-export async function PATCH(
+async function _PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ entity: string; id: string }> }
 ): Promise<NextResponse> {
@@ -115,7 +116,7 @@ export async function PATCH(
 
 // ---- DELETE — soft delete (set is_active=false) ----
 
-export async function DELETE(
+async function _DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ entity: string; id: string }> }
 ): Promise<NextResponse> {
@@ -154,4 +155,10 @@ export async function DELETE(
   });
   return NextResponse.json({ data: { archived: true }, error: null });
 }
+
+// Phase 0 — ครอบ timing log
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export const GET = timeRoute("master-v2:detail", _GET as any) as any;
+export const PATCH = timeRoute("master-v2:update", _PATCH as any) as any;
+export const DELETE = timeRoute("master-v2:delete", _DELETE as any) as any;
 

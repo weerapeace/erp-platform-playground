@@ -8,12 +8,13 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { computePeriodPreview } from "@/lib/payroll-calc-engine";
 import { money } from "@/lib/payroll-calc";
+import { timeRoute } from "@/lib/api-timing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 const NEAR = (a: number, b: number) => Math.abs(money(a) - money(b)) < 0.01;
 
-export async function GET(req: NextRequest) {
+async function _GET(req: NextRequest) {
   const denied = await guardPayroll(req); if (denied) return denied;
   let periodId = req.nextUrl.searchParams.get("period_id");
   try {
@@ -79,3 +80,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ data: [], summary: null, error: e instanceof Error ? e.message : "คำนวณไม่ได้" }, { status: 500 });
   }
 }
+
+// Phase 0 — ครอบ timing log (endpoint นี้หนักสุด: คำนวณ payroll สด)
+/* eslint-disable @typescript-eslint/no-explicit-any */
+export const GET = timeRoute("payroll:calc-run", _GET as any) as any;
