@@ -103,6 +103,7 @@ export default function ManualInputPage() {
   const [editDate, setEditDate] = useState<string | undefined>();
   const [editKind, setEditKind] = useState<TimeKind | undefined>();
   const [editAdjustMode, setEditAdjustMode] = useState<AdjustMode | undefined>();
+  const [editTimeOnly, setEditTimeOnly] = useState(false);
   const [quickAdjust, setQuickAdjust] = useState<{ row?: Row; mode: AdjustMode } | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [grid, setGrid] = useState<GridData | null>(null);
@@ -180,11 +181,12 @@ export default function ManualInputPage() {
     }
     return m;
   }, [recurringItems]);
-  const openRowEditor = (row: Row, date?: string, kind?: TimeKind, adjustMode?: AdjustMode) => {
+  const openRowEditor = (row: Row, date?: string, kind?: TimeKind, adjustMode?: AdjustMode, timeOnly = false) => {
     setEditRow(row);
     setEditDate(date);
     setEditKind(kind);
     setEditAdjustMode(adjustMode);
+    setEditTimeOnly(timeOnly);
   };
   const openQuickAdjust = (row: Row | undefined, mode: AdjustMode) => setQuickAdjust({ row, mode });
   const openGridEditor = (gridRow: GridRow, cell: GridCell) => {
@@ -205,7 +207,7 @@ export default function ManualInputPage() {
       has_manual: gridRow.manual_days > 0,
     };
     const kind: TimeKind = ["off", "ot", "paid_holiday"].includes(cell.status) ? "ot" : "late";
-    openRowEditor(row, cell.date, kind);
+    openRowEditor(row, cell.date, kind, undefined, true);
   };
 
   return (
@@ -371,8 +373,8 @@ export default function ManualInputPage() {
       )}
 
       {editRow && (
-        <AdjustDrawer row={editRow} periodId={periodId} editable={editable} initialDate={editDate} initialKind={editKind} initialAdjustMode={editAdjustMode}
-          onClose={() => { setEditRow(null); setEditDate(undefined); setEditKind(undefined); setEditAdjustMode(undefined); }}
+        <AdjustDrawer row={editRow} periodId={periodId} editable={editable} initialDate={editDate} initialKind={editKind} initialAdjustMode={editAdjustMode} timeOnly={editTimeOnly}
+          onClose={() => { setEditRow(null); setEditDate(undefined); setEditKind(undefined); setEditAdjustMode(undefined); setEditTimeOnly(false); }}
           onChanged={() => { load(periodId); if (activeTab === "attendance") loadGrid(periodId); }} />
       )}
       {quickAdjust && (
@@ -1101,8 +1103,8 @@ function Legend({ label, cls }: { label: string; cls: string }) {
   return <span className={`inline-flex h-7 items-center rounded-lg border px-2 font-semibold ${cls}`}>{label}</span>;
 }
 
-function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initialAdjustMode, onClose, onChanged }:
-  { row: Row; periodId: string; editable: boolean; initialDate?: string; initialKind?: TimeKind; initialAdjustMode?: AdjustMode; onClose: () => void; onChanged: () => void }) {
+function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initialAdjustMode, timeOnly = false, onClose, onChanged }:
+  { row: Row; periodId: string; editable: boolean; initialDate?: string; initialKind?: TimeKind; initialAdjustMode?: AdjustMode; timeOnly?: boolean; onClose: () => void; onChanged: () => void }) {
   const initialDrawerTab: DrawerTab = initialKind ?? "late";
   const [items, setItems] = useState<Adj[]>([]);
   const [timeItems, setTimeItems] = useState<TimeItem[]>([]);
@@ -1569,7 +1571,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
             )}
           </div>
 
-          <div className="border-t border-slate-100 pt-4 space-y-3">
+          <div className={timeOnly ? "hidden" : "border-t border-slate-100 pt-4 space-y-3"}>
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
               <div className="flex min-w-max gap-1">
                 {(["piecework", "earning", "deduction"] as AdjustMode[]).map((m) => {
@@ -1608,7 +1610,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
               </div>
             )}
           </div>
-          <p className="text-xs text-slate-400">หลังแก้รายการ กลับไปกด “คำนวณ + บันทึก” เพื่อออกผลจริง</p>
+          <p className={timeOnly ? "hidden" : "text-xs text-slate-400"}>หลังแก้รายการ กลับไปกด “คำนวณ + บันทึก” เพื่อออกผลจริง</p>
         </div>
     </Drawer>
   );
