@@ -73,6 +73,27 @@ export function ImageInput({
       }
     }
   };
+  // ปุ่ม "วางรูป" — อ่านรูปจากคลิปบอร์ดให้เลย (ไม่ต้องกด Ctrl+V เอง)
+  const pasteFromClipboard = async () => {
+    if (disabled || uploading) return;
+    setErr(null);
+    try {
+      const clip = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItems> };
+      if (!clip?.read) { setErr("เบราว์เซอร์นี้กดวางไม่ได้ — คลิกที่ช่องแล้วกด Ctrl+V แทน"); return; }
+      const items = await clip.read();
+      for (const it of items) {
+        const type = it.types.find((t) => t.startsWith("image/"));
+        if (type) {
+          const blob = await it.getType(type);
+          void handleFile(new File([blob], `paste.${type.split("/")[1] || "png"}`, { type }));
+          return;
+        }
+      }
+      setErr("ไม่พบรูปในคลิปบอร์ด — ลองพิมพ์หน้าจอ (PrtSc) ก่อน");
+    } catch {
+      setErr("อ่านคลิปบอร์ดไม่ได้ (ต้องอนุญาตสิทธิ์) — คลิกที่ช่องแล้วกด Ctrl+V แทน");
+    }
+  };
 
   return (
     <div className="mt-0.5">
@@ -101,6 +122,14 @@ export function ImageInput({
                   className="px-2 py-1 text-xs bg-white border border-slate-200 rounded shadow hover:bg-slate-50 disabled:opacity-50"
                 >
                   📷 เปลี่ยน
+                </button>
+                <button
+                  type="button"
+                  onClick={pasteFromClipboard}
+                  disabled={uploading}
+                  className="px-2 py-1 text-xs bg-white border border-slate-200 rounded shadow hover:bg-slate-50 disabled:opacity-50"
+                >
+                  📋 วาง
                 </button>
                 <button
                   type="button"
@@ -134,6 +163,16 @@ export function ImageInput({
           </button>
         )}
       </div>
+
+      {/* ปุ่มลัด: เลือกไฟล์ / วางรูปจากคลิปบอร์ด (แยกปุ่ม กดวางได้เลยไม่ต้อง Ctrl+V) */}
+      {!disabled && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+            className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-50">📷 เลือกรูป</button>
+          <button type="button" onClick={pasteFromClipboard} disabled={uploading}
+            className="h-8 px-3 text-xs font-medium border border-blue-200 rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">📋 วางรูป (จากคลิปบอร์ด)</button>
+        </div>
+      )}
 
       <input
         ref={fileRef}
