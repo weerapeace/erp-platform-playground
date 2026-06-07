@@ -385,8 +385,8 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
     }).finally(() => setLoading(false));
   }, [tableId, moduleKey]);
 
-  const save = async () => {
-    setSaving(true); setErr(null); setMsg(null);
+  // บันทึก layout (ใช้ร่วมกันระหว่าง "บันทึก" และ "บังคับใช้กับทุกคน") — คืน true ถ้าสำเร็จ
+  const persist = async (): Promise<boolean> => {
     const settings: LayoutSettings = {
       default_sort: sortCol ? { column: sortCol, dir: sortDir } : null,
       secondary_sort: sort2Col ? { column: sort2Col, dir: sort2Dir } : null,
@@ -401,26 +401,52 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       const ex = exByKey[f.value];
       return { key: f.value, label: f.label, visible: colVis[f.value] ?? true, order: ex?.order ?? (i + 1) * 10, width: ex?.width, pinned: ex?.pinned ?? null };
     });
-    // คงคอลัมน์เดิมที่ไม่อยู่ในทะเบียนแล้ว (กันข้อมูล layout หาย)
     for (const ex of existing) if (!fields.some((f) => f.value === ex.key)) columns.push(ex);
+    const j = await apiFetch("/api/admin/table-layouts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        table_id: tableId,
+        label: full?.label || tableId,
+        description: full?.description ?? null,
+        columns,
+        default_density: full?.default_density ?? "normal",
+        default_page_size: pageSize,
+        default_view_mode: full?.default_view_mode ?? "table",
+        notes: full?.notes ?? null,
+        settings,
+      }),
+    }).then((r) => r.json());
+    if (j.error) throw new Error(j.error);
+    return true;
+  };
+
+  const save = async () => {
+    setSaving(true); setErr(null); setMsg(null);
     try {
-      const j = await apiFetch("/api/admin/table-layouts", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          table_id: tableId,
-          label: full?.label || tableId,
-          description: full?.description ?? null,
-          columns,
-          default_density: full?.default_density ?? "normal",
-          default_page_size: pageSize,
-          default_view_mode: full?.default_view_mode ?? "table",
-          notes: full?.notes ?? null,
-          settings,
-        }),
-      }).then((r) => r.json());
-      if (j.error) throw new Error(j.error);
+      await persist();
       setMsg("บันทึกแล้ว ✓ (เปิดตารางใหม่จะใช้ค่านี้)");
       setTimeout(() => setMsg(null), 4000);
+    } catch (e) { setErr(String(e instanceof Error ? e.message : e)); }
+    finally { setSaving(false); }
+  };
+
+  // บังคับใช้กับทุกคน: บันทึก layout + ยกเลิก "มุมมองเริ่มต้น (ดาว)" ของตารางนี้ทั้งหมด
+  // → ค่ากลางนี้จะแสดงผลจริง (มุมมองดาวรายคน/ทีม ชนะ layout ปกติ)
+  const forceForEveryone = async () => {
+    if (!confirm("บังคับใช้คอลัมน์/ค่าตั้งนี้กับทุกคน?\n\n• มุมมองเริ่มต้น (ดาว ★) ของตารางนี้จะถูกยกเลิกทั้งหมด เพื่อให้ค่ากลางนี้แสดงผล\n• ผู้ใช้ที่เคยจัดคอลัมน์เองในเครื่อง อาจต้องกด \"รีเซ็ตเป็นค่าเริ่มต้น\" ในตารางอีกครั้ง")) return;
+    setSaving(true); setErr(null); setMsg(null);
+    try {
+      await persist();
+      const j = await apiFetch(`/api/admin/saved-views?table_id=${encodeURIComponent(tableId)}`).then((r) => r.json());
+      const defaults = ((j.data ?? []) as { id: string; is_default?: boolean }[]).filter((v) => v.is_default);
+      for (const v of defaults) {
+        await apiFetch("/api/admin/saved-views", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: v.id, is_default: false }),
+        });
+      }
+      setMsg(`บังคับใช้กับทุกคนแล้ว ✓${defaults.length ? ` — ยกเลิกมุมมองเริ่มต้น ${defaults.length} อัน` : ""}`);
+      setTimeout(() => setMsg(null), 6000);
     } catch (e) { setErr(String(e instanceof Error ? e.message : e)); }
     finally { setSaving(false); }
   };
@@ -566,13 +592,18 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       </div>
 
       {/* actions */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button onClick={save} disabled={saving} className="h-10 px-6 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
           {saving ? "กำลังบันทึก…" : "บันทึกค่าเริ่มต้นตาราง"}
+        </button>
+        <button onClick={forceForEveryone} disabled={saving} title="บันทึก + ยกเลิกมุมมองเริ่มต้น (ดาว) ของตารางนี้ เพื่อให้ค่ากลางนี้แสดงผลกับทุกคน"
+          className="h-10 px-5 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50">
+          📌 บังคับใช้กับทุกคน
         </button>
         {msg && <span className="text-sm text-emerald-600">{msg}</span>}
         {err && <span className="text-sm text-red-600">⚠️ {err}</span>}
       </div>
+      <p className="text-[11px] text-slate-400 -mt-2">ℹ️ ถ้าตารางมี “มุมมองเริ่มต้น (ดาว ★)” อยู่ มุมมองนั้นจะชนะค่านี้ — กด “บังคับใช้กับทุกคน” เพื่อล้างมุมมองดาวของตารางนี้</p>
 
       {/* ลิงก์ตัวจัดคอลัมน์เดิม */}
       <div className="text-center pt-2">
