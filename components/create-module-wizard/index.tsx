@@ -126,8 +126,9 @@ function CustomFieldEditor({ existingKeys, onAdd, onCancel }: {
   const add = () => {
     setErr(null);
     if (!label.trim()) { setErr("กรอกชื่อช่อง"); return; }
-    if (!/^[a-z][a-z0-9_]{0,62}$/.test(key)) { setErr("ชื่อ field (อังกฤษ) ไม่ถูกต้อง — a-z, 0-9, _ เริ่มด้วยตัวอักษร"); return; }
-    if (CF_RESERVED.includes(key) || existingKeys.includes(key)) { setErr("ชื่อ field ซ้ำกับช่องที่มีอยู่"); return; }
+    if (!/^[a-z][a-z0-9_]{0,62}$/.test(key)) { setErr("ชื่อ field (อังกฤษ) ไม่ถูกต้อง — a-z, 0-9, _ เริ่มด้วยตัวอักษร (ถ้าชื่อช่องเป็นภาษาไทย ให้พิมพ์ชื่อ field อังกฤษเอง)"); return; }
+    if (CF_RESERVED.includes(key)) { setErr(`“${key}” เป็นช่องระบบที่ทุกตารางมีอยู่แล้ว${key === "name" ? " (ช่อง “ชื่อ” หลัก — ไม่ต้องเพิ่มซ้ำ)" : ""} — เปลี่ยนชื่อ field อังกฤษเป็นอย่างอื่น`); return; }
+    if (existingKeys.includes(key)) { setErr(`ชื่อ field “${key}” ซ้ำกับช่องที่เลือก/เพิ่มไว้แล้ว — เปลี่ยนชื่อ field อังกฤษ`); return; }
     if (type === "select" && !opts.split(/[\n,]/).some((s) => s.trim())) { setErr("ใส่ตัวเลือกอย่างน้อย 1 ค่า"); return; }
     if (type === "relation" && !target) { setErr("เลือกตารางปลายทาง"); return; }
     onAdd({
@@ -344,7 +345,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
             const ij = await ir.json().catch(() => ({} as { data?: { created?: number; failed?: { row: number; error: string }[] }; error?: string }));
             if (ij?.data) {
               created += ij.data.created ?? 0;
-              (ij.data.failed ?? []).forEach((f) => failed.push({ row: i + f.row, error: f.error }));
+              (ij.data.failed ?? []).forEach((f: { row: number; error: string }) => failed.push({ row: i + f.row, error: f.error }));
             } else if (ij?.error) {
               failed.push({ row: i + 1, error: ij.error });
             }
