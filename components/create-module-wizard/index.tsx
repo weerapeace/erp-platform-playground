@@ -525,6 +525,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
                                 <input type="checkbox" checked={on} onChange={() => toggleField(f.key)} className="h-4 w-4 accent-blue-600" />
                                 <span className="text-sm text-slate-700 flex-1 min-w-0">
                                   {f.label}
+                                  <code className="ml-1.5 text-[10px] text-slate-400">{f.key}</code>
                                   <span className="ml-1.5 text-[10px] text-slate-400">{f.ui === "select" ? "ตัวเลือก" : f.ui === "image" ? "รูป" : f.ui === "number" ? "ตัวเลข" : f.ui === "date" ? "วันที่" : f.ui === "textarea" ? "ข้อความยาว" : "ข้อความ"}{f.sensitive ? " · ลับ" : ""}</span>
                                   {f.hint && <span className="block text-[10px] text-slate-400">{f.hint}</span>}
                                 </span>
