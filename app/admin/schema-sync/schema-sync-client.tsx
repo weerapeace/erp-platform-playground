@@ -20,6 +20,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useBackdropDismiss } from "@/components/modal";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { SearchableSelect } from "@/components/searchable-select";
+import { IconPicker } from "@/components/icon-picker";
 import { apiFetch } from "@/lib/api";
 import { useRoleOptions } from "@/lib/use-roles";
 import type { SchemaSyncResponse, RegistryField } from "@/app/api/admin/schema-sync/route";
@@ -322,17 +323,63 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
     });
   }, [data, filter, groupFilter]);
 
+  // meta (label/icon) ของกลุ่มฟิลด์ที่ตั้งเอง — เก็บใน erp_modules.config.field_groups
+  const fieldGroups = useMemo(
+    () => ((data?.module?.config?.field_groups ?? {}) as Record<string, { label?: string; icon?: string }>),
+    [data],
+  );
+  // resolve icon/label ของกลุ่ม: config.field_groups ก่อน → GROUP_META → fallback
+  const gMeta = (key: string): { icon: string; label: string; order: number } => {
+    const fg = fieldGroups[key];
+    if (fg) return { icon: fg.icon ?? "📁", label: fg.label ?? key, order: GROUP_META[key]?.order ?? 70 };
+    return groupMeta(key);
+  };
+
   // กลุ่มฟิลด์ที่ผู้ใช้เพิ่มเองในหน้านี้ (รวมกับ GROUP_OPTIONS + กลุ่มที่มีอยู่ในข้อมูล)
   const [customGroups, setCustomGroups] = useState<string[]>([]);
   const groupOptions = useMemo(() => {
     const seen = new Set(GROUP_OPTIONS.map((g) => g.value));
     const out = [...GROUP_OPTIONS];
     for (const f of data?.registry ?? []) {
-      if (f.group_key && !seen.has(f.group_key)) { seen.add(f.group_key); out.push({ value: f.group_key, label: GROUP_META[f.group_key]?.label ?? f.group_key }); }
+      if (f.group_key && !seen.has(f.group_key)) { seen.add(f.group_key); out.push({ value: f.group_key, label: gMeta(f.group_key).label }); }
     }
-    for (const g of customGroups) if (!seen.has(g)) { seen.add(g); out.push({ value: g, label: g }); }
+    for (const k of Object.keys(fieldGroups)) if (!seen.has(k)) { seen.add(k); out.push({ value: k, label: gMeta(k).label }); }
+    for (const g of customGroups) if (!seen.has(g)) { seen.add(g); out.push({ value: g, label: gMeta(g).label }); }
     return out;
-  }, [data, customGroups]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, customGroups, fieldGroups]);
+
+  // popup สร้าง/แก้ไขกลุ่มฟิลด์ + จัดการกลุ่ม
+  const [groupModal, setGroupModal] = useState<{ mode: "create" | "edit"; origKey: string; name: string; icon: string } | null>(null);
+  const [groupMgr, setGroupMgr] = useState(false);
+  const [groupSaving, setGroupSaving] = useState(false);
+
+  const saveGroupModal = async () => {
+    if (!groupModal) return;
+    const name = groupModal.name.trim();
+    if (!name) return;
+    setGroupSaving(true);
+    try {
+      if (groupModal.mode === "create") {
+        await apiFetch("/api/admin/field-groups", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ module_key: moduleKey, action: "upsert", key: name, label: name, icon: groupModal.icon }),
+        });
+        setCustomGroups((p) => (p.includes(name) ? p : [...p, name]));
+        if (selected.size > 0) await bulkUpdate({ group_key: name });
+      } else {
+        const res = await apiFetch("/api/admin/field-groups", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ module_key: moduleKey, action: "rename", key: groupModal.origKey, new: name, label: name, icon: groupModal.icon }),
+        });
+        const j = await res.json(); if (j.error) { flash("❌ " + j.error); return; }
+      }
+      setGroupModal(null);
+      flash("✓ บันทึกกลุ่มแล้ว");
+      await load();
+    } catch (e) { flash("❌ " + (e instanceof Error ? e.message : "ไม่สำเร็จ")); }
+    finally { setGroupSaving(false); }
+  };
 
   // เลือกกลุ่มของฟิลด์ — เลือก "เพิ่มกลุ่มใหม่" จะถามชื่อกลุ่มแล้วตั้งให้
   const pickGroup = (id: string, value: string) => {
@@ -412,14 +459,8 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
     });
   };
 
-  // เพิ่มกลุ่มฟิลด์ใหม่ (โผล่ในช่อง Group ทุกแถว) — ถ้ามีฟิลด์เลือกอยู่ ย้ายเข้ากลุ่มนี้เลย
-  const addGroup = () => {
-    const name = (typeof window !== "undefined" ? window.prompt("ชื่อกลุ่มใหม่ (เช่น สเปกเข็มขัด)") : "")?.trim();
-    if (!name) return;
-    setCustomGroups((p) => (p.includes(name) ? p : [...p, name]));
-    if (selected.size > 0) bulkUpdate({ group_key: name });
-    else flash(`เพิ่มกลุ่ม “${name}” แล้ว — เลือกในช่อง Group ของฟิลด์ หรือเลือกหลายฟิลด์แล้วกด “เพิ่มกลุ่ม” อีกครั้งเพื่อย้ายเข้ากลุ่มนี้`);
-  };
+  // เปิด popup สร้างกลุ่มฟิลด์ใหม่ (ใส่ชื่อ + เลือกไอคอน) — ถ้าเลือกฟิลด์ไว้จะย้ายเข้ากลุ่มนี้ตอนบันทึก
+  const addGroup = () => setGroupModal({ mode: "create", origKey: "", name: "", icon: "📁" });
 
   const inner = (
       <div className="min-h-screen bg-slate-50">
@@ -441,6 +482,13 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                   className="h-10 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50"
                 >
                   📁 เพิ่มกลุ่ม
+                </button>
+                <button
+                  onClick={() => setGroupMgr(true)}
+                  title="จัดการกลุ่ม — เปลี่ยนชื่อ/ไอคอน"
+                  className="h-10 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50"
+                >
+                  🗂️ จัดการกลุ่ม
                 </button>
                 <button
                   onClick={() => setFieldCreatorOpen(true)}
@@ -615,7 +663,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                     <SortableContext items={filtered.map((f) => f.id)} strategy={verticalListSortingStrategy}>
                       <tbody className="divide-y divide-slate-100">
                         {grouped.map(([groupKey, groupFields]) => {
-                          const meta = groupMeta(groupKey);
+                          const meta = gMeta(groupKey);
                           const isCollapsed = collapsedGroups.has(groupKey);
                           const allGroupSelected = groupFields.every((f) => selected.has(f.id));
                           const someGroupSelected = groupFields.some((f) => selected.has(f.id));
@@ -812,6 +860,66 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                   className="h-9 px-4 text-sm font-medium text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-40">
                   {tcApplying ? "กำลังเปลี่ยน..." : "เปลี่ยนประเภท"}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* สร้าง/แก้ไขกลุ่มฟิลด์ (ชื่อ + ไอคอน) */}
+        {groupModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4" onClick={() => !groupSaving && setGroupModal(null)}>
+            <div className="w-full max-w-sm bg-white rounded-xl shadow-xl p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-semibold text-slate-800 mb-3">{groupModal.mode === "create" ? "➕ เพิ่มกลุ่มฟิลด์" : "✏️ แก้ไขกลุ่ม"}</h3>
+              <div className="flex items-end gap-3">
+                <div>
+                  <div className="text-[11px] text-slate-500 mb-1">ไอคอน</div>
+                  <IconPicker value={groupModal.icon} onChange={(v) => setGroupModal((m) => (m ? { ...m, icon: v } : m))} />
+                </div>
+                <div className="flex-1">
+                  <div className="text-[11px] text-slate-500 mb-1">ชื่อกลุ่ม</div>
+                  <input autoFocus value={groupModal.name} onChange={(e) => setGroupModal((m) => (m ? { ...m, name: e.target.value } : m))}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveGroupModal(); }}
+                    placeholder="เช่น สเปกเข็มขัด" className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
+                </div>
+              </div>
+              {groupModal.mode === "edit" && groupModal.name.trim() !== groupModal.origKey && (
+                <p className="text-[11px] text-amber-600 mt-2">เปลี่ยนชื่อ = ย้ายทุกฟิลด์ในกลุ่มนี้ไปชื่อใหม่</p>
+              )}
+              {groupModal.mode === "create" && selected.size > 0 && (
+                <p className="text-[11px] text-blue-600 mt-2">จะย้ายฟิลด์ที่เลือก {selected.size} ช่อง เข้ากลุ่มนี้</p>
+              )}
+              <div className="flex justify-end gap-2 mt-4">
+                <button onClick={() => setGroupModal(null)} disabled={groupSaving}
+                  className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                <button onClick={saveGroupModal} disabled={groupSaving || !groupModal.name.trim()}
+                  className="h-9 px-4 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">
+                  {groupSaving ? "กำลังบันทึก…" : "บันทึก"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* จัดการกลุ่ม — รายการกลุ่ม + แก้ไข */}
+        {groupMgr && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4" onClick={() => setGroupMgr(false)}>
+            <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-slate-800">🗂️ จัดการกลุ่มฟิลด์</h3>
+                <button onClick={() => { setGroupMgr(false); addGroup(); }} className="text-xs px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700">➕ เพิ่มกลุ่ม</button>
+              </div>
+              <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                {groupOptions.map((g) => (
+                  <div key={g.value} className="flex items-center gap-2 px-4 py-2 text-sm">
+                    <span className="text-lg">{gMeta(g.value).icon}</span>
+                    <span className="flex-1 min-w-0 truncate">{gMeta(g.value).label} <code className="text-[10px] text-slate-400">{g.value}</code></span>
+                    <button onClick={() => { setGroupMgr(false); setGroupModal({ mode: "edit", origKey: g.value, name: gMeta(g.value).label, icon: gMeta(g.value).icon }); }}
+                      className="text-xs text-blue-600 hover:underline">แก้ไข</button>
+                  </div>
+                ))}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-200 text-right">
+                <button onClick={() => setGroupMgr(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>
               </div>
             </div>
           </div>
