@@ -102,15 +102,11 @@ export default function PurchaseOrdersPage() {
   // ป้าย Taobao: ดูจากลิงก์สินค้า (taobao/tmall) หรือร้านที่ตั้งว่าเป็น Taobao
   const isTaobaoRow = useCallback((r: Row) => isTaobaoLink(r.purchase_link) || taobaoShops.has(r.seller_name), [taobaoShops]);
 
-  // กดปุ่มลิงก์: มีลิงก์ → คัดลอก + แจ้งเตือน ; ไม่มี → เปิด popup ใส่ลิงก์
-  const onLinkClick = useCallback(async (r: Row) => {
-    if (r.purchase_link) {
-      try { await navigator.clipboard.writeText(r.purchase_link); toast.success("คัดลอกลิงก์แล้ว"); }
-      catch { window.open(r.purchase_link, "_blank", "noopener"); }
-    } else {
-      setLinkRow(r);
-    }
-  }, [toast]);
+  // กดปุ่มลิงก์: มีลิงก์ → เปิดในแท็บใหม่ ; ไม่มี → เปิด popup ใส่ลิงก์
+  const onLinkClick = useCallback((r: Row) => {
+    if (r.purchase_link) window.open(r.purchase_link, "_blank", "noopener");
+    else setLinkRow(r);
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -288,8 +284,8 @@ export default function PurchaseOrdersPage() {
                                 {!r.approved && <span className="absolute top-1.5 left-1.5 z-10 text-[10px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">ยังไม่อนุมัติ</span>}
                                 <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1">
                                   {isTaobaoRow(r) && <span title="Taobao" className="w-6 h-6 flex items-center justify-center rounded-full bg-orange-500 text-white text-[12px] font-bold shadow-sm leading-none">淘</span>}
-                                  <button onClick={(e) => { e.stopPropagation(); void onLinkClick(r); }}
-                                    title={r.purchase_link ? "คัดลอกลิงก์สินค้า" : "เพิ่มลิงก์สินค้า"}
+                                  <button onClick={(e) => { e.stopPropagation(); onLinkClick(r); }}
+                                    title={r.purchase_link ? "เปิดลิงก์สินค้า (แท็บใหม่)" : "เพิ่มลิงก์สินค้า"}
                                     className={`w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border shadow-sm text-xs hover:bg-blue-50 ${r.purchase_link ? "border-blue-200 text-blue-600" : "border-slate-200 text-slate-400"}`}>🔗</button>
                                   <button onClick={(e) => { e.stopPropagation(); setEditRow(r); }} title="ดูรายละเอียด / แก้ไข"
                                     className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-blue-50 text-slate-600 text-xs">✎</button>
