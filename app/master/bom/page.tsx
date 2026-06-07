@@ -7,9 +7,9 @@
  *   DataTable / ERPModal / ConfirmDialog / SkuPicker(/api/admin/picker) / useToast / useAuth
  *   ไม่ query Supabase ตรง — ผ่าน /api/bom (อ่าน auth, เขียน admin, audit)
  */
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { DataTable } from "@/components/data-table";
+import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -70,9 +70,8 @@ export default function BomWorkspacePage() {
   const { can } = useAuth();
   const toast = useToast();
 
-  const [rows, setRows]       = useState<BomListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refresh = () => setRefreshKey((k) => k + 1);
 
   const [form, setForm]       = useState<FormState | null>(null);
   const [dirty, setDirty]     = useState(false);
@@ -87,18 +86,16 @@ export default function BomWorkspacePage() {
   const [newVerOpen, setNewVerOpen] = useState(false);
   const [copyFromId, setCopyFromId] = useState<string>("");
 
-  const fetchList = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const res = await apiFetch("/api/bom");
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      setRows(json.data as BomListItem[]);
-    } catch (e) { setError(e instanceof Error ? e.message : "โหลดไม่ได้"); }
-    finally { setLoading(false); }
+  // server mode — โหลดทีละหน้า + ค้นที่ server (กันค้างตอนพิมพ์ search)
+  const serverFetch = useCallback(async (p: ServerFetchParams) => {
+    const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
+    if (p.search)  params.set("search", p.search);
+    if (p.sortBy)  { params.set("sort_by", p.sortBy); params.set("sort_dir", p.sortDir ?? "asc"); }
+    const res = await apiFetch(`/api/bom?${params}`);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    return { rows: json.data as BomListItem[], total: json.total as number };
   }, []);
-
-  useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
   // map lines จาก API → EditorLine
   const mapLines = (lines: BomLineRow[]): EditorLine[] => (lines ?? []).map((l) => ({
@@ -195,7 +192,7 @@ export default function BomWorkspacePage() {
       const remain = await fetchVersions(form.product_sku);
       const other = remain.find((v) => v.id !== form.id);
       if (other) { await switchVersion(other.id); } else { setForm(null); }
-      await fetchList();
+      refresh();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   };
 
@@ -231,7 +228,7 @@ export default function BomWorkspacePage() {
       if (json.error) throw new Error(json.error);
       toast.success(form.id ? "บันทึกสูตรแล้ว" : "สร้างสูตรใหม่แล้ว");
       setForm(null); setDirty(false);
-      await fetchList();
+      refresh();
     } catch (e) { setFormErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
@@ -246,7 +243,7 @@ export default function BomWorkspacePage() {
       if (json.error) throw new Error(json.error);
       toast.success("ย้ายสูตรเข้าคลังเก็บแล้ว");
       setArchiveTarget(null);
-      await fetchList();
+      refresh();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
     finally { setArchiving(false); }
   };
@@ -296,13 +293,12 @@ export default function BomWorkspacePage() {
           )}
         </div>
 
-        {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
-
         <DataTable
           tableId="bom-headers"
-          data={rows}
+          data={[]}
           columns={columns}
-          loading={loading}
+          serverFetch={serverFetch}
+          serverRefreshKey={refreshKey}
           searchableKeys={["bom_code", "product_sku", "product_name"]}
           searchPlaceholder="ค้นหา รหัสสูตร / SKU / ชื่อสินค้า..."
           exportFilename="bom-list"

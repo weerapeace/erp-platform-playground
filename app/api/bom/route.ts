@@ -83,21 +83,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
   const includeInactive = searchParams.get("include_inactive") === "true";
+  const limit  = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
+  const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
+  const sortBy = searchParams.get("sort_by");
+  const SAFE_COL = /^[a-z_][a-z0-9_]*$/i;
+  // line_count คำนวณนอกตาราง → sort ไม่ได้ตรง ๆ, fallback updated_at
+  const orderCol = sortBy && SAFE_COL.test(sortBy) && sortBy !== "line_count" ? sortBy : "updated_at";
+  const orderAsc = sortBy ? searchParams.get("sort_dir") === "asc" : false;
   const supabase = supabaseFromRequest(request);
 
   let q = supabase
     .from("bom_headers")
-    .select("id, bom_code, product_sku, product_name, version, bom_type, status, effective_from, note, source, is_active")
-    .order("updated_at", { ascending: false })
-    .limit(1000);
+    .select("id, bom_code, product_sku, product_name, version, bom_type, status, effective_from, note, source, is_active", { count: "exact" })
+    .order(orderCol, { ascending: orderAsc })
+    .range(offset, offset + limit - 1);
   if (!includeInactive) q = q.eq("is_active", true);
   if (search) {
     const term = `%${search}%`;
     q = q.or(`bom_code.ilike.${term},product_sku.ilike.${term},product_name.ilike.${term}`);
   }
 
-  const { data: headers, error } = await q;
-  if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  const { data: headers, error, count } = await q;
+  if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
 
   const rows = (headers ?? []) as BomHeader[];
   // นับจำนวนบรรทัดต่อสูตร ผ่าน RPC (group by ฝั่ง DB) — เลี่ยงเพดาน 1000 แถวที่ทำให้นับขาด
@@ -110,7 +117,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const data: BomListItem[] = rows.map((r) => ({ ...r, line_count: counts.get(r.bom_code) ?? 0 }));
-  return NextResponse.json({ data, total: data.length, error: null });
+  return NextResponse.json({ data, total: count ?? data.length, error: null });
 }
 
 // ---- POST — create header + lines ----
