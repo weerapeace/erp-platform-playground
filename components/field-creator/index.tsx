@@ -11,6 +11,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { SearchableSelect } from "@/components/searchable-select";
 import { useBackdropDismiss } from "@/components/modal";
 import { validateFormula } from "@/lib/formula";
 import { useRoleOptions } from "@/lib/use-roles";
@@ -324,11 +325,10 @@ export function FieldCreatorModal({
             <div className="space-y-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
               <div>
                 <label className="text-xs font-medium text-slate-600">เชื่อมไป table ไหน *</label>
-                <select value={targetTable} onChange={e => setTargetTable(e.target.value)}
-                  className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500">
-                  <option value="">— เลือก table —</option>
-                  {tables.map(t => <option key={t.table_name} value={t.table_name}>{t.table_name}{t.is_module ? " ⭐" : ""}</option>)}
-                </select>
+                <div className="mt-1">
+                  <SearchableSelect value={targetTable} onChange={setTargetTable} placeholder="— เลือก table —"
+                    options={tables.map(t => ({ value: t.table_name, label: t.table_name, badge: t.is_module ? "⭐" : undefined }))} />
+                </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">⭐ = มีหน้าจัดการในเว็บแล้ว (picker ดึงรายการได้)</p>
               </div>
               <div>

@@ -17,6 +17,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { IconPicker } from "@/components/icon-picker";
+import { SearchableSelect } from "@/components/searchable-select";
 
 /** นิยามช่องในคลัง (ของกลาง) */
 type CatalogField = {
@@ -164,10 +165,9 @@ function CustomFieldEditor({ existingKeys, onAdd, onCancel }: {
       {type === "relation" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div><label className="text-[11px] text-slate-500">ตารางปลายทาง</label>
-            <select value={target} onChange={(e) => setTarget(e.target.value)} className={inp}>
-              <option value="">— เลือก —</option>
-              {modules.filter((m) => m.table).map((m) => <option key={m.key} value={m.table}>{m.label}</option>)}
-            </select></div>
+            <SearchableSelect value={target} onChange={setTarget} placeholder="— เลือก —"
+              options={modules.filter((m) => m.table).map((m) => ({ value: String(m.table), label: m.label, sub: String(m.table) }))} />
+          </div>
           <div><label className="text-[11px] text-slate-500">field ที่ใช้แสดงชื่อ</label><input value={targetLabel} onChange={(e) => setTargetLabel(e.target.value)} placeholder="name" className={inp} /></div>
         </div>
       )}

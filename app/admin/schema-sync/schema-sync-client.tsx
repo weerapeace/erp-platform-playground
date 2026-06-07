@@ -19,6 +19,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useBackdropDismiss } from "@/components/modal";
 import { FieldCreatorModal } from "@/components/field-creator";
+import { SearchableSelect } from "@/components/searchable-select";
 import { apiFetch } from "@/lib/api";
 import { useRoleOptions } from "@/lib/use-roles";
 import type { SchemaSyncResponse, RegistryField } from "@/app/api/admin/schema-sync/route";
@@ -785,11 +786,9 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                   <div className="space-y-2">
                     <div>
                       <div className="text-xs text-slate-600 mb-1">ตารางปลายทาง</div>
-                      <select value={tcTargetTable} onChange={(e) => setTcTargetTable(e.target.value)}
-                        className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md bg-white">
-                        <option value="">— เลือก —</option>
-                        {modules.filter((m) => m.table).map((m) => <option key={m.key} value={m.table}>{m.label} ({m.table})</option>)}
-                      </select>
+                      <SearchableSelect value={tcTargetTable} onChange={setTcTargetTable} placeholder="— เลือก —"
+                        options={modules.filter((m) => m.table).map((m) => ({ value: String(m.table), label: m.label, sub: String(m.table) }))} />
+
                     </div>
                     <div>
                       <div className="text-xs text-slate-600 mb-1">field ที่ใช้แสดงชื่อ</div>
