@@ -321,6 +321,30 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
     });
   }, [data, filter, groupFilter]);
 
+  // กลุ่มฟิลด์ที่ผู้ใช้เพิ่มเองในหน้านี้ (รวมกับ GROUP_OPTIONS + กลุ่มที่มีอยู่ในข้อมูล)
+  const [customGroups, setCustomGroups] = useState<string[]>([]);
+  const groupOptions = useMemo(() => {
+    const seen = new Set(GROUP_OPTIONS.map((g) => g.value));
+    const out = [...GROUP_OPTIONS];
+    for (const f of data?.registry ?? []) {
+      if (f.group_key && !seen.has(f.group_key)) { seen.add(f.group_key); out.push({ value: f.group_key, label: GROUP_META[f.group_key]?.label ?? f.group_key }); }
+    }
+    for (const g of customGroups) if (!seen.has(g)) { seen.add(g); out.push({ value: g, label: g }); }
+    return out;
+  }, [data, customGroups]);
+
+  // เลือกกลุ่มของฟิลด์ — เลือก "เพิ่มกลุ่มใหม่" จะถามชื่อกลุ่มแล้วตั้งให้
+  const pickGroup = (id: string, value: string) => {
+    if (value === "__new__") {
+      const name = (typeof window !== "undefined" ? window.prompt("ชื่อกลุ่มใหม่ (เช่น สเปกเข็มขัด)") : "")?.trim();
+      if (!name) return;
+      setCustomGroups((p) => (p.includes(name) ? p : [...p, name]));
+      updateField(id, { group_key: name });
+    } else {
+      updateField(id, { group_key: value });
+    }
+  };
+
   const stats = useMemo(() => {
     if (!data) return { total: 0, visible: 0, filterable: 0, sortable: 0, searchable: 0, sensitive: 0, newDB: 0 };
     return {
@@ -614,6 +638,8 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                                   selected={selected.has(f.id)}
                                   isDisplay={!!f.column_name && displayField === f.column_name}
                                   onSetDisplay={f.column_name ? () => setDisplay(String(f.column_name)) : undefined}
+                                  groupOptions={groupOptions}
+                                  onPickGroup={(v) => pickGroup(f.id, v)}
                                   onToggle={() => toggleOne(f.id)}
                                   onUpdate={(patch) => updateField(f.id, patch)}
                                   onEditCondition={() => setConditionEditing(f)}
@@ -850,13 +876,15 @@ function RolePermissionCell({ field, onUpdate }: { field: RegistryField; onUpdat
 // ============================================================
 
 function SortableFieldRow({
-  field, saving, selected, isDisplay, onSetDisplay, onToggle, onUpdate, onEditCondition, onDelete, onChangeType,
+  field, saving, selected, isDisplay, onSetDisplay, groupOptions, onPickGroup, onToggle, onUpdate, onEditCondition, onDelete, onChangeType,
 }: {
   field:    RegistryField;
   saving:   boolean;
   selected: boolean;
   isDisplay?: boolean;
   onSetDisplay?: () => void;
+  groupOptions?: { value: string; label: string }[];
+  onPickGroup?: (value: string) => void;
   onToggle: () => void;
   onUpdate: (patch: Record<string, unknown>) => void | Promise<void>;
   onEditCondition?: () => void;
@@ -931,10 +959,11 @@ function SortableFieldRow({
       <td className="px-3 py-1.5">
         <select
           value={field.group_key}
-          onChange={(e) => onUpdate({ group_key: e.target.value })}
+          onChange={(e) => (onPickGroup ? onPickGroup(e.target.value) : onUpdate({ group_key: e.target.value }))}
           className="text-xs px-1.5 py-1 border border-slate-200 rounded bg-white"
         >
-          {GROUP_OPTIONS.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+          {(groupOptions ?? GROUP_OPTIONS).map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+          <option value="__new__">➕ เพิ่มกลุ่มใหม่…</option>
         </select>
       </td>
       <td className="px-3 py-1.5 text-center">
