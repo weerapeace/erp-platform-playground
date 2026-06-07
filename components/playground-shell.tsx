@@ -414,6 +414,21 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     return its[0]?.href ?? null;
   };
 
+  // ซิงก์ App ที่เลือก (หัวบน + sidebar) ให้ตรงกับ "หน้าที่เปิดอยู่" อัตโนมัติ
+  // จับคู่ pathname กับเมนู (ตรงเป๊ะ หรือขึ้นต้นตรงกัน) → สลับ App ให้ตรงหน้า
+  useEffect(() => {
+    if (!menuRows || menuRows.length === 0 || appGroups.length === 0) return;
+    const matches = menuRows.filter((r) =>
+      r.is_active && r.href && (pathname === r.href || pathname.startsWith(r.href + "/")));
+    if (matches.length === 0) return;   // หน้าไม่ผูกกับ App ไหน → คงค่าเดิม (ไม่สลับมั่ว)
+    const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
+    const keys = best.app_keys ?? [];
+    if (keys.length === 0) return;
+    if (activeApp && keys.includes(activeApp)) return;   // App ปัจจุบันถูกต้องแล้ว → ไม่กระตุก
+    const target = keys.find((k) => appGroups.some((a) => a.key === k));
+    if (target && target !== activeApp) setActiveAppState(target);
+  }, [pathname, menuRows, appGroups, activeApp]);
+
   // กลุ่มเมนูที่จะแสดง: จากทะเบียน (ถ้ามี) ไม่งั้น default — แล้วกรองตามสิทธิ์ + show_in_sidebar
   const navGroupsToShow = (() => {
     const fromRegistry = menuRows && menuRows.length > 0;
