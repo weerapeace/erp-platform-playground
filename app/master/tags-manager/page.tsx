@@ -47,6 +47,7 @@ export default function TagsManagerPage() {
 
   const [cart, setCart] = useState<Rec[]>([]);
   const [cartSearch, setCartSearch] = useState("");
+  const [cartSel, setCartSel] = useState<Set<string>>(new Set());
   const [tagSet, setTagSet] = useState<string[]>([]);
 
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -103,7 +104,7 @@ export default function TagsManagerPage() {
   }, [cfg.api, search, sortDir, page, loadTagMap]);
   useEffect(() => { const t = setTimeout(loadPool, 300); return () => clearTimeout(t); }, [loadPool]);
   useEffect(() => { setPage(0); }, [entity, search, sortDir]);   // เปลี่ยนเงื่อนไข → กลับหน้าแรก
-  useEffect(() => { setCart([]); setTagMap({}); }, [entity]);
+  useEffect(() => { setCart([]); setTagMap({}); setCartSel(new Set()); }, [entity]);
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const cartIds = useMemo(() => new Set(cart.map((c) => c.id)), [cart]);
@@ -125,7 +126,9 @@ export default function TagsManagerPage() {
       loadTagMap(recs.map((r) => r.id));
     } catch { alert("เลือกทั้งหมดไม่สำเร็จ"); } finally { setSelectingAll(false); }
   };
-  const removeFromCart = (id: string) => setCart((c) => c.filter((x) => x.id !== id));
+  const removeFromCart = (id: string) => { setCart((c) => c.filter((x) => x.id !== id)); setCartSel((p) => { const n = new Set(p); n.delete(id); return n; }); };
+  const toggleCartSel = (id: string) => setCartSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const removeSelectedFromCart = () => { setCart((c) => c.filter((x) => !cartSel.has(x.id))); setCartSel(new Set()); };
   const addTag = (id: string) => setTagSet((s) => {
     if (s.includes(id)) return s;
     const tag = allTags.find((t) => t.id === id);
@@ -292,12 +295,16 @@ export default function TagsManagerPage() {
   }, [cart, cartSearch]);
 
   // ---- การ์ดสินค้า (ใช้ทั้ง 2 ฝั่ง) ----
-  const Card = ({ r, action }: { r: Rec; action: React.ReactNode }) => {
+  const Card = ({ r, action, sel }: { r: Rec; action: React.ReactNode; sel?: { checked: boolean; onToggle: () => void } }) => {
     const tags = tagMap[r.id] ?? [];
     return (
       <div draggable onDragStart={() => { dragRef.current = { type: "rec", id: r.id }; }}
-        className="bg-white border border-slate-200 rounded-lg p-2 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing hover:border-blue-300">
+        className={`bg-white border rounded-lg p-2 flex flex-col gap-1.5 cursor-grab active:cursor-grabbing hover:border-blue-300 ${sel?.checked ? "border-blue-400 ring-1 ring-blue-300" : "border-slate-200"}`}>
         <div className="flex gap-2">
+          {sel && (
+            <input type="checkbox" checked={sel.checked} onChange={sel.onToggle}
+              onClick={(e) => e.stopPropagation()} className="mt-0.5 h-4 w-4 accent-blue-600 shrink-0" />
+          )}
           {recImg(r.image)
             ? <img src={recImg(r.image)!} alt="" className="w-12 h-12 rounded object-cover bg-slate-100 shrink-0" />
             : <div className="w-12 h-12 rounded bg-slate-100 shrink-0" />}
@@ -469,6 +476,30 @@ export default function TagsManagerPage() {
             <input value={cartSearch} onChange={(e) => setCartSearch(e.target.value)} placeholder="ค้นหาในตะกร้า…"
               className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
           </div>
+          {cart.length > 0 && (
+            <div className="px-3 py-1.5 border-b border-slate-100 bg-white flex items-center gap-2 text-xs flex-wrap">
+              {(() => {
+                const allSel = shownCart.length > 0 && shownCart.every((r) => cartSel.has(r.id));
+                return (
+                  <button onClick={() => setCartSel((p) => {
+                    const n = new Set(p);
+                    if (allSel) shownCart.forEach((r) => n.delete(r.id)); else shownCart.forEach((r) => n.add(r.id));
+                    return n;
+                  })} className="px-2 h-7 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">
+                    {allSel ? "ยกเลิกเลือกทั้งหมด" : `เลือกทั้งหมด (${shownCart.length})`}
+                  </button>
+                );
+              })()}
+              {cartSel.size > 0 && (
+                <>
+                  <span className="text-slate-500">เลือก {cartSel.size}</span>
+                  <button onClick={removeSelectedFromCart}
+                    className="px-2.5 h-7 rounded-md bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 font-medium">✕ เอาออกที่เลือก ({cartSel.size})</button>
+                  <button onClick={() => setCartSel(new Set())} className="text-slate-400 hover:text-slate-600 underline">ล้างเลือก</button>
+                </>
+              )}
+            </div>
+          )}
           {cartTagCounts.length > 0 && (
             <div className="px-3 py-2 border-b border-slate-100 bg-white">
               <div className="text-[11px] text-slate-500 mb-1">🏷️ แท็กในตะกร้า — กด ✕ เพื่อลบออกจากทุกตัวในตะกร้า</div>
@@ -485,7 +516,7 @@ export default function TagsManagerPage() {
           <div className="flex-1 overflow-y-auto p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 content-start">
             {cart.length === 0 && <div className="text-xs text-slate-400 py-6 text-center col-span-full">ลาก หรือกด “+ ใส่ตะกร้า” จากคลังด้านซ้าย</div>}
             {shownCart.map((r) => (
-              <Card key={r.id} r={r} action={
+              <Card key={r.id} r={r} sel={{ checked: cartSel.has(r.id), onToggle: () => toggleCartSel(r.id) }} action={
                 <button onClick={() => removeFromCart(r.id)} className="h-7 text-xs rounded-md text-slate-500 hover:bg-red-50 hover:text-red-600">✕ เอาออก</button>} />
             ))}
           </div>
