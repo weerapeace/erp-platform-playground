@@ -250,6 +250,21 @@ function groupMenuRows(rows: MenuRow[]): { label: string; items: { href: string;
     }));
 }
 
+// route → App สำรอง: สำหรับหน้าจริงที่ลิงก์ไม่ตรงกับ href ในเมนู (เช่น /master/quotations redirect → /quotations)
+// ใช้ตอน sync แถบ App/sidebar ให้ตรงกับหน้าที่เปิด เมื่อหา match จากเมนูไม่เจอ
+const ROUTE_APP_FALLBACK: { prefix: string; app: string }[] = [
+  { prefix: "/quotations", app: "sales" },
+  { prefix: "/sales-orders", app: "sales" },
+  { prefix: "/purchase-requests", app: "purchasing" },
+  { prefix: "/purchase-orders", app: "purchasing" },
+  { prefix: "/purchasing", app: "purchasing" },
+  { prefix: "/inventory", app: "inventory" },
+  { prefix: "/payroll", app: "payroll" },
+  { prefix: "/tasks", app: "tasks" },
+  { prefix: "/app/china-pay", app: "china-pay" },
+  { prefix: "/dashboard", app: "home" },
+];
+
 // default groups (fallback) → รูปแบบเดียวกับ groupMenuRows
 const DEFAULT_GROUPS = navGroups.map((g) => ({
   label: g.label,
@@ -420,12 +435,21 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     if (!menuRows || menuRows.length === 0 || appGroups.length === 0) return;
     const matches = menuRows.filter((r) =>
       r.is_active && r.href && (pathname === r.href || pathname.startsWith(r.href + "/")));
-    if (matches.length === 0) return;   // หน้าไม่ผูกกับ App ไหน → คงค่าเดิม (ไม่สลับมั่ว)
-    const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
-    const keys = best.app_keys ?? [];
-    if (keys.length === 0) return;
-    if (activeApp && keys.includes(activeApp)) return;   // App ปัจจุบันถูกต้องแล้ว → ไม่กระตุก
-    const target = keys.find((k) => appGroups.some((a) => a.key === k));
+    let target: string | undefined;
+    if (matches.length > 0) {
+      const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
+      const keys = best.app_keys ?? [];
+      if (activeApp && keys.includes(activeApp)) return;   // App ปัจจุบันถูกต้องแล้ว → ไม่กระตุก
+      target = keys.find((k) => appGroups.some((a) => a.key === k));
+    } else {
+      // หา match จากตารางสำรอง (หน้าจริงที่ลิงก์ไม่ตรงเมนู)
+      const fb = ROUTE_APP_FALLBACK
+        .filter((f) => pathname === f.prefix || pathname.startsWith(f.prefix + "/"))
+        .sort((a, b) => b.prefix.length - a.prefix.length)[0];
+      if (!fb) return;                                     // หน้าไม่รู้จัก → คงค่าเดิม (ไม่สลับมั่ว)
+      if (activeApp === fb.app) return;
+      if (appGroups.some((a) => a.key === fb.app)) target = fb.app;
+    }
     if (target && target !== activeApp) setActiveAppState(target);
   }, [pathname, menuRows, appGroups, activeApp]);
 
