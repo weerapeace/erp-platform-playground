@@ -58,6 +58,11 @@ function emptyForm(): FormState {
   return { id: null, bom_code: "", product_sku: "", product_name: "", version: "v1", bom_type: "normal", status: "draft", note: "", lines: [] };
 }
 
+// ---- versioning helpers ----
+const verNum  = (v: string | null) => { const m = (v ?? "").match(/(\d+)/); return m ? parseInt(m[1], 10) : 1; };
+const verCode = (sku: string, n: number) => (n <= 1 ? `BOM-${sku}` : `BOM-${sku}_v.${n}`);
+type BomVersionRow = { id: string; bom_code: string; version: string | null; status: string | null };
+
 export default function BomWorkspacePage() {
   const canView   = usePermission("products.view");
   const canCreate = usePermission("products.create");
@@ -78,6 +83,9 @@ export default function BomWorkspacePage() {
   const [archiveTarget, setArchiveTarget] = useState<BomListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
+  const [versions, setVersions]   = useState<BomVersionRow[]>([]);
+  const [newVerOpen, setNewVerOpen] = useState(false);
+  const [copyFromId, setCopyFromId] = useState<string>("");
 
   const fetchList = useCallback(async () => {
     setLoading(true); setError(null);
@@ -92,35 +100,103 @@ export default function BomWorkspacePage() {
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
+  // map lines จาก API → EditorLine
+  const mapLines = (lines: BomLineRow[]): EditorLine[] => (lines ?? []).map((l) => ({
+    key: l.id, component_id: l.sku_id ?? null, slot_code: l.slot_code, image_key: l.image_key ?? null,
+    component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
+    material_family_id: null, material_type: l.material_type ?? "",
+    qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
+    cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "",
+    pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
+    face_width_cm: Number(l.face_width_cm) || 0,
+    source: l.source, odoo_bom_line_id: l.odoo_bom_line_id,
+  }));
+
+  const loadFormById = async (id: string): Promise<FormState> => {
+    const res = await apiFetch(`/api/bom/${id}`);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    const d = json.data as BomListItem & { lines: BomLineRow[]; note?: string };
+    return {
+      id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "",
+      version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: d.note ?? "",
+      lines: mapLines(d.lines),
+    };
+  };
+
+  const fetchVersions = useCallback(async (sku: string): Promise<BomVersionRow[]> => {
+    if (!sku) { setVersions([]); return []; }
+    try {
+      const res = await apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(sku)}`);
+      const j = await res.json();
+      const v = (j.data ?? []) as BomVersionRow[];
+      setVersions(v); return v;
+    } catch { setVersions([]); return []; }
+  }, []);
+
   // ---- open create ----
-  const openCreate = () => { setForm(emptyForm()); setDirty(false); setFormErr(null); };
+  const openCreate = () => { setForm(emptyForm()); setVersions([]); setDirty(false); setFormErr(null); };
 
   // ---- open edit (โหลด header + lines) ----
   const openEdit = async (row: BomListItem) => {
     setLoadingForm(true); setFormErr(null);
-    setForm(emptyForm()); // เปิด modal ทันที (โชว์ loading)
+    setForm(emptyForm()); setVersions([]);
     try {
-      const res = await apiFetch(`/api/bom/${row.id}`);
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      const d = json.data as BomListItem & { lines: BomLineRow[] };
-      setForm({
-        id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "",
-        version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: (d as { note?: string }).note ?? "",
-        lines: (d.lines ?? []).map((l) => ({
-          key: l.id, component_id: l.sku_id ?? null, slot_code: l.slot_code, image_key: l.image_key ?? null,
-          component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
-          material_family_id: null, material_type: l.material_type ?? "",
-          qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
-          cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "",
-          pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
-          face_width_cm: Number(l.face_width_cm) || 0,
-          source: l.source, odoo_bom_line_id: l.odoo_bom_line_id,
-        })),
-      });
-      setDirty(false);
+      const f = await loadFormById(row.id);
+      setForm(f); setDirty(false);
+      fetchVersions(f.product_sku);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดสูตรไม่ได้"); }
     finally { setLoadingForm(false); }
+  };
+
+  // สลับไปดู/แก้เวอร์ชั่นอื่นของสินค้าเดียวกัน
+  const switchVersion = async (id: string) => {
+    if (id === form?.id) return;
+    if (dirty && !confirm("คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการสลับเวอร์ชั่นโดยไม่บันทึกหรือไม่?")) return;
+    setLoadingForm(true); setFormErr(null);
+    try { const f = await loadFormById(id); setForm(f); setDirty(false); }
+    catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดเวอร์ชั่นไม่ได้"); }
+    finally { setLoadingForm(false); }
+  };
+
+  // เลือกสินค้า → auto-fill รหัส/เวอร์ชั่น (เฉพาะตอนสร้างใหม่)
+  const onPickProduct = async (sku: string, name: string) => {
+    patchForm({ product_sku: sku, product_name: name });
+    const vers = await fetchVersions(sku);
+    if (form && form.id == null) {
+      const n = vers.length ? Math.max(...vers.map((v) => verNum(v.version))) + 1 : 1;
+      patchForm({ version: `v${n}`, bom_code: verCode(sku, n) });
+    }
+  };
+
+  // สร้างเวอร์ชั่นใหม่ (คัดลอกจากเวอร์ชั่นเดิม หรือ เริ่มว่าง)
+  const makeNewVersion = async (copyId: string | null) => {
+    if (!form) return;
+    const sku = form.product_sku;
+    if (!sku) { setFormErr("ต้องเลือกสินค้าก่อนจึงสร้างเวอร์ชั่นได้"); setNewVerOpen(false); return; }
+    const n = versions.length ? Math.max(...versions.map((v) => verNum(v.version))) + 1 : verNum(form.version) + 1;
+    let lines: EditorLine[] = [];
+    if (copyId) { try { const f = await loadFormById(copyId); lines = f.lines; } catch { /* ignore */ } }
+    setForm({
+      id: null, product_sku: sku, product_name: form.product_name, version: `v${n}`, bom_code: verCode(sku, n),
+      bom_type: form.bom_type, status: "draft", note: "", lines,
+    });
+    setDirty(true); setNewVerOpen(false); setCopyFromId("");
+  };
+
+  // ลบเวอร์ชั่นปัจจุบัน (เก็บเข้าคลัง)
+  const deleteVersion = async () => {
+    if (!form?.id) return;
+    if (!confirm(`ลบเวอร์ชั่น "${form.version}" (${form.bom_code})? — ย้ายเข้าคลังเก็บ กู้คืนได้ภายหลัง`)) return;
+    try {
+      const res = await apiFetch(`/api/bom/${form.id}`, { method: "DELETE" });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ลบเวอร์ชั่นแล้ว");
+      const remain = await fetchVersions(form.product_sku);
+      const other = remain.find((v) => v.id !== form.id);
+      if (other) { await switchVersion(other.id); } else { setForm(null); }
+      await fetchList();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   };
 
   const patchForm = (p: Partial<FormState>) => { setForm((f) => (f ? { ...f, ...p } : f)); setDirty(true); };
@@ -266,25 +342,41 @@ export default function BomWorkspacePage() {
             {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
 
             {/* header fields */}
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600">รหัสสูตร (bom_code) *</span>
-                <input value={form.bom_code} onChange={(e) => patchForm({ bom_code: e.target.value })}
-                  placeholder="เช่น BOM-PIX10-01"
-                  className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </label>
-              <label className="block">
-                <span className="text-xs font-medium text-slate-600">เวอร์ชัน</span>
-                <input value={form.version} onChange={(e) => patchForm({ version: e.target.value })}
-                  className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </label>
-            </div>
-
             <div>
               <span className="text-xs font-medium text-slate-600">สินค้าที่ผลิต (product)</span>
               <div className="mt-0.5">
                 <SkuPicker sku={form.product_sku} name={form.product_name} placeholder="— เลือกสินค้าที่ผลิต —"
-                  onPick={(sku, name) => patchForm({ product_sku: sku, product_name: name })} />
+                  onPick={onPickProduct} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="text-xs font-medium text-slate-600">รหัสสูตร <span className="font-normal text-slate-400">— ตั้งอัตโนมัติ</span></span>
+                <input value={form.bom_code} onChange={(e) => patchForm({ bom_code: e.target.value })}
+                  placeholder="เลือกสินค้าก่อน ระบบตั้งให้"
+                  className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </label>
+              <div className="block">
+                <span className="text-xs font-medium text-slate-600">เวอร์ชั่น</span>
+                <div className="flex gap-1.5 mt-0.5">
+                  <select
+                    value={form.id ?? "__cur__"}
+                    onChange={(e) => { const v = e.target.value; if (v === "__add__") setNewVerOpen(true); else if (v !== "__cur__" && v !== form.id) switchVersion(v); }}
+                    className="h-9 flex-1 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    {form.id && !versions.some((v) => v.id === form.id) && <option value={form.id}>{form.version} (กำลังแก้)</option>}
+                    {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.id === form.id ? " (กำลังแก้)" : ""}</option>)}
+                    {!form.id && <option value="__cur__">{form.version} (ใหม่)</option>}
+                    {form.product_sku && <option value="__add__">＋ เวอร์ชั่นใหม่...</option>}
+                  </select>
+                  {form.id && canEdit && (
+                    <button type="button" onClick={deleteVersion} title="ลบเวอร์ชั่นนี้ (เก็บเข้าคลัง)"
+                      className="h-9 w-9 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 rounded-lg">🗑</button>
+                  )}
+                </div>
+                <input value={form.version} onChange={(e) => patchForm({ version: e.target.value })}
+                  placeholder="ป้ายเวอร์ชั่น เช่น v1"
+                  className="w-full h-8 mt-1 px-3 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </div>
 
@@ -340,6 +432,31 @@ export default function BomWorkspacePage() {
         message={`สูตร "${archiveTarget?.bom_code ?? ""}" และรายการวัตถุดิบทั้งหมดจะถูกซ่อน (กู้คืนได้ภายหลัง)`}
         confirmText="ย้ายเข้าคลังเก็บ"
       />
+
+      {/* ---- new version popup ---- */}
+      <ERPModal open={newVerOpen} onClose={() => { setNewVerOpen(false); setCopyFromId(""); }} size="sm"
+        title="สร้างเวอร์ชั่นใหม่"
+        footer={
+          <>
+            <button onClick={() => { setNewVerOpen(false); setCopyFromId(""); }}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
+            <button onClick={() => makeNewVersion(copyFromId || null)}
+              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">สร้าง</button>
+          </>
+        }>
+        <div className="space-y-3 text-sm">
+          <p className="text-slate-600">เวอร์ชั่นใหม่ของสินค้า <code className="text-xs">{form?.product_sku}</code></p>
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">เริ่มจาก</span>
+            <select value={copyFromId} onChange={(e) => setCopyFromId(e.target.value)}
+              className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">เริ่มใหม่ (ว่าง)</option>
+              {versions.map((v) => <option key={v.id} value={v.id}>คัดลอกจาก {v.version}</option>)}
+            </select>
+          </label>
+          <p className="text-[11px] text-slate-400">ระบบจะตั้งรหัส/เวอร์ชั่นถัดไปให้อัตโนมัติ แล้วกด &ldquo;บันทึก&rdquo; เพื่อสร้างจริง</p>
+        </div>
+      </ERPModal>
     </>
   );
 }
