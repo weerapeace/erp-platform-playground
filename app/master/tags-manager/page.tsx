@@ -180,10 +180,49 @@ export default function TagsManagerPage() {
     if (!confirm(`ใส่ ${tagSet.length} แท็ก ให้ Parent ${cart.length} ตัว${childIds.length ? ` + SKU ลูก ${childIds.length} ตัว` : ""}\n(รวม ${totalLinks.toLocaleString()} รายการเชื่อมโยง)?`)) { setApplying(false); return; }
 
     const childJunction = ENTITIES["skus"].junction;
-    // สร้างคู่ลิงก์ทั้งหมด แล้วยิงเป็น batch (chunk 500/ครั้ง) + แสดง progress
+
+    // ----- บังคับกฎกลุ่ม "เลือก 1 รายการ": ห้ามใส่ถ้าสินค้ามีแท็กอื่นในกลุ่มเดียวกันอยู่แล้ว -----
+    const singleGroupOfTag: Record<string, string> = {};   // tagId -> groupId (เฉพาะกลุ่ม single_select)
+    for (const t of tagSet) {
+      const tag = allTags.find((x) => x.id === t);
+      const g = tag?.group_id ? groups.find((gg) => gg.id === tag.group_id) : null;
+      if (g?.single_select) singleGroupOfTag[t] = g.id;
+    }
+    const groupTagSet: Record<string, Set<string>> = {};
+    for (const gid of new Set(Object.values(singleGroupOfTag))) groupTagSet[gid] = new Set(allTags.filter((t) => t.group_id === gid).map((t) => t.id));
+    const needCheck = Object.keys(singleGroupOfTag).length > 0;
+
+    // ดึงแท็กปัจจุบันของสินค้า (chunk กัน URL ยาว) เพื่อตรวจการชนกฎ
+    const fetchLinks = async (junction: string, ids: string[]): Promise<Record<string, string[]>> => {
+      const out: Record<string, string[]> = {};
+      for (let i = 0; i < ids.length; i += 200) {
+        const chunk = ids.slice(i, i + 200);
+        try {
+          const j = await apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_ids=${chunk.join(",")}`).then((r) => r.json());
+          if (j.map) Object.assign(out, j.map as Record<string, string[]>);
+        } catch { /* ignore chunk */ }
+      }
+      return out;
+    };
+    if (needCheck) setResult("กำลังตรวจกฎกลุ่มเลือก1…");
+    const cartCur = needCheck ? await fetchLinks(cfg.junction, cart.map((c) => c.id)) : {};
+    const childCur = needCheck && childIds.length ? await fetchLinks(childJunction, childIds) : {};
+
+    let blocked = 0;
+    const buildLinks = (ids: string[], cur: Record<string, string[]>) =>
+      ids.flatMap((id) => tagSet.flatMap((t) => {
+        const gid = singleGroupOfTag[t];
+        if (gid) {
+          const conflict = (cur[id] ?? []).some((c) => c !== t && groupTagSet[gid].has(c));
+          if (conflict) { blocked++; return [] as { src_id: string; tgt_id: string }[]; }   // ข้าม: มีแท็กอื่นในกลุ่มแล้ว
+        }
+        return [{ src_id: id, tgt_id: t }];
+      }));
+
+    // สร้างคู่ลิงก์ (กรองตามกฎแล้ว) แล้วยิงเป็น batch (chunk 500/ครั้ง) + แสดง progress
     const tasks: { junction: string; links: { src_id: string; tgt_id: string }[] }[] = [
-      { junction: cfg.junction, links: cart.flatMap((r) => tagSet.map((t) => ({ src_id: r.id, tgt_id: t }))) },
-      ...(childIds.length ? [{ junction: childJunction, links: childIds.flatMap((c) => tagSet.map((t) => ({ src_id: c, tgt_id: t }))) }] : []),
+      { junction: cfg.junction, links: buildLinks(cart.map((r) => r.id), cartCur) },
+      ...(childIds.length ? [{ junction: childJunction, links: buildLinks(childIds, childCur) }] : []),
     ];
     const total = tasks.reduce((s, t) => s + t.links.length, 0);
     let done = 0, fail = 0;
@@ -201,7 +240,7 @@ export default function TagsManagerPage() {
       }
     }
     setApplying(false);
-    setResult(`✅ เสร็จแล้ว — ใส่แท็ก ${(total - fail).toLocaleString()}/${total.toLocaleString()} รายการ${fail ? ` (พลาด ${fail})` : ""}${childIds.length ? ` • รวม SKU ลูก ${childIds.length} ตัว` : ""}`);
+    setResult(`✅ เสร็จแล้ว — ใส่แท็ก ${(total - fail).toLocaleString()}/${total.toLocaleString()} รายการ${fail ? ` (พลาด ${fail})` : ""}${blocked ? ` • ข้าม ${blocked.toLocaleString()} รายการ (มีแท็กในกลุ่ม “เลือก 1” อยู่แล้ว)` : ""}${childIds.length ? ` • รวม SKU ลูก ${childIds.length} ตัว` : ""}`);
     loadTagMap(cart.map((c) => c.id));   // refresh แท็กบนการ์ด
   };
 
