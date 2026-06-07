@@ -220,6 +220,10 @@ export default function QuotationsPage() {
     setEditingId(null); setForm(makeEmpty(user?.name ?? "")); setFormErr(null); setModalOpen(true);
   };
 
+  const openPrint = useCallback((id: string) => {
+    window.open(`/print/quotation/${id}`, "_blank", "noopener,noreferrer");
+  }, []);
+
   // ---- Save ----
   const save = async () => {
     if (!form.customer) { setFormErr("กรุณาเลือกลูกค้า"); return; }
@@ -399,6 +403,7 @@ export default function QuotationsPage() {
 
   const rowActions = useMemo(() => [
     { label: "ดูรายละเอียด", onClick: (row: QuoteListItem) => openDetail(row.id) },
+    { label: "พิมพ์ใบเสนอราคา", onClick: (row: QuoteListItem) => openPrint(row.id) },
     { label: "เปิด/พับรายการสินค้า", onClick: (row: QuoteListItem) => toggleExpanded(row) },
     { label: "แก้ไข", show: (row: QuoteListItem) => row.status === "draft", onClick: (row: QuoteListItem) => openEditFromRow(row) },
     { label: "ส่งให้ลูกค้า", show: (row: QuoteListItem) => row.status === "draft" && canSend, onClick: (row: QuoteListItem) => transition(row.id, "send") },
@@ -406,7 +411,7 @@ export default function QuotationsPage() {
     { label: "แปลงเป็น SO", show: (row: QuoteListItem) => ["sent", "accepted"].includes(row.status) && canAccept, onClick: (row: QuoteListItem) => convertToSO(row.id) },
     { label: "ปฏิเสธ", show: (row: QuoteListItem) => row.status === "sent" && canReject, onClick: (row: QuoteListItem) => rejectFromRow(row) },
     { label: "ยกเลิก", variant: "danger" as const, show: (row: QuoteListItem) => ["draft", "sent"].includes(row.status) && canCancel, onClick: (row: QuoteListItem) => transition(row.id, "cancel") },
-  ], [canAccept, canCancel, canReject, canSend, openEditFromRow, rejectFromRow, toggleExpanded]);
+  ], [canAccept, canCancel, canReject, canSend, openEditFromRow, openPrint, rejectFromRow, toggleExpanded]);
 
   const bulkActions = useMemo(() => [
     { label: "ส่งที่เลือก", onClick: (selectedRows: QuoteListItem[]) => bulkTransition(selectedRows, "send") },
@@ -578,6 +583,7 @@ export default function QuotationsPage() {
               canReject={canReject}
               canCancel={canCancel}
               onOpenDetail={() => openDetail(row.id)}
+              onPrint={() => openPrint(row.id)}
               onEdit={() => openEditFromRow(row)}
               onSend={() => transition(row.id, "send")}
               onAccept={() => transition(row.id, "accept")}
@@ -598,6 +604,8 @@ export default function QuotationsPage() {
           <>
             <button onClick={() => setDetailOpen(false)}
               className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+            <button onClick={() => openPrint(detail.id)}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">พิมพ์</button>
 
             {detail.status === "draft" && (
               <>
@@ -840,6 +848,7 @@ function QuoteExpandedPanel({
   canReject,
   canCancel,
   onOpenDetail,
+  onPrint,
   onEdit,
   onSend,
   onAccept,
@@ -856,6 +865,7 @@ function QuoteExpandedPanel({
   canReject: boolean;
   canCancel: boolean;
   onOpenDetail: () => void;
+  onPrint: () => void;
   onEdit: () => void;
   onSend: () => void;
   onAccept: () => void;
@@ -887,6 +897,10 @@ function QuoteExpandedPanel({
             <button type="button" onClick={onOpenDetail}
               className="h-8 px-3 text-xs border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
               ดู
+            </button>
+            <button type="button" onClick={onPrint}
+              className="h-8 px-3 text-xs border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
+              พิมพ์
             </button>
             {detail.status === "draft" && (
               <button type="button" onClick={onEdit}
