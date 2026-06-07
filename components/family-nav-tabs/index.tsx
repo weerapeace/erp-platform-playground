@@ -12,6 +12,13 @@ import { usePathname } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { usePermission } from "@/components/auth";
 import { SearchableSelect } from "@/components/searchable-select";
+import { IconPicker } from "@/components/icon-picker";
+
+// ทางลัดหน้าที่ใช้บ่อย (ไม่ใช่โมดูล) ให้เลือกเพิ่มเป็นแท็บได้ง่าย
+const PAGE_SHORTCUTS: ExtraTab[] = [
+  { label: "Tags Manager (ใส่แท็ก)", icon: "🏷️", href: "/master/tags-manager" },
+  { label: "ข้อมูลตั้งต้น", icon: "🧱", href: "/master/lookups" },
+];
 
 type ExtraTab = { label: string; icon: string; href: string };
 
@@ -64,6 +71,8 @@ function TabManager({ initial, onClose, onSaved }: { initial: ExtraTab[]; onClos
   const [modules, setModules] = useState<{ key: string; label: string; icon: string | null }[]>([]);
   const [pick, setPick] = useState("");
   const [saving, setSaving] = useState(false);
+  // เพิ่มลิงก์เอง
+  const [cLabel, setCLabel] = useState(""); const [cHref, setCHref] = useState(""); const [cIcon, setCIcon] = useState("📋");
 
   useEffect(() => {
     apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
@@ -78,6 +87,14 @@ function TabManager({ initial, onClose, onSaved }: { initial: ExtraTab[]; onClos
     if (tabs.some((t) => t.href === href)) { setPick(""); return; }
     setTabs((p) => [...p, { label: m.label, icon: m.icon ?? "📋", href }]);
     setPick("");
+  };
+
+  const addOne = (t: ExtraTab) => setTabs((p) => (p.some((x) => x.href === t.href) ? p : [...p, t]));
+  const addCustom = () => {
+    const label = cLabel.trim(); const href = cHref.trim();
+    if (!label || !href) return;
+    addOne({ label, icon: cIcon || "📋", href });
+    setCLabel(""); setCHref(""); setCIcon("📋");
   };
 
   const save = async () => {
@@ -109,6 +126,31 @@ function TabManager({ initial, onClose, onSaved }: { initial: ExtraTab[]; onClos
             </div>
             <button onClick={addTab} disabled={!pick}
               className="h-9 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่ม</button>
+          </div>
+
+          {/* ทางลัดหน้าใช้บ่อย */}
+          <div>
+            <div className="text-[11px] text-slate-500 mb-1">ทางลัด</div>
+            <div className="flex flex-wrap gap-1.5">
+              {PAGE_SHORTCUTS.map((s) => (
+                <button key={s.href} onClick={() => addOne(s)}
+                  className="text-xs px-2 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">{s.icon} {s.label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* เพิ่มลิงก์เอง */}
+          <div className="rounded-lg border border-dashed border-slate-200 p-2.5">
+            <div className="text-[11px] text-slate-500 mb-1">หรือใส่ลิงก์เอง (หน้าอะไรก็ได้)</div>
+            <div className="flex items-end gap-2">
+              <div><div className="text-[10px] text-slate-400 mb-0.5">ไอคอน</div><IconPicker value={cIcon} onChange={setCIcon} /></div>
+              <div className="flex-1"><div className="text-[10px] text-slate-400 mb-0.5">ชื่อแท็บ</div>
+                <input value={cLabel} onChange={(e) => setCLabel(e.target.value)} placeholder="เช่น เข็มขัด" className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md" /></div>
+              <div className="flex-1"><div className="text-[10px] text-slate-400 mb-0.5">ลิงก์ (href)</div>
+                <input value={cHref} onChange={(e) => setCHref(e.target.value)} placeholder="/master/group/..." className="w-full h-9 px-2 text-sm font-mono border border-slate-200 rounded-md" /></div>
+              <button onClick={addCustom} disabled={!cLabel.trim() || !cHref.trim()}
+                className="h-9 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่ม</button>
+            </div>
           </div>
           <div className="space-y-1">
             {tabs.length === 0 && <div className="text-xs text-slate-400 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีแท็บเพิ่มเติม —</div>}
