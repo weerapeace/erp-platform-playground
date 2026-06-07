@@ -20,6 +20,7 @@ type Item = {
   seller_name?: string | null; price_est?: number; currency?: string | null;
   image_key?: string | null; note?: string | null;
   used_for_sku_id?: string | null; used_for_label?: string | null;
+  is_urgent?: boolean; needed_date?: string | null;
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -63,6 +64,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       seller_name: it.seller_name ?? null, price_est: num(it.price_est), currency: it.currency ?? "THB",
       image_key: it.image_key ?? null, note: it.note ?? null,
       used_for_sku_id: it.used_for_sku_id ?? null, used_for_label: it.used_for_label ?? null,
+      is_urgent: it.is_urgent === true, needed_date: it.needed_date || null,
     });
   }
 

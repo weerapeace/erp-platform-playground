@@ -25,7 +25,7 @@ const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
 type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null };
-type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; usedForId?: string | null; usedForLabel?: string | null };
+type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; usedForId?: string | null; usedForLabel?: string | null; urgent?: boolean; useDate?: string | null };
 type Source = "sku" | "group" | "favorite" | "frequent" | "tags";
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
@@ -111,6 +111,7 @@ export default function PurchasingShopPage() {
   const [partnerCountry, setPartnerCountry] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  const [showReview, setShowReview] = useState(false);   // ป๊อปทวนรายการก่อนสร้าง
   // วันที่สั่ง — ใส่ครั้งเดียวตอนกดสร้าง ใช้กับทุกใบ (default = วันนี้)
   const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
   // ข้อ 4: ใช้กับสินค้า (ปลายทาง) ระดับตะกร้า — เติมเฉพาะใบที่ยังไม่ได้ตั้งรายชิ้น
@@ -475,9 +476,9 @@ export default function PurchasingShopPage() {
     setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, skuId: v.skuId, note: "" }]);
     setSel(null); setVars([]);
   };
-  const addSku = (c: Card, qty: number, note: string, usedFor?: PickedSku | null) => {
+  const addSku = (c: Card, qty: number, note: string, usedFor?: PickedSku | null, urgent?: boolean, useDate?: string | null) => {
     const s = c.sku!;
-    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note, usedForId: usedFor?.id ?? null, usedForLabel: usedFor?.name ?? null }]);
+    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note, usedForId: usedFor?.id ?? null, usedForLabel: usedFor?.name ?? null, urgent: !!urgent, useDate: useDate || null }]);
     setConfirmSku(null);
   };
 
@@ -511,6 +512,7 @@ export default function PurchasingShopPage() {
             image_key: l.image, note: l.note || null,
             used_for_sku_id: l.usedForId ?? cartUsedFor?.id ?? null,        // รายชิ้นก่อน → ไม่มีค่อยใช้ระดับตะกร้า
             used_for_label:  l.usedForLabel ?? cartUsedFor?.name ?? null,
+            is_urgent: l.urgent === true, needed_date: l.useDate || null,
           })),
         }),
       });
@@ -797,6 +799,7 @@ export default function PurchasingShopPage() {
                   </span>
                 </div>
                 {l.note && <div className="text-[11px] text-amber-600 mt-0.5">📝 {l.note}</div>}
+                {l.urgent && <div className="text-[11px] text-rose-600 mt-0.5 font-medium">⚡ ส่งด่วน{l.useDate ? ` · ใช้ ${l.useDate}` : ""}</div>}
                 <div className="text-[11px] text-slate-400 mt-0.5">🏪 {l.seller}</div>
               </div>
             ))}
@@ -842,7 +845,7 @@ export default function PurchasingShopPage() {
                 </button>
               )}
             </div>
-            <button onClick={save} disabled={saving || cart.length === 0}
+            <button onClick={() => setShowReview(true)} disabled={saving || cart.length === 0}
               className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
               {saving ? "กำลังสร้าง..." : `สร้างใบขอซื้อ (${cart.length} ใบ) →`}
             </button>
@@ -854,6 +857,49 @@ export default function PurchasingShopPage() {
       <SkuImagePicker open={cartPickerOpen} onClose={() => setCartPickerOpen(false)}
         title="เลือกสินค้าปลายทาง (ใช้กับทุกใบในตะกร้า)"
         onPick={(sku) => { setCartUsedFor(sku); setCartPickerOpen(false); }} />
+
+      {/* ป๊อปทวนรายการก่อนสร้างใบขอซื้อ (recheck) — ของกลาง ERPModal */}
+      {showReview && (
+        <ERPModal open onClose={() => !saving && setShowReview(false)} size="lg"
+          title="ทวนรายการก่อนสร้างใบขอซื้อ"
+          description={`จะสร้างใบขอซื้อทั้งหมด ${cart.length} ใบ (แยกใบละ 1 สินค้า) · วันที่สั่ง ${orderDate}`}
+          footer={<>
+            <button onClick={() => setShowReview(false)} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">← กลับไปแก้</button>
+            <button onClick={async () => { await save(); setShowReview(false); }} disabled={saving || cart.length === 0}
+              className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังสร้าง…" : `✓ ยืนยันสร้าง ${cart.length} ใบ`}</button>
+          </>}>
+          <div className="space-y-2">
+            {cart.map((l, i) => (
+              <div key={i} className="flex items-center gap-3 border border-slate-100 rounded-lg p-2">
+                <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {img(l.image) ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img(l.image)!} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-slate-800 truncate">{l.label}</div>
+                  <div className="text-[11px] text-slate-400">🏪 {l.seller}{l.urgent ? <span className="text-rose-600 font-medium"> · ⚡ ส่งด่วน{l.useDate ? ` (ใช้ ${l.useDate})` : ""}</span> : ""}{l.note ? ` · 📝 ${l.note}` : ""}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-sm text-slate-700 tabular-nums">{l.qty.toLocaleString()} {l.uom}</div>
+                  <div className="text-[11px] text-slate-500 tabular-nums">{(l.price * (Number(l.qty) || 0)).toLocaleString()} {curLabel(l.currency)}</div>
+                </div>
+              </div>
+            ))}
+            {/* ยอดรวมแยกตามสกุลเงิน */}
+            <div className="mt-3 pt-2 border-t border-slate-200 space-y-0.5">
+              {(() => {
+                const totals: Record<string, number> = {};
+                for (const l of cart) totals[l.currency] = (totals[l.currency] ?? 0) + l.price * (Number(l.qty) || 0);
+                return Object.entries(totals).map(([c, sum]) => (
+                  <div key={c} className="flex justify-between text-sm">
+                    <span className="text-slate-500">ยอดรวม ({curLabel(c)})</span>
+                    <span className="font-bold text-blue-600 tabular-nums">{sum.toLocaleString()} {curLabel(c)}{c === "YUAN" && cnyRate > 0 ? <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(sum * cnyRate).toLocaleString()}</span> : null}</span>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+        </ERPModal>
+      )}
 
       {/* Filter picker (เลือก field ที่จะใช้กรอง) */}
       {/* เลือกตัวกรอง (ของกลาง ERPModal) */}
@@ -876,7 +922,7 @@ export default function PurchasingShopPage() {
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
         <ConfirmSku card={confirmSku} rate={cnyRate} onClose={() => setConfirmSku(null)}
-          onAdd={(qty, note, usedFor) => addSku(confirmSku, qty, note, usedFor)}
+          onAdd={(qty, note, usedFor, urgent, useDate) => addSku(confirmSku, qty, note, usedFor, urgent, useDate)}
           onSaveImage={saveSkuImage}
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
       )}
@@ -994,12 +1040,14 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
+function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null, urgent: boolean, useDate: string | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const [usedFor, setUsedFor] = useState<PickedSku | null>(null);   // 🎯 ใช้กับสินค้า (ปลายทาง)
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editImg, setEditImg] = useState(false);   // เปิดโหมดแก้รูปในป๊อปนี้
+  const [urgent, setUrgent] = useState(false);     // ⚡ ส่งด่วน
+  const [useDate, setUseDate] = useState("");       // วันที่ใช้งาน (ไม่บังคับ)
   const s = card.sku!;
   return (
     <ERPModal open onClose={onClose} size="md" title="เพิ่มลงใบขอซื้อ"
@@ -1007,7 +1055,7 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card:
         <>
           <button onClick={onEdit} className="mr-auto h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">✎ แก้ไขสินค้า</button>
           <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={() => onAdd(qty, note, usedFor)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
+          <button onClick={() => onAdd(qty, note, usedFor, urgent, useDate || null)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
         </>
       }>
       <div className="flex gap-3">
@@ -1042,6 +1090,19 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card:
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ (ถ้ามี)</label>
           <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น สีพิเศษ / ด่วน" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        </div>
+        {/* ⚡ ส่งด่วน → โชว์ช่องวันที่ใช้งาน (ไม่บังคับ) */}
+        <div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={urgent} onChange={e => setUrgent(e.target.checked)} className="rounded border-slate-300" />
+            <span className="font-medium">⚡ ส่งด่วน</span>
+          </label>
+          {urgent && (
+            <div className="mt-2">
+              <label className="block text-xs font-medium text-slate-600 mb-1">วันที่ใช้งาน (ถ้ามี)</label>
+              <input type="date" value={useDate} onChange={e => setUseDate(e.target.value)} className="w-full h-9 px-3 text-sm border border-amber-200 bg-amber-50/40 rounded-md" />
+            </div>
+          )}
         </div>
         {/* 🎯 ใช้กับสินค้า (ปลายทาง) — เลือกจาก SKU แบบมีรูป */}
         <div>
