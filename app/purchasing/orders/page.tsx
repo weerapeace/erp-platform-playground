@@ -448,10 +448,27 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
   const { user } = useAuth();
   const toast = useToast();
   const [seller, setSeller] = useState("");
+  const [sellerId, setSellerId] = useState("");   // id ร้าน (ไว้ sync เข้า price list)
   const [price, setPrice] = useState(String(row.price_est || ""));
   const [cur, setCur] = useState(row.currency || "THB");
   const [saving, setSaving] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [syncCount, setSyncCount] = useState(0);
+
+  // เก็บร้าน+ราคาเข้า "ร้านที่จำหน่าย" ของสินค้า (best-effort)
+  const syncToPriceList = async (silent = false): Promise<boolean> => {
+    if (!row.item_sku_id || !sellerId) return false;
+    try {
+      const res = await apiFetch(`/api/purchasing/sku-suppliers`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku_id: row.item_sku_id, partner_id: sellerId, price: Number(price) || null, currency: cur, default_if_none: true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { if (!silent) toast.error("เพิ่มเข้ารายการไม่สำเร็จ: " + (j.error ?? res.status)); return false; }
+      setSyncCount((n) => n + 1);
+      return true;
+    } catch { return false; }
+  };
 
   const save = async () => {
     if (!seller) { toast.error("เลือกร้านก่อน"); return; }
@@ -464,6 +481,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      await syncToPriceList(true);   // เก็บร้าน+ราคาเข้ารายการสินค้าอัตโนมัติ
       toast.success("ตั้งร้านแล้ว — ใส่ตะกร้าให้เลย");
       onSaved({ ...row, seller_name: seller, price_est: priceN, currency: cur, line_total: row.qty * priceN });
     } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
@@ -484,9 +502,9 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย) *</label>
           <div className="flex gap-1.5">
-            <select value={seller} onChange={(e) => setSeller(e.target.value)} className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+            <select value={sellerId} onChange={(e) => { const id = e.target.value; setSellerId(id); setSeller(suppliers.find((s) => s.id === id)?.name ?? ""); }} className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
               <option value="">— เลือกผู้จำหน่าย —</option>
-              {suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button type="button" onClick={() => setWizardOpen(true)} className="h-9 px-3 text-sm rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 shrink-0">+ เพิ่ม</button>
           </div>
@@ -494,14 +512,17 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(cur)})</label>
           <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" placeholder="0" />
+          <button type="button" onClick={() => void syncToPriceList()} disabled={!sellerId}
+            title={sellerId ? "" : "เลือกร้านจากรายการก่อน"}
+            className="mt-1.5 h-7 px-2.5 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50 disabled:opacity-40">➕ เพิ่มร้านนี้เข้ารายการสินค้า</button>
         </div>
         {/* รายการราคาหลายร้านของสินค้านี้ — กด "ใช้ร้านนี้" เพื่อดึงร้าน+ราคามาใส่ */}
         {row.item_sku_id && (
-          <SkuSupplierList skuId={row.item_sku_id} defaultOpen={false}
-            onUse={(r) => { setSeller(r.partner_name); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
+          <SkuSupplierList skuId={row.item_sku_id} defaultOpen={false} reloadSignal={syncCount}
+            onUse={(r) => { setSeller(r.partner_name); if (r.partner_id) setSellerId(r.partner_id); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
         )}
       </div>
-      {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
+      {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setSellerId(p.id); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
     </ERPModal>
   );
 }
@@ -514,10 +535,31 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
   const [price, setPrice] = useState(String(row.price_est));
   const [note, setNote] = useState(row.note ?? "");
   const [seller, setSeller] = useState(row.seller_name && row.seller_name !== "—" ? row.seller_name : "");
+  const [sellerId, setSellerId] = useState("");   // id ร้าน (ไว้ sync เข้า price list)
   const [cur, setCur] = useState(row.currency || "THB");
   const [imgKey, setImgKey] = useState<string | null>(row.cover_key);
   const [saving, setSaving] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [syncCount, setSyncCount] = useState(0);
+
+  // เดา id ร้านจากชื่อเดิม เมื่อรายชื่อร้านโหลดเสร็จ (PR เก็บแค่ชื่อ)
+  useEffect(() => {
+    if (!sellerId && seller) { const m = suppliers.find((s) => s.name === seller); if (m) setSellerId(m.id); }
+  }, [suppliers, seller, sellerId]);
+
+  const syncToPriceList = async (silent = false): Promise<boolean> => {
+    if (!row.item_sku_id || !sellerId) return false;
+    try {
+      const res = await apiFetch(`/api/purchasing/sku-suppliers`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku_id: row.item_sku_id, partner_id: sellerId, price: Number(price) || null, currency: cur, default_if_none: true }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { if (!silent) toast.error("เพิ่มเข้ารายการไม่สำเร็จ: " + (j.error ?? res.status)); return false; }
+      setSyncCount((n) => n + 1);
+      return true;
+    } catch { return false; }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -534,6 +576,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
           body: JSON.stringify({ cover_image_r2_key: imgKey, actor: user?.name }),
         });
       }
+      await syncToPriceList(true);   // เก็บร้าน+ราคาเข้ารายการสินค้าอัตโนมัติ
       toast.success("บันทึกแล้ว");
       await onSaved();
     } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
@@ -554,19 +597,22 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย)</label>
           <div className="flex gap-1.5">
-            <select value={seller} onChange={(e) => setSeller(e.target.value)} className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+            <select value={sellerId} onChange={(e) => { const id = e.target.value; setSellerId(id); setSeller(suppliers.find((s) => s.id === id)?.name ?? ""); }} className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
               <option value="">— เลือกผู้จำหน่าย —</option>
-              {seller && !suppliers.some((s) => s.name === seller) && <option value={seller}>{seller} (ปัจจุบัน · ไม่ใช่ผู้จำหน่าย)</option>}
-              {suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
             <button type="button" onClick={() => setWizardOpen(true)} title="เพิ่มผู้จำหน่ายใหม่" className="h-9 px-3 text-sm rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 shrink-0">+ เพิ่ม</button>
           </div>
+          {!sellerId && seller && <div className="text-[11px] text-amber-600 mt-1">ร้านปัจจุบัน: {seller} (ไม่ใช่ผู้จำหน่ายในระบบ — เลือกใหม่เพื่อเพิ่มเข้ารายการได้)</div>}
+          <button type="button" onClick={() => void syncToPriceList()} disabled={!sellerId}
+            title={sellerId ? "" : "เลือกร้านจากรายการก่อน"}
+            className="mt-1.5 h-7 px-2.5 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50 disabled:opacity-40">➕ เพิ่มร้านนี้เข้ารายการสินค้า</button>
         </div>
-        {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
+        {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setSellerId(p.id); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
         {/* รายการราคาหลายร้านของสินค้านี้ — กด "ใช้ร้านนี้" เพื่อดึงร้าน+ราคามาใส่ */}
         {row.item_sku_id && (
-          <SkuSupplierList skuId={row.item_sku_id} defaultOpen={false}
-            onUse={(r) => { setSeller(r.partner_name); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
+          <SkuSupplierList skuId={row.item_sku_id} defaultOpen={false} reloadSignal={syncCount}
+            onUse={(r) => { setSeller(r.partner_name); if (r.partner_id) setSellerId(r.partner_id); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
         )}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">รูปสินค้า (SKU จริง)</label>

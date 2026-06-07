@@ -76,28 +76,38 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!skuId || !partnerId) return NextResponse.json({ error: "ต้องระบุสินค้าและร้าน" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const wantDefault = b.is_default === true;
-  // ถ้าตั้งเป็นร้านหลัก → ปลดร้านหลักเดิมก่อน (กันชน unique index)
-  if (wantDefault) await admin.from("supplier_items").update({ is_default: false }).eq("item_sku_id", skuId).eq("is_default", true);
+  const currency = typeof b.currency === "string" && b.currency ? b.currency : "THB";
+  const price = num(b.price);
 
-  const row = {
-    item_sku_id: skuId,
-    supplier_partner_id: partnerId,
-    price: num(b.price),
-    currency: typeof b.currency === "string" && b.currency ? b.currency : "THB",
-    is_default: wantDefault,
-    supplier_sku: typeof b.supplier_sku === "string" ? b.supplier_sku : null,
-    moq: num(b.moq),
-    note: typeof b.note === "string" ? b.note : null,
-    is_active: true,
-  };
-  const { data, error } = await admin.from("supplier_items").insert(row).select(SELECT).single();
-  if (error) {
-    if (error.code === "23505") return NextResponse.json({ error: "ร้านนี้มีอยู่ในรายการแล้ว" }, { status: 409 });
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  // กติกาตั้งร้านหลัก: is_default=true → ตั้งแน่นอน ; default_if_none=true → ตั้งให้เฉพาะถ้าสินค้านี้ยังไม่มีร้านหลัก
+  let setDefault = b.is_default === true;
+  if (!setDefault && b.default_if_none === true) {
+    const { count } = await admin.from("supplier_items").select("id", { count: "exact", head: true }).eq("item_sku_id", skuId).eq("is_default", true);
+    setDefault = (count ?? 0) === 0;
   }
-  await writeAudit(admin, { action: "create", entityType: "supplier_items", entityId: String((data as unknown as Record<string, unknown>).id), actorId: user?.id, actorName: user?.user_metadata?.name as string | undefined, metadata: { sku_id: skuId, partner_id: partnerId, price: row.price, currency: row.currency } });
-  return NextResponse.json({ data: shape(data as unknown as Record<string, unknown>), error: null });
+  if (setDefault) await admin.from("supplier_items").update({ is_default: false }).eq("item_sku_id", skuId).eq("is_default", true);
+
+  // upsert: มีร้านนี้อยู่แล้ว → อัปเดตราคา/สกุลเงิน ; ยังไม่มี → เพิ่มใหม่
+  const { data: existing } = await admin.from("supplier_items")
+    .select("id").eq("item_sku_id", skuId).eq("supplier_partner_id", partnerId).maybeSingle();
+
+  let data: unknown, error: { message: string } | null;
+  if (existing) {
+    const patch: Record<string, unknown> = { price, currency, is_active: true };
+    if (setDefault) patch.is_default = true;
+    ({ data, error } = await admin.from("supplier_items").update(patch).eq("id", (existing as Record<string, unknown>).id as string).select(SELECT).single());
+  } else {
+    const row = {
+      item_sku_id: skuId, supplier_partner_id: partnerId, price, currency, is_default: setDefault,
+      supplier_sku: typeof b.supplier_sku === "string" ? b.supplier_sku : null,
+      moq: num(b.moq), note: typeof b.note === "string" ? b.note : null, is_active: true,
+    };
+    ({ data, error } = await admin.from("supplier_items").insert(row).select(SELECT).single());
+  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const shaped = shape(data as unknown as Record<string, unknown>);
+  await writeAudit(admin, { action: existing ? "update" : "create", entityType: "supplier_items", entityId: shaped.id, actorId: user?.id, actorName: user?.user_metadata?.name as string | undefined, metadata: { sku_id: skuId, partner_id: partnerId, price, currency } });
+  return NextResponse.json({ data: shaped, error: null });
 }
 
 // ── PATCH — แก้ราคา/สกุลเงิน/ตั้งร้านหลัก ──

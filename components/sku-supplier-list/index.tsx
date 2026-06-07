@@ -23,11 +23,12 @@ type Supplier = { id: string; name: string; currency: string };
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 const CURRENCIES = ["THB", "RMB"];
 
-export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true }: {
+export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, reloadSignal }: {
   skuId: string;
   onUse?: (row: SkuSupplierRow) => void;
   onChanged?: () => void;   // แจ้ง parent เมื่อ list เปลี่ยน (เผื่อ refresh ราคาตั้งต้น)
   defaultOpen?: boolean;    // false = ซ่อนไว้ก่อน โชว์ปุ่มกดเปิด
+  reloadSignal?: number;    // parent bump ค่านี้ → รีโหลดรายการ (อัปเดตจำนวนร้าน)
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [rows, setRows] = useState<SkuSupplierRow[]>([]);
@@ -54,6 +55,8 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true }:
   }, [skuId]);
 
   useEffect(() => { void load(); }, [load]);
+  // parent สั่งรีโหลด (เช่นหลัง sync ร้านจากหัวรายการ) — อัปเดตจำนวนร้าน/รายการ
+  useEffect(() => { if (reloadSignal !== undefined) void load(); }, [reloadSignal, load]);
 
   useEffect(() => {
     const f = encodeURIComponent(JSON.stringify({ is_supplier: { type: "boolean", value: "true" } }));
