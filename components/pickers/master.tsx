@@ -163,6 +163,11 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
     const list = query.trim()
       ? results
       : [...favs, ...baseList.filter(v => !favIds.has(v.id))];
+    const recentItems = recent.filter(v => !favIds.has(v.id));
+    const recentIds = new Set(recent.map(r => r.id));
+    const defaultItems = query.trim()
+      ? []
+      : results.filter(v => !favIds.has(v.id) && !recentIds.has(v.id));
 
     // row เดียว — ใช้ซ้ำ (มีปุ่มดาวปักหมุด)
     const renderRow = (v: V) => (
@@ -222,10 +227,14 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
                 <>
                   {favs.length > 0 && <div className="px-3 py-1 text-xs text-amber-500">★ รายการโปรด</div>}
                   {favs.map(renderRow)}
-                  {recent.filter(v => !favIds.has(v.id)).length > 0 && (
+                  {recentItems.length > 0 && (
                     <div className="px-3 py-1 text-xs text-slate-400">⏱ เคยใช้ล่าสุด</div>
                   )}
-                  {recent.filter(v => !favIds.has(v.id)).map(renderRow)}
+                  {recentItems.map(renderRow)}
+                  {defaultItems.length > 0 && (
+                    <div className="px-3 py-1 text-xs text-slate-400">รายการทั้งหมด</div>
+                  )}
+                  {defaultItems.map(renderRow)}
                 </>
               )}
 

@@ -5,6 +5,7 @@ import { guardApi } from "@/lib/api-auth";
 type SkuPickerRow = {
   id: string;
   code: string | null;
+  parent_sku_id: string | null;
   name_th: string | null;
   sku_name: string | null;
   list_price: number | null;
@@ -14,8 +15,23 @@ type SkuPickerRow = {
   uom: { name: string | null } | { name: string | null }[] | null;
 };
 
+type ParentSkuMatchRow = {
+  id: string;
+};
+
 const cleanSearch = (value: string) =>
-  value.replace(/[,()*]/g, " ").trim().split(/\s+/).filter(Boolean).slice(0, 4);
+  value.replace(/[%_,()*]/g, " ").trim().split(/\s+/).filter(Boolean).slice(0, 4);
+
+async function findParentSkuIds(request: NextRequest, token: string): Promise<string[]> {
+  const { data, error } = await supabaseFromRequest(request)
+    .from("parent_skus_v2")
+    .select("id")
+    .or(`code.ilike.%${token}%,name_th.ilike.%${token}%`)
+    .limit(100);
+
+  if (error) return [];
+  return ((data ?? []) as ParentSkuMatchRow[]).map((row) => row.id);
+}
 
 export async function GET(request: NextRequest) {
   const denied = await guardApi(request, "products.view");
@@ -25,12 +41,18 @@ export async function GET(request: NextRequest) {
   const search = (searchParams.get("search") ?? "").trim();
   const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") ?? "24", 10)));
   const salesOnly = searchParams.get("sales_only") !== "false";
+  const tokens = cleanSearch(search);
+  const parentIdsByToken = new Map<string, string[]>();
+  for (const token of tokens) {
+    parentIdsByToken.set(token, await findParentSkuIds(request, token));
+  }
 
   let query = supabaseFromRequest(request)
     .from("skus_v2")
     .select(`
       id,
       code,
+      parent_sku_id,
       name_th,
       sku_name,
       list_price,
@@ -42,8 +64,17 @@ export async function GET(request: NextRequest) {
     .eq("is_active", true);
   if (salesOnly) query = query.eq("sale_ok", true);
 
-  for (const token of cleanSearch(search)) {
-    query = query.or(`code.ilike.%${token}%,name_th.ilike.%${token}%,barcode.ilike.%${token}%`);
+  for (const token of tokens) {
+    const parentIds = parentIdsByToken.get(token) ?? [];
+    const parts = [
+      `code.ilike.%${token}%`,
+      `name_th.ilike.%${token}%`,
+      `barcode.ilike.%${token}%`,
+    ];
+    if (parentIds.length > 0) {
+      parts.push(`parent_sku_id.in.(${parentIds.join(",")})`);
+    }
+    query = query.or(parts.join(","));
   }
 
   const { data, error } = await query.order("code", { ascending: true }).limit(limit);
