@@ -16,7 +16,7 @@ import { SupplierWizard } from "@/components/supplier-wizard";
 export type SkuSupplierRow = {
   id: string; sku_id: string | null; partner_id: string | null; partner_name: string;
   partner_country: string | null; price: number | null; currency: string; is_default: boolean;
-  supplier_sku: string | null; moq: number | null; note: string | null;
+  supplier_sku: string | null; moq: number | null; lead_time_days: number | null; note: string | null;
 };
 type Supplier = { id: string; name: string; currency: string };
 
@@ -148,7 +148,8 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
       ) : (
         <div className="space-y-1.5">
           {rows.map((r) => (
-            <div key={r.id} className="flex items-center gap-2 bg-white border border-slate-200 rounded-md px-2 py-1.5">
+            <div key={r.id} className="bg-white border border-slate-200 rounded-md px-2 py-1.5">
+            <div className="flex items-center gap-2">
               <button type="button" title={r.is_default ? "ร้านหลัก" : "ตั้งเป็นร้านหลัก"}
                 onClick={() => !r.is_default && void patchRow(r.id, { is_default: true })} disabled={busy}
                 className={`text-base leading-none ${r.is_default ? "text-amber-400" : "text-slate-300 hover:text-amber-300"}`}>
@@ -169,6 +170,18 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
               )}
               <button type="button" onClick={() => void delRow(r.id)} disabled={busy}
                 className="text-slate-300 hover:text-red-500 text-sm">✕</button>
+            </div>
+            {/* บรรทัดรอง: MOQ + leadtime (แก้ได้) */}
+            <div className="flex items-center gap-3 mt-1 pl-6 text-[11px] text-slate-400">
+              <label className="flex items-center gap-1">MOQ
+                <input type="number" step="any" defaultValue={r.moq ?? ""} disabled={busy}
+                  onBlur={(e) => { const v = e.target.value === "" ? null : Number(e.target.value); if (v !== r.moq) void patchRow(r.id, { moq: v }); }}
+                  className="h-6 w-16 px-1 text-right border border-slate-200 rounded" placeholder="—" /></label>
+              <label className="flex items-center gap-1">ส่ง
+                <input type="number" step="1" defaultValue={r.lead_time_days ?? ""} disabled={busy}
+                  onBlur={(e) => { const v = e.target.value === "" ? null : Number(e.target.value); if (v !== r.lead_time_days) void patchRow(r.id, { lead_time_days: v }); }}
+                  className="h-6 w-12 px-1 text-right border border-slate-200 rounded" placeholder="—" />วัน</label>
+            </div>
             </div>
           ))}
         </div>

@@ -23,7 +23,7 @@ type Row = {
   id: string; seller_name: string; item_sku_id: string | null; item_name: string; code: string;
   qty: number; uom: string; price_est: number; line_total: number; currency: string;
   order_date: string | null; requester: string; note: string; status: string; approved: boolean; cover_key: string | null; image_url: string | null;
-  purchase_link: string | null;
+  purchase_link: string | null; moq: number | null; lead_time_days: number | null;
 };
 type CartLine = { qty: number; partial: boolean };
 
@@ -301,6 +301,13 @@ export default function PurchaseOrdersPage() {
                                 <div className="text-xs text-slate-500 mt-1">ขอซื้อ <b className="text-slate-700">{r.qty.toLocaleString()}</b> {r.uom}</div>
                                 <div className="text-sm font-semibold text-blue-600 mt-0.5">{money(r.line_total, r.currency)}{isCNY(r.currency) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(r.line_total * rate).toLocaleString()}</span>}</div>
                                 <div className="text-[11px] text-slate-400">@ {money(r.price_est, r.currency)} · {r.order_date ? formatDate(r.order_date) : "—"}</div>
+                                {(r.moq != null || r.lead_time_days != null) && (
+                                  <div className="text-[11px] text-slate-500 mt-0.5">
+                                    {r.moq != null && <span>MOQ {r.moq.toLocaleString()}</span>}
+                                    {r.moq != null && r.lead_time_days != null && " · "}
+                                    {r.lead_time_days != null && <span>ส่ง {r.lead_time_days} วัน</span>}
+                                  </div>
+                                )}
                                 <div className={`w-full mt-2 h-8 text-xs font-medium rounded-md flex items-center justify-center ${blocked ? "bg-amber-50 text-amber-700 border border-amber-200" : on ? "bg-blue-100 text-blue-700 border border-blue-200" : "bg-blue-600 text-white"}`}>
                                   {blocked ? "📍 ตั้งร้าน" : on ? "✓ อยู่ในตะกร้า" : "+ ใส่ตะกร้า"}
                                 </div>

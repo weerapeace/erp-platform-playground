@@ -41,6 +41,7 @@ function shape(r: Record<string, unknown>) {
     is_default: r.is_default === true,
     supplier_sku: (r.supplier_sku as string) ?? null,
     moq: r.moq == null ? null : Number(r.moq),
+    lead_time_days: r.lead_time_days == null ? null : Number(r.lead_time_days),
     note: (r.note as string) ?? null,
   };
 }
@@ -100,7 +101,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const row = {
       item_sku_id: skuId, supplier_partner_id: partnerId, price, currency, is_default: setDefault,
       supplier_sku: typeof b.supplier_sku === "string" ? b.supplier_sku : null,
-      moq: num(b.moq), note: typeof b.note === "string" ? b.note : null, is_active: true,
+      moq: num(b.moq), lead_time_days: num(b.lead_time_days),
+      note: typeof b.note === "string" ? b.note : null, is_active: true,
     };
     ({ data, error } = await admin.from("supplier_items").insert(row).select(SELECT).single());
   }
@@ -130,6 +132,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("currency" in b && typeof b.currency === "string") patch.currency = b.currency || "THB";
   if ("supplier_sku" in b) patch.supplier_sku = typeof b.supplier_sku === "string" ? b.supplier_sku : null;
   if ("moq" in b) patch.moq = num(b.moq);
+  if ("lead_time_days" in b) patch.lead_time_days = num(b.lead_time_days);
   if ("note" in b) patch.note = typeof b.note === "string" ? b.note : null;
 
   if (b.is_default === true) {
