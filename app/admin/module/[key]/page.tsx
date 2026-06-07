@@ -170,6 +170,7 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
   const [primaryField, setPrimaryField] = useState("");
   const [groupLabel, setGroupLabel] = useState("");
   const [groupOptions, setGroupOptions] = useState<string[]>([]);
+  const [newGroup, setNewGroup] = useState(false);   // โหมด "สร้างกลุ่มใหม่"
   const [isActive, setIsActive] = useState(true);
   const [sortOrder, setSortOrder] = useState(100);
   const [appKeys, setAppKeys] = useState<string[]>([]);
@@ -264,12 +265,27 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
         </div>
         <div className="mt-3">
           <label className={labelCls}>กลุ่ม (รวมหลายโมดูลเป็นหน้าแท็บเดียว)</label>
-          <input value={groupLabel} onChange={(e) => setGroupLabel(e.target.value)} list="erp-group-options"
-            className={inputCls} placeholder="เช่น ข้อมูลสินค้า, คู่ค้า — เว้นว่าง = ไม่รวมกลุ่ม" />
-          <datalist id="erp-group-options">
-            {groupOptions.map((g) => <option key={g} value={g} />)}
-          </datalist>
-          <p className="text-[11px] text-slate-400 mt-1">โมดูลที่ใส่ชื่อกลุ่มเดียวกัน จะเปิดรวมกันเป็นแท็บที่หน้า <code className="bg-slate-100 px-1 rounded">/master/group/{groupLabel ? encodeURIComponent(groupLabel) : "<ชื่อกลุ่ม>"}</code> — แล้วเพิ่มเมนู 1 อันชี้มาที่ลิงก์นี้ในหน้า “จัดการเมนู”</p>
+          {newGroup ? (
+            <div className="flex gap-2">
+              <input value={groupLabel} onChange={(e) => setGroupLabel(e.target.value)} autoFocus
+                className={inputCls} placeholder="ชื่อกลุ่มใหม่ เช่น ข้อมูลสินค้า" />
+              <button type="button" onClick={() => { setNewGroup(false); setGroupLabel(""); }}
+                className="shrink-0 h-10 px-3 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            </div>
+          ) : (
+            <select
+              value={groupLabel && [...groupOptions, groupLabel].includes(groupLabel) ? groupLabel : ""}
+              onChange={(e) => {
+                if (e.target.value === "__new__") { setNewGroup(true); setGroupLabel(""); }
+                else setGroupLabel(e.target.value);
+              }}
+              className={inputCls}>
+              <option value="">— ไม่รวมกลุ่ม —</option>
+              {[...new Set([...groupOptions, groupLabel].filter(Boolean))].map((g) => <option key={g} value={g}>{g}</option>)}
+              <option value="__new__">➕ สร้างกลุ่มใหม่…</option>
+            </select>
+          )}
+          <p className="text-[11px] text-slate-400 mt-1">โมดูลที่อยู่กลุ่มเดียวกัน จะเปิดรวมกันเป็นแท็บที่หน้า <code className="bg-slate-100 px-1 rounded">/master/group/{groupLabel ? encodeURIComponent(groupLabel) : "<ชื่อกลุ่ม>"}</code> — แล้วเพิ่มเมนู 1 อันชี้มาที่ลิงก์นี้ในหน้า “จัดการเมนู”</p>
         </div>
         <label className="flex items-center gap-2 mt-4 text-sm text-slate-700 cursor-pointer select-none">
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-slate-300 w-4 h-4" />
