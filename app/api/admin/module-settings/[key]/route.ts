@@ -165,8 +165,9 @@ export async function PATCH(
   if (groupVal) {
     const ghref = `/master/group/${encodeURIComponent(groupVal)}`;
     const gSection = (existing?.section as string | null) ?? "Master Data";
-    const gAppKeys = mn.app_keys ?? (existing?.app_keys as string[] | null) ?? [];
-    const { data: gExisting } = await admin.from("erp_menu_items").select("id").eq("href", ghref).maybeSingle();
+    const { data: gExisting } = await admin.from("erp_menu_items").select("id, app_keys").eq("href", ghref).maybeSingle();
+    // กัน app_keys ของเมนูกลุ่มโดนรีเซ็ต: ใช้ที่ส่งมา > ของเมนูกลุ่มเดิม > ของเมนูโมดูล
+    const gAppKeys = mn.app_keys ?? (gExisting?.app_keys as string[] | null) ?? (existing?.app_keys as string[] | null) ?? [];
     const gPatch: Record<string, unknown> = {
       label: groupVal, icon: "🗂️", app_keys: gAppKeys, show_in_sidebar: true, is_active: true,
     };
