@@ -105,13 +105,14 @@ export default function BomWorkspacePage() {
         id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "",
         version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: (d as { note?: string }).note ?? "",
         lines: (d.lines ?? []).map((l) => ({
-          key: l.id, slot_code: l.slot_code, component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
+          key: l.id, component_id: null, slot_code: l.slot_code,
+          component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
+          material_family_id: null, material_type: l.material_type ?? "",
           qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
-          source: l.source, odoo_bom_line_id: l.odoo_bom_line_id,
-          calc_mode: (l.calc_mode === "block" ? "block" : "manual") as "manual" | "block",
           cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "",
           pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
-          face_width_cm: Number(l.face_width_cm) || 0, material_type: l.material_type ?? "",
+          face_width_cm: Number(l.face_width_cm) || 0,
+          source: l.source, odoo_bom_line_id: l.odoo_bom_line_id,
         })),
       });
       setDirty(false);
@@ -138,7 +139,7 @@ export default function BomWorkspacePage() {
         slot_code: l.slot_code, component_sku: l.component_sku || null, component_name: l.component_name || null,
         qty: l.qty, uom: l.uom || null, waste_percent: l.waste_percent, is_optional: l.is_optional,
         sequence: i + 1, source: l.source ?? "manual", odoo_bom_line_id: l.odoo_bom_line_id ?? null,
-        calc_mode: l.calc_mode, cut_block_id: l.cut_block_id, cut_block_code: l.cut_block_code || null,
+        calc_mode: l.cut_block_id ? "block" : "manual", cut_block_id: l.cut_block_id, cut_block_code: l.cut_block_code || null,
         pieces: l.pieces, cut_width: l.cut_width, cut_length: l.cut_length,
         face_width_cm: l.face_width_cm, material_type: l.material_type || null,
       })),
