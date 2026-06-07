@@ -411,6 +411,15 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
     });
   };
 
+  // เพิ่มกลุ่มฟิลด์ใหม่ (โผล่ในช่อง Group ทุกแถว) — ถ้ามีฟิลด์เลือกอยู่ ย้ายเข้ากลุ่มนี้เลย
+  const addGroup = () => {
+    const name = (typeof window !== "undefined" ? window.prompt("ชื่อกลุ่มใหม่ (เช่น สเปกเข็มขัด)") : "")?.trim();
+    if (!name) return;
+    setCustomGroups((p) => (p.includes(name) ? p : [...p, name]));
+    if (selected.size > 0) bulkUpdate({ group_key: name });
+    else flash(`เพิ่มกลุ่ม “${name}” แล้ว — เลือกในช่อง Group ของฟิลด์ หรือเลือกหลายฟิลด์แล้วกด “เพิ่มกลุ่ม” อีกครั้งเพื่อย้ายเข้ากลุ่มนี้`);
+  };
+
   const inner = (
       <div className="min-h-screen bg-slate-50">
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
@@ -425,6 +434,13 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={addGroup}
+                  title="เพิ่มกลุ่มฟิลด์ (หมวดในฟอร์ม) — ถ้าเลือกฟิลด์ไว้จะย้ายเข้ากลุ่มนี้เลย"
+                  className="h-10 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50"
+                >
+                  📁 เพิ่มกลุ่ม
+                </button>
                 <button
                   onClick={() => setFieldCreatorOpen(true)}
                   className="h-10 px-4 text-sm font-medium text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50"
@@ -533,6 +549,8 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                 <div className="h-5 w-px bg-orange-300 mx-1" />
                 <BulkBtn onClick={() => bulkUpdate({ is_inline_editable: true })}  disabled={bulkSaving}>✎ เปิด inline edit</BulkBtn>
                 <BulkBtn onClick={() => bulkUpdate({ is_inline_editable: false })} disabled={bulkSaving} variant="muted">✎ ปิด inline edit</BulkBtn>
+                <div className="h-5 w-px bg-orange-300 mx-1" />
+                <BulkBtn onClick={addGroup} disabled={bulkSaving}>📁 ย้าย/สร้างกลุ่ม</BulkBtn>
                 <div className="ml-auto flex items-center gap-2">
                   <button
                     onClick={() => setSelected(new Set())}
