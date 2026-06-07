@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { ImageInput } from "@/components/image-input";
 import { SupplierWizard } from "@/components/supplier-wizard";
+import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -448,6 +449,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
   const toast = useToast();
   const [seller, setSeller] = useState("");
   const [price, setPrice] = useState(String(row.price_est || ""));
+  const [cur, setCur] = useState(row.currency || "THB");
   const [saving, setSaving] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
 
@@ -458,12 +460,12 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
       const priceN = Number(price) || 0;
       const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${row.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seller_name: seller, price_est: priceN, actor: user?.name }),
+        body: JSON.stringify({ seller_name: seller, price_est: priceN, currency: cur, actor: user?.name }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       toast.success("ตั้งร้านแล้ว — ใส่ตะกร้าให้เลย");
-      onSaved({ ...row, seller_name: seller, price_est: priceN, line_total: row.qty * priceN });
+      onSaved({ ...row, seller_name: seller, price_est: priceN, currency: cur, line_total: row.qty * priceN });
     } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -490,9 +492,14 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
           </div>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(row.currency)})</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(cur)})</label>
           <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" placeholder="0" />
         </div>
+        {/* รายการราคาหลายร้านของสินค้านี้ — กด "ใช้ร้านนี้" เพื่อดึงร้าน+ราคามาใส่ */}
+        {row.item_sku_id && (
+          <SkuSupplierList skuId={row.item_sku_id}
+            onUse={(r) => { setSeller(r.partner_name); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
+        )}
       </div>
       {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
     </ERPModal>
@@ -507,6 +514,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
   const [price, setPrice] = useState(String(row.price_est));
   const [note, setNote] = useState(row.note ?? "");
   const [seller, setSeller] = useState(row.seller_name && row.seller_name !== "—" ? row.seller_name : "");
+  const [cur, setCur] = useState(row.currency || "THB");
   const [imgKey, setImgKey] = useState<string | null>(row.cover_key);
   const [saving, setSaving] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -516,7 +524,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
     try {
       const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${row.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, seller_name: seller || null, actor: user?.name }),
+        body: JSON.stringify({ qty: Number(qty) || 0, price_est: Number(price) || 0, note: note || null, seller_name: seller || null, currency: cur, actor: user?.name }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
@@ -555,6 +563,11 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
           </div>
         </div>
         {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
+        {/* รายการราคาหลายร้านของสินค้านี้ — กด "ใช้ร้านนี้" เพื่อดึงร้าน+ราคามาใส่ */}
+        {row.item_sku_id && (
+          <SkuSupplierList skuId={row.item_sku_id}
+            onUse={(r) => { setSeller(r.partner_name); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
+        )}
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">รูปสินค้า (SKU จริง)</label>
           <ImageInput value={imgKey} onChange={setImgKey} folder="products" />
@@ -563,10 +576,10 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         <div className="grid grid-cols-2 gap-2">
           <div><label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({row.uom})</label>
             <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
-          <div><label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(row.currency)})</label>
+          <div><label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(cur)})</label>
             <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
         </div>
-        <div className="text-xs text-slate-500">ราคารวม: <b className="text-blue-600">{money((Number(qty) || 0) * (Number(price) || 0), row.currency)}</b></div>
+        <div className="text-xs text-slate-500">ราคารวม: <b className="text-blue-600">{money((Number(qty) || 0) * (Number(price) || 0), cur)}</b></div>
         <div><label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ</label>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="(ถ้ามี)" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
       </div>
