@@ -285,7 +285,7 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
               <option value="__new__">➕ สร้างกลุ่มใหม่…</option>
             </select>
           )}
-          <p className="text-[11px] text-slate-400 mt-1">โมดูลที่อยู่กลุ่มเดียวกัน จะเปิดรวมกันเป็นแท็บที่หน้า <code className="bg-slate-100 px-1 rounded">/master/group/{groupLabel ? encodeURIComponent(groupLabel) : "<ชื่อกลุ่ม>"}</code> — แล้วเพิ่มเมนู 1 อันชี้มาที่ลิงก์นี้ในหน้า “จัดการเมนู”</p>
+          <p className="text-[11px] text-slate-400 mt-1">โมดูลที่อยู่กลุ่มเดียวกัน จะรวมเป็นแท็บในหน้าเดียว และ<b>เมนู “{groupLabel || "ชื่อกลุ่ม"}” จะโผล่ในเมนูซ้ายให้อัตโนมัติ</b> (เมนูย่อยของโมดูลที่เข้ากลุ่มจะถูกซ่อนกันซ้ำ) · เลือก “สังกัด App” ด้านล่างให้ตรงกับที่อยากให้กลุ่มโผล่</p>
         </div>
         <label className="flex items-center gap-2 mt-4 text-sm text-slate-700 cursor-pointer select-none">
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-slate-300 w-4 h-4" />

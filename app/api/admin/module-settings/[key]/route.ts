@@ -136,7 +136,7 @@ export async function PATCH(
   const icon  = (cfg.icon as string) ?? "🧩";
 
   const { data: existing } = await admin
-    .from("erp_menu_items").select("id").eq("href", href).maybeSingle();
+    .from("erp_menu_items").select("id, section, app_keys").eq("href", href).maybeSingle();
 
   const menuPatch: Record<string, unknown> = { label, icon };
   if (mn.app_keys !== undefined)        menuPatch.app_keys = mn.app_keys;
@@ -157,6 +157,28 @@ export async function PATCH(
       app_keys: mn.app_keys ?? [], is_active: true,
     });
     if (e) return NextResponse.json({ error: e.message }, { status: 400 });
+  }
+
+  // ---- 2.5) เมนูกลุ่ม (auto) — ตั้ง group_label แล้วให้กลุ่มโผล่ใน sidebar เอง ----
+  // ชี้ไปหน้ารวมแท็บ /master/group/<กลุ่ม> · ใช้ section + app_keys เดียวกับโมดูล
+  const groupVal = m.group_label !== undefined ? ((m.group_label ?? "").trim() || null) : undefined;
+  if (groupVal) {
+    const ghref = `/master/group/${encodeURIComponent(groupVal)}`;
+    const gSection = (existing?.section as string | null) ?? "Master Data";
+    const gAppKeys = mn.app_keys ?? (existing?.app_keys as string[] | null) ?? [];
+    const { data: gExisting } = await admin.from("erp_menu_items").select("id").eq("href", ghref).maybeSingle();
+    const gPatch: Record<string, unknown> = {
+      label: groupVal, icon: "🗂️", app_keys: gAppKeys, show_in_sidebar: true, is_active: true,
+    };
+    if (gExisting) {
+      await admin.from("erp_menu_items").update(gPatch).eq("id", gExisting.id).then(() => {}, () => {});
+    } else {
+      await admin.from("erp_menu_items").insert({
+        section: gSection, section_order: 20, sort_order: 50, href: ghref, ...gPatch,
+      }).then(() => {}, () => {});
+    }
+    // ซ่อนเมนูย่อยของโมดูลนี้จาก sidebar (กันซ้ำกับเมนูกลุ่ม) — ออกจากกลุ่มค่อยเปิดคืนเอง
+    if (existing) await admin.from("erp_menu_items").update({ show_in_sidebar: false }).eq("id", existing.id).then(() => {}, () => {});
   }
 
   // ---- 3) audit (ของกลาง — ลง audit_logs, ไม่ throw) ----
