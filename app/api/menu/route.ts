@@ -38,8 +38,8 @@ export async function GET(request: NextRequest) {
   if (!all) q = q.eq("is_active", true);
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  // Phase 1 — cache เมนู 10 นาที (เปลี่ยนเฉพาะ admin) ลดดึงซ้ำทุก page load
-  return NextResponse.json({ data: data ?? [], error: null }, { headers: { "Cache-Control": "private, max-age=600" } });
+  // cache เมนูสั้น ๆ (30 วิ) — แก้เมนู/กลุ่มแล้วเห็นไว แต่ยังลดดึงซ้ำตอนสลับหน้าเร็ว ๆ
+  return NextResponse.json({ data: data ?? [], error: null }, { headers: { "Cache-Control": "private, max-age=30" } });
 }
 
 export async function POST(request: NextRequest) {
