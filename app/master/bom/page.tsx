@@ -30,6 +30,7 @@ type BomLineRow = {
   calc_mode: string | null; cut_block_id: number | null; cut_block_code: string | null;
   pieces: number | null; cut_width: number | null; cut_length: number | null;
   face_width_cm: number | null; material_type: string | null;
+  sku_id: string | null; image_key: string | null;
 };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -107,7 +108,7 @@ export default function BomWorkspacePage() {
         id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "",
         version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: (d as { note?: string }).note ?? "",
         lines: (d.lines ?? []).map((l) => ({
-          key: l.id, component_id: null, slot_code: l.slot_code, image_key: null,
+          key: l.id, component_id: l.sku_id ?? null, slot_code: l.slot_code, image_key: l.image_key ?? null,
           component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
           material_family_id: null, material_type: l.material_type ?? "",
           qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,

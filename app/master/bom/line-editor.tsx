@@ -70,16 +70,19 @@ const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export const lineArea = (l: EditorLine) => (l.cut_width || 0) * (l.cut_length || 0) * (l.pieces || 1);
-export function lineCalc(l: EditorLine): number {
+const NEEDS_BLOCK: CalcClass[] = ["area_face", "area_100"]; // กลุ่มที่ต้องมีบล็อก/กว้างยาว
+/** คิดปริมาณ — คืน null ถ้าข้อมูลไม่พอ (เก็บปริมาณเดิมไว้ ไม่ทับด้วย 0) */
+export function lineCalc(l: EditorLine): number | null {
   const cls = calcClass(l.material_type);
   const k = 1 + (l.waste_percent || 0) / 100;
   if (cls === "count")     return l.pieces || 0;
-  if (cls === "length_90") return r4((l.cut_length || 0) * k / 90);
-  if (cls === "area_100")  return r4(lineArea(l) * k / 100);
-  if (cls === "area_face") return l.face_width_cm ? r4(lineArea(l) * k / l.face_width_cm / 90) : 0;
-  return l.qty; // manual
+  if (cls === "length_90") return l.cut_length ? r4(l.cut_length * k / 90) : null;
+  if (cls === "area_100")  return (l.cut_width && l.cut_length) ? r4(lineArea(l) * k / 100) : null;
+  if (cls === "area_face") return (l.cut_width && l.cut_length && l.face_width_cm) ? r4(lineArea(l) * k / l.face_width_cm / 90) : null;
+  return null; // manual → พิมพ์เอง
 }
-const needFace = (l: EditorLine) => calcClass(l.material_type) === "area_face" && !l.face_width_cm;
+const showStatus = (l: EditorLine) => NEEDS_BLOCK.includes(calcClass(l.material_type));
+const needFace = (l: EditorLine) => calcClass(l.material_type) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm;
 
 const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
 const thumbUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -269,8 +272,7 @@ export function BomLineEditor({
   }, []);
 
   // คิดปริมาณใหม่ทุกครั้งที่แก้ (เว้นกลุ่ม manual ที่พิมพ์เอง)
-  const recalc = (l: EditorLine): EditorLine =>
-    calcClass(l.material_type) === "manual" ? l : { ...l, qty: lineCalc(l) };
+  const recalc = (l: EditorLine): EditorLine => { const c = lineCalc(l); return c == null ? l : { ...l, qty: c }; };
 
   // เลือกวัตถุดิบ → autofill ชนิด/หน้ากว้าง/เผื่อเสีย
   const pickComponent = (l: EditorLine, c: BomComponent): Partial<EditorLine> => ({
@@ -326,9 +328,11 @@ export function BomLineEditor({
     {
       key: "status", header: "สถานะ", width: 92, align: "center",
       getValue: (l) => (l.cut_block_code ? "done" : "wait"),
-      render: (l) => l.cut_block_code
-        ? <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">✓ done</span>
-        : <span className="text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700">รอ block</span>,
+      render: (l) => !showStatus(l)
+        ? <span className="text-slate-300 text-xs">—</span>
+        : l.cut_block_code
+          ? <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">✓ done</span>
+          : <span className="text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700">รอ block</span>,
     },
     {
       key: "cut_block", header: "บล็อกตัด", width: 150,
@@ -386,16 +390,16 @@ export function BomLineEditor({
     },
     {
       key: "calc", header: "คำนวณ", width: 84, align: "right",
-      getValue: (l) => lineCalc(l),
-      render: (l) => calcClass(l.material_type) === "manual"
+      getValue: (l) => lineCalc(l) ?? 0,
+      render: (l) => { const c = lineCalc(l); return c == null
         ? <span className="text-slate-300 text-xs">—</span>
-        : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{lineCalc(l)}</span>,
+        : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{c}</span>; },
     },
     {
       key: "qty", header: "ปริมาณ", width: 86, align: "right", sortable: true, summable: true,
       getValue: (l) => l.qty,
       render: (l, u, ro) =>
-        calcClass(l.material_type) === "manual" ? (
+        lineCalc(l) == null ? (
           <input type="number" min={0} step="any" value={l.qty} disabled={ro}
             onChange={(e) => u({ qty: Number(e.target.value) })} className={`${inputCls} text-right`} />
         ) : (
@@ -424,6 +428,8 @@ export function BomLineEditor({
       rowId={(l) => l.key}
       readonly={readonly}
       storageKey="bom-lines"
+      stickyHeader
+      maxHeight="56vh"
       onAdd={emptyLine}
       addLabel="＋ เพิ่มวัตถุดิบ"
       emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"

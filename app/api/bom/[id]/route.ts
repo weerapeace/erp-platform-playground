@@ -48,7 +48,42 @@ export async function GET(
     .order("id", { ascending: true });
   if (lErr) return NextResponse.json({ data: null, error: lErr.message }, { status: 500 });
 
-  return NextResponse.json({ data: { ...header, lines: lines ?? [] }, error: null });
+  // เติมข้อมูลจาก SKU (ชนิด/หน้ากว้าง/รูป/loss) ให้แต่ละบรรทัด — ดึงสดตอนเปิดสูตร
+  const rawLines = (lines ?? []) as Array<Record<string, unknown>>;
+  const codes = [...new Set(rawLines.map((l) => l.component_sku).filter(Boolean) as string[])];
+  const skuMap = new Map<string, { id: string; material_type: string | null; face: number | null; loss: number | null; image: string | null }>();
+  if (codes.length > 0) {
+    const { data: skus } = await supabase
+      .from("skus_v2")
+      .select("id, code, fabric_width_cm, cover_image_r2_key, families:product_families!material_family_id ( name, loss_percentage )")
+      .in("code", codes);
+    for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
+      const fam = (Array.isArray(s.families) ? s.families[0] : s.families) as { name?: string; loss_percentage?: number } | null;
+      skuMap.set(String(s.code), {
+        id: String(s.id),
+        material_type: fam?.name ?? null,
+        face: s.fabric_width_cm != null ? Number(s.fabric_width_cm) : null,
+        loss: fam?.loss_percentage != null ? Number(fam.loss_percentage) : null,
+        image: (s.cover_image_r2_key as string) ?? null,
+      });
+    }
+  }
+  const enriched = rawLines.map((l) => {
+    const sku = l.component_sku ? skuMap.get(String(l.component_sku)) : undefined;
+    if (!sku) return l;
+    const lineFace = Number(l.face_width_cm) || 0;
+    const lineWaste = Number(l.waste_percent) || 0;
+    return {
+      ...l,
+      sku_id:        sku.id,
+      material_type: l.material_type || sku.material_type,          // ใช้ของ SKU ถ้าบรรทัดยังว่าง
+      face_width_cm: lineFace > 0 ? lineFace : (sku.face ?? lineFace),
+      waste_percent: lineWaste > 0 ? lineWaste : (sku.loss ?? lineWaste),
+      image_key:     sku.image,
+    };
+  });
+
+  return NextResponse.json({ data: { ...header, lines: enriched }, error: null });
 }
 
 // ---- PATCH — save header + replace lines ----

@@ -54,6 +54,9 @@ export type LineItemsGridProps<T> = {
   footer?:    React.ReactNode;
   /** key เก็บความกว้างคอลัมน์ลง localStorage (เฟส 2) */
   storageKey?: string;
+  /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
+  stickyHeader?: boolean;
+  maxHeight?:    string;
 };
 
 type SortState = { key: string; dir: "asc" | "desc" } | null;
@@ -66,6 +69,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, emptyText = "ยังไม่มีรายการ", footer, storageKey,
+  stickyHeader = false, maxHeight,
 }: LineItemsGridProps<T>) {
   const [sort, setSort]       = useState<SortState>(null);
   const [groupBy, setGroupBy] = useState<string>("");
@@ -215,10 +219,12 @@ export function LineItemsGrid<T>({
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto border border-slate-200 rounded-lg">
+        <div className={`${stickyHeader ? "overflow-auto" : "overflow-x-auto"} border border-slate-200 rounded-lg`}
+          style={stickyHeader && maxHeight ? { maxHeight } : undefined}>
           <div style={{ minWidth }}>
             {/* header */}
-            <div style={{ gridTemplateColumns: template }} className="grid bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500">
+            <div style={{ gridTemplateColumns: template }}
+              className={`grid bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 ${stickyHeader ? "sticky top-0 z-20" : ""}`}>
               {canDrag && <span />}
               {columns.map((c) => (
                 <div key={c.key} className="relative border-r border-slate-100 last:border-r-0">
