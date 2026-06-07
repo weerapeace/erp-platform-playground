@@ -15,8 +15,10 @@ export type TagFilterValue = { tagIds: string[]; none: boolean };
 type Tag = { id: string; label: string; group_id: string | null };
 type Grp = { id: string; name: string; parent_group_id: string | null; sort_order: number; color: string | null; icon: string | null };
 
-export function TagGroupFilter({ value, onChange, label = "กรองแท็ก" }: {
+export function TagGroupFilter({ value, onChange, label = "กรองแท็ก", showNone = true }: {
   value: TagFilterValue; onChange: (v: TagFilterValue) => void; label?: string;
+  /** แสดงปุ่ม "ยังไม่มีแท็ก" หรือไม่ (โหมดซ่อน/โชว์เฉพาะ/เลือกแท็ก ไม่ต้องใช้) */
+  showNone?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -76,11 +78,13 @@ export function TagGroupFilter({ value, onChange, label = "กรองแท็
               <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="ค้นหาแท็ก…" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              <button type="button" onClick={() => onChange({ ...value, none: !value.none })}
-                className={`flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded border ${value.none ? "bg-amber-50 border-amber-200 text-amber-700" : "border-slate-200 hover:bg-slate-50"}`}>
-                <span className={`inline-flex items-center justify-center w-4 h-4 rounded border text-[10px] ${value.none ? "bg-amber-500 border-amber-500 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
-                ยังไม่มีแท็ก
-              </button>
+              {showNone && (
+                <button type="button" onClick={() => onChange({ ...value, none: !value.none })}
+                  className={`flex items-center gap-2 w-full px-2 py-1.5 text-sm text-left rounded border ${value.none ? "bg-amber-50 border-amber-200 text-amber-700" : "border-slate-200 hover:bg-slate-50"}`}>
+                  <span className={`inline-flex items-center justify-center w-4 h-4 rounded border text-[10px] ${value.none ? "bg-amber-500 border-amber-500 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
+                  ยังไม่มีแท็ก
+                </button>
+              )}
               {tops.map((g) => {
                 const direct = tagsOf(g.id);
                 const subs = subsOf(g.id).map((s) => ({ s, t: tagsOf(s.id) }));

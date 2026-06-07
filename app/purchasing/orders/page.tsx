@@ -25,7 +25,9 @@ type Row = {
 };
 type CartLine = { qty: number; partial: boolean };
 
-const money = (v: number, cur: string) => `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${cur}`;
+// แสดงสกุลเงินเป็น "RMB" (ภายในบางที่เก็บ "YUAN" — คงข้อมูลเดิม แต่โชว์ RMB)
+const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
+const money = (v: number, cur: string) => `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${curLabel(cur)}`;
 const today = () => new Date().toISOString().slice(0, 10);
 const isCNY = (c: string) => c === "RMB" || c === "YUAN" || c === "CNY";
 const noShop = (r: Row) => !r.seller_name || r.seller_name === "—" || r.seller_name === "ไม่ระบุร้าน";
@@ -349,7 +351,7 @@ export default function PurchaseOrdersPage() {
                   </div>
                   <div className="p-3 border-t border-slate-100 space-y-2">
                     {Object.entries(grandByCur).map(([cur, sum]) => (
-                      <div key={cur} className="flex justify-between text-sm"><span className="text-slate-500">ยอดรวม ({cur})</span><span className="font-bold text-blue-600">{money(sum, cur)}{isCNY(cur) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(sum * rate).toLocaleString()}</span>}</span></div>
+                      <div key={cur} className="flex justify-between text-sm"><span className="text-slate-500">ยอดรวม ({curLabel(cur)})</span><span className="font-bold text-blue-600">{money(sum, cur)}{isCNY(cur) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(sum * rate).toLocaleString()}</span>}</span></div>
                     ))}
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">📅 วันที่สั่ง (ใช้กับทุกใบ)</label>
@@ -488,7 +490,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
           </div>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({row.currency})</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(row.currency)})</label>
           <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" placeholder="0" />
         </div>
       </div>
@@ -561,7 +563,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         <div className="grid grid-cols-2 gap-2">
           <div><label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({row.uom})</label>
             <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
-          <div><label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({row.currency})</label>
+          <div><label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(row.currency)})</label>
             <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
         </div>
         <div className="text-xs text-slate-500">ราคารวม: <b className="text-blue-600">{money((Number(qty) || 0) * (Number(price) || 0), row.currency)}</b></div>

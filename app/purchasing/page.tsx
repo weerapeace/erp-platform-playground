@@ -16,13 +16,17 @@ import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { SkuImagePicker, type PickedSku } from "@/components/sku-image-picker";
-import { ImageGallery, HoverZoomImage } from "@/components/image-input";
+import { ImageGallery, HoverZoomImage, ImageInput } from "@/components/image-input";
+import { TagGroupFilter } from "@/components/tag-filter";
+
+// แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
+const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
 type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null };
 type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; usedForId?: string | null; usedForLabel?: string | null };
-type Source = "sku" | "group" | "favorite" | "frequent";
+type Source = "sku" | "group" | "favorite" | "frequent" | "tags";
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
 // relation = field ที่เป็น FK → ต้องโชว์ "ชื่อ" จากตารางปลายทาง แต่กรองด้วย id
@@ -80,6 +84,8 @@ export default function PurchasingShopPage() {
   const [cardTags, setCardTags] = useState<Record<string, string[]>>({});       // sku_id → [tag_id] ของการ์ดที่แสดงอยู่
   const [m2mHide, setM2mHide] = useState<Record<string, string[]>>({});  // แท็กที่ "ซ่อน" ต่อ field (negative)
   const [m2mShow, setM2mShow] = useState<Record<string, string[]>>({});  // แท็กที่ "โชว์เฉพาะ" ต่อ field (positive)
+  // โหมด "ตาม Tags": แท็กที่เลือกเพื่อดูสินค้าในแท็กนั้น (ใช้ RPC กรองที่ DB)
+  const [tagsSel, setTagsSel] = useState<string[]>([]);
 
   // group-mode drill-in
   const [sel, setSel] = useState<Card | null>(null);
@@ -309,6 +315,17 @@ export default function PurchasingShopPage() {
         }
         nextCards = mapped;
         nextTotal = num(j.total) || num(j.count) || (pg * PAGE + mapped.length);
+      } else if (source === "tags") {
+        // โหมด "ตาม Tags": เลือกแท็กแล้วโชว์เฉพาะสินค้าในแท็กนั้น (กรองที่ DB ผ่าน RPC)
+        if (tagsSel.length === 0) { nextCards = []; nextTotal = 0; }
+        else {
+          const sp = q ? `&search=${encodeURIComponent(q)}` : "";
+          let frag = `&incl_junction=skus_v2_product_family_m2m&incl_tgt_ids=${tagsSel.join(",")}`;
+          if (hiddenTagIds.length) frag += `&excl_junction=skus_v2_product_family_m2m&excl_tgt_ids=${hiddenTagIds.join(",")}`;  // คงกฎกลาง "ห้ามขอซื้อ"
+          const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${frag}${sortParam}`).then(r => r.json());
+          nextCards = (j.data ?? []).map(mapSku);
+          nextTotal = num(j.total) || num(j.count) || (pg * PAGE + nextCards.length);
+        }
       } else if (source === "group") {
         const j = await apiFetch("/api/master-v2/product-groups?limit=500").then(r => r.json());
         nextCards = (j.data ?? []).map((g: Record<string, unknown>) => ({
@@ -338,7 +355,7 @@ export default function PurchasingShopPage() {
     } finally {
       if (myId === reqIdRef.current) setLoading(false);
     }
-  }, [source, q, builtFilters, mapSku, fetchSkusByIds, exclParam, sortParam]);
+  }, [source, q, builtFilters, mapSku, fetchSkusByIds, exclParam, sortParam, tagsSel, hiddenTagIds]);
 
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
   // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
@@ -464,6 +481,21 @@ export default function PurchasingShopPage() {
     setConfirmSku(null);
   };
 
+  // แก้รูปสินค้าในป๊อปอัป "เพิ่มลงใบขอซื้อ" → บันทึกเข้า SKU ทันที + อัปเดตการ์ด/ป๊อปที่แสดงอยู่
+  const saveSkuImage = async (skuId: string, key: string | null) => {
+    try {
+      const res = await apiFetch(`/api/master-v2/skus/${skuId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cover_image_r2_key: key, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) { toast.error("บันทึกรูปไม่สำเร็จ: " + j.error); return; }
+      setCards(cs => cs.map(c => c.id === skuId ? { ...c, image_key: key } : c));
+      setConfirmSku(c => (c && c.id === skuId ? { ...c, image_key: key } : c));
+      toast.success("อัปเดตรูปสินค้าแล้ว");
+    } catch (e) { toast.error("บันทึกรูปไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+  };
+
   const save = async () => {
     if (cart.length === 0) return;
     setSaving(true);
@@ -510,7 +542,7 @@ export default function PurchasingShopPage() {
           {/* source toggle (โหมดแสดงสินค้า) */}
           <div className="grid grid-cols-2 gap-1 mb-3 text-xs">
             {([
-              ["sku", "SKU จริง"], ["group", "Product Group"],
+              ["sku", "SKU จริง"], ["tags", "🏷️ ตาม Tags"],
               ["favorite", "⭐ รายการโปรด"], ["frequent", "🔁 ซื้อบ่อย"],
             ] as [Source, string][]).map(([s, label]) => (
               <button key={s} onClick={() => switchSource(s)}
@@ -546,13 +578,15 @@ export default function PurchasingShopPage() {
                         <div className="space-y-2">
                           <div>
                             <div className="text-[10px] font-medium text-rose-600 mb-0.5">🙈 ซ่อนแท็กที่เลือก (สินค้าที่ติดจะไม่แสดง)</div>
-                            <FilterCombobox column={fd.column} label={fd.label} allFrom={fd.m2m}
-                              values={m2mHide[k] ?? []} onChange={(vals) => setM2mHide(p => ({ ...p, [k]: vals }))} />
+                            <TagGroupFilter label="เลือกแท็กที่จะซ่อน" showNone={false}
+                              value={{ tagIds: m2mHide[k] ?? [], none: false }}
+                              onChange={(v) => setM2mHide(p => ({ ...p, [k]: v.tagIds }))} />
                           </div>
                           <div>
                             <div className="text-[10px] font-medium text-emerald-600 mb-0.5">👁 โชว์เฉพาะแท็กที่เลือก</div>
-                            <FilterCombobox column={fd.column} label={fd.label} allFrom={fd.m2m}
-                              values={m2mShow[k] ?? []} onChange={(vals) => setM2mShow(p => ({ ...p, [k]: vals }))} />
+                            <TagGroupFilter label="เลือกแท็กที่จะโชว์" showNone={false}
+                              value={{ tagIds: m2mShow[k] ?? [], none: false }}
+                              onChange={(v) => setM2mShow(p => ({ ...p, [k]: v.tagIds }))} />
                           </div>
                         </div>
                       ) : fd.type === "boolean" ? (
@@ -579,6 +613,29 @@ export default function PurchasingShopPage() {
                 })}
               </div>
             </>
+          )}
+
+          {/* โหมด "ตาม Tags": เลือกแท็ก → โชว์สินค้าในแท็กนั้น (ของกลาง TagGroupFilter + RPC) */}
+          {source === "tags" && (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500 leading-relaxed">เลือกแท็ก (ประเภทสินค้า) เพื่อดูเฉพาะสินค้าในแท็กนั้น</p>
+              <TagGroupFilter label="เลือกแท็ก" showNone={false}
+                value={{ tagIds: tagsSel, none: false }}
+                onChange={(v) => setTagsSel(v.tagIds)} />
+              {tagsSel.length > 0 ? (
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {tagsSel.map(tid => (
+                    <span key={tid} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-[11px] border border-indigo-100">
+                      {tagNames[tid] ?? "…"}
+                      <button type="button" onClick={() => setTagsSel(s => s.filter(x => x !== tid))} className="text-indigo-400 hover:text-red-500">✕</button>
+                    </span>
+                  ))}
+                  <button type="button" onClick={() => setTagsSel([])} className="text-[11px] text-slate-400 hover:text-red-500 ml-1">ล้างทั้งหมด</button>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-300">ยังไม่ได้เลือกแท็ก</p>
+              )}
+            </div>
           )}
         </aside>
 
@@ -613,7 +670,7 @@ export default function PurchasingShopPage() {
           )}
 
           {/* ข้อ 1: ปุ่มเลื่อนหน้าด้านบน (เฉพาะ SKU ที่แบ่งหน้าฝั่ง server) */}
-          {!loading && source === "sku" && total > PAGE && (
+          {!loading && (source === "sku" || source === "tags") && total > PAGE && (
             <div className="flex items-center justify-end gap-2 mb-3">
               <span className="text-xs text-slate-400 mr-1">{total.toLocaleString()} รายการ</span>
               <button onClick={() => goToPage(page - 1)} disabled={page <= 0}
@@ -647,12 +704,12 @@ export default function PurchasingShopPage() {
                       : <span className="text-slate-300 text-3xl">📦</span>}
                   </div>
                   <div className="p-3">
-                    <div className="font-medium text-slate-800 text-sm line-clamp-2">{c.name}</div>
+                    <div className="font-medium text-slate-800 text-[13px] leading-snug line-clamp-2" title={c.name}>{c.name}</div>
                     {c.sku ? (
                       <>
                         {c.sub && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{c.sub}</div>}
                         <div className="text-xs text-slate-400 line-clamp-1 mt-0.5">🏪 {c.sku.seller}</div>
-                        <div className="text-sm font-semibold text-blue-600 mt-1">{c.sku.price.toLocaleString()} {c.sku.currency}<span className="text-xs font-normal text-slate-400"> / {c.sku.uom}</span></div>
+                        <div className="text-sm font-semibold text-blue-600 mt-1">{c.sku.price.toLocaleString()} {curLabel(c.sku.currency)}<span className="text-xs font-normal text-slate-400"> / {c.sku.uom}</span></div>
                         {c.sku.currency === "YUAN" && cnyRate > 0 && (
                           <div className="text-[11px] text-slate-400">≈ ฿{Math.round(c.sku.price * cnyRate).toLocaleString()}</div>
                         )}
@@ -675,7 +732,11 @@ export default function PurchasingShopPage() {
                 </button>
               </div>
             ))}
-            {!loading && !error && cards.length === 0 && <div className="col-span-full text-center text-slate-300 py-16">ไม่พบสินค้า</div>}
+            {!loading && !error && cards.length === 0 && (
+              <div className="col-span-full text-center text-slate-300 py-16">
+                {source === "tags" && tagsSel.length === 0 ? "👈 เลือกแท็กทางซ้ายเพื่อดูสินค้าในแท็กนั้น" : "ไม่พบสินค้า"}
+              </div>
+            )}
           </div>
 
           {loading && <div className="text-center text-slate-400 py-6 text-sm">กำลังโหลด…</div>}
@@ -684,7 +745,7 @@ export default function PurchasingShopPage() {
           {!loading && cards.length > 0 && (
             <div className="flex items-center justify-center gap-6 py-6 flex-wrap">
               {/* เลื่อนหน้า — ตัวควบคุมหลัก (เฉพาะ SKU ที่แบ่งหน้าฝั่ง server) */}
-              {source === "sku" && total > PAGE && (
+              {(source === "sku" || source === "tags") && total > PAGE && (
                 <div className="flex items-center gap-2">
                   <button onClick={() => goToPage(page - 1)} disabled={page <= 0}
                     className="h-10 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">◀ หน้าก่อน</button>
@@ -730,7 +791,7 @@ export default function PurchasingShopPage() {
                   <input type="number" value={l.qty} min={1} step="any" onChange={e => setCart(c => c.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))}
                     className="w-16 h-6 px-1 border border-slate-200 rounded" /> {l.uom}
                   <span className="ml-auto text-right leading-tight">
-                    <span className="block text-sm font-semibold text-slate-700 tabular-nums">{(l.price * (Number(l.qty) || 0)).toLocaleString()} {l.currency}</span>
+                    <span className="block text-sm font-semibold text-slate-700 tabular-nums">{(l.price * (Number(l.qty) || 0)).toLocaleString()} {curLabel(l.currency)}</span>
                     {l.currency === "YUAN" && cnyRate > 0 && <span className="block text-[10px] text-slate-400">≈ ฿{Math.round(l.price * (Number(l.qty) || 0) * cnyRate).toLocaleString()}</span>}
                     <span className="block text-[10px] text-slate-400">@ {l.price.toLocaleString()} / {l.uom}</span>
                   </span>
@@ -749,9 +810,9 @@ export default function PurchasingShopPage() {
                 <div className="px-1 space-y-0.5">
                   {Object.entries(totals).map(([cur, sum]) => (
                     <div key={cur} className="flex justify-between items-baseline">
-                      <span className="text-sm text-slate-500">ยอดรวมทั้งหมด{multi ? ` (${cur})` : ""}</span>
+                      <span className="text-sm text-slate-500">ยอดรวมทั้งหมด{multi ? ` (${curLabel(cur)})` : ""}</span>
                       <span className="text-right">
-                        <span className="block text-base font-bold text-blue-600 tabular-nums">{sum.toLocaleString()} {cur}</span>
+                        <span className="block text-base font-bold text-blue-600 tabular-nums">{sum.toLocaleString()} {curLabel(cur)}</span>
                         {cur === "YUAN" && cnyRate > 0 && <span className="block text-[11px] text-slate-400">≈ ฿{Math.round(sum * cnyRate).toLocaleString()}</span>}
                       </span>
                     </div>
@@ -816,6 +877,7 @@ export default function PurchasingShopPage() {
       {confirmSku && confirmSku.sku && (
         <ConfirmSku card={confirmSku} rate={cnyRate} onClose={() => setConfirmSku(null)}
           onAdd={(qty, note, usedFor) => addSku(confirmSku, qty, note, usedFor)}
+          onSaveImage={saveSkuImage}
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
       )}
 
@@ -932,11 +994,12 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null) => void; onEdit: () => void }) {
+function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const [usedFor, setUsedFor] = useState<PickedSku | null>(null);   // 🎯 ใช้กับสินค้า (ปลายทาง)
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [editImg, setEditImg] = useState(false);   // เปิดโหมดแก้รูปในป๊อปนี้
   const s = card.sku!;
   return (
     <ERPModal open onClose={onClose} size="md" title="เพิ่มลงใบขอซื้อ"
@@ -948,16 +1011,26 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit }: { card: Card; rate: 
         </>
       }>
       <div className="flex gap-3">
-        <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden" title="คลิกเพื่อดูรูปใหญ่">
-          {card.image_key
-            ? <ImageGallery r2Key={card.image_key} />
-            : <span className="text-slate-300 text-2xl">📦</span>}
+        <div className="flex flex-col items-center gap-1 flex-shrink-0">
+          {editImg ? (
+            <div className="w-24">
+              <ImageInput value={card.image_key} folder="skus" onChange={(k) => { void onSaveImage(card.id, k); }} />
+            </div>
+          ) : (
+            <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden" title="คลิกเพื่อดูรูปใหญ่">
+              {card.image_key
+                ? <ImageGallery r2Key={card.image_key} />
+                : <span className="text-slate-300 text-2xl">📦</span>}
+            </div>
+          )}
+          <button type="button" onClick={() => setEditImg(v => !v)}
+            className="text-[11px] text-blue-600 hover:underline">{editImg ? "เสร็จ" : "✎ แก้รูป"}</button>
         </div>
         <div className="min-w-0">
           <div className="font-medium text-slate-800 text-sm">{card.name}</div>
           <div className="text-xs text-slate-400 mt-0.5">{s.code}</div>
           <div className="text-xs text-slate-500 mt-0.5">🏪 {s.seller}</div>
-          <div className="text-sm font-semibold text-blue-600 mt-1">{s.price.toLocaleString()} {s.currency} / {s.uom}</div>
+          <div className="text-sm font-semibold text-blue-600 mt-1">{s.price.toLocaleString()} {curLabel(s.currency)} / {s.uom}</div>
           {s.currency === "YUAN" && rate > 0 && <div className="text-xs text-slate-400">≈ ฿{Math.round(s.price * rate).toLocaleString()} / {s.uom}</div>}
         </div>
       </div>
