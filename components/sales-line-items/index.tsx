@@ -40,6 +40,11 @@ export const emptyLine = (): EditorLine => ({
   tax_code: null,
 });
 
+const lineImageUrl = (line: Pick<EditorLine, "image_url" | "image_key">) => {
+  if (line.image_url) return line.image_url;
+  return line.image_key ? `/api/r2-image?key=${encodeURIComponent(line.image_key)}` : null;
+};
+
 export function calculateEditorTotals(
   lines: EditorLine[],
   opts: {
@@ -128,7 +133,7 @@ export function SOLineEditor({
                 name: l.product_name,
                 list_price: l.unit_price,
                 uom_name: l.unit,
-                image_url: l.image_url ?? null,
+                image_url: lineImageUrl(l),
                 image_key: l.image_key ?? null,
               } satisfies SkuPickerValue)
             : null;
@@ -138,7 +143,7 @@ export function SOLineEditor({
               <div className="grid grid-cols-[28px_64px_minmax(0,1fr)_auto] items-start gap-3">
                 <div className="pt-3 text-center font-mono text-xs text-slate-400">{i + 1}</div>
                 <div className="pt-1">
-                  <ImageThumbnail url={l.image_url} size={56} alt={l.product_name || "สินค้า"} />
+                  <ImageThumbnail url={lineImageUrl(l)} size={56} alt={l.product_name || "สินค้า"} />
                 </div>
                 <div className="min-w-0">
                   <label className="mb-1 block text-xs font-medium text-slate-500">สินค้า</label>
@@ -328,7 +333,7 @@ export function SalesLineCompactTable({
               <tr key={line.tempId} className="bg-white hover:bg-slate-50/80">
                 <td className="px-3 py-2 text-center font-mono text-xs text-slate-400">{index + 1}</td>
                 <td className="px-2 py-2">
-                  <ImageThumbnail url={line.image_url} size={44} alt={line.product_name || "สินค้า"} />
+                  <ImageThumbnail url={lineImageUrl(line)} size={44} alt={line.product_name || "สินค้า"} />
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex min-w-0 flex-col gap-1">
