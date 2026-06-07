@@ -524,16 +524,18 @@ async function _GET(
   };
   const exclJunction = searchParams.get("excl_junction") ?? "";
   const exclTgtIds = (searchParams.get("excl_tgt_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  let excludeIds: string[] = [];
-  if (JUNC_RE.test(exclJunction) && exclTgtIds.length > 0) excludeIds = await resolveSrcIds(exclJunction, exclTgtIds);
-
   const inclJunction = searchParams.get("incl_junction") ?? "";
   const inclTgtIds = (searchParams.get("incl_tgt_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const hasExcl = JUNC_RE.test(exclJunction) && exclTgtIds.length > 0;
+  const hasIncl = JUNC_RE.test(inclJunction) && inclTgtIds.length > 0;
+  // skus + กรองแท็ก → ใช้ RPC (EXISTS/NOT EXISTS ที่ DB) รองรับทุกขนาด ไม่ส่ง id ใน URL
+  const useRpcTags = cfg.table === "skus_v2" && (hasExcl || hasIncl);
+
+  let excludeIds: string[] = [];
   let includeIds: string[] | null = null;
-  if (JUNC_RE.test(inclJunction) && inclTgtIds.length > 0) {
-    includeIds = await resolveSrcIds(inclJunction, inclTgtIds);
-    // ขอ "โชว์เฉพาะ" แต่ไม่มีสินค้าผูกเลย → ต้องได้ 0 แถว (ใส่ id ที่ไม่มีจริง)
-    if (includeIds.length === 0) includeIds = ["00000000-0000-0000-0000-000000000000"];
+  if (!useRpcTags) {
+    if (hasExcl) excludeIds = await resolveSrcIds(exclJunction, exclTgtIds);
+    if (hasIncl) { includeIds = await resolveSrcIds(inclJunction, inclTgtIds); if (includeIds.length === 0) includeIds = ["00000000-0000-0000-0000-000000000000"]; }
   }
 
   // F10a: ใช้ listColumns ถ้ามี (เล็กกว่า, กัน JSON truncate)
@@ -541,6 +543,34 @@ async function _GET(
   //       → loop fetch batch ละ 1000 จน reach limit หรือหมด
   const selectCols = cfg.listColumns ?? cfg.selectColumns;
   const supabase = supabaseFromRequest(request);
+
+  // ── กรอง SKU ตามแท็กผ่าน RPC แล้วดึงเฉพาะหน้านั้น (รองรับแท็กที่มีของเป็นพัน) ──
+  if (useRpcTags) {
+    const admin2 = supabaseAdmin();
+    const orderCol = sortBy && SAFE_COL.test(sortBy) ? sortBy : "code";
+    const { data: rpc, error: rpcErr } = await admin2.rpc("erp_skus_tag_page", {
+      p_incl: hasIncl ? inclTgtIds : null,
+      p_excl: hasExcl ? exclTgtIds : null,
+      p_search: search || null,
+      p_include_inactive: includeInactive,
+      p_limit: limit,
+      p_offset: offset,
+      p_sort_by: orderCol,
+      p_sort_dir: sortDir ? "asc" : "desc",
+    });
+    if (rpcErr) return NextResponse.json({ data: [], error: rpcErr.message }, { status: 500 });
+    const ids = ((rpc as { ids?: string[]; total?: number } | null)?.ids ?? []);
+    const total = Number((rpc as { total?: number } | null)?.total ?? 0);
+    if (ids.length === 0) return NextResponse.json({ data: [], total, error: null });
+    const { data: rowsData, error: fetchErr } = await supabase.from(cfg.table).select(selectCols).in("id", ids);
+    if (fetchErr) return NextResponse.json({ data: [], error: fetchErr.message }, { status: 500 });
+    const order = new Map(ids.map((id, i) => [id, i]));
+    const ordered = ((rowsData ?? []) as unknown as Record<string, unknown>[]).sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
+    const processed = cfg.postProcess ? ordered.map(cfg.postProcess) : ordered;
+    const rows = await resolveRelationLabels(supabase, cfg, processed);
+    const { hiddenCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
+    return NextResponse.json({ data: stripHidden(rows, hiddenCols), total, error: null }, { headers: { "x-row-count": String(rows.length) } });
+  }
 
   const BATCH = 1000;
   const allRows: Record<string, unknown>[] = [];
