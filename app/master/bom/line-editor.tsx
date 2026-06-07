@@ -25,6 +25,7 @@ export type EditorLine = {
   component_id:   string | null;     // sku uuid (สำหรับติด tag)
   component_sku:  string;
   component_name: string;
+  image_key:      string | null;     // รูปวัตถุดิบ (cover_image_r2_key)
   material_family_id: string | null;
   material_type:  string;            // ชื่อกลุ่ม เช่น "ผ้า"
   qty:            number;
@@ -46,7 +47,7 @@ let _seq = 0;
 const genKey = () => `l${Date.now()}_${_seq++}`;
 export function emptyLine(): EditorLine {
   return {
-    key: genKey(), component_id: null, component_sku: "", component_name: "",
+    key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
     material_family_id: null, material_type: "", qty: 0, uom: "หลา", waste_percent: 0, is_optional: false,
     cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, slot_code: null,
   };
@@ -81,6 +82,12 @@ export function lineCalc(l: EditorLine): number {
 const needFace = (l: EditorLine) => calcClass(l.material_type) === "area_face" && !l.face_width_cm;
 
 const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
+const thumbUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+function Thumb({ k, size = 22 }: { k: string | null; size?: number }) {
+  if (!k) return <span className="inline-block rounded bg-slate-100 shrink-0" style={{ width: size, height: size }} />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={thumbUrl(k)} alt="" loading="lazy" className="rounded object-cover bg-slate-50 shrink-0" style={{ width: size, height: size }} />;
+}
 
 // ============================================================
 // SkuPicker — เลือก SKU ทั่วไป (หัวสูตร product) ผ่าน /api/admin/picker
@@ -134,7 +141,7 @@ export function SkuPicker({
 // ============================================================
 // ComponentPicker — เลือกวัตถุดิบ (คืนกลุ่ม+หน้ากว้าง+loss) ผ่าน /api/bom/components
 // ============================================================
-function ComponentPicker({ sku, name, onPick }: { sku: string; name: string; onPick: (c: BomComponent) => void }) {
+function ComponentPicker({ sku, name, imageKey, onPick }: { sku: string; name: string; imageKey?: string | null; onPick: (c: BomComponent) => void }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState<BomComponent[]>([]);
@@ -150,8 +157,8 @@ function ComponentPicker({ sku, name, onPick }: { sku: string; name: string; onP
   return (
     <div ref={boxRef} className="relative">
       <button type="button" onClick={() => { setOpen((o) => !o); setSearch(""); }}
-        className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 truncate">
-        {sku ? <span><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span> : <span className="text-slate-400">— เลือกวัตถุดิบ —</span>}
+        className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1.5 overflow-hidden">
+        {sku ? <><Thumb k={imageKey ?? null} /><span className="truncate"><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span></> : <span className="text-slate-400">— เลือกวัตถุดิบ —</span>}
       </button>
       {open && (
         <div className="absolute z-30 mt-1 w-[440px] max-w-[90vw] bg-white border border-slate-200 rounded-lg shadow-lg">
@@ -164,6 +171,7 @@ function ComponentPicker({ sku, name, onPick }: { sku: string; name: string; onP
             {options.map((c) => (
               <button key={c.id} type="button" onClick={() => { onPick(c); setOpen(false); }}
                 className="w-full px-3 py-1.5 text-left hover:bg-blue-50 flex items-center gap-2">
+                <Thumb k={c.image_key} size={26} />
                 <code className="text-xs text-slate-500 shrink-0">{c.code}</code>
                 <span className="text-sm text-slate-700 truncate flex-1">{c.name}</span>
                 {c.material_type && <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 shrink-0">{c.material_type}</span>}
@@ -179,12 +187,24 @@ function ComponentPicker({ sku, name, onPick }: { sku: string; name: string; onP
 // ============================================================
 // CutBlockPicker — เลือกบล็อกตัด (/api/bom/cutting-blocks)
 // ============================================================
-function CutBlockPicker({ code, disabled, onPick }: { code: string; disabled?: boolean; onPick: (b: CuttingBlock) => void }) {
+function CutBlockPicker({ code, disabled, width, length, onPick }: { code: string; disabled?: boolean; width: number; length: number; onPick: (b: CuttingBlock) => void }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState<CuttingBlock[]>([]);
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  const createBlock = async () => {
+    const newCode = search.trim();
+    if (!newCode || !(width > 0) || !(length > 0)) return;
+    setCreating(true);
+    try {
+      const res = await apiFetch("/api/bom/cutting-blocks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: newCode, width, length }) });
+      const j = await res.json();
+      if (j.data) { onPick(j.data as CuttingBlock); setOpen(false); }
+    } finally { setCreating(false); }
+  };
   const load = useCallback(async (q: string) => {
     setLoading(true);
     try { const res = await apiFetch(`/api/bom/cutting-blocks${q ? `?search=${encodeURIComponent(q)}` : ""}`); const json = await res.json(); setOptions((json.data ?? []) as CuttingBlock[]); }
@@ -209,11 +229,28 @@ function CutBlockPicker({ code, disabled, onPick }: { code: string; disabled?: b
             {options.map((b) => (
               <button key={b.id} type="button" onClick={() => { onPick(b); setOpen(false); }}
                 className="w-full px-3 py-1.5 text-left hover:bg-blue-50 flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2 min-w-0"><code className="text-xs text-slate-700 shrink-0">{b.code}</code><span className="text-[11px] text-slate-400 truncate">{b.type}</span></span>
+                <span className="flex items-center gap-2 min-w-0">
+                  <code className="text-xs text-slate-700 shrink-0">{b.code}</code>
+                  <span className="text-[11px] text-slate-400 truncate">{b.type}</span>
+                  {b.source === "manual" && <span className="text-[9px] px-1 rounded bg-blue-50 text-blue-600 shrink-0">ใหม่</span>}
+                </span>
                 <span className="text-xs text-slate-500 shrink-0 tabular-nums">{b.width}×{b.length}</span>
               </button>
             ))}
           </div>
+          {/* สร้างบล็อกใหม่จากกว้าง/ยาวที่พิมพ์ */}
+          {search.trim() && !options.some((o) => o.code === search.trim()) && (
+            <div className="border-t border-slate-100 p-2">
+              {width > 0 && length > 0 ? (
+                <button type="button" disabled={creating} onClick={createBlock}
+                  className="w-full text-left text-xs px-2 py-1.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                  ＋ สร้างบล็อก &ldquo;{search.trim()}&rdquo; ({width}×{length} ซม.)
+                </button>
+              ) : (
+                <p className="text-[11px] text-slate-400 px-1">พิมพ์ กว้าง/ยาว ในบรรทัดก่อน จึงจะสร้างบล็อกใหม่ได้</p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -237,11 +274,21 @@ export function BomLineEditor({
 
   // เลือกวัตถุดิบ → autofill ชนิด/หน้ากว้าง/เผื่อเสีย
   const pickComponent = (l: EditorLine, c: BomComponent): Partial<EditorLine> => ({
-    component_id: c.id, component_sku: c.code, component_name: c.name,
+    component_id: c.id, component_sku: c.code, component_name: c.name, image_key: c.image_key ?? null,
     material_family_id: c.material_family_id, material_type: c.material_type ?? "",
     face_width_cm: c.fabric_width_cm ?? l.face_width_cm,
     waste_percent: c.loss_percent ?? l.waste_percent,
   });
+
+  // เขียนหน้ากว้างกลับไปที่ SKU (เพื่อครั้งหน้าใช้ซ้ำ)
+  const saveFaceToSku = async (l: EditorLine) => {
+    let skuId = l.component_id;
+    if (!skuId && l.component_sku) {
+      try { const res = await apiFetch(`/api/bom/components?search=${encodeURIComponent(l.component_sku)}`); const j = await res.json();
+        skuId = ((j.data ?? []) as BomComponent[]).find((c) => c.code === l.component_sku)?.id ?? null; } catch { /* ignore */ }
+    }
+    if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, fabric_width_cm: l.face_width_cm || null }) }).catch(() => {});
+  };
 
   // ติด tag กลุ่มให้ SKU (บันทึกที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
   const tagFamily = async (l: EditorLine, update: (p: Partial<EditorLine>) => void, familyId: string) => {
@@ -260,7 +307,7 @@ export function BomLineEditor({
     {
       key: "component", header: "วัตถุดิบ", minWidth: 230, sortable: true,
       getValue: (l) => l.component_name || l.component_sku,
-      render: (l, u) => <ComponentPicker sku={l.component_sku} name={l.component_name} onPick={(c) => u(pickComponent(l, c))} />,
+      render: (l, u) => <ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} />,
     },
     {
       key: "material_type", header: "ชนิด", width: 130, sortable: true,
@@ -278,15 +325,20 @@ export function BomLineEditor({
     },
     {
       key: "status", header: "สถานะ", width: 92, align: "center",
-      getValue: (l) => (l.cut_block_id ? "done" : "wait"),
-      render: (l) => l.cut_block_id
+      getValue: (l) => (l.cut_block_code ? "done" : "wait"),
+      render: (l) => l.cut_block_code
         ? <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">✓ done</span>
         : <span className="text-[11px] px-2 py-0.5 rounded bg-amber-50 text-amber-700">รอ block</span>,
     },
     {
-      key: "cut_block", header: "บล็อกตัด", width: 140,
-      render: (l, u, ro) => <CutBlockPicker code={l.cut_block_code} disabled={ro}
-        onPick={(b) => u({ cut_block_id: b.id, cut_block_code: b.code, cut_width: b.width ?? 0, cut_length: b.length ?? 0 })} />,
+      key: "cut_block", header: "บล็อกตัด", width: 150,
+      render: (l, u, ro) => ro ? <span className="text-xs text-slate-500">{l.cut_block_code || "—"}</span> : (
+        <CutBlockPicker code={l.cut_block_code} width={l.cut_width} length={l.cut_length}
+          onPick={(b) => u({
+            cut_block_id: b.source === "odoo" && /^\d+$/.test(b.id) ? Number(b.id) : null,
+            cut_block_code: b.code, cut_width: b.width ?? l.cut_width, cut_length: b.length ?? l.cut_length,
+          })} />
+      ),
     },
     {
       key: "pieces", header: "ชิ้น", width: 56, align: "right",
@@ -295,21 +347,27 @@ export function BomLineEditor({
     },
     {
       key: "cut_width", header: "กว้าง", width: 64, align: "right",
-      render: (l, u, ro) => <input type="number" min={0} step="any" value={l.cut_width} disabled={ro || !!l.cut_block_id}
-        title={l.cut_block_id ? "ดึงจากบล็อก" : ""} onChange={(e) => u({ cut_width: Number(e.target.value) })} className={`${inputCls} text-right`} />,
+      render: (l, u, ro) => <input type="number" min={0} step="any" value={l.cut_width} disabled={ro || !!l.cut_block_code}
+        title={l.cut_block_code ? "ดึงจากบล็อก" : ""} onChange={(e) => u({ cut_width: Number(e.target.value) })} className={`${inputCls} text-right`} />,
     },
     {
       key: "cut_length", header: "ยาว", width: 64, align: "right",
-      render: (l, u, ro) => <input type="number" min={0} step="any" value={l.cut_length} disabled={ro || !!l.cut_block_id}
-        title={l.cut_block_id ? "ดึงจากบล็อก" : ""} onChange={(e) => u({ cut_length: Number(e.target.value) })} className={`${inputCls} text-right`} />,
+      render: (l, u, ro) => <input type="number" min={0} step="any" value={l.cut_length} disabled={ro || !!l.cut_block_code}
+        title={l.cut_block_code ? "ดึงจากบล็อก" : ""} onChange={(e) => u({ cut_length: Number(e.target.value) })} className={`${inputCls} text-right`} />,
     },
     {
-      key: "face_width_cm", header: "หน้ากว้าง", width: 80, align: "right",
+      key: "face_width_cm", header: "หน้ากว้าง", width: 104, align: "right",
       render: (l, u, ro) => (
-        <input type="number" min={0} step="any" value={l.face_width_cm} disabled={ro}
-          title={needFace(l) ? "กลุ่มนี้ต้องมีหน้ากว้างจึงคำนวณได้ — เพิ่มที่นี่" : ""}
-          onChange={(e) => u({ face_width_cm: Number(e.target.value) })}
-          className={`${inputCls} text-right ${needFace(l) ? "border-red-400 bg-red-50" : ""}`} />
+        <div className="flex items-center gap-1">
+          <input type="number" min={0} step="any" value={l.face_width_cm} disabled={ro}
+            title={needFace(l) ? "กลุ่มนี้ต้องมีหน้ากว้างจึงคำนวณได้ — เพิ่มที่นี่" : ""}
+            onChange={(e) => u({ face_width_cm: Number(e.target.value) })}
+            className={`${inputCls} text-right ${needFace(l) ? "border-red-400 bg-red-50" : ""}`} />
+          {!ro && l.face_width_cm > 0 && l.component_sku && (
+            <button type="button" title="บันทึกหน้ากว้างนี้กลับไปที่ SKU (ใช้ซ้ำครั้งหน้า)" onClick={() => saveFaceToSku(l)}
+              className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">💾</button>
+          )}
+        </div>
       ),
     },
     {

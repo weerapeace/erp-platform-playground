@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { BomLineEditor, SkuPicker, emptyLine, type EditorLine } from "./line-editor";
+import { CopyBomModal } from "./copy-bom-modal";
 
 // ---- types (ตรงกับ /api/bom) ----
 type BomListItem = {
@@ -75,6 +76,7 @@ export default function BomWorkspacePage() {
 
   const [archiveTarget, setArchiveTarget] = useState<BomListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const fetchList = useCallback(async () => {
     setLoading(true); setError(null);
@@ -105,7 +107,7 @@ export default function BomWorkspacePage() {
         id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "",
         version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: (d as { note?: string }).note ?? "",
         lines: (d.lines ?? []).map((l) => ({
-          key: l.id, component_id: null, slot_code: l.slot_code,
+          key: l.id, component_id: null, slot_code: l.slot_code, image_key: null,
           component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
           material_family_id: null, material_type: l.material_type ?? "",
           qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
@@ -310,9 +312,18 @@ export default function BomWorkspacePage() {
 
             {/* lines */}
             <div className="pt-2 border-t border-slate-100">
-              <h3 className="text-sm font-semibold text-slate-700 mb-2">รายการวัตถุดิบ</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-slate-700">รายการวัตถุดิบ</h3>
+                {canEdit && (
+                  <button type="button" onClick={() => setCopyOpen(true)}
+                    className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">📋 คัดลอก BOM</button>
+                )}
+              </div>
               <BomLineEditor lines={form.lines} onChange={(lines) => patchForm({ lines })} readonly={!canEdit} />
             </div>
+
+            <CopyBomModal open={copyOpen} onClose={() => setCopyOpen(false)}
+              onCopy={(copied) => patchForm({ lines: [...form.lines, ...copied] })} />
           </div>
         )}
       </ERPModal>
