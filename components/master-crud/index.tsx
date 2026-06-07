@@ -49,7 +49,7 @@ function defaultRelationCellRender(key: string) {
   // strip _id suffix สำหรับหา key ของ label
   const base = key.endsWith("_id") ? key.slice(0, -3) : key;
   return (value: unknown, row?: Record<string, unknown>): React.ReactNode => {
-    if (!row) return value ? <code className="text-xs text-slate-400">{String(value).slice(0, 8)}...</code> : <span className="text-slate-300">—</span>;
+    if (!row) return value ? <span className="inline-block h-3.5 w-20 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" /> : <span className="text-slate-300">—</span>;
     const label = row[`${base}_label`] ?? row[`${base}_name`];
     const secondary = row[`${base}_secondary`];
     if (label) return (
@@ -58,7 +58,7 @@ function defaultRelationCellRender(key: string) {
         {secondary != null && String(secondary) !== "" && <span className="ml-1 text-xs text-slate-400">· {String(secondary)}</span>}
       </span>
     );
-    if (value) return <code className="text-xs text-slate-400" title="ยังไม่ได้ resolve label">{String(value).slice(0, 8)}...</code>;
+    if (value) return <span className="inline-block h-3.5 w-20 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" />;
     return <span className="text-slate-300">—</span>;
   };
 }
@@ -1577,7 +1577,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const label = form[`${base}_label`] ?? form[`${base}_name`];
       const content: React.ReactNode = f.cellRender ? f.cellRender(v, form)
         : label ? <span className="text-sm text-slate-800" style={vs}>{String(label)}</span>
-        : v ? <code className="text-xs text-slate-400">{String(v).slice(0, 8)}…</code>
+        : v ? <span className="inline-block h-3.5 w-24 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" />
         : <span className="text-slate-300">—</span>;
       const tgt = (f.relationConfig as RelationConfig | undefined)?.target_module_key
         ?? (f.relationConfig as RelationConfig | undefined)?.target_table;
