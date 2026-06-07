@@ -15,10 +15,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { FamilyNavTabs } from "@/components/family-nav-tabs";
+import { IconPicker } from "@/components/icon-picker";
+import { SearchableSelect } from "@/components/searchable-select";
 
 type Rec = { id: string; code: string; name: string; image: string | null };
 type Tag = { id: string; label: string; group_id: string | null };
-type Grp = { id: string; name: string; parent_group_id: string | null; sort_order: number; icon: string | null };
+type Grp = { id: string; name: string; parent_group_id: string | null; sort_order: number; icon: string | null; single_select: boolean };
 
 const ENTITIES = {
   "parent-skus": { label: "Parent SKU", api: "parent-skus", junction: "parent_skus_v2_product_family_m2m" },
@@ -65,13 +67,16 @@ export default function TagsManagerPage() {
   }, []);
   useEffect(() => { loadTags(); }, [loadTags]);
   // โหลดกลุ่มแท็ก (จัด palette + filter ตามกลุ่ม)
-  useEffect(() => {
+  const [groupMgr, setGroupMgr] = useState(false);
+  const loadGroups = useCallback(() => {
     apiFetch(`/api/master-v2/product_family_groups?limit=500`).then((r) => r.json())
       .then((j) => setGroups(((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
         id: String(g.id), name: String(g.name ?? ""), parent_group_id: g.parent_group_id ? String(g.parent_group_id) : null,
         sort_order: Number(g.sort_order ?? 100), icon: g.icon ? String(g.icon) : null,
-      })))).catch(() => {});
+        single_select: !!g.single_select,
+      } as Grp)))).catch(() => {});
   }, []);
+  useEffect(() => { loadGroups(); }, [loadGroups]);
 
   // ดึงแท็กปัจจุบันของหลายรายการทีเดียว (bulk) → โชว์บนการ์ด
   const loadTagMap = useCallback((ids: string[]) => {
@@ -121,7 +126,17 @@ export default function TagsManagerPage() {
     } catch { alert("เลือกทั้งหมดไม่สำเร็จ"); } finally { setSelectingAll(false); }
   };
   const removeFromCart = (id: string) => setCart((c) => c.filter((x) => x.id !== id));
-  const addTag = (id: string) => setTagSet((s) => (s.includes(id) ? s : [...s, id]));
+  const addTag = (id: string) => setTagSet((s) => {
+    if (s.includes(id)) return s;
+    const tag = allTags.find((t) => t.id === id);
+    const grp = tag?.group_id ? groups.find((g) => g.id === tag.group_id) : null;
+    // กลุ่มแบบ "เลือก 1 รายการ" → เอาแท็กอื่นในกลุ่มเดียวกันออกจากชุดก่อน
+    if (grp?.single_select) {
+      const sameGroup = new Set(allTags.filter((t) => t.group_id === grp.id).map((t) => t.id));
+      return [...s.filter((tid) => !sameGroup.has(tid)), id];
+    }
+    return [...s, id];
+  });
   const removeTag = (id: string) => setTagSet((s) => s.filter((x) => x !== id));
 
   const createTag = async () => {
@@ -287,6 +302,7 @@ export default function TagsManagerPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <FamilyNavTabs active="tags" />
+      {groupMgr && <GroupManager groups={groups} onClose={() => setGroupMgr(false)} onChanged={loadGroups} />}
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -310,7 +326,10 @@ export default function TagsManagerPage() {
       <div className="bg-white border-b border-slate-200 px-4 py-3 space-y-2" onDrop={onDrop("tagset")} onDragOver={allowDrop}>
         <div className="flex items-start gap-3 flex-wrap">
           <div className="flex-1 min-w-[280px]">
-            <div className="text-xs text-slate-500 mb-1">คลังแท็ก — กดหรือลากเพื่อเพิ่มเข้าชุดแท็ก</div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-slate-500">คลังแท็ก — กดหรือลากเพื่อเพิ่มเข้าชุดแท็ก</span>
+              <button onClick={() => setGroupMgr(true)} className="text-xs px-2 py-0.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">⚙️ จัดการกลุ่ม</button>
+            </div>
             <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
               {topGroups.map((g) => {
                 const direct = tagsOfGrp(g.id);
@@ -445,6 +464,119 @@ export default function TagsManagerPage() {
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// GroupManager — จัดการกลุ่มแท็ก (เพิ่ม/ลบ/แก้ไข + โหมดเลือก หลาย/1)
+// ============================================================
+type GForm = { id?: string; name: string; icon: string; parent_group_id: string; single_select: boolean };
+function GroupManager({ groups, onClose, onChanged }: { groups: Grp[]; onClose: () => void; onChanged: () => void }) {
+  const [form, setForm] = useState<GForm | null>(null);   // null = ดูรายการ; มีค่า = กำลังเพิ่ม/แก้
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const tops = groups.filter((g) => !g.parent_group_id).sort((a, b) => a.sort_order - b.sort_order);
+  const subsOf = (id: string) => groups.filter((g) => g.parent_group_id === id).sort((a, b) => a.sort_order - b.sort_order);
+
+  const openNew = () => { setErr(null); setForm({ name: "", icon: "🏷️", parent_group_id: "", single_select: false }); };
+  const openEdit = (g: Grp) => { setErr(null); setForm({ id: g.id, name: g.name, icon: g.icon ?? "🏷️", parent_group_id: g.parent_group_id ?? "", single_select: g.single_select }); };
+
+  const save = async () => {
+    if (!form || !form.name.trim()) return;
+    setBusy(true); setErr(null);
+    const body = JSON.stringify({
+      name: form.name.trim(), icon: form.icon || null,
+      parent_group_id: form.parent_group_id || null, single_select: form.single_select,
+    });
+    try {
+      const res = form.id
+        ? await apiFetch(`/api/master-v2/product_family_groups/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body })
+        : await apiFetch(`/api/master-v2/product_family_groups`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setErr(j.error ?? "บันทึกไม่สำเร็จ"); return; }
+      setForm(null); onChanged();
+    } catch (e) { setErr(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const del = async (g: Grp) => {
+    if (!confirm(`ลบกลุ่ม "${g.name}"?\n(แท็กในกลุ่มจะไม่ถูกลบ แต่จะไม่มีกลุ่ม)`)) return;
+    setBusy(true); setErr(null);
+    try {
+      const res = await apiFetch(`/api/master-v2/product_family_groups/${g.id}?hard=1`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setErr(j.error ?? "ลบไม่สำเร็จ (อาจมีกลุ่มย่อย/แท็กอ้างอยู่)"); return; }
+      onChanged();
+    } catch (e) { setErr(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  const inp = "w-full h-9 px-2 text-sm border border-slate-200 rounded-md";
+  const Row = ({ g, sub }: { g: Grp; sub?: boolean }) => (
+    <div className={`flex items-center gap-2 px-3 py-2 text-sm ${sub ? "pl-8" : ""}`}>
+      <span className="text-lg">{g.icon ?? "🏷️"}</span>
+      <span className="flex-1 min-w-0 truncate">{sub ? "↳ " : ""}{g.name}</span>
+      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${g.single_select ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+        {g.single_select ? "เลือก 1" : "หลายรายการ"}
+      </span>
+      <button onClick={() => openEdit(g)} className="text-xs text-blue-600 hover:underline">แก้ไข</button>
+      <button onClick={() => del(g)} className="text-slate-300 hover:text-red-500">✕</button>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4" onClick={() => !busy && onClose()}>
+      <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">⚙️ จัดการกลุ่มแท็ก</h3>
+          {!form && <button onClick={openNew} className="text-xs px-2.5 py-1 rounded-md bg-blue-600 text-white hover:bg-blue-700">➕ เพิ่มกลุ่ม</button>}
+        </div>
+
+        {form ? (
+          <div className="p-5 space-y-3">
+            <div className="flex items-end gap-3">
+              <div><div className="text-[11px] text-slate-500 mb-1">ไอคอน</div><IconPicker value={form.icon} onChange={(v) => setForm((f) => f ? { ...f, icon: v } : f)} /></div>
+              <div className="flex-1"><div className="text-[11px] text-slate-500 mb-1">ชื่อกลุ่ม *</div>
+                <input autoFocus value={form.name} onChange={(e) => setForm((f) => f ? { ...f, name: e.target.value } : f)} className={inp} placeholder="เช่น สี" /></div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">กลุ่มแม่ (ถ้าเป็นกลุ่มย่อย)</div>
+              <SearchableSelect value={form.parent_group_id} onChange={(v) => setForm((f) => f ? { ...f, parent_group_id: v } : f)} placeholder="— ไม่มี (กลุ่มหลัก) —"
+                options={tops.filter((g) => g.id !== form.id).map((g) => ({ value: g.id, label: `${g.icon ?? ""} ${g.name}`.trim() }))} />
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 mb-1">โหมดเลือกแท็กในกลุ่มนี้</div>
+              <select value={form.single_select ? "single" : "multi"} onChange={(e) => setForm((f) => f ? { ...f, single_select: e.target.value === "single" } : f)} className={`${inp} bg-white`}>
+                <option value="multi">เลือกได้หลายรายการ</option>
+                <option value="single">เลือกได้ 1 รายการ</option>
+              </select>
+            </div>
+            {err && <div className="text-xs text-red-600">⚠ {err}</div>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setForm(null)} disabled={busy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={save} disabled={busy || !form.name.trim()} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+              {tops.length === 0 && <div className="px-4 py-6 text-center text-xs text-slate-400">— ยังไม่มีกลุ่ม —</div>}
+              {tops.map((g) => (
+                <div key={g.id}>
+                  <Row g={g} />
+                  {subsOf(g.id).map((s) => <Row key={s.id} g={s} sub />)}
+                </div>
+              ))}
+            </div>
+            {err && <div className="px-5 py-2 text-xs text-red-600">⚠ {err}</div>}
+            <div className="px-5 py-3 border-t border-slate-200 text-right">
+              <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
