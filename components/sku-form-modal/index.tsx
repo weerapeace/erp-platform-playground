@@ -12,6 +12,7 @@ import { useAuth } from "@/components/auth";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput } from "@/components/image-input";
 import { useBackdropDismiss } from "@/components/modal";
+import { SkuSupplierList } from "@/components/sku-supplier-list";
 
 type RF = {
   field_key: string;
@@ -149,9 +150,17 @@ export function SkuFormModal({
           {loading ? (
             <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลดฟอร์ม…</div>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {fields.map((fd) => <div key={fd.field_key}>{renderField(fd)}</div>)}
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                {fields.map((fd) => <div key={fd.field_key}>{renderField(fd)}</div>)}
+              </div>
+              {/* รายการราคาหลายร้าน (ของกลาง) — เฉพาะตอนแก้ไขสินค้าที่มีอยู่แล้ว */}
+              {mode === "edit" && skuId && (
+                <div className="mt-4">
+                  <SkuSupplierList skuId={skuId} />
+                </div>
+              )}
+            </>
           )}
           {err && <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">⚠ {err}</div>}
         </div>
