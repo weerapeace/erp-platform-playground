@@ -83,6 +83,11 @@ export function lineCalc(l: EditorLine): number | null {
 }
 const showStatus = (l: EditorLine) => NEEDS_BLOCK.includes(calcClass(l.material_type));
 const needFace = (l: EditorLine) => calcClass(l.material_type) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm;
+// ช่องไหนใช้กับกลุ่มไหน (ไม่ใช้ → โชว์ "—")
+const usesWidth  = (l: EditorLine) => { const c = calcClass(l.material_type); return c === "area_face" || c === "area_100"; };
+const usesLength = (l: EditorLine) => { const c = calcClass(l.material_type); return c === "area_face" || c === "area_100" || c === "length_90"; };
+const usesFace   = (l: EditorLine) => calcClass(l.material_type) === "area_face";
+const dash = <span className="text-slate-300 text-xs">—</span>;
 
 const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
 const thumbUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -351,17 +356,17 @@ export function BomLineEditor({
     },
     {
       key: "cut_width", header: "กว้าง", width: 64, align: "right",
-      render: (l, u, ro) => <input type="number" min={0} step="any" value={l.cut_width} disabled={ro || !!l.cut_block_code}
+      render: (l, u, ro) => !usesWidth(l) ? dash : <input type="number" min={0} step="any" value={l.cut_width} disabled={ro || !!l.cut_block_code}
         title={l.cut_block_code ? "ดึงจากบล็อก" : ""} onChange={(e) => u({ cut_width: Number(e.target.value) })} className={`${inputCls} text-right`} />,
     },
     {
       key: "cut_length", header: "ยาว", width: 64, align: "right",
-      render: (l, u, ro) => <input type="number" min={0} step="any" value={l.cut_length} disabled={ro || !!l.cut_block_code}
+      render: (l, u, ro) => !usesLength(l) ? dash : <input type="number" min={0} step="any" value={l.cut_length} disabled={ro || !!l.cut_block_code}
         title={l.cut_block_code ? "ดึงจากบล็อก" : ""} onChange={(e) => u({ cut_length: Number(e.target.value) })} className={`${inputCls} text-right`} />,
     },
     {
       key: "face_width_cm", header: "หน้ากว้าง", width: 104, align: "right",
-      render: (l, u, ro) => (
+      render: (l, u, ro) => !usesFace(l) ? dash : (
         <div className="flex items-center gap-1">
           <input type="number" min={0} step="any" value={l.face_width_cm} disabled={ro}
             title={needFace(l) ? "กลุ่มนี้ต้องมีหน้ากว้างจึงคำนวณได้ — เพิ่มที่นี่" : ""}
@@ -376,7 +381,7 @@ export function BomLineEditor({
     },
     {
       key: "waste_percent", header: "% เผื่อเสีย", width: 82, align: "right",
-      render: (l, u, ro) => <input type="number" min={0} step="any" value={l.waste_percent} disabled={ro}
+      render: (l, u, ro) => !usesLength(l) ? dash : <input type="number" min={0} step="any" value={l.waste_percent} disabled={ro}
         onChange={(e) => u({ waste_percent: Number(e.target.value) })} className={`${inputCls} text-right`} />,
     },
     {
