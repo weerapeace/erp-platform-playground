@@ -665,6 +665,7 @@ export {
   CustomerPicker, EmployeePicker, WarehousePicker,
   DepartmentPicker, UnitPicker, TaxPicker,
 } from "./master";
+export { RecordPeekLink } from "./record-peek-link";
 export type {
   CustomerPickerValue, EmployeePickerValue, WarehousePickerValue,
   DepartmentPickerValue, UnitPickerValue, TaxPickerValue, MasterValue,

@@ -7,7 +7,6 @@ type SkuPickerRow = {
   code: string | null;
   parent_sku_id: string | null;
   name_th: string | null;
-  sku_name: string | null;
   list_price: number | null;
   cover_image_r2_key: string | null;
   sale_ok: boolean | null;
@@ -54,7 +53,6 @@ export async function GET(request: NextRequest) {
       code,
       parent_sku_id,
       name_th,
-      sku_name,
       list_price,
       cover_image_r2_key,
       sale_ok,
@@ -69,7 +67,6 @@ export async function GET(request: NextRequest) {
     const parts = [
       `code.ilike.%${token}%`,
       `name_th.ilike.%${token}%`,
-      `sku_name.ilike.%${token}%`,
       `barcode.ilike.%${token}%`,
     ];
     if (parentIds.length > 0) {
@@ -87,7 +84,7 @@ export async function GET(request: NextRequest) {
     return {
       id: row.id,
       code,
-      name: row.name_th ?? row.sku_name ?? code,
+      name: row.name_th ?? code,
       uom_name: uom?.name ?? null,
       list_price: row.list_price,
       image_key: row.cover_image_r2_key,

@@ -5,7 +5,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { AttachmentPanel } from "@/components/attachment-panel";
 import { ERPModal } from "@/components/modal";
-import { CustomerPicker, WarehousePicker, EmployeePicker } from "@/components/pickers";
+import { CustomerPicker, WarehousePicker, EmployeePicker, RecordPeekLink } from "@/components/pickers";
 import type { CustomerPickerValue, WarehousePickerValue, EmployeePickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -468,16 +468,11 @@ export default function SalesOrdersPage() {
                 <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
               </div>
               {form.customer && (
-                <a
-                  href={`/admin/customers?search=${encodeURIComponent(form.customer.code || form.customer.name)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-blue-600 hover:text-blue-700 hover:underline"
-                  title="เปิดหน้าลูกค้า"
-                >
-                  <span className="truncate">{form.customer.code ? `${form.customer.code} - ${form.customer.name}` : form.customer.name}</span>
-                  <span className="shrink-0">↗</span>
-                </a>
+                <RecordPeekLink
+                  moduleKey="partners-v2"
+                  recordId={form.customer.id}
+                  label={form.customer.code ? `${form.customer.code} - ${form.customer.name}` : form.customer.name}
+                />
               )}
             </div>
             <div>
