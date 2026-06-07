@@ -78,7 +78,8 @@ export default function PurchasingShopPage() {
   const [hiddenTagIds, setHiddenTagIds] = useState<string[]>([]);
   const [tagNames, setTagNames] = useState<Record<string, string>>({});        // id → ชื่อแท็ก (ไว้โชว์บนการ์ด)
   const [cardTags, setCardTags] = useState<Record<string, string[]>>({});       // sku_id → [tag_id] ของการ์ดที่แสดงอยู่
-  const [m2mMode, setM2mMode] = useState<Record<string, "hide" | "show">>({});  // โหมดตัวกรองแต่ละ field: ซ่อน/โชว์เฉพาะ
+  const [m2mHide, setM2mHide] = useState<Record<string, string[]>>({});  // แท็กที่ "ซ่อน" ต่อ field (negative)
+  const [m2mShow, setM2mShow] = useState<Record<string, string[]>>({});  // แท็กที่ "โชว์เฉพาะ" ต่อ field (positive)
 
   // group-mode drill-in
   const [sel, setSel] = useState<Card | null>(null);
@@ -144,13 +145,11 @@ export default function PurchasingShopPage() {
     for (const k of activeKeys) {
       const fd = filterFields.find(f => f.key === k);
       if (!fd?.m2m || fd.m2m.junction !== "skus_v2_product_family_m2m") continue;
-      const v = filterValues[k];
-      if (!(v && v.type === "select")) continue;
-      const target = (m2mMode[k] ?? "hide") === "show" ? inc : ex;
-      v.selected.forEach(id => target.add(id));
+      (m2mHide[k] ?? []).forEach(id => ex.add(id));
+      (m2mShow[k] ?? []).forEach(id => inc.add(id));
     }
     return { exclTagIds: [...ex], inclTagIds: [...inc] };
-  }, [hiddenTagIds, activeKeys, filterFields, filterValues, m2mMode]);
+  }, [hiddenTagIds, activeKeys, filterFields, m2mHide, m2mShow]);
   // query fragment การเรียง (sort by) — ส่งให้ API skus
   const sortParam = useMemo(() => {
     const s = SORTS.find(x => x.key === sortKey);
@@ -542,30 +541,20 @@ export default function PurchasingShopPage() {
                   const cur = filterValues[k];
                   return (
                     <div key={k}>
+                      <div className="text-xs font-medium text-slate-600 mb-1">{fd.label}</div>
                       {fd.m2m ? (
-                        <div className="flex items-center justify-between mb-1 gap-1">
-                          <span className="text-xs font-medium text-slate-600">{fd.label}</span>
-                          <div className="flex rounded-md border border-slate-200 overflow-hidden text-[10px] flex-shrink-0">
-                            {([["hide", "🙈 ซ่อน"], ["show", "👁 โชว์เฉพาะ"]] as ["hide" | "show", string][]).map(([m, lbl]) => (
-                              <button key={m} type="button" onClick={() => setM2mMode(p => ({ ...p, [k]: m }))}
-                                className={`px-1.5 py-0.5 ${(m2mMode[k] ?? "hide") === m ? "bg-blue-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}>{lbl}</button>
-                            ))}
+                        <div className="space-y-2">
+                          <div>
+                            <div className="text-[10px] font-medium text-rose-600 mb-0.5">🙈 ซ่อนแท็กที่เลือก (สินค้าที่ติดจะไม่แสดง)</div>
+                            <FilterCombobox column={fd.column} label={fd.label} allFrom={fd.m2m}
+                              values={m2mHide[k] ?? []} onChange={(vals) => setM2mHide(p => ({ ...p, [k]: vals }))} />
+                          </div>
+                          <div>
+                            <div className="text-[10px] font-medium text-emerald-600 mb-0.5">👁 โชว์เฉพาะแท็กที่เลือก</div>
+                            <FilterCombobox column={fd.column} label={fd.label} allFrom={fd.m2m}
+                              values={m2mShow[k] ?? []} onChange={(vals) => setM2mShow(p => ({ ...p, [k]: vals }))} />
                           </div>
                         </div>
-                      ) : (
-                        <div className="text-xs font-medium text-slate-600 mb-1">{fd.label}</div>
-                      )}
-                      {fd.m2m ? (
-                        <>
-                          <FilterCombobox
-                            column={fd.column}
-                            label={fd.label}
-                            allFrom={fd.m2m}
-                            values={cur && cur.type === "select" ? cur.selected : []}
-                            onChange={(vals) => setFV(k, vals.length ? { type: "select", selected: vals } : null)}
-                          />
-                          <p className="text-[10px] text-slate-400 mt-1">{(m2mMode[k] ?? "hide") === "show" ? "โชว์เฉพาะสินค้าที่ติดแท็กที่เลือก" : "เลือกแล้วสินค้าที่ติดแท็กนั้นจะไม่แสดง"}</p>
-                        </>
                       ) : fd.type === "boolean" ? (
                         <select value={cur && cur.type === "boolean" ? cur.value : ""} onChange={e => setFV(k, e.target.value ? { type: "boolean", value: e.target.value as "true" | "false" } : null)}
                           className="w-full h-8 px-2 text-xs border border-slate-200 rounded-md bg-white">
