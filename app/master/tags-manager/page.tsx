@@ -211,6 +211,24 @@ export default function TagsManagerPage() {
   };
   const allowDrop = (e: React.DragEvent) => e.preventDefault();
 
+  // ลากแท็กไปวางที่กลุ่ม → ย้ายแท็กเข้ากลุ่มนั้น (groupId=null = เอาออกจากกลุ่ม)
+  const moveTagToGroup = async (groupId: string | null) => {
+    const d = dragRef.current; dragRef.current = null;
+    if (!d || d.type !== "tag") return;
+    setResult(null);
+    try {
+      const res = await apiFetch(`/api/master-v2/${TAG_MODULE}/${d.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: groupId }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setResult("❌ ย้ายกลุ่มไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+      loadTags();
+    } catch (e) { setResult("❌ " + (e instanceof Error ? e.message : "network")); }
+  };
+  const onGroupDrop = (groupId: string | null) => (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); moveTagToGroup(groupId); };
+  const onGroupOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
+
   // pool หลังกรอง (client-side) — OR: มีอย่างน้อย 1 แท็กที่ติ๊ก / หรือ "ยังไม่มีแท็ก"
   const shownPool = useMemo(() => pool.filter((r) => {
     const { tagIds, none } = filterSel;
@@ -330,31 +348,39 @@ export default function TagsManagerPage() {
               <span className="text-xs text-slate-500">คลังแท็ก — กดหรือลากเพื่อเพิ่มเข้าชุดแท็ก</span>
               <button onClick={() => setGroupMgr(true)} className="text-xs px-2 py-0.5 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">⚙️ จัดการกลุ่ม</button>
             </div>
-            <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+              {/* โชว์ทุกกลุ่ม (รวมกลุ่มว่าง) · ลากแท็กมาวางที่กลุ่ม = ย้ายเข้ากลุ่ม */}
               {topGroups.map((g) => {
                 const direct = tagsOfGrp(g.id);
                 const subs = subOfGrp(g.id).map((s) => ({ s, t: tagsOfGrp(s.id) }));
-                if (direct.length === 0 && subs.every((x) => x.t.length === 0)) return null;
+                const empty = direct.length === 0 && subs.every((x) => x.t.length === 0);
                 return (
-                  <div key={g.id}>
-                    <div className="text-[11px] font-medium text-slate-500">{g.icon ? g.icon + " " : ""}{g.name}</div>
+                  <div key={g.id} onDrop={onGroupDrop(g.id)} onDragOver={onGroupOver}
+                    className="rounded-md border border-transparent hover:border-blue-300 hover:bg-blue-50/30 p-1 transition-colors">
+                    <div className="text-[11px] font-medium text-slate-500">{g.icon ? g.icon + " " : ""}{g.name}{g.single_select ? " · เลือก1" : ""}</div>
                     <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                      {empty && <span className="text-[10px] text-slate-300">— ลากแท็กมาวางที่นี่ —</span>}
                       {direct.map(tagChip)}
-                      {subs.filter((x) => x.t.length > 0).map(({ s, t }) => (
-                        <span key={s.id} className="inline-flex items-center gap-1 flex-wrap">
-                          <span className="text-[10px] text-slate-400">↳{s.name}:</span>{t.map(tagChip)}
+                      {subs.map(({ s, t }) => (
+                        <span key={s.id} onDrop={onGroupDrop(s.id)} onDragOver={onGroupOver}
+                          className="inline-flex items-center gap-1 flex-wrap rounded border border-transparent hover:border-blue-300 px-1">
+                          <span className="text-[10px] text-slate-400">↳{s.name}:</span>
+                          {t.length === 0 ? <span className="text-[10px] text-slate-300">วางที่นี่</span> : t.map(tagChip)}
                         </span>
                       ))}
                     </div>
                   </div>
                 );
               })}
-              {ungroupedTags.length > 0 && (
-                <div>
-                  <div className="text-[11px] font-medium text-slate-400">ไม่มีกลุ่ม</div>
-                  <div className="flex flex-wrap items-center gap-1.5 mt-0.5">{ungroupedTags.map(tagChip)}</div>
+              {/* ไม่มีกลุ่ม — ลากมาที่นี่เพื่อเอาออกจากกลุ่ม */}
+              <div onDrop={onGroupDrop(null)} onDragOver={onGroupOver}
+                className="rounded-md border border-transparent hover:border-blue-300 hover:bg-blue-50/30 p-1 transition-colors">
+                <div className="text-[11px] font-medium text-slate-400">ไม่มีกลุ่ม</div>
+                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                  {ungroupedTags.length === 0 && <span className="text-[10px] text-slate-300">— ลากแท็กมาที่นี่เพื่อเอาออกจากกลุ่ม —</span>}
+                  {ungroupedTags.map(tagChip)}
                 </div>
-              )}
+              </div>
               <div className="flex items-center gap-1.5 pt-1">
                 <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") createTag(); }}
                   placeholder="แท็กใหม่…" className="h-7 w-28 px-2 text-xs border border-slate-200 rounded-md" />
