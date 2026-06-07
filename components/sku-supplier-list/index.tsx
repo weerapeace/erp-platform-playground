@@ -39,6 +39,17 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
   const [wizardOpen, setWizardOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tierEdit, setTierEdit] = useState<{ id: string; tiers: { qty: number; price: number }[] } | null>(null);   // ตัวแก้ขั้นราคา
+  const [histId, setHistId] = useState<string | null>(null);   // ดูประวัติราคาของแถวไหน
+  const [hist, setHist] = useState<{ id: string; old_price: number | null; new_price: number | null; currency: string; changed_by_name: string | null; changed_at: string }[]>([]);
+
+  const openHistory = async (id: string) => {
+    if (histId === id) { setHistId(null); return; }
+    setHistId(id); setHist([]);
+    try {
+      const j = await apiFetch(`/api/purchasing/sku-suppliers?history_id=${encodeURIComponent(id)}`).then((r) => r.json());
+      setHist(j.data ?? []);
+    } catch { /* ignore */ }
+  };
 
   // ฟอร์มเพิ่มแถว
   const [newPartner, setNewPartner] = useState("");
@@ -187,7 +198,20 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
                 className="text-blue-600 hover:underline">
                 ราคาขั้นบันได{r.price_tiers?.length ? ` (${r.price_tiers.length})` : ""}
               </button>
+              <button type="button" onClick={() => void openHistory(r.id)} className="text-slate-500 hover:text-blue-600 hover:underline">📈 ประวัติ</button>
             </div>
+            {/* ประวัติราคา */}
+            {histId === r.id && (
+              <div className="mt-1 pl-6 text-[11px] text-slate-500 space-y-0.5">
+                {hist.length === 0 ? <div className="text-slate-300">— ยังไม่มีประวัติการเปลี่ยนราคา —</div> : hist.map((h) => (
+                  <div key={h.id} className="flex items-center gap-2">
+                    <span className="text-slate-400">{h.changed_at?.slice(0, 10)}</span>
+                    <span>{h.old_price ?? "—"} → <b className="text-slate-700">{h.new_price ?? "—"}</b> {curLabel(h.currency)}</span>
+                    {h.changed_by_name && <span className="text-slate-400">· {h.changed_by_name}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
             {/* แสดงขั้นราคาแบบย่อ */}
             {r.price_tiers?.length > 0 && tierEdit?.id !== r.id && (
               <div className="mt-1 pl-6 flex flex-wrap gap-1">

@@ -55,11 +55,32 @@ function shape(r: Record<string, unknown>) {
   };
 }
 
-// ── GET — รายการร้าน+ราคาของสินค้า ──
+// บันทึกประวัติราคา (best-effort) เมื่อราคาเปลี่ยน
+async function logPriceChange(admin: ReturnType<typeof supabaseAdmin>, p: { supplier_item_id: string; item_sku_id: string | null; partner_id: string | null; old_price: number | null; new_price: number | null; currency: string; userId?: string; userName?: string }) {
+  if (p.old_price === p.new_price) return;
+  await admin.from("supplier_price_history").insert({
+    supplier_item_id: p.supplier_item_id, item_sku_id: p.item_sku_id, supplier_partner_id: p.partner_id,
+    old_price: p.old_price, new_price: p.new_price, currency: p.currency, changed_by: p.userId ?? null, changed_by_name: p.userName ?? null,
+  });
+}
+
+// ── GET — รายการร้าน+ราคาของสินค้า (หรือ history_id=<supplier_item_id> → ประวัติราคา) ──
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view");
   if (denied) return denied;
-  const skuId = new URL(request.url).searchParams.get("sku_id");
+  const sp = new URL(request.url).searchParams;
+
+  // ดูประวัติราคาของร้าน-สินค้านี้
+  const historyId = sp.get("history_id");
+  if (historyId) {
+    const { data, error } = await supabaseAdmin().from("supplier_price_history")
+      .select("id, old_price, new_price, currency, changed_by_name, changed_at")
+      .eq("supplier_item_id", historyId).order("changed_at", { ascending: false }).limit(50);
+    if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+    return NextResponse.json({ data: data ?? [], error: null });
+  }
+
+  const skuId = sp.get("sku_id");
   if (!skuId) return NextResponse.json({ data: [], error: "ต้องระบุ sku_id" }, { status: 400 });
 
   const { data, error } = await supabaseAdmin()
@@ -99,13 +120,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // upsert: มีร้านนี้อยู่แล้ว → อัปเดตราคา/สกุลเงิน ; ยังไม่มี → เพิ่มใหม่
   const { data: existing } = await admin.from("supplier_items")
-    .select("id").eq("item_sku_id", skuId).eq("supplier_partner_id", partnerId).maybeSingle();
+    .select("id, price").eq("item_sku_id", skuId).eq("supplier_partner_id", partnerId).maybeSingle();
 
   let data: unknown, error: { message: string } | null;
   if (existing) {
+    const exRow = existing as Record<string, unknown>;
+    const exId = exRow.id as string;
+    const oldPrice = exRow.price == null ? null : Number(exRow.price);
     const patch: Record<string, unknown> = { price, currency, is_active: true };
     if (setDefault) patch.is_default = true;
-    ({ data, error } = await admin.from("supplier_items").update(patch).eq("id", (existing as Record<string, unknown>).id as string).select(SELECT).single());
+    ({ data, error } = await admin.from("supplier_items").update(patch).eq("id", exId).select(SELECT).single());
+    if (!error) await logPriceChange(admin, { supplier_item_id: exId, item_sku_id: skuId, partner_id: partnerId, old_price: oldPrice, new_price: price, currency, userId: user?.id, userName: user?.user_metadata?.name as string | undefined });
   } else {
     const row = {
       item_sku_id: skuId, supplier_partner_id: partnerId, price, currency, is_default: setDefault,
@@ -134,8 +159,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: cur } = await admin.from("supplier_items").select("item_sku_id").eq("id", id).single();
-  const skuId = cur ? String((cur as unknown as Record<string, unknown>).item_sku_id) : null;
+  const { data: cur } = await admin.from("supplier_items").select("item_sku_id, supplier_partner_id, price, currency").eq("id", id).single();
+  const curRow = (cur ?? {}) as Record<string, unknown>;
+  const skuId = cur ? String(curRow.item_sku_id) : null;
+  const oldPrice = curRow.price == null ? null : Number(curRow.price);
 
   const patch: Record<string, unknown> = {};
   if ("price" in b) patch.price = num(b.price);
@@ -155,6 +182,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   const { data, error } = await admin.from("supplier_items").update(patch).eq("id", id).select(SELECT).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if ("price" in patch) await logPriceChange(admin, { supplier_item_id: id, item_sku_id: skuId, partner_id: curRow.supplier_partner_id ? String(curRow.supplier_partner_id) : null, old_price: oldPrice, new_price: patch.price as number | null, currency: (patch.currency as string) ?? (curRow.currency as string) ?? "THB", userId: user?.id, userName: user?.user_metadata?.name as string | undefined });
   await writeAudit(admin, { action: "update", entityType: "supplier_items", entityId: id, actorId: user?.id, actorName: user?.user_metadata?.name as string | undefined, metadata: { changes: patch } });
   return NextResponse.json({ data: shape(data as unknown as Record<string, unknown>), error: null });
 }
