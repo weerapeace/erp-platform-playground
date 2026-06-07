@@ -334,7 +334,7 @@ export function BomLineEditor({
         : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{lineCalc(l)}</span>,
     },
     {
-      key: "qty", header: "ปริมาณ", width: 86, align: "right", sortable: true,
+      key: "qty", header: "ปริมาณ", width: 86, align: "right", sortable: true, summable: true,
       getValue: (l) => l.qty,
       render: (l, u, ro) =>
         calcClass(l.material_type) === "manual" ? (
@@ -347,6 +347,7 @@ export function BomLineEditor({
     {
       key: "uom", header: "หน่วย", width: 70,
       getValue: (l) => l.uom,
+      setValue: (_l, v) => ({ uom: v }),
       render: (l, u, ro) => <input type="text" value={l.uom} disabled={ro}
         onChange={(e) => u({ uom: e.target.value })} className={inputCls} />,
     },
@@ -364,6 +365,7 @@ export function BomLineEditor({
       onChange={(rows) => onChange(rows.map(recalc))}
       rowId={(l) => l.key}
       readonly={readonly}
+      storageKey="bom-lines"
       onAdd={emptyLine}
       addLabel="＋ เพิ่มวัตถุดิบ"
       emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"
