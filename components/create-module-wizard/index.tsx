@@ -13,7 +13,7 @@
  *
  * ใช้ซ้ำได้ทุกที่ (modal overlay) — ส่ง onClose + onCreated เข้ามา
  */
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 
@@ -179,7 +179,7 @@ function CustomFieldEditor({ existingKeys, onAdd, onCancel }: {
 }
 
 export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void; onCreated?: (moduleKey: string) => void }) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   // ขั้น 1
   const [label, setLabel] = useState("");
   const [table, setTable] = useState("");
@@ -191,11 +191,13 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
   const [reqKeys, setReqKeys] = useState<Set<string>>(new Set());
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  // ขั้น 4 — ข้อมูลเริ่มต้น (กริดแบบ Excel)
+  const [dataRows, setDataRows] = useState<Record<string, string>[]>(() => Array.from({ length: 5 }, () => ({})));
   // สถานะ
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<Progress>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState<{ key: string; warnings: string[] } | null>(null);
+  const [done, setDone] = useState<{ key: string; warnings: string[]; imported?: { created: number; failed: { row: number; error: string }[]; total: number } } | null>(null);
 
   const onLabel = (v: string) => {
     setLabel(v);
@@ -221,6 +223,43 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
 
   const selectedList = useMemo(() => CATALOG.filter((f) => selected.has(f.key)), [selected]);
 
+  // คอลัมน์ของกริดใส่ข้อมูล (ขั้น 4) = ชื่อ + ช่องที่เลือก/เพิ่มเอง (ตัด image ออก — วางไม่ได้)
+  const dataCols = useMemo(() => {
+    const cols: { key: string; label: string; ui: string; required?: boolean }[] = [{ key: "name", label: "ชื่อ", ui: "text", required: true }];
+    for (const f of selectedList) if (f.ui !== "image") cols.push({ key: f.key, label: f.label, ui: f.ui, required: reqKeys.has(f.key) });
+    for (const c of customFields) if (c.ui !== "image") cols.push({ key: c.key, label: c.label, ui: c.ui, required: c.required });
+    return cols;
+  }, [selectedList, customFields, reqKeys]);
+  const filledRowCount = useMemo(() => dataRows.filter((r) => dataCols.some((c) => (r[c.key] ?? "").trim() !== "")).length, [dataRows, dataCols]);
+
+  const setCell = (rowIdx: number, key: string, val: string) => {
+    setDataRows((prev) => {
+      const next = prev.map((r, i) => (i === rowIdx ? { ...r, [key]: val } : r));
+      if (rowIdx === next.length - 1 && val.trim() !== "") next.push({});   // auto เพิ่มแถวว่างเมื่อพิมพ์ในแถวสุดท้าย
+      return next;
+    });
+  };
+  // วางจาก Excel: clipboard มี \t / \n → กระจายลงหลายเซลล์/หลายแถว เริ่มจากเซลล์ที่วาง
+  const handlePaste = (e: React.ClipboardEvent, rowIdx: number, colIdx: number) => {
+    const text = e.clipboardData.getData("text/plain");
+    if (!text || (!text.includes("\t") && !text.includes("\n"))) return;   // เซลล์เดียว → ปล่อยปกติ
+    e.preventDefault();
+    const matrix = text.replace(/\r/g, "").replace(/\n+$/, "").split("\n").map((line) => line.split("\t"));
+    setDataRows((prev) => {
+      const next = prev.map((r) => ({ ...r }));
+      matrix.forEach((line, i) => {
+        const rIdx = rowIdx + i;
+        while (next.length <= rIdx) next.push({});
+        line.forEach((cell, j) => {
+          const cIdx = colIdx + j;
+          if (cIdx < dataCols.length) next[rIdx][dataCols[cIdx].key] = cell;
+        });
+      });
+      if (next.every((r) => dataCols.some((c) => (r[c.key] ?? "").trim() !== ""))) next.push({});
+      return next;
+    });
+  };
+
   // ไปขั้นถัดไป — validate แบบมีข้อความบอก (ไม่ปิดปุ่มเฉยๆ ให้กดแล้วรู้สาเหตุ)
   const goNext = () => {
     setErr(null);
@@ -231,7 +270,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
         return;
       }
     }
-    setStep((s) => (s + 1) as 1 | 2 | 3);
+    setStep((s) => (s + 1) as 1 | 2 | 3 | 4);
   };
 
   const create = async () => {
@@ -241,7 +280,21 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
       ...selectedList.map((f) => ({ field_key: f.key, label: f.label, ui_type: f.ui, is_searchable: !!f.searchable, is_required: reqKeys.has(f.key), is_sensitive: !!f.sensitive, options: f.ui === "select" ? f.options : undefined })),
       ...customFields.map((c) => ({ field_key: c.key, label: c.label, ui_type: c.ui, is_searchable: c.searchable, is_required: c.required, is_sensitive: c.sensitive, options: c.ui === "select" ? c.options : undefined, target_table: c.target_table, target_label_field: c.target_label })),
     ];
-    setProgress({ total: toCreate.length + 1, done: 0, current: "สร้างตาราง…" });
+    // เตรียมข้อมูลจากกริด (ขั้น 4) → object ต่อแถว (ตัดช่องว่าง, coerce boolean)
+    const importRows = dataRows
+      .map((r) => {
+        const o: Record<string, unknown> = {};
+        for (const c of dataCols) {
+          const v = (r[c.key] ?? "").trim();
+          if (v === "") continue;
+          o[c.key] = c.ui === "boolean" ? /^(true|1|yes|y|ใช่|จริง)$/i.test(v) : v;
+        }
+        return o;
+      })
+      .filter((o) => Object.keys(o).length > 0);
+    const IMPORT_BATCH = 150;
+    const batchCount = Math.ceil(importRows.length / IMPORT_BATCH);
+    setProgress({ total: toCreate.length + 1 + batchCount, done: 0, current: "สร้างตาราง…" });
     try {
       // 1) สร้าง table (จะได้ field "ชื่อ" + สถานะ มาให้)
       const r = await apiFetch("/api/admin/schema/create-table", {
@@ -256,7 +309,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
       const warnings: string[] = [];
       let doneCount = 1;
       for (const f of toCreate) {
-        setProgress({ total: toCreate.length + 1, done: doneCount, current: `เพิ่มช่อง “${f.label}”…` });
+        setProgress({ total: toCreate.length + 1 + batchCount, done: doneCount, current: `เพิ่มช่อง “${f.label}”…` });
         try {
           const fr = await apiFetch("/api/admin/schema/add-field", {
             method: "POST", headers: { "Content-Type": "application/json" },
@@ -274,8 +327,37 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
         }
         doneCount += 1;
       }
+
+      // 3) นำเข้าข้อมูลเริ่มต้น (ถ้ามี) — ผ่าน import API กลาง แบ่ง batch 150
+      let imported: { created: number; failed: { row: number; error: string }[]; total: number } | undefined;
+      if (importRows.length > 0) {
+        let created = 0;
+        const failed: { row: number; error: string }[] = [];
+        for (let i = 0; i < importRows.length; i += IMPORT_BATCH) {
+          const batch = importRows.slice(i, i + IMPORT_BATCH);
+          setProgress({ total: toCreate.length + 1 + batchCount, done: doneCount, current: `นำเข้าข้อมูล ${i + 1}–${i + batch.length}…` });
+          try {
+            const ir = await apiFetch(`/api/master-v2/${moduleKey}/import`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ rows: batch, mode: "create" }),
+            });
+            const ij = await ir.json().catch(() => ({} as { data?: { created?: number; failed?: { row: number; error: string }[] }; error?: string }));
+            if (ij?.data) {
+              created += ij.data.created ?? 0;
+              (ij.data.failed ?? []).forEach((f) => failed.push({ row: i + f.row, error: f.error }));
+            } else if (ij?.error) {
+              failed.push({ row: i + 1, error: ij.error });
+            }
+          } catch (e) {
+            failed.push({ row: i + 1, error: String((e as Error).message ?? e) });
+          }
+          doneCount += 1;
+        }
+        imported = { created, failed, total: importRows.length };
+      }
+
       setProgress(null);
-      setDone({ key: moduleKey, warnings });
+      setDone({ key: moduleKey, warnings, imported });
       onCreated?.(moduleKey);
     } catch (e) {
       setErr(String((e as Error).message ?? e)); setProgress(null);
@@ -285,7 +367,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
   };
 
   // popup กลาง: dirty = มีการกรอก/เลือก หรือกำลังสร้าง → ใช้กฎ "เตือนก่อนปิด"
-  const dirty = !done && (saving || !!label.trim() || !!table.trim() || selected.size > 0 || customFields.length > 0);
+  const dirty = !done && (saving || !!label.trim() || !!table.trim() || selected.size > 0 || customFields.length > 0 || filledRowCount > 0);
   const totalFields = selected.size + customFields.length;
   const guardedClose = () => { if (saving) return; onClose(); };   // ห้ามปิดระหว่างกำลังสร้าง
 
@@ -296,11 +378,11 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
     </>
   ) : (
     <div className="flex w-full items-center justify-between">
-      <button onClick={() => (step === 1 ? onClose() : setStep((s) => (s - 1) as 1 | 2 | 3))} disabled={saving}
+      <button onClick={() => (step === 1 ? onClose() : setStep((s) => (s - 1) as 1 | 2 | 3 | 4))} disabled={saving}
         className="h-9 px-4 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-40">
         {step === 1 ? "ยกเลิก" : "← ย้อนกลับ"}
       </button>
-      {step < 3 ? (
+      {step < 4 ? (
         <button onClick={goNext}
           className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
           ถัดไป →
@@ -308,7 +390,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
       ) : (
         <button onClick={create} disabled={saving}
           className="h-9 px-5 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-          {saving ? "กำลังสร้าง…" : `สร้างโมดูล (${totalFields} ช่อง)`}
+          {saving ? "กำลังสร้าง…" : `สร้างโมดูล (${totalFields} ช่อง${filledRowCount ? ` · ${filledRowCount} แถว` : ""})`}
         </button>
       )}
     </div>
@@ -321,6 +403,18 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
           <div className="py-2 text-center">
             <div className="text-4xl mb-2">✅</div>
             <p className="text-emerald-800 font-medium">สร้างโมดูล “{label}” แล้ว!</p>
+            {done.imported && (
+              <div className="mt-2 text-sm text-slate-600">
+                นำเข้าข้อมูล {done.imported.total} แถว — สำเร็จ <b className="text-emerald-700">{done.imported.created}</b>
+                {done.imported.failed.length > 0 && <> · ล้มเหลว <b className="text-red-600">{done.imported.failed.length}</b></>}
+              </div>
+            )}
+            {done.imported && done.imported.failed.length > 0 && (
+              <div className="mt-2 text-left text-xs bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 max-h-40 overflow-y-auto">
+                <div className="font-medium mb-1">แถวที่นำเข้าไม่สำเร็จ:</div>
+                <ul className="list-disc pl-4 space-y-0.5">{done.imported.failed.slice(0, 50).map((f, i) => <li key={i}>แถว {f.row}: {f.error}</li>)}</ul>
+              </div>
+            )}
             {done.warnings.length > 0 && (
               <div className="mt-3 text-left text-xs bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800">
                 <div className="font-medium mb-1">⚠ บางช่องเพิ่มไม่สำเร็จ ({done.warnings.length}) — เพิ่มเองภายหลังได้:</div>
@@ -332,11 +426,11 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
           <>
             {/* stepper */}
             <div className="flex items-center gap-2 pb-4 text-xs">
-              {[{ n: 1, t: "ข้อมูลโมดูล" }, { n: 2, t: "เลือกแม่แบบ" }, { n: 3, t: "ปรับช่อง" }].map((s, i) => (
+              {[{ n: 1, t: "ข้อมูลโมดูล" }, { n: 2, t: "เลือกแม่แบบ" }, { n: 3, t: "ปรับช่อง" }, { n: 4, t: "ใส่ข้อมูล" }].map((s, i) => (
                 <div key={s.n} className="flex items-center gap-2">
-                  <span className={`h-6 w-6 rounded-full grid place-items-center font-semibold ${step >= (s.n as 1 | 2 | 3) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>{s.n}</span>
+                  <span className={`h-6 w-6 rounded-full grid place-items-center font-semibold ${step >= (s.n as 1 | 2 | 3 | 4) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-400"}`}>{s.n}</span>
                   <span className={step === s.n ? "text-slate-700 font-medium" : "text-slate-400"}>{s.t}</span>
-                  {i < 2 && <span className="text-slate-300">›</span>}
+                  {i < 3 && <span className="text-slate-300">›</span>}
                 </div>
               ))}
             </div>
@@ -447,6 +541,58 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* ── ขั้น 4 — ใส่ข้อมูล (ไม่บังคับ) แบบ Excel ── */}
+              {step === 4 && (
+                <div className="space-y-3">
+                  <div className="p-2.5 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-900">
+                    📋 ใส่ข้อมูลเริ่มต้นได้เลย (ไม่บังคับ) — <b>คัดลอกหลายช่อง/หลายแถวจาก Excel แล้ว Ctrl+V วางในตารางได้ทันที</b><br />
+                    ช่อง “ชื่อ” ต้องมีค่า · ช่องที่เชื่อมตารางอื่นให้พิมพ์เป็น “ชื่อ” ของรายการปลายทาง
+                  </div>
+                  <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table className="text-sm border-collapse">
+                      <thead className="bg-slate-50">
+                        <tr>
+                          <th className="w-8 px-1 py-1.5 text-[10px] text-slate-400 border-b border-slate-200">#</th>
+                          {dataCols.map((c) => (
+                            <th key={c.key} className="px-2 py-1.5 text-left text-xs font-medium text-slate-600 border-b border-l border-slate-200 whitespace-nowrap">
+                              {c.label}{c.required && <span className="text-rose-500"> *</span>}
+                              <span className="block text-[9px] text-slate-400 font-normal">{c.key}</span>
+                            </th>
+                          ))}
+                          <th className="w-8 border-b border-l border-slate-200"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dataRows.map((row, ri) => (
+                          <tr key={ri}>
+                            <td className="px-1 py-0.5 text-[10px] text-slate-300 text-center border-b border-slate-100">{ri + 1}</td>
+                            {dataCols.map((c, ci) => (
+                              <td key={c.key} className="border-b border-l border-slate-100 p-0">
+                                <input
+                                  value={row[c.key] ?? ""}
+                                  onChange={(e) => setCell(ri, c.key, e.target.value)}
+                                  onPaste={(e) => handlePaste(e, ri, ci)}
+                                  className="w-32 h-8 px-2 text-sm outline-none focus:bg-blue-50 focus:ring-1 focus:ring-inset focus:ring-blue-400"
+                                />
+                              </td>
+                            ))}
+                            <td className="border-b border-l border-slate-100 text-center">
+                              <button onClick={() => setDataRows((p) => p.length > 1 ? p.filter((_, i) => i !== ri) : p)}
+                                className="text-slate-300 hover:text-red-500 text-xs px-1" title="ลบแถว">✕</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <button onClick={() => setDataRows((p) => [...p, {}])}
+                      className="text-xs px-2.5 py-1 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">+ เพิ่มแถว</button>
+                    <span className="text-xs text-slate-400">มีข้อมูล {filledRowCount} แถว (แถวว่างถูกข้าม) · สูงสุด ~500 แถว/ครั้ง</span>
+                  </div>
                 </div>
               )}
 
