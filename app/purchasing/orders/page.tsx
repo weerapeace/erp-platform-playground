@@ -24,6 +24,7 @@ type Row = {
   qty: number; uom: string; price_est: number; line_total: number; currency: string;
   order_date: string | null; requester: string; note: string; status: string; approved: boolean; cover_key: string | null; image_url: string | null;
   purchase_link: string | null; moq: number | null; lead_time_days: number | null;
+  price_tiers: { qty: number; price: number }[];
 };
 type CartLine = { qty: number; partial: boolean };
 
@@ -306,6 +307,13 @@ export default function PurchaseOrdersPage() {
                                     {r.moq != null && <span>MOQ {r.moq.toLocaleString()}</span>}
                                     {r.moq != null && r.lead_time_days != null && " · "}
                                     {r.lead_time_days != null && <span>ส่ง {r.lead_time_days} วัน</span>}
+                                  </div>
+                                )}
+                                {r.price_tiers?.length > 0 && (
+                                  <div className="mt-0.5 flex flex-wrap gap-1">
+                                    {r.price_tiers.map((t, i) => (
+                                      <span key={i} className="text-[10px] px-1 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">≥{t.qty.toLocaleString()}→{t.price} {curLabel(r.currency)}</span>
+                                    ))}
                                   </div>
                                 )}
                                 <div className={`w-full mt-2 h-8 text-xs font-medium rounded-md flex items-center justify-center ${blocked ? "bg-amber-50 text-amber-700 border border-amber-200" : on ? "bg-blue-100 text-blue-700 border border-blue-200" : "bg-blue-600 text-white"}`}>

@@ -38,11 +38,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // ดึง MOQ + leadtime จาก "ร้านหลัก" (is_default) ของแต่ละสินค้า — โชว์บนการ์ด
-  const supMap = new Map<string, { moq: number | null; lead: number | null }>();
+  const supMap = new Map<string, { moq: number | null; lead: number | null; tiers: { qty: number; price: number }[] }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const chunk = skuIds.slice(i, i + 300);
-    const { data: si } = await admin.from("supplier_items").select("item_sku_id, moq, lead_time_days").eq("is_default", true).in("item_sku_id", chunk);
-    for (const s of (si ?? []) as Record<string, unknown>[]) supMap.set(String(s.item_sku_id), { moq: s.moq == null ? null : Number(s.moq), lead: s.lead_time_days == null ? null : Number(s.lead_time_days) });
+    const { data: si } = await admin.from("supplier_items").select("item_sku_id, moq, lead_time_days, price_tiers").eq("is_default", true).in("item_sku_id", chunk);
+    for (const s of (si ?? []) as Record<string, unknown>[]) supMap.set(String(s.item_sku_id), {
+      moq: s.moq == null ? null : Number(s.moq), lead: s.lead_time_days == null ? null : Number(s.lead_time_days),
+      tiers: Array.isArray(s.price_tiers) ? (s.price_tiers as { qty: number; price: number }[]) : [],
+    });
   }
 
   const rows = (prs ?? []).map((p) => {
@@ -69,6 +72,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       purchase_link: sk?.link ?? null,   // ลิงก์ซื้อสินค้า (จาก SKU)
       moq: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.moq : null) ?? null,
       lead_time_days: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.lead : null) ?? null,
+      price_tiers: (p.item_sku_id ? supMap.get(String(p.item_sku_id))?.tiers : null) ?? [],
     };
   });
 

@@ -17,6 +17,7 @@ export type SkuSupplierRow = {
   id: string; sku_id: string | null; partner_id: string | null; partner_name: string;
   partner_country: string | null; price: number | null; currency: string; is_default: boolean;
   supplier_sku: string | null; moq: number | null; lead_time_days: number | null; note: string | null;
+  price_tiers: { qty: number; price: number }[];
 };
 type Supplier = { id: string; name: string; currency: string };
 
@@ -37,6 +38,7 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [tierEdit, setTierEdit] = useState<{ id: string; tiers: { qty: number; price: number }[] } | null>(null);   // ตัวแก้ขั้นราคา
 
   // ฟอร์มเพิ่มแถว
   const [newPartner, setNewPartner] = useState("");
@@ -181,7 +183,42 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
                 <input type="number" step="1" defaultValue={r.lead_time_days ?? ""} disabled={busy}
                   onBlur={(e) => { const v = e.target.value === "" ? null : Number(e.target.value); if (v !== r.lead_time_days) void patchRow(r.id, { lead_time_days: v }); }}
                   className="h-6 w-12 px-1 text-right border border-slate-200 rounded" placeholder="—" />วัน</label>
+              <button type="button" onClick={() => setTierEdit(tierEdit?.id === r.id ? null : { id: r.id, tiers: r.price_tiers?.length ? [...r.price_tiers] : [{ qty: 0, price: 0 }] })}
+                className="text-blue-600 hover:underline">
+                ราคาขั้นบันได{r.price_tiers?.length ? ` (${r.price_tiers.length})` : ""}
+              </button>
             </div>
+            {/* แสดงขั้นราคาแบบย่อ */}
+            {r.price_tiers?.length > 0 && tierEdit?.id !== r.id && (
+              <div className="mt-1 pl-6 flex flex-wrap gap-1">
+                {r.price_tiers.map((t, i) => (
+                  <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">≥{t.qty.toLocaleString()} → {t.price} {curLabel(r.currency)}</span>
+                ))}
+              </div>
+            )}
+            {/* ตัวแก้ขั้นราคา */}
+            {tierEdit?.id === r.id && (
+              <div className="mt-1.5 pl-6 space-y-1">
+                {tierEdit.tiers.map((t, i) => (
+                  <div key={i} className="flex items-center gap-1 text-[11px] text-slate-500">
+                    ซื้อ ≥
+                    <input type="number" value={t.qty || ""} onChange={(e) => setTierEdit((te) => te && { ...te, tiers: te.tiers.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) || 0 } : x) })}
+                      className="h-6 w-16 px-1 text-right border border-slate-200 rounded" placeholder="จำนวน" />
+                    → ราคา
+                    <input type="number" step="any" value={t.price || ""} onChange={(e) => setTierEdit((te) => te && { ...te, tiers: te.tiers.map((x, j) => j === i ? { ...x, price: Number(e.target.value) || 0 } : x) })}
+                      className="h-6 w-16 px-1 text-right border border-slate-200 rounded" placeholder="ราคา" />
+                    {curLabel(r.currency)}
+                    <button type="button" onClick={() => setTierEdit((te) => te && { ...te, tiers: te.tiers.filter((_, j) => j !== i) })} className="text-slate-300 hover:text-red-500">✕</button>
+                  </div>
+                ))}
+                <div className="flex items-center gap-2 pt-0.5">
+                  <button type="button" onClick={() => setTierEdit((te) => te && { ...te, tiers: [...te.tiers, { qty: 0, price: 0 }] })} className="text-[11px] text-slate-500 hover:text-blue-600">+ เพิ่มขั้น</button>
+                  <button type="button" disabled={busy} onClick={async () => { await patchRow(r.id, { price_tiers: tierEdit.tiers.filter((t) => t.qty > 0) }); setTierEdit(null); }}
+                    className="h-6 px-2 text-[11px] font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-40">บันทึกขั้นราคา</button>
+                  <button type="button" onClick={() => setTierEdit(null)} className="text-[11px] text-slate-400 hover:text-slate-600">ยกเลิก</button>
+                </div>
+              </div>
+            )}
             </div>
           ))}
         </div>

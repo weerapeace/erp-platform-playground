@@ -21,8 +21,16 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const SELECT =
-  "id, item_sku_id, supplier_partner_id, price, currency, is_default, supplier_sku, moq, lead_time_days, note, " +
+  "id, item_sku_id, supplier_partner_id, price, currency, is_default, supplier_sku, moq, lead_time_days, price_tiers, note, " +
   "partner:supplier_partner_id(id, display_name, name_th, default_currency, shop_country)";
+
+// ทำความสะอาดราคาขั้นบันได: [{qty,price}] เรียงตามจำนวนน้อย→มาก
+type Tier = { qty: number; price: number };
+function cleanTiers(v: unknown): Tier[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((t) => ({ qty: Number((t as Tier)?.qty) || 0, price: Number((t as Tier)?.price) || 0 }))
+    .filter((t) => t.qty > 0).sort((a, b) => a.qty - b.qty);
+}
 
 type PartnerEmbed = { id: string; display_name: string | null; name_th: string | null; default_currency: string | null; shop_country: string | null } | null;
 
@@ -42,6 +50,7 @@ function shape(r: Record<string, unknown>) {
     supplier_sku: (r.supplier_sku as string) ?? null,
     moq: r.moq == null ? null : Number(r.moq),
     lead_time_days: r.lead_time_days == null ? null : Number(r.lead_time_days),
+    price_tiers: cleanTiers(r.price_tiers),
     note: (r.note as string) ?? null,
   };
 }
@@ -102,6 +111,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       item_sku_id: skuId, supplier_partner_id: partnerId, price, currency, is_default: setDefault,
       supplier_sku: typeof b.supplier_sku === "string" ? b.supplier_sku : null,
       moq: num(b.moq), lead_time_days: num(b.lead_time_days),
+      price_tiers: "price_tiers" in b ? cleanTiers(b.price_tiers) : [],
       note: typeof b.note === "string" ? b.note : null, is_active: true,
     };
     ({ data, error } = await admin.from("supplier_items").insert(row).select(SELECT).single());
@@ -133,6 +143,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("supplier_sku" in b) patch.supplier_sku = typeof b.supplier_sku === "string" ? b.supplier_sku : null;
   if ("moq" in b) patch.moq = num(b.moq);
   if ("lead_time_days" in b) patch.lead_time_days = num(b.lead_time_days);
+  if ("price_tiers" in b) patch.price_tiers = cleanTiers(b.price_tiers);
   if ("note" in b) patch.note = typeof b.note === "string" ? b.note : null;
 
   if (b.is_default === true) {
