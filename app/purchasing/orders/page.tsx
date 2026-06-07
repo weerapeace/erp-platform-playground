@@ -80,6 +80,7 @@ export default function PurchaseOrdersPage() {
   const [buyAllShop, setBuyAllShop] = useState<{ name: string; rows: Row[] } | null>(null);
   const [linkRow, setLinkRow] = useState<Row | null>(null);          // popup ใส่ลิงก์สินค้า
   const [reviewOpen, setReviewOpen] = useState(false);               // ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ
+  const [contactShop, setContactShop] = useState<{ name: string; partnerId: string | null } | null>(null);   // popup ติดต่อร้าน
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
   const [taobaoShops, setTaobaoShops] = useState<Set<string>>(new Set());   // ชื่อร้านที่เป็น Taobao
   const [shopQ, setShopQ] = useState("");
@@ -184,6 +185,30 @@ export default function PurchaseOrdersPage() {
     await submitPO({ items, order_date: orderDate }, cartRows.map((r) => r.id));
     setReviewOpen(false);
   }, [cartRows, cart, orderDate, submitPO]);
+
+  // ── PDF ใบขอราคา (RFQ) ส่งร้าน — เปิดหน้าพิมพ์ (Save as PDF) สองภาษาตามสกุลเงินร้าน ──
+  const printRfq = useCallback((shop: string, items: Row[]) => {
+    const lang = isCNY(items[0]?.currency ?? "THB") ? "en" : "th";
+    const t = lang === "en"
+      ? { title: "Purchase Inquiry (RFQ)", shop: "Supplier", date: "Date", no: "No.", img: "Image", code: "Code", name: "Item", qty: "Qty", link: "Link", price: "Unit Price", lead: "Lead time", note: "Remark", footer: "Please fill in unit price & lead time, then reply. Thank you.", print: "Print / Save PDF" }
+      : { title: "ใบขอราคา (RFQ)", shop: "ร้าน", date: "วันที่", no: "ลำดับ", img: "รูป", code: "รหัส", name: "สินค้า", qty: "จำนวน", link: "ลิงก์", price: "ราคา/หน่วย", lead: "ลีดไทม์", note: "หมายเหตุ", footer: "กรุณากรอกราคาต่อหน่วยและลีดไทม์ แล้วส่งกลับ ขอบคุณค่ะ", print: "พิมพ์ / บันทึก PDF" };
+    const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+    const origin = window.location.origin;
+    const body = items.map((r, i) => {
+      const q = cart[r.id]?.qty ?? r.qty;
+      return `<tr><td>${i + 1}</td><td>${r.image_url ? `<img src="${origin}${esc(r.image_url)}"/>` : ""}</td><td>${esc(r.code || "")}</td><td>${esc(r.item_name || "")}</td><td>${q.toLocaleString()} ${esc(r.uom || "")}</td><td>${r.purchase_link ? `<a href="${esc(r.purchase_link)}">link</a>` : ""}</td><td></td><td></td><td></td></tr>`;
+    }).join("");
+    const html = `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${t.title} - ${esc(shop)}</title>
+      <style>body{font-family:'Sarabun','Segoe UI',Tahoma,sans-serif;padding:24px;color:#1e293b}h1{font-size:18px;margin:0 0 4px}.meta{font-size:13px;color:#475569;margin-bottom:12px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #cbd5e1;padding:6px;text-align:left;vertical-align:top}th{background:#f1f5f9}img{width:56px;height:56px;object-fit:cover}.note{margin-top:14px;font-size:12px;color:#64748b}@media print{.noprint{display:none}}</style></head>
+      <body><h1>${t.title}</h1><div class="meta">${t.shop}: <b>${esc(shop)}</b> · ${t.date}: ${esc(orderDate)}</div>
+      <table><thead><tr><th>${t.no}</th><th>${t.img}</th><th>${t.code}</th><th>${t.name}</th><th>${t.qty}</th><th>${t.link}</th><th>${t.price}</th><th>${t.lead}</th><th>${t.note}</th></tr></thead><tbody>${body}</tbody></table>
+      <div class="note">${t.footer}</div>
+      <button class="noprint" onclick="window.print()" style="margin-top:16px;padding:8px 16px;font-size:14px;cursor:pointer">🖨️ ${t.print}</button>
+      </body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { toast.error("เบราว์เซอร์บล็อกป๊อปอัป — อนุญาตป๊อปอัปก่อน"); return; }
+    w.document.write(html); w.document.close();
+  }, [cart, orderDate, toast]);
 
   // ── ข้อมูล view การ์ด ──
   const shops = useMemo(() => {
@@ -422,6 +447,8 @@ export default function PurchaseOrdersPage() {
       {linkRow && <LinkModal row={linkRow} onClose={() => setLinkRow(null)}
         onSaved={(url) => { const sid = linkRow.item_sku_id; setRows((rs) => rs.map((x) => x.item_sku_id === sid ? { ...x, purchase_link: url } : x)); setLinkRow(null); }} />}
 
+      {contactShop && <ShopContactModal shopName={contactShop.name} partnerId={contactShop.partnerId} onClose={() => setContactShop(null)} />}
+
       {/* ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ — แยกตามร้าน (1 ใบ/ร้าน) */}
       {reviewOpen && (
         <ERPModal open onClose={() => !busy && setReviewOpen(false)} size="lg"
@@ -438,9 +465,15 @@ export default function PurchaseOrdersPage() {
               const cur = items[0]?.currency ?? "THB";
               return (
                 <div key={shop} className="border border-slate-200 rounded-lg overflow-hidden">
-                  <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
-                    <span className="text-sm font-semibold text-slate-700">🏪 {shop} <span className="text-[11px] font-normal text-slate-400">({items.length} รายการ)</span></span>
-                    <span className="text-sm font-bold text-blue-600">{money(subtotal, cur)}{isCNY(cur) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(subtotal * rate).toLocaleString()}</span>}</span>
+                  <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100 gap-2">
+                    <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">🏪 {shop} <span className="text-[11px] font-normal text-slate-400">({items.length} รายการ)</span></span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button type="button" onClick={() => printRfq(shop, items)} title="ใบขอราคา (PDF) ส่งร้าน"
+                        className="h-7 px-2 text-[11px] font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-white">📄 PDF</button>
+                      <button type="button" onClick={() => setContactShop({ name: shop, partnerId: suppliers.find((s) => s.name === shop)?.id ?? null })} title="ติดต่อร้าน (Line/WeChat)"
+                        className="h-7 px-2 text-[11px] font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">💬 ติดต่อ</button>
+                      <span className="text-sm font-bold text-blue-600">{money(subtotal, cur)}{isCNY(cur) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(subtotal * rate).toLocaleString()}</span>}</span>
+                    </div>
                   </div>
                   <div className="divide-y divide-slate-50">
                     {items.map((r) => {
@@ -479,6 +512,106 @@ export default function PurchaseOrdersPage() {
         </ERPModal>
       )}
     </PlaygroundShell>
+  );
+}
+
+// ── popup ติดต่อร้าน (Line/WeChat/เบอร์/ชื่อ Sale) — ดู + แก้ไข ──
+type Contact = { line_id: string; line_url: string; wechat_id: string; sale_name: string; phone: string; mobile: string; shop_country: string; default_currency: string };
+function ShopContactModal({ shopName, partnerId, onClose }: { shopName: string; partnerId: string | null; onClose: () => void }) {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [c, setC] = useState<Contact>({ line_id: "", line_url: "", wechat_id: "", sale_name: "", phone: "", mobile: "", shop_country: "", default_currency: "" });
+  const set = (k: keyof Contact, v: string) => setC((p) => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    if (!partnerId) { setLoading(false); return; }
+    apiFetch(`/api/master-v2/partners/${partnerId}`).then((r) => r.json()).then((j) => {
+      const d = (j.data ?? {}) as Record<string, unknown>;
+      setC({
+        line_id: String(d.line_id ?? ""), line_url: String(d.line_url ?? ""), wechat_id: String(d.wechat_id ?? ""),
+        sale_name: String(d.sale_name ?? ""), phone: String(d.phone ?? ""), mobile: String(d.mobile ?? ""),
+        shop_country: String(d.shop_country ?? ""), default_currency: String(d.default_currency ?? ""),
+      });
+      if (!d.line_id && !d.wechat_id && !d.phone && !d.mobile && !d.sale_name) setEdit(true);   // ไม่มีข้อมูล → เปิดโหมดแก้เลย
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [partnerId]);
+
+  const isCN = /จีน|china|taobao|tmall/i.test(c.shop_country) || c.default_currency === "RMB" || /taobao/i.test(shopName);
+  const copy = async (txt: string, label: string) => { try { await navigator.clipboard.writeText(txt); toast.success(`คัดลอก ${label} แล้ว`); } catch { /* ignore */ } };
+
+  const save = async () => {
+    if (!partnerId) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/partners/${partnerId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ line_id: c.line_id || null, line_url: c.line_url || null, wechat_id: c.wechat_id || null, sale_name: c.sale_name || null, phone: c.phone || null, mobile: c.mobile || null, actor: user?.name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      toast.success("บันทึกข้อมูลติดต่อแล้ว"); setEdit(false);
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-md";
+  const lbl = "block text-xs font-medium text-slate-600 mb-1";
+  return (
+    <ERPModal open onClose={onClose} size="md" title={`💬 ติดต่อร้าน — ${shopName}`}
+      footer={partnerId ? <>
+        <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>
+        {edit
+          ? <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
+          : <button onClick={() => setEdit(true)} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">✎ แก้ไขข้อมูลติดต่อ</button>}
+      </> : <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>}>
+      {!partnerId ? (
+        <div className="py-6 text-center text-sm text-slate-400">ร้านนี้ไม่ใช่ผู้จำหน่ายในระบบ — เลือกร้านจากรายการก่อน ถึงจะเก็บข้อมูลติดต่อได้</div>
+      ) : loading ? (
+        <div className="py-6 text-center text-sm text-slate-400">กำลังโหลด…</div>
+      ) : edit ? (
+        <div className="space-y-3">
+          <div><label className={lbl}>ชื่อ Sale</label><input value={c.sale_name} onChange={(e) => set("sale_name", e.target.value)} className={inp} placeholder="ชื่อผู้ติดต่อ" /></div>
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className={lbl}>เบอร์โทร</label><input value={c.phone} onChange={(e) => set("phone", e.target.value)} className={inp} /></div>
+            <div><label className={lbl}>มือถือ</label><input value={c.mobile} onChange={(e) => set("mobile", e.target.value)} className={inp} /></div>
+          </div>
+          <div><label className={lbl}>Line ID</label><input value={c.line_id} onChange={(e) => set("line_id", e.target.value)} className={inp} placeholder="เช่น @shopname" /></div>
+          <div><label className={lbl}>ลิงก์ Line / กลุ่ม (ถ้ามี)</label><input value={c.line_url} onChange={(e) => set("line_url", e.target.value)} className={inp} placeholder="https://line.me/..." /></div>
+          <div><label className={lbl}>WeChat ID</label><input value={c.wechat_id} onChange={(e) => set("wechat_id", e.target.value)} className={inp} placeholder="เช่น wxid_xxx" /></div>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {c.sale_name && <div className="text-sm text-slate-700">👤 Sale: <b>{c.sale_name}</b></div>}
+          {/* ปุ่มหลักตามประเภทร้าน */}
+          {isCN ? (
+            c.wechat_id ? (
+              <div className="flex items-center gap-2 p-2.5 rounded-lg border border-green-200 bg-green-50">
+                <span className="text-sm flex-1">🟢 WeChat: <b>{c.wechat_id}</b></span>
+                <button onClick={() => copy(c.wechat_id, "WeChat ID")} className="h-8 px-3 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700">คัดลอก ID</button>
+              </div>
+            ) : <div className="text-xs text-slate-400">ยังไม่มี WeChat — กด &quot;แก้ไขข้อมูลติดต่อ&quot; เพื่อเพิ่ม</div>
+          ) : (
+            (c.line_url || c.line_id) ? (
+              <div className="flex items-center gap-2 p-2.5 rounded-lg border border-emerald-200 bg-emerald-50">
+                <span className="text-sm flex-1">💬 Line: <b>{c.line_id || "(ลิงก์)"}</b></span>
+                {c.line_url && <a href={c.line_url} target="_blank" rel="noopener noreferrer" className="h-8 px-3 text-xs font-medium bg-emerald-600 text-white rounded-md hover:bg-emerald-700 flex items-center">เปิด Line</a>}
+                {c.line_id && <button onClick={() => copy(c.line_id, "Line ID")} className="h-8 px-3 text-xs font-medium border border-emerald-300 text-emerald-700 rounded-md hover:bg-emerald-100">คัดลอก ID</button>}
+              </div>
+            ) : <div className="text-xs text-slate-400">ยังไม่มี Line — กด &quot;แก้ไขข้อมูลติดต่อ&quot; เพื่อเพิ่ม</div>
+          )}
+          {/* เบอร์โทร */}
+          {(c.phone || c.mobile) && (
+            <div className="flex items-center gap-2 p-2.5 rounded-lg border border-slate-200">
+              <span className="text-sm flex-1">📞 {c.phone}{c.phone && c.mobile ? " · " : ""}{c.mobile}</span>
+              <a href={`tel:${c.mobile || c.phone}`} className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-md hover:bg-slate-50 flex items-center">โทร</a>
+            </div>
+          )}
+        </div>
+      )}
+    </ERPModal>
   );
 }
 
