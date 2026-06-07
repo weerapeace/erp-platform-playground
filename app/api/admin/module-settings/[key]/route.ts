@@ -38,7 +38,7 @@ export async function GET(
 
   const { data: mod, error } = await admin
     .from("erp_modules")
-    .select("id, module_key, table_name, label, description, primary_field, config, is_active, sort_order")
+    .select("id, module_key, table_name, label, description, primary_field, group_label, config, is_active, sort_order")
     .eq("module_key", key)
     .maybeSingle();
   if (error || !mod) return NextResponse.json({ data: null, error: "ไม่พบโมดูล" }, { status: 404 });
@@ -70,6 +70,7 @@ export async function GET(
         label:         mod.label ?? "",
         description:   mod.description ?? "",
         primary_field: mod.primary_field ?? "",
+        group_label:   mod.group_label ?? "",
         icon:          (cfg.icon as string) ?? "🧩",
         is_active:     mod.is_active !== false,
         sort_order:    mod.sort_order ?? 100,
@@ -85,7 +86,7 @@ export async function GET(
 // ---- PATCH — บันทึกการตั้งค่า ----
 type PatchBody = {
   module?: {
-    label?: string; description?: string; primary_field?: string;
+    label?: string; description?: string; primary_field?: string; group_label?: string;
     icon?: string; is_active?: boolean; sort_order?: number;
   };
   menu?: { app_keys?: string[]; show_in_sidebar?: boolean; show_in_launcher?: boolean };
@@ -121,6 +122,7 @@ export async function PATCH(
   if (m.label !== undefined)         modPatch.label = String(m.label).trim() || mod.label;
   if (m.description !== undefined)   modPatch.description = m.description;
   if (m.primary_field !== undefined) modPatch.primary_field = m.primary_field || null;
+  if (m.group_label !== undefined)   modPatch.group_label = (m.group_label ?? "").trim() || null;
   if (m.is_active !== undefined)     modPatch.is_active = !!m.is_active;
   if (m.sort_order !== undefined)    modPatch.sort_order = Number(m.sort_order) || 0;
 

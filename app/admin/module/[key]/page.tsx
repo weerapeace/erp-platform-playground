@@ -28,7 +28,7 @@ type Tab = "general" | "fields" | "views" | "layout";
 type App = { key: string; label: string; icon: string | null };
 type ModuleGeneral = {
   key: string; table: string; label: string; description: string;
-  primary_field: string; icon: string; is_active: boolean; sort_order: number;
+  primary_field: string; group_label: string; icon: string; is_active: boolean; sort_order: number;
 };
 type MenuLink = { id: string; app_keys: string[] | null; show_in_sidebar: boolean; show_in_launcher: boolean; section: string | null } | null;
 type GeneralData = {
@@ -167,6 +167,8 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("🧩");
   const [primaryField, setPrimaryField] = useState("");
+  const [groupLabel, setGroupLabel] = useState("");
+  const [groupOptions, setGroupOptions] = useState<string[]>([]);
   const [isActive, setIsActive] = useState(true);
   const [sortOrder, setSortOrder] = useState(100);
   const [appKeys, setAppKeys] = useState<string[]>([]);
@@ -181,12 +183,21 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
       setData(d);
       setLabel(d.module.label); setDescription(d.module.description);
       setIcon(d.module.icon || "🧩"); setPrimaryField(d.module.primary_field);
+      setGroupLabel(d.module.group_label ?? "");
       setIsActive(d.module.is_active); setSortOrder(d.module.sort_order);
       setAppKeys(d.menu?.app_keys ?? []);
       setInSidebar(d.menu?.show_in_sidebar ?? false);
       setInLauncher(d.menu?.show_in_launcher ?? false);
     }).catch(() => setErr("โหลดข้อมูลไม่สำเร็จ")).finally(() => setLoading(false));
   }, [moduleKey]);
+
+  // รายชื่อกลุ่มที่มีอยู่แล้ว (datalist ช่วยเลือกซ้ำได้ง่าย)
+  useEffect(() => {
+    apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
+      const gs = [...new Set(((j.data ?? []) as { group_label?: string | null }[]).map((m) => m.group_label).filter((g): g is string => !!g))];
+      setGroupOptions(gs.sort());
+    }).catch(() => {});
+  }, []);
 
   const toggleApp = (k: string) =>
     setAppKeys((cur) => cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]);
@@ -198,7 +209,7 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
       const j = await apiFetch(`/api/admin/module-settings/${encodeURIComponent(moduleKey)}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          module: { label: label.trim(), description, icon, primary_field: primaryField, is_active: isActive, sort_order: sortOrder },
+          module: { label: label.trim(), description, icon, primary_field: primaryField, group_label: groupLabel, is_active: isActive, sort_order: sortOrder },
           menu: { app_keys: appKeys, show_in_sidebar: inSidebar, show_in_launcher: inLauncher },
         }),
       }).then((r) => r.json());
@@ -250,6 +261,15 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
             <label className={labelCls}>ลำดับการแสดง</label>
             <input type="number" value={sortOrder} onChange={(e) => setSortOrder(Number(e.target.value) || 0)} className={inputCls} />
           </div>
+        </div>
+        <div className="mt-3">
+          <label className={labelCls}>กลุ่ม (รวมหลายโมดูลเป็นหน้าแท็บเดียว)</label>
+          <input value={groupLabel} onChange={(e) => setGroupLabel(e.target.value)} list="erp-group-options"
+            className={inputCls} placeholder="เช่น ข้อมูลสินค้า, คู่ค้า — เว้นว่าง = ไม่รวมกลุ่ม" />
+          <datalist id="erp-group-options">
+            {groupOptions.map((g) => <option key={g} value={g} />)}
+          </datalist>
+          <p className="text-[11px] text-slate-400 mt-1">โมดูลที่ใส่ชื่อกลุ่มเดียวกัน จะเปิดรวมกันเป็นแท็บที่หน้า <code className="bg-slate-100 px-1 rounded">/master/group/{groupLabel ? encodeURIComponent(groupLabel) : "<ชื่อกลุ่ม>"}</code> — แล้วเพิ่มเมนู 1 อันชี้มาที่ลิงก์นี้ในหน้า “จัดการเมนู”</p>
         </div>
         <label className="flex items-center gap-2 mt-4 text-sm text-slate-700 cursor-pointer select-none">
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="rounded border-slate-300 w-4 h-4" />

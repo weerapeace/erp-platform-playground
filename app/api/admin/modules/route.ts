@@ -11,10 +11,16 @@ export const revalidate = 0;
 export async function GET(request: NextRequest) {
   const { data, error } = await supabaseFromRequest(request)
     .from("erp_modules")
-    .select("module_key, label, table_name, sort_order")
+    .select("module_key, label, table_name, sort_order, group_label, config")
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  const modules = (data ?? []).map((m) => ({ key: m.module_key as string, label: m.label as string, table: m.table_name as string }));
+  const modules = (data ?? []).map((m) => ({
+    key: m.module_key as string,
+    label: m.label as string,
+    table: m.table_name as string,
+    group_label: (m.group_label as string | null) ?? null,
+    icon: ((m.config ?? {}) as { icon?: string }).icon ?? null,
+  }));
   return NextResponse.json({ data: modules, error: null });
 }
