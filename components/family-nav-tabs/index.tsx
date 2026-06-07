@@ -1,29 +1,131 @@
 "use client";
 
 /**
- * FamilyNavTabs — แถบแท็บสลับระหว่าง "ใส่แท็กให้สินค้า" กับ "เทมเพลตประเภทสินค้า"
- * (ของกลาง) ใช้บนหัวหน้า /master/tags-manager และ /admin/family-template
+ * FamilyNavTabs — แถบแท็บด้านบนของ Tags Manager / เทมเพลตประเภทสินค้า (ของกลาง)
+ * - 2 แท็บหลัก: ใส่แท็กให้สินค้า / เทมเพลตประเภทสินค้า
+ * - แท็บเพิ่มเติม (ตั้งเองได้จากเว็บ) — เก็บใน app_settings.family_nav_tabs
+ * - ปุ่ม ⚙️ จัดการแท็บ (เฉพาะ admin) เลือกตารางมาเป็นแท็บได้
  */
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { apiFetch } from "@/lib/api";
+import { usePermission } from "@/components/auth";
+import { SearchableSelect } from "@/components/searchable-select";
 
-const TABS = [
+type ExtraTab = { label: string; icon: string; href: string };
+
+const BASE = [
   { key: "tags", label: "🏷️ ใส่แท็กให้สินค้า", href: "/master/tags-manager" },
   { key: "template", label: "🧩 เทมเพลตประเภทสินค้า", href: "/admin/family-template" },
-] as const;
+];
 
 export function FamilyNavTabs({ active }: { active: "tags" | "template" }) {
+  const pathname = usePathname();
+  const canManage = usePermission("products.create");
+  const [extra, setExtra] = useState<ExtraTab[]>([]);
+  const [mgr, setMgr] = useState(false);
+
+  const load = () => {
+    apiFetch("/api/admin/family-tabs").then((r) => r.json()).then((j) => setExtra((j.data ?? []) as ExtraTab[])).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
   return (
-    <div className="bg-white border-b border-slate-200 px-4 pt-2 flex gap-1.5">
-      {TABS.map((t) => (
+    <div className="bg-white border-b border-slate-200 px-4 pt-2 flex items-center gap-1.5">
+      {BASE.map((t) => (
         <Link key={t.key} href={t.href}
           className={`h-10 px-5 inline-flex items-center text-sm font-semibold rounded-t-lg border-b-2 transition-colors ${
-            active === t.key
-              ? "border-blue-600 text-blue-700 bg-blue-50/60"
-              : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+            active === t.key ? "border-blue-600 text-blue-700 bg-blue-50/60" : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
           }`}>
           {t.label}
         </Link>
       ))}
+      {extra.map((t) => (
+        <Link key={t.href} href={t.href}
+          className={`h-10 px-4 inline-flex items-center gap-1 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+            pathname === t.href ? "border-blue-600 text-blue-700 bg-blue-50/60" : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+          }`}>
+          <span>{t.icon}</span><span>{t.label}</span>
+        </Link>
+      ))}
+      {canManage && (
+        <button onClick={() => setMgr(true)} title="จัดการแท็บ — เพิ่มตารางมาเป็นแท็บ"
+          className="ml-1 h-8 w-8 grid place-items-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg">⚙️</button>
+      )}
+      {mgr && <TabManager initial={extra} onClose={() => setMgr(false)} onSaved={(t) => { setExtra(t); setMgr(false); }} />}
+    </div>
+  );
+}
+
+// ---- Manager modal ----
+function TabManager({ initial, onClose, onSaved }: { initial: ExtraTab[]; onClose: () => void; onSaved: (t: ExtraTab[]) => void }) {
+  const [tabs, setTabs] = useState<ExtraTab[]>(initial);
+  const [modules, setModules] = useState<{ key: string; label: string; icon: string | null }[]>([]);
+  const [pick, setPick] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
+      if (Array.isArray(j.data)) setModules(j.data as { key: string; label: string; icon: string | null }[]);
+    }).catch(() => {});
+  }, []);
+
+  const addTab = () => {
+    const m = modules.find((x) => x.key === pick);
+    if (!m) return;
+    const href = `/m/${m.key}`;
+    if (tabs.some((t) => t.href === href)) { setPick(""); return; }
+    setTabs((p) => [...p, { label: m.label, icon: m.icon ?? "📋", href }]);
+    setPick("");
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/admin/family-tabs", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tabs }),
+      });
+      const j = await res.json();
+      if (j.error) { alert(j.error); return; }
+      onSaved(tabs);
+    } catch (e) { alert(String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4" onClick={() => !saving && onClose()}>
+      <div className="w-full max-w-md bg-white rounded-xl shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-3 border-b border-slate-200">
+          <h3 className="text-sm font-semibold text-slate-800">⚙️ จัดการแท็บ (เพิ่มตารางมาเป็นแท็บ)</h3>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <div className="text-[11px] text-slate-500 mb-1">เลือกตาราง/โมดูล</div>
+              <SearchableSelect value={pick} onChange={setPick} placeholder="— เลือกตาราง —"
+                options={modules.map((m) => ({ value: m.key, label: m.label, sub: m.key }))} />
+            </div>
+            <button onClick={addTab} disabled={!pick}
+              className="h-9 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่ม</button>
+          </div>
+          <div className="space-y-1">
+            {tabs.length === 0 && <div className="text-xs text-slate-400 text-center py-3 border border-dashed border-slate-200 rounded-lg">— ยังไม่มีแท็บเพิ่มเติม —</div>}
+            {tabs.map((t, i) => (
+              <div key={t.href} className="flex items-center gap-2 text-sm bg-slate-50 rounded-md px-2 py-1.5">
+                <span>{t.icon}</span>
+                <span className="flex-1 min-w-0 truncate">{t.label} <code className="text-[10px] text-slate-400">{t.href}</code></span>
+                <button onClick={() => setTabs((p) => p.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-500">✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
+        </div>
+      </div>
     </div>
   );
 }
