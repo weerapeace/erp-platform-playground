@@ -23,11 +23,13 @@ type Supplier = { id: string; name: string; currency: string };
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 const CURRENCIES = ["THB", "RMB"];
 
-export function SkuSupplierList({ skuId, onUse, onChanged }: {
+export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true }: {
   skuId: string;
   onUse?: (row: SkuSupplierRow) => void;
   onChanged?: () => void;   // แจ้ง parent เมื่อ list เปลี่ยน (เผื่อ refresh ราคาตั้งต้น)
+  defaultOpen?: boolean;    // false = ซ่อนไว้ก่อน โชว์ปุ่มกดเปิด
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [rows, setRows] = useState<SkuSupplierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -115,11 +117,25 @@ export function SkuSupplierList({ skuId, onUse, onChanged }: {
 
   const inp = "h-8 px-2 text-sm border border-slate-200 rounded-md";
 
+  // ยุบไว้ก่อน — โชว์เป็นปุ่ม กดแล้วค่อยขยาย
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)}
+        className="w-full h-9 px-3 text-sm text-left text-slate-600 border border-dashed border-slate-300 rounded-lg hover:border-blue-300 hover:text-blue-600 flex items-center gap-2">
+        🏪 ร้านที่จำหน่าย + ราคา{loading ? "" : ` (${rows.length} ร้าน)`}
+        <span className="ml-auto text-blue-500">+ เพิ่ม/เลือกร้าน ▾</span>
+      </button>
+    );
+  }
+
   return (
     <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
       <div className="flex items-center justify-between mb-2">
         <div className="text-sm font-semibold text-slate-700">🏪 ร้านที่จำหน่าย + ราคา</div>
-        <span className="text-[11px] text-slate-400">{rows.length} ร้าน · ⭐ = ร้านหลัก</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-400">{rows.length} ร้าน · ⭐ = ร้านหลัก</span>
+          {!defaultOpen && <button type="button" onClick={() => setOpen(false)} className="text-[11px] text-slate-400 hover:text-slate-600">▴ ซ่อน</button>}
+        </div>
       </div>
 
       {loading ? (

@@ -27,6 +27,7 @@ export function ImageInput({
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // F15: ใช้ /api/r2-image proxy ตรงๆ (ไม่ติด CORS + เร็วขึ้น)
@@ -54,11 +55,36 @@ export function ImageInput({
     }
   };
 
+  // ลากรูปมาวาง (drag & drop)
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false);
+    if (disabled || uploading) return;
+    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/"));
+    if (f) void handleFile(f);
+  };
+  // วางรูปจากคลิปบอร์ด (Ctrl+V / print screen → วาง)
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (disabled || uploading) return;
+    const items = e.clipboardData?.items ?? [];
+    for (const it of items) {
+      if (it.type.startsWith("image/")) {
+        const f = it.getAsFile();
+        if (f) { e.preventDefault(); void handleFile(f); return; }
+      }
+    }
+  };
+
   return (
     <div className="mt-0.5">
-      <div className={`relative w-full rounded-md border-2 border-dashed transition-colors ${
-        hasError ? "border-red-300" : "border-slate-200 hover:border-orange-300"
-      } ${disabled ? "opacity-50" : ""}`}
+      <div
+        tabIndex={disabled ? -1 : 0}
+        onPaste={onPaste}
+        onDragOver={(e) => { if (!disabled && !uploading) { e.preventDefault(); setDragOver(true); } }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        className={`relative w-full rounded-md border-2 border-dashed transition-colors outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 ${
+          dragOver ? "border-orange-400 bg-orange-50" : hasError ? "border-red-300" : "border-slate-200 hover:border-orange-300"
+        } ${disabled ? "opacity-50" : ""}`}
         style={{ minHeight: previewUrl ? 120 : 80 }}
       >
         {previewUrl ? (
@@ -101,10 +127,10 @@ export function ImageInput({
               <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
             </svg>
             <span className="text-xs">
-              {uploading ? "กำลังอัปโหลด..." : "คลิกเพื่อเลือกรูป"}
+              {uploading ? "กำลังอัปโหลด..." : "คลิกเลือกรูป · ลากวาง · วาง (Ctrl+V)"}
               {required && <span className="text-red-500 ml-1">*</span>}
             </span>
-            <span className="text-[10px] text-slate-400">JPG / PNG / WebP — สูงสุด 5MB</span>
+            <span className="text-[10px] text-slate-400">JPG / PNG / WebP — สูงสุด 5MB · พิมพ์หน้าจอแล้ววางได้</span>
           </button>
         )}
       </div>

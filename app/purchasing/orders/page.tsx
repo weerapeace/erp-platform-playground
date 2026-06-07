@@ -497,7 +497,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
         </div>
         {/* รายการราคาหลายร้านของสินค้านี้ — กด "ใช้ร้านนี้" เพื่อดึงร้าน+ราคามาใส่ */}
         {row.item_sku_id && (
-          <SkuSupplierList skuId={row.item_sku_id}
+          <SkuSupplierList skuId={row.item_sku_id} defaultOpen={false}
             onUse={(r) => { setSeller(r.partner_name); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
         )}
       </div>
@@ -565,7 +565,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
         {/* รายการราคาหลายร้านของสินค้านี้ — กด "ใช้ร้านนี้" เพื่อดึงร้าน+ราคามาใส่ */}
         {row.item_sku_id && (
-          <SkuSupplierList skuId={row.item_sku_id}
+          <SkuSupplierList skuId={row.item_sku_id} defaultOpen={false}
             onUse={(r) => { setSeller(r.partner_name); if (r.price != null) setPrice(String(r.price)); setCur(curLabel(r.currency)); toast.success(`ใช้ราคาจาก ${r.partner_name}`); }} />
         )}
         <div>
