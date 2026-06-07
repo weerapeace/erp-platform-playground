@@ -5,7 +5,7 @@
  * แสดง PR ที่รอออกใบสั่งซื้อ → เลือก → สร้าง PO (แยกใบตามร้านอัตโนมัติ)
  * 2 view: ตาราง (DataTable) / การ์ด (ร้าน + การ์ดแบ่ง section + ตะกร้า)
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -552,6 +552,21 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
     } catch { return false; }
   };
 
+  // ปุ่มลัด Taobao → หา/สร้างร้าน Taobao แล้วตั้งเป็นร้าน (m2o จริง, RMB)
+  const pickTaobao = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/purchasing/taobao-shop", { method: "POST" }).then((r) => r.json());
+      if (j.error || !j.data?.id) { toast.error("ตั้งร้าน Taobao ไม่สำเร็จ: " + (j.error ?? "")); return; }
+      onSupplierAdded(j.data); setSeller(j.data.name); setSellerId(j.data.id); setCur("RMB");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+  }, [onSupplierAdded, toast]);
+  // ลิงก์เป็น taobao + ยังไม่เลือกร้าน → ตั้งร้าน Taobao ให้อัตโนมัติ (ครั้งเดียว)
+  const autoTaobao = useRef(false);
+  useEffect(() => {
+    if (autoTaobao.current || !isTaobaoLink(row.purchase_link) || sellerId || seller) return;
+    autoTaobao.current = true; void pickTaobao();
+  }, [row.purchase_link, sellerId, seller, pickTaobao]);
+
   const save = async () => {
     if (!seller) { toast.error("เลือกร้านก่อน"); return; }
     setSaving(true);
@@ -590,6 +605,8 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
             </select>
             <button type="button" onClick={() => setWizardOpen(true)} className="h-9 px-3 text-sm rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 shrink-0">+ เพิ่ม</button>
           </div>
+          <button type="button" onClick={() => void pickTaobao()}
+            className="mt-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(cur)})</label>
@@ -628,6 +645,21 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
   useEffect(() => {
     if (!sellerId && seller) { const m = suppliers.find((s) => s.name === seller); if (m) setSellerId(m.id); }
   }, [suppliers, seller, sellerId]);
+
+  // ปุ่มลัด Taobao → หา/สร้างร้าน Taobao แล้วตั้งเป็นร้าน
+  const pickTaobao = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/purchasing/taobao-shop", { method: "POST" }).then((r) => r.json());
+      if (j.error || !j.data?.id) { toast.error("ตั้งร้าน Taobao ไม่สำเร็จ: " + (j.error ?? "")); return; }
+      onSupplierAdded(j.data); setSeller(j.data.name); setSellerId(j.data.id); setCur("RMB");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+  }, [onSupplierAdded, toast]);
+  // ลิงก์เป็น taobao + ยังไม่มีร้าน → ตั้ง Taobao อัตโนมัติ (ครั้งเดียว)
+  const autoTaobao = useRef(false);
+  useEffect(() => {
+    if (autoTaobao.current || !isTaobaoLink(row.purchase_link) || sellerId || seller) return;
+    autoTaobao.current = true; void pickTaobao();
+  }, [row.purchase_link, sellerId, seller, pickTaobao]);
 
   const syncToPriceList = async (silent = false): Promise<boolean> => {
     if (!row.item_sku_id || !sellerId) return false;
@@ -686,6 +718,8 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
             <button type="button" onClick={() => setWizardOpen(true)} title="เพิ่มผู้จำหน่ายใหม่" className="h-9 px-3 text-sm rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 shrink-0">+ เพิ่ม</button>
           </div>
           {!sellerId && seller && <div className="text-[11px] text-amber-600 mt-1">ร้านปัจจุบัน: {seller} (ไม่ใช่ผู้จำหน่ายในระบบ — เลือกใหม่เพื่อเพิ่มเข้ารายการได้)</div>}
+          <button type="button" onClick={() => void pickTaobao()}
+            className="mt-1.5 mr-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>
           <button type="button" onClick={() => void syncToPriceList()} disabled={!sellerId}
             title={sellerId ? "" : "เลือกร้านจากรายการก่อน"}
             className="mt-1.5 h-7 px-2.5 text-xs font-medium text-emerald-700 border border-emerald-200 rounded-md hover:bg-emerald-50 disabled:opacity-40">➕ เพิ่มร้านนี้เข้ารายการสินค้า</button>
