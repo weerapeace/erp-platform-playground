@@ -75,6 +75,10 @@ export interface ERPModalProps {
   loading?: boolean;
   hasUnsavedChanges?: boolean;
   closeOnBackdrop?: boolean;
+  /** ให้ผู้ใช้ลากปรับขนาด popup เองได้ (มุมขวาล่าง) — default: true */
+  resizable?: boolean;
+  /** key สำหรับจำขนาดที่ผู้ใช้ปรับไว้ใน localStorage (เช่น "journal-modal") */
+  storageKey?: string;
 }
 
 export interface ConfirmDialogProps {
@@ -161,6 +165,9 @@ function UnsavedChangesDialog({
 
 // ---- ERPModal ----
 
+// ค่ากว้างเริ่มต้น (px) ตาม size preset — ใช้เป็นจุดเริ่มเมื่อผู้ใช้ลากครั้งแรก
+const SIZE_PX: Record<ModalSize, number> = { sm: 384, md: 448, lg: 672, xl: 896 };
+
 export function ERPModal({
   open,
   onClose,
@@ -172,12 +179,75 @@ export function ERPModal({
   loading = false,
   hasUnsavedChanges = false,
   closeOnBackdrop = true,
+  resizable = true,
+  storageKey,
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // ขนาดที่ผู้ใช้ลากเอง (null = ใช้ preset). { w, h } เป็น px
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const resizing = useRef(false);
+  const resizeAxis = useRef<"x" | "y" | "both">("both");   // ลากขอบขวา=x / ขอบล่าง=y / มุม=both
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setMounted(true); }, []);
+
+  // โหลดขนาดที่จำไว้
+  useEffect(() => {
+    if (!storageKey) return;
+    try {
+      const saved = localStorage.getItem(`erp-modal-${storageKey}`);
+      if (saved) { const d = JSON.parse(saved); if (d?.w && d?.h) setDims(d); }
+    } catch { /* ignore */ }
+  }, [storageKey]);
+
+  // ลากปรับขนาด — มุมขวาล่างตามเคอร์เซอร์ (popup จัดกึ่งกลาง → คำนวณจาก center)
+  useEffect(() => {
+    if (!open || !resizable) return;
+    const onMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      const w = Math.round(Math.max(320, Math.min(2 * (e.clientX - cx), window.innerWidth * 0.98)));
+      const h = Math.round(Math.max(200, Math.min(2 * (e.clientY - cy), window.innerHeight * 0.96)));
+      const ax = resizeAxis.current;
+      setDims((d) => {
+        const base = d ?? { w, h };
+        return { w: ax === "y" ? base.w : w, h: ax === "x" ? base.h : h };
+      });
+    };
+    const onUp = () => {
+      if (!resizing.current) return;
+      resizing.current = false;
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      if (storageKey) {
+        try { setDims((d) => { if (d) localStorage.setItem(`erp-modal-${storageKey}`, JSON.stringify(d)); return d; }); }
+        catch { /* ignore */ }
+      }
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+  }, [open, resizable, storageKey]);
+
+  const startResize = (e: React.MouseEvent, axis: "x" | "y" | "both" = "both") => {
+    e.preventDefault(); e.stopPropagation();
+    // ถ้ายังไม่เคยตั้งขนาด → เริ่มจากขนาดจริงปัจจุบันของ panel
+    if (!dims && panelRef.current) {
+      const r = panelRef.current.getBoundingClientRect();
+      setDims({ w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    resizeAxis.current = axis;
+    resizing.current = true;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = axis === "x" ? "ew-resize" : axis === "y" ? "ns-resize" : "nwse-resize";
+  };
+  const resetSize = () => {
+    setDims(null);
+    if (storageKey) { try { localStorage.removeItem(`erp-modal-${storageKey}`); } catch { /* ignore */ } }
+  };
 
   const handleClose = useCallback(() => {
     if (hasUnsavedChanges) {
@@ -200,6 +270,17 @@ export function ERPModal({
 
   if (!mounted || !open) return null;
 
+  // เลือกขนาด: expanded > custom dims > preset
+  const usingCustom = !!dims && !expanded;
+  const panelClass = expanded
+    ? "w-[96vw] max-w-[96vw] h-[94vh] max-h-[94vh]"
+    : usingCustom
+      ? ""                                  // ขนาดมาจาก inline style
+      : `w-full ${SIZE_CLASS[size]} max-h-[90vh]`;
+  const panelStyle = usingCustom
+    ? { width: dims!.w, height: dims!.h, maxWidth: "98vw", maxHeight: "96vh" }
+    : undefined;
+
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -210,7 +291,9 @@ export function ERPModal({
 
       {/* Modal panel */}
       <div
-        className={`relative bg-white rounded-xl shadow-2xl flex flex-col ${expanded ? "w-[96vw] max-w-[96vw] h-[94vh] max-h-[94vh]" : `w-full ${SIZE_CLASS[size]} max-h-[90vh]`}`}
+        ref={panelRef}
+        className={`relative bg-white rounded-xl shadow-2xl flex flex-col ${panelClass}`}
+        style={panelStyle}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Unsaved changes guard */}
@@ -227,6 +310,17 @@ export function ERPModal({
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
           </div>
           <div className="ml-4 flex-shrink-0 flex items-center gap-1">
+            {usingCustom && (
+              <button
+                onClick={resetSize}
+                title="รีเซ็ตขนาด"
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => setExpanded((v) => !v)}
               title={expanded ? "ย่อหน้าต่าง" : "ขยายหน้าต่าง"}
@@ -267,6 +361,42 @@ export function ERPModal({
           <div className="px-6 py-4 border-t border-slate-100 flex-shrink-0 flex items-center justify-end gap-2">
             {footer}
           </div>
+        )}
+
+        {/* แถบลากปรับขนาด — ขอบขวา (กว้าง), ขอบล่าง (สูง), มุม (ทั้งคู่) วางนอกขอบเล็กน้อยกันทับแถบเลื่อน/ปุ่ม */}
+        {resizable && !expanded && (
+          <>
+            {/* ขอบขวา → ปรับความกว้าง */}
+            <div
+              onMouseDown={(e) => startResize(e, "x")}
+              onDoubleClick={resetSize}
+              title="ลากเพื่อปรับความกว้าง"
+              className="absolute top-8 bottom-8 -right-1.5 w-3 cursor-ew-resize z-20 group flex items-center justify-center"
+            >
+              <div className="w-1 h-12 rounded-full bg-slate-300 group-hover:bg-orange-400 transition-colors" />
+            </div>
+            {/* ขอบล่าง → ปรับความสูง */}
+            <div
+              onMouseDown={(e) => startResize(e, "y")}
+              onDoubleClick={resetSize}
+              title="ลากเพื่อปรับความสูง"
+              className="absolute -bottom-1.5 left-8 right-8 h-3 cursor-ns-resize z-20 group flex items-center justify-center"
+            >
+              <div className="h-1 w-12 rounded-full bg-slate-300 group-hover:bg-orange-400 transition-colors" />
+            </div>
+            {/* มุมขวาล่าง → ปรับทั้งคู่ */}
+            <div
+              onMouseDown={(e) => startResize(e, "both")}
+              onDoubleClick={resetSize}
+              title="ลากเพื่อปรับขนาด · ดับเบิลคลิกเพื่อรีเซ็ต"
+              className="absolute -bottom-1 -right-1 w-7 h-7 cursor-nwse-resize z-30 group flex items-end justify-end p-1"
+            >
+              <svg className="text-slate-400 group-hover:text-orange-500 transition-colors"
+                width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M13 6 6 13M13 10l-3 3M13 2 2 13" />
+              </svg>
+            </div>
+          </>
         )}
       </div>
     </div>,
