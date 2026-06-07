@@ -13,7 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { QuoteListItem, QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
-import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
+import { SOLineEditor, SalesLineCompactTable, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
 
 // ---- helpers ----
 
@@ -941,9 +941,9 @@ function QuoteExpandedPanel({
           </div>
         </div>
 
-        <SOLineEditor lines={quoteLinesToEditor(detail.lines)} onChange={() => {}} readonly />
+        <SalesLineCompactTable lines={quoteLinesToEditor(detail.lines)} maxHeight={320} />
 
-        <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
           <Info label="วันที่เสนอ" value={formatDate(detail.quote_date)} />
           <Info label="ยืนราคาถึง" value={formatDate(detail.valid_until)} />
           <Info label="เซลส์" value={detail.sale_person_name} />

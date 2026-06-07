@@ -272,6 +272,111 @@ export function SOLineEditor({
   );
 }
 
+const compactLineTotal = (line: EditorLine) => {
+  const subtotal = Number(line.qty ?? 0) * Number(line.unit_price ?? 0);
+  const discount = Number(line.discount_value ?? 0) <= 0
+    ? 0
+    : line.discount_type === "percent"
+      ? subtotal * (Number(line.discount_value ?? 0) / 100)
+      : Number(line.discount_value ?? 0);
+  return Math.max(0, subtotal - discount);
+};
+
+const compactDiscountLabel = (line: EditorLine) => {
+  const value = Number(line.discount_value ?? 0);
+  if (value <= 0) return "-";
+  return line.discount_type === "percent"
+    ? `${value.toLocaleString("th-TH")}%`
+    : formatMoney(money(value));
+};
+
+export function SalesLineCompactTable({
+  lines,
+  maxHeight = 360,
+}: {
+  lines: EditorLine[];
+  maxHeight?: number;
+}) {
+  const total = lines.reduce((sum, line) => sum + compactLineTotal(line), 0);
+
+  if (lines.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-400">
+        ไม่มีรายการสินค้า
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="overflow-auto" style={{ maxHeight }}>
+        <table className="min-w-[960px] w-full text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+            <tr className="border-b border-slate-200">
+              <th className="w-12 px-3 py-2 text-center font-semibold">#</th>
+              <th className="w-16 px-2 py-2 text-left font-semibold">รูป</th>
+              <th className="min-w-[320px] px-3 py-2 text-left font-semibold">สินค้า</th>
+              <th className="w-24 px-3 py-2 text-right font-semibold">จำนวน</th>
+              <th className="w-24 px-3 py-2 text-left font-semibold">หน่วย</th>
+              <th className="w-32 px-3 py-2 text-right font-semibold">ราคา/หน่วย</th>
+              <th className="w-28 px-3 py-2 text-right font-semibold">ส่วนลด</th>
+              <th className="w-36 px-3 py-2 text-right font-semibold">รวม</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {lines.map((line, index) => (
+              <tr key={line.tempId} className="bg-white hover:bg-slate-50/80">
+                <td className="px-3 py-2 text-center font-mono text-xs text-slate-400">{index + 1}</td>
+                <td className="px-2 py-2">
+                  <ImageThumbnail url={line.image_url} size={44} alt={line.product_name || "สินค้า"} />
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="truncate font-medium text-slate-800">{line.product_name || "-"}</div>
+                    <div className="flex min-w-0 items-center gap-2 text-[11px] text-slate-400">
+                      {line.sku ? (
+                        <code className="shrink-0 rounded bg-orange-50 px-1.5 py-0.5 font-mono text-orange-700">
+                          {line.sku}
+                        </code>
+                      ) : (
+                        <span className="shrink-0">ไม่มี SKU</span>
+                      )}
+                      {line.note ? <span className="truncate">{line.note}</span> : null}
+                    </div>
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-700">
+                  {Number(line.qty ?? 0).toLocaleString("th-TH")}
+                </td>
+                <td className="px-3 py-2 text-slate-600">{line.unit || "-"}</td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-700">
+                  {formatMoney(money(Number(line.unit_price ?? 0)))}
+                </td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-500">
+                  {compactDiscountLabel(line)}
+                </td>
+                <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums text-slate-900">
+                  {formatMoney(money(compactLineTotal(line)))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="sticky bottom-0 bg-slate-50">
+            <tr className="border-t border-slate-200">
+              <td colSpan={7} className="px-3 py-2 text-right text-xs font-semibold text-slate-600">
+                รวมรายการสินค้า
+              </td>
+              <td className="px-3 py-2 text-right font-mono text-sm font-semibold tabular-nums text-slate-900">
+                {formatMoney(money(total))}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block min-w-0">
