@@ -101,7 +101,7 @@ export default function BomWorkspacePage() {
   const mapLines = (lines: BomLineRow[]): EditorLine[] => (lines ?? []).map((l) => ({
     key: l.id, component_id: l.sku_id ?? null, slot_code: l.slot_code, image_key: l.image_key ?? null,
     component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
-    material_family_id: null, material_type: l.material_type ?? "",
+    material_group_id: null, material_type: l.material_type ?? "",
     qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
     cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "",
     pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,

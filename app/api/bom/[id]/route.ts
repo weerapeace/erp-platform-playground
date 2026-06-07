@@ -55,15 +55,15 @@ export async function GET(
   if (codes.length > 0) {
     const { data: skus } = await supabase
       .from("skus_v2")
-      .select("id, code, fabric_width_cm, cover_image_r2_key, families:product_families!material_family_id ( name, loss_percentage )")
+      .select("id, code, fabric_width_cm, cover_image_r2_key, grp:material_groups!material_group_id ( name, loss_percent )")
       .in("code", codes);
     for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
-      const fam = (Array.isArray(s.families) ? s.families[0] : s.families) as { name?: string; loss_percentage?: number } | null;
+      const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string; loss_percent?: number } | null;
       skuMap.set(String(s.code), {
         id: String(s.id),
-        material_type: fam?.name ?? null,
+        material_type: g?.name ?? null,
         face: s.fabric_width_cm != null ? Number(s.fabric_width_cm) : null,
-        loss: fam?.loss_percentage != null ? Number(fam.loss_percentage) : null,
+        loss: g?.loss_percent != null ? Number(g.loss_percent) : null,
         image: (s.cover_image_r2_key as string) ?? null,
       });
     }

@@ -17,7 +17,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import type { CuttingBlock } from "@/app/api/bom/cutting-blocks/route";
 import type { BomComponent } from "@/app/api/bom/components/route";
-import type { MaterialFamily } from "@/app/api/bom/material-families/route";
+import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 
 export type EditorLine = {
@@ -26,7 +26,7 @@ export type EditorLine = {
   component_sku:  string;
   component_name: string;
   image_key:      string | null;     // รูปวัตถุดิบ (cover_image_r2_key)
-  material_family_id: string | null;
+  material_group_id: string | null;
   material_type:  string;            // ชื่อกลุ่ม เช่น "ผ้า"
   qty:            number;
   uom:            string;
@@ -48,46 +48,28 @@ const genKey = () => `l${Date.now()}_${_seq++}`;
 export function emptyLine(): EditorLine {
   return {
     key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
-    material_family_id: null, material_type: "", qty: 0, uom: "หลา", waste_percent: 0, is_optional: false,
+    material_group_id: null, material_type: "", qty: 0, uom: "หลา", waste_percent: 0, is_optional: false,
     cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, slot_code: null,
   };
 }
 
-// ---- สูตรตามชนิด ----
-const AREA_FACE = ["ผ้า", "ผ้า (ชิ้น)", "PU", "ลายพิมพ์", "ตัวเสริม"];
-const AREA_100  = ["หนัง"];
-const LENGTH_90 = ["ซิป", "สาย/เทป"];
-const COUNT     = ["อะไหล่"];
-export type CalcClass = "area_face" | "area_100" | "length_90" | "count" | "manual";
-export function calcClass(materialType: string): CalcClass {
-  if (AREA_FACE.includes(materialType)) return "area_face";
-  if (AREA_100.includes(materialType))  return "area_100";
-  if (LENGTH_90.includes(materialType)) return "length_90";
-  if (COUNT.includes(materialType))     return "count";
-  return "manual";
-}
+// ---- helper คำนวณ (กฎมาจากตาราง material_groups; calc_method = area_face|area_100|length|count) ----
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const r2 = (n: number) => Math.round(n * 100) / 100;
-
 export const lineArea = (l: EditorLine) => (l.cut_width || 0) * (l.cut_length || 0) * (l.pieces || 1);
-const NEEDS_BLOCK: CalcClass[] = ["area_face", "area_100"]; // กลุ่มที่ต้องมีบล็อก/กว้างยาว
+const dash = <span className="text-slate-300 text-xs">—</span>;
+type GroupInfo = { calc_method: string; divisor: number };
 /** คิดปริมาณ — คืน null ถ้าข้อมูลไม่พอ (เก็บปริมาณเดิมไว้ ไม่ทับด้วย 0) */
-export function lineCalc(l: EditorLine): number | null {
-  const cls = calcClass(l.material_type);
+function calcLine(l: EditorLine, g: GroupInfo | undefined): number | null {
+  const m = g?.calc_method ?? "manual";
+  const d = g?.divisor || 90;
   const k = 1 + (l.waste_percent || 0) / 100;
-  if (cls === "count")     return l.pieces || 0;
-  if (cls === "length_90") return l.cut_length ? r4(l.cut_length * k / 90) : null;
-  if (cls === "area_100")  return (l.cut_width && l.cut_length) ? r4(lineArea(l) * k / 100) : null;
-  if (cls === "area_face") return (l.cut_width && l.cut_length && l.face_width_cm) ? r4(lineArea(l) * k / l.face_width_cm / 90) : null;
+  if (m === "count")     return l.pieces || 0;
+  if (m === "length")    return l.cut_length ? r4(l.cut_length * k / d) : null;
+  if (m === "area_100")  return (l.cut_width && l.cut_length) ? r4(lineArea(l) * k / d) : null;
+  if (m === "area_face") return (l.cut_width && l.cut_length && l.face_width_cm) ? r4(lineArea(l) * k / l.face_width_cm / d) : null;
   return null; // manual → พิมพ์เอง
 }
-const showStatus = (l: EditorLine) => NEEDS_BLOCK.includes(calcClass(l.material_type));
-const needFace = (l: EditorLine) => calcClass(l.material_type) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm;
-// ช่องไหนใช้กับกลุ่มไหน (ไม่ใช้ → โชว์ "—")
-const usesWidth  = (l: EditorLine) => { const c = calcClass(l.material_type); return c === "area_face" || c === "area_100"; };
-const usesLength = (l: EditorLine) => { const c = calcClass(l.material_type); return c === "area_face" || c === "area_100" || c === "length_90"; };
-const usesFace   = (l: EditorLine) => calcClass(l.material_type) === "area_face";
-const dash = <span className="text-slate-300 text-xs">—</span>;
 
 const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
 const thumbUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -271,10 +253,24 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
 export function BomLineEditor({
   lines, onChange, readonly,
 }: { lines: EditorLine[]; onChange: (lines: EditorLine[]) => void; readonly?: boolean }) {
-  const [families, setFamilies] = useState<MaterialFamily[]>([]);
+  const [groups, setGroups] = useState<MaterialGroup[]>([]);
   useEffect(() => {
-    apiFetch("/api/bom/material-families").then((r) => r.json()).then((j) => setFamilies((j.data ?? []) as MaterialFamily[])).catch(() => {});
+    apiFetch("/api/bom/material-groups").then((r) => r.json()).then((j) => setGroups((j.data ?? []) as MaterialGroup[])).catch(() => {});
   }, []);
+
+  // กฎคำนวณของชนิด (จากตาราง material_groups)
+  const groupOf = (name: string): GroupInfo | undefined => {
+    const g = groups.find((x) => x.name === name);
+    return g ? { calc_method: g.calc_method, divisor: g.divisor ?? 90 } : undefined;
+  };
+  const methodOf  = (l: EditorLine) => groupOf(l.material_type)?.calc_method ?? "manual";
+  const lineCalc  = (l: EditorLine) => calcLine(l, groupOf(l.material_type));
+  const isArea    = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100"; };
+  const usesWidth  = (l: EditorLine) => isArea(l);
+  const usesLength = (l: EditorLine) => { const m = methodOf(l); return m === "area_face" || m === "area_100" || m === "length"; };
+  const usesFace   = (l: EditorLine) => methodOf(l) === "area_face";
+  const showStatus = (l: EditorLine) => isArea(l);
+  const needFace   = (l: EditorLine) => methodOf(l) === "area_face" && (l.cut_width > 0 || l.cut_length > 0) && !l.face_width_cm;
 
   // คิดปริมาณใหม่ทุกครั้งที่แก้ (เว้นกลุ่ม manual ที่พิมพ์เอง)
   const recalc = (l: EditorLine): EditorLine => { const c = lineCalc(l); return c == null ? l : { ...l, qty: c }; };
@@ -282,32 +278,31 @@ export function BomLineEditor({
   // เลือกวัตถุดิบ → autofill ชนิด/หน้ากว้าง/เผื่อเสีย
   const pickComponent = (l: EditorLine, c: BomComponent): Partial<EditorLine> => ({
     component_id: c.id, component_sku: c.code, component_name: c.name, image_key: c.image_key ?? null,
-    material_family_id: c.material_family_id, material_type: c.material_type ?? "",
+    material_group_id: c.material_group_id, material_type: c.material_type ?? "",
     face_width_cm: c.fabric_width_cm ?? l.face_width_cm,
     waste_percent: c.loss_percent ?? l.waste_percent,
   });
 
+  const resolveSkuId = async (l: EditorLine): Promise<string | null> => {
+    if (l.component_id) return l.component_id;
+    if (!l.component_sku) return null;
+    try { const res = await apiFetch(`/api/bom/components?search=${encodeURIComponent(l.component_sku)}`); const j = await res.json();
+      return ((j.data ?? []) as BomComponent[]).find((c) => c.code === l.component_sku)?.id ?? null; } catch { return null; }
+  };
+
   // เขียนหน้ากว้างกลับไปที่ SKU (เพื่อครั้งหน้าใช้ซ้ำ)
   const saveFaceToSku = async (l: EditorLine) => {
-    let skuId = l.component_id;
-    if (!skuId && l.component_sku) {
-      try { const res = await apiFetch(`/api/bom/components?search=${encodeURIComponent(l.component_sku)}`); const j = await res.json();
-        skuId = ((j.data ?? []) as BomComponent[]).find((c) => c.code === l.component_sku)?.id ?? null; } catch { /* ignore */ }
-    }
+    const skuId = await resolveSkuId(l);
     if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, fabric_width_cm: l.face_width_cm || null }) }).catch(() => {});
   };
 
-  // ติด tag กลุ่มให้ SKU (บันทึกที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
-  const tagFamily = async (l: EditorLine, update: (p: Partial<EditorLine>) => void, familyId: string) => {
-    const fam = families.find((f) => f.id === familyId);
-    if (!fam) return;
-    update({ material_family_id: fam.id, material_type: fam.name, waste_percent: fam.loss_percentage ?? l.waste_percent });
-    let skuId = l.component_id;
-    if (!skuId && l.component_sku) {
-      try { const res = await apiFetch(`/api/bom/components?search=${encodeURIComponent(l.component_sku)}`); const j = await res.json();
-        skuId = ((j.data ?? []) as BomComponent[]).find((c) => c.code === l.component_sku)?.id ?? null; } catch { /* ignore */ }
-    }
-    if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, material_family_id: fam.id }) }).catch(() => {});
+  // เลือกชนิดให้ SKU (บันทึก material_group_id ที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
+  const tagGroup = async (l: EditorLine, update: (p: Partial<EditorLine>) => void, groupId: string) => {
+    const g = groups.find((x) => x.id === groupId);
+    if (!g) return;
+    update({ material_group_id: g.id, material_type: g.name, waste_percent: g.loss_percent ?? l.waste_percent });
+    const skuId = await resolveSkuId(l);
+    if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, material_group_id: g.id }) }).catch(() => {});
   };
 
   const columns: LineColumn<EditorLine>[] = [
@@ -324,9 +319,9 @@ export function BomLineEditor({
         l.material_type ? (
           <span className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 inline-block truncate max-w-full" title={l.material_type}>{l.material_type}</span>
         ) : ro ? <span className="text-slate-300 text-xs">—</span> : (
-          <select value="" onChange={(e) => e.target.value && tagFamily(l, u, e.target.value)} className={`${inputCls} text-amber-700`} title="ติด tag กลุ่มวัตถุดิบให้ SKU">
-            <option value="">＋ ติด tag</option>
-            {families.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          <select value="" onChange={(e) => e.target.value && tagGroup(l, u, e.target.value)} className={`${inputCls} text-amber-700`} title="เลือกชนิดวัตถุดิบให้ SKU">
+            <option value="">＋ เลือกชนิด</option>
+            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
         ),
     },
@@ -387,11 +382,9 @@ export function BomLineEditor({
     {
       key: "area", header: "คำนวณพื้นที่", width: 92, align: "right",
       getValue: (l) => lineArea(l),
-      render: (l) => {
-        const cls = calcClass(l.material_type);
-        if (cls !== "area_face" && cls !== "area_100") return <span className="text-slate-300 text-xs">—</span>;
-        return <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{r2(lineArea(l))}</span>;
-      },
+      render: (l) => !isArea(l)
+        ? <span className="text-slate-300 text-xs">—</span>
+        : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{r2(lineArea(l))}</span>,
     },
     {
       key: "calc", header: "คำนวณ", width: 84, align: "right",
