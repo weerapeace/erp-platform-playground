@@ -408,7 +408,7 @@ export function SkuPicker({
   placeholder = "เลือก SKU...",
   disabled,
   error,
-  salesOnly = true,
+  salesOnly = false,
 }: SkuPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");

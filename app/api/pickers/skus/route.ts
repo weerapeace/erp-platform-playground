@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
   const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") ?? "24", 10)));
-  const salesOnly = searchParams.get("sales_only") !== "false";
+  const salesOnly = searchParams.get("sales_only") === "true";
   const tokens = cleanSearch(search);
   const parentIdsByToken = new Map<string, string[]>();
   for (const token of tokens) {
@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
     const parts = [
       `code.ilike.%${token}%`,
       `name_th.ilike.%${token}%`,
+      `sku_name.ilike.%${token}%`,
       `barcode.ilike.%${token}%`,
     ];
     if (parentIds.length > 0) {
