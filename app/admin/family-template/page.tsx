@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { RelationPicker } from "@/components/relation-picker";
 import { resolveRelationLabels, type RelationConfig } from "@/lib/relation";
+import { FamilyNavTabs } from "@/components/family-nav-tabs";
 
 type FieldMode = "normal" | "show" | "hide";
 
@@ -305,6 +306,7 @@ export default function FamilyTemplatePage({ embedded = false }: { embedded?: bo
 
   return (
     <div className={embedded ? "" : "min-h-screen bg-slate-50"}>
+      {!embedded && <FamilyNavTabs active="template" />}
       <div className={embedded ? "px-1 pb-3" : "bg-white border-b border-slate-200 px-6 py-4"}>
         {!embedded && (
           <div className="flex items-start justify-between gap-3">

@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
+import { FamilyNavTabs } from "@/components/family-nav-tabs";
 
 type Rec = { id: string; code: string; name: string; image: string | null };
 type Tag = { id: string; label: string; group_id: string | null };
@@ -285,6 +286,7 @@ export default function TagsManagerPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
+      <FamilyNavTabs active="tags" />
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-wrap gap-3">
         <div>
