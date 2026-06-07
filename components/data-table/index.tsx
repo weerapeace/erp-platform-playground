@@ -294,6 +294,10 @@ export interface DataTableProps<T extends Record<string, unknown>> {
   pageSize?: number;
   onRetry?: () => void;
   onRowClick?: (row: T) => void;
+  /** ของกลาง: แสดงรายละเอียดแบบ slide-down ใต้แถวหลัก */
+  renderExpandedRow?: (row: T) => React.ReactNode;
+  /** ของกลาง: บอกว่าแถวนี้กำลังเปิดรายละเอียดอยู่หรือไม่ */
+  isRowExpanded?: (row: T) => boolean;
   drawerContent?: (row: T) => React.ReactNode;
   drawerTitle?: string | ((row: T) => string);
   /** ID สำหรับบันทึก saved views ลง localStorage เช่น "products" */
@@ -483,6 +487,8 @@ export function DataTable<T extends Record<string, unknown>>({
   pageSize: initialPageSize = 10,
   onRetry,
   onRowClick,
+  renderExpandedRow,
+  isRowExpanded,
   drawerContent,
   drawerTitle,
   tableId,
@@ -1849,16 +1855,25 @@ export function DataTable<T extends Record<string, unknown>>({
                   ];
                   if (!collapsed) for (const row of grp) {
                     out.push(
-                      <tr key={row.id} onClick={() => isRowClickable && handleRowClick(row.original)}
-                        className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable ? "cursor-pointer" : ""}`}>
-                        {row.getVisibleCells().map(cell => (
-                          <td key={cell.id} className={`${cellPad} text-slate-700 overflow-hidden text-ellipsis`}>
-                            {cell.column.columnDef.meta?.type === "image"
-                              ? <ImageThumbnail url={cell.getValue() as string | null} />
-                              : flexRender(cell.column.columnDef.cell, cell.getContext())}
-                          </td>
-                        ))}
-                      </tr>
+                      <React.Fragment key={row.id}>
+                        <tr onClick={() => isRowClickable && handleRowClick(row.original)}
+                          className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable ? "cursor-pointer" : ""}`}>
+                          {row.getVisibleCells().map(cell => (
+                            <td key={cell.id} className={`${cellPad} text-slate-700 overflow-hidden text-ellipsis`}>
+                              {cell.column.columnDef.meta?.type === "image"
+                                ? <ImageThumbnail url={cell.getValue() as string | null} />
+                                : flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          ))}
+                        </tr>
+                        {renderExpandedRow && isRowExpanded?.(row.original) && (
+                          <tr className="bg-slate-50/70">
+                            <td colSpan={leaf.length} className="p-0">
+                              {renderExpandedRow(row.original)}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   }
                   return out;
@@ -1876,7 +1891,8 @@ export function DataTable<T extends Record<string, unknown>>({
                     ? { boxShadow: `inset 3px 0 0 0 ${ROW_COLOR_BORDER[rc] ?? "#94a3b8"}`, ...(row.getIsSelected() ? {} : { backgroundColor: ROW_COLOR_BG[rc] ?? "#f8fafc" }) }
                     : undefined;
                   return (
-                  <tr key={row.id}
+                  <React.Fragment key={row.id}>
+                  <tr
                     onClick={() => isRowClickable && handleRowClick(row.original)}
                     style={rcStyle}
                     className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable ? "cursor-pointer" : ""}`}>
@@ -1940,6 +1956,14 @@ export function DataTable<T extends Record<string, unknown>>({
                       );
                     })}
                   </tr>
+                  {renderExpandedRow && isRowExpanded?.(row.original) && (
+                    <tr className="bg-slate-50/70">
+                      <td colSpan={table.getVisibleLeafColumns().length} className="p-0">
+                        {renderExpandedRow(row.original)}
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                   );
                 })
               )}

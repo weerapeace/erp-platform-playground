@@ -12,7 +12,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
-import type { QuoteListItem, QuoteDetail } from "@/app/api/quotations/route";
+import type { QuoteListItem, QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
 import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
 
 // ---- helpers ----
@@ -53,6 +53,21 @@ type FormState = {
   lines: EditorLine[];
 };
 
+type QuoteLineView = QuoteLine & {
+  image_url?: string | null;
+  image_key?: string | null;
+};
+
+type QuoteDetailView = Omit<QuoteDetail, "lines"> & {
+  lines: QuoteLineView[];
+};
+
+type SkuPickerItem = {
+  code?: string | null;
+  image_url?: string | null;
+  image_key?: string | null;
+};
+
 const makeEmpty = (salePersonName = ""): FormState => {
   const today = new Date().toISOString().slice(0, 10);
   return {
@@ -63,6 +78,22 @@ const makeEmpty = (salePersonName = ""): FormState => {
     note: "", lines: [emptyLine()],
   };
 };
+
+const quoteLinesToEditor = (lines: QuoteLineView[]): EditorLine[] => lines.map((l, index) => ({
+  tempId: l.id ?? `${l.sku ?? "line"}-${index}`,
+  product_id: l.product_id ?? null,
+  sku: l.sku ?? null,
+  product_name: l.product_name,
+  image_url: l.image_url ?? null,
+  image_key: l.image_key ?? null,
+  qty: l.qty,
+  unit: l.unit,
+  unit_price: l.unit_price,
+  discount_type: l.discount_type ?? "percent",
+  discount_value: l.discount_value ?? 0,
+  tax_code: l.tax_code ?? null,
+  note: l.note ?? "",
+}));
 
 // ============================================================
 // Page
@@ -89,13 +120,17 @@ export default function QuotationsPage() {
   const [saving,    setSaving]    = useState(false);
 
   // detail drawer
-  const [detail,        setDetail]        = useState<QuoteDetail | null>(null);
+  const [detail,        setDetail]        = useState<QuoteDetailView | null>(null);
   const [detailOpen,    setDetailOpen]    = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [expandedDetails, setExpandedDetails] = useState<Record<string, QuoteDetailView>>({});
+  const [expandedLoading, setExpandedLoading] = useState<Record<string, boolean>>({});
+  const [visibleRows, setVisibleRows] = useState<QuoteListItem[]>([]);
 
   // workflow
   const [wfLoading, setWfLoading] = useState(false);
-  const [rejectTarget, setRejectTarget] = useState<QuoteDetail | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<QuoteDetailView | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
   // toast
@@ -115,14 +150,47 @@ export default function QuotationsPage() {
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
+  const enrichQuoteDetail = useCallback(async (q: QuoteDetail): Promise<QuoteDetailView> => {
+    const skuCodes = Array.from(new Set(q.lines.map(l => l.sku).filter(Boolean))) as string[];
+    const imageBySku = new Map<string, Pick<QuoteLineView, "image_url" | "image_key">>();
+
+    await Promise.all(skuCodes.map(async (code) => {
+      const params = new URLSearchParams({ search: code, limit: "8", sales_only: "false" });
+      const res = await apiFetch(`/api/pickers/skus?${params.toString()}`);
+      const json = await res.json().catch(() => ({ data: [] }));
+      const items = (json.data ?? []) as SkuPickerItem[];
+      const match = items.find(item => item.code === code) ?? items[0];
+      if (match) {
+        imageBySku.set(code, {
+          image_url: match.image_url ?? null,
+          image_key: match.image_key ?? null,
+        });
+      }
+    }));
+
+    return {
+      ...q,
+      lines: q.lines.map(line => ({
+        ...line,
+        ...(line.sku ? imageBySku.get(line.sku) : undefined),
+      })),
+    };
+  }, []);
+
+  const fetchDetail = useCallback(async (id: string): Promise<QuoteDetailView> => {
+    const res = await apiFetch(`/api/quotations/${id}`);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    return enrichQuoteDetail(json.data as QuoteDetail);
+  }, [enrichQuoteDetail]);
+
   // ---- Open detail ----
   const openDetail = async (id: string) => {
     setDetailOpen(true); setDetailLoading(true); setDetail(null);
     try {
-      const res = await apiFetch(`/api/quotations/${id}`);
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      setDetail(json.data as QuoteDetail);
+      const loaded = expandedDetails[id] ?? await fetchDetail(id);
+      setExpandedDetails(prev => ({ ...prev, [id]: loaded }));
+      setDetail(loaded);
     } catch (err) {
       flash(err instanceof Error ? err.message : "โหลดไม่ได้");
       setDetailOpen(false);
@@ -130,7 +198,7 @@ export default function QuotationsPage() {
   };
 
   // ---- Open edit (draft only) ----
-  const openEdit = (q: QuoteDetail) => {
+  const openEdit = (q: QuoteDetailView) => {
     setEditingId(q.id);
     setForm({
       customer: q.customer_id ? {
@@ -143,14 +211,7 @@ export default function QuotationsPage() {
       header_discount_type: q.header_discount_type, header_discount_value: q.header_discount_value,
       shipping_fee: q.shipping_fee,
       note: q.note ?? "",
-      lines: q.lines.map(l => ({
-        tempId: l.id ?? String(Math.random()),
-        product_id: l.product_id ?? null, sku: l.sku ?? null, product_name: l.product_name,
-        qty: l.qty, unit: l.unit, unit_price: l.unit_price,
-        discount_type: l.discount_type ?? "percent",
-        discount_value: l.discount_value ?? 0,
-        tax_code: l.tax_code ?? null, note: l.note ?? "",
-      })),
+      lines: quoteLinesToEditor(q.lines),
     });
     setFormErr(null); setDetailOpen(false); setModalOpen(true);
   };
@@ -200,20 +261,29 @@ export default function QuotationsPage() {
   };
 
   // ---- Transition ----
+  const runTransitionRequest = useCallback(async (id: string, action: string, reason?: string) => {
+    const res = await apiFetch(`/api/quotations/${id}/transition`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, actor: user?.name, reason }),
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+  }, [user?.name]);
+
   const transition = async (id: string, action: string, reason?: string) => {
     setWfLoading(true);
     try {
-      const res = await apiFetch(`/api/quotations/${id}/transition`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, actor: user?.name, reason }),
-      });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
+      await runTransitionRequest(id, action, reason);
       flash({
         send: "ส่งใบเสนอราคาแล้ว", accept: "บันทึกว่าลูกค้าตอบรับ",
         reject: "ปฏิเสธแล้ว", expire: "ทำเครื่องหมายหมดอายุ", cancel: "ยกเลิกแล้ว",
       }[action] ?? "อัปเดตแล้ว");
       setDetailOpen(false); setRejectTarget(null); setRejectReason("");
+      setExpandedDetails(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       await fetchList();
     } catch (err) { flash(err instanceof Error ? err.message : "ผิดพลาด"); }
     finally { setWfLoading(false); }
@@ -236,8 +306,138 @@ export default function QuotationsPage() {
     finally { setWfLoading(false); }
   };
 
+  const loadExpandedDetail = useCallback(async (id: string) => {
+    if (expandedDetails[id] || expandedLoading[id]) return;
+    setExpandedLoading(prev => ({ ...prev, [id]: true }));
+    try {
+      const loaded = await fetchDetail(id);
+      setExpandedDetails(prev => ({ ...prev, [id]: loaded }));
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "โหลดรายการสินค้าไม่ได้");
+      setExpandedIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    } finally {
+      setExpandedLoading(prev => ({ ...prev, [id]: false }));
+    }
+  }, [expandedDetails, expandedLoading, fetchDetail]);
+
+  const toggleExpanded = useCallback((row: QuoteListItem) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(row.id)) next.delete(row.id);
+      else {
+        next.add(row.id);
+        void loadExpandedDetail(row.id);
+      }
+      return next;
+    });
+  }, [loadExpandedDetail]);
+
+  const showAllExpanded = useCallback(() => {
+    const targetRows = visibleRows.length > 0 ? visibleRows : rows.slice(0, 20);
+    setExpandedIds(new Set(targetRows.map(row => row.id)));
+    targetRows.forEach(row => void loadExpandedDetail(row.id));
+  }, [loadExpandedDetail, rows, visibleRows]);
+
+  const collapseAllExpanded = useCallback(() => {
+    setExpandedIds(new Set());
+  }, []);
+
+  const openEditFromRow = useCallback(async (row: QuoteListItem) => {
+    try {
+      const loaded = expandedDetails[row.id] ?? await fetchDetail(row.id);
+      setExpandedDetails(prev => ({ ...prev, [row.id]: loaded }));
+      openEdit(loaded);
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "โหลดเพื่อแก้ไขไม่ได้");
+    }
+  }, [expandedDetails, fetchDetail]);
+
+  const rejectFromRow = useCallback(async (row: QuoteListItem) => {
+    try {
+      const loaded = expandedDetails[row.id] ?? await fetchDetail(row.id);
+      setExpandedDetails(prev => ({ ...prev, [row.id]: loaded }));
+      setRejectTarget(loaded);
+      setRejectReason("");
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "โหลดเพื่อปฏิเสธไม่ได้");
+    }
+  }, [expandedDetails, fetchDetail]);
+
+  const bulkTransition = useCallback(async (selectedRows: QuoteListItem[], action: "send" | "cancel") => {
+    const allowed = selectedRows.filter(row => (
+      action === "send" ? row.status === "draft" : ["draft", "sent"].includes(row.status)
+    ));
+    if (allowed.length === 0) {
+      flash("ไม่มีรายการที่ทำรายการนี้ได้");
+      return;
+    }
+
+    setWfLoading(true);
+    let ok = 0;
+    let fail = 0;
+    for (const row of allowed) {
+      try {
+        await runTransitionRequest(row.id, action);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setWfLoading(false);
+    flash(`อัปเดต ${ok} รายการ${fail ? `, ไม่สำเร็จ ${fail}` : ""}`);
+    setExpandedDetails(prev => {
+      const next = { ...prev };
+      allowed.forEach(row => delete next[row.id]);
+      return next;
+    });
+    await fetchList();
+  }, [fetchList, runTransitionRequest]);
+
+  const rowActions = useMemo(() => [
+    { label: "ดูรายละเอียด", onClick: (row: QuoteListItem) => openDetail(row.id) },
+    { label: "เปิด/พับรายการสินค้า", onClick: (row: QuoteListItem) => toggleExpanded(row) },
+    { label: "แก้ไข", show: (row: QuoteListItem) => row.status === "draft", onClick: (row: QuoteListItem) => openEditFromRow(row) },
+    { label: "ส่งให้ลูกค้า", show: (row: QuoteListItem) => row.status === "draft" && canSend, onClick: (row: QuoteListItem) => transition(row.id, "send") },
+    { label: "ลูกค้าตอบรับ", show: (row: QuoteListItem) => row.status === "sent" && canAccept, onClick: (row: QuoteListItem) => transition(row.id, "accept") },
+    { label: "แปลงเป็น SO", show: (row: QuoteListItem) => ["sent", "accepted"].includes(row.status) && canAccept, onClick: (row: QuoteListItem) => convertToSO(row.id) },
+    { label: "ปฏิเสธ", show: (row: QuoteListItem) => row.status === "sent" && canReject, onClick: (row: QuoteListItem) => rejectFromRow(row) },
+    { label: "ยกเลิก", variant: "danger" as const, show: (row: QuoteListItem) => ["draft", "sent"].includes(row.status) && canCancel, onClick: (row: QuoteListItem) => transition(row.id, "cancel") },
+  ], [canAccept, canCancel, canReject, canSend, openEditFromRow, rejectFromRow, toggleExpanded]);
+
+  const bulkActions = useMemo(() => [
+    { label: "ส่งที่เลือก", onClick: (selectedRows: QuoteListItem[]) => bulkTransition(selectedRows, "send") },
+    { label: "ยกเลิกที่เลือก", variant: "danger" as const, onClick: (selectedRows: QuoteListItem[]) => bulkTransition(selectedRows, "cancel") },
+  ], [bulkTransition]);
+
   // ---- Columns ----
   const columns: ColumnDef<QuoteListItem>[] = useMemo(() => [
+    {
+      id: "expand",
+      header: "",
+      size: 44,
+      enableSorting: false,
+      enableHiding: false,
+      cell: ({ row }) => {
+        const expanded = expandedIds.has(row.original.id);
+        return (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleExpanded(row.original);
+            }}
+            className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+            aria-label={expanded ? "พับรายการสินค้า" : "เปิดรายการสินค้า"}
+          >
+            {expanded ? "⌄" : "›"}
+          </button>
+        );
+      },
+    },
     {
       id: "quote_number", accessorKey: "quote_number", header: "เลขที่ใบเสนอราคา", size: 150,
       cell: ({ getValue }) => {
@@ -275,7 +475,7 @@ export default function QuotationsPage() {
       id: "line_count", accessorKey: "line_count", header: "รายการ", size: 70,
       cell: ({ getValue }) => <span className="text-xs text-slate-500">{getValue() as number}</span>,
     },
-  ], []);
+  ], [expandedIds, toggleExpanded]);
 
   // ---- Saved Views (ของกลาง §14) ----
   const views = useMemo(() => {
@@ -332,6 +532,23 @@ export default function QuotationsPage() {
 
         {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {error}</div>}
 
+        <div className="mb-2 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={showAllExpanded}
+            className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 bg-white hover:bg-slate-50"
+          >
+            โชว์รายการทั้งหมดในหน้านี้
+          </button>
+          <button
+            type="button"
+            onClick={collapseAllExpanded}
+            className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 bg-white hover:bg-slate-50"
+          >
+            พับทั้งหมด
+          </button>
+        </div>
+
         <DataTable
           tableId="quotations"
           data={rows}
@@ -344,7 +561,31 @@ export default function QuotationsPage() {
           exportEntityType="erp_playground_quote"
           canCheck={(p) => can(p as Parameters<typeof can>[0])}
           pageSize={20}
-          onRowClick={(r) => openDetail(r.id)}
+          selectable
+          rowActions={rowActions}
+          bulkActions={bulkActions}
+          onVisibleRowsChange={setVisibleRows}
+          onRowClick={toggleExpanded}
+          isRowExpanded={(row) => expandedIds.has(row.id)}
+          renderExpandedRow={(row) => (
+            <QuoteExpandedPanel
+              quote={row}
+              detail={expandedDetails[row.id]}
+              loading={!!expandedLoading[row.id]}
+              wfLoading={wfLoading}
+              canSend={canSend}
+              canAccept={canAccept}
+              canReject={canReject}
+              canCancel={canCancel}
+              onOpenDetail={() => openDetail(row.id)}
+              onEdit={() => openEditFromRow(row)}
+              onSend={() => transition(row.id, "send")}
+              onAccept={() => transition(row.id, "accept")}
+              onConvert={() => convertToSO(row.id)}
+              onReject={() => rejectFromRow(row)}
+              onCancel={() => transition(row.id, "cancel")}
+            />
+          )}
         />
 
         {toast && <div className="fixed bottom-6 right-6 px-4 py-3 bg-emerald-600 text-white rounded-lg shadow-lg text-sm z-50">✓ {toast}</div>}
@@ -418,14 +659,7 @@ export default function QuotationsPage() {
               </div>
             )}
 
-            <SOLineEditor lines={detail.lines.map(l => ({
-              tempId: l.id ?? "",
-              product_id: l.product_id ?? null, sku: l.sku ?? null,
-              product_name: l.product_name, qty: l.qty, unit: l.unit, unit_price: l.unit_price,
-              discount_type: l.discount_type ?? "percent",
-              discount_value: l.discount_value ?? 0,
-              tax_code: l.tax_code ?? null,
-            }))} onChange={() => {}} readonly />
+            <SOLineEditor lines={quoteLinesToEditor(detail.lines)} onChange={() => {}} readonly />
 
             {/* Totals */}
             <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-4 grid grid-cols-2 gap-x-6">
@@ -596,6 +830,117 @@ export default function QuotationsPage() {
 }
 
 // ---- helpers ----
+function QuoteExpandedPanel({
+  quote,
+  detail,
+  loading,
+  wfLoading,
+  canSend,
+  canAccept,
+  canReject,
+  canCancel,
+  onOpenDetail,
+  onEdit,
+  onSend,
+  onAccept,
+  onConvert,
+  onReject,
+  onCancel,
+}: {
+  quote: QuoteListItem;
+  detail?: QuoteDetailView;
+  loading: boolean;
+  wfLoading: boolean;
+  canSend: boolean;
+  canAccept: boolean;
+  canReject: boolean;
+  canCancel: boolean;
+  onOpenDetail: () => void;
+  onEdit: () => void;
+  onSend: () => void;
+  onAccept: () => void;
+  onConvert: () => void;
+  onReject: () => void;
+  onCancel: () => void;
+}) {
+  if (loading || !detail) {
+    return (
+      <div className="px-6 py-4 border-t border-slate-100">
+        <div className="h-20 rounded-lg bg-white border border-slate-200 animate-pulse" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-6 py-4 border-t border-slate-100">
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">
+              รายการสินค้าใน {quote.quote_number ?? "ใบเสนอราคาฉบับร่าง"}
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {detail.customer_name ?? "-"} · {detail.lines.length} รายการ · รวม {baht(detail.grand_total)}
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" onClick={onOpenDetail}
+              className="h-8 px-3 text-xs border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
+              ดู
+            </button>
+            {detail.status === "draft" && (
+              <button type="button" onClick={onEdit}
+                className="h-8 px-3 text-xs border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">
+                แก้ไข
+              </button>
+            )}
+            {detail.status === "draft" && canSend && (
+              <button type="button" onClick={onSend} disabled={wfLoading}
+                className="h-8 px-3 text-xs bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                ส่งให้ลูกค้า
+              </button>
+            )}
+            {detail.status === "sent" && canAccept && (
+              <button type="button" onClick={onAccept} disabled={wfLoading}
+                className="h-8 px-3 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                ตอบรับ
+              </button>
+            )}
+            {["sent", "accepted"].includes(detail.status) && canAccept && (
+              <button type="button" onClick={onConvert} disabled={wfLoading}
+                className="h-8 px-3 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                แปลงเป็น SO
+              </button>
+            )}
+            {detail.status === "sent" && canReject && (
+              <button type="button" onClick={onReject} disabled={wfLoading}
+                className="h-8 px-3 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">
+                ปฏิเสธ
+              </button>
+            )}
+            {["draft", "sent"].includes(detail.status) && canCancel && (
+              <button type="button" onClick={onCancel} disabled={wfLoading}
+                className="h-8 px-3 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">
+                ยกเลิก
+              </button>
+            )}
+          </div>
+        </div>
+
+        <SOLineEditor lines={quoteLinesToEditor(detail.lines)} onChange={() => {}} readonly />
+
+        <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+          <Info label="วันที่เสนอ" value={formatDate(detail.quote_date)} />
+          <Info label="ยืนราคาถึง" value={formatDate(detail.valid_until)} />
+          <Info label="เซลส์" value={detail.sale_person_name} />
+          <Info label="VAT" value={`${detail.vat_rate}%${detail.vat_included ? " included" : ""}`} />
+          <Info label="ยอดสุทธิ" value={baht(detail.grand_total)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Info({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div>
