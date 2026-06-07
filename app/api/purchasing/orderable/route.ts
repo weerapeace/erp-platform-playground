@@ -30,11 +30,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ดึง code + รูปปก SKU จริง (batch)
   const skuIds = [...new Set((prs ?? []).map((p) => p.item_sku_id).filter(Boolean) as string[])];
-  const skuMap = new Map<string, { code: string | null; cover: string | null }>();
+  const skuMap = new Map<string, { code: string | null; cover: string | null; link: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const chunk = skuIds.slice(i, i + 300);
-    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", chunk);
-    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
+    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, purchase_link").in("id", chunk);
+    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null, link: (s.purchase_link as string) ?? null });
   }
 
   const rows = (prs ?? []).map((p) => {
@@ -58,6 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       approved: p.status === "approved",
       cover_key: key,   // r2 key ดิบ (ไว้แก้รูป SKU)
       image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
+      purchase_link: sk?.link ?? null,   // ลิงก์ซื้อสินค้า (จาก SKU)
     };
   });
 

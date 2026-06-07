@@ -23,8 +23,13 @@ type Row = {
   id: string; seller_name: string; item_sku_id: string | null; item_name: string; code: string;
   qty: number; uom: string; price_est: number; line_total: number; currency: string;
   order_date: string | null; requester: string; note: string; status: string; approved: boolean; cover_key: string | null; image_url: string | null;
+  purchase_link: string | null;
 };
 type CartLine = { qty: number; partial: boolean };
+
+// ลิงก์ Taobao/Tmall → ใช้โชว์ป้าย Taobao
+const TAOBAO_RE = /taobao\.com|tmall\.com|world\.taobao/i;
+const isTaobaoLink = (u: string | null | undefined) => !!u && TAOBAO_RE.test(u);
 
 // แสดงสกุลเงินเป็น "RMB" (ภายในบางที่เก็บ "YUAN" — คงข้อมูลเดิม แต่โชว์ RMB)
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
@@ -72,7 +77,9 @@ export default function PurchaseOrdersPage() {
   const [editRow, setEditRow] = useState<Row | null>(null);
   const [setShopRow, setSetShopRow] = useState<Row | null>(null);   // popup ตั้งร้านให้สินค้าที่ยังไม่มีร้าน
   const [buyAllShop, setBuyAllShop] = useState<{ name: string; rows: Row[] } | null>(null);
+  const [linkRow, setLinkRow] = useState<Row | null>(null);          // popup ใส่ลิงก์สินค้า
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [taobaoShops, setTaobaoShops] = useState<Set<string>>(new Set());   // ชื่อร้านที่เป็น Taobao
   const [shopQ, setShopQ] = useState("");
   const [prodQ, setProdQ] = useState("");
   const [cartQ, setCartQ] = useState("");
@@ -82,11 +89,27 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     const f = encodeURIComponent(JSON.stringify({ is_supplier: { type: "boolean", value: "true" } }));
     apiFetch(`/api/master-v2/partners?limit=1000&filters=${f}`).then((r) => r.json())
-      .then((j) => setSuppliers(((j.data ?? []) as Record<string, unknown>[])
-        .map((p) => ({ id: String(p.id), name: String(p.name_th ?? p.display_name ?? p.code ?? "") }))
-        .filter((s) => s.name).sort((a, b) => a.name.localeCompare(b.name, "th"))))
+      .then((j) => {
+        const data = (j.data ?? []) as Record<string, unknown>[];
+        const nm = (p: Record<string, unknown>) => String(p.name_th ?? p.display_name ?? p.code ?? "");
+        setSuppliers(data.map((p) => ({ id: String(p.id), name: nm(p) })).filter((s) => s.name).sort((a, b) => a.name.localeCompare(b.name, "th")));
+        setTaobaoShops(new Set(data.filter((p) => p.is_taobao === true).map(nm).filter(Boolean)));
+      })
       .catch(() => {});
   }, []);
+
+  // ป้าย Taobao: ดูจากลิงก์สินค้า (taobao/tmall) หรือร้านที่ตั้งว่าเป็น Taobao
+  const isTaobaoRow = useCallback((r: Row) => isTaobaoLink(r.purchase_link) || taobaoShops.has(r.seller_name), [taobaoShops]);
+
+  // กดปุ่มลิงก์: มีลิงก์ → คัดลอก + แจ้งเตือน ; ไม่มี → เปิด popup ใส่ลิงก์
+  const onLinkClick = useCallback(async (r: Row) => {
+    if (r.purchase_link) {
+      try { await navigator.clipboard.writeText(r.purchase_link); toast.success("คัดลอกลิงก์แล้ว"); }
+      catch { window.open(r.purchase_link, "_blank", "noopener"); }
+    } else {
+      setLinkRow(r);
+    }
+  }, [toast]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -262,8 +285,14 @@ export default function PurchaseOrdersPage() {
                               className={`bg-white border rounded-xl overflow-hidden cursor-pointer transition-all ${on ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}>
                               <div className="aspect-square bg-slate-50 flex items-center justify-center relative">
                                 {!r.approved && <span className="absolute top-1.5 left-1.5 z-10 text-[10px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">ยังไม่อนุมัติ</span>}
-                                <button onClick={(e) => { e.stopPropagation(); setEditRow(r); }} title="ดูรายละเอียด / แก้ไข"
-                                  className="absolute top-1.5 right-1.5 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-blue-50 text-slate-600 text-xs">✎</button>
+                                <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1">
+                                  {isTaobaoRow(r) && <span title="Taobao" className="w-6 h-6 flex items-center justify-center rounded-full bg-orange-500 text-white text-[12px] font-bold shadow-sm leading-none">淘</span>}
+                                  <button onClick={(e) => { e.stopPropagation(); void onLinkClick(r); }}
+                                    title={r.purchase_link ? "คัดลอกลิงก์สินค้า" : "เพิ่มลิงก์สินค้า"}
+                                    className={`w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border shadow-sm text-xs hover:bg-blue-50 ${r.purchase_link ? "border-blue-200 text-blue-600" : "border-slate-200 text-slate-400"}`}>🔗</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditRow(r); }} title="ดูรายละเอียด / แก้ไข"
+                                    className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-blue-50 text-slate-600 text-xs">✎</button>
+                                </div>
                                 {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
                               </div>
                               <div className="p-2.5">
@@ -379,7 +408,49 @@ export default function PurchaseOrdersPage() {
       {buyAllShop && <BuyAllModal shop={buyAllShop.name} rows={buyAllShop.rows} rate={rate}
         onClose={() => setBuyAllShop(null)}
         onConfirm={async (items) => { await submitPO({ items, order_date: orderDate }, items.map((i) => i.pr_id)); setBuyAllShop(null); }} />}
+      {linkRow && <LinkModal row={linkRow} onClose={() => setLinkRow(null)}
+        onSaved={(url) => { const sid = linkRow.item_sku_id; setRows((rs) => rs.map((x) => x.item_sku_id === sid ? { ...x, purchase_link: url } : x)); setLinkRow(null); }} />}
     </PlaygroundShell>
+  );
+}
+
+// ── popup ใส่/แก้ลิงก์สินค้า → บันทึกเข้า SKU จริง (purchase_link) ──
+function LinkModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; onSaved: (url: string | null) => void }) {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [url, setUrl] = useState(row.purchase_link ?? "");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!row.item_sku_id) { toast.error("รายการนี้ไม่ผูกกับสินค้า (SKU)"); return; }
+    setSaving(true);
+    try {
+      const clean = url.trim() || null;
+      const res = await apiFetch(`/api/master-v2/skus/${row.item_sku_id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ purchase_link: clean, actor: user?.name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      toast.success("บันทึกลิงก์เข้าสินค้าแล้ว");
+      onSaved(clean);
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setSaving(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md" title="🔗 ลิงก์สินค้า"
+      footer={<>
+        <button onClick={onClose} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+        <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกลิงก์"}</button>
+      </>}>
+      <div className="space-y-2">
+        <div className="text-sm font-medium text-slate-800">{row.item_name}</div>
+        <div className="text-xs text-slate-400">{row.code || "—"}</div>
+        <label className="block text-xs font-medium text-slate-600 mt-2">ลิงก์ร้าน/สินค้า (เก็บเข้า SKU จริง)</label>
+        <input value={url} onChange={(e) => setUrl(e.target.value)} autoFocus
+          placeholder="วางลิงก์ เช่น https://item.taobao.com/..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        <p className="text-[11px] text-slate-400">ลิงก์ Taobao/Tmall จะขึ้นป้าย 淘 ให้อัตโนมัติ · มีผลกับทุกใบที่ใช้สินค้านี้</p>
+      </div>
+    </ERPModal>
   );
 }
 
