@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar } from "@/components/report";
 import { apiFetch } from "@/lib/api";
+import { buildReportHtml } from "@/lib/template";
+import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
 
 type QuoteLinePrint = QuoteLine & {
@@ -271,11 +273,46 @@ function buildQuotationHtml(quote: QuotePrintDetail, origin: string): string {
 </html>`;
 }
 
+function buildQuoteTemplateData(quote: QuotePrintDetail, origin: string): Record<string, unknown> {
+  const subtotal = quote.subtotal || quote.lines.reduce((sum, line) => sum + lineAmount(line), 0);
+  return {
+    quote_number: quote.quote_number || "-",
+    quote_date_th: thaiDate(quote.quote_date),
+    valid_until_th: thaiDate(quote.valid_until),
+    customer_name: quote.customer_name || "-",
+    customer_code: quote.customer_code || "",
+    customer_address: quote.customer_address || "",
+    customer_phone: quote.customer_phone || "",
+    sale_person_name: quote.sale_person_name || "-",
+    note: quote.note || "",
+    subtotal: money(subtotal),
+    vat_rate: String(quote.vat_rate ?? 0),
+    total_vat: money(quote.total_vat),
+    grand_total: money(quote.grand_total),
+    grand_total_text: thaiBahtText(quote.grand_total),
+    lines: quote.lines.map((line, index) => {
+      const src = imageSrc(line, origin);
+      return {
+        idx: index + 1,
+        sku: line.sku || "",
+        product_name: line.product_name,
+        image_url: src,
+        image_html: src ? `<img src="${esc(src)}" alt="${esc(line.product_name)}">` : "",
+        qty: qty(line.qty),
+        unit: line.unit,
+        unit_price: money(line.unit_price),
+        line_total: money(lineAmount(line)),
+      };
+    }),
+  };
+}
+
 export default function PrintQuotationPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
   const [quote, setQuote] = useState<QuotePrintDetail | null>(null);
+  const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
   const [origin, setOrigin] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -288,12 +325,17 @@ export default function PrintQuotationPage() {
     let alive = true;
     setLoading(true);
     setError(null);
-    apiFetch(`/api/quotations/${id}`)
-      .then(res => res.json())
-      .then(async (json) => {
-        if (json.error) throw new Error(json.error);
-        const enriched = await enrichQuoteImages(json.data as QuoteDetail);
+    Promise.all([
+      apiFetch(`/api/quotations/${id}`).then(res => res.json()),
+      apiFetch("/api/admin/report-templates?entity_type=qt").then(res => res.json()).catch(() => ({ data: [] })),
+    ])
+      .then(async ([quoteJson, templateJson]) => {
+        if (quoteJson.error) throw new Error(quoteJson.error);
+        const enriched = await enrichQuoteImages(quoteJson.data as QuoteDetail);
+        const templates = ((templateJson as ReportTemplatesResponse).data ?? []).filter(item => item.active);
+        const published = templates.find(item => item.is_default) ?? templates[0] ?? null;
         if (alive) setQuote(enriched);
+        if (alive) setTemplate(published);
       })
       .catch(err => {
         if (alive) setError(err instanceof Error ? err.message : "โหลดเอกสารไม่ได้");
@@ -304,7 +346,20 @@ export default function PrintQuotationPage() {
     return () => { alive = false; };
   }, [id]);
 
-  const html = useMemo(() => quote ? buildQuotationHtml(quote, origin) : "", [origin, quote]);
+  const html = useMemo(() => {
+    if (!quote) return "";
+    if (template) {
+      return buildReportHtml({
+        paper_size: template.paper_size,
+        orientation: template.orientation,
+        header_html: template.header_html,
+        body_html: template.body_html,
+        footer_html: template.footer_html,
+        custom_css: template.custom_css,
+      }, buildQuoteTemplateData(quote, origin));
+    }
+    return buildQuotationHtml(quote, origin);
+  }, [origin, quote, template]);
 
   return (
     <div className="min-h-screen bg-slate-100">

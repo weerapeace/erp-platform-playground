@@ -2,7 +2,8 @@
  * Template renderer กลาง — แทน {{token}} ในสตริง HTML
  *
  * Syntax:
- *   {{name}}                 — แทนค่า data.name
+ *   {{name}}                 — แทนค่า data.name แบบ escape HTML
+ *   {{{name}}}               — แทนค่า data.name แบบ raw HTML (ใช้กับรูป/table ที่ระบบสร้างให้)
  *   {{user.email}}           — nested path
  *   {{#items}}{{x}}{{/items}}— loop array; ใน loop, scope = item
  *   {{#name}}value{{/name}}  — show ถ้า truthy (อาจเป็น scalar)
@@ -60,7 +61,10 @@ export function renderTemplate(tpl: string, data: Record<string, unknown>): stri
     out = out.slice(0, m.index!) + replaced + out.slice(m.index! + full.length);
   }
 
-  // 2. Plain tokens {{token}}
+  // 2. Raw HTML tokens {{{token}}}
+  out = out.replace(/\{\{\{([\w.]+)\}\}\}/g, (_, path) => String(getPath(data, path) ?? ""));
+
+  // 3. Plain tokens {{token}}
   out = out.replace(/\{\{([\w.]+)\}\}/g, (_, path) => esc(getPath(data, path)));
 
   return out;
