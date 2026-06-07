@@ -467,7 +467,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
   };
 
   return (
-    <ERPModal open onClose={onClose} size="sm" title="📍 ตั้งร้านให้สินค้า"
+    <ERPModal open onClose={onClose} size="md" title="📍 ตั้งร้านให้สินค้า"
       footer={<>
         <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก + ใส่ตะกร้า"}</button>
