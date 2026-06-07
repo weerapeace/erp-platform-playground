@@ -100,19 +100,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
   const rows = (headers ?? []) as BomHeader[];
-  // นับจำนวนบรรทัดต่อสูตร (ผูกด้วย bom_code)
+  // นับจำนวนบรรทัดต่อสูตร ผ่าน RPC (group by ฝั่ง DB) — เลี่ยงเพดาน 1000 แถวที่ทำให้นับขาด
   const codes = rows.map((r) => r.bom_code).filter(Boolean);
   const counts = new Map<string, number>();
   if (codes.length > 0) {
-    const { data: lineRows } = await supabase
-      .from("bom_lines")
-      .select("bom_code")
-      .eq("is_active", true)
-      .in("bom_code", codes);
-    (lineRows ?? []).forEach((l) => {
-      const c = (l as { bom_code: string }).bom_code;
-      counts.set(c, (counts.get(c) ?? 0) + 1);
-    });
+    const { data: cntRows, error: cntErr } = await supabase.rpc("erp_bom_line_counts", { p_codes: codes });
+    if (cntErr) console.error("[api/bom] line counts", cntErr.message);
+    (cntRows as { bom_code: string; cnt: number }[] | null ?? []).forEach((c) => counts.set(c.bom_code, Number(c.cnt)));
   }
 
   const data: BomListItem[] = rows.map((r) => ({ ...r, line_count: counts.get(r.bom_code) ?? 0 }));
