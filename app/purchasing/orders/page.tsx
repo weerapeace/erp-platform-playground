@@ -79,6 +79,7 @@ export default function PurchaseOrdersPage() {
   const [setShopRow, setSetShopRow] = useState<Row | null>(null);   // popup ตั้งร้านให้สินค้าที่ยังไม่มีร้าน
   const [buyAllShop, setBuyAllShop] = useState<{ name: string; rows: Row[] } | null>(null);
   const [linkRow, setLinkRow] = useState<Row | null>(null);          // popup ใส่ลิงก์สินค้า
+  const [reviewOpen, setReviewOpen] = useState(false);               // ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
   const [taobaoShops, setTaobaoShops] = useState<Set<string>>(new Set());   // ชื่อร้านที่เป็น Taobao
   const [shopQ, setShopQ] = useState("");
@@ -176,13 +177,12 @@ export default function PurchaseOrdersPage() {
   const lineTotal = (r: Row) => (cart[r.id]?.qty ?? r.qty) * r.price_est;
   const grandByCur = useMemo(() => { const t: Record<string, number> = {}; for (const r of cartRows) t[r.currency] = (t[r.currency] ?? 0) + lineTotal(r); return t; }, [cartRows, cart]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const createPOFromCart = useCallback(async () => {
+  // ยืนยันจากป๊อปทวนรายการ → สร้างใบสั่งซื้อจริง (แยกใบละร้าน)
+  const confirmCreatePO = useCallback(async () => {
     if (cartRows.length === 0) return;
     const items = cartRows.map((r) => ({ pr_id: r.id, qty: cart[r.id]?.qty ?? r.qty, keep_remainder: cart[r.id]?.partial ?? false }));
-    const shops = [...new Set(cartRows.map((r) => r.seller_name))];
-    const partials = items.filter((it) => it.keep_remainder).length;
-    if (!confirm(`สร้างใบสั่งซื้อ ${cartRows.length} รายการ → ${shops.length} ร้าน (1 ใบ/ร้าน)?${partials ? `\n(มี ${partials} รายการสั่งไม่ครบ → ส่วนที่เหลือจะเปิดเป็นใบขอซื้อใหม่)` : ""}`)) return;
     await submitPO({ items, order_date: orderDate }, cartRows.map((r) => r.id));
+    setReviewOpen(false);
   }, [cartRows, cart, orderDate, submitPO]);
 
   // ── ข้อมูล view การ์ด ──
@@ -398,7 +398,7 @@ export default function PurchaseOrdersPage() {
                       <label className="block text-xs font-medium text-slate-600 mb-1">📅 วันที่สั่ง (ใช้กับทุกใบ)</label>
                       <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
                     </div>
-                    <button onClick={createPOFromCart} disabled={busy || cartRows.length === 0} className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังสร้าง…" : "สร้างใบสั่งซื้อ →"}</button>
+                    <button onClick={() => cartRows.length > 0 && setReviewOpen(true)} disabled={busy || cartRows.length === 0} className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{busy ? "กำลังสร้าง…" : "สร้างใบสั่งซื้อ →"}</button>
                     <p className="text-[10px] text-slate-400 text-center">รายการต่างร้านจะแยกเป็นคนละใบให้อัตโนมัติ</p>
                   </div>
                 </div>
@@ -421,6 +421,63 @@ export default function PurchaseOrdersPage() {
         onConfirm={async (items) => { await submitPO({ items, order_date: orderDate }, items.map((i) => i.pr_id)); setBuyAllShop(null); }} />}
       {linkRow && <LinkModal row={linkRow} onClose={() => setLinkRow(null)}
         onSaved={(url) => { const sid = linkRow.item_sku_id; setRows((rs) => rs.map((x) => x.item_sku_id === sid ? { ...x, purchase_link: url } : x)); setLinkRow(null); }} />}
+
+      {/* ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ — แยกตามร้าน (1 ใบ/ร้าน) */}
+      {reviewOpen && (
+        <ERPModal open onClose={() => !busy && setReviewOpen(false)} size="lg"
+          title="ทวนรายการก่อนสร้างใบสั่งซื้อ"
+          description={`จะสร้าง ${cartByShop.length} ใบ (1 ใบ/ร้าน) · วันที่สั่ง ${orderDate}`}
+          footer={<>
+            <button onClick={() => setReviewOpen(false)} disabled={busy} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">← กลับไปแก้</button>
+            <button onClick={() => void confirmCreatePO()} disabled={busy || cartRows.length === 0}
+              className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{busy ? "กำลังสร้าง…" : `✓ ยืนยันสร้าง ${cartByShop.length} ใบ`}</button>
+          </>}>
+          <div className="space-y-3">
+            {cartByShop.map(([shop, items]) => {
+              const subtotal = items.reduce((s, r) => s + lineTotal(r), 0);
+              const cur = items[0]?.currency ?? "THB";
+              return (
+                <div key={shop} className="border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-100">
+                    <span className="text-sm font-semibold text-slate-700">🏪 {shop} <span className="text-[11px] font-normal text-slate-400">({items.length} รายการ)</span></span>
+                    <span className="text-sm font-bold text-blue-600">{money(subtotal, cur)}{isCNY(cur) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(subtotal * rate).toLocaleString()}</span>}</span>
+                  </div>
+                  <div className="divide-y divide-slate-50">
+                    {items.map((r) => {
+                      const q = cart[r.id]?.qty ?? r.qty;
+                      const partial = cart[r.id]?.partial ?? false;
+                      return (
+                        <div key={r.id} className="flex items-center gap-2 px-3 py-1.5">
+                          <div className="w-8 h-8 rounded bg-slate-50 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">📦</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm text-slate-700 truncate">{r.item_name}</div>
+                            <div className="text-[11px] text-slate-400">{r.code || "—"}{partial ? <span className="text-amber-600"> · สั่งไม่ครบ (ที่เหลือเปิดใบใหม่)</span> : ""}{!r.approved ? <span className="text-amber-600"> · ยังไม่อนุมัติ (อนุมัติให้อัตโนมัติ)</span> : ""}</div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="text-sm text-slate-700 tabular-nums">{q.toLocaleString()} {r.uom}</div>
+                            <div className="text-[11px] text-slate-500 tabular-nums">{money(q * r.price_est, r.currency)}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {/* ยอดรวมทั้งหมดแยกสกุลเงิน */}
+            <div className="pt-2 border-t border-slate-200 space-y-0.5">
+              {Object.entries(grandByCur).map(([c, sum]) => (
+                <div key={c} className="flex justify-between text-sm">
+                  <span className="text-slate-500">ยอดรวมทั้งหมด ({curLabel(c)})</span>
+                  <span className="font-bold text-blue-600 tabular-nums">{money(sum, c)}{isCNY(c) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(sum * rate).toLocaleString()}</span>}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </ERPModal>
+      )}
     </PlaygroundShell>
   );
 }
