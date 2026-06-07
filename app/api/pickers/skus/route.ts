@@ -12,6 +12,7 @@ type SkuPickerRow = {
   sale_ok: boolean | null;
   is_active: boolean | null;
   uom: { name: string | null } | { name: string | null }[] | null;
+  parent_skus_v2: { cover_image_r2_key: string | null } | { cover_image_r2_key: string | null }[] | null;
 };
 
 type ParentSkuMatchRow = {
@@ -57,6 +58,7 @@ export async function GET(request: NextRequest) {
       cover_image_r2_key,
       sale_ok,
       is_active,
+      parent_skus_v2 ( cover_image_r2_key ),
       uom:uoms!uom_id ( name )
     `)
     .eq("is_active", true);
@@ -80,14 +82,16 @@ export async function GET(request: NextRequest) {
 
   const rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {
     const uom = Array.isArray(row.uom) ? row.uom[0] : row.uom;
+    const parent = Array.isArray(row.parent_skus_v2) ? row.parent_skus_v2[0] : row.parent_skus_v2;
     const code = row.code ?? "";
+    const imageKey = row.cover_image_r2_key ?? parent?.cover_image_r2_key ?? null;
     return {
       id: row.id,
       code,
       name: row.name_th ?? code,
       uom_name: uom?.name ?? null,
       list_price: row.list_price,
-      image_key: row.cover_image_r2_key,
+      image_key: imageKey,
       sale_ok: row.sale_ok,
     };
   });

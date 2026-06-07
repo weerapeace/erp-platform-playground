@@ -13,7 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { QuoteListItem, QuoteDetail } from "@/app/api/quotations/route";
-import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/app/sales-orders/line-editor";
+import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
 
 // ---- helpers ----
 

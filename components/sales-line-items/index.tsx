@@ -1,0 +1,319 @@
+"use client";
+
+import type { ReactNode } from "react";
+import { SkuPicker, UnitPicker } from "@/components/pickers";
+import type { SkuPickerValue, UnitPickerValue } from "@/components/pickers";
+import { ImageThumbnail } from "@/components/image-manager";
+import { calculateDocument, type DocumentResult } from "@/lib/tax";
+import { format as formatMoney, money } from "@/lib/money";
+
+export type EditorLine = {
+  tempId: string;
+  product_id?: string | null;
+  sku: string | null;
+  product_name: string;
+  image_url?: string | null;
+  image_key?: string | null;
+  qty: number;
+  unit: string;
+  unit_price: number;
+  discount_type: "percent" | "amount";
+  discount_value: number;
+  tax_code?: string | null;
+  note?: string;
+};
+
+export type LineDraft = EditorLine;
+
+export const emptyLine = (): EditorLine => ({
+  tempId: String(Math.random()).slice(2),
+  product_id: null,
+  sku: null,
+  product_name: "",
+  image_url: null,
+  image_key: null,
+  qty: 1,
+  unit: "ชิ้น",
+  unit_price: 0,
+  discount_type: "percent",
+  discount_value: 0,
+  tax_code: null,
+});
+
+export function calculateEditorTotals(
+  lines: EditorLine[],
+  opts: {
+    vatRate: number;
+    vatIncluded: boolean;
+    whtRate: number;
+    headerDiscountType: "percent" | "amount";
+    headerDiscountValue: number;
+    shippingFee: number;
+  },
+) {
+  return calculateDocument({
+    lines: lines
+      .filter((l) => l.product_name.trim())
+      .map((l) => ({
+        qty: l.qty,
+        unit_price: l.unit_price,
+        discount: l.discount_value > 0
+          ? { type: l.discount_type, value: l.discount_value }
+          : undefined,
+      })),
+    header_discount: opts.headerDiscountValue > 0
+      ? { type: opts.headerDiscountType, value: opts.headerDiscountValue }
+      : undefined,
+    shipping_fee: opts.shippingFee,
+    tax: {
+      vat_rate: opts.vatRate,
+      vat_included: opts.vatIncluded,
+      wht_rate: opts.whtRate,
+    },
+  });
+}
+
+export function SOLineEditor({
+  lines,
+  onChange,
+  readonly,
+}: {
+  lines: EditorLine[];
+  onChange: (lines: EditorLine[]) => void;
+  readonly?: boolean;
+}) {
+  const update = (i: number, patch: Partial<EditorLine>) => {
+    onChange(lines.map((l, idx) => idx === i ? { ...l, ...patch } : l));
+  };
+  const add = () => onChange([...lines, emptyLine()]);
+  const remove = (i: number) => onChange(lines.filter((_, idx) => idx !== i));
+
+  const lineTotal = (l: EditorLine) => {
+    const sub = l.qty * l.unit_price;
+    const disc = l.discount_type === "percent"
+      ? sub * (l.discount_value / 100)
+      : l.discount_value;
+    return Math.max(0, sub - disc);
+  };
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">
+            รายการสินค้า <span className="text-xs font-normal text-slate-400">({lines.length})</span>
+          </h3>
+          <p className="mt-0.5 text-[11px] leading-4 text-slate-400">
+            เลือก SKU แล้วระบบจะดึงรูป หน่วย และราคาขายมาให้ แก้จำนวน/ราคาได้ในแถวนี้
+          </p>
+        </div>
+        {!readonly && (
+          <button
+            type="button"
+            onClick={add}
+            className="h-9 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            + เพิ่มรายการ
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-3 bg-slate-50/40 p-3">
+        {lines.map((l, i) => {
+          const hasDiscount = l.discount_value > 0;
+          const pickerValue = l.product_name
+            ? ({
+                id: l.product_id ?? "",
+                code: l.sku ?? "",
+                name: l.product_name,
+                list_price: l.unit_price,
+                uom_name: l.unit,
+                image_url: l.image_url ?? null,
+                image_key: l.image_key ?? null,
+              } satisfies SkuPickerValue)
+            : null;
+
+          return (
+            <article key={l.tempId} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="grid grid-cols-[28px_64px_minmax(0,1fr)_auto] items-start gap-3">
+                <div className="pt-3 text-center font-mono text-xs text-slate-400">{i + 1}</div>
+                <div className="pt-1">
+                  <ImageThumbnail url={l.image_url} size={56} alt={l.product_name || "สินค้า"} />
+                </div>
+                <div className="min-w-0">
+                  <label className="mb-1 block text-xs font-medium text-slate-500">สินค้า</label>
+                  <SkuPicker
+                    value={pickerValue}
+                    onChange={(p: SkuPickerValue | null) => {
+                      if (!p) {
+                        update(i, {
+                          product_id: null,
+                          sku: null,
+                          product_name: "",
+                          image_url: null,
+                          image_key: null,
+                        });
+                        return;
+                      }
+                      update(i, {
+                        product_id: p.id,
+                        sku: p.code,
+                        product_name: p.name,
+                        image_url: p.image_url ?? null,
+                        image_key: p.image_key ?? null,
+                        unit_price: p.list_price ?? l.unit_price ?? 0,
+                        unit: p.uom_name ?? l.unit,
+                      });
+                    }}
+                    disabled={readonly}
+                    placeholder="เลือก SKU / ชื่อสินค้า..."
+                  />
+                  {l.sku && (
+                    <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                      <code className="rounded bg-orange-50 px-1.5 py-0.5 font-mono text-orange-700">{l.sku}</code>
+                      <span className="truncate">{l.product_name}</span>
+                    </div>
+                  )}
+                </div>
+                {!readonly && (
+                  <button
+                    type="button"
+                    onClick={() => remove(i)}
+                    className="mt-7 h-8 w-8 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500"
+                    aria-label="ลบรายการ"
+                  >
+                    x
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 md:grid-cols-[96px_150px_130px_minmax(160px,1fr)_150px]">
+                <Field label="จำนวน">
+                  <input
+                    type="number"
+                    value={l.qty}
+                    onChange={(e) => update(i, { qty: parseFloat(e.target.value) || 0 })}
+                    disabled={readonly}
+                    className="h-10 w-full rounded-lg border border-slate-200 px-3 text-right text-sm tabular-nums disabled:bg-slate-50"
+                  />
+                </Field>
+
+                <Field label="หน่วย">
+                  <UnitPicker
+                    value={l.unit ? ({ id: "", code: null, name: l.unit, symbol: l.unit } satisfies UnitPickerValue) : null}
+                    onChange={(u: UnitPickerValue | null) => update(i, { unit: u?.name ?? "ชิ้น" })}
+                    disabled={readonly}
+                  />
+                </Field>
+
+                <Field label="ราคา/หน่วย">
+                  <input
+                    type="number"
+                    value={l.unit_price}
+                    onChange={(e) => update(i, { unit_price: parseFloat(e.target.value) || 0 })}
+                    disabled={readonly}
+                    className="h-10 w-full rounded-lg border border-slate-200 px-3 text-right text-sm tabular-nums disabled:bg-slate-50"
+                  />
+                </Field>
+
+                <Field label="ส่วนลด">
+                  <div className="flex min-h-10 flex-wrap items-center gap-2">
+                    <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={hasDiscount}
+                        onChange={(e) => update(i, e.target.checked ? { discount_value: l.discount_value || 1 } : { discount_value: 0 })}
+                        disabled={readonly}
+                        className="rounded border-slate-300"
+                      />
+                      มีส่วนลด
+                    </label>
+                    {hasDiscount && (
+                      <div className="grid grid-cols-[minmax(76px,1fr)_58px] gap-1">
+                        <input
+                          type="number"
+                          value={l.discount_value}
+                          onChange={(e) => update(i, { discount_value: parseFloat(e.target.value) || 0 })}
+                          disabled={readonly}
+                          className="h-9 rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50"
+                        />
+                        <select
+                          value={l.discount_type}
+                          onChange={(e) => update(i, { discount_type: e.target.value as "percent" | "amount" })}
+                          disabled={readonly}
+                          className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:bg-slate-50"
+                        >
+                          <option value="percent">%</option>
+                          <option value="amount">บาท</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </Field>
+
+                <div className="col-span-2 rounded-lg bg-slate-50 px-3 py-2 text-right md:col-span-1">
+                  <div className="text-[11px] font-medium text-slate-400">รวมก่อนภาษี</div>
+                  <div className="mt-1 font-mono text-base font-semibold tabular-nums text-slate-900">
+                    {formatMoney(money(lineTotal(l)))}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+
+        {lines.length === 0 && (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-400">
+            {readonly ? "ไม่มีรายการสินค้า" : 'กด "+ เพิ่มรายการ" เพื่อเริ่มเลือกสินค้า'}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block min-w-0">
+      <span className="mb-1 block text-xs font-medium text-slate-500">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+export function SalesTotalsPreview({
+  result,
+  payerLabel = "ลูกค้าจ่ายจริง",
+}: {
+  result: DocumentResult;
+  payerLabel?: string;
+}) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-700">สรุปรวม</span>
+        <span className="text-[11px] text-slate-400">คำนวณจากรายการด้านบนทันที</span>
+      </div>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+        <PreviewRow label="ยอดก่อนลด" value={formatMoney(result.subtotal)} />
+        <PreviewRow label="ลดรายบรรทัด" value={formatMoney(result.total_line_discount)} />
+        <PreviewRow label="ลดท้ายบิล" value={formatMoney(result.header_discount)} />
+        <PreviewRow label="ค่าจัดส่ง" value={formatMoney(result.shipping)} />
+        <PreviewRow label="ฐานภาษี" value={formatMoney(result.taxable)} />
+        <PreviewRow label="VAT" value={formatMoney(result.total_vat)} />
+        <PreviewRow label="WHT" value={formatMoney(result.total_wht)} />
+        <PreviewRow label="รวมทั้งสิ้น" value={formatMoney(result.grand_total)} strong />
+        <PreviewRow label={payerLabel} value={formatMoney(result.amount_due)} strong accent />
+      </div>
+    </div>
+  );
+}
+
+function PreviewRow({ label, value, strong, accent }: { label: string; value: string; strong?: boolean; accent?: boolean }) {
+  return (
+    <div className={`flex items-center justify-between gap-3 ${strong ? "font-semibold" : ""}`}>
+      <span className={accent ? "text-emerald-700" : "text-slate-500"}>{label}</span>
+      <span className={`font-mono tabular-nums ${accent ? "text-emerald-700" : strong ? "text-blue-700" : "text-slate-800"}`}>{value}</span>
+    </div>
+  );
+}
