@@ -16,6 +16,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
+import { IconPicker } from "@/components/icon-picker";
 
 /** นิยามช่องในคลัง (ของกลาง) */
 type CatalogField = {
@@ -453,8 +454,7 @@ export function CreateModuleWizard({ onClose, onCreated }: { onClose: () => void
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-600">ไอคอน</label>
-                    <input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={4}
-                      className="mt-1 w-20 h-10 px-3 text-lg text-center border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                    <div className="mt-1"><IconPicker value={icon} onChange={setIcon} /></div>
                   </div>
                   <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-900">
                     💡 ทุกตารางจะมีช่อง <code>ชื่อ</code> + สถานะเปิด/ปิด ให้อยู่แล้ว — ขั้นต่อไปเลือกช่องอื่นเพิ่ม

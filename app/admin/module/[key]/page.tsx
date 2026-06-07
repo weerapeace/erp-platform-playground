@@ -17,6 +17,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
+import { IconPicker } from "@/components/icon-picker";
 
 const SchemaSyncClient = dynamic(
   () => import("@/app/admin/schema-sync/schema-sync-client").then((m) => m.SchemaSyncClient),
@@ -236,8 +237,7 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
         <div className="grid grid-cols-1 sm:grid-cols-[80px_1fr] gap-3">
           <div>
             <label className={labelCls}>ไอคอน</label>
-            <input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={4}
-              className={`${inputCls} text-center text-xl`} placeholder="🧩" />
+            <div className="mt-0.5"><IconPicker value={icon} onChange={setIcon} /></div>
           </div>
           <div>
             <label className={labelCls}>ชื่อโมดูล (ที่โชว์ในเมนู)</label>
