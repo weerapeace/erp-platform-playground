@@ -2,10 +2,10 @@
 
 /**
  * บอร์ดจ่ายงาน (Canvas / Whiteboard แบบ Miro) — เฟส D
- * เลื่อน(pan)/ซูมได้ · ลากย้ายตำแหน่ง "โซนแผนก" ได้ (จำใน localStorage)
- * โซน "📥 รอจ่าย" (การ์ดใบสั่งผลิตที่ยังจ่ายไม่ครบ) + โซนแผนก (การ์ดใบจ่ายงาน)
+ * เลื่อน(pan)/ซูม · ลากย้าย+ขยายโซนแผนกได้ · วางการ์ดอิสระ (จำตำแหน่ง) · ปุ่มจัดเรียงสวย
+ * โซน "📥 รอจ่าย" (การ์ดใบสั่งผลิตยังจ่ายไม่ครบ) + โซนแผนก (การ์ดใบจ่ายงาน)
  * ลากการ์ด MO ปล่อยในโซนแผนก = popup จ่ายงาน · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
- * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีตามแบรนด์ + ปุ่มตั้งสี
+ * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีแบรนด์ + ปุ่มตั้งสี
  */
 import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as RPE } from "react";
 import { ERPModal } from "@/components/modal";
@@ -24,13 +24,13 @@ type PendingMO = {
 };
 type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[] };
 type Pos = { x: number; y: number };
-type Viewport = { x: number; y: number; scale: number };
 type Size = { w: number; h: number };
+type Viewport = { x: number; y: number; scale: number };
 type Inter =
   | { type: "pan"; sx: number; sy: number; ox: number; oy: number }
   | { type: "zone"; key: string; sx: number; sy: number; ox: number; oy: number }
   | { type: "resize"; key: string; sx: number; sy: number; ow: number; oh: number }
-  | { type: "card"; kind: "mo" | "wo"; id: string; sourceKey: string }
+  | { type: "card"; cid: string; kind: "mo" | "wo"; id: string; sx: number; sy: number; ox: number; oy: number }
   | null;
 
 const WO_STATUS: Record<string, { label: string; cls: string }> = {
@@ -41,9 +41,8 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 
-const ZONE_W = 240, HEADER_H = 48, CARD_SLOT = 300, PAD = 12, GAP = 40, INNER_W = ZONE_W - PAD * 2;
-const ZONES_KEY = "erp-workboard-zones:v1";
-const ZONESIZE_KEY = "erp-workboard-zonesizes:v1";
+const ZONE_W = 240, HEADER_H = 48, CARD_W = 200, CARD_SLOT = 300, PAD = 12, GAP = 40;
+const ZONES_KEY = "erp-workboard-zones:v1", ZONESIZE_KEY = "erp-workboard-zonesizes:v1", CARDPOS_KEY = "erp-workboard-cards:v1";
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 const PALETTE = ["#94a3b8", "#60a5fa", "#34d399", "#f472b6", "#fb923c", "#a78bfa", "#22d3ee", "#facc15"];
@@ -92,11 +91,11 @@ export default function WorkBoardPage() {
   const [vp, setVp] = useState<Viewport>({ x: 24, y: 16, scale: 0.85 });
   const [zonePos, setZonePos] = useState<Record<string, Pos>>({});
   const [zoneSize, setZoneSize] = useState<Record<string, Size>>({});
+  const [cardPos, setCardPos] = useState<Record<string, Pos>>({});
   const [tool, setTool] = useState<"select" | "pan">("select");
   const [isMax, setIsMax] = useState(false);
-  const [drag, setDrag] = useState<{ kind: "mo" | "wo"; id: string; x: number; y: number } | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
 
-  // popup จ่ายงาน / ตั้งสี
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
   const [dispDept, setDispDept] = useState<Dept | null>(null);
   const [dispQty, setDispQty] = useState(0);
@@ -114,10 +113,14 @@ export default function WorkBoardPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ } })(); }, []);
-  // โหลด/จำตำแหน่งโซน
-  useEffect(() => { try { const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r)); const s = localStorage.getItem(ZONESIZE_KEY); if (s) setZoneSize(JSON.parse(s)); } catch { /* ignore */ } }, []);
+  useEffect(() => { try {
+    const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r));
+    const s = localStorage.getItem(ZONESIZE_KEY); if (s) setZoneSize(JSON.parse(s));
+    const c = localStorage.getItem(CARDPOS_KEY); if (c) setCardPos(JSON.parse(c));
+  } catch { /* ignore */ } }, []);
   useEffect(() => { try { localStorage.setItem(ZONES_KEY, JSON.stringify(zonePos)); } catch { /* ignore */ } }, [zonePos]);
   useEffect(() => { try { localStorage.setItem(ZONESIZE_KEY, JSON.stringify(zoneSize)); } catch { /* ignore */ } }, [zoneSize]);
+  useEffect(() => { try { localStorage.setItem(CARDPOS_KEY, JSON.stringify(cardPos)); } catch { /* ignore */ } }, [cardPos]);
 
   const wosByDept = useMemo(() => {
     const m = new Map<string, WorkOrder[]>();
@@ -141,11 +144,22 @@ export default function WorkBoardPage() {
   const posOfZone = useCallback((key: string): Pos => zonePos[key] ?? { x: (zoneIndex[key] ?? 0) * (ZONE_W + GAP), y: 0 }, [zonePos, zoneIndex]);
   const countOf = (z: Zone) => (z.kind === "pending" ? z.moCards.length : z.woCards.length);
   const zoneWof = useCallback((key: string) => zoneSize[key]?.w ?? ZONE_W, [zoneSize]);
-  const innerWof = useCallback((key: string) => zoneWof(key) - PAD * 2, [zoneWof]);
   const zoneH = useCallback((z: Zone) => {
     const auto = HEADER_H + Math.max(1, countOf(z)) * CARD_SLOT + PAD;
     return Math.max(auto, zoneSize[z.key]?.h ?? 0);
   }, [zoneSize]);
+
+  // ตำแหน่ง "จัดเรียงสวย" อัตโนมัติ (ถ้าการ์ดยังไม่ถูกวางอิสระ) — เกาะตามตำแหน่งโซน
+  const autoPos = useMemo(() => {
+    const map: Record<string, Pos> = {};
+    for (const z of zones) {
+      const p = posOfZone(z.key);
+      const cids = z.kind === "pending" ? z.moCards.map((m) => `mo:${m.id}`) : z.woCards.map((w) => `wo:${w.id}`);
+      cids.forEach((cid, i) => { map[cid] = { x: p.x + (zoneWof(z.key) - CARD_W) / 2, y: p.y + HEADER_H + 10 + i * CARD_SLOT }; });
+    }
+    return map;
+  }, [zones, posOfZone, zoneWof]);
+  const posOfCard = useCallback((cid: string): Pos => cardPos[cid] ?? autoPos[cid] ?? { x: 0, y: 0 }, [cardPos, autoPos]);
 
   const screenToWorld = (cx: number, cy: number): Pos => {
     const r = boardRef.current!.getBoundingClientRect();
@@ -167,10 +181,11 @@ export default function WorkBoardPage() {
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [loading]);   // ต้องผูกใหม่หลังกระดานแสดง (ตอน loading ยังไม่มี boardRef)
+  }, [loading]);
   const zoomBtn = (f: number) => { const el = boardRef.current; if (!el) return; const r = el.getBoundingClientRect(); const sx = r.width / 2, sy = r.height / 2;
     setVp((v) => { const ns = clamp(v.scale * f, 0.3, 1.8); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; }); };
   const resetView = () => setVp({ x: 24, y: 16, scale: 0.85 });
+  const tidy = () => setCardPos({});   // จัดเรียงการ์ดกลับเข้าโซนสวยๆ
   const resetZones = () => { setZonePos({}); setZoneSize({}); };
 
   // ---- pointer ----
@@ -179,7 +194,7 @@ export default function WorkBoardPage() {
     interRef.current = { type: "pan", sx: e.clientX, sy: e.clientY, ox: vp.x, oy: vp.y };
   };
   const onZoneDown = (e: RPE, key: string) => {
-    if (tool === "pan") return; // ให้ pan ทำงาน
+    if (tool === "pan") return;
     e.stopPropagation();
     boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
     const p = posOfZone(key);
@@ -190,47 +205,50 @@ export default function WorkBoardPage() {
     boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
     interRef.current = { type: "resize", key: z.key, sx: e.clientX, sy: e.clientY, ow: zoneWof(z.key), oh: zoneH(z) };
   };
-  const onCardDown = (e: RPE, kind: "mo" | "wo", id: string, sourceKey: string) => {
+  const onCardDown = (e: RPE, kind: "mo" | "wo", id: string) => {
     if (tool === "pan" || !canEdit) return;
     e.stopPropagation();
-    boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
-    interRef.current = { type: "card", kind, id, sourceKey };
-    setDrag({ kind, id, x: e.clientX, y: e.clientY });
+    const cid = `${kind}:${id}`; const p = posOfCard(cid);
+    boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false; setDragId(cid);
+    interRef.current = { type: "card", cid, kind, id, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
   };
   const onMove = (e: RPE) => {
     const it = interRef.current; if (!it) return;
-    if (it.type === "pan" || it.type === "zone" || it.type === "resize") {
-      const dx = e.clientX - it.sx, dy = e.clientY - it.sy;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
-      if (it.type === "pan") setVp((v) => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
-      else if (it.type === "zone") setZonePos((zp) => ({ ...zp, [it.key]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
-      else setZoneSize((zs) => ({ ...zs, [it.key]: { w: clamp(it.ow + dx / vp.scale, 180, 560), h: Math.max(160, it.oh + dy / vp.scale) } }));
-    } else if (it.type === "card") { movedRef.current = true; setDrag((d) => d ? { ...d, x: e.clientX, y: e.clientY } : d); }
+    const dx = e.clientX - it.sx, dy = e.clientY - it.sy;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
+    if (it.type === "pan") setVp((v) => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
+    else if (it.type === "zone") setZonePos((zp) => ({ ...zp, [it.key]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
+    else if (it.type === "resize") setZoneSize((zs) => ({ ...zs, [it.key]: { w: clamp(it.ow + dx / vp.scale, 180, 640), h: Math.max(160, it.oh + dy / vp.scale) } }));
+    else if (it.type === "card") setCardPos((cp) => ({ ...cp, [it.cid]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
   };
   const onUp = async (e: RPE) => {
-    const it = interRef.current; interRef.current = null;
+    const it = interRef.current; interRef.current = null; setDragId(null);
     try { boardRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (!it) return;
-    if (it.type !== "card") return;
-    setDrag(null);
+    if (!it || it.type !== "card") return;
     if (!movedRef.current) return;
     const w = screenToWorld(e.clientX, e.clientY);
     const target = hitZone(w.x, w.y);
-    if (!target || target.kind !== "dept" || !target.dept) return;
     if (it.kind === "mo") {
-      const mo = board.pending.find((m) => m.id === it.id); if (!mo) return;
-      setDispMO(mo); setDispDept(target.dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
+      // วางในโซนแผนก = จ่ายงาน (เด้ง popup) แล้วสแนปการ์ดกลับโซนรอจ่าย
+      if (target && target.kind === "dept" && target.dept) {
+        const mo = board.pending.find((m) => m.id === it.id);
+        setCardPos((cp) => { const n = { ...cp }; delete n[it.cid]; return n; });
+        if (mo) { setDispMO(mo); setDispDept(target.dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? ""); }
+      }
+      // วางที่อื่น = คงตำแหน่งอิสระไว้
     } else {
-      const wo = board.workOrders.find((x) => x.id === it.id); if (!wo || wo.department_id === target.dept.id) return;
-      const d = target.dept;
-      setBoard((b) => ({ ...b, workOrders: b.workOrders.map((x) => x.id === it.id ? { ...x, department_id: d.id, department_name: d.name } : x) }));
-      try { const res = await apiFetch(`/api/mo/work-orders/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: d.id, department_name: d.name, stage: stageOfDept(d.name) }) });
-        const j = await res.json(); if (j.error) throw new Error(j.error);
-      } catch (err) { toast.error(err instanceof Error ? err.message : "ย้ายไม่สำเร็จ"); await load(); }
+      const wo = board.workOrders.find((x) => x.id === it.id); if (!wo) return;
+      if (target && target.kind === "dept" && target.dept && wo.department_id !== target.dept.id) {
+        const d = target.dept;
+        setBoard((b) => ({ ...b, workOrders: b.workOrders.map((x) => x.id === it.id ? { ...x, department_id: d.id, department_name: d.name } : x) }));
+        try { const res = await apiFetch(`/api/mo/work-orders/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: d.id, department_name: d.name, stage: stageOfDept(d.name) }) });
+          const j = await res.json(); if (j.error) throw new Error(j.error);
+        } catch (err) { toast.error(err instanceof Error ? err.message : "ย้ายไม่สำเร็จ"); await load(); }
+      }
+      // คงตำแหน่งที่วางไว้ (อิสระ)
     }
   };
 
-  // ---- ตั้งสีแบรนด์ ----
   const openColor = async () => { setColorOpen(true); try { const r = await apiFetch("/api/brands"); const j = await r.json(); setBrands(j.data ?? []); } catch { /* ignore */ } };
   const saveColor = async (id: string, color: string) => {
     setBrands((bs) => bs.map((b) => b.id === id ? { ...b, color } : b));
@@ -257,11 +275,13 @@ export default function WorkBoardPage() {
   };
   const deptCraftsmen = useMemo(() => dispDept ? craftsmen.filter((c) => c.department_id === dispDept.id) : [], [dispDept, craftsmen]);
 
-  const dragBody = useMemo(() => {
-    if (!drag) return null;
-    if (drag.kind === "mo") { const m = board.pending.find((x) => x.id === drag.id); return m ? <PendingBody mo={m} dragging /> : null; }
-    const w = board.workOrders.find((x) => x.id === drag.id); return w ? <WOBody w={w} dragging /> : null;
-  }, [drag, board]);
+  // รายการการ์ดทั้งหมด (วาดแยกจากโซน เพื่อวางอิสระทับโซนได้)
+  const cards = useMemo(() => {
+    const arr: { cid: string; kind: "mo" | "wo"; node: React.ReactNode }[] = [];
+    for (const m of board.pending) arr.push({ cid: `mo:${m.id}`, kind: "mo", node: <PendingBody mo={m} /> });
+    for (const w of board.workOrders) if (w.status !== "done") arr.push({ cid: `wo:${w.id}`, kind: "wo", node: <WOBody w={w} /> });
+    return arr;
+  }, [board]);
 
   if (!canView) return <AccessDenied />;
 
@@ -270,7 +290,7 @@ export default function WorkBoardPage() {
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">📋 บอร์ดจ่ายงาน</h1>
-          <p className="text-sm text-slate-500 mt-0.5">ลากการ์ดจาก “รอจ่าย” ไปวางที่แผนก = จ่ายงาน · ลากการ์ดข้ามแผนก = ย้าย · ลากหัวโซน = ย้ายตำแหน่งแผนก</p>
+          <p className="text-sm text-slate-500 mt-0.5">ลากการ์ดวางได้อิสระ · ปล่อยในโซนแผนก = จ่าย/ย้าย · ลากหัวโซน = ย้าย · ลากมุมโซน = ขยาย · ปุ่ม ▦ จัดเรียง</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
@@ -287,8 +307,9 @@ export default function WorkBoardPage() {
         <span className="text-xs text-slate-500 tabular-nums w-10 text-center">{Math.round(vp.scale * 100)}%</span>
         <ToolBtn onClick={() => zoomBtn(1.2)} title="ซูมเข้า">➕</ToolBtn>
         <Sep />
+        <ToolBtn onClick={tidy} title="จัดเรียงการ์ดให้สวย">▦</ToolBtn>
         <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
-        <ToolBtn onClick={resetZones} title="จัดเรียงโซนใหม่">↺</ToolBtn>
+        <ToolBtn onClick={resetZones} title="รีเซ็ตตำแหน่ง/ขนาดโซน">↺</ToolBtn>
         <ToolBtn onClick={() => void load()} title="โหลดใหม่">⟳</ToolBtn>
         <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
       </div>
@@ -298,37 +319,35 @@ export default function WorkBoardPage() {
           className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isMax ? "flex-1" : "h-[calc(100vh-230px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : "cursor-default"}`}
           style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
           <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
+            {/* โซน (กล่องพื้นหลัง + drop target) */}
             {zones.map((z) => {
-              const p = posOfZone(z.key); const count = countOf(z); const zw = zoneWof(z.key); const iw = innerWof(z.key);
+              const p = posOfZone(z.key); const count = countOf(z); const zw = zoneWof(z.key);
               return (
-                <div key={z.key} className="absolute rounded-2xl border-2 border-dashed bg-white/40" style={{ left: p.x, top: p.y, width: zw, minHeight: zoneH(z), borderColor: `${z.accent}88` }}>
-                  {/* หัวโซน (ลากย้าย) */}
+                <div key={z.key} className="absolute rounded-2xl border-2 border-dashed bg-white/40" style={{ left: p.x, top: p.y, width: zw, height: zoneH(z), borderColor: `${z.accent}88` }}>
                   <div onPointerDown={(e) => onZoneDown(e, z.key)} title="ลากเพื่อย้ายตำแหน่งแผนก"
                     className="flex items-center justify-between px-3 rounded-t-2xl cursor-move select-none" style={{ height: HEADER_H, background: `${z.accent}1f`, borderBottom: `2px solid ${z.accent}55` }}>
                     <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ background: z.accent }} /><span className="text-base font-bold text-slate-700 truncate">{z.label}</span></div>
                     <span className="text-xs font-medium text-slate-500 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
                   </div>
-                  {/* การ์ด */}
-                  <div className="p-3 space-y-2">
-                    {z.kind === "pending"
-                      ? z.moCards.map((m) => <div key={m.id} onPointerDown={(e) => onCardDown(e, "mo", m.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "mo" && drag.id === m.id ? "opacity-30" : ""}`} style={{ width: iw }}><PendingBody mo={m} /></div>)
-                      : z.woCards.map((w) => <div key={w.id} onPointerDown={(e) => onCardDown(e, "wo", w.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "wo" && drag.id === w.id ? "opacity-30" : ""}`} style={{ width: iw }}><WOBody w={w} /></div>)}
-                    {count === 0 && <div className="h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg" style={{ width: iw }}>{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
-                  </div>
-                  {/* มือจับขยายขนาดโซน (มุมขวาล่าง) */}
+                  {count === 0 && <div className="flex items-center justify-center text-xs text-slate-300 mt-6">{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
                   <div onPointerDown={(e) => onZoneResizeDown(e, z)} title="ลากเพื่อขยาย/ย่อโซน"
                     className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize rounded-br-2xl" style={{ background: `linear-gradient(135deg, transparent 50%, ${z.accent}99 50%)` }} />
                 </div>
               );
             })}
-          </div>
 
-          {/* การ์ดที่กำลังลาก (ลอยตามเมาส์) */}
-          {drag && dragBody && (
-            <div className="fixed z-[70] pointer-events-none" style={{ left: drag.x, top: drag.y, width: INNER_W * vp.scale, transform: "translate(-50%,-50%) rotate(2deg)" }}>
-              <div style={{ width: INNER_W, transform: `scale(${vp.scale})`, transformOrigin: "top left" }}>{dragBody}</div>
-            </div>
-          )}
+            {/* การ์ด (วางอิสระทับโซน) */}
+            {cards.map((c) => {
+              const p = posOfCard(c.cid);
+              return (
+                <div key={c.cid} onPointerDown={(e) => onCardDown(e, c.kind, c.cid.slice(3))}
+                  className={`absolute ${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${dragId === c.cid ? "z-50 rotate-1" : "z-10"}`}
+                  style={{ left: p.x, top: p.y, width: CARD_W }}>
+                  {c.node}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -387,13 +406,13 @@ function ToolBtn({ active, onClick, title, children }: { active?: boolean; onCli
 }
 
 // ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) ----
-function PendingBody({ mo, dragging }: { mo: PendingMO; dragging?: boolean }) {
+function PendingBody({ mo }: { mo: PendingMO }) {
   const urg = urgencyByDate(mo.due_date, false);
   const border = mo.brand_color || prodColor(mo.product_sku);
   return (
-    <div className={`bg-white rounded-lg p-2.5 shadow-sm ${dragging ? "shadow-xl" : "hover:shadow"} transition`} style={{ border: `2px solid ${border}` }}>
+    <div className="bg-white rounded-lg p-2.5 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${border}` }}>
       <div className="relative w-full aspect-square rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
-        {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" className="w-full h-full object-contain" /> : <span className="text-slate-300 text-3xl">📦</span>}
+        {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-3xl">📦</span>}
         <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
       </div>
       <div className="flex items-center justify-between gap-2 mb-1">
@@ -410,14 +429,14 @@ function PendingBody({ mo, dragging }: { mo: PendingMO; dragging?: boolean }) {
 }
 
 // ---- เนื้อการ์ดใบจ่ายงาน (ในแผนก) ----
-function WOBody({ w, dragging }: { w: WorkOrder; dragging?: boolean }) {
+function WOBody({ w }: { w: WorkOrder }) {
   const urg = urgencyByDate(w.due_date, w.status === "done");
   const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
   const border = w.brand_color || prodColor(w.product_sku);
   return (
-    <div className={`bg-white rounded-lg p-2.5 shadow-sm ${dragging ? "shadow-xl" : "hover:shadow"} transition`} style={{ border: `2px solid ${border}` }}>
+    <div className="bg-white rounded-lg p-2.5 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${border}` }}>
       <div className="relative w-full aspect-square rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
-        {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" className="w-full h-full object-contain" /> : <span className="text-slate-300 text-3xl">📦</span>}
+        {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-3xl">📦</span>}
         <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
         <span className={`absolute top-1.5 left-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${st.cls}`}>{st.label}</span>
       </div>
