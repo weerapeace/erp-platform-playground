@@ -83,11 +83,21 @@ export function RelationPeekModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startInEdit, isCreate, loading, row]);
 
+  // แปลงค่าให้ตรงชนิดก่อนส่ง (เหมือน master-crud) — กัน "" ไปลงคอลัมน์ number/integer แล้วฐานข้อมูล error
+  const serializeValue = (fd: RF, v: unknown): unknown => {
+    if (fd.ui_field_type === "number" || fd.ui_field_type === "currency") {
+      if (v === "" || v == null) return null;
+      const n = Number(v); return Number.isFinite(n) ? n : null;
+    }
+    if (fd.ui_field_type === "boolean") return !!v;
+    return v === "" || v == null ? null : v;   // ข้อความว่าง → null (เหมือนตารางกลาง)
+  };
+
   const save = async () => {
     setSaving(true); setErr(null);
     try {
       const body: Record<string, unknown> = { actor: user?.name };
-      editableFields.forEach((fd) => { body[fd.field_key] = form[fd.field_key]; });
+      editableFields.forEach((fd) => { body[fd.field_key] = serializeValue(fd, form[fd.field_key]); });
       if (isCreate) {
         Object.assign(body, createDefaults ?? {});   // กัน FK/ค่าตั้งต้นหลุด แม้ไม่ใช่ field ที่แก้ได้
         const res = await apiFetch(`/api/master-v2/${moduleKey}`, {
