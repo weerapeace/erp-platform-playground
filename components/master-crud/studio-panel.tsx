@@ -207,11 +207,18 @@ export function StudioPanel({
     if (i < 0 || j < 0 || j >= p.length) return p;
     const n = [...p]; [n[i], n[j]] = [n[j], n[i]]; setDirty(true); return n;
   });
-  const addSection = () => {
+  const addSection = (tab = "") => {
     const nums = sections.filter((s) => /^sec_\d+$/.test(s.key)).map((s) => parseInt(s.key.slice(4), 10));
     const n = (nums.length ? Math.max(...nums) : 0) + 1;
-    setSections((p) => [...p, { key: `sec_${n}`, label: `หมวดใหม่ ${n}`, icon: "📁", columns: 2 }]);
+    setSections((p) => [...p, { key: `sec_${n}`, label: `หมวดใหม่ ${n}`, icon: "📁", columns: 2, tab }]);
     setDirty(true);
+  };
+  // เปลี่ยนชื่อแท็บ → กระทบทุก section ในแท็บนั้น
+  const renameTab = (oldTab: string, newTab: string) => { setSections((p) => p.map((s) => (s.tab ?? "") === oldTab ? { ...s, tab: newTab } : s)); setDirty(true); };
+  const addTab = () => {
+    const base = "แท็บใหม่"; const used = new Set(sections.map((s) => (s.tab ?? "").trim()));
+    let i = 1; while (used.has(`${base} ${i}`)) i++;
+    addSection(`${base} ${i}`);
   };
   const deleteSection = (key: string) => {
     setItems((prev) => prev.map((i) => (i.groupKey ?? "other") === key ? { ...i, groupKey: "other" } : i));
@@ -538,7 +545,8 @@ export function StudioPanel({
               groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
               row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
               editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
-              onResizeSpan={(k,span)=>patchItem(k,{formSpan:span})} onPatch={patchItem} />
+              onResizeSpan={(k,span)=>patchItem(k,{formSpan:span})} onPatch={patchItem}
+              editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}) }} />
           )}
         </div>
       </div>
@@ -930,11 +938,25 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan
   );
 }
 
-function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onResizeSpan, onPatch }: {
+type EditApi = {
+  sections: SectionDef[];
+  renameSection: (key: string, label: string)=>void;
+  setCols: (key: string, n: number)=>void;
+  setSectionTab: (key: string, tab: string)=>void;
+  deleteSection: (key: string)=>void;
+  addSection: (tab?: string)=>void;
+  addTab: ()=>void;
+  renameTab: (oldTab: string, newTab: string)=>void;
+  moveField: (fieldKey: string, groupKey: string)=>void;
+};
+
+function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onResizeSpan, onPatch, editApi }: {
   groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string;
   editable?: boolean; selectedKey?: string | null; onSelectField?: (k: string)=>void;
   onResizeSpan?: (k: string, span: number)=>void; onPatch?: (k: string, patch: Partial<StudioField>)=>void;
+  editApi?: EditApi;
 }) {
+  const allTabNames = editApi ? [...new Set(editApi.sections.map((s)=>(s.tab??"").trim()).filter(Boolean))] : [];
   // จัด section เข้าแท็บ (ตรงกับฟอร์มจริง): tab เดียวกัน = แท็บเดียว, เว้นว่าง = แท็บเดี่ยว
   const tabs = useMemo(() => {
     const m = new Map<string, { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] }>();
@@ -961,17 +983,37 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
             <span className="text-xs font-semibold text-slate-700 truncate">⚙️ {selField.label}</span>
             <button type="button" onClick={()=>onSelectField?.(selField.key)} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
           </div>
-          <div className="max-h-[60vh] overflow-y-auto"><FieldSettings field={selField} onPatch={(patch)=>onPatch(selField.key, patch)} /></div>
+          {editApi && (
+            <div className="px-3 py-2 border-b border-orange-100 text-xs flex items-center gap-1.5">
+              <span className="text-slate-500 whitespace-nowrap">📦 ย้ายไปกล่อง:</span>
+              <select value={selField.groupKey} onChange={(e)=>editApi.moveField(selField.key, e.target.value)} className="flex-1 h-7 px-1 border border-slate-200 rounded bg-white">
+                {editApi.sections.map((s)=><option key={s.key} value={s.key}>{s.tab?`[${s.tab}] `:""}{s.label}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="max-h-[55vh] overflow-y-auto"><FieldSettings field={selField} onPatch={(patch)=>onPatch(selField.key, patch)} /></div>
         </div>
       )}
-      {tabs.length > 1 && (
+      {(tabs.length > 1 || (editable && editApi)) && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
-          {tabs.map((t, i)=>(
-            <button key={t.key} type="button" onClick={()=>setActive(i)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 ${i===curIdx?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"}`}>
-              {iconNode(t.icon)}<span>{t.label}</span>
-            </button>
-          ))}
+          {tabs.map((t, i)=>{
+            const named = t.key.startsWith("tab_");
+            return (
+            <div key={t.key} onClick={()=>setActive(i)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${i===curIdx?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"}`}>
+              {iconNode(t.icon)}
+              {editable && editApi
+                ? <input value={t.label} onClick={(e)=>e.stopPropagation()}
+                    onChange={(e)=> named ? editApi.renameTab(t.label, e.target.value) : editApi.renameSection(t.entries[0][0].key, e.target.value)}
+                    className="bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 w-24 focus:outline-none" />
+                : <span>{t.label}</span>}
+            </div>
+            );
+          })}
+          {editable && editApi && (
+            <button type="button" onClick={()=>editApi.addTab()} title="เพิ่มแท็บใหม่"
+              className="px-2.5 py-2 text-sm text-orange-500 hover:text-orange-700 whitespace-nowrap">＋ แท็บ</button>
+          )}
         </div>
       )}
       {(cur?.entries ?? []).map(([sec, fs])=>{
@@ -979,8 +1021,26 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
         const gridCls = cols===1 ? "grid-cols-1" : cols===3 ? "grid-cols-3" : "grid-cols-2";
         return (
           <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden">
-            <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5">
-              {iconNode(sec.icon)}{sec.label}
+            <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
+              {iconNode(sec.icon)}
+              {editable && editApi ? (
+                <>
+                  <input value={sec.label} onChange={(e)=>editApi.renameSection(sec.key, e.target.value)} title="ชื่อกล่อง"
+                    className="bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 w-32 focus:outline-none" />
+                  <div className="ml-auto flex items-center gap-1 text-[11px] text-slate-400">
+                    คอลัมน์:
+                    {[1,2,3].map((n)=>(
+                      <button key={n} type="button" onClick={()=>editApi.setCols(sec.key,n)}
+                        className={`w-5 h-5 rounded border ${cols===n?"bg-orange-100 border-orange-300 text-orange-700":"bg-white border-slate-200 text-slate-500"}`}>{n}</button>
+                    ))}
+                    <span className="mx-1">·</span>📑
+                    <input list="studio-tabs-canvas" value={sec.tab ?? ""} onChange={(e)=>editApi.setSectionTab(sec.key, e.target.value)} placeholder="(เดี่ยว)" title="ชื่อแท็บ"
+                      className="w-20 h-5 px-1 border border-slate-200 rounded bg-white focus:outline-none" />
+                    <datalist id="studio-tabs-canvas">{allTabNames.map((t)=><option key={t} value={t} />)}</datalist>
+                    <button type="button" onClick={()=>{ if(confirm(`ลบกล่อง "${sec.label}"? ฟิลด์จะย้ายไป "อื่น ๆ"`)) editApi.deleteSection(sec.key); }} title="ลบกล่อง" className="ml-1 text-slate-300 hover:text-red-500">✕</button>
+                  </div>
+                </>
+              ) : sec.label}
             </div>
             <div className={`p-3 grid ${gridCls} gap-3`}>
               {fs.map(f=>(
@@ -991,6 +1051,12 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
           </div>
         );
       })}
+      {editable && editApi && (
+        <button type="button" onClick={()=>editApi.addSection((cur?.key ?? "").startsWith("tab_") ? cur!.label : "")}
+          className="w-full h-9 text-sm border border-dashed border-slate-300 rounded-lg text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50/40">
+          ➕ เพิ่มกล่อง (section){cur && cur.key.startsWith("tab_") ? ` ในแท็บ "${cur.label}"` : ""}
+        </button>
+      )}
     </div>
   );
 }
