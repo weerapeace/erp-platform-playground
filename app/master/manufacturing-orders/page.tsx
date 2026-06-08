@@ -49,7 +49,7 @@ export default function MoWorkspacePage() {
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
   const canEdit = usePermission("products.edit");
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const toast = useToast();
 
   const [refreshKey, setRefreshKey] = useState(0);
@@ -63,6 +63,13 @@ export default function MoWorkspacePage() {
   const [archiving, setArchiving] = useState(false);
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
   const [editBuy, setEditBuy] = useState<Set<string>>(new Set());
+  // popup สร้างใบขอซื้อ
+  type PrItem = { key: string; sku: string | null; name: string | null; uom: string | null; qty: number; include: boolean };
+  const [prOpen, setPrOpen] = useState(false);
+  const [prDate, setPrDate] = useState("");
+  const [prRequester, setPrRequester] = useState("");
+  const [prItems, setPrItems] = useState<PrItem[]>([]);
+  const [prSaving, setPrSaving] = useState(false);
 
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
@@ -195,20 +202,38 @@ export default function MoWorkspacePage() {
   };
   const sumSource = (): SummaryMat[] => (form?.id ? form.summary : aggregate(form?.materials ?? []));
 
-  // สร้างใบขอซื้อ (PR) จากวัตถุดิบที่ขาด (ขอซื้อ > 0)
-  const createPR = async () => {
+  // เปิด popup ขอซื้อ — เตรียมรายการที่ขาด + วันที่/ชื่อที่สั่ง
+  const openPR = () => {
     if (!form) return;
-    const need = sumSource()
-      .map((m) => { const base = Math.max(0, Math.round((m.qty_per * (form.qty || 0) - (m.on_hand_qty || 0)) * 10000) / 10000); return { m, tp: m.purchase_override != null ? m.purchase_override : base }; })
-      .filter((x) => x.tp > 0);
+    const need: PrItem[] = sumSource()
+      .map((m) => { const base = Math.max(0, Math.round((m.qty_per * (form.qty || 0) - (m.on_hand_qty || 0)) * 10000) / 10000); return { key: m.key, sku: m.component_sku, name: m.component_name, uom: m.uom, qty: m.purchase_override != null ? m.purchase_override : base, include: true }; })
+      .filter((x) => x.qty > 0);
     if (need.length === 0) { toast.info("ไม่มีรายการที่ต้องขอซื้อ (มีของครบแล้ว)"); return; }
+    setPrItems(need);
+    setPrDate(new Date().toISOString().slice(0, 10));
+    setPrRequester(user?.name ?? user?.email ?? "");
+    setPrOpen(true);
+  };
+
+  // ส่งเข้าระบบขอซื้อ v2 (โผล่หน้า "ขอซื้อ (ช้อปปิ้ง)")
+  const submitPR = async () => {
+    if (!form) return;
+    const items = prItems.filter((i) => i.include && i.qty > 0).map((i) => ({
+      item_name: i.sku ? `[${i.sku}] ${i.name ?? ""}` : (i.name ?? ""),
+      qty: i.qty, uom: i.uom,
+      used_for_label: form.product_sku ? `[${form.product_sku}] ${form.product_name ?? ""}` : (form.product_name ?? ""),
+      needed_date: form.due_date || null, source_mo_no: form.mo_no, note: `จากใบสั่งผลิต ${form.mo_no}`,
+    }));
+    if (items.length === 0) { toast.error("ยังไม่ได้เลือกรายการ"); return; }
+    setPrSaving(true);
     try {
-      const lines = need.map((x) => ({ sku: x.m.component_sku, product_name: x.m.component_name ?? "", qty: x.tp, unit: x.m.uom ?? "", unit_price: 0 }));
-      const res = await apiFetch("/api/purchase-requests", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: `ขอซื้อวัตถุดิบ ${form.mo_no}`, note: `จากใบสั่งผลิต ${form.mo_no}`, lines }) });
+      const res = await apiFetch("/api/purchasing/create-pr", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, order_date: prDate, actor: prRequester || undefined }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(`สร้างใบขอซื้อแล้ว (${need.length} รายการ) — ดูที่เมนูใบขอซื้อ`);
+      toast.success(`สร้างใบขอซื้อ ${j.created} รายการ — ดูที่หน้า "ขอซื้อ (ช้อปปิ้ง)"`);
+      setPrOpen(false);
     } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างใบขอซื้อไม่สำเร็จ"); }
+    finally { setPrSaving(false); }
   };
 
   const columns: ColumnDef<MoListItem>[] = useMemo(() => [
@@ -364,7 +389,7 @@ export default function MoWorkspacePage() {
                       <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
                     </div>
                     {editable && matTab === "sum" && needCount > 0 && canEdit && (
-                      <button type="button" onClick={createPR} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
+                      <button type="button" onClick={openPR} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
                     )}
                   </div>
                   {form.materials.length === 0 ? (
@@ -390,6 +415,43 @@ export default function MoWorkspacePage() {
       <ConfirmDialog open={archiveTarget !== null} onClose={() => !archiving && setArchiveTarget(null)} onConfirm={doArchive}
         loading={archiving} variant="danger" title="ย้ายใบสั่งผลิตเข้าคลังเก็บ?"
         message={`ใบสั่งผลิต "${archiveTarget?.mo_no ?? ""}" จะถูกซ่อน (กู้คืนได้)`} confirmText="ย้ายเข้าคลังเก็บ" />
+
+      {/* popup สร้างใบขอซื้อ (ลงระบบจัดซื้อ v2) */}
+      <ERPModal open={prOpen} onClose={() => !prSaving && setPrOpen(false)} size="lg" title={`🛒 สร้างใบขอซื้อ — ${form?.mo_no ?? ""}`}
+        footer={<>
+          <button onClick={() => setPrOpen(false)} disabled={prSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={submitPR} disabled={prSaving} className="h-9 px-4 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">{prSaving ? "กำลังสร้าง..." : `สร้างใบขอซื้อ (${prItems.filter((i) => i.include && i.qty > 0).length})`}</button>
+        </>}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-[11px] text-slate-500">วันที่สั่ง</span>
+              <input type="date" value={prDate} onChange={(e) => setPrDate(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
+            <label className="block"><span className="text-[11px] text-slate-500">ชื่อที่สั่ง</span>
+              <input value={prRequester} onChange={(e) => setPrRequester(e.target.value)} placeholder="ชื่อผู้สั่งซื้อ" className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
+          </div>
+          <p className="text-[11px] text-slate-400">ใช้กับสินค้า: <b>{form?.product_sku}</b> {form?.product_name} · กำหนดส่ง {form?.due_date || "—"}</p>
+          <div className="max-h-72 overflow-auto border border-slate-200 rounded-lg">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-xs text-slate-500 sticky top-0">
+                <tr><th className="w-8 px-2 py-1.5"></th><th className="text-left px-2 py-1.5">วัตถุดิบ</th><th className="text-right px-2 py-1.5 w-24">จำนวนที่ขอ</th><th className="text-left px-2 py-1.5 w-16">หน่วย</th></tr>
+              </thead>
+              <tbody>
+                {prItems.map((it, idx) => (
+                  <tr key={it.key} className="border-t border-slate-100">
+                    <td className="px-2 py-1 text-center"><input type="checkbox" checked={it.include} onChange={(e) => setPrItems((p) => p.map((x, i) => i === idx ? { ...x, include: e.target.checked } : x))} className="rounded border-slate-300" /></td>
+                    <td className="px-2 py-1"><code className="text-[10px] text-slate-400">{it.sku}</code> <span className="text-slate-700">{it.name}</span></td>
+                    <td className="px-2 py-1 text-right">
+                      <input type="number" min={0} step="any" value={it.qty} onChange={(e) => setPrItems((p) => p.map((x, i) => i === idx ? { ...x, qty: Number(e.target.value) } : x))}
+                        className="w-20 h-7 px-2 text-sm text-right border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" /></td>
+                    <td className="px-2 py-1 text-slate-500">{it.uom}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-400">รายการจะไปโผล่ที่หน้า &ldquo;ขอซื้อ (ช้อปปิ้ง)&rdquo; (กลุ่มยังไม่ตั้งร้าน) + แท็บ &ldquo;จากใบสั่งงาน&rdquo;</p>
+        </div>
+      </ERPModal>
     </>
   );
 }
