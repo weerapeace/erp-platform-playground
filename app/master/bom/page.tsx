@@ -14,7 +14,8 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { BomLineEditor, SkuPicker, emptyLine, type EditorLine } from "./line-editor";
+import { BomLineEditor, ComponentPicker, emptyLine, type EditorLine } from "./line-editor";
+import type { BomComponent } from "@/app/api/bom/components/route";
 import { CopyBomModal } from "./copy-bom-modal";
 
 // ---- types (ตรงกับ /api/bom) ----
@@ -30,7 +31,7 @@ type BomLineRow = {
   calc_mode: string | null; cut_block_id: number | null; cut_block_code: string | null;
   pieces: number | null; cut_width: number | null; cut_length: number | null;
   face_width_cm: number | null; material_type: string | null;
-  sku_id: string | null; image_key: string | null;
+  sku_id: string | null; image_key: string | null; uom_id: string | null;
 };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -47,6 +48,7 @@ type FormState = {
   bom_code: string;
   product_sku: string;
   product_name: string;
+  product_image: string | null;
   version: string;
   bom_type: string;
   status: string;
@@ -55,13 +57,13 @@ type FormState = {
 };
 
 function emptyForm(): FormState {
-  return { id: null, bom_code: "", product_sku: "", product_name: "", version: "v1", bom_type: "normal", status: "draft", note: "", lines: [] };
+  return { id: null, bom_code: "", product_sku: "", product_name: "", product_image: null, version: "v1", bom_type: "normal", status: "active", note: "", lines: [] };
 }
 
 // ---- versioning helpers ----
 const verNum  = (v: string | null) => { const m = (v ?? "").match(/(\d+)/); return m ? parseInt(m[1], 10) : 1; };
 const verCode = (sku: string, n: number) => (n <= 1 ? `BOM-${sku}` : `BOM-${sku}_v.${n}`);
-type BomVersionRow = { id: string; bom_code: string; version: string | null; status: string | null };
+type BomVersionRow = { id: string; bom_code: string; version: string | null; status: string | null; is_default: boolean };
 
 export default function BomWorkspacePage() {
   const canView   = usePermission("products.view");
@@ -102,7 +104,7 @@ export default function BomWorkspacePage() {
     key: l.id, component_id: l.sku_id ?? null, slot_code: l.slot_code, image_key: l.image_key ?? null,
     component_sku: l.component_sku ?? "", component_name: l.component_name ?? "",
     material_group_id: null, material_type: l.material_type ?? "",
-    qty: Number(l.qty) || 0, uom: l.uom ?? "", waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
+    qty: Number(l.qty) || 0, uom: l.uom ?? "", uom_id: l.uom_id ?? null, waste_percent: Number(l.waste_percent) || 0, is_optional: !!l.is_optional,
     cut_block_id: l.cut_block_id ?? null, cut_block_code: l.cut_block_code ?? "",
     pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
     face_width_cm: Number(l.face_width_cm) || 0,
@@ -115,7 +117,7 @@ export default function BomWorkspacePage() {
     if (json.error) throw new Error(json.error);
     const d = json.data as BomListItem & { lines: BomLineRow[]; note?: string };
     return {
-      id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "",
+      id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
       version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: d.note ?? "",
       lines: mapLines(d.lines),
     };
@@ -157,8 +159,8 @@ export default function BomWorkspacePage() {
   };
 
   // เลือกสินค้า → auto-fill รหัส/เวอร์ชั่น (เฉพาะตอนสร้างใหม่)
-  const onPickProduct = async (sku: string, name: string) => {
-    patchForm({ product_sku: sku, product_name: name });
+  const onPickProduct = async (sku: string, name: string, image?: string | null) => {
+    patchForm({ product_sku: sku, product_name: name, product_image: image ?? null });
     const vers = await fetchVersions(sku);
     if (form && form.id == null) {
       const n = vers.length ? Math.max(...vers.map((v) => verNum(v.version))) + 1 : 1;
@@ -175,8 +177,8 @@ export default function BomWorkspacePage() {
     let lines: EditorLine[] = [];
     if (copyId) { try { const f = await loadFormById(copyId); lines = f.lines; } catch { /* ignore */ } }
     setForm({
-      id: null, product_sku: sku, product_name: form.product_name, version: `v${n}`, bom_code: verCode(sku, n),
-      bom_type: form.bom_type, status: "draft", note: "", lines,
+      id: null, product_sku: sku, product_name: form.product_name, product_image: form.product_image, version: `v${n}`, bom_code: verCode(sku, n),
+      bom_type: form.bom_type, status: "active", note: "", lines,
     });
     setDirty(true); setNewVerOpen(false); setCopyFromId("");
   };
@@ -195,6 +197,18 @@ export default function BomWorkspacePage() {
       refresh();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   };
+
+  // ตั้งเวอร์ชั่นนี้เป็น default (MO ดึงไปใช้)
+  const setDefault = async () => {
+    if (!form?.id) return;
+    try {
+      const res = await apiFetch(`/api/bom/${form.id}/set-default`, { method: "POST" });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ตั้งเป็นเวอร์ชั่นหลัก (default) แล้ว");
+      await fetchVersions(form.product_sku);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้ง default ไม่สำเร็จ"); }
+  };
+  const curIsDefault = !!versions.find((v) => v.id === form?.id)?.is_default;
 
   const patchForm = (p: Partial<FormState>) => { setForm((f) => (f ? { ...f, ...p } : f)); setDirty(true); };
 
@@ -334,70 +348,70 @@ export default function BomWorkspacePage() {
         {loadingForm ? (
           <div className="py-12 text-center text-slate-400">กำลังโหลดสูตร...</div>
         ) : form && (
-          <div className="space-y-4">
-            {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
+          <div className="space-y-2">
+            {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
 
-            {/* header fields */}
+            {/* header fields (compact) */}
             <div>
-              <span className="text-xs font-medium text-slate-600">สินค้าที่ผลิต (product)</span>
+              <span className="text-[11px] text-slate-500">สินค้าที่ผลิต</span>
               <div className="mt-0.5">
-                <SkuPicker sku={form.product_sku} name={form.product_name} placeholder="— เลือกสินค้าที่ผลิต —"
-                  onPick={onPickProduct} />
+                <ComponentPicker sku={form.product_sku} name={form.product_name} imageKey={form.product_image} placeholder="— เลือกสินค้าที่ผลิต —"
+                  onPick={(c) => onPickProduct(c.code, c.name, c.image_key)} />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-xs font-medium text-slate-600">รหัสสูตร <span className="font-normal text-slate-400">— ตั้งอัตโนมัติ</span></span>
+                <span className="text-[11px] text-slate-500">รหัสสูตร — ตั้งอัตโนมัติ</span>
                 <input value={form.bom_code} onChange={(e) => patchForm({ bom_code: e.target.value })}
                   placeholder="เลือกสินค้าก่อน ระบบตั้งให้"
-                  className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </label>
               <div className="block">
-                <span className="text-xs font-medium text-slate-600">เวอร์ชั่น</span>
-                <div className="flex gap-1.5 mt-0.5">
+                <span className="text-[11px] text-slate-500">เวอร์ชั่น {curIsDefault && <span className="text-amber-500">★ หลัก</span>}</span>
+                <div className="flex gap-1 mt-0.5">
                   <select
                     value={form.id ?? "__cur__"}
                     onChange={(e) => { const v = e.target.value; if (v === "__add__") setNewVerOpen(true); else if (v !== "__cur__" && v !== form.id) switchVersion(v); }}
-                    className="h-9 flex-1 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    className="h-8 flex-1 min-w-0 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                     {form.id && !versions.some((v) => v.id === form.id) && <option value={form.id}>{form.version} (กำลังแก้)</option>}
-                    {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.id === form.id ? " (กำลังแก้)" : ""}</option>)}
+                    {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.is_default ? " ★" : ""}{v.id === form.id ? " (กำลังแก้)" : ""}</option>)}
                     {!form.id && <option value="__cur__">{form.version} (ใหม่)</option>}
                     {form.product_sku && <option value="__add__">＋ เวอร์ชั่นใหม่...</option>}
                   </select>
                   {form.id && canEdit && (
+                    <button type="button" onClick={setDefault} title="ตั้งเป็นเวอร์ชั่นหลัก (default) — MO จะดึงไปใช้"
+                      className={`h-8 w-8 shrink-0 flex items-center justify-center border border-slate-200 rounded-lg ${curIsDefault ? "text-amber-500" : "text-slate-300 hover:text-amber-500 hover:bg-amber-50"}`}>{curIsDefault ? "★" : "☆"}</button>
+                  )}
+                  {form.id && canEdit && (
                     <button type="button" onClick={deleteVersion} title="ลบเวอร์ชั่นนี้ (เก็บเข้าคลัง)"
-                      className="h-9 w-9 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 rounded-lg">🗑</button>
+                      className="h-8 w-8 shrink-0 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 border border-slate-200 rounded-lg">🗑</button>
                   )}
                 </div>
-                <input value={form.version} onChange={(e) => patchForm({ version: e.target.value })}
-                  placeholder="ป้ายเวอร์ชั่น เช่น v1"
-                  className="w-full h-8 mt-1 px-3 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-2">
               <label className="block">
-                <span className="text-xs font-medium text-slate-600">ประเภทสูตร</span>
+                <span className="text-[11px] text-slate-500">ประเภทสูตร</span>
                 <select value={form.bom_type} onChange={(e) => patchForm({ bom_type: e.target.value })}
-                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                   {BOMTYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </label>
               <label className="block">
-                <span className="text-xs font-medium text-slate-600">สถานะ</span>
+                <span className="text-[11px] text-slate-500">สถานะ</span>
                 <select value={form.status} onChange={(e) => patchForm({ status: e.target.value })}
-                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                   {STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </label>
+              <label className="block">
+                <span className="text-[11px] text-slate-500">หมายเหตุ</span>
+                <input value={form.note} onChange={(e) => patchForm({ note: e.target.value })}
+                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </label>
             </div>
-
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">หมายเหตุ</span>
-              <input value={form.note} onChange={(e) => patchForm({ note: e.target.value })}
-                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </label>
 
             {/* lines */}
             <div className="pt-2 border-t border-slate-100">

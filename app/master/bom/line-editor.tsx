@@ -32,6 +32,7 @@ export type EditorLine = {
   material_type:  string;            // ชื่อกลุ่ม เช่น "ผ้า"
   qty:            number;
   uom:            string;
+  uom_id:         string | null;
   waste_percent:  number;
   is_optional:    boolean;
   cut_block_id:   number | null;
@@ -50,7 +51,7 @@ const genKey = () => `l${Date.now()}_${_seq++}`;
 export function emptyLine(): EditorLine {
   return {
     key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
-    material_group_id: null, material_type: "", qty: 0, uom: "หลา", waste_percent: 0, is_optional: false,
+    material_group_id: null, material_type: "", qty: 0, uom: "หลา", uom_id: null, waste_percent: 0, is_optional: false,
     cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, slot_code: null,
   };
 }
@@ -154,7 +155,7 @@ export function SkuPicker({
 // ============================================================
 // ComponentPicker — เลือกวัตถุดิบ (คืนกลุ่ม+หน้ากว้าง+loss) ผ่าน /api/bom/components
 // ============================================================
-function ComponentPicker({ sku, name, imageKey, onPick }: { sku: string; name: string; imageKey?: string | null; onPick: (c: BomComponent) => void }) {
+export function ComponentPicker({ sku, name, imageKey, placeholder = "— เลือกวัตถุดิบ —", onPick }: { sku: string; name: string; imageKey?: string | null; placeholder?: string; onPick: (c: BomComponent) => void }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState<BomComponent[]>([]);
@@ -171,7 +172,7 @@ function ComponentPicker({ sku, name, imageKey, onPick }: { sku: string; name: s
     <div ref={boxRef} className="relative">
       <button type="button" onClick={() => { setOpen((o) => !o); setSearch(""); }}
         className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1.5 overflow-hidden">
-        {sku ? <><Thumb k={imageKey ?? null} /><span className="truncate"><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span></> : <span className="text-slate-400">— เลือกวัตถุดิบ —</span>}
+        {sku ? <><Thumb k={imageKey ?? null} /><span className="truncate"><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span></> : <span className="text-slate-400">{placeholder}</span>}
       </button>
       <FloatingPanel anchorRef={boxRef} open={open}>
         <div className="bg-white border border-slate-200 rounded-lg shadow-xl">
@@ -277,10 +278,16 @@ export function BomLineEditor({
   lines, onChange, readonly,
 }: { lines: EditorLine[]; onChange: (lines: EditorLine[]) => void; readonly?: boolean }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
+  const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
   const [detail, setDetail] = useState<EditorLine | null>(null);
+  const [editFace, setEditFace] = useState<Set<string>>(new Set());
+  const [editUom, setEditUom] = useState<Set<string>>(new Set());
   useEffect(() => {
     apiFetch("/api/bom/material-groups").then((r) => r.json()).then((j) => setGroups((j.data ?? []) as MaterialGroup[])).catch(() => {});
+    apiFetch("/api/admin/picker?table=uoms&label=name&limit=100").then((r) => r.json())
+      .then((j) => setUoms(((j.data ?? []) as { id: string; label: string }[]).map((o) => ({ id: o.id, name: o.label })))).catch(() => {});
   }, []);
+  const toggleSet = (set: Set<string>, key: string, on: boolean) => { const n = new Set(set); if (on) n.add(key); else n.delete(key); return n; };
 
   // กฎคำนวณของชนิด (จากตาราง material_groups)
   const groupOf = (name: string): GroupInfo | undefined => {
@@ -305,6 +312,7 @@ export function BomLineEditor({
     material_group_id: c.material_group_id, material_type: c.material_type ?? "",
     face_width_cm: c.fabric_width_cm ?? l.face_width_cm,
     waste_percent: c.loss_percent ?? l.waste_percent,
+    uom: c.uom_name ?? l.uom, uom_id: c.uom_id ?? l.uom_id,
   });
 
   const resolveSkuId = async (l: EditorLine): Promise<string | null> => {
@@ -318,6 +326,15 @@ export function BomLineEditor({
   const saveFaceToSku = async (l: EditorLine) => {
     const skuId = await resolveSkuId(l);
     if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, fabric_width_cm: l.face_width_cm || null }) }).catch(() => {});
+    setEditFace((s) => toggleSet(s, l.key, false));
+  };
+
+  // เขียนหน่วยกลับไปที่ SKU
+  const saveUomToSku = async (l: EditorLine, uomId: string, uomName: string, update: (p: Partial<EditorLine>) => void) => {
+    update({ uom_id: uomId, uom: uomName });
+    const skuId = await resolveSkuId(l);
+    if (skuId) apiFetch("/api/bom/components", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_id: skuId, uom_id: uomId }) }).catch(() => {});
+    setEditUom((s) => toggleSet(s, l.key, false));
   };
 
   // เลือกชนิดให้ SKU (บันทึก material_group_id ที่ SKU ด้วย เพื่อครั้งหน้าใช้ซ้ำ)
@@ -393,23 +410,32 @@ export function BomLineEditor({
     },
     {
       key: "face_width_cm", header: "หน้ากว้าง", width: 104, align: "right",
-      render: (l, u, ro) => !usesFace(l) ? dash : (
-        <div className="flex items-center gap-1">
-          <input type="number" min={0} step="any" value={l.face_width_cm} disabled={ro}
-            title={needFace(l) ? "กลุ่มนี้ต้องมีหน้ากว้างจึงคำนวณได้ — เพิ่มที่นี่" : ""}
-            onChange={(e) => u({ face_width_cm: Number(e.target.value) })}
-            className={`${inputCls} text-right ${needFace(l) ? "border-red-400 bg-red-50" : ""}`} />
-          {!ro && l.face_width_cm > 0 && l.component_sku && (
-            <button type="button" title="บันทึกหน้ากว้างนี้กลับไปที่ SKU (ใช้ซ้ำครั้งหน้า)" onClick={() => saveFaceToSku(l)}
-              className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">💾</button>
-          )}
-        </div>
-      ),
+      render: (l, u, ro) => {
+        if (!usesFace(l)) return dash;
+        if (ro) return <span className="block px-2 text-sm text-right text-slate-700">{l.face_width_cm || "—"}</span>;
+        const editing = editFace.has(l.key) || needFace(l);
+        return editing ? (
+          <div className="flex items-center gap-1">
+            <input type="number" min={0} step="any" value={l.face_width_cm} autoFocus={editFace.has(l.key)}
+              title="กรอกหน้ากว้าง แล้วกด 💾 บันทึกกลับ SKU"
+              onChange={(e) => u({ face_width_cm: Number(e.target.value) })}
+              className={`${inputCls} text-right ${needFace(l) ? "border-red-400 bg-red-50" : ""}`} />
+            <button type="button" title="บันทึกกลับ SKU" onClick={() => saveFaceToSku(l)}
+              className="shrink-0 h-7 w-6 flex items-center justify-center text-blue-600 hover:bg-blue-50 rounded">💾</button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-1">
+            <span className="text-sm text-slate-700 tabular-nums">{l.face_width_cm}</span>
+            <button type="button" title="แก้หน้ากว้าง (ของ SKU)" onClick={() => setEditFace((s) => toggleSet(s, l.key, true))}
+              className="shrink-0 h-6 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 rounded">✏</button>
+          </div>
+        );
+      },
     },
     {
       key: "waste_percent", header: "% เผื่อเสีย", width: 82, align: "right",
-      render: (l, u, ro) => !usesLength(l) ? dash : <input type="number" min={0} step="any" value={l.waste_percent} disabled={ro}
-        onChange={(e) => u({ waste_percent: Number(e.target.value) })} className={`${inputCls} text-right`} />,
+      render: (l) => !usesLength(l) ? dash
+        : <span className="block px-2 text-sm text-right tabular-nums text-slate-600" title="แก้ที่ตารางกลุ่มวัตถุดิบ">{l.waste_percent}</span>,
     },
     {
       key: "area", header: "คำนวณพื้นที่", width: 92, align: "right",
@@ -437,11 +463,26 @@ export function BomLineEditor({
         ),
     },
     {
-      key: "uom", header: "หน่วย", width: 70,
+      key: "uom", header: "หน่วย", width: 96,
       getValue: (l) => l.uom,
-      setValue: (_l, v) => ({ uom: v }),
-      render: (l, u, ro) => <input type="text" value={l.uom} disabled={ro}
-        onChange={(e) => u({ uom: e.target.value })} className={inputCls} />,
+      render: (l, u, ro) => {
+        if (ro) return <span className="text-sm text-slate-700">{l.uom || "—"}</span>;
+        const editing = editUom.has(l.key) || !l.uom;
+        return editing ? (
+          <select value={l.uom_id ?? ""} autoFocus={editUom.has(l.key)}
+            onChange={(e) => { const o = uoms.find((x) => x.id === e.target.value); if (o) saveUomToSku(l, o.id, o.name, u); }}
+            className={inputCls} title="เลือกหน่วย แล้วบันทึกกลับ SKU">
+            <option value="">— เลือก —</option>
+            {uoms.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        ) : (
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-slate-700 flex-1 truncate">{l.uom}</span>
+            <button type="button" title="แก้หน่วย (ของ SKU)" onClick={() => setEditUom((s) => toggleSet(s, l.key, true))}
+              className="shrink-0 h-6 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 rounded">✏</button>
+          </div>
+        );
+      },
     },
     {
       key: "is_optional", header: "ทางเลือก", width: 64, align: "center",

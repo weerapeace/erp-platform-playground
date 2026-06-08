@@ -51,20 +51,23 @@ export async function GET(
   // เติมข้อมูลจาก SKU (ชนิด/หน้ากว้าง/รูป/loss) ให้แต่ละบรรทัด — ดึงสดตอนเปิดสูตร
   const rawLines = (lines ?? []) as Array<Record<string, unknown>>;
   const codes = [...new Set(rawLines.map((l) => l.component_sku).filter(Boolean) as string[])];
-  const skuMap = new Map<string, { id: string; material_type: string | null; face: number | null; loss: number | null; image: string | null }>();
+  const skuMap = new Map<string, { id: string; material_type: string | null; face: number | null; loss: number | null; image: string | null; uom_id: string | null; uom_name: string | null }>();
   if (codes.length > 0) {
     const { data: skus } = await supabase
       .from("skus_v2")
-      .select("id, code, fabric_width_cm, cover_image_r2_key, grp:material_groups!material_group_id ( name, loss_percent )")
+      .select("id, code, fabric_width_cm, cover_image_r2_key, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
       .in("code", codes);
     for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
       const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string; loss_percent?: number } | null;
+      const u = (Array.isArray(s.uom) ? s.uom[0] : s.uom) as { name?: string } | null;
       skuMap.set(String(s.code), {
         id: String(s.id),
         material_type: g?.name ?? null,
         face: s.fabric_width_cm != null ? Number(s.fabric_width_cm) : null,
         loss: g?.loss_percent != null ? Number(g.loss_percent) : null,
         image: (s.cover_image_r2_key as string) ?? null,
+        uom_id: (s.uom_id as string) ?? null,
+        uom_name: u?.name ?? null,
       });
     }
   }
@@ -73,12 +76,15 @@ export async function GET(
     if (!sku) return l;
     const lineFace = Number(l.face_width_cm) || 0;
     const lineWaste = Number(l.waste_percent) || 0;
+    const lineUom = (l.uom as string) || "";
     return {
       ...l,
       sku_id:        sku.id,
       material_type: l.material_type || sku.material_type,          // ใช้ของ SKU ถ้าบรรทัดยังว่าง
       face_width_cm: lineFace > 0 ? lineFace : (sku.face ?? lineFace),
       waste_percent: lineWaste > 0 ? lineWaste : (sku.loss ?? lineWaste),
+      uom:           lineUom || sku.uom_name || "",
+      uom_id:        sku.uom_id,
       image_key:     sku.image,
     };
   });

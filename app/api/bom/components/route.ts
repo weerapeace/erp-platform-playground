@@ -20,16 +20,19 @@ export type BomComponent = {
   material_type: string | null;     // ชื่อกลุ่ม เช่น "ผ้า"
   loss_percent: number | null;
   fabric_width_cm: number | null;
+  uom_id: string | null;
+  uom_name: string | null;
   image_key: string | null;         // cover_image_r2_key (โชว์ thumbnail)
 };
 
 type GroupEmbed = { name: string | null; loss_percent: number | null } | null;
+type UomEmbed = { name: string | null } | null;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const search = (new URL(request.url).searchParams.get("search") ?? "").trim();
   let q = supabaseFromRequest(request)
     .from("skus_v2")
-    .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, grp:material_groups!material_group_id ( name, loss_percent )")
+    .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
     .eq("is_active", true)
     .order("code", { ascending: true })
     .limit(30);
@@ -43,6 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rows = (data ?? []) as Array<Record<string, unknown>>;
   const out: BomComponent[] = rows.map((r) => {
     const g = (Array.isArray(r.grp) ? r.grp[0] : r.grp) as GroupEmbed;
+    const u = (Array.isArray(r.uom) ? r.uom[0] : r.uom) as UomEmbed;
     return {
       id:                String(r.id),
       code:              String(r.code ?? ""),
@@ -51,6 +55,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       material_type:     g?.name ?? null,
       loss_percent:      g?.loss_percent != null ? Number(g.loss_percent) : null,
       fabric_width_cm:   r.fabric_width_cm != null ? Number(r.fabric_width_cm) : null,
+      uom_id:            (r.uom_id as string) ?? null,
+      uom_name:          u?.name ?? null,
       image_key:         (r.cover_image_r2_key as string) ?? null,
     };
   });
@@ -62,7 +68,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { sku_id?: string; material_group_id?: string | null; fabric_width_cm?: number | null };
+  let body: { sku_id?: string; material_group_id?: string | null; fabric_width_cm?: number | null; uom_id?: string | null };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.sku_id) return NextResponse.json({ error: "ต้องระบุ sku_id" }, { status: 400 });
@@ -70,6 +76,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const patch: Record<string, unknown> = {};
   if ("material_group_id" in body) patch.material_group_id = body.material_group_id ?? null;
   if ("fabric_width_cm" in body)   patch.fabric_width_cm = body.fabric_width_cm ?? null;
+  if ("uom_id" in body)            patch.uom_id = body.uom_id ?? null;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });
 
   const admin = supabaseAdmin();
