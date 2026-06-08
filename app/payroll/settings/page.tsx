@@ -36,6 +36,27 @@ type SettingsCenter = {
   };
 };
 
+const EMPTY_COUNTS: SettingsCenter["counts"] = {
+  employeeSettings: 0,
+  appSettings: 0,
+  attendanceEntries: 0,
+  leaveEntries: 0,
+  overtimeEntries: 0,
+  paymentBatches: 0,
+  payslips: 0,
+  payrollRuns: 0,
+};
+
+const EMPTY_READINESS: SettingsCenter["readiness"] = {
+  appRuleStorage: false,
+  appRuleStorageReason: "",
+  employeeSettingsReady: false,
+  periodWorkflowReady: false,
+  timestampImportReady: false,
+  reportsReady: false,
+  paymentBatchReady: false,
+};
+
 const statusText: Record<string, string> = {
   draft: "ร่าง",
   review: "รอตรวจ",
@@ -130,11 +151,12 @@ export default function PayrollSettingsCenterPage() {
   }, []);
 
   const period = data?.latestPeriod ?? null;
+  const counts = data?.counts ?? EMPTY_COUNTS;
+  const readiness = data?.readiness ?? EMPTY_READINESS;
   const locked = period?.status === "locked" || period?.status === "paid";
   const inputTotal = useMemo(() => {
-    if (!data) return 0;
-    return data.counts.attendanceEntries + data.counts.leaveEntries + data.counts.overtimeEntries;
-  }, [data]);
+    return counts.attendanceEntries + counts.leaveEntries + counts.overtimeEntries;
+  }, [counts]);
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 sm:p-6">
@@ -199,11 +221,11 @@ export default function PayrollSettingsCenterPage() {
             </section>
 
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <HealthPill ok={data.readiness.employeeSettingsReady} label={`ตั้งค่ารายคน ${formatCount(data.counts.employeeSettings)} รายการ`} />
-              <HealthPill ok={data.readiness.periodWorkflowReady} label="workflow งวดมี API แล้ว" />
-              <HealthPill ok={data.readiness.timestampImportReady} label="Import Timestamp" />
-              <HealthPill ok={data.readiness.reportsReady} label={`Reports/Slip ${formatCount(data.counts.payslips)} รายการ`} />
-              <HealthPill ok={data.readiness.paymentBatchReady} label={`Payment ${formatCount(data.counts.paymentBatches)} รอบ`} />
+              <HealthPill ok={readiness.employeeSettingsReady} label={`ตั้งค่ารายคน ${formatCount(counts.employeeSettings)} รายการ`} />
+              <HealthPill ok={readiness.periodWorkflowReady} label="workflow งวดมี API แล้ว" />
+              <HealthPill ok={readiness.timestampImportReady} label="Import Timestamp" />
+              <HealthPill ok={readiness.reportsReady} label={`Reports/Slip ${formatCount(counts.payslips)} รายการ`} />
+              <HealthPill ok={readiness.paymentBatchReady} label={`Payment ${formatCount(counts.paymentBatches)} รอบ`} />
             </section>
 
             <section className="grid gap-4 xl:grid-cols-5">
