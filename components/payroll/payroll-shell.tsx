@@ -35,6 +35,7 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
     { href: "/payroll/recurring", icon: "🔁", label: "เงินประจำ" },
   ] },
   { group: "ตั้งค่า", items: [
+    { href: "/payroll/settings", icon: "⚙️", label: "ศูนย์ตั้งค่า Payroll" },
     { href: "/payroll/employee-settings", icon: "⚙️", label: "ตั้งค่าเงินเดือนรายคน" },
     { href: "/payroll/requests", icon: "📨", label: "คำขอพนักงาน" },
     { href: "/payroll/departments", icon: "🗂️", label: "แผนก" },
