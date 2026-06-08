@@ -48,6 +48,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `เปลี่ยนจาก "${from}" → "${toStatus}" ไม่ได้ (อนุญาต: ${allowed.join(", ") || "ไม่มี"})` }, { status: 409 });
     }
 
+    if (["approved", "locked", "paid"].includes(toStatus)) {
+      const { data: runs, error: runErr } = await a.from("payroll_runs")
+        .select("id, run_no")
+        .eq("payroll_period_id", periodId)
+        .order("run_no", { ascending: false })
+        .limit(1);
+      if (runErr) return NextResponse.json({ error: `ตรวจรอบคำนวณไม่สำเร็จ: ${runErr.message}` }, { status: 500 });
+      const latestRun = runs?.[0] as { id: string; run_no: number } | undefined;
+      if (!latestRun) return NextResponse.json({ error: "งวดนี้ยังไม่มีผลคำนวณ — ไปคำนวณและบันทึกก่อน" }, { status: 409 });
+
+      const { count: lineCount, error: lineErr } = await a.from("payroll_lines")
+        .select("id", { count: "exact", head: true })
+        .eq("payroll_period_id", periodId)
+        .eq("payroll_run_id", latestRun.id);
+      if (lineErr) return NextResponse.json({ error: `ตรวจบรรทัดเงินเดือนไม่สำเร็จ: ${lineErr.message}` }, { status: 500 });
+      if (!lineCount) return NextResponse.json({ error: "รอบคำนวณล่าสุดยังไม่มีบรรทัดเงินเดือน — ให้คำนวณใหม่ก่อน" }, { status: 409 });
+    }
+
+    if (toStatus === "paid") {
+      const { count: slipCount, error: slipErr } = await a.from("payroll_payslips")
+        .select("id", { count: "exact", head: true })
+        .eq("payroll_period_id", periodId);
+      if (slipErr) return NextResponse.json({ error: `ตรวจสลิปไม่สำเร็จ: ${slipErr.message}` }, { status: 500 });
+      if (!slipCount) return NextResponse.json({ error: "ยังไม่มีสลิปเงินเดือน — ออกสลิปก่อนทำเครื่องหมายว่าจ่ายแล้ว" }, { status: 409 });
+    }
+
     const patch: Record<string, unknown> = { status: toStatus, updated_at: new Date().toISOString() };
     const now = new Date().toISOString();
     if (toStatus === "locked") patch.locked_at = now;

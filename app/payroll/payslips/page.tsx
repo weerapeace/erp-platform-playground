@@ -43,7 +43,13 @@ export default function PayrollPayslipsPage() {
 
   useEffect(() => {
     apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
-      .then((j) => { const ps = (j.data ?? []) as Period[]; setPeriods(ps); if (ps[0]) setPeriodId(ps[0].id); }).catch(() => {});
+      .then((j) => {
+        const ps = (j.data ?? []) as Period[];
+        const requested = new URLSearchParams(window.location.search).get("period_id");
+        setPeriods(ps);
+        const picked = requested && ps.some((p) => p.id === requested) ? requested : ps[0]?.id;
+        if (picked) setPeriodId(picked);
+      }).catch(() => {});
   }, []);
 
   const load = useCallback(async (pid: string) => {

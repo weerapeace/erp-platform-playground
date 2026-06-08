@@ -193,7 +193,7 @@ export function RelationPeekModal({
             {!editing && !loading && row && editableFields.length > 0 && (
               <button onClick={enterEdit} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
             )}
-            {!editing && (
+            {!editing && !isCreate && recordId && (
               <a href={`/m/${moduleKey}?open=${encodeURIComponent(recordId)}`}
                 className="h-7 px-2.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 inline-flex items-center">เปิดหน้าเต็ม →</a>
             )}

@@ -31,6 +31,39 @@ const STATUS_TH: Record<string, { th: string; cls: string }> = {
   cancelled: { th: "ยกเลิก", cls: "bg-red-100 text-red-700" },
   held: { th: "พักไว้", cls: "bg-orange-100 text-orange-700" },
 };
+const STATUS_LABEL: Record<string, string> = {
+  draft: "ร่าง",
+  review: "รอตรวจ",
+  approved: "อนุมัติแล้ว",
+  locked: "ล็อกงวดแล้ว",
+  paid: "จ่ายแล้ว",
+  cancelled: "ยกเลิก",
+};
+const TRANSITIONS: Record<string, string[]> = {
+  draft: ["review", "cancelled"],
+  review: ["approved", "draft", "cancelled"],
+  approved: ["locked", "review", "cancelled"],
+  locked: ["paid", "approved"],
+  paid: [],
+  cancelled: ["draft"],
+};
+const actionLabel = (from: string, to: string) => {
+  if (to === "review") return from === "draft" ? "ส่งตรวจ" : "ถอยกลับรอตรวจ";
+  if (to === "approved") return from === "locked" ? "ปลดล็อกกลับอนุมัติ" : "อนุมัติผลเงินเดือน";
+  if (to === "locked") return "ล็อกงวด";
+  if (to === "paid") return "ส่งไปจ่าย / จ่ายแล้ว";
+  if (to === "draft") return "ส่งกลับไปแก้";
+  if (to === "cancelled") return "ยกเลิกงวด";
+  return to;
+};
+const actionClass = (to: string) => {
+  if (to === "approved") return "bg-blue-600 hover:bg-blue-700";
+  if (to === "locked") return "bg-purple-600 hover:bg-purple-700";
+  if (to === "paid") return "bg-emerald-600 hover:bg-emerald-700";
+  if (to === "cancelled") return "bg-red-600 hover:bg-red-700";
+  if (to === "review") return "bg-amber-600 hover:bg-amber-700";
+  return "bg-slate-600 hover:bg-slate-700";
+};
 const badge = (s: string) => {
   const m = STATUS_TH[s] ?? { th: s, cls: "bg-slate-100 text-slate-600" };
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${m.cls}`}>{m.th}</span>;
@@ -49,6 +82,8 @@ export default function PayrollReviewPage() {
   const [q, setQ] = useState("");
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [issueCounts, setIssueCounts] = useState<IssueCounts | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
@@ -93,11 +128,55 @@ export default function PayrollReviewPage() {
   }
 
   const curPeriod = periods.find((p) => p.id === periodId);
+  const currentStatus = periodStatus || curPeriod?.status || "";
+  const nextStatuses = TRANSITIONS[currentStatus] ?? [];
+
+  async function changeStatus(toStatus: string) {
+    if (!periodId || !curPeriod) return;
+    const fromLabel = STATUS_LABEL[currentStatus] ?? currentStatus;
+    const toLabel = STATUS_LABEL[toStatus] ?? toStatus;
+    const extra = toStatus === "locked"
+      ? "\n\nหลังล็อกงวดแล้วจะแก้ตัวเลขเงินเดือนไม่ควรทำ เว้นแต่ปลดล็อกกลับมาแก้"
+      : toStatus === "paid"
+        ? "\n\nใช้เมื่อออกสลิปและเตรียมจ่าย/จ่ายจริงแล้ว"
+        : "";
+    if (!confirm(`ยืนยันเปลี่ยนสถานะงวด "${curPeriod.period_name}"\nจาก "${fromLabel}" เป็น "${toLabel}" ?${extra}`)) return;
+    setBusyAction(toStatus); setErr(null); setActionMsg(null);
+    try {
+      const res = await apiFetch("/api/payroll/period-status", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId, to_status: toStatus }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.error) { setErr(j.error ?? `เปลี่ยนสถานะไม่สำเร็จ (HTTP ${res.status})`); return; }
+      setPeriodStatus(toStatus);
+      setPeriods((prev) => prev.map((p) => p.id === periodId ? { ...p, status: toStatus } : p));
+      setActionMsg(`เปลี่ยนสถานะเป็น "${toLabel}" แล้ว`);
+      await load(periodId, runId || undefined);
+    } catch { setErr("เปลี่ยนสถานะไม่สำเร็จ"); }
+    finally { setBusyAction(null); }
+  }
+
+  async function generatePayslips() {
+    if (!periodId || !curPeriod) return;
+    if (!confirm(`ออกสลิปงวด "${curPeriod.period_name}" จากผลคำนวณล่าสุด?\n\nถ้ามีสลิปเดิม ระบบจะอัปเดต ไม่สร้างซ้ำ`)) return;
+    setBusyAction("generate_payslips"); setErr(null); setActionMsg(null);
+    try {
+      const res = await apiFetch("/api/payroll/payslips/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.error) { setErr(j.error ?? `ออกสลิปไม่สำเร็จ (HTTP ${res.status})`); return; }
+      setActionMsg(`ออกสลิปสำเร็จ: ใหม่ ${j.data.created} · อัปเดต ${j.data.updated} · รวม ${j.data.total}`);
+    } catch { setErr("ออกสลิปไม่สำเร็จ"); }
+    finally { setBusyAction(null); }
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-xl font-bold text-slate-800">✅ ตรวจสอบเงินเดือน</h1>
-      <p className="text-sm text-slate-500 mb-4">เลือกงวดเพื่อดูผลคำนวณ + ยอดรวมทั้งงวด (อ่านอย่างเดียว) — คำนวณ/บันทึกทำที่หน้า “คำนวณงวด”</p>
+      <p className="text-sm text-slate-500 mb-4">เลือกงวดเพื่อดูผลคำนวณ ตรวจเคสเสี่ยง แล้วปิดงวดตามขั้นตอนก่อนออกสลิป/จ่ายเงินจริง</p>
 
       <div className="flex flex-wrap items-end gap-3 mb-5">
         <div>
@@ -125,6 +204,34 @@ export default function PayrollReviewPage() {
           className="h-10 px-4 border border-slate-300 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">⬇ Export CSV</button>
         {curPeriod && <span className="h-10 flex items-center">{badge(periodStatus || curPeriod.status)}</span>}
       </div>
+
+      {curPeriod && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4 mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-800">ขั้นตอนหลังตรวจเงินเดือน</div>
+              <div className="text-xs text-slate-500 mt-0.5">อนุมัติเมื่อตรวจยอดแล้ว → ล็อกงวดเพื่อกันแก้พลาด → ออกสลิป → ส่งไปจ่าย</div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {nextStatuses.map((to) => (
+                <button key={to} onClick={() => changeStatus(to)} disabled={!!busyAction || (to === "approved" && !lines.length)}
+                  className={`h-9 px-3 rounded-lg text-xs font-medium text-white disabled:opacity-40 ${actionClass(to)}`}>
+                  {busyAction === to ? "กำลังทำ..." : actionLabel(currentStatus, to)}
+                </button>
+              ))}
+              <button onClick={generatePayslips} disabled={!!busyAction || !lines.length || currentStatus === "cancelled"}
+                className="h-9 px-3 rounded-lg text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 disabled:opacity-40">
+                {busyAction === "generate_payslips" ? "กำลังออกสลิป..." : "ออกสลิป"}
+              </button>
+              <a href={`/payroll/payslips?period_id=${encodeURIComponent(periodId)}`}
+                className="h-9 px-3 rounded-lg text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center">ไปหน้าสลิป</a>
+              <a href="/payroll/payments"
+                className="h-9 px-3 rounded-lg text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 inline-flex items-center">ไปหน้าจ่ายเงิน</a>
+            </div>
+          </div>
+          {actionMsg && <div className="mt-3 rounded-lg bg-emerald-50 text-emerald-800 px-3 py-2 text-sm">{actionMsg}</div>}
+        </div>
+      )}
 
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm mb-4">{err}</div>}
 
