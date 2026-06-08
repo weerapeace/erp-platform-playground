@@ -369,7 +369,10 @@ export default function MoWorkspacePage() {
             <h1 className="text-2xl font-semibold text-slate-800">🏭 ใบสั่งผลิต (MO)</h1>
             <p className="text-sm text-slate-500 mt-0.5">สั่งผลิต + กางสูตรวัตถุดิบตามจำนวน — คลิกแถวเพื่อแก้</p>
           </div>
-          {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบสั่งผลิต</button>}
+          <div className="flex items-center gap-2">
+            <a href="/master/work-board" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 บอร์ดจ่ายงาน</a>
+            {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบสั่งผลิต</button>}
+          </div>
         </div>
 
         <DataTable

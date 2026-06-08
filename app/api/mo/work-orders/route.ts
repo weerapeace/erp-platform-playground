@@ -32,13 +32,16 @@ async function nextWoNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string
   return `WO-${yr}-${String((count ?? 0) + 1).padStart(5, "0")}`;
 }
 
-// ---- GET list (ตาม MO) ----
+// ---- GET list ----
+// ?mo_no=...  → ใบจ่ายงานของ MO นั้น
+// (ไม่ใส่ mo_no) → ทุกใบจ่ายงานที่ยัง active (ใช้กับบอร์ด Kanban ทั้งโรงงาน)
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const moNo = (new URL(request.url).searchParams.get("mo_no") ?? "").trim();
-  if (!moNo) return NextResponse.json({ data: [], error: "ต้องระบุ mo_no" }, { status: 400 });
-  const { data, error } = await supabaseFromRequest(request)
-    .from("mo_work_orders").select("*").eq("mo_no", moNo).eq("is_active", true)
-    .order("stage", { ascending: true }).order("created_at", { ascending: true });
+  let q = supabaseFromRequest(request).from("mo_work_orders").select("*").eq("is_active", true);
+  q = moNo
+    ? q.eq("mo_no", moNo).order("stage", { ascending: true }).order("created_at", { ascending: true })
+    : q.order("due_date", { ascending: true, nullsFirst: false }).order("created_at", { ascending: true }).limit(1000);
+  const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   return NextResponse.json({ data: (data ?? []) as WorkOrder[], error: null });
 }
