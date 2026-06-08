@@ -17,6 +17,7 @@
 import { useState, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { FieldCreatorModal } from "@/components/field-creator";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { Popover } from "@/components/popover";
 import {
@@ -230,6 +231,32 @@ export function StudioPanel({
   const [dirty,  setDirty]  = useState(false);
   const [msg,    setMsg]    = useState<string | null>(null);
   const [settingsKey, setSettingsKey] = useState<string | null>(null);   // field ที่กำลังเปิด ⚙️ ตั้งค่า
+  const [creatorOpen, setCreatorOpen] = useState(false);                  // เปิดฟอร์มสร้างฟิลด์ใหม่
+
+  // โหลด field ใหม่ที่เพิ่งสร้าง (เพิ่มคอลัมน์ DB) เข้ามาในตัวออกแบบ โดยไม่ทับ edit เดิม
+  const reloadNewFields = useCallback(async () => {
+    if (!moduleKey) return;
+    const j = await apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json()).catch(() => ({}));
+    const regs = (j.fields ?? []) as Record<string, unknown>[];
+    const mapReg = (r: Record<string, unknown>): StudioField => ({
+      fieldId: String(r.id), key: String(r.field_key), label: String(r.field_label ?? r.field_key), groupKey: String(r.group_key ?? "other"),
+      order: Number(r.display_order ?? 999), type: String(r.ui_field_type ?? "text"), isVisible: !!r.is_visible, showInForm: !!r.show_in_form,
+      inlineEditable: !!r.is_inline_editable, bulkEditable: !!r.is_bulk_editable, formSpan: Number(r.form_column_span ?? 1),
+      helpText: (r.help_text as string) ?? "", placeholder: (r.placeholder as string) ?? "", required: !!r.is_required,
+      editable: r.is_editable !== false, defaultValue: (r.default_value as string) ?? null, uiStyle: (r.ui_style as Record<string, unknown>) ?? {},
+    });
+    setItems((prev) => {
+      const have = new Set(prev.map((i) => i.key));
+      const add = regs.filter((r) => !have.has(String(r.field_key))).map(mapReg);
+      return add.length ? [...prev, ...add] : prev;
+    });
+    setSections((prev) => {
+      const have = new Set(prev.map((s) => s.key));
+      const extra = [...new Set(regs.map((r) => String(r.group_key ?? "other")).filter((g) => !have.has(g)))]
+        .map((g) => ({ key: g, label: gmeta(g).label, icon: gmeta(g).icon, columns: 2, tab: "" }));
+      return extra.length ? [...prev, ...extra] : prev;
+    });
+  }, [moduleKey]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -471,6 +498,7 @@ export function StudioPanel({
               settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)} onPatch={patchItem}
               onSetCols={setCols} onRename={renameSection} onSetIcon={setSectionIcon} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
               onSetTab={setSectionTab} tabNames={[...new Set(sections.map((s) => (s.tab ?? "").trim()).filter(Boolean))]}
+              paletteFields={items.filter((i) => !i.showInForm)} onAddToForm={(k) => toggleForm(k)} onAddNew={moduleKey ? () => setCreatorOpen(true) : undefined}
             />
           )}
         </div>
@@ -514,6 +542,11 @@ export function StudioPanel({
           )}
         </div>
       </div>
+      )}
+
+      {creatorOpen && moduleKey && (
+        <FieldCreatorModal moduleKey={moduleKey} moduleTitle={moduleLabel}
+          onClose={() => setCreatorOpen(false)} onCreated={() => { void reloadNewFields(); }} />
       )}
     </div>
   );
@@ -596,7 +629,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection, onSetTab, tabNames,
+  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection, onSetTab, tabNames, paletteFields, onAddToForm, onAddNew,
 }: {
   formGroups: [SectionDef, StudioField[]][];
   sectionOptions: { key: string; label: string }[];
@@ -617,22 +650,30 @@ function FormEditor({
   settingsKey: string | null;
   onToggleSettings: (key: string)=>void;
   onPatch: (key: string, patch: Partial<StudioField>)=>void;
+  paletteFields: StudioField[];
+  onAddToForm: (key: string)=>void;
+  onAddNew?: ()=>void;
 }) {
+  const [paletteQ, setPaletteQ] = useState("");
+  const ql = paletteQ.trim().toLowerCase();
+  const palette = ql ? paletteFields.filter((f)=>f.label.toLowerCase().includes(ql)||f.key.toLowerCase().includes(ql)) : paletteFields;
   return (
     <div>
       <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว • ∑ = bulk • ⚙️ = ตั้งค่า/สไตล์ • ลาก ⋮⋮ เรียง/ย้ายหมวด • หัวหมวด: แก้ชื่อ/คอลัมน์/↑↓/ลบ</p>
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
-        <SortableContext items={formGroups.flatMap(([,fs])=>fs.map(f=>f.key))} strategy={verticalListSortingStrategy}>
+        <SortableContext items={formGroups.flatMap(([,fs])=>fs.filter(f=>f.showInForm).map(f=>f.key))} strategy={verticalListSortingStrategy}>
           <div className="space-y-3">
-            {formGroups.map(([sec, fs], idx)=>(
-              <FormSectionZone key={sec.key} groupKey={sec.key} label={sec.label} icon={sec.icon} count={fs.length}
+            {formGroups.map(([sec, fs], idx)=>{
+              const inForm = fs.filter(f=>f.showInForm);
+              return (
+              <FormSectionZone key={sec.key} groupKey={sec.key} label={sec.label} icon={sec.icon} count={inForm.length}
                 cols={sec.columns} onSetCols={(n)=>onSetCols(sec.key,n)} onSetIcon={(ic)=>onSetIcon(sec.key,ic)}
                 onRename={(l)=>onRename(sec.key,l)} onUp={idx>0?()=>onMove(sec.key,-1):undefined}
                 onDown={idx<formGroups.length-1?()=>onMove(sec.key,1):undefined}
                 tab={sec.tab ?? ""} onSetTab={(t)=>onSetTab(sec.key,t)} tabNames={tabNames}
                 onDelete={()=>onDelete(sec.key)}>
-                {fs.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ลากฟิลด์มาวางที่นี่ —</div>}
-                {fs.map(f=>(
+                {inForm.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ยังไม่มีฟิลด์ในหมวดนี้ (เพิ่มจากคลังด้านล่าง) —</div>}
+                {inForm.map(f=>(
                   <div key={f.key}>
                     <FormFieldRow field={f} sectionOptions={sectionOptions} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)}
                       settingsOpen={settingsKey===f.key} onToggleSettings={()=>onToggleSettings(f.key)} />
@@ -640,7 +681,8 @@ function FormEditor({
                   </div>
                 ))}
               </FormSectionZone>
-            ))}
+              );
+            })}
           </div>
         </SortableContext>
       </DndContext>
@@ -648,6 +690,28 @@ function FormEditor({
         className="mt-3 w-full h-9 text-sm border border-dashed border-slate-300 rounded-lg text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50/40">
         ➕ เพิ่มหมวด
       </button>
+
+      {/* คลังฟิลด์ที่ยังไม่อยู่ในฟอร์ม */}
+      <div className="mt-4 border border-slate-200 rounded-xl">
+        <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-700">📥 คลังฟิลด์ (ยังไม่อยู่ในฟอร์ม)</span>
+          <span className="text-xs text-slate-400">({paletteFields.length})</span>
+          {onAddNew && <button type="button" onClick={onAddNew} className="ml-auto h-7 px-2.5 text-xs font-medium rounded-md bg-orange-500 text-white hover:bg-orange-600">➕ สร้างฟิลด์ใหม่</button>}
+        </div>
+        <div className="p-2 space-y-1">
+          {paletteFields.length > 5 && (
+            <input value={paletteQ} onChange={(e)=>setPaletteQ(e.target.value)} placeholder="ค้นหาฟิลด์ในคลัง…" className="w-full h-7 px-2 mb-1 text-xs border border-slate-200 rounded" />
+          )}
+          {palette.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ทุกฟิลด์อยู่ในฟอร์มแล้ว —</div>}
+          {palette.map(f=>(
+            <div key={f.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-200 bg-white">
+              <span className="flex-1 text-sm text-slate-600 truncate">{f.label}<code className="ml-1.5 text-[10px] text-slate-400">{f.key}</code></span>
+              <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded">{f.type}</span>
+              <button type="button" onClick={()=>onAddToForm(f.key)} className="h-7 px-2.5 text-xs font-medium rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">+ ใส่ฟอร์ม</button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
