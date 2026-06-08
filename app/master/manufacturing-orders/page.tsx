@@ -20,7 +20,7 @@ type Version = { id: string; version: string | null; bom_code: string; is_defaul
 type PreviewMat = {
   key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
   qty_per: number; uom: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null;
-  on_hand_qty: number; is_ready: boolean;
+  on_hand_qty: number; is_ready: boolean; purchase_override: number | null;
 };
 type MatRow = PreviewMat & { required: number; to_purchase: number };
 type FormState = {
@@ -60,6 +60,7 @@ export default function MoWorkspacePage() {
   const [archiveTarget, setArchiveTarget] = useState<MoListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
+  const [editBuy, setEditBuy] = useState<Set<string>>(new Set());
 
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
@@ -82,7 +83,7 @@ export default function MoWorkspacePage() {
         material_type: (l.material_type as string) ?? null, qty_per: Number(l.qty) || 0, uom: (l.uom as string) ?? null,
         cut_block_code: (l.cut_block_code as string) ?? null,
         cut_width: l.cut_width != null ? Number(l.cut_width) : null, cut_length: l.cut_length != null ? Number(l.cut_length) : null,
-        pieces: l.pieces != null ? Number(l.pieces) : null, on_hand_qty: 0, is_ready: false,
+        pieces: l.pieces != null ? Number(l.pieces) : null, on_hand_qty: 0, is_ready: false, purchase_override: null,
       }));
     } catch { return []; }
   };
@@ -111,14 +112,21 @@ export default function MoWorkspacePage() {
       const res = await apiFetch(`/api/mo/${row.id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
       const d = j.data;
-      const mats: PreviewMat[] = (d.materials ?? []).map((m: Record<string, unknown>, i: number) => ({
-        key: `m${i}`, id: (m.id as string) ?? null, component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
-        material_type: (m.material_type as string) ?? null, qty_per: Number(m.qty_per) || 0, uom: (m.uom as string) ?? null,
-        cut_block_code: (m.cut_block_code as string) ?? null,
-        cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
-        pieces: m.pieces != null ? Number(m.pieces) : null,
-        on_hand_qty: Number(m.on_hand_qty) || 0, is_ready: !!m.is_ready,
-      }));
+      const moQty = Number(d.qty) || 0;
+      const mats: PreviewMat[] = (d.materials ?? []).map((m: Record<string, unknown>, i: number) => {
+        const qtyPer = Number(m.qty_per) || 0; const onHand = Number(m.on_hand_qty) || 0;
+        const base = Math.max(0, Math.round((qtyPer * moQty - onHand) * 10000) / 10000);
+        const stored = m.to_purchase_qty != null ? Number(m.to_purchase_qty) : null;
+        const override = stored != null && Math.round(stored * 10000) !== Math.round(base * 10000) ? stored : null; // เคยแก้จำนวนขอซื้อเอง
+        return {
+          key: `m${i}`, id: (m.id as string) ?? null, component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
+          material_type: (m.material_type as string) ?? null, qty_per: qtyPer, uom: (m.uom as string) ?? null,
+          cut_block_code: (m.cut_block_code as string) ?? null,
+          cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
+          pieces: m.pieces != null ? Number(m.pieces) : null,
+          on_hand_qty: onHand, is_ready: !!m.is_ready, purchase_override: override,
+        };
+      });
       setForm({
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
         qty: Number(d.qty) || 1, due_date: d.due_date ?? "", bom_code: d.bom_code ?? null, bom_version: d.bom_version ?? null, bom_id: null,
@@ -142,7 +150,8 @@ export default function MoWorkspacePage() {
       due_date: form.due_date || null, bom_code: form.bom_code, bom_version: form.bom_version, status: form.status, note: form.note || null };
     if (form.id) payload.materials = form.materials.filter((m) => m.id).map((m) => {
       const req = m.qty_per * (form.qty || 0);
-      return { id: m.id, on_hand_qty: m.on_hand_qty || 0, is_ready: !!m.is_ready, to_purchase_qty: Math.max(0, Math.round((req - (m.on_hand_qty || 0)) * 10000) / 10000) };
+      const base = Math.max(0, Math.round((req - (m.on_hand_qty || 0)) * 10000) / 10000);
+      return { id: m.id, on_hand_qty: m.on_hand_qty || 0, is_ready: !!m.is_ready, to_purchase_qty: m.purchase_override != null ? m.purchase_override : base };
     });
     try {
       const res = form.id
@@ -167,7 +176,7 @@ export default function MoWorkspacePage() {
   const createPR = async () => {
     if (!form) return;
     const need = form.materials
-      .map((m) => ({ m, tp: Math.max(0, Math.round((m.qty_per * (form.qty || 0) - (m.on_hand_qty || 0)) * 10000) / 10000) }))
+      .map((m) => { const base = Math.max(0, Math.round((m.qty_per * (form.qty || 0) - (m.on_hand_qty || 0)) * 10000) / 10000); return { m, tp: m.purchase_override != null ? m.purchase_override : base }; })
       .filter((x) => x.tp > 0);
     if (need.length === 0) { toast.info("ไม่มีรายการที่ต้องขอซื้อ (มีของครบแล้ว)"); return; }
     try {
@@ -282,7 +291,8 @@ export default function MoWorkspacePage() {
               const numCls = "w-full h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
               const matRows: MatRow[] = form.materials.map((m) => {
                 const required = Math.round(m.qty_per * (form.qty || 0) * 10000) / 10000;
-                return { ...m, required, to_purchase: Math.max(0, Math.round((required - (m.on_hand_qty || 0)) * 10000) / 10000) };
+                const base = Math.max(0, Math.round((required - (m.on_hand_qty || 0)) * 10000) / 10000);
+                return { ...m, required, to_purchase: m.purchase_override != null ? m.purchase_override : base };
               });
               const codeCol: LineColumn<MatRow> = {
                 key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
@@ -294,10 +304,20 @@ export default function MoWorkspacePage() {
               const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 60, getValue: (r) => r.uom };
               const onhandCol: LineColumn<MatRow> = { key: "on_hand_qty", header: "จำนวนที่มี", width: 92, align: "right", getValue: (r) => r.on_hand_qty,
                 render: (r, u) => <input type="number" min={0} step="any" value={r.on_hand_qty} onChange={(e) => u({ on_hand_qty: Number(e.target.value) })} className={numCls} /> };
-              const buyCol: LineColumn<MatRow> = { key: "to_purchase", header: "ต้องขอซื้อ", width: 90, align: "right", summable: true, getValue: (r) => r.to_purchase,
-                render: (r) => <span className={`block px-1 text-right tabular-nums ${r.to_purchase > 0 ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{r.to_purchase > 0 ? fmt(r.to_purchase) : "—"}</span> };
+              const buyCol: LineColumn<MatRow> = { key: "to_purchase", header: "ต้องขอซื้อ", width: 112, align: "right", summable: true, getValue: (r) => r.to_purchase,
+                render: (r, u) => editBuy.has(r.key)
+                  ? <input type="number" min={0} step="any" value={r.to_purchase} autoFocus onChange={(e) => u({ purchase_override: Number(e.target.value) })} className={numCls} />
+                  : (
+                    <div className="flex items-center justify-end gap-1">
+                      <span className={`tabular-nums ${r.to_purchase > 0 ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{r.to_purchase > 0 ? fmt(r.to_purchase) : "—"}</span>
+                      <button type="button" title="แก้จำนวนที่ขอซื้อ" onClick={() => setEditBuy((s) => { const n = new Set(s); n.add(r.key); return n; })}
+                        className="shrink-0 h-6 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 rounded">✏</button>
+                    </div>
+                  ) };
               const readyCol: LineColumn<MatRow> = { key: "is_ready", header: "เตรียมครบ", width: 80, align: "center", getValue: (r) => (r.is_ready ? 1 : 0),
-                render: (r, u) => <input type="checkbox" checked={r.is_ready} onChange={(e) => u({ is_ready: e.target.checked })} className="rounded border-slate-300" /> };
+                render: (r, u) => <input type="checkbox" checked={r.is_ready}
+                  onChange={(e) => e.target.checked ? u({ is_ready: true, on_hand_qty: r.required, purchase_override: null }) : u({ is_ready: false })}
+                  className="rounded border-slate-300" /> };
               const sumCols: LineColumn<MatRow>[] = editable
                 ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol]
                 : [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
