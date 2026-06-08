@@ -22,7 +22,7 @@ import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { Popover } from "@/components/popover";
 import {
   DndContext, type DragEndEvent, PointerSensor, KeyboardSensor,
-  useSensor, useSensors, closestCorners,
+  useSensor, useSensors, closestCorners, useDroppable,
 } from "@dnd-kit/core";
 import {
   SortableContext, sortableKeyboardCoordinates, useSortable,
@@ -410,11 +410,21 @@ export function StudioPanel({
     }
   };
 
-  // ---- drag (form tab — group + reorder) ----
+  // ---- drag (form tab — group + reorder + drop ที่คลัง/แท็บ) ----
   const onDragEnd = useCallback((e: DragEndEvent) => {
     const { active, over } = e;
     if (!over) return;
     const activeKey = String(active.id), overId = String(over.id);
+    // ลากออกไปคลังซ้าย → เอาออกจากฟอร์ม
+    if (overId === "palette") { setItems((p) => p.map((i) => i.key === activeKey ? { ...i, showInForm: false } : i)); setDirty(true); return; }
+    // ลากไปจ่อชื่อแท็บ → ย้ายเข้ากล่องแรกของแท็บนั้น
+    if (overId.startsWith("tab:")) {
+      const tk = overId.slice(4);
+      const secTabKey = (s: SectionDef) => ((s.tab ?? "").trim() ? `tab_${(s.tab ?? "").trim()}` : s.key);
+      const target = sections.find((s) => secTabKey(s) === tk);
+      if (target) { setItems((p) => p.map((i) => i.key === activeKey ? { ...i, groupKey: target.key } : i)); setDirty(true); }
+      return;
+    }
     setItems((prev) => {
       const ai = prev.findIndex((i) => i.key === activeKey);
       if (ai < 0) return prev;
@@ -429,7 +439,7 @@ export function StudioPanel({
       setDirty(true);
       return arrayMove(next, ai, oi);
     });
-  }, []);
+  }, [sections]);
 
   // ---- group สำหรับ form tab ----
   const grouped = useMemo(() => {
@@ -487,8 +497,9 @@ export function StudioPanel({
         </div>
       )}
 
-      {/* Body: ซ้าย = editor / ขวา = preview */}
+      {/* Body: ซ้าย = editor / ขวา = preview (DnD ครอบทั้งคู่ → ลากข้ามฝั่ง/แท็บ/คลังได้) */}
       {tab !== "registry" && (
+      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
       <div className="flex-1 overflow-hidden flex">
         {/* ---- LEFT: editor ---- */}
         <div className={`${previewFull ? "hidden" : (tab === "form" ? "w-64" : "w-2/5")} overflow-y-auto border-r border-slate-200 p-4 bg-slate-50`}>
@@ -543,14 +554,15 @@ export function StudioPanel({
             <TablePreview cols={visibleCols} />
           ) : (
             <FormPreview
-              groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
+              groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]])}
               row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
               editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
-              onPatch={patchItem} onRemoveField={(k)=>toggleForm(k)} sensors={sensors} onDragEnd={onDragEnd}
+              onPatch={patchItem} onRemoveField={(k)=>toggleForm(k)}
               editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}) }} />
           )}
         </div>
       </div>
+      </DndContext>
       )}
 
       {creatorOpen && moduleKey && (
@@ -666,8 +678,9 @@ function FormEditor({
   const [paletteQ, setPaletteQ] = useState("");
   const ql = paletteQ.trim().toLowerCase();
   const palette = ql ? paletteFields.filter((f)=>f.label.toLowerCase().includes(ql)||f.key.toLowerCase().includes(ql)) : paletteFields;
+  const { setNodeRef: paletteDropRef, isOver: paletteOver } = useDroppable({ id: "palette" });
   const paletteBlock = (
-    <div className="border border-slate-200 rounded-xl bg-white">
+    <div ref={paletteDropRef} className={`border rounded-xl bg-white ${paletteOver?"border-orange-400 ring-2 ring-orange-200":"border-slate-200"}`}>
       <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2 flex-wrap">
         <span className="text-sm font-semibold text-slate-700">📥 คลังฟิลด์</span>
         <span className="text-xs text-slate-400">({paletteFields.length})</span>
@@ -934,7 +947,7 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onPatch }: {
   return (
     <div ref={(el)=>{ setNodeRef(el); boxRef.current = el; }} style={dndStyle} {...attributes}
       onClick={editable ? (e)=>{ e.stopPropagation(); onSelect?.(f.key); } : undefined}
-      className={`relative space-y-0.5 rounded p-1.5 ${hl?"bg-amber-50 border border-amber-200":selected?"ring-2 ring-orange-400 bg-orange-50/40":editable?"border border-transparent hover:border-orange-200 hover:bg-orange-50/20 cursor-pointer":""}`}>
+      className={`relative space-y-0.5 rounded p-2 ${hl?"bg-amber-50 border border-amber-200":selected?"ring-2 ring-orange-400 bg-orange-50":editable?"bg-white border border-slate-200 shadow-sm hover:border-orange-300 cursor-pointer":""}`}>
       {editable && (
         <span {...listeners} onClick={(e)=>e.stopPropagation()} title="ลากเพื่อย้าย/สลับตำแหน่ง"
           className="absolute top-0.5 left-0.5 text-slate-300 hover:text-orange-400 cursor-grab active:cursor-grabbing select-none text-xs leading-none">⋮⋮</span>
@@ -952,6 +965,31 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onPatch }: {
   );
 }
 
+// กริดของ section บน canvas — เป็น drop zone (id group:<key>) รับ field ที่ลากมาวาง
+function GridDrop({ id, children }: { id: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return <div ref={setNodeRef} className={`p-3 grid grid-cols-12 gap-3 min-h-[3rem] ${isOver?"bg-orange-50 ring-1 ring-orange-200":""}`}>{children}</div>;
+}
+// หัวแท็บ — drop zone (id tab:<key>) ลาก field มาจ่อ = ย้ายเข้าแท็บนั้น
+function CanvasTab({ t, active, editable, editApi, onClick }: {
+  t: { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] };
+  active: boolean; editable?: boolean; editApi?: EditApi; onClick: ()=>void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: `tab:${t.key}` });
+  const named = t.key.startsWith("tab_");
+  return (
+    <div ref={setNodeRef} onClick={onClick}
+      className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${active?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"} ${isOver?"bg-orange-100 ring-1 ring-orange-300 rounded-t":""}`}>
+      {iconNode(t.icon)}
+      {editable && editApi
+        ? <input value={t.label} onClick={(e)=>e.stopPropagation()}
+            onChange={(e)=> named ? editApi.renameTab(t.label, e.target.value) : editApi.renameSection(t.entries[0][0].key, e.target.value)}
+            className="bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 w-24 focus:outline-none" />
+        : <span>{t.label}</span>}
+    </div>
+  );
+}
+
 type EditApi = {
   sections: SectionDef[];
   renameSection: (key: string, label: string)=>void;
@@ -964,11 +1002,11 @@ type EditApi = {
   moveField: (fieldKey: string, groupKey: string)=>void;
 };
 
-function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, onRemoveField, editApi, sensors, onDragEnd }: {
+function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, onRemoveField, editApi }: {
   groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string;
   editable?: boolean; selectedKey?: string | null; onSelectField?: (k: string)=>void;
   onPatch?: (k: string, patch: Partial<StudioField>)=>void; onRemoveField?: (k: string)=>void;
-  editApi?: EditApi; sensors?: ReturnType<typeof useSensors>; onDragEnd?: (e: DragEndEvent)=>void;
+  editApi?: EditApi;
 }) {
   const allTabNames = editApi ? [...new Set(editApi.sections.map((s)=>(s.tab??"").trim()).filter(Boolean))] : [];
   // จัด section เข้าแท็บ (ตรงกับฟอร์มจริง): tab เดียวกัน = แท็บเดียว, เว้นว่าง = แท็บเดี่ยว
@@ -1011,27 +1049,15 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
       )}
       {(tabs.length > 1 || (editable && editApi)) && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
-          {tabs.map((t, i)=>{
-            const named = t.key.startsWith("tab_");
-            return (
-            <div key={t.key} onClick={()=>setActive(i)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${i===curIdx?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"}`}>
-              {iconNode(t.icon)}
-              {editable && editApi
-                ? <input value={t.label} onClick={(e)=>e.stopPropagation()}
-                    onChange={(e)=> named ? editApi.renameTab(t.label, e.target.value) : editApi.renameSection(t.entries[0][0].key, e.target.value)}
-                    className="bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 w-24 focus:outline-none" />
-                : <span>{t.label}</span>}
-            </div>
-            );
-          })}
+          {tabs.map((t, i)=>(
+            <CanvasTab key={t.key} t={t} active={i===curIdx} editable={editable} editApi={editApi} onClick={()=>setActive(i)} />
+          ))}
           {editable && editApi && (
             <button type="button" onClick={()=>editApi.addTab()} title="เพิ่มแท็บใหม่"
               className="px-2.5 py-2 text-sm text-orange-500 hover:text-orange-700 whitespace-nowrap">＋ แท็บ</button>
           )}
         </div>
       )}
-      <DndContext sensors={sensors ?? undefined} collisionDetection={closestCorners} onDragEnd={onDragEnd ?? (()=>{})}>
       {(cur?.entries ?? []).map(([sec, fs])=>{
         const cols = sec.columns || 2;
         return (
@@ -1058,17 +1084,17 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
               ) : sec.label}
             </div>
             <SortableContext items={fs.map(f=>f.key)} strategy={rectSortingStrategy}>
-              <div className="p-3 grid grid-cols-12 gap-3">
+              <GridDrop id={`group:${sec.key}`}>
+                {fs.length===0 && <div className="col-span-12 text-[11px] text-slate-300 italic py-2 text-center">— ลากฟิลด์มาวางที่นี่ —</div>}
                 {fs.map(f=>(
                   <PreviewField key={f.key} f={f} cols={cols} row={row} editable={editable}
                     selected={selectedKey===f.key} onSelect={onSelectField} onPatch={onPatch} />
                 ))}
-              </div>
+              </GridDrop>
             </SortableContext>
           </div>
         );
       })}
-      </DndContext>
       {editable && editApi && (
         <button type="button" onClick={()=>editApi.addSection((cur?.key ?? "").startsWith("tab_") ? cur!.label : "")}
           className="w-full h-9 text-sm border border-dashed border-slate-300 rounded-lg text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50/40">
