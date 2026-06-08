@@ -820,7 +820,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   };
 
   const openCreate = () => {
-    setEditingId(null); setForm({ ...emptyForm, ...(config.createDefaults ?? {}) }); setFormErr(null); setDirty(false);
+    // ของกลาง: รายการใหม่ default เป็น "เปิดอยู่" (active=true) ทุกโมดูล
+    // — createDefaults ของแต่ละโมดูล override ได้ถ้าต้องการค่าอื่น
+    setEditingId(null); setForm({ ...emptyForm, [activeField]: true, ...(config.createDefaults ?? {}) }); setFormErr(null); setDirty(false);
     setDrawerMode("edit");   // F24: กดเพิ่ม → เข้าฟอร์มกรอกเลย (ไม่ใช่ view)
     setModalOpen(true);
   };
