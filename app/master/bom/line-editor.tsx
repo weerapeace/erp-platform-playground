@@ -13,12 +13,14 @@
  *       อะไหล่                             : = ชิ้น
  *   - ไม่มีกลุ่ม → พิมพ์ปริมาณเองได้ + มีปุ่มติด tag กลุ่มให้ SKU
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useLayoutEffect, useCallback, type RefObject, type ReactNode, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import type { CuttingBlock } from "@/app/api/bom/cutting-blocks/route";
 import type { BomComponent } from "@/app/api/bom/components/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
+import { ERPModal } from "@/components/modal";
 
 export type EditorLine = {
   key:            string;
@@ -72,6 +74,27 @@ function calcLine(l: EditorLine, g: GroupInfo | undefined): number | null {
 }
 
 const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
+
+// dropdown ลอยผ่าน portal — ไม่โดนตาราง scroll บัง + เด้งขึ้นบนเมื่อพื้นที่ล่างไม่พอ
+function FloatingPanel({ anchorRef, open, children }: { anchorRef: RefObject<HTMLDivElement | null>; open: boolean; children: ReactNode }) {
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !anchorRef.current) { setStyle(null); return; }
+    const r = anchorRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < 300 && r.top > spaceBelow;
+    const width = Math.min(Math.max(r.width, 340), window.innerWidth - 16);
+    setStyle({
+      position: "fixed",
+      left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
+      width,
+      zIndex: 60,
+      ...(openUp ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
+    });
+  }, [open, anchorRef]);
+  if (!open || !style) return null;
+  return createPortal(<div style={style} onMouseDown={(e) => e.stopPropagation()}>{children}</div>, document.body);
+}
 const thumbUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
 function Thumb({ k, size = 22 }: { k: string | null; size?: number }) {
   if (!k) return <span className="inline-block rounded bg-slate-100 shrink-0" style={{ width: size, height: size }} />;
@@ -150,12 +173,12 @@ function ComponentPicker({ sku, name, imageKey, onPick }: { sku: string; name: s
         className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1.5 overflow-hidden">
         {sku ? <><Thumb k={imageKey ?? null} /><span className="truncate"><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span></> : <span className="text-slate-400">— เลือกวัตถุดิบ —</span>}
       </button>
-      {open && (
-        <div className="absolute z-30 mt-1 w-[440px] max-w-[90vw] bg-white border border-slate-200 rounded-lg shadow-lg">
+      <FloatingPanel anchorRef={boxRef} open={open}>
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xl">
           <div className="p-2 border-b border-slate-100">
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
-          <div className="max-h-64 overflow-auto py-1">
+          <div className="max-h-72 overflow-auto py-1">
             {loading && <div className="px-3 py-2 text-xs text-slate-400">กำลังค้นหา...</div>}
             {!loading && options.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ไม่พบวัตถุดิบ</div>}
             {options.map((c) => (
@@ -169,7 +192,7 @@ function ComponentPicker({ sku, name, imageKey, onPick }: { sku: string; name: s
             ))}
           </div>
         </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 }
@@ -208,8 +231,8 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
         className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 truncate disabled:bg-slate-50 disabled:text-slate-300">
         {code ? <code className="text-xs text-slate-700">{code}</code> : <span className="text-slate-400">— เลือกบล็อก —</span>}
       </button>
-      {open && (
-        <div className="absolute z-30 mt-1 w-[360px] max-w-[90vw] bg-white border border-slate-200 rounded-lg shadow-lg">
+      <FloatingPanel anchorRef={boxRef} open={open}>
+        <div className="bg-white border border-slate-200 rounded-lg shadow-xl">
           <div className="p-2 border-b border-slate-100">
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหารหัสบล็อก เช่น A-4-18..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
@@ -242,7 +265,7 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
             </div>
           )}
         </div>
-      )}
+      </FloatingPanel>
     </div>
   );
 }
@@ -254,6 +277,7 @@ export function BomLineEditor({
   lines, onChange, readonly,
 }: { lines: EditorLine[]; onChange: (lines: EditorLine[]) => void; readonly?: boolean }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
+  const [detail, setDetail] = useState<EditorLine | null>(null);
   useEffect(() => {
     apiFetch("/api/bom/material-groups").then((r) => r.json()).then((j) => setGroups((j.data ?? []) as MaterialGroup[])).catch(() => {});
   }, []);
@@ -307,9 +331,17 @@ export function BomLineEditor({
 
   const columns: LineColumn<EditorLine>[] = [
     {
-      key: "component", header: "วัตถุดิบ", minWidth: 230, sortable: true,
+      key: "component", header: "วัตถุดิบ", minWidth: 250, sortable: true,
       getValue: (l) => l.component_name || l.component_sku,
-      render: (l, u) => <ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} />,
+      render: (l, u) => (
+        <div className="flex items-center gap-1">
+          <div className="flex-1 min-w-0"><ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} /></div>
+          {l.component_sku && (
+            <button type="button" title="รายละเอียดวัตถุดิบ" onClick={() => setDetail(l)}
+              className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">ℹ</button>
+          )}
+        </div>
+      ),
     },
     {
       key: "material_type", header: "ชนิด", width: 130, sortable: true,
@@ -419,20 +451,40 @@ export function BomLineEditor({
   ];
 
   return (
-    <LineItemsGrid<EditorLine>
-      rows={lines}
-      columns={columns}
-      onChange={(rows) => onChange(rows.map(recalc))}
-      rowId={(l) => l.key}
-      readonly={readonly}
-      storageKey="bom-lines"
-      stickyHeader
-      maxHeight="56vh"
-      onAdd={emptyLine}
-      addLabel="＋ เพิ่มวัตถุดิบ"
-      emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"
-      groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "uom", label: "หน่วย" }]}
-      footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
-    />
+    <>
+      <LineItemsGrid<EditorLine>
+        rows={lines}
+        columns={columns}
+        onChange={(rows) => onChange(rows.map(recalc))}
+        rowId={(l) => l.key}
+        readonly={readonly}
+        storageKey="bom-lines"
+        stickyHeader
+        maxHeight="56vh"
+        onAdd={emptyLine}
+        addLabel="＋ เพิ่มวัตถุดิบ"
+        emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"
+        groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "uom", label: "หน่วย" }]}
+        footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
+      />
+
+      <ERPModal open={detail !== null} onClose={() => setDetail(null)} size="sm" title="รายละเอียดวัตถุดิบ">
+        {detail && (
+          <div className="flex gap-3 text-sm">
+            <Thumb k={detail.image_key} size={96} />
+            <div className="flex-1 space-y-1 min-w-0 select-text">
+              <div><span className="text-slate-400">รหัส:</span> <code className="text-slate-700">{detail.component_sku || "—"}</code></div>
+              <div><span className="text-slate-400">ชื่อ:</span> {detail.component_name || "—"}</div>
+              <div><span className="text-slate-400">ชนิด:</span> {detail.material_type || "— ยังไม่ระบุ —"}</div>
+              <div><span className="text-slate-400">หน้ากว้างผ้า:</span> {detail.face_width_cm || "—"} ซม.</div>
+              <div><span className="text-slate-400">บล็อกตัด:</span> {detail.cut_block_code || "—"}</div>
+              <div><span className="text-slate-400">กว้าง×ยาว×ชิ้น:</span> {detail.cut_width}×{detail.cut_length}×{detail.pieces}</div>
+              <div><span className="text-slate-400">% เผื่อเสีย:</span> {detail.waste_percent}</div>
+              <div><span className="text-slate-400">ปริมาณ:</span> <b className="text-emerald-700">{r2(detail.qty)}</b> {detail.uom}</div>
+            </div>
+          </div>
+        )}
+      </ERPModal>
+    </>
   );
 }
