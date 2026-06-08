@@ -25,6 +25,7 @@ type Row = {
   order_date: string | null; requester: string; note: string; status: string; approved: boolean; cover_key: string | null; image_url: string | null;
   purchase_link: string | null; moq: number | null; lead_time_days: number | null;
   price_tiers: { qty: number; price: number }[];
+  source_mo_no: string | null; used_for_label: string | null;
 };
 type CartLine = { qty: number; partial: boolean };
 
@@ -69,6 +70,7 @@ export default function PurchaseOrdersPage() {
   const [busy, setBusy] = useState(false);
 
   const [view, setView] = useState<"table" | "card">("card");
+  const [mainTab, setMainTab] = useState<"shop" | "mo">("shop");
   const [cols, setCols] = useState(5);
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [activeShop, setActiveShop] = useState<string | null>(null);
@@ -219,6 +221,19 @@ export default function PurchaseOrdersPage() {
   const shopNames = useMemo(() => (activeShop ? [activeShop] : shops.map((s) => s.name)), [activeShop, shops]);
   const rowsOfShop = useCallback((name: string) => rows.filter((r) => r.seller_name === name), [rows]);
 
+  // ---- จัดกลุ่มตาม "ใบสั่งงาน" (MO) สำหรับแท็บ "จากใบสั่งงาน" ----
+  const moGroups = useMemo(() => {
+    const m = new Map<string, { mo: string; product: string; items: Row[] }>();
+    for (const r of rows) {
+      if (!r.source_mo_no) continue;
+      const g = m.get(r.source_mo_no);
+      if (g) { g.items.push(r); if (!g.product && r.used_for_label) g.product = r.used_for_label; }
+      else m.set(r.source_mo_no, { mo: r.source_mo_no, product: r.used_for_label ?? "", items: [r] });
+    }
+    return [...m.values()].sort((a, b) => b.mo.localeCompare(a.mo, "th"));
+  }, [rows]);
+  const moCount = useMemo(() => rows.filter((r) => r.source_mo_no).length, [rows]);
+
   // resize ตะกร้า (ลากขอบซ้าย)
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -239,20 +254,26 @@ export default function PurchaseOrdersPage() {
             <p className="text-sm text-slate-500 mt-0.5">เลือกรายการ → สร้างใบสั่งซื้อ (ระบบแยกใบตามร้านให้อัตโนมัติ • 1 ใบ/ร้าน)</p>
           </div>
           <div className="flex items-center gap-2">
-            {view === "card" && (
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+              <button onClick={() => setMainTab("shop")} className={`h-9 px-3 ${mainTab === "shop" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน</button>
+              <button onClick={() => setMainTab("mo")} className={`h-9 px-3 border-l border-slate-200 ${mainTab === "mo" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🏭 จากใบสั่งงาน{moCount ? ` (${moCount})` : ""}</button>
+            </div>
+            {mainTab === "shop" && view === "card" && (
               <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
                 <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
               </label>
             )}
-            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
-              <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
-              <button onClick={() => changeView("table")} className={`h-9 px-3 border-l border-slate-200 ${view === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
-            </div>
+            {mainTab === "shop" && (
+              <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+                <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
+                <button onClick={() => changeView("table")} className={`h-9 px-3 border-l border-slate-200 ${view === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
+              </div>
+            )}
             <a href="/m/purchase-orders-v2" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 ดูใบสั่งซื้อ</a>
           </div>
         </div>
 
-        {view === "table" && (
+        {mainTab === "shop" && view === "table" && (
           <DataTable<Row>
             data={rows} columns={COLUMNS} loading={loading} error={error ?? undefined} onRetry={fetchRows}
             emptyMessage="ไม่มีรายการรอสั่งซื้อ" searchPlaceholder="ค้นหา ร้าน / สินค้า / รหัส..."
@@ -263,7 +284,7 @@ export default function PurchaseOrdersPage() {
           />
         )}
 
-        {view === "card" && (
+        {mainTab === "shop" && view === "card" && (
           loading ? <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลด…</div>
           : error ? <div className="text-center text-red-500 py-16 text-sm">⚠ {error} <button onClick={fetchRows} className="underline ml-2">ลองใหม่</button></div>
           : rows.length === 0 ? <div className="text-center text-slate-300 py-16">ไม่มีรายการรอสั่งซื้อ</div>
@@ -428,6 +449,76 @@ export default function PurchaseOrdersPage() {
                   </div>
                 </div>
               </aside>
+            </div>
+          )
+        )}
+
+        {/* แท็บ: จากใบสั่งงาน (MO) — จัดกลุ่มตามเลขใบสั่งผลิต + รหัสสินค้าที่ผลิต */}
+        {mainTab === "mo" && (
+          loading ? <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลด…</div>
+          : error ? <div className="text-center text-red-500 py-16 text-sm">⚠ {error} <button onClick={fetchRows} className="underline ml-2">ลองใหม่</button></div>
+          : moGroups.length === 0 ? (
+            <div className="text-center text-slate-300 py-16">
+              ยังไม่มีรายการขอซื้อที่มาจากใบสั่งงาน<br />
+              <span className="text-xs text-slate-400">เปิดใบสั่งผลิต (MO) แล้วกด “ขอซื้อ” รายการวัตถุดิบจะมาโผล่ที่นี่</span>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {moGroups.map((g) => {
+                const sum: Record<string, number> = {};
+                for (const r of g.items) sum[r.currency] = (sum[r.currency] ?? 0) + r.line_total;
+                return (
+                  <div key={g.mo} className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-slate-800 text-white">🏭 {g.mo}</span>
+                        {g.product && <span className="text-sm text-slate-600 truncate">ผลิต: {g.product}</span>}
+                        <span className="text-xs text-slate-400">· {g.items.length} รายการ</span>
+                      </div>
+                      <div className="text-xs text-slate-500">{Object.entries(sum).map(([cur, s]) => <span key={cur} className="ml-2 font-semibold text-slate-700">{money(s, cur)}</span>)}</div>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-[11px] text-slate-400 text-left border-b border-slate-100">
+                          <th className="px-3 py-1.5 font-medium w-10"></th>
+                          <th className="px-2 py-1.5 font-medium">รหัส</th>
+                          <th className="px-2 py-1.5 font-medium">ชื่อสินค้า</th>
+                          <th className="px-2 py-1.5 font-medium text-right">จำนวน</th>
+                          <th className="px-2 py-1.5 font-medium">ร้าน</th>
+                          <th className="px-2 py-1.5 font-medium text-right">รวม</th>
+                          <th className="px-3 py-1.5 font-medium text-center w-24">ตะกร้า</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.items.map((r) => {
+                          const on = inCart(r.id); const blocked = noShop(r);
+                          return (
+                            <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                              <td className="px-3 py-2">
+                                <div className="w-9 h-9 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
+                                  {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">📦</span>}
+                                </div>
+                              </td>
+                              <td className="px-2 py-2 text-[11px] text-slate-400 font-mono">{r.code || "—"}</td>
+                              <td className="px-2 py-2 text-slate-700 max-w-[280px] truncate">{r.item_name}</td>
+                              <td className="px-2 py-2 text-right text-slate-600 whitespace-nowrap">{r.qty.toLocaleString()} {r.uom}</td>
+                              <td className="px-2 py-2 text-slate-500">{blocked ? <span className="text-amber-600">📍 ยังไม่มีร้าน</span> : r.seller_name}</td>
+                              <td className="px-2 py-2 text-right text-slate-600 whitespace-nowrap">{money(r.line_total, r.currency)}</td>
+                              <td className="px-3 py-2 text-center">
+                                <button onClick={() => toggleCart(r)} disabled={blocked}
+                                  className={`h-7 px-2 text-xs rounded-md border ${blocked ? "border-amber-200 bg-amber-50 text-amber-600 cursor-not-allowed" : on ? "border-blue-200 bg-blue-100 text-blue-700" : "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"}`}>
+                                  {blocked ? "ตั้งร้าน" : on ? "✓ ในตะกร้า" : "+ ใส่"}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+              <p className="text-[11px] text-slate-400 text-center">เลือกใส่ตะกร้าแล้วสลับไปแท็บ “ทุกร้าน” เพื่อกดสร้างใบสั่งซื้อ (แยกใบตามร้านอัตโนมัติ)</p>
             </div>
           )
         )}

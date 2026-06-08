@@ -19,7 +19,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data: prs, error } = await admin
     .from("purchase_requests_v2")
-    .select("id, seller_name, item_sku_id, item_name, qty, uom, price_est, currency, order_date, requester, status, image_key, note")
+    .select("id, seller_name, item_sku_id, item_name, qty, uom, price_est, currency, order_date, requester, status, image_key, note, source_mo_no, used_for_label")
     .is("po_id", null)
     .eq("is_active", true)
     .not("status", "in", "(rejected,cancelled)")
@@ -66,6 +66,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       requester: p.requester ?? "",
       note: p.note ?? "",
       status: p.status ?? "",
+      source_mo_no: p.source_mo_no ?? null,
+      used_for_label: p.used_for_label ?? null,
       approved: p.status === "approved",
       cover_key: key,   // r2 key ดิบ (ไว้แก้รูป SKU)
       image_url: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
