@@ -560,7 +560,24 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
             ))}
           </div>
         )}
-        <p className="text-[11px] text-amber-600 mt-3">หมายเหตุ: คนที่เคยเปิดตารางนี้แล้วอาจต้องกด “รีเซ็ตเป็นค่าเริ่มต้น” ในตารางถึงจะเห็นการเปลี่ยน (ระบบจำการปรับแต่งรายคนไว้)</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window === "undefined") return;
+              if (!confirm(`รีเซ็ตมุมมองตาราง "${tableId}" ที่จำไว้ในเครื่องนี้?\n\nคอลัมน์/ฟิลเตอร์/ความหนาแน่นที่คุณเคยปรับเอง จะกลับไปใช้ค่าเริ่มต้นของระบบ`)) return;
+              try {
+                const p1 = `erp-dt-${tableId}`;
+                const p2 = `erp-card-cfg-${tableId}`;
+                Object.keys(localStorage).forEach((k) => { if (k.startsWith(p1) || k === p2) localStorage.removeItem(k); });
+                alert("รีเซ็ตแล้ว ✓ — เปิดตารางใหม่จะเห็นค่าเริ่มต้นล่าสุด");
+              } catch { alert("รีเซ็ตไม่สำเร็จ"); }
+            }}
+            className="h-8 px-3 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 inline-flex items-center gap-1">
+            ↺ รีเซ็ตมุมมองตารางของฉัน
+          </button>
+          <p className="text-[11px] text-amber-600 flex-1 min-w-[200px]">กดปุ่มนี้ถ้าแก้คอลัมน์ด้านบนแล้วแต่ในตารางยังไม่เปลี่ยน (ระบบจำการปรับแต่งของแต่ละคนไว้ในเครื่อง — ปุ่มนี้รีเซ็ตเฉพาะเครื่องของคุณ)</p>
+        </div>
       </div>
 
       {/* สีแถวตามเงื่อนไข */}
