@@ -207,10 +207,17 @@ export default function MoWorkspacePage() {
   // เปิด popup ขอซื้อ — เตรียมรายการที่ขาด + วันที่/ชื่อที่สั่ง
   const openPR = () => {
     if (!form) return;
+    const reqMap = form.requested ?? {};
     const need: PrItem[] = sumSource()
-      .map((m) => { const base = Math.max(0, Math.round((m.qty_per * (form.qty || 0) - (m.on_hand_qty || 0)) * 10000) / 10000); return { key: m.key, sku: m.component_sku, name: m.component_name, uom: m.uom, qty: m.purchase_override != null ? m.purchase_override : base, include: true }; })
-      .filter((x) => x.qty > 0);
-    if (need.length === 0) { toast.info("ไม่มีรายการที่ต้องขอซื้อ (มีของครบแล้ว)"); return; }
+      .map((m) => {
+        const base = Math.max(0, Math.round((m.qty_per * (form.qty || 0) - (m.on_hand_qty || 0)) * 10000) / 10000);
+        const want = m.purchase_override != null ? m.purchase_override : base;
+        const got = m.component_sku ? (reqMap[m.component_sku] ?? 0) : 0;   // ขอซื้อไปแล้วเท่าไร
+        const remaining = Math.max(0, Math.round((want - got) * 10000) / 10000);  // เหลือที่ยังต้องขอ
+        return { key: m.key, sku: m.component_sku, name: m.component_name, uom: m.uom, qty: remaining, include: true };
+      })
+      .filter((x) => x.qty > 0);   // ตัดตัวที่ขอครบแล้วออก
+    if (need.length === 0) { toast.info("ไม่มีรายการที่ต้องขอซื้อเพิ่ม (ขอครบ/มีของครบแล้ว)"); return; }
     setPrItems(need);
     setPrDate(new Date().toISOString().slice(0, 10));
     setPrRequester(user?.name ?? user?.email ?? "");
@@ -398,7 +405,7 @@ export default function MoWorkspacePage() {
                 { key: "cut_length", header: "ยาว", width: 60, align: "right", getValue: (r) => r.cut_length ?? "" },
                 { key: "pieces", header: "ชิ้น", width: 54, align: "right", getValue: (r) => r.pieces ?? "" },
                 reqCol, uomCol];
-              const needCount = sumRows.filter((r) => r.to_purchase > 0).length;
+              const needCount = sumRows.filter((r) => { const got = r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0; return r.to_purchase - got > 0.0001; }).length;
               return (
                 <div className="pt-2 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-1">
