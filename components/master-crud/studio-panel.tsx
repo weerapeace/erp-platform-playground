@@ -508,7 +508,9 @@ export function StudioPanel({
           ) : (
             <FormPreview
               groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
-              row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel} />
+              row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
+              editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
+              onResizeSpan={(k,span)=>patchItem(k,{formSpan:span})} onPatch={patchItem} />
           )}
         </div>
       </div>
@@ -821,7 +823,54 @@ function previewVal(row: Record<string, unknown> | undefined, f: StudioField): s
   return String(v);
 }
 
-function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string }) {
+// ฟิลด์ 1 ช่องบน preview (โหมดแก้ไข: คลิก=เลือก, ลากขอบขวา=ปรับช่อง 1/2/3)
+function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan }: {
+  f: StudioField; cols: number; row?: Record<string, unknown>; editable?: boolean;
+  selected?: boolean; onSelect?: (k: string)=>void; onResizeSpan?: (k: string, span: number)=>void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const us = (f.uiStyle ?? {}) as Record<string, unknown>;
+  const css = uiStyleCss(us);
+  const hl = !!us.highlight;
+  const val = previewVal(row, f);
+  const rawSpan = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
+  const span = Math.min(rawSpan, cols);
+  const spanCls = span>=3 ? "col-span-3" : span===2 ? "col-span-2" : "";
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const el = ref.current; if (!el || !onResizeSpan) return;
+    const colW = el.offsetWidth / span;            // ความกว้างต่อ 1 ช่อง (โดยประมาณ)
+    const startX = e.clientX, startSpan = span;
+    const move = (ev: PointerEvent) => {
+      const next = Math.max(1, Math.min(cols, startSpan + Math.round((ev.clientX - startX) / colW)));
+      if (next !== (f.formSpan ?? 1)) onResizeSpan(f.key, next);
+    };
+    const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); document.body.style.cursor=""; };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up); document.body.style.cursor = "ew-resize";
+  };
+
+  return (
+    <div ref={ref} onClick={editable ? (e)=>{ e.stopPropagation(); onSelect?.(f.key); } : undefined}
+      className={`relative space-y-0.5 ${spanCls} rounded p-1.5 ${hl?"bg-amber-50 border border-amber-200":selected?"ring-2 ring-orange-400 bg-orange-50/40":editable?"border border-transparent hover:border-orange-200 hover:bg-orange-50/20 cursor-pointer":""}`}>
+      <div className="text-[11px] text-slate-500" style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
+        {editable && <span className="ml-1 text-[9px] text-slate-300">{span} ช่อง</span>}</div>
+      <div className="text-sm text-slate-800 min-h-[1.25rem] break-words whitespace-pre-wrap" style={css}>{val || <span className="text-slate-300">—</span>}</div>
+      {editable && onResizeSpan && (
+        <div onPointerDown={startResize} title="ลากเพื่อปรับความกว้าง (ช่อง)"
+          className="absolute top-0 right-0 h-full w-2 cursor-ew-resize group flex items-center justify-center">
+          <div className="w-0.5 h-6 rounded bg-slate-200 group-hover:bg-orange-400" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onResizeSpan, onPatch }: {
+  groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string;
+  editable?: boolean; selectedKey?: string | null; onSelectField?: (k: string)=>void;
+  onResizeSpan?: (k: string, span: number)=>void; onPatch?: (k: string, patch: Partial<StudioField>)=>void;
+}) {
   // จัด section เข้าแท็บ (ตรงกับฟอร์มจริง): tab เดียวกัน = แท็บเดียว, เว้นว่าง = แท็บเดี่ยว
   const tabs = useMemo(() => {
     const m = new Map<string, { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] }>();
@@ -835,11 +884,22 @@ function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, Studio
   }, [groups]);
   const [active, setActive] = useState(0);
   const curIdx = active < tabs.length ? active : 0;
+  const selField = useMemo(() => groups.flatMap(([,fs])=>fs).find((f)=>f.key===selectedKey) ?? null, [groups, selectedKey]);
   if (groups.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
   const cur = tabs[curIdx];
   return (
-    <div className="space-y-4 w-full">
-      <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}</div>
+    <div className="space-y-4 w-full relative">
+      <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}{editable && <span className="ml-2 text-[11px] font-normal text-orange-500">✏️ คลิกที่ field เพื่อตั้งค่า · ลากขอบปรับความกว้าง</span>}</div>
+      {/* กล่องตั้งค่า field ที่เลือก (ลอยมุมขวาบน) */}
+      {editable && selField && onPatch && (
+        <div className="absolute right-0 top-7 z-20 w-[360px] max-w-[90%] bg-white rounded-lg border border-orange-200 shadow-xl">
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-orange-100 bg-orange-50/60">
+            <span className="text-xs font-semibold text-slate-700 truncate">⚙️ {selField.label}</span>
+            <button type="button" onClick={()=>onSelectField?.(selField.key)} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto"><FieldSettings field={selField} onPatch={(patch)=>onPatch(selField.key, patch)} /></div>
+        </div>
+      )}
       {tabs.length > 1 && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
           {tabs.map((t, i)=>(
@@ -859,23 +919,10 @@ function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, Studio
               {iconNode(sec.icon)}{sec.label}
             </div>
             <div className={`p-3 grid ${gridCls} gap-3`}>
-              {fs.map(f=>{
-                const us = (f.uiStyle ?? {}) as Record<string, unknown>;
-                const css = uiStyleCss(us);
-                const hl = !!us.highlight;
-                const val = previewVal(row, f);
-                // ความกว้าง field 1/2/3 (textarea/image กินเต็มถ้าไม่ได้ตั้ง) — ให้ตรงกับฟอร์มจริง
-                // clamp ไม่ให้ span เกินจำนวนคอลัมน์ของ section (กัน grid 1 คอลัมน์แตกเป็น 2)
-                const rawSpan = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
-                const span = Math.min(rawSpan, cols);
-                const spanCls = span>=3 ? "col-span-3" : span===2 ? "col-span-2" : "";
-                return (
-                  <div key={f.key} className={`space-y-0.5 ${spanCls} ${hl?"bg-amber-50 border border-amber-200 rounded p-1.5":""}`}>
-                    <div className="text-[11px] text-slate-500" style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}</div>
-                    <div className="text-sm text-slate-800 min-h-[1.25rem] break-words whitespace-pre-wrap" style={css}>{val || <span className="text-slate-300">—</span>}</div>
-                  </div>
-                );
-              })}
+              {fs.map(f=>(
+                <PreviewField key={f.key} f={f} cols={cols} row={row} editable={editable}
+                  selected={selectedKey===f.key} onSelect={onSelectField} onResizeSpan={onResizeSpan} />
+              ))}
             </div>
           </div>
         );
