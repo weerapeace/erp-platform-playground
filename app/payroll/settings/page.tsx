@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { PayrollGlobalRulesCard } from "@/components/payroll/payroll-global-rules-card";
 
 type SettingsCenter = {
   latestPeriod: {
@@ -228,6 +229,8 @@ export default function PayrollSettingsCenterPage() {
               <HealthPill ok={readiness.reportsReady} label={`Reports/Slip ${formatCount(counts.payslips)} รายการ`} />
               <HealthPill ok={readiness.paymentBatchReady} label={`Payment ${formatCount(counts.paymentBatches)} รอบ`} />
             </section>
+
+            <PayrollGlobalRulesCard />
 
             <section className="grid gap-4 xl:grid-cols-5">
               {featureCards.map((card) => (

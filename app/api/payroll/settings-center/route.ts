@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { getPayrollGlobalRules } from "@/lib/payroll-global-rules-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
       paymentBatches,
       payslips,
       payrollRuns,
+      globalRules,
     ] = await Promise.all([
       a
         .from("payroll_periods")
@@ -55,6 +57,7 @@ export async function GET(req: NextRequest) {
       countRows("payment_batches"),
       countRows("payslips"),
       countRows("payroll_runs"),
+      getPayrollGlobalRules(a),
     ]);
 
     if (periodRes.error) throw new Error(periodRes.error.message);
@@ -74,8 +77,8 @@ export async function GET(req: NextRequest) {
           payrollRuns: payrollRuns.count,
         },
         readiness: {
-          appRuleStorage: false,
-          appRuleStorageReason: "payroll_app_settings ตอนนี้ใช้เก็บ admin password ของแอปเก่า ยังไม่มีช่อง value/json สำหรับกฎคำนวณกลาง",
+          appRuleStorage: globalRules.storageReady,
+          appRuleStorageReason: globalRules.storageReason,
           employeeSettingsReady: employeeSettings.count > 0,
           periodWorkflowReady: true,
           timestampImportReady: false,
