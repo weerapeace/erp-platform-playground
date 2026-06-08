@@ -104,6 +104,11 @@ export default function WorkBoardPage() {
   const [dispSaving, setDispSaving] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [brands, setBrands] = useState<Brand[]>([]);
+  // คลิกการ์ด = ดูรายละเอียด / รับงานคืน
+  const [detailWO, setDetailWO] = useState<WorkOrder | null>(null);
+  const [detailMO, setDetailMO] = useState<PendingMO | null>(null);
+  const [recvQty, setRecvQty] = useState(0);
+  const [recvSaving, setRecvSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -225,7 +230,12 @@ export default function WorkBoardPage() {
     const it = interRef.current; interRef.current = null; setDragId(null);
     try { boardRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
     if (!it || it.type !== "card") return;
-    if (!movedRef.current) return;
+    if (!movedRef.current) {
+      // คลิก (ไม่ลาก) = เปิดรายละเอียด
+      if (it.kind === "wo") { const wo = board.workOrders.find((x) => x.id === it.id); if (wo) { setDetailWO(wo); setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); } }
+      else { const mo = board.pending.find((x) => x.id === it.id); if (mo) setDetailMO(mo); }
+      return;
+    }
     const w = screenToWorld(e.clientX, e.clientY);
     const target = hitZone(w.x, w.y);
     if (it.kind === "mo") {
@@ -274,6 +284,24 @@ export default function WorkBoardPage() {
     finally { setDispSaving(false); }
   };
   const deptCraftsmen = useMemo(() => dispDept ? craftsmen.filter((c) => c.department_id === dispDept.id) : [], [dispDept, craftsmen]);
+
+  // รับงานคืน (จากการ์ดบนบอร์ด) — รองรับรับคืนบางส่วน
+  const submitReceive = async () => {
+    if (!detailWO) return;
+    const total = (detailWO.received_qty || 0) + recvQty;
+    setRecvSaving(true);
+    try {
+      const res = await apiFetch(`/api/mo/work-orders/${detailWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ received_qty: total }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("บันทึกรับงานคืนแล้ว"); setDetailWO(null); await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setRecvSaving(false); }
+  };
+  const cancelWO = async (wo: WorkOrder) => {
+    try { const res = await apiFetch(`/api/mo/work-orders/${wo.id}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ยกเลิกใบจ่ายงานแล้ว"); setDetailWO(null); await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
+  };
 
   // รายการการ์ดทั้งหมด (วาดแยกจากโซน เพื่อวางอิสระทับโซนได้)
   const cards = useMemo(() => {
@@ -395,6 +423,54 @@ export default function WorkBoardPage() {
           ))}
           {brands.length === 0 && <div className="text-center text-xs text-slate-300 py-6">ไม่มีแบรนด์</div>}
         </div>
+      </ERPModal>
+
+      {/* รายละเอียดใบจ่ายงาน + รับงานคืน (คลิกการ์ด) */}
+      <ERPModal open={detailWO !== null} onClose={() => !recvSaving && setDetailWO(null)} size="sm" title={`📄 ${detailWO?.wo_no ?? ""}`}
+        footer={detailWO && (detailWO.status === "done" ? <button onClick={() => setDetailWO(null)} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg">ปิด</button> : <>
+          <button onClick={() => detailWO && cancelWO(detailWO)} disabled={recvSaving} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-50 mr-auto">ยกเลิกใบ</button>
+          <button onClick={() => setDetailWO(null)} disabled={recvSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
+          <button onClick={submitReceive} disabled={recvSaving || recvQty <= 0} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{recvSaving ? "กำลังบันทึก..." : "รับงานคืน"}</button>
+        </>)}>
+        {detailWO && (
+          <div className="space-y-2 text-sm">
+            <p className="font-medium text-slate-800">{detailWO.product_name ?? detailWO.product_sku}</p>
+            <div className="grid grid-cols-2 gap-y-1 text-xs text-slate-500">
+              <span>ใบสั่งผลิต</span><span className="text-slate-700">{detailWO.mo_no}</span>
+              <span>แผนก/ผู้รับ</span><span className="text-slate-700">{detailWO.department_name ?? "—"} · {detailWO.assignee_name ?? "—"}</span>
+              <span>จ่าย</span><span className="text-slate-700">{fmt(detailWO.qty)} ชิ้น</span>
+              <span>รับคืนแล้ว</span><span className="text-slate-700">{fmt(detailWO.received_qty)} · เหลือ {fmt(detailWO.qty - detailWO.received_qty)}</span>
+              <span>กำหนดเสร็จ</span><span className="text-slate-700">{detailWO.due_date ?? "—"}</span>
+              <span>สถานะ</span><span><span className={`text-[11px] px-2 py-0.5 rounded border ${(WO_STATUS[detailWO.status] ?? WO_STATUS.dispatched).cls}`}>{(WO_STATUS[detailWO.status] ?? WO_STATUS.dispatched).label}</span></span>
+            </div>
+            {detailWO.status !== "done" && (
+              <label className="block pt-1"><span className="text-[11px] text-slate-500">รับคืนรอบนี้ (ชิ้น)</span>
+                <input type="number" min={0} step="any" max={detailWO.qty - detailWO.received_qty} value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))}
+                  className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
+            )}
+          </div>
+        )}
+      </ERPModal>
+
+      {/* รายละเอียดใบสั่งผลิต (คลิกการ์ดรอจ่าย) */}
+      <ERPModal open={detailMO !== null} onClose={() => setDetailMO(null)} size="sm" title={`🏭 ${detailMO?.mo_no ?? ""}`}
+        footer={<>
+          <button onClick={() => setDetailMO(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
+          <a href="/master/manufacturing-orders" className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center">เปิดหน้าใบสั่งผลิต</a>
+        </>}>
+        {detailMO && (
+          <div className="space-y-2 text-sm">
+            <p className="font-medium text-slate-800">{detailMO.product_name ?? detailMO.product_sku}</p>
+            <div className="grid grid-cols-2 gap-y-1 text-xs text-slate-500">
+              {detailMO.brand && <><span>แบรนด์</span><span className="text-slate-700">{detailMO.brand}</span></>}
+              <span>ผลิตทั้งหมด</span><span className="text-slate-700">{fmt(detailMO.qty)} ชิ้น</span>
+              <span>จ่ายแล้ว</span><span className="text-slate-700">{fmt(detailMO.dispatched)}</span>
+              <span>เหลือจ่าย</span><span className="text-rose-600 font-semibold">{fmt(detailMO.remaining)}</span>
+              <span>กำหนดเสร็จ</span><span className="text-slate-700">{detailMO.due_date ?? "—"}</span>
+            </div>
+            <p className="text-[11px] text-slate-400 pt-1">ลากการ์ดนี้ไปวางที่โซนแผนก เพื่อจ่ายงาน</p>
+          </div>
+        )}
       </ERPModal>
     </div>
   );
