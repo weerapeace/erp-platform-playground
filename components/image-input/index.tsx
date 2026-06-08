@@ -203,11 +203,9 @@ export function ImageInput({
         )}
       </div>
 
-      {/* ปุ่มลัด: เลือกไฟล์ / วางรูปจากคลิปบอร์ด (แยกปุ่ม กดวางได้เลยไม่ต้อง Ctrl+V) */}
+      {/* ปุ่มลัดวางรูปจากคลิปบอร์ด (คลิกที่กรอบ = เลือกไฟล์อยู่แล้ว ไม่ต้องมีปุ่มซ้ำ) */}
       {!disabled && (
         <div className="mt-1.5 flex items-center gap-2">
-          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
-            className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 disabled:opacity-50">📷 เลือกรูป</button>
           <button type="button" onClick={pasteFromClipboard} disabled={uploading}
             className="h-8 px-3 text-xs font-medium border border-blue-200 rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">📋 วางรูป (จากคลิปบอร์ด)</button>
         </div>

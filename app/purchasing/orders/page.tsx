@@ -84,12 +84,12 @@ export default function PurchaseOrdersPage() {
   const [linkRow, setLinkRow] = useState<Row | null>(null);          // popup ใส่ลิงก์สินค้า
   const [reviewOpen, setReviewOpen] = useState(false);               // ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ
   const [contactShop, setContactShop] = useState<{ name: string; partnerId: string | null } | null>(null);   // popup ติดต่อร้าน
-  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string; cn?: boolean }[]>([]);
   const [taobaoShops, setTaobaoShops] = useState<Set<string>>(new Set());   // ชื่อร้านที่เป็น Taobao
   const [shopQ, setShopQ] = useState("");
   const [prodQ, setProdQ] = useState("");
   const [cartQ, setCartQ] = useState("");
-  const addSupplier = (s: { id: string; name: string }) => setSuppliers((arr) => arr.some((x) => x.id === s.id) ? arr : [...arr, s].sort((a, b) => a.name.localeCompare(b.name, "th")));
+  const addSupplier = (s: { id: string; name: string; cn?: boolean }) => setSuppliers((arr) => arr.some((x) => x.id === s.id) ? arr : [...arr, s].sort((a, b) => a.name.localeCompare(b.name, "th")));
 
   // โหลดรายชื่อผู้จำหน่าย (m2o สำหรับแก้ร้าน — เลือกได้จากลิสต์เท่านั้น)
   useEffect(() => {
@@ -98,7 +98,8 @@ export default function PurchaseOrdersPage() {
       .then((j) => {
         const data = (j.data ?? []) as Record<string, unknown>[];
         const nm = (p: Record<string, unknown>) => String(p.name_th ?? p.display_name ?? p.code ?? "");
-        setSuppliers(data.map((p) => ({ id: String(p.id), name: nm(p) })).filter((s) => s.name).sort((a, b) => a.name.localeCompare(b.name, "th")));
+        const isCn = (p: Record<string, unknown>) => p.is_taobao === true || /จีน|china/i.test(String(p.shop_country ?? "")) || String(p.default_currency ?? "") === "RMB";
+        setSuppliers(data.map((p) => ({ id: String(p.id), name: nm(p), cn: isCn(p) })).filter((s) => s.name).sort((a, b) => a.name.localeCompare(b.name, "th")));
         setTaobaoShops(new Set(data.filter((p) => p.is_taobao === true).map(nm).filter(Boolean)));
       })
       .catch(() => {});
@@ -741,7 +742,7 @@ function BuyAllModal({ shop, rows, rate, onClose, onConfirm }: {
 
 // ── popup ตั้งร้านให้สินค้าที่ยังไม่มีร้าน (เลือกผู้จำหน่าย m2o + ราคา + เพิ่มผู้จำหน่าย) ──
 function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
-  row: Row; suppliers: { id: string; name: string }[]; onSupplierAdded: (s: { id: string; name: string }) => void;
+  row: Row; suppliers: { id: string; name: string; cn?: boolean }[]; onSupplierAdded: (s: { id: string; name: string; cn?: boolean }) => void;
   onClose: () => void; onSaved: (updated: Row) => void;
 }) {
   const { user } = useAuth();
@@ -821,7 +822,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
             className="mt-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(cur)})</label>
+          <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/{row.uom || "หน่วย"} ({curLabel(cur)})</label>
           <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" placeholder="0" />
           <button type="button" onClick={() => void syncToPriceList()} disabled={!sellerId}
             title={sellerId ? "" : "เลือกร้านจากรายการก่อน"}
@@ -839,7 +840,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
 }
 
 // ── popup ดูรายละเอียด/แก้ไขรายการ (จำนวน/ราคา/หมายเหตุ + รูป SKU จริง) ──
-function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { row: Row; suppliers: { id: string; name: string }[]; onSupplierAdded: (s: { id: string; name: string }) => void; onClose: () => void; onSaved: () => void | Promise<void> }) {
+function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { row: Row; suppliers: { id: string; name: string; cn?: boolean }[]; onSupplierAdded: (s: { id: string; name: string; cn?: boolean }) => void; onClose: () => void; onSaved: () => void | Promise<void> }) {
   const { user } = useAuth();
   const toast = useToast();
   const [qty, setQty] = useState(String(row.qty));
@@ -940,12 +941,11 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">รูปสินค้า (SKU จริง)</label>
           <ImageInput value={imgKey} onChange={setImgKey} folder="products" />
-          <p className="text-[10px] text-amber-600 mt-1">⚠ เปลี่ยนรูปนี้ = เปลี่ยนรูปปก SKU จริง มีผลทุกที่ที่ใช้สินค้านี้</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <div><label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({row.uom})</label>
+          <div><label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({row.uom || "หน่วย"})</label>
             <input type="number" value={qty} onChange={(e) => setQty(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
-          <div><label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(cur)})</label>
+          <div><label className="block text-xs font-medium text-slate-600 mb-1">ราคา/{row.uom || "หน่วย"} ({curLabel(cur)})</label>
             <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
         </div>
         <div className="text-xs text-slate-500">ราคารวม: <b className="text-blue-600">{money((Number(qty) || 0) * (Number(price) || 0), cur)}</b></div>

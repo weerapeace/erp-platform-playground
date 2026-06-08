@@ -20,7 +20,7 @@ export type SkuSupplierRow = {
   supplier_sku: string | null; moq: number | null; lead_time_days: number | null; note: string | null;
   price_tiers: { qty: number; price: number }[];
 };
-type Supplier = { id: string; name: string; currency: string };
+type Supplier = { id: string; name: string; currency: string; cn?: boolean };
 
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 const CURRENCIES = ["THB", "RMB"];
@@ -78,6 +78,7 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
       .then((j) => setSuppliers(((j.data ?? []) as Record<string, unknown>[]).map((p) => ({
         id: String(p.id), name: String(p.display_name || p.name_th || p.id),
         currency: String(p.default_currency || "THB"),
+        cn: p.is_taobao === true || /จีน|china/i.test(String(p.shop_country ?? "")) || String(p.default_currency ?? "") === "RMB",
       }))))
       .catch(() => {});
   }, []);

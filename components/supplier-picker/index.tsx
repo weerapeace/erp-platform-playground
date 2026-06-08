@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-type Supplier = { id: string; name: string };
+type Supplier = { id: string; name: string; cn?: boolean };   // cn = ร้านจีน
 
 export function SupplierPicker({ value, onChange, suppliers, onAddNew, placeholder = "— เลือกผู้จำหน่าย —", disabled }: {
   value: string;
@@ -22,13 +22,18 @@ export function SupplierPicker({ value, onChange, suppliers, onAddNew, placehold
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [kind, setKind] = useState<"all" | "th" | "cn">("all");   // กรองร้านไทย/จีน
   const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const sel = suppliers.find((s) => s.id === value);
   const ql = q.trim().toLowerCase();
-  const filtered = useMemo(() => (ql ? suppliers.filter((s) => s.name.toLowerCase().includes(ql)) : suppliers).slice(0, 300), [suppliers, ql]);
+  const hasKinds = suppliers.some((s) => s.cn);   // มีร้านจีนอย่างน้อย 1 → โชว์ badge กรอง
+  const filtered = useMemo(() => suppliers
+    .filter((s) => (ql ? s.name.toLowerCase().includes(ql) : true))
+    .filter((s) => kind === "all" ? true : kind === "cn" ? !!s.cn : !s.cn)
+    .slice(0, 300), [suppliers, ql, kind]);
 
   const openPanel = () => {
     if (disabled) return;
@@ -59,8 +64,16 @@ export function SupplierPicker({ value, onChange, suppliers, onAddNew, placehold
       {open && rect && createPortal(
         <div ref={panelRef} style={{ position: "fixed", left: rect.left, top: rect.top, width: rect.width, zIndex: 300 }}
           className="bg-white border border-slate-200 rounded-md shadow-xl max-h-72 flex flex-col">
-          <div className="p-1.5 border-b border-slate-100">
+          <div className="p-1.5 border-b border-slate-100 space-y-1.5">
             <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="พิมพ์ค้นหาร้าน…" className="w-full h-8 px-2 text-sm border border-slate-200 rounded" />
+            {hasKinds && (
+              <div className="flex gap-1">
+                {([["all", "ทั้งหมด"], ["th", "🇹🇭 ร้านไทย"], ["cn", "🛒 ร้านจีน"]] as const).map(([k, lbl]) => (
+                  <button key={k} type="button" onClick={() => setKind(k)}
+                    className={`h-6 px-2 text-[11px] rounded-full border ${kind === k ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{lbl}</button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="overflow-y-auto">
             {value && <button type="button" onClick={() => { onChange("", ""); setOpen(false); }} className="w-full px-3 py-1.5 text-sm text-left text-slate-400 hover:bg-slate-50">— ไม่เลือก —</button>}

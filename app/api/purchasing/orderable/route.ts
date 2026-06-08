@@ -30,11 +30,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ดึง code + รูปปก SKU จริง (batch)
   const skuIds = [...new Set((prs ?? []).map((p) => p.item_sku_id).filter(Boolean) as string[])];
-  const skuMap = new Map<string, { code: string | null; cover: string | null; link: string | null }>();
+  const skuMap = new Map<string, { code: string | null; cover: string | null; link: string | null; uom_id: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
     const chunk = skuIds.slice(i, i + 300);
-    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, purchase_link").in("id", chunk);
-    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null, link: (s.purchase_link as string) ?? null });
+    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key, purchase_link, uom_id").in("id", chunk);
+    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null, link: (s.purchase_link as string) ?? null, uom_id: (s.uom_id as string) ?? null });
+  }
+
+  // หน่วยนับจาก SKU (uoms.name) — ไว้เติมเมื่อใบขอซื้อไม่มีหน่วย เช่น "หลา"
+  const uomIds = [...new Set([...skuMap.values()].map((s) => s.uom_id).filter(Boolean) as string[])];
+  const uomMap = new Map<string, string>();
+  for (let i = 0; i < uomIds.length; i += 300) {
+    const chunk = uomIds.slice(i, i + 300);
+    const { data: u } = await admin.from("uoms").select("id, name").in("id", chunk);
+    for (const r of (u ?? []) as Record<string, unknown>[]) uomMap.set(String(r.id), String(r.name ?? ""));
   }
 
   // ดึง MOQ + leadtime จาก "ร้านหลัก" (is_default) ของแต่ละสินค้า — โชว์บนการ์ด
@@ -58,7 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       item_name: p.item_name ?? "",
       code: sk?.code ?? "",
       qty: num(p.qty),
-      uom: p.uom ?? "",
+      uom: (p.uom as string) || (sk?.uom_id ? (uomMap.get(sk.uom_id) ?? "") : "") || "",
       price_est: num(p.price_est),
       line_total: num(p.qty) * num(p.price_est),
       currency: p.currency ?? "THB",
