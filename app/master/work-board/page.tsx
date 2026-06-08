@@ -39,7 +39,7 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 
-const ZONE_W = 300, HEADER_H = 48, CARD_SLOT = 150, PAD = 12, GAP = 40, INNER_W = ZONE_W - PAD * 2;
+const ZONE_W = 240, HEADER_H = 48, CARD_SLOT = 224, PAD = 12, GAP = 40, INNER_W = ZONE_W - PAD * 2;
 const ZONES_KEY = "erp-workboard-zones:v1";
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
@@ -157,7 +157,7 @@ export default function WorkBoardPage() {
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [loading]);   // ต้องผูกใหม่หลังกระดานแสดง (ตอน loading ยังไม่มี boardRef)
   const zoomBtn = (f: number) => { const el = boardRef.current; if (!el) return; const r = el.getBoundingClientRect(); const sx = r.width / 2, sy = r.height / 2;
     setVp((v) => { const ns = clamp(v.scale * f, 0.3, 1.8); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; }); };
   const resetView = () => setVp({ x: 24, y: 16, scale: 0.85 });
@@ -372,19 +372,18 @@ function PendingBody({ mo, dragging }: { mo: PendingMO; dragging?: boolean }) {
   const urg = urgencyByDate(mo.due_date, false);
   const border = mo.brand_color || prodColor(mo.product_sku);
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        {mo.brand ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={{ background: `${border}18`, color: border, borderColor: `${border}55` }}>{mo.brand}</span> : <span className="text-[10px] text-slate-400">ใบสั่งผลิต</span>}
-        <div className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${URG_DOT[urg]}`} /><span className="font-mono text-[10px] text-slate-400">{mo.mo_no}</span></div>
+    <div className={`bg-white rounded-lg border border-slate-200 p-2.5 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
+      <div className="relative w-full h-24 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
+        {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-2xl">📦</span>}
+        <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
       </div>
-      <div className="flex gap-2">
-        <div className="w-12 h-12 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center shrink-0">
-          {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300">📦</span>}
-        </div>
-        <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 flex-1">{mo.product_name ?? mo.product_sku}</p>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        {mo.brand ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border truncate max-w-[60%]" style={{ background: `${border}18`, color: border, borderColor: `${border}55` }}>{mo.brand}</span> : <span className="text-[10px] text-slate-400">ใบสั่งผลิต</span>}
+        <span className="font-mono text-[10px] text-slate-400">{mo.mo_no}</span>
       </div>
+      <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.4em]">{mo.product_name ?? mo.product_sku}</p>
       <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100 text-[11px]">
-        <span className="text-rose-600 font-semibold">เหลือจ่าย {fmt(mo.remaining)}/{fmt(mo.qty)}</span>
+        <span className="text-rose-600 font-semibold">เหลือ {fmt(mo.remaining)}/{fmt(mo.qty)}</span>
         <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(mo.due_date)}</span>
       </div>
     </div>
@@ -397,20 +396,17 @@ function WOBody({ w, dragging }: { w: WorkOrder; dragging?: boolean }) {
   const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
   const border = w.brand_color || prodColor(w.product_sku);
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${st.cls}`}>{st.label}</span>
-        <div className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${URG_DOT[urg]}`} /><span className="font-mono text-[10px] text-slate-400">{w.wo_no}</span></div>
+    <div className={`bg-white rounded-lg border border-slate-200 p-2.5 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
+      <div className="relative w-full h-24 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
+        {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-2xl">📦</span>}
+        <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
+        <span className={`absolute top-1.5 left-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${st.cls}`}>{st.label}</span>
       </div>
-      <div className="flex gap-2">
-        <div className="w-12 h-12 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center shrink-0">
-          {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300">📦</span>}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{w.product_name ?? w.product_sku}</p>
-          <span className="text-[11px] text-slate-500 line-clamp-1">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
-        </div>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <span className="text-[11px] text-slate-500 truncate">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
+        <span className="font-mono text-[10px] text-slate-400">{w.wo_no}</span>
       </div>
+      <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.4em]">{w.product_name ?? w.product_sku}</p>
       <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100 text-[11px]">
         <span className="tabular-nums text-slate-600">{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
         <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(w.due_date)}</span>
