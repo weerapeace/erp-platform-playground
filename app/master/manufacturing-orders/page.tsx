@@ -32,8 +32,9 @@ type FormState = {
   status: string; note: string;
   materials: PreviewMat[];   // ต่อบล็อก (แท็บรายละเอียด)
   summary: SummaryMat[];     // รวมต่อวัตถุดิบ (แท็บวัตถุดิบที่ต้องใช้ + checklist)
+  requested: Record<string, number>;  // วัตถุดิบ(รหัส) → จำนวนที่ขอซื้อไปแล้ว (จากใบขอซื้อที่ผูก MO นี้)
 };
-const empty = (): FormState => ({ id: null, mo_no: "", product_sku: "", product_name: "", product_image: null, qty: 1, due_date: "", bom_code: null, bom_version: null, bom_id: null, status: "draft", note: "", materials: [], summary: [] });
+const empty = (): FormState => ({ id: null, mo_no: "", product_sku: "", product_name: "", product_image: null, qty: 1, due_date: "", bom_code: null, bom_version: null, bom_id: null, status: "draft", note: "", materials: [], summary: [], requested: {} });
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   draft:       { label: "ร่าง",        cls: "bg-slate-100 text-slate-600" },
@@ -148,6 +149,7 @@ export default function MoWorkspacePage() {
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
         qty: Number(d.qty) || 1, due_date: d.due_date ?? "", bom_code: d.bom_code ?? null, bom_version: d.bom_version ?? null, bom_id: null,
         status: d.status ?? "draft", note: d.note ?? "", materials: mats, summary: summ,
+        requested: (d.requested ?? {}) as Record<string, number>,
       });
       if (d.product_sku) {
         const vr = await apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(d.product_sku)}`); const vj = await vr.json();
@@ -231,6 +233,13 @@ export default function MoWorkspacePage() {
         body: JSON.stringify({ items, order_date: prDate, actor: prRequester || undefined }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`สร้างใบขอซื้อ ${j.created} รายการ — ดูที่หน้า "ขอซื้อ (ช้อปปิ้ง)"`);
+      // อัปเดตสถานะ "ขอซื้อแล้ว" ทันที (ไม่ต้องโหลดใหม่)
+      setForm((f) => {
+        if (!f) return f;
+        const next = { ...(f.requested ?? {}) };
+        for (const it of prItems) if (it.include && it.qty > 0 && it.sku) next[it.sku] = (next[it.sku] ?? 0) + it.qty;
+        return { ...f, requested: next };
+      });
       setPrOpen(false);
     } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างใบขอซื้อไม่สำเร็จ"); }
     finally { setPrSaving(false); }
@@ -371,8 +380,17 @@ export default function MoWorkspacePage() {
                 render: (r, u) => <input type="checkbox" checked={r.is_ready}
                   onChange={(e) => e.target.checked ? u({ is_ready: true, on_hand_qty: r.required, purchase_override: null }) : u({ is_ready: false })}
                   className="rounded border-slate-300" /> };
+              const reqMap = form.requested ?? {};
+              const orderedCol: LineColumn<MatRow> = { key: "ordered", header: "สถานะสั่งซื้อ", width: 124, align: "center", sortable: true,
+                getValue: (r) => (r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0),
+                render: (r) => {
+                  const got = r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0;
+                  if (got <= 0) return <span className="text-slate-300 text-xs">— ยังไม่ขอ</span>;
+                  const full = got >= r.to_purchase - 0.0001;
+                  return <span className={`text-[11px] px-2 py-0.5 rounded whitespace-nowrap ${full ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>🛒 ขอแล้ว {fmt(got)}{full ? "" : " (บางส่วน)"}</span>;
+                } };
               const sumCols: LineColumn<MatRow>[] = editable
-                ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol]
+                ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol, orderedCol]
                 : [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
               const blockCols: LineColumn<MatRow>[] = [codeCol, typeCol,
                 { key: "cut_block_code", header: "บล็อกตัด", width: 130, getValue: (r) => r.cut_block_code },
@@ -398,9 +416,11 @@ export default function MoWorkspacePage() {
                     </div>
                   ) : (
                     <LineItemsGrid<MatRow>
+                      key={matTab}
                       rows={matTab === "sum" ? sumRows : blockRows} columns={matTab === "sum" ? sumCols : blockCols}
                       onChange={(rows) => { if (matTab === "sum" && editable) patch({ summary: rows.map((r) => ({ key: r.key, id: r.id, component_sku: r.component_sku, component_name: r.component_name, material_type: r.material_type, uom: r.uom, qty_per: r.qty_per, on_hand_qty: r.on_hand_qty, is_ready: r.is_ready, purchase_override: r.purchase_override })) }); }}
                       rowId={(r) => r.key} readonly={!editable || matTab === "block"} stickyHeader maxHeight="38vh"
+                      dense={matTab === "block"} defaultSort={matTab === "block" ? { key: "component", dir: "asc" } : null}
                       groupByOptions={[{ key: "material_type", label: "ประเภท" }, { key: "component", label: "วัตถุดิบ" }]}
                     />
                   )}

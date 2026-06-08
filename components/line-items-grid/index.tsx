@@ -59,6 +59,10 @@ export type LineItemsGridProps<T> = {
   /** ตรึงหัวตาราง + ให้ตารางเลื่อนเองภายในความสูงนี้ (เช่น "55vh") */
   stickyHeader?: boolean;
   maxHeight?:    string;
+  /** เรียงเริ่มต้นเมื่อเปิดตาราง (เช่น เรียงตามชื่อวัตถุดิบ) */
+  defaultSort?:  { key: string; dir: "asc" | "desc" } | null;
+  /** โหมดกะทัดรัด — แถว/ตัวอักษรเล็กลง เหมาะกับตารางอ่านอย่างเดียวรายการเยอะ */
+  dense?:        boolean;
 };
 
 type SortState = { key: string; dir: "asc" | "desc" } | null;
@@ -71,9 +75,9 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, emptyText = "ยังไม่มีรายการ", footer, storageKey,
-  stickyHeader = false, maxHeight,
+  stickyHeader = false, maxHeight, defaultSort = null, dense = false,
 }: LineItemsGridProps<T>) {
-  const [sort, setSort]       = useState<SortState>(null);
+  const [sort, setSort]       = useState<SortState>(defaultSort);
   const [groupBy, setGroupBy] = useState<string>("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [widths, setWidths]   = useState<Record<string, number>>({});
@@ -234,7 +238,7 @@ export function LineItemsGrid<T>({
               {columns.map((c) => (
                 <div key={c.key} className="relative border-r border-slate-100 last:border-r-0">
                   <button type="button" disabled={!c.sortable} onClick={() => c.sortable && toggleSort(c.key)}
-                    className={`w-full px-2 py-2 flex items-center gap-1 ${c.align === "right" ? "justify-end" : c.align === "center" ? "justify-center" : ""} ${c.sortable ? "hover:text-slate-800 cursor-pointer" : "cursor-default"}`}>
+                    className={`w-full px-2 ${dense ? "py-1" : "py-2"} flex items-center gap-1 ${c.align === "right" ? "justify-end" : c.align === "center" ? "justify-center" : ""} ${c.sortable ? "hover:text-slate-800 cursor-pointer" : "cursor-default"}`}>
                     <span className="truncate">{c.header}</span>
                     {sort?.key === c.key && <span className="text-blue-600">{sort.dir === "asc" ? "▲" : "▼"}</span>}
                   </button>
@@ -271,7 +275,7 @@ export function LineItemsGrid<T>({
                     </div>
                   ) : (
                     <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
-                      columns={columns} row={d.row}
+                      columns={columns} row={d.row} dense={dense}
                       onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))} />
                   ),
                 )}
@@ -296,11 +300,11 @@ export function LineItemsGrid<T>({
 
 // ---- single sortable row ----
 function GridRow<T>({
-  id, template, canDrag, readonly, columns, row, onUpdate, onRemove,
+  id, template, canDrag, readonly, columns, row, onUpdate, onRemove, dense = false,
 }: {
   id: string; template: string; canDrag: boolean; readonly: boolean;
   columns: LineColumn<T>[]; row: T;
-  onUpdate: (patch: Partial<T>) => void; onRemove: () => void;
+  onUpdate: (patch: Partial<T>) => void; onRemove: () => void; dense?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !canDrag });
   const style: React.CSSProperties = {
@@ -316,10 +320,10 @@ function GridRow<T>({
           className="h-9 flex items-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="ลากเพื่อเรียงลำดับ">⠿</button>
       )}
       {columns.map((c) => (
-        <div key={c.key} className={`px-1.5 min-w-0 ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>
+        <div key={c.key} className={`px-1.5 min-w-0 ${dense ? "py-1" : ""} ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>
           {c.render
             ? c.render(row, onUpdate, readonly)
-            : <span className="block truncate text-sm text-slate-700" title={String(colValue(c, row) ?? "")}>{String(colValue(c, row) ?? "")}</span>}
+            : <span className={`block truncate ${dense ? "text-xs" : "text-sm"} text-slate-700`} title={String(colValue(c, row) ?? "")}>{String(colValue(c, row) ?? "")}</span>}
         </div>
       ))}
       {!readonly && (

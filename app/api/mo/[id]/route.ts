@@ -23,7 +23,20 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
   const { data: summary } = await supabase.from("mo_material_summary").select("*").eq("mo_no", moNo).eq("is_active", true)
     .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
-  return NextResponse.json({ data: { ...header, materials: materials ?? [], summary: summary ?? [] }, error: null });
+
+  // สถานะ "ขอซื้อแล้ว" — รวมจำนวนจากใบขอซื้อ (PR v2) ที่ผูกใบสั่งผลิตนี้ จับคู่ด้วยรหัสวัตถุดิบในชื่อ "[CODE] ..."
+  const requested: Record<string, number> = {};
+  const { data: prRows } = await supabaseAdmin()
+    .from("purchase_requests_v2").select("item_name, qty, status")
+    .eq("source_mo_no", moNo).eq("is_active", true).not("status", "in", "(rejected,cancelled)");
+  for (const p of (prRows ?? []) as { item_name: string | null; qty: number | null }[]) {
+    const m = /^\[([^\]]+)\]/.exec(p.item_name ?? "");
+    const code = m ? m[1] : (p.item_name ?? "");
+    if (!code) continue;
+    requested[code] = (requested[code] ?? 0) + (Number(p.qty) || 0);
+  }
+
+  return NextResponse.json({ data: { ...header, materials: materials ?? [], summary: summary ?? [], requested }, error: null });
 }
 
 type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };
