@@ -491,7 +491,7 @@ export function StudioPanel({
       {tab !== "registry" && (
       <div className="flex-1 overflow-hidden flex">
         {/* ---- LEFT: editor ---- */}
-        <div className={`${previewFull ? "hidden" : "w-2/5"} overflow-y-auto border-r border-slate-200 p-5`}>
+        <div className={`${previewFull ? "hidden" : (tab === "form" ? "w-64" : "w-2/5")} overflow-y-auto border-r border-slate-200 p-4 bg-slate-50`}>
           {tab === "table" ? (
             <TableEditor
               items={items} sensors={sensors}
@@ -506,12 +506,13 @@ export function StudioPanel({
               onSetCols={setCols} onRename={renameSection} onSetIcon={setSectionIcon} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
               onSetTab={setSectionTab} tabNames={[...new Set(sections.map((s) => (s.tab ?? "").trim()).filter(Boolean))]}
               paletteFields={items.filter((i) => !i.showInForm)} onAddToForm={(k) => toggleForm(k)} onAddNew={moduleKey ? () => setCreatorOpen(true) : undefined}
+              paletteOnly
             />
           )}
         </div>
 
-        {/* ---- RIGHT: live preview ---- */}
-        <div className={`${previewFull ? "w-full" : "flex-1 min-w-0"} overflow-y-auto bg-white p-5`}>
+        {/* ---- RIGHT: live preview (พื้นหลังเทาอ่อน ให้กล่อง field เด่นชัด) ---- */}
+        <div className={`${previewFull ? "w-full" : "flex-1 min-w-0"} overflow-y-auto bg-slate-100 p-5`}>
           <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
             <div className="text-xs font-semibold text-slate-400 uppercase flex items-center gap-2">
               👁 Preview สด {tab==="form" && (pickedRow || sampleRows.length>0) ? "(ข้อมูลจริง)" : ""}
@@ -545,7 +546,7 @@ export function StudioPanel({
               groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
               row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
               editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
-              onPatch={patchItem} sensors={sensors} onDragEnd={onDragEnd}
+              onPatch={patchItem} onRemoveField={(k)=>toggleForm(k)} sensors={sensors} onDragEnd={onDragEnd}
               editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}) }} />
           )}
         </div>
@@ -637,7 +638,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection, onSetTab, tabNames, paletteFields, onAddToForm, onAddNew,
+  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection, onSetTab, tabNames, paletteFields, onAddToForm, onAddNew, paletteOnly,
 }: {
   formGroups: [SectionDef, StudioField[]][];
   sectionOptions: { key: string; label: string }[];
@@ -660,10 +661,35 @@ function FormEditor({
   paletteFields: StudioField[];
   onAddToForm: (key: string)=>void;
   onAddNew?: ()=>void;
+  paletteOnly?: boolean;
 }) {
   const [paletteQ, setPaletteQ] = useState("");
   const ql = paletteQ.trim().toLowerCase();
   const palette = ql ? paletteFields.filter((f)=>f.label.toLowerCase().includes(ql)||f.key.toLowerCase().includes(ql)) : paletteFields;
+  const paletteBlock = (
+    <div className="border border-slate-200 rounded-xl bg-white">
+      <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+        <span className="text-sm font-semibold text-slate-700">📥 คลังฟิลด์</span>
+        <span className="text-xs text-slate-400">({paletteFields.length})</span>
+        {onAddNew && <button type="button" onClick={onAddNew} className="ml-auto h-7 px-2.5 text-xs font-medium rounded-md bg-orange-500 text-white hover:bg-orange-600">➕ สร้างฟิลด์ใหม่</button>}
+      </div>
+      <div className="p-2 space-y-1">
+        <p className="text-[11px] text-slate-400 px-1 pb-1">ฟิลด์ที่ยังไม่อยู่ในฟอร์ม — กด &quot;+ ใส่ฟอร์ม&quot; เพื่อเพิ่ม</p>
+        {paletteFields.length > 5 && (
+          <input value={paletteQ} onChange={(e)=>setPaletteQ(e.target.value)} placeholder="ค้นหาฟิลด์…" className="w-full h-7 px-2 mb-1 text-xs border border-slate-200 rounded" />
+        )}
+        {palette.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ทุกฟิลด์อยู่ในฟอร์มแล้ว —</div>}
+        {palette.map(f=>(
+          <div key={f.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-200 bg-white">
+            <span className="flex-1 text-sm text-slate-600 truncate">{f.label}<code className="ml-1.5 text-[10px] text-slate-400">{f.key}</code></span>
+            <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded">{f.type}</span>
+            <button type="button" onClick={()=>onAddToForm(f.key)} className="h-7 px-2 text-xs font-medium rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">+ ใส่</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+  if (paletteOnly) return paletteBlock;
   return (
     <div>
       <p className="text-xs text-slate-500 mb-3">☑ = โชว์ในฟอร์ม • ⚡ = แก้ไขเร็ว • ∑ = bulk • ⚙️ = ตั้งค่า/สไตล์ • ลาก ⋮⋮ เรียง/ย้ายหมวด • หัวหมวด: แก้ชื่อ/คอลัมน์/↑↓/ลบ</p>
@@ -695,27 +721,7 @@ function FormEditor({
         ➕ เพิ่มหมวด
       </button>
 
-      {/* คลังฟิลด์ที่ยังไม่อยู่ในฟอร์ม */}
-      <div className="mt-4 border border-slate-200 rounded-xl">
-        <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
-          <span className="text-sm font-semibold text-slate-700">📥 คลังฟิลด์ (ยังไม่อยู่ในฟอร์ม)</span>
-          <span className="text-xs text-slate-400">({paletteFields.length})</span>
-          {onAddNew && <button type="button" onClick={onAddNew} className="ml-auto h-7 px-2.5 text-xs font-medium rounded-md bg-orange-500 text-white hover:bg-orange-600">➕ สร้างฟิลด์ใหม่</button>}
-        </div>
-        <div className="p-2 space-y-1">
-          {paletteFields.length > 5 && (
-            <input value={paletteQ} onChange={(e)=>setPaletteQ(e.target.value)} placeholder="ค้นหาฟิลด์ในคลัง…" className="w-full h-7 px-2 mb-1 text-xs border border-slate-200 rounded" />
-          )}
-          {palette.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ทุกฟิลด์อยู่ในฟอร์มแล้ว —</div>}
-          {palette.map(f=>(
-            <div key={f.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-200 bg-white">
-              <span className="flex-1 text-sm text-slate-600 truncate">{f.label}<code className="ml-1.5 text-[10px] text-slate-400">{f.key}</code></span>
-              <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded">{f.type}</span>
-              <button type="button" onClick={()=>onAddToForm(f.key)} className="h-7 px-2.5 text-xs font-medium rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">+ ใส่ฟอร์ม</button>
-            </div>
-          ))}
-        </div>
-      </div>
+      <div className="mt-4">{paletteBlock}</div>
     </div>
   );
 }
@@ -958,10 +964,10 @@ type EditApi = {
   moveField: (fieldKey: string, groupKey: string)=>void;
 };
 
-function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, editApi, sensors, onDragEnd }: {
+function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, onRemoveField, editApi, sensors, onDragEnd }: {
   groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string;
   editable?: boolean; selectedKey?: string | null; onSelectField?: (k: string)=>void;
-  onPatch?: (k: string, patch: Partial<StudioField>)=>void;
+  onPatch?: (k: string, patch: Partial<StudioField>)=>void; onRemoveField?: (k: string)=>void;
   editApi?: EditApi; sensors?: ReturnType<typeof useSensors>; onDragEnd?: (e: DragEndEvent)=>void;
 }) {
   const allTabNames = editApi ? [...new Set(editApi.sections.map((s)=>(s.tab??"").trim()).filter(Boolean))] : [];
@@ -988,7 +994,8 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
       {editable && selField && onPatch && (
         <div onClick={(e)=>e.stopPropagation()} className="absolute right-0 top-7 z-20 w-[360px] max-w-[90%] bg-white rounded-lg border border-orange-200 shadow-xl">
           <div className="flex items-center justify-between px-3 py-1.5 border-b border-orange-100 bg-orange-50/60">
-            <span className="text-xs font-semibold text-slate-700 truncate">⚙️ {selField.label}</span>
+            <span className="text-xs font-semibold text-slate-700 truncate flex-1">⚙️ {selField.label}</span>
+            {onRemoveField && <button type="button" onClick={()=>{ onRemoveField(selField.key); onSelectField?.(selField.key); }} title="เอาออกจากฟอร์ม (กลับเข้าคลัง)" className="text-[11px] text-rose-500 hover:text-rose-700 mr-1">เอาออก</button>}
             <button type="button" onClick={()=>onSelectField?.(selField.key)} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
           </div>
           {editApi && (
