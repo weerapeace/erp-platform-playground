@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
         ? a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds)
         : Promise.resolve({ data: [] as Row[] }),
       empIds.length
-        ? a.from("employee_contracts").select("employee_id, work_schedule_id, attendance_scan_exempt, status, is_current").in("employee_id", empIds).eq("is_current", true).eq("status", "active")
+        ? a.from("employee_contracts").select("employee_id, contract_type, wage_type, work_schedule_id, attendance_scan_exempt, status, is_current").in("employee_id", empIds).eq("is_current", true).eq("status", "active")
         : Promise.resolve({ data: [] as Row[] }),
       a.from("attendance_entries").select("employee_id, work_date, late_minutes, late_deduction, absence_hours, absence_deduction, status, note").eq("payroll_period_id", periodId),
       a.from("leave_entries").select("employee_id, leave_date, days, hours, unpaid_leave_deduction, status, note").eq("payroll_period_id", periodId),
@@ -155,7 +155,7 @@ export async function GET(req: NextRequest) {
           if (scheduled && holiday) {
             status = "paid_holiday";
             label = "หยุด";
-            sublabel = "จ่าย";
+            sublabel = "พิเศษ";
           } else if (scheduled && exempt) {
             status = "exempt";
             label = "ยกเว้น";
@@ -203,6 +203,8 @@ export async function GET(req: NextRequest) {
           employee_id: employeeId,
           employee_code: line.employee_code,
           employee_name: employeeName.get(employeeId) ?? "",
+          contract_type: line.contract_type ?? contract.contract_type ?? null,
+          wage_type: line.wage_type ?? contract.wage_type ?? null,
           net_estimate: money(line.net_pay),
           manual_days: manualDays,
           cells,

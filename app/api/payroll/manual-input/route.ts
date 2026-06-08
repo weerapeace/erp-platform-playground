@@ -83,6 +83,8 @@ export async function GET(req: NextRequest) {
       const hasManual = late || absence || leave || ot || piecework || special || other;
       return {
         id, employee_id: id, employee_code: l.employee_code, employee_name: nameBy[id] ?? "",
+        contract_type: l.contract_type ?? null,
+        wage_type: l.wage_type ?? null,
         work_days: money(l.attendance_days),
         late_baht: Math.round(late * 100) / 100,
         late_minutes: Math.round((lateMinBy.get(id) ?? 0) * 100) / 100,

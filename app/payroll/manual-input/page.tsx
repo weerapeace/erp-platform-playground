@@ -15,6 +15,7 @@ import { formatDate } from "@/lib/date";
 type Period = { id: string; period_name: string; status: string };
 type Row = {
   id: string; employee_id: string; employee_code: string; employee_name: string; work_days: number;
+  contract_type?: string | null; wage_type?: string | null;
   late_baht: number; late_minutes: number; absence_baht: number; absence_days: number; absence_hours: number;
   leave_baht: number; leave_days: number; leave_hours: number; ot_baht: number; ot_hours: number;
   piecework_baht: number; special_add: number; other_deduct: number; net_estimate: number; has_manual: boolean;
@@ -51,7 +52,7 @@ type GridCell = {
   amount: number; note?: string;
 };
 type GridRow = {
-  employee_id: string; employee_code: string; employee_name: string; net_estimate: number; manual_days: number; cells: GridCell[];
+  employee_id: string; employee_code: string; employee_name: string; contract_type?: string | null; wage_type?: string | null; net_estimate: number; manual_days: number; cells: GridCell[];
 };
 type GridData = { days: GridDay[]; rows: GridRow[]; period?: { default_hours_per_day?: number } };
 const TIME_META: Record<TimeKind, { label: string; unit: string; sign: "+" | "-"; cls: string }> = {
@@ -83,6 +84,13 @@ const DRAWER_TABS: { key: DrawerTab; label: string }[] = [
   { key: "ot", label: "OT" },
 ];
 const STANDARD_HOURS_PER_DAY = 8;
+const CONTRACT_BADGE: Record<string, { label: string; cls: string }> = {
+  permanent: { label: "ประจำ", cls: "border-indigo-200 bg-indigo-50 text-indigo-700" },
+  regular_external: { label: "ประจำนอกระบบ", cls: "border-sky-200 bg-sky-50 text-sky-700" },
+  daily: { label: "รายวัน", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  contractor: { label: "เหมา", cls: "border-violet-200 bg-violet-50 text-violet-700" },
+  hourly: { label: "รายชั่วโมง", cls: "border-amber-200 bg-amber-50 text-amber-700" },
+};
 const LEAVE_REASON_LABEL: Record<LeaveReason, string> = {
   medical_certificate: "ลาแบบมีใบรับรองแพทย์",
   sick_paid: "ลาป่วยรับเงิน",
@@ -96,6 +104,35 @@ function timeKindFromCell(cell: GridCell): TimeKind {
   if (cell.late_minutes > 0) return "late";
   if (cell.ot_hours > 0 || ["off", "ot", "paid_holiday"].includes(cell.status)) return "ot";
   return "late";
+}
+
+function contractBadgeMeta(contractType?: string | null, wageType?: string | null) {
+  const key = String(contractType || wageType || "").trim();
+  return CONTRACT_BADGE[key] ?? (key ? { label: key, cls: "border-slate-200 bg-slate-50 text-slate-600" } : null);
+}
+
+function ContractBadge({ contractType, wageType }: { contractType?: string | null; wageType?: string | null }) {
+  const meta = contractBadgeMeta(contractType, wageType);
+  if (!meta) return null;
+  return (
+    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-4 ${meta.cls}`}>
+      {meta.label}
+    </span>
+  );
+}
+
+function EmployeeIdentity({ code, name, contractType, wageType }: { code: string; name: string; contractType?: string | null; wageType?: string | null }) {
+  return (
+    <div className="min-w-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="font-mono text-xs text-slate-400">{code}</span>
+        <span className="truncate font-medium text-slate-800">{name || "-"}</span>
+      </div>
+      <div className="mt-1">
+        <ContractBadge contractType={contractType} wageType={wageType} />
+      </div>
+    </div>
+  );
 }
 
 export default function ManualInputPage() {
@@ -206,6 +243,8 @@ export default function ManualInputPage() {
       employee_id: gridRow.employee_id,
       employee_code: gridRow.employee_code,
       employee_name: gridRow.employee_name,
+      contract_type: gridRow.contract_type,
+      wage_type: gridRow.wage_type,
       work_days: 0,
       late_baht: 0,
       late_minutes: 0,
@@ -345,8 +384,12 @@ export default function ManualInputPage() {
                 const deductionItems = employeeAdjustments.filter((item) => matchesMode(item, "deduction"));
                 return (
                   <tr key={r.id} className={`border-t border-slate-100 hover:bg-slate-50 ${r.has_manual ? "bg-amber-50/30" : ""}`}>
-                    <td className="px-3 py-2"><span className="font-mono text-xs text-slate-400">{r.employee_code}</span> {r.employee_name}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-500">{r.work_days || "-"}</td>
+                    <td className="px-3 py-2">
+                      <EmployeeIdentity code={r.employee_code} name={r.employee_name} contractType={r.contract_type} wageType={r.wage_type} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <WorkDaysCell row={r} />
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <TimeSummaryCell row={r} kind="late" tone="text-red-600" onClick={() => setTimeSummary({ row: r, kind: "late" })} />
                     </td>
@@ -572,6 +615,22 @@ function rowTimeAmount(row: Row, kind: TimeKind) {
   if (kind === "absence") return row.absence_baht;
   if (kind === "leave") return row.leave_baht;
   return row.ot_baht;
+}
+
+function WorkDaysCell({ row }: { row: Row }) {
+  const title = [
+    "วันทำงานจากเครื่องคำนวณจริงของงวดนี้",
+    "รวมวันทำงานตามสัญญาและวันหยุดพิเศษที่ยังต้องจ่ายเงิน",
+    row.absence_days ? `ขาด: ${formatQty(row.absence_days, "วัน")}` : "",
+    row.leave_days ? `ลาหักเงิน: ${formatQty(row.leave_days, "วัน")}` : "",
+    row.late_minutes ? `สาย/ออกก่อน: ${minutesQty(row.late_minutes)}` : "",
+  ].filter(Boolean).join("\n");
+  return (
+    <span className="inline-flex items-center justify-end gap-1 tabular-nums text-slate-500" title={title}>
+      {row.work_days || "-"}
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>
+    </span>
+  );
 }
 
 function TimeSummaryCell({ row, kind, tone, onClick }: { row: Row; kind: TimeKind; tone: string; onClick: () => void }) {
@@ -1088,9 +1147,7 @@ function AdjustmentList({
                 <tr key={item.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-3 py-2">
                     {row ? (
-                      <>
-                        <span className="font-mono text-xs text-slate-400">{row.employee_code}</span> {row.employee_name}
-                      </>
+                      <EmployeeIdentity code={row.employee_code} name={row.employee_name} contractType={row.contract_type} wageType={row.wage_type} />
                     ) : (
                       <span className="font-mono text-xs text-slate-400">{item.employee_id}</span>
                     )}
@@ -1204,6 +1261,7 @@ function AttendanceGrid({
   const rows = grid.rows
     .filter((r) => !onlyManual || r.manual_days > 0)
     .filter((r) => !q || `${r.employee_code} ${r.employee_name}`.toLowerCase().includes(q));
+  const holidayCount = grid.days.filter((d) => d.is_holiday).length;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -1211,17 +1269,18 @@ function AttendanceGrid({
         <div>
           <div className="text-sm font-semibold text-slate-800">ตารางเข้างานรายวัน</div>
           <div className="text-xs text-slate-500">กดช่องวันที่เพื่อแก้สาย/ขาด/ลา/OT ของพนักงานคนนั้น</div>
+          {holidayCount > 0 && <div className="mt-1 text-[11px] font-medium text-teal-700">มีวันหยุดพิเศษในงวดนี้ {holidayCount} วัน</div>}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500">
           <Legend label="8:00" cls="bg-emerald-50 border-emerald-200 text-emerald-700" />
           <Legend label="7:48" cls="bg-amber-50 border-amber-300 text-amber-700" />
           <Legend label="0:00" cls="bg-red-50 border-red-200 text-red-600" />
-          <Legend label="หยุด" cls="bg-teal-50 border-teal-200 text-teal-700" />
+          <Legend label="วันหยุดพิเศษ" cls="bg-teal-50 border-teal-200 text-teal-700" />
           <Legend label="+ OT" cls="bg-slate-50 border-slate-200 text-slate-500" />
         </div>
       </div>
 
-      <div className="max-h-[68vh] overflow-auto">
+      <div className="max-h-[76vh] overflow-auto">
         <table className="min-w-max border-separate border-spacing-0 text-sm">
           <thead className="sticky top-0 z-20 bg-slate-50">
             <tr>
@@ -1232,6 +1291,7 @@ function AttendanceGrid({
                 <th key={d.iso} className={`w-[74px] min-w-[74px] border-b border-r border-slate-200 px-2 py-2 text-center ${d.is_holiday ? "bg-teal-50" : ""}`}>
                   <div className="text-[11px] text-slate-500">{DOW_TH[d.dow]}</div>
                   <div className="font-semibold text-slate-700">{String(d.day).padStart(2, "0")}</div>
+                  {d.is_holiday && <div className="text-[9px] font-medium text-teal-600">พิเศษ</div>}
                 </th>
               ))}
             </tr>
@@ -1240,8 +1300,7 @@ function AttendanceGrid({
             {rows.map((row) => (
               <tr key={row.employee_id} className="group">
                 <td className="sticky left-0 z-10 w-[240px] min-w-[240px] border-b border-r border-slate-200 bg-white px-3 py-2 group-hover:bg-slate-50">
-                  <div className="font-medium text-slate-800 truncate">{row.employee_name || "—"}</div>
-                  <div className="font-mono text-xs text-slate-400">{row.employee_code}</div>
+                  <EmployeeIdentity code={row.employee_code} name={row.employee_name} contractType={row.contract_type} wageType={row.wage_type} />
                   <div className="text-[11px] text-slate-400">
                     {row.manual_days ? `มีรายการในงวดนี้ ${row.manual_days} วัน` : "ทำงานปกติทั้งงวด"}
                   </div>
