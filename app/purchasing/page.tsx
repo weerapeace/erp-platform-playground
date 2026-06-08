@@ -860,7 +860,7 @@ export default function PurchasingShopPage() {
 
       {/* ป๊อปทวนรายการก่อนสร้างใบขอซื้อ (recheck) — ของกลาง ERPModal */}
       {showReview && (
-        <ERPModal open onClose={() => !saving && setShowReview(false)} size="lg"
+        <ERPModal open onClose={() => !saving && setShowReview(false)} size="lg" storageKey="pr-review"
           title="ทวนรายการก่อนสร้างใบขอซื้อ"
           description={`จะสร้างใบขอซื้อทั้งหมด ${cart.length} ใบ (แยกใบละ 1 สินค้า) · วันที่สั่ง ${orderDate}`}
           footer={<>
@@ -1050,7 +1050,7 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card:
   const [useDate, setUseDate] = useState("");       // วันที่ใช้งาน (ไม่บังคับ)
   const s = card.sku!;
   return (
-    <ERPModal open onClose={onClose} size="md" title="เพิ่มลงใบขอซื้อ"
+    <ERPModal open onClose={onClose} size="md" storageKey="pr-add-item" title="เพิ่มลงใบขอซื้อ"
       footer={
         <>
           <button onClick={onEdit} className="mr-auto h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">✎ แก้ไขสินค้า</button>

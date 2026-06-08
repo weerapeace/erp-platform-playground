@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { SupplierWizard } from "@/components/supplier-wizard";
+import { SupplierPicker } from "@/components/supplier-picker";
 
 export type SkuSupplierRow = {
   id: string; sku_id: string | null; partner_id: string | null; partner_name: string;
@@ -250,10 +251,10 @@ export function SkuSupplierList({ skuId, onUse, onChanged, defaultOpen = true, r
 
       {/* แถวเพิ่มร้าน */}
       <div className="mt-2 pt-2 border-t border-slate-200 flex flex-wrap items-center gap-2">
-        <select value={newPartner} onChange={(e) => pickPartner(e.target.value)} className={inp + " bg-white flex-1 min-w-[140px]"}>
-          <option value="">+ เลือกร้าน…</option>
-          {available.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
+        <div className="flex-1 min-w-[150px]">
+          <SupplierPicker value={newPartner} suppliers={available} placeholder="+ เลือกร้าน…"
+            onChange={(id) => pickPartner(id)} onAddNew={() => setWizardOpen(true)} />
+        </div>
         <input type="number" step="any" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} placeholder="ราคา" className={inp + " w-20 text-right"} />
         <select value={newCur} onChange={(e) => setNewCur(e.target.value)} className={inp + " bg-white w-[68px]"}>
           {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}

@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { ImageInput } from "@/components/image-input";
 import { SupplierWizard } from "@/components/supplier-wizard";
+import { SupplierPicker } from "@/components/supplier-picker";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
@@ -477,7 +478,7 @@ export default function PurchaseOrdersPage() {
 
       {/* ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ — แยกตามร้าน (1 ใบ/ร้าน) */}
       {reviewOpen && (
-        <ERPModal open onClose={() => !busy && setReviewOpen(false)} size="lg"
+        <ERPModal open onClose={() => !busy && setReviewOpen(false)} size="lg" storageKey="po-review"
           title="ทวนรายการก่อนสร้างใบสั่งซื้อ"
           description={`จะสร้าง ${cartByShop.length} ใบ (1 ใบ/ร้าน) · วันที่สั่ง ${orderDate}`}
           footer={<>
@@ -586,7 +587,7 @@ function ShopContactModal({ shopName, partnerId, onClose }: { shopName: string; 
   const inp = "w-full h-9 px-3 text-sm border border-slate-200 rounded-md";
   const lbl = "block text-xs font-medium text-slate-600 mb-1";
   return (
-    <ERPModal open onClose={onClose} size="md" title={`💬 ติดต่อร้าน — ${shopName}`}
+    <ERPModal open onClose={onClose} size="md" storageKey="po-contact" title={`💬 ติดต่อร้าน — ${shopName}`}
       footer={partnerId ? <>
         <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>
         {edit
@@ -664,7 +665,7 @@ function LinkModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
     finally { setSaving(false); }
   };
   return (
-    <ERPModal open onClose={onClose} size="md" title="🔗 ลิงก์สินค้า"
+    <ERPModal open onClose={onClose} size="md" storageKey="po-link" title="🔗 ลิงก์สินค้า"
       footer={<>
         <button onClick={onClose} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกลิงก์"}</button>
@@ -697,7 +698,7 @@ function BuyAllModal({ shop, rows, rate, onClose, onConfirm }: {
     setSaving(false);
   };
   return (
-    <ERPModal open onClose={onClose} size="lg" title={`🛒 ซื้อทั้งร้าน: ${shop}`}
+    <ERPModal open onClose={onClose} size="lg" storageKey="po-buyall" title={`🛒 ซื้อทั้งร้าน: ${shop}`}
       description="ปรับจำนวนได้ (ตั้งต้น = จำนวนที่ขอซื้อ) • ติ๊ก 'รอซื้ออีก' ถ้าสั่งไม่ครบ • ยืนยันแล้วอนุมัติ+ออกใบสั่งซื้อทันที"
       footer={<>
         <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
@@ -802,7 +803,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
   };
 
   return (
-    <ERPModal open onClose={onClose} size="md" title="📍 ตั้งร้านให้สินค้า"
+    <ERPModal open onClose={onClose} size="md" storageKey="po-set-shop" title="📍 ตั้งร้านให้สินค้า"
       footer={<>
         <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก + ใส่ตะกร้า"}</button>
@@ -814,13 +815,8 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย) *</label>
-          <div className="flex gap-1.5">
-            <select value={sellerId} onChange={(e) => { const id = e.target.value; setSellerId(id); setSeller(suppliers.find((s) => s.id === id)?.name ?? ""); }} className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
-              <option value="">— เลือกผู้จำหน่าย —</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <button type="button" onClick={() => setWizardOpen(true)} className="h-9 px-3 text-sm rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 shrink-0">+ เพิ่ม</button>
-          </div>
+          <SupplierPicker value={sellerId} suppliers={suppliers}
+            onChange={(id, name) => { setSellerId(id); setSeller(name); }} onAddNew={() => setWizardOpen(true)} />
           <button type="button" onClick={() => void pickTaobao()}
             className="mt-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>
         </div>
@@ -914,7 +910,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
   };
 
   return (
-    <ERPModal open onClose={onClose} size="md" title="รายละเอียด / แก้ไขรายการ"
+    <ERPModal open onClose={onClose} size="md" storageKey="po-card-edit" title="รายละเอียด / แก้ไขรายการ"
       footer={<>
         <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
@@ -926,13 +922,8 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย)</label>
-          <div className="flex gap-1.5">
-            <select value={sellerId} onChange={(e) => { const id = e.target.value; setSellerId(id); setSeller(suppliers.find((s) => s.id === id)?.name ?? ""); }} className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
-              <option value="">— เลือกผู้จำหน่าย —</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <button type="button" onClick={() => setWizardOpen(true)} title="เพิ่มผู้จำหน่ายใหม่" className="h-9 px-3 text-sm rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 shrink-0">+ เพิ่ม</button>
-          </div>
+          <SupplierPicker value={sellerId} suppliers={suppliers}
+            onChange={(id, name) => { setSellerId(id); setSeller(name); }} onAddNew={() => setWizardOpen(true)} />
           {!sellerId && seller && <div className="text-[11px] text-amber-600 mt-1">ร้านปัจจุบัน: {seller} (ไม่ใช่ผู้จำหน่ายในระบบ — เลือกใหม่เพื่อเพิ่มเข้ารายการได้)</div>}
           <button type="button" onClick={() => void pickTaobao()}
             className="mt-1.5 mr-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>

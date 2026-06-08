@@ -27,6 +27,8 @@ export function SupplierWizard({ onClose, onCreated }: {
   const [website, setWebsite] = useState("");
   const [notes, setNotes] = useState("");
   const [currency, setCurrency] = useState("RMB");
+  const [phone, setPhone] = useState("");
+  const [lineId, setLineId] = useState("");
   // หน้า 2
   const [nameTh, setNameTh] = useState("");
   const [address, setAddress] = useState("");
@@ -51,6 +53,8 @@ export function SupplierWizard({ onClose, onCreated }: {
         website: website.trim() || null,
         notes: notes.trim() || null,
         default_currency: currency,
+        phone: phone.trim() || null,
+        line_id: lineId.trim() || null,
         address_line: address.trim() || null,
         company_name: companyName.trim() || null,
         payment_terms_days: creditDays ? Number(creditDays) : null,
@@ -90,6 +94,12 @@ export function SupplierWizard({ onClose, onCreated }: {
                   <option value="">— เลือก —</option>
                   {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select></div>
+              <div className="grid grid-cols-2 gap-2">
+                <div><label className={lbl}>เบอร์โทร (Phone)</label>
+                  <input value={phone} onChange={(e) => setPhone(e.target.value)} className={cls} placeholder="(ถ้ามี)" /></div>
+                <div><label className={lbl}>Line ID</label>
+                  <input value={lineId} onChange={(e) => setLineId(e.target.value)} className={cls} placeholder="เช่น @shop" /></div>
+              </div>
               <div><label className={lbl}>Website</label>
                 <input value={website} onChange={(e) => setWebsite(e.target.value)} className={cls} placeholder="https://…" /></div>
               <div><label className={lbl}>Notes</label>
