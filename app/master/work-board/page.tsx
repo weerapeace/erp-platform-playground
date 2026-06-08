@@ -1,14 +1,13 @@
 "use client";
 
 /**
- * บอร์ดจ่ายงาน (Whiteboard) — เฟส D (รื้อใหม่)
+ * บอร์ดจ่ายงาน (Whiteboard) — เฟส D · ปรับหน้าตาให้เหมือนบอร์ด Tasks (การ์ดแนวตั้ง + พื้นลายจุด)
  * โซน "📥 รอจ่าย" (การ์ดใบสั่งผลิตที่ยังจ่ายไม่ครบ) + โซนแผนก (การ์ดใบจ่ายงาน)
  * ลาก MO → แผนก = popup จ่ายงาน (จำนวน/ช่าง/กำหนดเสร็จ) · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
  * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีตามแบรนด์ + ปุ่มตั้งสี
- * ของกลาง: useAuth / useToast / apiFetch / ERPModal / @dnd-kit
  */
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
+import { DndContext, DragOverlay, type DragStartEvent, type DragEndEvent, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -33,9 +32,11 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 
-// สีสำรองต่อสินค้า (ถ้าแบรนด์ยังไม่ตั้งสี)
 const PALETTE = ["#94a3b8", "#60a5fa", "#34d399", "#f472b6", "#fb923c", "#a78bfa", "#22d3ee", "#facc15"];
 const prodColor = (sku: string | null) => { let h = 0; for (const c of sku ?? "") h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
+// สีหัวโซนแผนก (แถบบน + จุด) แบบ Tasks
+const ACCENT = ["border-t-indigo-400", "border-t-blue-400", "border-t-emerald-400", "border-t-rose-400", "border-t-violet-400", "border-t-cyan-400"];
+const DOT = ["bg-indigo-400", "bg-blue-400", "bg-emerald-400", "bg-rose-400", "bg-violet-400", "bg-cyan-400"];
 
 type Urg = "green" | "orange" | "red";
 function urgencyByDate(due: string | null, done: boolean): Urg {
@@ -64,21 +65,20 @@ const stageOfDept = (name: string) => (name.includes("ตัด") || name.includ
 export default function WorkBoardPage() {
   const canView = usePermission("products.view");
   const canEdit = usePermission("products.edit");
-  const { user } = useAuth();
+  const { user } = useAuth(); void user;
   const toast = useToast();
 
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
   const [loading, setLoading] = useState(true);
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
 
-  // popup จ่ายงาน
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
   const [dispDept, setDispDept] = useState<Dept | null>(null);
   const [dispQty, setDispQty] = useState(0);
   const [dispCraftsman, setDispCraftsman] = useState("");
   const [dispDue, setDispDue] = useState("");
   const [dispSaving, setDispSaving] = useState(false);
-  // popup ตั้งสีแบรนด์
   const [colorOpen, setColorOpen] = useState(false);
   const [brands, setBrands] = useState<Brand[]>([]);
 
@@ -95,7 +95,6 @@ export default function WorkBoardPage() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
-  // ใบจ่ายงานต่อแผนก (ซ่อน done) — map ตาม department_id, ถ้าไม่มีก็เดาจาก stage
   const wosByDept = useMemo(() => {
     const m = new Map<string, WorkOrder[]>();
     for (const w of board.workOrders) {
@@ -116,6 +115,7 @@ export default function WorkBoardPage() {
   };
 
   const onDragEnd = async (e: DragEndEvent) => {
+    setActiveId(null);
     const a = String(e.active.id); const over = e.over ? String(e.over.id) : null;
     if (!over || !over.startsWith("dept:")) return;
     const deptId = over.slice(5);
@@ -123,11 +123,9 @@ export default function WorkBoardPage() {
     if (!canEdit) { toast.error("คุณไม่มีสิทธิ์แก้ไข"); return; }
 
     if (a.startsWith("mo:")) {
-      // ลากใบสั่งผลิต → เปิด popup จ่ายงาน
       const mo = board.pending.find((m) => m.id === a.slice(3)); if (!mo) return;
       setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
     } else if (a.startsWith("wo:")) {
-      // ลากใบจ่ายงานข้ามแผนก → ย้ายแผนก
       const id = a.slice(3); const w = board.workOrders.find((x) => x.id === id); if (!w || w.department_id === deptId) return;
       setBoard((b) => ({ ...b, workOrders: b.workOrders.map((x) => x.id === id ? { ...x, department_id: deptId, department_name: dept.name } : x) }));
       try {
@@ -158,6 +156,14 @@ export default function WorkBoardPage() {
 
   const deptCraftsmen = useMemo(() => dispDept ? craftsmen.filter((c) => c.department_id === dispDept.id) : [], [dispDept, craftsmen]);
 
+  // การ์ดที่กำลังลาก (สำหรับ DragOverlay)
+  const activeOverlay = useMemo(() => {
+    if (!activeId) return null;
+    if (activeId.startsWith("mo:")) { const mo = board.pending.find((m) => m.id === activeId.slice(3)); return mo ? <PendingBody mo={mo} dragging /> : null; }
+    if (activeId.startsWith("wo:")) { const w = board.workOrders.find((x) => x.id === activeId.slice(3)); return w ? <WOBody w={w} dragging /> : null; }
+    return null;
+  }, [activeId, board]);
+
   if (!canView) return <AccessDenied />;
 
   return (
@@ -175,29 +181,31 @@ export default function WorkBoardPage() {
       </div>
 
       {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div> : (
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-          <div className="flex gap-3 overflow-x-auto pb-3" style={{ minHeight: "62vh" }}>
+        <DndContext sensors={sensors} onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))} onDragEnd={onDragEnd}>
+          <div className="flex gap-3 overflow-x-auto pb-3 rounded-xl border border-slate-200 p-3"
+            style={{ minHeight: "64vh", backgroundColor: "#fafbfc", backgroundImage: "radial-gradient(circle, #d8dee9 1px, transparent 1px)", backgroundSize: "18px 18px" }}>
             {/* โซนรอจ่าย */}
-            <div className="w-72 shrink-0">
-              <div className="px-2 py-1.5 mb-2 rounded-lg bg-amber-100 text-amber-800 text-sm font-semibold flex items-center justify-between">
-                <span>📥 รอจ่าย</span><span className="text-xs font-normal text-amber-600">{board.pending.length} ใบ</span>
+            <div className="flex flex-col w-72 shrink-0">
+              <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4 border-t-amber-400">
+                <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-400" /><span className="text-sm font-semibold text-slate-700">📥 รอจ่าย</span></div>
+                <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{board.pending.length}</span>
               </div>
-              <div className="space-y-2 rounded-lg p-1.5 bg-amber-50/40 min-h-[120px]">
-                {board.pending.map((m) => <PendingCard key={m.id} mo={m} canEdit={canEdit} />)}
-                {board.pending.length === 0 && <div className="text-center text-[11px] text-slate-300 py-8">ไม่มีงานรอจ่าย</div>}
+              <div className="flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 bg-amber-50/40">
+                {board.pending.map((m) => <PendingCard key={m.id} mo={m} canEdit={canEdit} dim={activeId === `mo:${m.id}`} />)}
+                {board.pending.length === 0 && <div className="h-20 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">ไม่มีงานรอจ่าย</div>}
               </div>
             </div>
 
             {/* โซนแผนก */}
-            {board.departments.map((d) => <DeptZone key={d.id} dept={d} cards={wosByDept.get(d.id) ?? []} canEdit={canEdit} />)}
+            {board.departments.map((d, i) => <DeptZone key={d.id} dept={d} cards={wosByDept.get(d.id) ?? []} canEdit={canEdit} idx={i} activeId={activeId} />)}
             {board.departments.length === 0 && <div className="text-slate-300 text-sm py-10">ยังไม่มีแผนก (ตั้งที่ Master Data → แผนก)</div>}
           </div>
+          <DragOverlay dropAnimation={null}>{activeOverlay ? <div className="w-[17rem]">{activeOverlay}</div> : null}</DragOverlay>
         </DndContext>
       )}
 
       {/* popup จ่ายงาน */}
-      <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md"
-        title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
+      <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
         footer={<>
           <button onClick={() => setDispMO(null)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
           <button onClick={submitDispatch} disabled={dispSaving} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
@@ -245,84 +253,88 @@ export default function WorkBoardPage() {
   );
 }
 
-// ---- โซนแผนก (droppable) ----
-function DeptZone({ dept, cards, canEdit }: { dept: Dept; cards: WorkOrder[]; canEdit: boolean }) {
+// ---- โซนแผนก (droppable) — หัวโซนสไตล์ Tasks ----
+function DeptZone({ dept, cards, canEdit, idx, activeId }: { dept: Dept; cards: WorkOrder[]; canEdit: boolean; idx: number; activeId: string | null }) {
   const { setNodeRef, isOver } = useDroppable({ id: `dept:${dept.id}` });
   const total = cards.reduce((s, c) => s + (c.qty || 0), 0);
   return (
-    <div className="w-72 shrink-0">
-      <div className="px-2 py-1.5 mb-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-semibold flex items-center justify-between">
-        <span className="truncate">🏭 {dept.name}</span><span className="text-xs font-normal text-slate-400">{cards.length} ใบ · {fmt(total)} ชิ้น</span>
+    <div className="flex flex-col w-72 shrink-0">
+      <div className={`flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4 ${ACCENT[idx % ACCENT.length]}`}>
+        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${DOT[idx % DOT.length]}`} /><span className="text-sm font-semibold text-slate-700 truncate">{dept.name}</span></div>
+        <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{cards.length}</span>
       </div>
-      <div ref={setNodeRef} className={`space-y-2 rounded-lg p-1.5 min-h-[120px] border-2 border-dashed transition-colors ${isOver ? "bg-indigo-50 border-indigo-300" : "bg-slate-50/50 border-transparent"}`}>
-        {cards.map((w) => <WOCard key={w.id} w={w} canEdit={canEdit} />)}
-        {cards.length === 0 && <div className="text-center text-[11px] text-slate-300 py-8">ลากงานมาที่นี่</div>}
+      <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-indigo-50" : "bg-slate-50/60"}`}>
+        {cards.map((w) => <WOCard key={w.id} w={w} canEdit={canEdit} dim={activeId === `wo:${w.id}`} />)}
+        {cards.length === 0 && <div className="h-20 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">ลากงานมาวางที่นี่</div>}
       </div>
     </div>
   );
 }
 
-// ---- การ์ดใบสั่งผลิต (รอจ่าย) ----
-function PendingCard({ mo, canEdit }: { mo: PendingMO; canEdit: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `mo:${mo.id}`, disabled: !canEdit });
+// ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) ----
+function PendingBody({ mo, dragging }: { mo: PendingMO; dragging?: boolean }) {
   const urg = urgencyByDate(mo.due_date, false);
   const border = mo.brand_color || prodColor(mo.product_sku);
-  const style: React.CSSProperties = { borderLeft: `5px solid ${border}`, transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined, opacity: isDragging ? 0.5 : 1, cursor: canEdit ? "grab" : "default" };
-  const tip = `${mo.mo_no}\nสินค้า: ${mo.product_name ?? mo.product_sku ?? "—"}${mo.brand ? `\nแบรนด์: ${mo.brand}` : ""}\nผลิต ${fmt(mo.qty)} · จ่ายแล้ว ${fmt(mo.dispatched)} · เหลือ ${fmt(mo.remaining)}\nกำหนดเสร็จ: ${mo.due_date ?? "—"}`;
   return (
-    <div ref={setNodeRef} {...listeners} {...attributes} style={style} title={tip} className="bg-white border border-slate-200 rounded-lg p-2 shadow-sm hover:shadow select-none">
-      <div className="flex items-center justify-between gap-1">
-        <code className="text-[10px] text-slate-400">{mo.mo_no}</code>
-        <span className={`w-2 h-2 rounded-full ${URG_DOT[urg]}`} />
+    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300 rotate-1" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        {mo.brand ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={{ background: `${border}18`, color: border, borderColor: `${border}55` }}>{mo.brand}</span> : <span className="text-[10px] text-slate-400">ใบสั่งผลิต</span>}
+        <div className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${URG_DOT[urg]}`} /><span className="font-mono text-[10px] text-slate-400">{mo.mo_no}</span></div>
       </div>
-      <div className="flex gap-2 mt-1">
-        <div className="w-11 h-11 rounded bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center shrink-0">
-          {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+      <div className="flex gap-2">
+        <div className="w-12 h-12 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center shrink-0">
+          {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300">📦</span>}
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm text-slate-800 font-medium leading-snug line-clamp-2">{mo.product_name ?? mo.product_sku}</div>
-          {mo.brand && <span className="text-[10px] px-1 rounded" style={{ background: `${border}22`, color: border }}>{mo.brand}</span>}
-        </div>
+        <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 flex-1">{mo.product_name ?? mo.product_sku}</p>
       </div>
-      <div className="flex items-center justify-between mt-1.5 text-[11px]">
-        <span className="text-rose-600 font-medium">เหลือจ่าย {fmt(mo.remaining)}/{fmt(mo.qty)}</span>
-        <span className="text-slate-500">⏱ {daysLeftText(mo.due_date)}</span>
+      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100 text-[11px]">
+        <span className="text-rose-600 font-semibold">เหลือจ่าย {fmt(mo.remaining)}/{fmt(mo.qty)}</span>
+        <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(mo.due_date)}</span>
       </div>
     </div>
   );
 }
+function PendingCard({ mo, canEdit, dim }: { mo: PendingMO; canEdit: boolean; dim: boolean }) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: `mo:${mo.id}`, disabled: !canEdit });
+  return (
+    <div ref={setNodeRef} {...listeners} {...attributes} className={`touch-none ${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${dim ? "opacity-40" : ""}`}>
+      <PendingBody mo={mo} />
+    </div>
+  );
+}
 
-// ---- การ์ดใบจ่ายงาน (ในแผนก) ----
-function WOCard({ w, canEdit }: { w: WorkOrder; canEdit: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `wo:${w.id}`, disabled: !canEdit });
+// ---- เนื้อการ์ดใบจ่ายงาน (ในแผนก) ----
+function WOBody({ w, dragging }: { w: WorkOrder; dragging?: boolean }) {
   const urg = urgencyByDate(w.due_date, w.status === "done");
   const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
   const border = w.brand_color || prodColor(w.product_sku);
-  const style: React.CSSProperties = { borderLeft: `5px solid ${border}`, transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined, opacity: isDragging ? 0.5 : 1, cursor: canEdit ? "grab" : "default" };
-  const tip = `${w.wo_no} · ${w.mo_no}\nสินค้า: ${w.product_name ?? w.product_sku ?? "—"}${w.brand ? `\nแบรนด์: ${w.brand}` : ""}\nผู้รับ: ${w.assignee_name ?? "—"}\nจ่าย ${fmt(w.qty)} · รับคืน ${fmt(w.received_qty)}\nกำหนดเสร็จ: ${w.due_date ?? "—"}\nสถานะ: ${st.label}`;
   return (
-    <div ref={setNodeRef} {...listeners} {...attributes} style={style} title={tip} className="bg-white border border-slate-200 rounded-lg p-2 shadow-sm hover:shadow select-none">
-      <div className="flex items-center justify-between gap-1">
-        <code className="text-[10px] text-slate-400">{w.wo_no}</code>
-        <span className={`w-2 h-2 rounded-full ${URG_DOT[urg]}`} />
+    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300 rotate-1" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${st.cls}`}>{st.label}</span>
+        <div className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${URG_DOT[urg]}`} /><span className="font-mono text-[10px] text-slate-400">{w.wo_no}</span></div>
       </div>
-      <div className="flex gap-2 mt-1">
-        <div className="w-11 h-11 rounded bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center shrink-0">
-          {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+      <div className="flex gap-2">
+        <div className="w-12 h-12 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center shrink-0">
+          {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300">📦</span>}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm text-slate-800 font-medium leading-snug line-clamp-2">{w.product_name ?? w.product_sku}</div>
-          <span className="text-[11px] text-slate-500">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
+          <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{w.product_name ?? w.product_sku}</p>
+          <span className="text-[11px] text-slate-500 line-clamp-1">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
         </div>
       </div>
-      <div className="flex items-center justify-between mt-1.5 text-[11px]">
-        <span className={`px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
-        <span className="tabular-nums text-slate-600">{fmt(w.qty)} ชิ้น</span>
+      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100 text-[11px]">
+        <span className="tabular-nums text-slate-600">{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
+        <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(w.due_date)}</span>
       </div>
-      <div className="flex items-center justify-between mt-1 text-[11px]">
-        <span className="text-slate-500">⏱ {daysLeftText(w.due_date)}</span>
-        {w.received_qty > 0 && w.status !== "done" && <span className="text-orange-600">รับคืน {fmt(w.received_qty)}/{fmt(w.qty)}</span>}
-      </div>
+    </div>
+  );
+}
+function WOCard({ w, canEdit, dim }: { w: WorkOrder; canEdit: boolean; dim: boolean }) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: `wo:${w.id}`, disabled: !canEdit });
+  return (
+    <div ref={setNodeRef} {...listeners} {...attributes} className={`touch-none ${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${dim ? "opacity-40" : ""}`}>
+      <WOBody w={w} />
     </div>
   );
 }
