@@ -544,20 +544,16 @@ export function DataTable<T extends Record<string, unknown>>({
   );
 
   // ---- Admin default layout (Tier 3I) ----
-  // โหลด default จาก server ถ้า user ยังไม่มี state ใน localStorage
+  // โหลด default คอลัมน์/ค่าตั้งจาก server (admin View default)
+  // เก็บ "เวอร์ชัน" (updated_at) ที่เคยใช้ไว้ใน localStorage — ถ้า admin แก้ default (updated_at เปลี่ยน)
+  // จะ "บังคับใช้ค่าใหม่ทับ" ให้อัตโนมัติในการโหลดครั้งถัดไป (ไม่ต้องรีเซ็ตเอง)
   const layoutAppliedRef = useRef(false);
-  const layoutKey = tableId ? `erp-dt-${tableId}-layout-applied` : null;
+  const layoutKey = tableId ? `erp-dt-${tableId}-layout-ver` : null;
   const [pendingDefaultPageSize, setPendingDefaultPageSize] = useState<number | null>(null);
   // ค่าเริ่มต้นตารางแบบขยายได้ (settings jsonb) — ใช้ทำสรุปคอลัมน์/สีแถว ตอน render
   const [layoutSettings, setLayoutSettings] = useState<TableLayoutSettings | null>(null);
   useEffect(() => {
     if (!tableId || layoutAppliedRef.current) return;
-    try {
-      if (layoutKey && localStorage.getItem(layoutKey)) {
-        layoutAppliedRef.current = true;
-        return;
-      }
-    } catch { /* ignore */ }
     let cancelled = false;
     (async () => {
       try {
@@ -569,8 +565,15 @@ export function DataTable<T extends Record<string, unknown>>({
           default_page_size: number;
           default_view_mode: "table" | "cards";
           settings?: TableLayoutSettings | null;
+          updated_at?: string;
         } | null;
         if (cancelled || !layout) return;
+        // เทียบเวอร์ชัน: ถ้า updated_at ต่างจากที่เคยเก็บ = admin แก้ default ใหม่ → บังคับทับ
+        const layoutVer = String(layout.updated_at ?? "");
+        let storedVer = "";
+        try { storedVer = (layoutKey && localStorage.getItem(layoutKey)) || ""; } catch { /* ignore */ }
+        const isNewVersion = !!layoutVer && storedVer !== layoutVer;
+
         const vis: VisibilityState = {};
         const order: ColumnOrderState = [];
         const pinned: ColumnPinningState = { left: [], right: [] };
@@ -583,10 +586,18 @@ export function DataTable<T extends Record<string, unknown>>({
           if (c.pinned === "right") pinned.right!.push(c.key);
           if (c.width) sizing[c.key] = c.width;
         });
-        setColumnVisibility(prev => ({ ...vis, ...prev }));
-        setColumnOrder(prev => prev.length ? prev : order);
-        setColumnPinning(prev => (prev.left?.length || prev.right?.length) ? prev : pinned);
-        setColumnSizing(prev => Object.keys(prev).length ? prev : sizing);
+        if (isNewVersion) {
+          // เวอร์ชันใหม่จาก admin → ทับของเดิมทั้งหมด เพื่อให้ default ใหม่แสดงผลจริง
+          setColumnVisibility(vis);
+          setColumnOrder(order);
+          setColumnPinning(pinned);
+          setColumnSizing(sizing);
+        } else {
+          setColumnVisibility(prev => ({ ...vis, ...prev }));
+          setColumnOrder(prev => prev.length ? prev : order);
+          setColumnPinning(prev => (prev.left?.length || prev.right?.length) ? prev : pinned);
+          setColumnSizing(prev => Object.keys(prev).length ? prev : sizing);
+        }
         setDensity(layout.default_density);
         setViewMode(layout.default_view_mode);
         setPendingDefaultPageSize(layout.default_page_size);
@@ -600,7 +611,7 @@ export function DataTable<T extends Record<string, unknown>>({
         }
         if (s?.group_by) setGroupBy((prev) => prev ?? s.group_by ?? null);
         layoutAppliedRef.current = true;
-        try { if (layoutKey) localStorage.setItem(layoutKey, "1"); } catch { /* ignore */ }
+        try { if (layoutKey && layoutVer) localStorage.setItem(layoutKey, layoutVer); } catch { /* ignore */ }
       } catch { /* silent — fallback to component defaults */ }
     })();
     return () => { cancelled = true; };

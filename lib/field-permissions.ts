@@ -19,6 +19,32 @@ type Admin = ReturnType<typeof supabaseAdmin>;
 export type FieldAccess = { hiddenCols: string[]; readonlyCols: string[] };
 const EMPTY: FieldAccess = { hiddenCols: [], readonlyCols: [] };
 
+// perf: แคช "ฟิลด์ที่จำกัดสิทธิ์ต่อตาราง" (config เปลี่ยนไม่บ่อย) — ลด DB round-trip 2 ครั้ง/คำขอ
+// คีย์ = tableName · TTL สั้น ๆ (กันค่าค้างนานถ้า admin แก้สิทธิ์)
+type RestrictedField = { column_name: string; view_roles: string[] | null; edit_roles: string[] | null };
+const META_TTL_MS = 30_000;
+const metaCache = new Map<string, { at: number; restricted: RestrictedField[] }>();
+
+async function loadRestrictedMeta(admin: Admin, tableName: string): Promise<RestrictedField[]> {
+  const hit = metaCache.get(tableName);
+  if (hit && Date.now() - hit.at < META_TTL_MS) return hit.restricted;
+
+  const { data: mod } = await admin.from("erp_modules").select("id").eq("table_name", tableName).maybeSingle();
+  if (!mod) { metaCache.set(tableName, { at: Date.now(), restricted: [] }); return []; }
+
+  const { data: flds } = await admin.from("erp_module_fields")
+    .select("column_name, view_roles, edit_roles")
+    .eq("module_id", mod.id)
+    .or("view_roles.not.is.null,edit_roles.not.is.null");
+
+  const restricted = ((flds ?? []) as RestrictedField[]).filter((f) => {
+    const vr = f.view_roles; const er = f.edit_roles;
+    return f.column_name && (((vr?.length ?? 0) > 0) || ((er?.length ?? 0) > 0));
+  });
+  metaCache.set(tableName, { at: Date.now(), restricted });
+  return restricted;
+}
+
 async function getUserRole(request: NextRequest): Promise<string> {
   try {
     const { data } = await supabaseFromRequest(request).rpc("erp_current_user");
@@ -32,18 +58,7 @@ async function getUserRole(request: NextRequest): Promise<string> {
  * (ลัดวงจร: ถ้าโมดูลไม่มีฟิลด์ที่จำกัดสิทธิ์เลย → ไม่ต้องเช็ค role)
  */
 export async function getFieldAccess(request: NextRequest, admin: Admin, tableName: string): Promise<FieldAccess> {
-  const { data: mod } = await admin.from("erp_modules").select("id").eq("table_name", tableName).maybeSingle();
-  if (!mod) return EMPTY;
-
-  const { data: flds } = await admin.from("erp_module_fields")
-    .select("column_name, view_roles, edit_roles")
-    .eq("module_id", mod.id)
-    .or("view_roles.not.is.null,edit_roles.not.is.null");
-
-  const restricted = (flds ?? []).filter((f) => {
-    const vr = f.view_roles as string[] | null; const er = f.edit_roles as string[] | null;
-    return f.column_name && (((vr?.length ?? 0) > 0) || ((er?.length ?? 0) > 0));
-  });
+  const restricted = await loadRestrictedMeta(admin, tableName);
   if (restricted.length === 0) return EMPTY;
 
   const role = await getUserRole(request);

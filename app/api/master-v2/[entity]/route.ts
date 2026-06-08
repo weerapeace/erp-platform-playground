@@ -487,6 +487,9 @@ async function _GET(
   const cfg = await resolveEntity(entity);
   if (!cfg) return NextResponse.json({ data: [], error: "entity ไม่รองรับ" }, { status: 400 });
 
+  // perf: เริ่มคำนวณสิทธิ์ระดับฟิลด์ "ขนาน" กับการดึงข้อมูล (ไม่พึ่งข้อมูลแถว) — ลด wall-clock
+  const fieldAccessP = getFieldAccess(request, supabaseAdmin(), cfg.table);
+
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
   // F19: default 200 (server mode) — client mode ส่ง limit=2000 (เห็นครบ)
@@ -568,7 +571,7 @@ async function _GET(
     const ordered = ((rowsData ?? []) as unknown as Record<string, unknown>[]).sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
     const processed = cfg.postProcess ? ordered.map(cfg.postProcess) : ordered;
     const rows = await resolveRelationLabels(supabase, cfg, processed);
-    const { hiddenCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
+    const { hiddenCols } = await fieldAccessP;
     return NextResponse.json({ data: stripHidden(rows, hiddenCols), total, error: null }, { headers: { "x-row-count": String(rows.length) } });
   }
 
@@ -613,8 +616,8 @@ async function _GET(
 
   const processed = cfg.postProcess ? allRows.map(cfg.postProcess) : allRows;
   const rows = await resolveRelationLabels(supabase, cfg, processed);
-  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์เห็นออกจาก response
-  const { hiddenCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
+  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์เห็นออกจาก response (รันขนานไว้แล้ว)
+  const { hiddenCols } = await fieldAccessP;
   return NextResponse.json({ data: stripHidden(rows, hiddenCols), total: totalCount || rows.length, error: null }, { headers: { "x-row-count": String(rows.length) } });
 }
 
