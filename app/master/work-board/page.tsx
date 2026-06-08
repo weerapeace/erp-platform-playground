@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * บอร์ดจ่ายงาน (Whiteboard) — เฟส D · ปรับหน้าตาให้เหมือนบอร์ด Tasks (การ์ดแนวตั้ง + พื้นลายจุด)
+ * บอร์ดจ่ายงาน (Canvas / Whiteboard แบบ Miro) — เฟส D
+ * เลื่อน(pan)/ซูมได้ · ลากย้ายตำแหน่ง "โซนแผนก" ได้ (จำใน localStorage)
  * โซน "📥 รอจ่าย" (การ์ดใบสั่งผลิตที่ยังจ่ายไม่ครบ) + โซนแผนก (การ์ดใบจ่ายงาน)
- * ลาก MO → แผนก = popup จ่ายงาน (จำนวน/ช่าง/กำหนดเสร็จ) · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
+ * ลากการ์ด MO ปล่อยในโซนแผนก = popup จ่ายงาน · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
  * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีตามแบรนด์ + ปุ่มตั้งสี
  */
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { DndContext, DragOverlay, type DragStartEvent, type DragEndEvent, PointerSensor, useSensor, useSensors, useDraggable, useDroppable } from "@dnd-kit/core";
+import { useState, useEffect, useCallback, useMemo, useRef, type PointerEvent as RPE } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -23,6 +23,13 @@ type PendingMO = {
   image_url: string | null; brand: string | null; brand_color: string | null;
 };
 type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[] };
+type Pos = { x: number; y: number };
+type Viewport = { x: number; y: number; scale: number };
+type Inter =
+  | { type: "pan"; sx: number; sy: number; ox: number; oy: number }
+  | { type: "zone"; key: string; sx: number; sy: number; ox: number; oy: number }
+  | { type: "card"; kind: "mo" | "wo"; id: string; sourceKey: string }
+  | null;
 
 const WO_STATUS: Record<string, { label: string; cls: string }> = {
   dispatched:     { label: "จ่ายแล้ว",       cls: "bg-blue-50 text-blue-700 border-blue-200" },
@@ -32,11 +39,13 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 
+const ZONE_W = 300, HEADER_H = 48, CARD_SLOT = 150, PAD = 12, GAP = 40, INNER_W = ZONE_W - PAD * 2;
+const ZONES_KEY = "erp-workboard-zones:v1";
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
 const PALETTE = ["#94a3b8", "#60a5fa", "#34d399", "#f472b6", "#fb923c", "#a78bfa", "#22d3ee", "#facc15"];
 const prodColor = (sku: string | null) => { let h = 0; for (const c of sku ?? "") h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; };
-// สีหัวโซนแผนก (แถบบน + จุด) แบบ Tasks
-const ACCENT = ["border-t-indigo-400", "border-t-blue-400", "border-t-emerald-400", "border-t-rose-400", "border-t-violet-400", "border-t-cyan-400"];
-const DOT = ["bg-indigo-400", "bg-blue-400", "bg-emerald-400", "bg-rose-400", "bg-violet-400", "bg-cyan-400"];
+const ACCENT = ["#fbbf24", "#818cf8", "#60a5fa", "#34d399", "#fb7185", "#a78bfa", "#22d3ee"];
 
 type Urg = "green" | "orange" | "red";
 function urgencyByDate(due: string | null, done: boolean): Urg {
@@ -62,6 +71,8 @@ const daysLeftText = (due: string | null) => {
 };
 const stageOfDept = (name: string) => (name.includes("ตัด") || name.includes("เตรียม") ? "cut" : "assemble");
 
+type Zone = { key: string; label: string; kind: "pending" | "dept"; dept?: Dept; accent: string; moCards: PendingMO[]; woCards: WorkOrder[] };
+
 export default function WorkBoardPage() {
   const canView = usePermission("products.view");
   const canEdit = usePermission("products.edit");
@@ -71,8 +82,17 @@ export default function WorkBoardPage() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
   const [loading, setLoading] = useState(true);
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
 
+  const boardRef = useRef<HTMLDivElement>(null);
+  const interRef = useRef<Inter>(null);
+  const movedRef = useRef(false);
+  const [vp, setVp] = useState<Viewport>({ x: 24, y: 16, scale: 0.85 });
+  const [zonePos, setZonePos] = useState<Record<string, Pos>>({});
+  const [tool, setTool] = useState<"select" | "pan">("select");
+  const [isMax, setIsMax] = useState(false);
+  const [drag, setDrag] = useState<{ kind: "mo" | "wo"; id: string; x: number; y: number } | null>(null);
+
+  // popup จ่ายงาน / ตั้งสี
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
   const [dispDept, setDispDept] = useState<Dept | null>(null);
   const [dispQty, setDispQty] = useState(0);
@@ -89,11 +109,10 @@ export default function WorkBoardPage() {
     } catch { /* ignore */ } finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void (async () => {
-    try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ }
-  })(); }, []);
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ } })(); }, []);
+  // โหลด/จำตำแหน่งโซน
+  useEffect(() => { try { const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r)); } catch { /* ignore */ } }, []);
+  useEffect(() => { try { localStorage.setItem(ZONES_KEY, JSON.stringify(zonePos)); } catch { /* ignore */ } }, [zonePos]);
 
   const wosByDept = useMemo(() => {
     const m = new Map<string, WorkOrder[]>();
@@ -107,32 +126,100 @@ export default function WorkBoardPage() {
     return m;
   }, [board]);
 
-  const openColor = async () => { setColorOpen(true); try { const r = await apiFetch("/api/brands"); const j = await r.json(); setBrands(j.data ?? []); } catch { /* ignore */ } };
-  const saveColor = async (id: string, color: string) => {
-    setBrands((bs) => bs.map((b) => b.id === id ? { ...b, color } : b));
-    try { await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, color }) }); }
-    catch { toast.error("บันทึกสีไม่สำเร็จ"); }
+  const zones: Zone[] = useMemo(() => {
+    const arr: Zone[] = [{ key: "pending", label: "📥 รอจ่าย", kind: "pending", accent: ACCENT[0], moCards: board.pending, woCards: [] }];
+    board.departments.forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
+    return arr;
+  }, [board, wosByDept]);
+
+  const zoneIndex = useMemo(() => { const m: Record<string, number> = {}; zones.forEach((z, i) => { m[z.key] = i; }); return m; }, [zones]);
+  const posOfZone = useCallback((key: string): Pos => zonePos[key] ?? { x: (zoneIndex[key] ?? 0) * (ZONE_W + GAP), y: 0 }, [zonePos, zoneIndex]);
+  const countOf = (z: Zone) => (z.kind === "pending" ? z.moCards.length : z.woCards.length);
+  const zoneH = (z: Zone) => HEADER_H + Math.max(1, countOf(z)) * CARD_SLOT + PAD;
+
+  const screenToWorld = (cx: number, cy: number): Pos => {
+    const r = boardRef.current!.getBoundingClientRect();
+    return { x: (cx - r.left - vp.x) / vp.scale, y: (cy - r.top - vp.y) / vp.scale };
+  };
+  const hitZone = (wx: number, wy: number): Zone | null => {
+    for (const z of zones) { const p = posOfZone(z.key); if (wx >= p.x && wx <= p.x + ZONE_W && wy >= p.y && wy <= p.y + zoneH(z)) return z; }
+    return null;
   };
 
-  const onDragEnd = async (e: DragEndEvent) => {
-    setActiveId(null);
-    const a = String(e.active.id); const over = e.over ? String(e.over.id) : null;
-    if (!over || !over.startsWith("dept:")) return;
-    const deptId = over.slice(5);
-    const dept = board.departments.find((d) => d.id === deptId); if (!dept) return;
-    if (!canEdit) { toast.error("คุณไม่มีสิทธิ์แก้ไข"); return; }
+  // ---- zoom ----
+  useEffect(() => {
+    const el = boardRef.current; if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top;
+      const f = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setVp((v) => { const ns = clamp(v.scale * f, 0.3, 1.8); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+  const zoomBtn = (f: number) => { const el = boardRef.current; if (!el) return; const r = el.getBoundingClientRect(); const sx = r.width / 2, sy = r.height / 2;
+    setVp((v) => { const ns = clamp(v.scale * f, 0.3, 1.8); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; }); };
+  const resetView = () => setVp({ x: 24, y: 16, scale: 0.85 });
+  const resetZones = () => setZonePos({});
 
-    if (a.startsWith("mo:")) {
-      const mo = board.pending.find((m) => m.id === a.slice(3)); if (!mo) return;
-      setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
-    } else if (a.startsWith("wo:")) {
-      const id = a.slice(3); const w = board.workOrders.find((x) => x.id === id); if (!w || w.department_id === deptId) return;
-      setBoard((b) => ({ ...b, workOrders: b.workOrders.map((x) => x.id === id ? { ...x, department_id: deptId, department_name: dept.name } : x) }));
-      try {
-        const res = await apiFetch(`/api/mo/work-orders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: deptId, department_name: dept.name, stage: stageOfDept(dept.name) }) });
+  // ---- pointer ----
+  const onBoardDown = (e: RPE) => {
+    boardRef.current?.setPointerCapture(e.pointerId);
+    interRef.current = { type: "pan", sx: e.clientX, sy: e.clientY, ox: vp.x, oy: vp.y };
+  };
+  const onZoneDown = (e: RPE, key: string) => {
+    if (tool === "pan") return; // ให้ pan ทำงาน
+    e.stopPropagation();
+    boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
+    const p = posOfZone(key);
+    interRef.current = { type: "zone", key, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
+  };
+  const onCardDown = (e: RPE, kind: "mo" | "wo", id: string, sourceKey: string) => {
+    if (tool === "pan" || !canEdit) return;
+    e.stopPropagation();
+    boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
+    interRef.current = { type: "card", kind, id, sourceKey };
+    setDrag({ kind, id, x: e.clientX, y: e.clientY });
+  };
+  const onMove = (e: RPE) => {
+    const it = interRef.current; if (!it) return;
+    if (it.type === "pan" || it.type === "zone") {
+      const dx = e.clientX - it.sx, dy = e.clientY - it.sy;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
+      if (it.type === "pan") setVp((v) => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
+      else setZonePos((zp) => ({ ...zp, [it.key]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
+    } else if (it.type === "card") { movedRef.current = true; setDrag((d) => d ? { ...d, x: e.clientX, y: e.clientY } : d); }
+  };
+  const onUp = async (e: RPE) => {
+    const it = interRef.current; interRef.current = null;
+    try { boardRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (!it) return;
+    if (it.type !== "card") return;
+    setDrag(null);
+    if (!movedRef.current) return;
+    const w = screenToWorld(e.clientX, e.clientY);
+    const target = hitZone(w.x, w.y);
+    if (!target || target.kind !== "dept" || !target.dept) return;
+    if (it.kind === "mo") {
+      const mo = board.pending.find((m) => m.id === it.id); if (!mo) return;
+      setDispMO(mo); setDispDept(target.dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
+    } else {
+      const wo = board.workOrders.find((x) => x.id === it.id); if (!wo || wo.department_id === target.dept.id) return;
+      const d = target.dept;
+      setBoard((b) => ({ ...b, workOrders: b.workOrders.map((x) => x.id === it.id ? { ...x, department_id: d.id, department_name: d.name } : x) }));
+      try { const res = await apiFetch(`/api/mo/work-orders/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: d.id, department_name: d.name, stage: stageOfDept(d.name) }) });
         const j = await res.json(); if (j.error) throw new Error(j.error);
       } catch (err) { toast.error(err instanceof Error ? err.message : "ย้ายไม่สำเร็จ"); await load(); }
     }
+  };
+
+  // ---- ตั้งสีแบรนด์ ----
+  const openColor = async () => { setColorOpen(true); try { const r = await apiFetch("/api/brands"); const j = await r.json(); setBrands(j.data ?? []); } catch { /* ignore */ } };
+  const saveColor = async (id: string, color: string) => {
+    setBrands((bs) => bs.map((b) => b.id === id ? { ...b, color } : b));
+    try { await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, color }) }); await load(); }
+    catch { toast.error("บันทึกสีไม่สำเร็จ"); }
   };
 
   const submitDispatch = async () => {
@@ -145,63 +232,85 @@ export default function WorkBoardPage() {
         body: JSON.stringify({ mo_no: dispMO.mo_no, product_sku: dispMO.product_sku, product_name: dispMO.product_name,
           stage: stageOfDept(dispDept.name), department_id: dispDept.id, department_name: dispDept.name,
           assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? dispDept.name,
-          qty: dispQty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: dispDue || null,
-          note: `จากใบสั่งผลิต ${dispMO.mo_no}` }) });
+          qty: dispQty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}` }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`จ่ายงานเข้า ${dispDept.name} แล้ว: ${j.wo_no ?? ""}`);
       setDispMO(null); setDispDept(null); await load();
     } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
     finally { setDispSaving(false); }
   };
-
   const deptCraftsmen = useMemo(() => dispDept ? craftsmen.filter((c) => c.department_id === dispDept.id) : [], [dispDept, craftsmen]);
 
-  // การ์ดที่กำลังลาก (สำหรับ DragOverlay)
-  const activeOverlay = useMemo(() => {
-    if (!activeId) return null;
-    if (activeId.startsWith("mo:")) { const mo = board.pending.find((m) => m.id === activeId.slice(3)); return mo ? <PendingBody mo={mo} dragging /> : null; }
-    if (activeId.startsWith("wo:")) { const w = board.workOrders.find((x) => x.id === activeId.slice(3)); return w ? <WOBody w={w} dragging /> : null; }
-    return null;
-  }, [activeId, board]);
+  const dragBody = useMemo(() => {
+    if (!drag) return null;
+    if (drag.kind === "mo") { const m = board.pending.find((x) => x.id === drag.id); return m ? <PendingBody mo={m} dragging /> : null; }
+    const w = board.workOrders.find((x) => x.id === drag.id); return w ? <WOBody w={w} dragging /> : null;
+  }, [drag, board]);
 
   if (!canView) return <AccessDenied />;
 
   return (
-    <div className="max-w-[1700px] mx-auto px-5 py-5">
+    <div className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "max-w-[1700px] mx-auto px-5 py-5"}>
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">📋 บอร์ดจ่ายงาน</h1>
-          <p className="text-sm text-slate-500 mt-0.5">ลากใบสั่งผลิตจาก “รอจ่าย” ไปวางที่แผนก = จ่ายงาน · ลากการ์ดข้ามแผนก = ย้ายแผนก</p>
+          <p className="text-sm text-slate-500 mt-0.5">ลากการ์ดจาก “รอจ่าย” ไปวางที่แผนก = จ่ายงาน · ลากการ์ดข้ามแผนก = ย้าย · ลากหัวโซน = ย้ายตำแหน่งแผนก</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
-          <button onClick={() => void load()} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">↻</button>
         </div>
       </div>
 
-      {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div> : (
-        <DndContext sensors={sensors} onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))} onDragEnd={onDragEnd}>
-          <div className="flex gap-3 overflow-x-auto pb-3 rounded-xl border border-slate-200 p-3"
-            style={{ minHeight: "64vh", backgroundColor: "#fafbfc", backgroundImage: "radial-gradient(circle, #d8dee9 1px, transparent 1px)", backgroundSize: "18px 18px" }}>
-            {/* โซนรอจ่าย */}
-            <div className="flex flex-col w-72 shrink-0">
-              <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4 border-t-amber-400">
-                <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-400" /><span className="text-sm font-semibold text-slate-700">📥 รอจ่าย</span></div>
-                <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{board.pending.length}</span>
-              </div>
-              <div className="flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 bg-amber-50/40">
-                {board.pending.map((m) => <PendingCard key={m.id} mo={m} canEdit={canEdit} dim={activeId === `mo:${m.id}`} />)}
-                {board.pending.length === 0 && <div className="h-20 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">ไม่มีงานรอจ่าย</div>}
-              </div>
-            </div>
+      {/* Toolbar */}
+      <div className="z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit mb-2">
+        <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
+        <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
+        <Sep />
+        <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title="ซูมออก">➖</ToolBtn>
+        <span className="text-xs text-slate-500 tabular-nums w-10 text-center">{Math.round(vp.scale * 100)}%</span>
+        <ToolBtn onClick={() => zoomBtn(1.2)} title="ซูมเข้า">➕</ToolBtn>
+        <Sep />
+        <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
+        <ToolBtn onClick={resetZones} title="จัดเรียงโซนใหม่">↺</ToolBtn>
+        <ToolBtn onClick={() => void load()} title="โหลดใหม่">⟳</ToolBtn>
+        <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
+      </div>
 
-            {/* โซนแผนก */}
-            {board.departments.map((d, i) => <DeptZone key={d.id} dept={d} cards={wosByDept.get(d.id) ?? []} canEdit={canEdit} idx={i} activeId={activeId} />)}
-            {board.departments.length === 0 && <div className="text-slate-300 text-sm py-10">ยังไม่มีแผนก (ตั้งที่ Master Data → แผนก)</div>}
+      {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div> : (
+        <div ref={boardRef} onPointerDown={onBoardDown} onPointerMove={onMove} onPointerUp={onUp}
+          className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isMax ? "flex-1" : "h-[calc(100vh-230px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : "cursor-default"}`}
+          style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
+          <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
+            {zones.map((z) => {
+              const p = posOfZone(z.key); const count = countOf(z);
+              return (
+                <div key={z.key} className="absolute rounded-2xl border-2 border-dashed bg-white/40" style={{ left: p.x, top: p.y, width: ZONE_W, minHeight: zoneH(z), borderColor: `${z.accent}88` }}>
+                  {/* หัวโซน (ลากย้าย) */}
+                  <div onPointerDown={(e) => onZoneDown(e, z.key)} title="ลากเพื่อย้ายตำแหน่งแผนก"
+                    className="flex items-center justify-between px-3 rounded-t-2xl cursor-move select-none" style={{ height: HEADER_H, background: `${z.accent}1f`, borderBottom: `2px solid ${z.accent}55` }}>
+                    <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ background: z.accent }} /><span className="text-base font-bold text-slate-700 truncate">{z.label}</span></div>
+                    <span className="text-xs font-medium text-slate-500 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
+                  </div>
+                  {/* การ์ด */}
+                  <div className="p-3 space-y-2">
+                    {z.kind === "pending"
+                      ? z.moCards.map((m) => <div key={m.id} onPointerDown={(e) => onCardDown(e, "mo", m.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "mo" && drag.id === m.id ? "opacity-30" : ""}`} style={{ width: INNER_W }}><PendingBody mo={m} /></div>)
+                      : z.woCards.map((w) => <div key={w.id} onPointerDown={(e) => onCardDown(e, "wo", w.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "wo" && drag.id === w.id ? "opacity-30" : ""}`} style={{ width: INNER_W }}><WOBody w={w} /></div>)}
+                    {count === 0 && <div className="h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg" style={{ width: INNER_W }}>{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <DragOverlay dropAnimation={null}>{activeOverlay ? <div className="w-[17rem]">{activeOverlay}</div> : null}</DragOverlay>
-        </DndContext>
+
+          {/* การ์ดที่กำลังลาก (ลอยตามเมาส์) */}
+          {drag && dragBody && (
+            <div className="fixed z-[70] pointer-events-none" style={{ left: drag.x, top: drag.y, width: INNER_W * vp.scale, transform: "translate(-50%,-50%) rotate(2deg)" }}>
+              <div style={{ width: INNER_W, transform: `scale(${vp.scale})`, transformOrigin: "top left" }}>{dragBody}</div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* popup จ่ายงาน */}
@@ -253,22 +362,9 @@ export default function WorkBoardPage() {
   );
 }
 
-// ---- โซนแผนก (droppable) — หัวโซนสไตล์ Tasks ----
-function DeptZone({ dept, cards, canEdit, idx, activeId }: { dept: Dept; cards: WorkOrder[]; canEdit: boolean; idx: number; activeId: string | null }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `dept:${dept.id}` });
-  const total = cards.reduce((s, c) => s + (c.qty || 0), 0);
-  return (
-    <div className="flex flex-col w-72 shrink-0">
-      <div className={`flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4 ${ACCENT[idx % ACCENT.length]}`}>
-        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${DOT[idx % DOT.length]}`} /><span className="text-sm font-semibold text-slate-700 truncate">{dept.name}</span></div>
-        <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{cards.length}</span>
-      </div>
-      <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-indigo-50" : "bg-slate-50/60"}`}>
-        {cards.map((w) => <WOCard key={w.id} w={w} canEdit={canEdit} dim={activeId === `wo:${w.id}`} />)}
-        {cards.length === 0 && <div className="h-20 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">ลากงานมาวางที่นี่</div>}
-      </div>
-    </div>
-  );
+function Sep() { return <span className="w-px h-6 bg-slate-200 mx-0.5" />; }
+function ToolBtn({ active, onClick, title, children }: { active?: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+  return <button onClick={onClick} title={title} className={`h-8 min-w-8 px-1.5 flex items-center justify-center rounded-md text-sm transition-colors ${active ? "bg-indigo-100 ring-1 ring-indigo-300" : "hover:bg-slate-100"}`}>{children}</button>;
 }
 
 // ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) ----
@@ -276,7 +372,7 @@ function PendingBody({ mo, dragging }: { mo: PendingMO; dragging?: boolean }) {
   const urg = urgencyByDate(mo.due_date, false);
   const border = mo.brand_color || prodColor(mo.product_sku);
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300 rotate-1" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
+    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
       <div className="flex items-center justify-between gap-2 mb-2">
         {mo.brand ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border" style={{ background: `${border}18`, color: border, borderColor: `${border}55` }}>{mo.brand}</span> : <span className="text-[10px] text-slate-400">ใบสั่งผลิต</span>}
         <div className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${URG_DOT[urg]}`} /><span className="font-mono text-[10px] text-slate-400">{mo.mo_no}</span></div>
@@ -294,14 +390,6 @@ function PendingBody({ mo, dragging }: { mo: PendingMO; dragging?: boolean }) {
     </div>
   );
 }
-function PendingCard({ mo, canEdit, dim }: { mo: PendingMO; canEdit: boolean; dim: boolean }) {
-  const { attributes, listeners, setNodeRef } = useDraggable({ id: `mo:${mo.id}`, disabled: !canEdit });
-  return (
-    <div ref={setNodeRef} {...listeners} {...attributes} className={`touch-none ${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${dim ? "opacity-40" : ""}`}>
-      <PendingBody mo={mo} />
-    </div>
-  );
-}
 
 // ---- เนื้อการ์ดใบจ่ายงาน (ในแผนก) ----
 function WOBody({ w, dragging }: { w: WorkOrder; dragging?: boolean }) {
@@ -309,7 +397,7 @@ function WOBody({ w, dragging }: { w: WorkOrder; dragging?: boolean }) {
   const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
   const border = w.brand_color || prodColor(w.product_sku);
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300 rotate-1" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
+    <div className={`bg-white rounded-lg border border-slate-200 p-3 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
       <div className="flex items-center justify-between gap-2 mb-2">
         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${st.cls}`}>{st.label}</span>
         <div className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${URG_DOT[urg]}`} /><span className="font-mono text-[10px] text-slate-400">{w.wo_no}</span></div>
@@ -327,14 +415,6 @@ function WOBody({ w, dragging }: { w: WorkOrder; dragging?: boolean }) {
         <span className="tabular-nums text-slate-600">{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
         <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(w.due_date)}</span>
       </div>
-    </div>
-  );
-}
-function WOCard({ w, canEdit, dim }: { w: WorkOrder; canEdit: boolean; dim: boolean }) {
-  const { attributes, listeners, setNodeRef } = useDraggable({ id: `wo:${w.id}`, disabled: !canEdit });
-  return (
-    <div ref={setNodeRef} {...listeners} {...attributes} className={`touch-none ${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${dim ? "opacity-40" : ""}`}>
-      <WOBody w={w} />
     </div>
   );
 }
