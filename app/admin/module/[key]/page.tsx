@@ -544,7 +544,7 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
               className="px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">ไม่เลือก</button>
           </div>
         </div>
-        <p className="text-xs text-slate-500 mb-3">เปิดตารางครั้งแรกจะโชว์คอลัมน์ที่ติ๊กไว้ · ผู้ใช้ปรับเองได้ภายหลัง (จัดลำดับ/ความกว้างที่ “ตัวจัดเลย์เอาต์เต็ม” ด้านล่าง)</p>
+        <p className="text-xs text-slate-500 mb-3">เปิดตารางครั้งแรกจะโชว์คอลัมน์ที่ติ๊กไว้ · ผู้ใช้ปรับเองได้ภายหลัง (จัดลำดับ/ความกว้างที่ “ตัวจัดเลย์เอาต์เต็ม” ด้านล่าง) · ป้าย <span className="px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-medium">ซ่อน</span> = field ที่ตั้งให้ซ่อนไว้ (ยังติ๊กให้โชว์ในตารางนี้ได้)</p>
         {fields.length === 0 ? (
           <div className="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg p-3 text-center">— ไม่มีคอลัมน์ —</div>
         ) : (
@@ -554,7 +554,10 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
                 <input type="checkbox" checked={colVis[f.value] ?? true}
                   onChange={(e) => setColVis((p) => ({ ...p, [f.value]: e.target.checked }))}
                   className="rounded border-slate-300 w-4 h-4" />
-                <span className="flex-1 min-w-0 truncate">{f.label}</span>
+                <span className={`flex-1 min-w-0 truncate inline-flex items-center gap-1.5 ${f.visible ? "" : "text-slate-400"}`}>
+                  <span className="truncate">{f.label}</span>
+                  {!f.visible && <span className="shrink-0 px-1 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-medium" title="field นี้ถูกตั้งให้ซ่อน (is_visible=false) — ติ๊กเพื่อบังคับโชว์ในตารางนี้">ซ่อน</span>}
+                </span>
                 <code className="text-[10px] text-slate-400 shrink-0">{f.value}</code>
               </label>
             ))}
