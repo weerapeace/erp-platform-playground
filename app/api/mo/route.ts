@@ -29,6 +29,7 @@ export type MoMaterial = {
 /** กางสูตร: ดึง bom_lines ของ bomCode → insert mo_materials (required = qty_per × moQty) */
 export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCode: string | null, moNo: string, moQty: number) {
   await admin.from("mo_materials").delete().eq("mo_no", moNo);
+  await admin.from("mo_material_summary").delete().eq("mo_no", moNo);
   if (!bomCode) return;
   const { data: lines } = await admin.from("bom_lines").select("*").eq("bom_code", bomCode).eq("is_active", true)
     .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
@@ -66,6 +67,22 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     };
   });
   await admin.from("mo_materials").insert(mats);
+
+  // สรุปต่อวัตถุดิบ (รวมตัวเดียวกันจากหลายบล็อก)
+  const r4 = (n: number) => Math.round(n * 10000) / 10000;
+  const byKey = new Map<string, { sku: string | null; name: string | null; type: string | null; uom: string | null; qtyPer: number }>();
+  for (const m of mats) {
+    const k = m.component_sku ?? "∅";
+    const e = byKey.get(k);
+    if (e) e.qtyPer += m.qty_per || 0;
+    else byKey.set(k, { sku: m.component_sku, name: m.component_name, type: m.material_type, uom: m.uom, qtyPer: m.qty_per || 0 });
+  }
+  const sumRows = [...byKey.values()].map((e, i) => ({
+    mo_no: moNo, component_sku: e.sku, component_name: e.name, material_type: e.type, uom: e.uom,
+    qty_per: r4(e.qtyPer), required_qty: r4(e.qtyPer * (moQty || 0)),
+    on_hand_qty: 0, to_purchase_qty: r4(e.qtyPer * (moQty || 0)), is_ready: false, sequence: i + 1, is_active: true,
+  }));
+  if (sumRows.length > 0) await admin.from("mo_material_summary").insert(sumRows);
 }
 
 async function nextMoNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string> {

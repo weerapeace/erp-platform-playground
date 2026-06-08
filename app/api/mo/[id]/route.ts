@@ -18,9 +18,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const supabase = supabaseFromRequest(_request);
   const { data: header, error } = await supabase.from("manufacturing_orders").select("*").eq("id", id).single();
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 404 });
-  const { data: materials } = await supabase.from("mo_materials").select("*").eq("mo_no", (header as { mo_no: string }).mo_no).eq("is_active", true)
+  const moNo = (header as { mo_no: string }).mo_no;
+  const { data: materials } = await supabase.from("mo_materials").select("*").eq("mo_no", moNo).eq("is_active", true)
     .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
-  return NextResponse.json({ data: { ...header, materials: materials ?? [] }, error: null });
+  const { data: summary } = await supabase.from("mo_material_summary").select("*").eq("mo_no", moNo).eq("is_active", true)
+    .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
+  return NextResponse.json({ data: { ...header, materials: materials ?? [], summary: summary ?? [] }, error: null });
 }
 
 type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };
@@ -58,9 +61,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (reexploded) {
     await explodeBom(admin, newBom ?? null, moNo, newQty);
   } else if (Array.isArray(body.materials)) {
-    // อัปเดต checklist เตรียม/จำนวนที่มี/ขอซื้อ (เฉพาะเมื่อไม่ได้กางสูตรใหม่)
+    // อัปเดต checklist เตรียม/จำนวนที่มี/ขอซื้อ ที่ "สรุปต่อวัตถุดิบ" (เฉพาะเมื่อไม่ได้กางสูตรใหม่)
     for (const m of body.materials) {
-      await admin.from("mo_materials").update({
+      await admin.from("mo_material_summary").update({
         on_hand_qty: Number(m.on_hand_qty) || 0,
         is_ready: !!m.is_ready,
         to_purchase_qty: Number(m.to_purchase_qty) || 0,
