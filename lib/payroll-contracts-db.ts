@@ -7,6 +7,7 @@
  * soft delete = status → cancelled (กันลบสัญญาจริงที่มีเงินเดือนผูก)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { nullifyEmpty } from "@/lib/payroll-coerce";
 
 const TABLE = "employee_contracts";
 // ดึงทุกคอลัมน์ (เหมือนแอปเก่า)
@@ -98,7 +99,7 @@ async function toColumns(body: Record<string, unknown>): Promise<Record<string, 
     out.status = body.active === true || body.active === "true" ? "active" : "cancelled";
   }
   if ("company_name" in body) out.company_id = await nameToCompanyId(String(body.company_name ?? ""));
-  for (const k of ["end_date"]) { if (out[k] === "") out[k] = null; }
+  nullifyEmpty(out);   // '' → null สำหรับ uuid(_id)/date/timestamp ทั้งหมด
   return out;
 }
 

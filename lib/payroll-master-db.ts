@@ -8,6 +8,7 @@
  * soft delete เท่านั้น (เปลี่ยน status) — กันลบข้อมูลจริง
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { nullifyEmpty } from "@/lib/payroll-coerce";
 
 type Relation = { field: string; table: string; as: string; select?: string; labelOf?: (r: Record<string, unknown>) => string };
 type EntityCfg = {
@@ -116,7 +117,7 @@ async function relationMap(rel: Relation): Promise<Record<string, string>> {
   const { data } = await supabaseAdmin().from(rel.table).select(rel.select ?? "id, name");
   const m: Record<string, string> = {};
   (data ?? []).forEach((r) => {
-    const row = r as Record<string, unknown>;
+    const row = r as unknown as Record<string, unknown>;
     m[String(row.id)] = rel.labelOf ? rel.labelOf(row) : String(row.name ?? "");
   });
   return m;
@@ -141,7 +142,7 @@ export async function listMaster(cfg: EntityCfg, includeInactive: boolean): Prom
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   const relMap = cfg.relation ? await relationMap(cfg.relation) : null;
-  return (data ?? []).map((r) => decorate(cfg, r as Record<string, unknown>, relMap));
+  return (data ?? []).map((r) => decorate(cfg, r as unknown as Record<string, unknown>, relMap));
 }
 
 export async function getMaster(cfg: EntityCfg, id: string): Promise<MasterRow | null> {
@@ -149,7 +150,7 @@ export async function getMaster(cfg: EntityCfg, id: string): Promise<MasterRow |
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
   const relMap = cfg.relation ? await relationMap(cfg.relation) : null;
-  return decorate(cfg, data[0] as Record<string, unknown>, relMap);
+  return decorate(cfg, data[0] as unknown as Record<string, unknown>, relMap);
 }
 
 async function toColumns(cfg: EntityCfg, body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -164,7 +165,7 @@ async function toColumns(cfg: EntityCfg, body: Record<string, unknown>): Promise
   if (cfg.relation && cfg.relation.as in body) {
     out[cfg.relation.field] = await nameToId(cfg.relation, String(body[cfg.relation.as] ?? ""));
   }
-  for (const k of ["start_date", "end_date", "payment_date", "holiday_date", "warning_date"]) { if (out[k] === "") out[k] = null; }
+  nullifyEmpty(out);   // '' → null สำหรับ uuid(_id)/date/timestamp ทั้งหมด
   return out;
 }
 
@@ -178,7 +179,7 @@ export async function createMaster(cfg: EntityCfg, body: Record<string, unknown>
   const { data, error } = await supabaseAdmin().from(cfg.table).insert(cols).select(cfg.cols).limit(1);
   if (error) throw new Error(error.message);
   const relMap = cfg.relation ? await relationMap(cfg.relation) : null;
-  return decorate(cfg, data![0] as Record<string, unknown>, relMap);
+  return decorate(cfg, data![0] as unknown as Record<string, unknown>, relMap);
 }
 
 export async function updateMaster(cfg: EntityCfg, id: string, body: Record<string, unknown>): Promise<MasterRow | null> {
@@ -188,7 +189,7 @@ export async function updateMaster(cfg: EntityCfg, id: string, body: Record<stri
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
   const relMap = cfg.relation ? await relationMap(cfg.relation) : null;
-  return decorate(cfg, data[0] as Record<string, unknown>, relMap);
+  return decorate(cfg, data[0] as unknown as Record<string, unknown>, relMap);
 }
 
 export async function softDeleteMaster(cfg: EntityCfg, id: string): Promise<boolean> {

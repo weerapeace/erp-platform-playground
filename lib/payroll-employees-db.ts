@@ -11,6 +11,7 @@
  *   - ทุก mutation เขียน audit log กลาง (writeAudit → audit_logs)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { nullifyEmpty } from "@/lib/payroll-coerce";
 
 const TABLE = "employees";
 // ดึงทุกคอลัมน์ (เหมือนแอปเก่า) — field ใหม่ที่เพิ่มใน DB ก็ติดมาอัตโนมัติ
@@ -34,8 +35,6 @@ const WRITABLE = new Set([
   // ตำแหน่ง/สังกัด (relation picker → เก็บ FK id ตรง)
   "position_id", "cost_center_id",
 ]);
-/** คอลัมน์วันที่ที่ต้องแปลง '' → null */
-const DATE_COLS = ["start_date", "resign_date", "birth_date", "work_permit_id_expire_date"];
 
 async function deptMap(): Promise<Record<string, string>> {
   const { data } = await supabaseAdmin().from("departments").select("id, name");
@@ -164,10 +163,8 @@ async function toColumns(body: Record<string, unknown>): Promise<Record<string, 
   if ("department_name" in body) {
     out.department_id = await nameToDeptId(String(body.department_name ?? ""));
   }
-  // ช่องว่าง → null (กัน '' ลง column ที่เป็น date)
-  for (const k of DATE_COLS) {
-    if (out[k] === "") out[k] = null;
-  }
+  // ช่องว่าง → null สำหรับ uuid(_id)/date/timestamp ทั้งหมด (กัน error type uuid/date: "")
+  nullifyEmpty(out);
   return out;
 }
 
@@ -186,7 +183,7 @@ export async function createEmployee(body: Record<string, unknown>): Promise<Emp
   const { data, error } = await supabaseAdmin().from(TABLE).insert(insert).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   const dmap = await deptMap();
-  return decorate(data![0] as Record<string, unknown>, dmap);
+  return decorate(data![0] as unknown as Record<string, unknown>, dmap, {});
 }
 
 export async function updateEmployee(id: string, body: Record<string, unknown>): Promise<EmployeeRow | null> {
@@ -196,7 +193,7 @@ export async function updateEmployee(id: string, body: Record<string, unknown>):
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
   const dmap = await deptMap();
-  return decorate(data[0] as Record<string, unknown>, dmap);
+  return decorate(data[0] as unknown as Record<string, unknown>, dmap, {});
 }
 
 /** soft delete เท่านั้น — เปลี่ยนสถานะเป็น inactive (กันลบข้อมูลจริง) */

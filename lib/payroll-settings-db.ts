@@ -5,6 +5,7 @@
  * ใช้ใน Phase 3 (เครื่องคำนวณ) → ห้ามดึงมาไม่ครบ
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { nullifyEmpty } from "@/lib/payroll-coerce";
 
 const TABLE = "employee_payroll_settings";
 const SELECT = "*";
@@ -47,6 +48,7 @@ function toColumns(body: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(body)) { if (WRITABLE.has(k)) out[k] = v; }
   for (const k of NUMERIC) { if (k in out) out[k] = Number(out[k]) || 0; }
+  nullifyEmpty(out);   // '' → null สำหรับ uuid(_id)/date/timestamp
   return out;
 }
 
