@@ -25,9 +25,11 @@ type PendingMO = {
 type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[] };
 type Pos = { x: number; y: number };
 type Viewport = { x: number; y: number; scale: number };
+type Size = { w: number; h: number };
 type Inter =
   | { type: "pan"; sx: number; sy: number; ox: number; oy: number }
   | { type: "zone"; key: string; sx: number; sy: number; ox: number; oy: number }
+  | { type: "resize"; key: string; sx: number; sy: number; ow: number; oh: number }
   | { type: "card"; kind: "mo" | "wo"; id: string; sourceKey: string }
   | null;
 
@@ -39,8 +41,9 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 
-const ZONE_W = 240, HEADER_H = 48, CARD_SLOT = 224, PAD = 12, GAP = 40, INNER_W = ZONE_W - PAD * 2;
+const ZONE_W = 240, HEADER_H = 48, CARD_SLOT = 300, PAD = 12, GAP = 40, INNER_W = ZONE_W - PAD * 2;
 const ZONES_KEY = "erp-workboard-zones:v1";
+const ZONESIZE_KEY = "erp-workboard-zonesizes:v1";
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 const PALETTE = ["#94a3b8", "#60a5fa", "#34d399", "#f472b6", "#fb923c", "#a78bfa", "#22d3ee", "#facc15"];
@@ -88,6 +91,7 @@ export default function WorkBoardPage() {
   const movedRef = useRef(false);
   const [vp, setVp] = useState<Viewport>({ x: 24, y: 16, scale: 0.85 });
   const [zonePos, setZonePos] = useState<Record<string, Pos>>({});
+  const [zoneSize, setZoneSize] = useState<Record<string, Size>>({});
   const [tool, setTool] = useState<"select" | "pan">("select");
   const [isMax, setIsMax] = useState(false);
   const [drag, setDrag] = useState<{ kind: "mo" | "wo"; id: string; x: number; y: number } | null>(null);
@@ -111,8 +115,9 @@ export default function WorkBoardPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ } })(); }, []);
   // โหลด/จำตำแหน่งโซน
-  useEffect(() => { try { const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r)); } catch { /* ignore */ } }, []);
+  useEffect(() => { try { const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r)); const s = localStorage.getItem(ZONESIZE_KEY); if (s) setZoneSize(JSON.parse(s)); } catch { /* ignore */ } }, []);
   useEffect(() => { try { localStorage.setItem(ZONES_KEY, JSON.stringify(zonePos)); } catch { /* ignore */ } }, [zonePos]);
+  useEffect(() => { try { localStorage.setItem(ZONESIZE_KEY, JSON.stringify(zoneSize)); } catch { /* ignore */ } }, [zoneSize]);
 
   const wosByDept = useMemo(() => {
     const m = new Map<string, WorkOrder[]>();
@@ -135,14 +140,19 @@ export default function WorkBoardPage() {
   const zoneIndex = useMemo(() => { const m: Record<string, number> = {}; zones.forEach((z, i) => { m[z.key] = i; }); return m; }, [zones]);
   const posOfZone = useCallback((key: string): Pos => zonePos[key] ?? { x: (zoneIndex[key] ?? 0) * (ZONE_W + GAP), y: 0 }, [zonePos, zoneIndex]);
   const countOf = (z: Zone) => (z.kind === "pending" ? z.moCards.length : z.woCards.length);
-  const zoneH = (z: Zone) => HEADER_H + Math.max(1, countOf(z)) * CARD_SLOT + PAD;
+  const zoneWof = useCallback((key: string) => zoneSize[key]?.w ?? ZONE_W, [zoneSize]);
+  const innerWof = useCallback((key: string) => zoneWof(key) - PAD * 2, [zoneWof]);
+  const zoneH = useCallback((z: Zone) => {
+    const auto = HEADER_H + Math.max(1, countOf(z)) * CARD_SLOT + PAD;
+    return Math.max(auto, zoneSize[z.key]?.h ?? 0);
+  }, [zoneSize]);
 
   const screenToWorld = (cx: number, cy: number): Pos => {
     const r = boardRef.current!.getBoundingClientRect();
     return { x: (cx - r.left - vp.x) / vp.scale, y: (cy - r.top - vp.y) / vp.scale };
   };
   const hitZone = (wx: number, wy: number): Zone | null => {
-    for (const z of zones) { const p = posOfZone(z.key); if (wx >= p.x && wx <= p.x + ZONE_W && wy >= p.y && wy <= p.y + zoneH(z)) return z; }
+    for (const z of zones) { const p = posOfZone(z.key); if (wx >= p.x && wx <= p.x + zoneWof(z.key) && wy >= p.y && wy <= p.y + zoneH(z)) return z; }
     return null;
   };
 
@@ -161,7 +171,7 @@ export default function WorkBoardPage() {
   const zoomBtn = (f: number) => { const el = boardRef.current; if (!el) return; const r = el.getBoundingClientRect(); const sx = r.width / 2, sy = r.height / 2;
     setVp((v) => { const ns = clamp(v.scale * f, 0.3, 1.8); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; }); };
   const resetView = () => setVp({ x: 24, y: 16, scale: 0.85 });
-  const resetZones = () => setZonePos({});
+  const resetZones = () => { setZonePos({}); setZoneSize({}); };
 
   // ---- pointer ----
   const onBoardDown = (e: RPE) => {
@@ -175,6 +185,11 @@ export default function WorkBoardPage() {
     const p = posOfZone(key);
     interRef.current = { type: "zone", key, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
   };
+  const onZoneResizeDown = (e: RPE, z: Zone) => {
+    e.stopPropagation();
+    boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
+    interRef.current = { type: "resize", key: z.key, sx: e.clientX, sy: e.clientY, ow: zoneWof(z.key), oh: zoneH(z) };
+  };
   const onCardDown = (e: RPE, kind: "mo" | "wo", id: string, sourceKey: string) => {
     if (tool === "pan" || !canEdit) return;
     e.stopPropagation();
@@ -184,11 +199,12 @@ export default function WorkBoardPage() {
   };
   const onMove = (e: RPE) => {
     const it = interRef.current; if (!it) return;
-    if (it.type === "pan" || it.type === "zone") {
+    if (it.type === "pan" || it.type === "zone" || it.type === "resize") {
       const dx = e.clientX - it.sx, dy = e.clientY - it.sy;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
       if (it.type === "pan") setVp((v) => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
-      else setZonePos((zp) => ({ ...zp, [it.key]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
+      else if (it.type === "zone") setZonePos((zp) => ({ ...zp, [it.key]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
+      else setZoneSize((zs) => ({ ...zs, [it.key]: { w: clamp(it.ow + dx / vp.scale, 180, 560), h: Math.max(160, it.oh + dy / vp.scale) } }));
     } else if (it.type === "card") { movedRef.current = true; setDrag((d) => d ? { ...d, x: e.clientX, y: e.clientY } : d); }
   };
   const onUp = async (e: RPE) => {
@@ -283,9 +299,9 @@ export default function WorkBoardPage() {
           style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
           <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
             {zones.map((z) => {
-              const p = posOfZone(z.key); const count = countOf(z);
+              const p = posOfZone(z.key); const count = countOf(z); const zw = zoneWof(z.key); const iw = innerWof(z.key);
               return (
-                <div key={z.key} className="absolute rounded-2xl border-2 border-dashed bg-white/40" style={{ left: p.x, top: p.y, width: ZONE_W, minHeight: zoneH(z), borderColor: `${z.accent}88` }}>
+                <div key={z.key} className="absolute rounded-2xl border-2 border-dashed bg-white/40" style={{ left: p.x, top: p.y, width: zw, minHeight: zoneH(z), borderColor: `${z.accent}88` }}>
                   {/* หัวโซน (ลากย้าย) */}
                   <div onPointerDown={(e) => onZoneDown(e, z.key)} title="ลากเพื่อย้ายตำแหน่งแผนก"
                     className="flex items-center justify-between px-3 rounded-t-2xl cursor-move select-none" style={{ height: HEADER_H, background: `${z.accent}1f`, borderBottom: `2px solid ${z.accent}55` }}>
@@ -295,10 +311,13 @@ export default function WorkBoardPage() {
                   {/* การ์ด */}
                   <div className="p-3 space-y-2">
                     {z.kind === "pending"
-                      ? z.moCards.map((m) => <div key={m.id} onPointerDown={(e) => onCardDown(e, "mo", m.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "mo" && drag.id === m.id ? "opacity-30" : ""}`} style={{ width: INNER_W }}><PendingBody mo={m} /></div>)
-                      : z.woCards.map((w) => <div key={w.id} onPointerDown={(e) => onCardDown(e, "wo", w.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "wo" && drag.id === w.id ? "opacity-30" : ""}`} style={{ width: INNER_W }}><WOBody w={w} /></div>)}
-                    {count === 0 && <div className="h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg" style={{ width: INNER_W }}>{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
+                      ? z.moCards.map((m) => <div key={m.id} onPointerDown={(e) => onCardDown(e, "mo", m.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "mo" && drag.id === m.id ? "opacity-30" : ""}`} style={{ width: iw }}><PendingBody mo={m} /></div>)
+                      : z.woCards.map((w) => <div key={w.id} onPointerDown={(e) => onCardDown(e, "wo", w.id, z.key)} className={`${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${drag?.kind === "wo" && drag.id === w.id ? "opacity-30" : ""}`} style={{ width: iw }}><WOBody w={w} /></div>)}
+                    {count === 0 && <div className="h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg" style={{ width: iw }}>{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
                   </div>
+                  {/* มือจับขยายขนาดโซน (มุมขวาล่าง) */}
+                  <div onPointerDown={(e) => onZoneResizeDown(e, z)} title="ลากเพื่อขยาย/ย่อโซน"
+                    className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize rounded-br-2xl" style={{ background: `linear-gradient(135deg, transparent 50%, ${z.accent}99 50%)` }} />
                 </div>
               );
             })}
@@ -372,9 +391,9 @@ function PendingBody({ mo, dragging }: { mo: PendingMO; dragging?: boolean }) {
   const urg = urgencyByDate(mo.due_date, false);
   const border = mo.brand_color || prodColor(mo.product_sku);
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 p-2.5 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
-      <div className="relative w-full h-24 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
-        {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-2xl">📦</span>}
+    <div className={`bg-white rounded-lg p-2.5 shadow-sm ${dragging ? "shadow-xl" : "hover:shadow"} transition`} style={{ border: `2px solid ${border}` }}>
+      <div className="relative w-full aspect-square rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
+        {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" className="w-full h-full object-contain" /> : <span className="text-slate-300 text-3xl">📦</span>}
         <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
       </div>
       <div className="flex items-center justify-between gap-2 mb-1">
@@ -396,9 +415,9 @@ function WOBody({ w, dragging }: { w: WorkOrder; dragging?: boolean }) {
   const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
   const border = w.brand_color || prodColor(w.product_sku);
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 p-2.5 shadow-sm ${dragging ? "shadow-xl ring-2 ring-indigo-300" : "hover:border-indigo-300 hover:shadow"} transition`} style={{ borderLeft: `4px solid ${border}` }}>
-      <div className="relative w-full h-24 rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
-        {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-2xl">📦</span>}
+    <div className={`bg-white rounded-lg p-2.5 shadow-sm ${dragging ? "shadow-xl" : "hover:shadow"} transition`} style={{ border: `2px solid ${border}` }}>
+      <div className="relative w-full aspect-square rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
+        {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" className="w-full h-full object-contain" /> : <span className="text-slate-300 text-3xl">📦</span>}
         <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
         <span className={`absolute top-1.5 left-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${st.cls}`}>{st.label}</span>
       </div>
