@@ -15,6 +15,8 @@ import { apiFetch } from "@/lib/api";
 import { ComponentPicker } from "../bom/line-editor";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import type { MoListItem } from "@/app/api/mo/route";
+import type { WorkOrder } from "@/app/api/mo/work-orders/route";
+import type { Assignee } from "@/app/api/mo/assignees/route";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {
@@ -46,6 +48,17 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 const STATUS_OPTS = [["draft","ร่าง"],["confirmed","ยืนยันแล้ว"],["in_progress","กำลังผลิต"],["done","เสร็จ"],["cancelled","ยกเลิก"]] as const;
 const fmt = (n: number) => (Math.round(n * 10000) / 10000).toLocaleString("th-TH");
 
+// ขั้นตอนงาน (จ่ายงาน) — ตัด/เตรียม → ประกอบ(รวมเย็บ) แล้วส่ง QC (โมดูลแยก)
+const STAGES = [["cut", "ตัด / เตรียม"], ["assemble", "ประกอบ (เย็บ)"]] as const;
+const stageLabel = (s: string) => STAGES.find((x) => x[0] === s)?.[1] ?? s;
+const WO_STATUS: Record<string, { label: string; cls: string }> = {
+  dispatched:     { label: "จ่ายแล้ว",       cls: "bg-blue-50 text-blue-700" },
+  in_progress:    { label: "กำลังทำ",        cls: "bg-amber-50 text-amber-700" },
+  partial_return: { label: "รับคืนบางส่วน",  cls: "bg-orange-50 text-orange-700" },
+  done:           { label: "รับครบ",         cls: "bg-emerald-50 text-emerald-700" },
+  cancelled:      { label: "ยกเลิก",         cls: "bg-rose-50 text-rose-700" },
+};
+
 export default function MoWorkspacePage() {
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
@@ -71,6 +84,21 @@ export default function MoWorkspacePage() {
   const [prRequester, setPrRequester] = useState("");
   const [prItems, setPrItems] = useState<PrItem[]>([]);
   const [prSaving, setPrSaving] = useState(false);
+  // ใบจ่ายงาน (เฟส C)
+  const [woList, setWoList] = useState<WorkOrder[]>([]);
+  const [woLoading, setWoLoading] = useState(false);
+  const [assignees, setAssignees] = useState<{ craftsmen: Assignee[]; departments: Assignee[] }>({ craftsmen: [], departments: [] });
+  const [dispOpen, setDispOpen] = useState(false);
+  const [dispStage, setDispStage] = useState<string>("cut");
+  const [dispType, setDispType] = useState<"craftsman" | "department">("craftsman");
+  const [dispAssignee, setDispAssignee] = useState("");   // id ผู้รับ
+  const [dispQty, setDispQty] = useState(0);
+  const [dispDue, setDispDue] = useState("");
+  const [dispNote, setDispNote] = useState("");
+  const [dispSaving, setDispSaving] = useState(false);
+  const [recvWO, setRecvWO] = useState<WorkOrder | null>(null);  // ใบที่กำลังรับงานคืน
+  const [recvQty, setRecvQty] = useState(0);
+  const [recvSaving, setRecvSaving] = useState(false);
 
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
@@ -114,10 +142,10 @@ export default function MoWorkspacePage() {
     patch({ bom_id: v.id, bom_code: v.bom_code, bom_version: v.version, materials: mats });
   };
 
-  const openCreate = () => { setForm(empty()); setVersions([]); setFormErr(null); };
+  const openCreate = () => { setForm(empty()); setVersions([]); setFormErr(null); setWoList([]); };
 
   const openEdit = async (row: MoListItem) => {
-    setLoadingForm(true); setFormErr(null); setForm(empty()); setVersions([]);
+    setLoadingForm(true); setFormErr(null); setForm(empty()); setVersions([]); setWoList([]);
     try {
       const res = await apiFetch(`/api/mo/${row.id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
@@ -156,6 +184,7 @@ export default function MoWorkspacePage() {
         const vers = (vj.data ?? []) as Version[]; setVersions(vers);
         const cur = vers.find((v) => v.bom_code === d.bom_code); if (cur) patch({ bom_id: cur.id });
       }
+      if (d.mo_no) void loadWorkOrders(d.mo_no);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดไม่ได้"); }
     finally { setLoadingForm(false); }
   };
@@ -250,6 +279,74 @@ export default function MoWorkspacePage() {
       setPrOpen(false);
     } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างใบขอซื้อไม่สำเร็จ"); }
     finally { setPrSaving(false); }
+  };
+
+  // ---- ใบจ่ายงาน (เฟส C) ----
+  const loadWorkOrders = useCallback(async (moNo: string) => {
+    setWoLoading(true);
+    try { const res = await apiFetch(`/api/mo/work-orders?mo_no=${encodeURIComponent(moNo)}`); const j = await res.json();
+      if (!j.error) setWoList((j.data ?? []) as WorkOrder[]);
+    } catch { /* ignore */ } finally { setWoLoading(false); }
+  }, []);
+  const loadAssignees = useCallback(async () => {
+    if (assignees.craftsmen.length || assignees.departments.length) return;
+    try { const res = await apiFetch("/api/mo/assignees"); const j = await res.json();
+      setAssignees({ craftsmen: j.craftsmen ?? [], departments: j.departments ?? [] });
+    } catch { /* ignore */ }
+  }, [assignees]);
+
+  // ค้างจ่ายต่อขั้นตอน = จำนวนผลิต − จ่ายไปแล้ว(ไม่นับยกเลิก)
+  const dispatchedOf = (stage: string) => woList.filter((w) => w.stage === stage && w.status !== "cancelled").reduce((s, w) => s + (w.qty || 0), 0);
+  const remainingOf = (stage: string) => Math.max(0, Math.round(((form?.qty || 0) - dispatchedOf(stage)) * 10000) / 10000);
+
+  const openDispatch = () => {
+    if (!form?.id) return;
+    void loadAssignees();
+    setDispStage("cut"); setDispType("craftsman"); setDispAssignee("");
+    setDispQty(remainingOf("cut")); setDispDue(form.due_date || ""); setDispNote("");
+    setDispOpen(true);
+  };
+  const submitDispatch = async () => {
+    if (!form?.id) return;
+    if (!(dispQty > 0)) { toast.error("จำนวนที่จ่ายต้องมากกว่า 0"); return; }
+    const pool = dispType === "craftsman" ? assignees.craftsmen : assignees.departments;
+    const picked = pool.find((a) => a.id === dispAssignee);
+    if (!picked) { toast.error("เลือกผู้รับงานก่อน"); return; }
+    setDispSaving(true);
+    try {
+      const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mo_no: form.mo_no, product_sku: form.product_sku, product_name: form.product_name,
+          stage: dispStage, assignee_type: dispType, assignee_id: picked.id, assignee_name: picked.name,
+          qty: dispQty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: dispDue || null, note: dispNote || null }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(`จ่ายงานแล้ว: ${j.wo_no ?? ""}`);
+      setDispOpen(false); await loadWorkOrders(form.mo_no);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
+    finally { setDispSaving(false); }
+  };
+
+  const openReceive = (w: WorkOrder) => { setRecvWO(w); setRecvQty(w.qty - (w.received_qty || 0)); };
+  const submitReceive = async () => {
+    if (!recvWO || !form) return;
+    const totalRecv = (recvWO.received_qty || 0) + recvQty;
+    setRecvSaving(true);
+    try {
+      const res = await apiFetch(`/api/mo/work-orders/${recvWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ received_qty: totalRecv }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("บันทึกรับงานคืนแล้ว");
+      setRecvWO(null); await loadWorkOrders(form.mo_no);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setRecvSaving(false); }
+  };
+
+  const cancelWO = async (w: WorkOrder) => {
+    if (!form) return;
+    try {
+      const res = await apiFetch(`/api/mo/work-orders/${w.id}`, { method: "DELETE" });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ยกเลิกใบจ่ายงานแล้ว"); await loadWorkOrders(form.mo_no);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
 
   const columns: ColumnDef<MoListItem>[] = useMemo(() => [
@@ -435,6 +532,71 @@ export default function MoWorkspacePage() {
                 </div>
               );
             })()}
+
+            {/* ===== ใบจ่ายงาน (เฟส C) — แสดงเมื่อบันทึกใบแล้ว ===== */}
+            {form.id && (
+              <div className="pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-slate-800">🧰 ใบจ่ายงาน</h3>
+                  {canEdit && <button type="button" onClick={openDispatch} className="h-7 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">＋ จ่ายงาน</button>}
+                </div>
+
+                {/* สรุปค้างจ่ายต่อขั้นตอน */}
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  {STAGES.map(([key, label]) => {
+                    const done = dispatchedOf(key); const remain = remainingOf(key);
+                    return (
+                      <div key={key} className="border border-slate-200 rounded-lg px-3 py-2 text-xs">
+                        <div className="font-medium text-slate-700">{label}</div>
+                        <div className="text-slate-500 mt-0.5">จ่ายแล้ว <b className="text-slate-700">{fmt(done)}</b> / {fmt(form.qty || 0)} ชิ้น
+                          {remain > 0 ? <span className="text-rose-600"> · ค้างจ่าย {fmt(remain)}</span> : <span className="text-emerald-600"> · ครบ ✓</span>}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {woLoading ? <div className="text-center py-4 text-xs text-slate-400">กำลังโหลด…</div>
+                : woList.length === 0 ? (
+                  <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">ยังไม่มีใบจ่ายงาน — กด “จ่ายงาน” เพื่อเริ่ม</div>
+                ) : (
+                  <div className="border border-slate-200 rounded-lg overflow-auto" style={{ maxHeight: "30vh" }}>
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 text-slate-500 sticky top-0">
+                        <tr>
+                          <th className="text-left px-2 py-1.5">เลขที่ / ขั้นตอน</th>
+                          <th className="text-left px-2 py-1.5">ผู้รับงาน</th>
+                          <th className="text-right px-2 py-1.5">จ่าย</th>
+                          <th className="text-right px-2 py-1.5">รับคืน</th>
+                          <th className="text-center px-2 py-1.5">สถานะ</th>
+                          <th className="text-left px-2 py-1.5">กำหนดเสร็จ</th>
+                          <th className="px-2 py-1.5"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {woList.map((w) => {
+                          const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
+                          const closed = w.status === "done" || w.status === "cancelled";
+                          return (
+                            <tr key={w.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                              <td className="px-2 py-1.5"><code className="text-[10px] text-slate-400">{w.wo_no}</code><div className="text-slate-600">{stageLabel(w.stage)}</div></td>
+                              <td className="px-2 py-1.5 text-slate-700">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-slate-700">{fmt(w.qty)}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{w.received_qty > 0 ? fmt(w.received_qty) : "—"}</td>
+                              <td className="px-2 py-1.5 text-center"><span className={`px-2 py-0.5 rounded ${st.cls}`}>{st.label}</span></td>
+                              <td className="px-2 py-1.5 text-slate-500">{w.due_date || "—"}</td>
+                              <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                                {canEdit && !closed && <button type="button" onClick={() => openReceive(w)} className="h-6 px-2 text-[11px] border border-emerald-300 text-emerald-700 rounded hover:bg-emerald-50">รับงานคืน</button>}
+                                {canEdit && w.status !== "cancelled" && <button type="button" onClick={() => cancelWO(w)} title="ยกเลิกใบจ่ายงาน" className="ml-1 h-6 w-6 text-slate-300 hover:text-rose-500 rounded">✕</button>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </ERPModal>
@@ -478,6 +640,68 @@ export default function MoWorkspacePage() {
           </div>
           <p className="text-[11px] text-slate-400">รายการจะไปโผล่ที่หน้า &ldquo;ขอซื้อ (ช้อปปิ้ง)&rdquo; (กลุ่มยังไม่ตั้งร้าน) + แท็บ &ldquo;จากใบสั่งงาน&rdquo;</p>
         </div>
+      </ERPModal>
+
+      {/* popup จ่ายงาน (ใบจ่ายงาน) */}
+      <ERPModal open={dispOpen} onClose={() => !dispSaving && setDispOpen(false)} size="md" title={`🧰 จ่ายงาน — ${form?.mo_no ?? ""}`}
+        footer={<>
+          <button onClick={() => setDispOpen(false)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={submitDispatch} disabled={dispSaving} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "จ่ายงาน"}</button>
+        </>}>
+        <div className="space-y-3">
+          <p className="text-[11px] text-slate-400">สินค้า: <b>{form?.product_sku}</b> {form?.product_name} · ผลิต {fmt(form?.qty || 0)} ชิ้น</p>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-[11px] text-slate-500">ขั้นตอน</span>
+              <select value={dispStage} onChange={(e) => { setDispStage(e.target.value); setDispQty(remainingOf(e.target.value)); }}
+                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                {STAGES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+            <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่จ่าย (ค้างจ่าย {fmt(remainingOf(dispStage))})</span>
+              <input type="number" min={0} step="any" value={dispQty} onChange={(e) => setDispQty(Number(e.target.value))}
+                className="w-full h-8 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+          </div>
+          <div>
+            <span className="text-[11px] text-slate-500">ผู้รับงาน</span>
+            <div className="flex gap-2 mt-0.5">
+              <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm shrink-0">
+                <button type="button" onClick={() => { setDispType("craftsman"); setDispAssignee(""); }} className={`h-8 px-3 ${dispType === "craftsman" ? "bg-indigo-600 text-white" : "bg-white text-slate-600"}`}>👤 ช่าง</button>
+                <button type="button" onClick={() => { setDispType("department"); setDispAssignee(""); }} className={`h-8 px-3 border-l border-slate-200 ${dispType === "department" ? "bg-indigo-600 text-white" : "bg-white text-slate-600"}`}>🏢 แผนก</button>
+              </div>
+              <select value={dispAssignee} onChange={(e) => setDispAssignee(e.target.value)}
+                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">— เลือก{dispType === "craftsman" ? "ช่าง" : "แผนก"} —</option>
+                {(dispType === "craftsman" ? assignees.craftsmen : assignees.departments).map((a) => (
+                  <option key={a.id} value={a.id}>{a.code ? `[${a.code}] ` : ""}{a.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
+              <input type="date" value={dispDue} onChange={(e) => setDispDue(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+            <label className="block"><span className="text-[11px] text-slate-500">หมายเหตุ</span>
+              <input value={dispNote} onChange={(e) => setDispNote(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+          </div>
+        </div>
+      </ERPModal>
+
+      {/* popup รับงานคืน (รองรับรับคืนบางส่วน) */}
+      <ERPModal open={recvWO !== null} onClose={() => !recvSaving && setRecvWO(null)} size="sm" title={`📥 รับงานคืน — ${recvWO?.wo_no ?? ""}`}
+        footer={<>
+          <button onClick={() => setRecvWO(null)} disabled={recvSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={submitReceive} disabled={recvSaving} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{recvSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
+        </>}>
+        {recvWO && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-600">{stageLabel(recvWO.stage)} · {recvWO.assignee_name}</p>
+            <p className="text-[11px] text-slate-400">จ่ายไป {fmt(recvWO.qty)} · รับคืนแล้ว {fmt(recvWO.received_qty)} · ค้างรับ {fmt(recvWO.qty - recvWO.received_qty)} ชิ้น</p>
+            <label className="block"><span className="text-[11px] text-slate-500">รับคืนรอบนี้ (ชิ้น)</span>
+              <input type="number" min={0} step="any" max={recvWO.qty - recvWO.received_qty} value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))}
+                className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
+            <p className="text-[11px] text-slate-400">รับครบ = สถานะเป็น “รับครบ” อัตโนมัติ · รับไม่ครบ = “รับคืนบางส่วน”</p>
+          </div>
+        )}
       </ERPModal>
     </>
   );
