@@ -21,9 +21,15 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { Popover } from "@/components/popover";
 import {
-  DndContext, type DragEndEvent, PointerSensor, KeyboardSensor,
-  useSensor, useSensors, closestCorners, useDroppable,
+  DndContext, type DragEndEvent, type CollisionDetection, PointerSensor, KeyboardSensor,
+  useSensor, useSensors, closestCorners, pointerWithin, useDroppable,
 } from "@dnd-kit/core";
+
+// จับจุดวางด้วยตำแหน่งเมาส์ก่อน (หัวแท็บ/คลัง/กล่องเล็กๆ) ไม่งั้นใช้มุมใกล้สุด (เรียงในกล่อง)
+const smartCollision: CollisionDetection = (args) => {
+  const p = pointerWithin(args);
+  return p.length ? p : closestCorners(args);
+};
 import {
   SortableContext, sortableKeyboardCoordinates, useSortable,
   verticalListSortingStrategy, rectSortingStrategy, arrayMove,
@@ -499,7 +505,7 @@ export function StudioPanel({
 
       {/* Body: ซ้าย = editor / ขวา = preview (DnD ครอบทั้งคู่ → ลากข้ามฝั่ง/แท็บ/คลังได้) */}
       {tab !== "registry" && (
-      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={smartCollision} onDragEnd={onDragEnd}>
       <div className="flex-1 overflow-hidden flex">
         {/* ---- LEFT: editor ---- */}
         <div className={`${previewFull ? "hidden" : (tab === "form" ? "w-64" : "w-2/5")} overflow-y-auto border-r border-slate-200 p-4 bg-slate-50`}>
@@ -1053,7 +1059,7 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
   if (groups.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
   const cur = tabs[curIdx];
   return (
-    <div className="space-y-4 w-full relative" onClick={editable && selectedKey ? ()=>onSelectField?.(selectedKey) : undefined}>
+    <div className="space-y-4 w-full max-w-5xl mx-auto relative" onClick={editable && selectedKey ? ()=>onSelectField?.(selectedKey) : undefined}>
       <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}{editable && <span className="ml-2 text-[11px] font-normal text-orange-500">✏️ คลิกที่ field เพื่อตั้งค่า · ลากขอบปรับความกว้าง</span>}</div>
       {/* กล่องตั้งค่า field ที่เลือก (ลอยมุมขวาบน) */}
       {editable && selField && onPatch && (
