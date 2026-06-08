@@ -9,6 +9,7 @@ import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
+import { ImageInput } from "@/components/image-input";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
 
 type RelConfig = {
@@ -405,7 +406,7 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
   );
 }
 
-export function RelationOne2Many({ config, recordId, title, fieldId, configurable }: { config: RelConfig; recordId?: string | null; title?: string; fieldId?: string; configurable?: boolean }) {
+export function RelationOne2Many({ config, recordId, title, fieldId, configurable, parentCode }: { config: RelConfig; recordId?: string | null; title?: string; fieldId?: string; configurable?: boolean; parentCode?: string }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const fk = config.target_fk_column ?? "";
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
@@ -590,13 +591,34 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const canAdd = canEditRows && !!recordId && !!fk && !!moduleKey;
   // inline add-row: พิมพ์ในแถวว่างท้ายตารางแล้วสร้างลูกได้เลย (ไม่ต้องเปิด popup)
   const [newRow, setNewRow] = useState<Record<string, string>>({});
+  const [newImg, setNewImg] = useState<string | null>(null);   // รูปปกของแถวที่กำลังเพิ่ม (r2 key)
   const [adding, setAdding] = useState(false);
+
+  // ไล่เลข code อัตโนมัติ = {parentCode}-{NN} (หาเลขถัดไปจากลูกที่มีอยู่ของ parent นี้)
+  const genNextCode = async () => {
+    if (!parentCode || !recordId || !fk) return;
+    try {
+      const flt = encodeURIComponent(JSON.stringify({ [fk]: { type: "text", value: recordId } }));
+      const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=500&offset=0&filters=${flt}`).then((r) => r.json());
+      const childRows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
+      const esc = parentCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`^${esc}-(\\d+)$`);
+      let max = 0, width = 2;
+      childRows.forEach((r) => {
+        const m = re.exec(String(r[titleField] ?? ""));
+        if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; width = Math.max(width, m[1].length); }
+      });
+      setNewRow((p) => ({ ...p, [titleField]: `${parentCode}-${String(max + 1).padStart(width, "0")}` }));
+    } catch { setNewRow((p) => ({ ...p, [titleField]: `${parentCode}-01` })); }
+  };
+
   const submitNewRow = async () => {
     const code = (newRow[titleField] ?? "").trim();
     if (!code || !recordId || !fk) return;
     setAdding(true);
     try {
       const body: Record<string, unknown> = { [fk]: recordId, [titleField]: code, is_active: true };
+      if (imageField && newImg) body[imageField] = newImg;
       subFields.forEach((f) => {
         if (!isEditableCol(f)) return;
         const raw = newRow[f];
@@ -608,6 +630,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { alert("เพิ่มไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
       setNewRow({});
+      setNewImg(null);
       load();
     } catch (e) { alert("เพิ่มไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
     finally { setAdding(false); }
@@ -737,13 +760,24 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
             ))}
             {showInlineAdd && (
               <tr className="bg-amber-50/50">
-                {imageField && <td className="px-2 py-1.5 text-center text-slate-300 text-xs">＋</td>}
+                {imageField && (
+                  <td className="px-2 py-1.5">
+                    <ImageInput compact value={newImg} onChange={setNewImg} folder={moduleKey} disabled={adding} />
+                  </td>
+                )}
                 <td className="px-2 py-1">
-                  <input value={newRow[titleField] ?? ""} disabled={adding}
-                    onChange={(e) => setNewRow((p) => ({ ...p, [titleField]: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") void submitNewRow(); }}
-                    placeholder={`+ ${labelOf(titleField)} ใหม่…`}
-                    className="w-full h-7 px-1.5 text-sm border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                  <div className="flex items-center gap-1">
+                    <input value={newRow[titleField] ?? ""} disabled={adding}
+                      onChange={(e) => setNewRow((p) => ({ ...p, [titleField]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") void submitNewRow(); }}
+                      placeholder={`+ ${labelOf(titleField)} ใหม่…`}
+                      className="flex-1 min-w-0 h-7 px-1.5 text-sm border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                    {parentCode && (
+                      <button type="button" onClick={() => void genNextCode()} disabled={adding}
+                        title={`ไล่เลขอัตโนมัติ (${parentCode}-xx)`}
+                        className="flex-shrink-0 h-7 px-1.5 rounded border border-amber-300 bg-white text-amber-600 hover:bg-amber-100 text-xs font-medium disabled:opacity-40">🔢</button>
+                    )}
+                  </div>
                 </td>
                 {subFields.map((f) => {
                   const editable = isEditableCol(f);

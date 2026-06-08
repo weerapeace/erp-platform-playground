@@ -19,10 +19,11 @@ interface ImageInputProps {
   required?: boolean;
   disabled?: boolean;
   hasError?: boolean;
+  compact?: boolean;              // ช่องสี่เหลี่ยมเล็ก (ลากวาง/คลิก/วาง) เช่นในแถวตาราง
 }
 
 export function ImageInput({
-  value, onChange, folder = "uploads", required, disabled, hasError,
+  value, onChange, folder = "uploads", required, disabled, hasError, compact,
 }: ImageInputProps) {
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -94,6 +95,44 @@ export function ImageInput({
       setErr("อ่านคลิปบอร์ดไม่ได้ (ต้องอนุญาตสิทธิ์) — คลิกที่ช่องแล้วกด Ctrl+V แทน");
     }
   };
+
+  // โหมดเล็ก (compact) — ช่องสี่เหลี่ยมจิ๋ว สำหรับวางในเซลล์ตาราง: ลากวาง/คลิก/วาง (Ctrl+V)
+  if (compact) {
+    return (
+      <div
+        tabIndex={disabled ? -1 : 0}
+        onPaste={onPaste}
+        onClick={() => { if (!disabled && !uploading) fileRef.current?.click(); }}
+        onDragOver={(e) => { if (!disabled && !uploading) { e.preventDefault(); setDragOver(true); } }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        title="ลากรูปมาวาง · คลิกเลือก · วาง (Ctrl+V)"
+        className={`relative w-10 h-10 rounded-md border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer outline-none transition-colors ${
+          dragOver ? "border-orange-400 bg-orange-50" : hasError ? "border-red-300" : "border-slate-200 hover:border-orange-300"
+        } ${disabled ? "opacity-50" : ""}`}
+      >
+        {uploading ? (
+          <span className="text-[9px] text-slate-400">…</span>
+        ) : previewUrl ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={previewUrl} alt="" className="w-full h-full object-cover" />
+            {!disabled && (
+              <button type="button" onClick={(e) => { e.stopPropagation(); onChange(null); }}
+                title="ลบรูป"
+                className="absolute top-0 right-0 bg-white/85 text-red-600 text-[9px] leading-none w-3.5 h-3.5 rounded-bl flex items-center justify-center">✕</button>
+            )}
+          </>
+        ) : (
+          <span className="text-slate-300 text-base leading-none">＋</span>
+        )}
+        <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
+          disabled={disabled || uploading}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+          className="hidden" />
+      </div>
+    );
+  }
 
   return (
     <div className="mt-0.5">
