@@ -400,8 +400,15 @@ function LayoutPanel({ tableId, moduleKey }: { tableId: string; moduleKey: strin
       apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(moduleKey)}`).then((r) => r.json()).catch(() => ({})),
       apiFetch(`/api/table-layouts?table_id=${encodeURIComponent(tableId)}`).then((r) => r.json()).catch(() => ({})),
     ]).then(([fr, lr]) => {
-      const fl = (fr.fields as { column_name: string | null; field_label: string; is_visible?: boolean }[] | undefined) ?? [];
-      const flClean = fl.filter((f) => f.column_name).map((f) => ({ value: String(f.column_name), label: f.field_label || String(f.column_name), visible: !!f.is_visible }));
+      const fl = (fr.fields as { field_key: string; column_name: string | null; field_label: string; ui_field_type?: string; is_visible?: boolean }[] | undefined) ?? [];
+      // ใช้ key เดียวกับที่ตารางใช้ (column_name ?? field_key) เพื่อให้คุมคอลัมน์ได้ครบ
+      // — รวม field ชนิด related/computed (ที่ไม่มี column_name) ด้วย, ตัดเฉพาะ one2many/many2many (ไม่ใช่คอลัมน์ตาราง)
+      const flClean = fl
+        .filter((f) => !["one2many", "many2many"].includes(String(f.ui_field_type)))
+        .map((f) => {
+          const key = String(f.column_name ?? f.field_key);
+          return { value: key, label: f.field_label || key, visible: !!f.is_visible };
+        });
       setFields(flClean);
       const layout = (lr.data as FullLayout | null) ?? null;
       setFull(layout);
