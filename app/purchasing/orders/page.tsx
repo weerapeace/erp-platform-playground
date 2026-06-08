@@ -254,26 +254,20 @@ export default function PurchaseOrdersPage() {
             <p className="text-sm text-slate-500 mt-0.5">เลือกรายการ → สร้างใบสั่งซื้อ (ระบบแยกใบตามร้านให้อัตโนมัติ • 1 ใบ/ร้าน)</p>
           </div>
           <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
-              <button onClick={() => setMainTab("shop")} className={`h-9 px-3 ${mainTab === "shop" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน</button>
-              <button onClick={() => setMainTab("mo")} className={`h-9 px-3 border-l border-slate-200 ${mainTab === "mo" ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🏭 จากใบสั่งงาน{moCount ? ` (${moCount})` : ""}</button>
-            </div>
-            {mainTab === "shop" && view === "card" && (
+            {view === "card" && (
               <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
                 <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
               </label>
             )}
-            {mainTab === "shop" && (
-              <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
-                <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
-                <button onClick={() => changeView("table")} className={`h-9 px-3 border-l border-slate-200 ${view === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
-              </div>
-            )}
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+              <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
+              <button onClick={() => changeView("table")} className={`h-9 px-3 border-l border-slate-200 ${view === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
+            </div>
             <a href="/m/purchase-orders-v2" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 ดูใบสั่งซื้อ</a>
           </div>
         </div>
 
-        {mainTab === "shop" && view === "table" && (
+        {view === "table" && (
           <DataTable<Row>
             data={rows} columns={COLUMNS} loading={loading} error={error ?? undefined} onRetry={fetchRows}
             emptyMessage="ไม่มีรายการรอสั่งซื้อ" searchPlaceholder="ค้นหา ร้าน / สินค้า / รหัส..."
@@ -284,7 +278,7 @@ export default function PurchaseOrdersPage() {
           />
         )}
 
-        {mainTab === "shop" && view === "card" && (
+        {view === "card" && (
           loading ? <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลด…</div>
           : error ? <div className="text-center text-red-500 py-16 text-sm">⚠ {error} <button onClick={fetchRows} className="underline ml-2">ลองใหม่</button></div>
           : rows.length === 0 ? <div className="text-center text-slate-300 py-16">ไม่มีรายการรอสั่งซื้อ</div>
@@ -295,10 +289,11 @@ export default function PurchaseOrdersPage() {
                 <div className="text-xs font-medium text-slate-500 mb-1.5">ร้านที่มีของรอสั่ง ({shops.length})</div>
                 <input value={shopQ} onChange={(e) => setShopQ(e.target.value)} placeholder="🔎 ค้นหาร้าน…" className="w-full h-8 px-2 mb-2 text-xs border border-slate-200 rounded-md" />
                 <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                  <button onClick={() => setActiveShop(null)} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${!activeShop ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({rows.length})</button>
+                  <button onClick={() => { setMainTab("shop"); setActiveShop(null); }} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "shop" && !activeShop ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({rows.length})</button>
+                  <button onClick={() => setMainTab("mo")} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "mo" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🏭 จากใบสั่งงาน ({moCount})</button>
                   {shops.filter((s) => !shopQ.trim() || s.name.toLowerCase().includes(shopQ.trim().toLowerCase())).map((s) => (
-                    <button key={s.name} onClick={() => setActiveShop(s.name)} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                      <div className={`text-sm ${activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
+                    <button key={s.name} onClick={() => { setMainTab("shop"); setActiveShop(s.name); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${mainTab === "shop" && activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                      <div className={`text-sm ${mainTab === "shop" && activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
                       <div className="text-[11px] text-slate-400">{s.count} รายการ · {money(s.total, s.currency)}</div>
                     </button>
                   ))}
@@ -308,16 +303,25 @@ export default function PurchaseOrdersPage() {
               {/* กลาง: การ์ด แบ่ง section ตามร้าน */}
               <main className="flex-1 min-w-0 space-y-4">
                 <input value={prodQ} onChange={(e) => setProdQ(e.target.value)} placeholder="🔎 ค้นหาสินค้า (ชื่อ / รหัส)…" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
-                {shopNames.map((name) => {
+                {mainTab === "mo" && moGroups.length === 0 && (
+                  <div className="text-center text-slate-300 py-16 border border-dashed border-slate-200 rounded-lg">
+                    ยังไม่มีรายการขอซื้อที่มาจากใบสั่งงาน<br />
+                    <span className="text-xs text-slate-400">เปิดใบสั่งผลิต (MO) แล้วกด “ขอซื้อ” รายการวัตถุดิบจะมาโผล่ที่นี่</span>
+                  </div>
+                )}
+                {(mainTab === "mo"
+                  ? moGroups.map((g) => ({ key: g.mo, title: `🏭 ${g.mo}`, sub: g.product, items: g.items, shopName: null as string | null }))
+                  : shopNames.map((name) => ({ key: name, title: `🏪 ${name}`, sub: "", items: rowsOfShop(name), shopName: name as string | null }))
+                ).map((sec) => {
                   const pq = prodQ.trim().toLowerCase();
-                  const list = rowsOfShop(name).filter((r) => !pq || r.item_name.toLowerCase().includes(pq) || r.code.toLowerCase().includes(pq));
+                  const list = sec.items.filter((r) => !pq || r.item_name.toLowerCase().includes(pq) || r.code.toLowerCase().includes(pq));
                   if (list.length === 0) return null;
-                  const sectionNoShop = noShop(list[0]);
+                  const sectionNoShop = sec.shopName ? noShop(list[0]) : true;
                   return (
-                    <section key={name}>
+                    <section key={sec.key}>
                       <div className="flex items-center justify-between mb-2">
-                        <h2 className="text-sm font-semibold text-slate-800">🏪 {name} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
-                        {!sectionNoShop && <button onClick={() => setBuyAllShop({ name, rows: list })} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
+                        <h2 className="text-sm font-semibold text-slate-800">{sec.title} {sec.sub ? <span className="text-xs font-normal text-slate-500">· ผลิต: {sec.sub}</span> : null} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
+                        {sec.shopName && !sectionNoShop && <button onClick={() => setBuyAllShop({ name: sec.shopName!, rows: list })} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
                       </div>
                       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
                         {list.map((r) => {
@@ -453,75 +457,6 @@ export default function PurchaseOrdersPage() {
           )
         )}
 
-        {/* แท็บ: จากใบสั่งงาน (MO) — จัดกลุ่มตามเลขใบสั่งผลิต + รหัสสินค้าที่ผลิต */}
-        {mainTab === "mo" && (
-          loading ? <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลด…</div>
-          : error ? <div className="text-center text-red-500 py-16 text-sm">⚠ {error} <button onClick={fetchRows} className="underline ml-2">ลองใหม่</button></div>
-          : moGroups.length === 0 ? (
-            <div className="text-center text-slate-300 py-16">
-              ยังไม่มีรายการขอซื้อที่มาจากใบสั่งงาน<br />
-              <span className="text-xs text-slate-400">เปิดใบสั่งผลิต (MO) แล้วกด “ขอซื้อ” รายการวัตถุดิบจะมาโผล่ที่นี่</span>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {moGroups.map((g) => {
-                const sum: Record<string, number> = {};
-                for (const r of g.items) sum[r.currency] = (sum[r.currency] ?? 0) + r.line_total;
-                return (
-                  <div key={g.mo} className="border border-slate-200 rounded-lg overflow-hidden">
-                    <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-slate-800 text-white">🏭 {g.mo}</span>
-                        {g.product && <span className="text-sm text-slate-600 truncate">ผลิต: {g.product}</span>}
-                        <span className="text-xs text-slate-400">· {g.items.length} รายการ</span>
-                      </div>
-                      <div className="text-xs text-slate-500">{Object.entries(sum).map(([cur, s]) => <span key={cur} className="ml-2 font-semibold text-slate-700">{money(s, cur)}</span>)}</div>
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-[11px] text-slate-400 text-left border-b border-slate-100">
-                          <th className="px-3 py-1.5 font-medium w-10"></th>
-                          <th className="px-2 py-1.5 font-medium">รหัส</th>
-                          <th className="px-2 py-1.5 font-medium">ชื่อสินค้า</th>
-                          <th className="px-2 py-1.5 font-medium text-right">จำนวน</th>
-                          <th className="px-2 py-1.5 font-medium">ร้าน</th>
-                          <th className="px-2 py-1.5 font-medium text-right">รวม</th>
-                          <th className="px-3 py-1.5 font-medium text-center w-24">ตะกร้า</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {g.items.map((r) => {
-                          const on = inCart(r.id); const blocked = noShop(r);
-                          return (
-                            <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-                              <td className="px-3 py-2">
-                                <div className="w-9 h-9 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
-                                  {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">📦</span>}
-                                </div>
-                              </td>
-                              <td className="px-2 py-2 text-[11px] text-slate-400 font-mono">{r.code || "—"}</td>
-                              <td className="px-2 py-2 text-slate-700 max-w-[280px] truncate">{r.item_name}</td>
-                              <td className="px-2 py-2 text-right text-slate-600 whitespace-nowrap">{r.qty.toLocaleString()} {r.uom}</td>
-                              <td className="px-2 py-2 text-slate-500">{blocked ? <span className="text-amber-600">📍 ยังไม่มีร้าน</span> : r.seller_name}</td>
-                              <td className="px-2 py-2 text-right text-slate-600 whitespace-nowrap">{money(r.line_total, r.currency)}</td>
-                              <td className="px-3 py-2 text-center">
-                                <button onClick={() => toggleCart(r)} disabled={blocked}
-                                  className={`h-7 px-2 text-xs rounded-md border ${blocked ? "border-amber-200 bg-amber-50 text-amber-600 cursor-not-allowed" : on ? "border-blue-200 bg-blue-100 text-blue-700" : "border-blue-600 bg-blue-600 text-white hover:bg-blue-700"}`}>
-                                  {blocked ? "ตั้งร้าน" : on ? "✓ ในตะกร้า" : "+ ใส่"}
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })}
-              <p className="text-[11px] text-slate-400 text-center">เลือกใส่ตะกร้าแล้วสลับไปแท็บ “ทุกร้าน” เพื่อกดสร้างใบสั่งซื้อ (แยกใบตามร้านอัตโนมัติ)</p>
-            </div>
-          )
-        )}
       </div>
 
       {setShopRow && <SetShopModal row={setShopRow} suppliers={suppliers} onSupplierAdded={addSupplier}
