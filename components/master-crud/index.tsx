@@ -1417,8 +1417,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const us = (f.uiStyle ?? {}) as Record<string, unknown>;
     const SZ: Record<string, string> = { sm: "12px", base: "14px", lg: "16px", xl: "20px" };
     const FF: Record<string, string> = { serif: "Georgia, 'Times New Roman', serif", mono: "ui-monospace, 'Courier New', monospace" };
-    const tStyle: React.CSSProperties = {
-      fontSize: SZ[String(us.size ?? "")] || undefined,
+    const baseStyle: React.CSSProperties = {
       fontWeight: us.bold ? 700 : undefined,
       fontStyle: us.italic ? "italic" : undefined,
       textDecoration: us.underline ? "underline" : undefined,
@@ -1426,12 +1425,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       fontFamily: FF[String(us.font ?? "")] || undefined,
       textAlign: (["left", "center", "right"].includes(String(us.align)) ? (us.align as "left" | "center" | "right") : undefined),
     };
+    const tStyle: React.CSSProperties = { ...baseStyle, fontSize: SZ[String(us.value_size ?? us.size ?? "")] || undefined };   // ค่า
+    const labelStyle: React.CSSProperties = { ...baseStyle, fontSize: SZ[String(us.label_size ?? us.size ?? "")] || undefined };  // หัวข้อ
     const highlight = !!us.highlight;
+    const hlColor = (us.highlightColor as string) || "#fef08a";
     // ฟิลด์ที่มี control หลายตัว (m2m/o2m) ห้ามครอบด้วย <label> — เพราะคลิกที่ชื่อ label เบราว์เซอร์จะไปกด control ตัวแรก (แท็กอันแรกหลุด)
     const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many") ? "div" : "label";
     return (
-      <FieldWrap key={f.key} style={{ gridColumn: `span ${gw12(f, maxSpan)}` }} className={`block ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
-        <span className="text-xs font-medium text-slate-600" style={tStyle}>
+      <FieldWrap key={f.key} style={{ gridColumn: `span ${gw12(f, maxSpan)}`, ...(highlight ? { background: hlColor, borderColor: hlColor } : {}) }} className={`block ${highlight ? "border rounded-lg p-2" : ""}`}>
+        <span className="text-xs font-medium text-slate-600" style={labelStyle}>
           {f.label}
           {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
           {f.readonly && f.type !== "one2many" && f.type !== "many2many" && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
@@ -2414,13 +2416,17 @@ function DetailSections({
   const renderDl = (fs: FieldDef[], cols: number) => (
     <dl className="grid grid-cols-12 gap-x-4 gap-y-3">
       {fs.map((f) => {
+        const us = (f.uiStyle ?? {}) as Record<string, unknown>;
         const labelCss = fieldStyleCss(f.uiStyle, "label_size");
         const valueCss = fieldStyleCss(f.uiStyle, "value_size");
-        const hl = !!(f.uiStyle ?? {}).highlight;
+        const hl = !!us.highlight;
+        const hlColor = (us.highlightColor as string) || "#fef08a";
+        const labelLeft = String(us.labelPos ?? "top") === "left";
         return (
-          <div key={f.key} style={{ gridColumn: `span ${gw12(f, cols)}` }} className={`${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
-            <dt className="text-[11px] text-slate-400 mb-0.5" style={labelCss}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
-            <dd style={valueCss}>{renderValue(f)}</dd>
+          <div key={f.key} style={{ gridColumn: `span ${gw12(f, cols)}`, ...(hl ? { background: hlColor, borderColor: hlColor } : {}) }}
+            className={`${hl ? "border rounded-md p-1.5 -m-0.5" : ""} ${labelLeft ? "flex items-baseline gap-2" : ""}`}>
+            <dt className="text-[11px] text-slate-400 mb-0.5" style={{ ...labelCss, ...(labelLeft ? { width: "33%", flexShrink: 0 } : {}) }}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
+            <dd style={valueCss} className={labelLeft ? "flex-1 min-w-0" : ""}>{renderValue(f)}</dd>
           </div>
         );
       })}

@@ -739,80 +739,103 @@ function FormEditor({
   );
 }
 
-// ⚙️ แผงตั้งค่า field (ความกว้าง/help/required/readonly/default + สไตล์ presets)
+// ⚙️ แผงตั้งค่า field — จัดเป็นกลุ่ม: เลย์เอาต์ · ข้อความ · ตัวอักษร · เน้น
 const STYLE_COLORS = ["", "#0f172a", "#dc2626", "#ea580c", "#16a34a", "#2563eb", "#7c3aed", "#64748b"];
+const HL_COLORS = ["#fef08a", "#bbf7d0", "#bfdbfe", "#fbcfe8", "#ddd6fe", "#fecaca", "#fed7aa"];
+const SIZE_OPTS: [string,string][] = [["","อัตโนมัติ"],["sm","เล็ก"],["base","ปกติ"],["lg","ใหญ่"],["xl","ใหญ่มาก"]];
 function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch: Partial<StudioField>)=>void }) {
   const us = (field.uiStyle ?? {}) as Record<string, unknown>;
   const setUi = (k: string, v: unknown) => onPatch({ uiStyle: { ...us, [k]: v } });
-  const Toggle = ({ on, label, onClick }: { on: boolean; label: string; onClick: ()=>void }) => (
-    <button type="button" onClick={onClick} className={`px-2 py-1 rounded border text-xs ${on?"bg-orange-100 border-orange-300 text-orange-700":"bg-white border-slate-200 text-slate-500"}`}>{label}</button>
+  const Toggle = ({ on, label, onClick, title }: { on: boolean; label: string; onClick: ()=>void; title?: string }) => (
+    <button type="button" title={title} onClick={onClick} className={`px-2 py-1 rounded border text-xs ${on?"bg-orange-100 border-orange-300 text-orange-700 font-medium":"bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{label}</button>
   );
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-slate-500 w-[68px] shrink-0">{label}</span>{children}
+    </div>
+  );
+  const Group = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div className="space-y-1.5 pt-2.5 first:pt-0 border-t first:border-t-0 border-slate-100">
+      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{title}</div>
+      {children}
+    </div>
+  );
+  const labelPos = String(us.labelPos ?? "top");
+  const selStyle = "h-7 px-1.5 border border-slate-200 rounded bg-white text-slate-600";
   return (
-    <div className="mt-1 mb-1 ml-7 mr-1 p-3 rounded-lg border border-orange-200 bg-orange-50/40 space-y-2.5 text-xs">
-      {/* แถว 1: ความกว้าง (กริด 12) + required + readonly */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-slate-500">ความกว้าง:</span>
-        {([[3,"¼"],[4,"⅓"],[6,"ครึ่ง"],[8,"⅔"],[12,"เต็ม"]] as [number,string][]).map(([n,lbl])=>(
-          <Toggle key={n} on={Number(us.gw)===n} label={lbl} onClick={()=>setUi("gw",n)} />
-        ))}
-        <span className="ml-2 text-slate-300">|</span>
-        <Toggle on={!!field.required} label="บังคับกรอก" onClick={()=>onPatch({required:!field.required})} />
-        <Toggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />
-      </div>
-      {/* แถว 2: help/placeholder/default */}
-      <div className="grid grid-cols-1 gap-1.5">
-        <input value={field.helpText ?? ""} onChange={(e)=>onPatch({helpText:e.target.value})} placeholder="ข้อความช่วย (help text)" className="h-8 px-2 border border-slate-200 rounded" />
+    <div className="p-3 space-y-2 text-xs">
+      <Group title="เลย์เอาต์">
+        <Row label="ความกว้าง">
+          {([[3,"¼"],[4,"⅓"],[6,"ครึ่ง"],[8,"⅔"],[12,"เต็ม"]] as [number,string][]).map(([n,lbl])=>(
+            <Toggle key={n} on={Number(us.gw)===n} label={lbl} onClick={()=>setUi("gw",n)} />
+          ))}
+        </Row>
+        <Row label="ตำแหน่งหัวข้อ">
+          <Toggle on={labelPos!=="left"} label="⬆ บน" onClick={()=>setUi("labelPos","top")} />
+          <Toggle on={labelPos==="left"} label="⬅ ข้างหน้า" onClick={()=>setUi("labelPos","left")} />
+        </Row>
+        <Row label="ตัวเลือก">
+          <Toggle on={!!field.required} label="บังคับกรอก" onClick={()=>onPatch({required:!field.required})} />
+          <Toggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />
+          <Toggle on={!!us.count} label="📊 นับความครบ" onClick={()=>setUi("count",!us.count)} />
+        </Row>
+      </Group>
+
+      <Group title="ข้อความช่วย">
+        <input value={field.helpText ?? ""} onChange={(e)=>onPatch({helpText:e.target.value})} placeholder="ข้อความช่วย (help text)" className="w-full h-8 px-2 border border-slate-200 rounded" />
         <div className="grid grid-cols-2 gap-1.5">
           <input value={field.placeholder ?? ""} onChange={(e)=>onPatch({placeholder:e.target.value})} placeholder="placeholder" className="h-8 px-2 border border-slate-200 rounded" />
           <input value={String(field.defaultValue ?? "")} onChange={(e)=>onPatch({defaultValue:e.target.value})} placeholder="ค่าเริ่มต้น" className="h-8 px-2 border border-slate-200 rounded" />
         </div>
-      </div>
-      {/* แถว 3: สไตล์ตัวอักษร */}
-      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-orange-100">
-        <span className="text-slate-500">สไตล์:</span>
-        {(["sm","base","lg","xl"] as const).map(s=>(
-          <Toggle key={s} on={String(us.size??"base")===s} label={s==="sm"?"เล็ก":s==="base"?"ปกติ":s==="lg"?"ใหญ่":"ใหญ่มาก"} onClick={()=>setUi("size",s)} />
-        ))}
-        <Toggle on={!!us.bold} label="B" onClick={()=>setUi("bold",!us.bold)} />
-        <Toggle on={!!us.italic} label="I" onClick={()=>setUi("italic",!us.italic)} />
-        <Toggle on={!!us.underline} label="U" onClick={()=>setUi("underline",!us.underline)} />
-      </div>
-      {/* แถว 3b: ขนาดหัวข้อ/ค่า แยกกัน + นับความครบ */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-slate-500">ขนาดหัวข้อ:</span>
-        <select value={String(us.label_size ?? "")} onChange={(e)=>setUi("label_size", e.target.value)} className="h-7 px-1 border border-slate-200 rounded bg-white">
-          <option value="">อัตโนมัติ</option><option value="sm">เล็ก</option><option value="base">ปกติ</option><option value="lg">ใหญ่</option><option value="xl">ใหญ่มาก</option>
-        </select>
-        <span className="text-slate-500 ml-1">ขนาดค่า:</span>
-        <select value={String(us.value_size ?? "")} onChange={(e)=>setUi("value_size", e.target.value)} className="h-7 px-1 border border-slate-200 rounded bg-white">
-          <option value="">อัตโนมัติ</option><option value="sm">เล็ก</option><option value="base">ปกติ</option><option value="lg">ใหญ่</option><option value="xl">ใหญ่มาก</option>
-        </select>
-        <span className="ml-1 text-slate-300">|</span>
-        <Toggle on={!!us.count} label="📊 นับความครบ" onClick={()=>setUi("count",!us.count)} />
-      </div>
-      {/* แถว 4: ฟอนต์ + จัดชิด + ไฮไลต์ */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-slate-500">ฟอนต์:</span>
-        {(["","serif","mono"] as const).map(ff=>(
-          <Toggle key={ff||"sans"} on={String(us.font??"")===ff} label={ff===""?"ปกติ":ff==="serif"?"มีหัว":"monospace"} onClick={()=>setUi("font",ff)} />
-        ))}
-        <span className="ml-1 text-slate-300">|</span>
-        {(["left","center","right"] as const).map(al=>(
-          <Toggle key={al} on={String(us.align??"left")===al} label={al==="left"?"⬅":al==="center"?"↔":"➡"} onClick={()=>setUi("align",al)} />
-        ))}
-        <span className="ml-1 text-slate-300">|</span>
-        <Toggle on={!!us.highlight} label="ไฮไลต์" onClick={()=>setUi("highlight",!us.highlight)} />
-        <Toggle on={!!us.copyable} label="📋 คัดลอกค่า" onClick={()=>setUi("copyable",!us.copyable)} />
-      </div>
-      {/* แถว 5: สี */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-slate-500">สี:</span>
-        {STYLE_COLORS.map(c=>(
-          <button key={c||"default"} type="button" onClick={()=>setUi("color",c)}
-            className={`w-6 h-6 rounded-full border-2 ${String(us.color??"")===c?"border-orange-500":"border-slate-200"} ${c===""?"bg-white text-[9px] text-slate-400 flex items-center justify-center":""}`}
-            style={c?{background:c}:undefined} title={c||"ค่าเริ่มต้น"}>{c===""?"—":""}</button>
-        ))}
-      </div>
+      </Group>
+
+      <Group title="ตัวอักษร">
+        <Row label="ขนาดหัวข้อ">
+          <select value={String(us.label_size ?? "")} onChange={(e)=>setUi("label_size", e.target.value)} className={selStyle}>
+            {SIZE_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+          </select>
+        </Row>
+        <Row label="ขนาดค่า">
+          <select value={String(us.value_size ?? "")} onChange={(e)=>setUi("value_size", e.target.value)} className={selStyle}>
+            {SIZE_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+          </select>
+        </Row>
+        <Row label="สไตล์">
+          <Toggle on={!!us.bold} label="B" onClick={()=>setUi("bold",!us.bold)} title="ตัวหนา" />
+          <Toggle on={!!us.italic} label="I" onClick={()=>setUi("italic",!us.italic)} title="ตัวเอียง" />
+          <Toggle on={!!us.underline} label="U" onClick={()=>setUi("underline",!us.underline)} title="ขีดเส้นใต้" />
+          <span className="text-slate-300">|</span>
+          {(["left","center","right"] as const).map(al=>(
+            <Toggle key={al} on={String(us.align??"left")===al} label={al==="left"?"⬅":al==="center"?"↔":"➡"} onClick={()=>setUi("align",al)} />
+          ))}
+        </Row>
+        <Row label="ฟอนต์">
+          {(["","serif","mono"] as const).map(ff=>(
+            <Toggle key={ff||"sans"} on={String(us.font??"")===ff} label={ff===""?"ปกติ":ff==="serif"?"มีหัว":"mono"} onClick={()=>setUi("font",ff)} />
+          ))}
+        </Row>
+        <Row label="สีตัวอักษร">
+          {STYLE_COLORS.map(c=>(
+            <button key={c||"default"} type="button" onClick={()=>setUi("color",c)}
+              className={`w-6 h-6 rounded-full border-2 ${String(us.color??"")===c?"border-orange-500":"border-slate-200"} ${c===""?"bg-white text-[9px] text-slate-400 flex items-center justify-center":""}`}
+              style={c?{background:c}:undefined} title={c||"ค่าเริ่มต้น"}>{c===""?"—":""}</button>
+          ))}
+        </Row>
+      </Group>
+
+      <Group title="เน้น / อื่นๆ">
+        <Row label="ไฮไลต์">
+          <Toggle on={!!us.highlight} label={us.highlight?"เปิด":"ปิด"} onClick={()=>setUi("highlight",!us.highlight)} />
+          {us.highlight ? HL_COLORS.map(c=>(
+            <button key={c} type="button" onClick={()=>setUi("highlightColor",c)}
+              className={`w-6 h-6 rounded-full border-2 ${String(us.highlightColor??HL_COLORS[0])===c?"border-orange-500":"border-slate-200"}`}
+              style={{background:c}} title="สีไฮไลต์" />
+          )) : <span className="text-slate-300 text-[11px]">(เปิดก่อนถึงเลือกสีได้)</span>}
+        </Row>
+        <Row label="ค่า">
+          <Toggle on={!!us.copyable} label="📋 ปุ่มคัดลอกค่า" onClick={()=>setUi("copyable",!us.copyable)} />
+        </Row>
+      </Group>
     </div>
   );
 }
@@ -882,12 +905,13 @@ function FormFieldRow({ field, sectionOptions, onToggle, onToggleInline, onToggl
   );
 }
 
-// preset → CSS (ให้ตรงกับฝั่ง form จริงใน MasterCRUD)
-function uiStyleCss(us: Record<string, unknown>): React.CSSProperties {
+// preset → CSS (ให้ตรงกับฝั่ง form จริงใน MasterCRUD) — sizeKey: label_size/value_size แยกขนาดหัวข้อ/ค่า
+function uiStyleCss(us: Record<string, unknown>, sizeKey?: "label_size" | "value_size"): React.CSSProperties {
   const SZ: Record<string, string> = { sm: "12px", base: "14px", lg: "16px", xl: "20px" };
   const FF: Record<string, string> = { serif: "Georgia, 'Times New Roman', serif", mono: "ui-monospace, 'Courier New', monospace" };
+  const sizeVal = sizeKey ? (us[sizeKey] ?? us.size) : us.size;
   return {
-    fontSize: SZ[String(us.size ?? "")] || undefined,
+    fontSize: SZ[String(sizeVal ?? "")] || undefined,
     fontWeight: us.bold ? 700 : undefined,
     fontStyle: us.italic ? "italic" : undefined,
     textDecoration: us.underline ? "underline" : undefined,
@@ -916,8 +940,11 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onPatch }: {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: f.key, disabled: !editable });
   const boxRef = useRef<HTMLDivElement | null>(null);
   const us = (f.uiStyle ?? {}) as Record<string, unknown>;
-  const css = uiStyleCss(us);
+  const labelCss = uiStyleCss(us, "label_size");
+  const valueCss = uiStyleCss(us, "value_size");
   const hl = !!us.highlight;
+  const hlColor = (us.highlightColor as string) || "#fef08a";
+  const labelLeft = String(us.labelPos ?? "top") === "left";
   const val = previewVal(row, f);
   // ความกว้างบนกริด 12 ช่อง — ui_style.gw (1-12) ถ้ามี ; ไม่งั้นแปลงจาก span/คอลัมน์เดิม
   const gwDerive = (() => { const g = Number(us.gw); if (g>=1 && g<=12) return Math.round(g);
@@ -945,16 +972,16 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onPatch }: {
   };
 
   return (
-    <div ref={(el)=>{ setNodeRef(el); boxRef.current = el; }} style={dndStyle} {...attributes}
+    <div ref={(el)=>{ setNodeRef(el); boxRef.current = el; }} style={{ ...dndStyle, ...(hl?{ background: hlColor, borderColor: hlColor }:{}) }} {...attributes}
       onClick={editable ? (e)=>{ e.stopPropagation(); onSelect?.(f.key); } : undefined}
-      className={`relative space-y-0.5 rounded p-2 ${hl?"bg-amber-50 border border-amber-200":selected?"ring-2 ring-orange-400 bg-orange-50":editable?"bg-white border border-slate-200 shadow-sm hover:border-orange-300 cursor-pointer":""}`}>
+      className={`relative rounded p-2 ${hl?"border":selected?"ring-2 ring-orange-400 bg-orange-50":editable?"bg-white border border-slate-200 shadow-sm hover:border-orange-300 cursor-pointer":""} ${labelLeft?"flex items-baseline gap-2":"space-y-0.5"}`}>
       {editable && (
         <span {...listeners} onClick={(e)=>e.stopPropagation()} title="ลากเพื่อย้าย/สลับตำแหน่ง"
-          className="absolute top-0.5 left-0.5 text-slate-300 hover:text-orange-400 cursor-grab active:cursor-grabbing select-none text-xs leading-none">⋮⋮</span>
+          className="absolute top-0.5 left-0.5 text-slate-300 hover:text-orange-400 cursor-grab active:cursor-grabbing select-none text-xs leading-none z-10">⋮⋮</span>
       )}
-      <div className={`text-[11px] text-slate-500 ${editable?"pl-3":""}`} style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
+      <div className={`text-[11px] text-slate-500 ${editable&&!labelLeft?"pl-3":""} ${labelLeft?"shrink-0 pt-0.5":""}`} style={{ ...labelCss, ...(labelLeft?{ width: "33%" }:{}) }}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
         {editable && <span className="ml-1 text-[9px] text-slate-300">{gw}/12{isTextarea&&rows?` · ${rows} บรรทัด`:""}</span>}</div>
-      <div className="text-sm text-slate-800 break-words whitespace-pre-wrap" style={{ ...css, minHeight: isTextarea && rows ? `${rows*1.4}em` : "1.25rem" }}>{val || <span className="text-slate-300">—</span>}</div>
+      <div className={`text-sm text-slate-800 break-words whitespace-pre-wrap ${labelLeft?"flex-1":""}`} style={{ ...valueCss, minHeight: isTextarea && rows ? `${rows*1.4}em` : "1.25rem" }}>{val || <span className="text-slate-300">—</span>}</div>
       {editable && (
         <div onPointerDown={startResize} title={isTextarea?"ลากปรับกว้าง (ซ้าย-ขวา) / สูง (บน-ล่าง)":"ลากปรับความกว้าง (ช่อง)"}
           className="absolute bottom-0 right-0 w-3.5 h-3.5 flex items-end justify-end cursor-nwse-resize group">
