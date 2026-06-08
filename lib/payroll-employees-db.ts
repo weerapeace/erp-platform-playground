@@ -33,7 +33,7 @@ const WRITABLE = new Set([
   "employment_status", "start_date", "resign_date", "payroll_register_base_salary",
   "scanner_employee_code", "payslip_language", "notes",
   // ตำแหน่ง/สังกัด (relation picker → เก็บ FK id ตรง)
-  "position_id", "cost_center_id",
+  "position_id", "cost_center_id", "department_id",
 ]);
 
 async function deptMap(): Promise<Record<string, string>> {
