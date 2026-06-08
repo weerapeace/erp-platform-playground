@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { createJob, runInBackground, sendToQueue } from "@/lib/jobs";
 import { runJob } from "@/lib/job-runner";
+import { validatePayrollPeriod } from "@/lib/payroll-validation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,6 +19,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const denied = await guardPayroll(req); if (denied) return denied;
   let body: { period_id?: string; actor?: string };
   try { body = await req.json(); } catch { body = {}; }
+  if (body.period_id) {
+    const validation = await validatePayrollPeriod(body.period_id);
+    if (!validation.ready) return NextResponse.json({ error: "งวดยังไม่พร้อมคำนวณ", validation }, { status: 409 });
+  }
   const jobId = await createJob("payroll_calc", { period_id: body.period_id ?? null }, body.actor);
 
   const queued = await sendToQueue({ job_id: jobId });   // มี Cloudflare Queue → ส่งเข้าคิว

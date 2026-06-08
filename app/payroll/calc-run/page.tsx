@@ -12,6 +12,12 @@ type Period = { id: string; period_name: string; status: string };
 type Row = { id: string; employee_name: string; gross_new: number; gross_old: number | null; net_new: number; net_old: number | null; diff_net: number | null; status: string; ok: boolean };
 type ColumnDiff = { column: string; count: number };
 type Summary = { total: number; match: number; diff: number; fresh: number; columnDiffs: ColumnDiff[] };
+type ValidationIssue = { level: "error" | "warning"; code: string; title: string; detail: string; count?: number };
+type Validation = {
+  ready: boolean;
+  summary: { errors: number; warnings: number; active_employees: number; active_contracts: number; recurring_items: number };
+  issues: ValidationIssue[];
+};
 
 // แปลชื่อคอลัมน์เป็นไทยสำหรับหน้าผลเทียบ
 const COL_TH: Record<string, string> = {
@@ -68,6 +74,8 @@ export default function PayrollCalcRunPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);   // Phase 2 — สถานะคำนวณเบื้องหลัง
+  const [validation, setValidation] = useState<Validation | null>(null);
+  const [validationLoading, setValidationLoading] = useState(false);
 
   async function loadPeriods(keepSelected = false) {
     try {
@@ -80,6 +88,24 @@ export default function PayrollCalcRunPage() {
   useEffect(() => { loadPeriods(); }, []);
 
   const curPeriod = periods.find((p) => p.id === periodId);
+
+  const loadValidation = useCallback(async (pid: string) => {
+    if (!pid) { setValidation(null); return null; }
+    setValidationLoading(true);
+    try {
+      const j = await apiFetch(`/api/payroll/validation?period_id=${encodeURIComponent(pid)}`).then((r) => r.json());
+      if (j.error) { setValidation(null); return null; }
+      setValidation(j.data as Validation);
+      return j.data as Validation;
+    } catch {
+      setValidation(null);
+      return null;
+    } finally {
+      setValidationLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { if (periodId) void loadValidation(periodId); }, [periodId, loadValidation]);
 
   async function changeStatus(toStatus: string) {
     if (!periodId || !curPeriod) return;
@@ -98,11 +124,14 @@ export default function PayrollCalcRunPage() {
   // Phase 2 — คำนวณแบบเบื้องหลัง: สร้าง job → poll สถานะ → แสดงผลเมื่อเสร็จ (ไม่บล็อกหน้าจอ/ไม่ timeout)
   async function run() {
     if (!periodId) return;
+    const v = await loadValidation(periodId);
+    if (v && !v.ready) { setErr("งวดยังไม่พร้อมคำนวณ กรุณาแก้รายการ error ในกล่องตรวจความพร้อมก่อน"); return; }
     setLoading(true); setErr(null); setRows(null); setSummary(null); setSaveMsg(null); setProgress("กำลังส่งงานคำนวณ…");
     try {
       const enq = await apiFetch("/api/payroll/calc-enqueue", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_id: periodId }),
       }).then((r) => r.json());
+      if (enq.validation) setValidation(enq.validation as Validation);
       if (enq.error || !enq.job_id) { setErr(enq.error ?? "สร้างงานไม่สำเร็จ"); setProgress(null); setLoading(false); return; }
       const jobId = enq.job_id as string;
       setProgress("กำลังคำนวณเบื้องหลัง… (อาจใช้เวลาสักครู่)");
@@ -126,6 +155,8 @@ export default function PayrollCalcRunPage() {
 
   async function save() {
     if (!periodId) return;
+    const v = await loadValidation(periodId);
+    if (v && !v.ready) { setErr("งวดยังไม่พร้อมบันทึกผลคำนวณ กรุณาแก้รายการ error ในกล่องตรวจความพร้อมก่อน"); return; }
     const period = periods.find((p) => p.id === periodId);
     if (!confirm(`ยืนยันบันทึกผลคำนวณงวด "${period?.period_name ?? ""}" ลงระบบ?\n\nระบบจะสร้าง "รอบคำนวณใหม่" (ไม่ลบของเดิม) — ทำได้เฉพาะงวดที่ยังไม่ล็อก`)) return;
     setSaving(true); setErr(null); setSaveMsg(null);
@@ -134,6 +165,7 @@ export default function PayrollCalcRunPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ period_id: periodId }),
       }).then((r) => r.json());
+      if (j.validation) setValidation(j.validation as Validation);
       if (j.error) setErr(j.error);
       else {
         setSaveMsg(`✅ บันทึกสำเร็จ — รอบคำนวณที่ ${j.data.run_no}, ${j.data.line_count} บรรทัด`);
@@ -158,7 +190,7 @@ export default function PayrollCalcRunPage() {
             {periods.map((p) => <option key={p.id} value={p.id}>{p.period_name} ({p.status})</option>)}
           </select>
         </div>
-        <button onClick={run} disabled={loading || !periodId}
+        <button onClick={run} disabled={loading || !periodId || validationLoading || validation?.ready === false}
           className="h-10 px-5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
           {loading ? "กำลังคำนวณ..." : "▶ คำนวณ + เทียบ"}
         </button>
@@ -169,6 +201,8 @@ export default function PayrollCalcRunPage() {
           </span>
         )}
       </div>
+
+      <ValidationPanel validation={validation} loading={validationLoading} />
 
       {/* สถานะงวด + เปลี่ยนสถานะ (workflow) */}
       {curPeriod && (
@@ -280,6 +314,44 @@ export default function PayrollCalcRunPage() {
         </div>
       )}
       <p className="text-xs text-slate-400 mt-4">หมายเหตุ: กด <b>คำนวณ + เทียบ</b> เพื่อตรวจยอดทุกช่องกับของเดิมก่อน เมื่อตรงครบ (หรือเป็นงวดใหม่) ปุ่ม <b>บันทึกผลคำนวณ</b> จะเปิดให้เขียนลงระบบ — สร้างรอบคำนวณใหม่ ไม่ลบของเดิม และบันทึกได้เฉพาะงวดที่ยังไม่ล็อก/จ่าย</p>
+    </div>
+  );
+}
+
+function ValidationPanel({ validation, loading }: { validation: Validation | null; loading: boolean }) {
+  if (loading) return <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 mb-5">กำลังตรวจความพร้อมงวด...</div>;
+  if (!validation) return null;
+  const errors = validation.issues.filter((i) => i.level === "error");
+  const warnings = validation.issues.filter((i) => i.level === "warning");
+  return (
+    <div className={`rounded-xl border px-4 py-3 mb-5 ${errors.length ? "border-red-200 bg-red-50" : warnings.length ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className={`text-sm font-semibold ${errors.length ? "text-red-800" : warnings.length ? "text-amber-800" : "text-emerald-800"}`}>
+            {errors.length ? "ยังไม่พร้อมคำนวณ" : warnings.length ? "พร้อมคำนวณ แต่มีคำเตือน" : "พร้อมคำนวณ"}
+          </div>
+          <div className="text-xs text-slate-600 mt-0.5">
+            พนักงาน active {validation.summary.active_employees} คน · สัญญาที่ใช้คำนวณ {validation.summary.active_contracts} รายการ · เงินประจำ {validation.summary.recurring_items} รายการ
+          </div>
+        </div>
+        <div className="text-xs font-medium">
+          <span className="text-red-700">{validation.summary.errors} error</span>
+          <span className="text-slate-300 mx-2">·</span>
+          <span className="text-amber-700">{validation.summary.warnings} warning</span>
+        </div>
+      </div>
+      {validation.issues.length > 0 && (
+        <div className="mt-3 grid gap-2">
+          {validation.issues.slice(0, 8).map((it) => (
+            <div key={it.code} className="rounded-lg bg-white/70 border border-white px-3 py-2">
+              <div className={`text-sm font-medium ${it.level === "error" ? "text-red-700" : "text-amber-700"}`}>
+                {it.level === "error" ? "ต้องแก้" : "ควรดู"}: {it.title}{it.count != null ? ` (${it.count})` : ""}
+              </div>
+              <div className="text-xs text-slate-600 mt-0.5">{it.detail}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

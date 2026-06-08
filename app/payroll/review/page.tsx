@@ -11,11 +11,15 @@ import { apiFetch } from "@/lib/api";
 type Period = { id: string; period_name: string; status: string };
 type Run = { id: string; run_no: number; calculated_at: string | null };
 type Totals = { count: number; gross_pay: number; total_deduction: number; social_security_employee: number; withholding_tax: number; net_pay: number };
+type IssueCounts = { negative_net: number; high_deduction: number; missing_base: number; zero_work_days: number; has_recurring: number };
 type Line = {
   id: string; employee_code: string; employee_name: string; base_salary: number; gross_pay: number;
   total_deduction: number; social_security_employee: number; withholding_tax: number; net_pay: number;
-  attendance_days: number; status: string;
+  attendance_days: number; attendance_hours: number; recurring_earning_amount: number; recurring_deduction_amount: number;
+  late_deduction: number; absence_deduction: number; unpaid_leave_deduction: number; overtime_amount: number; other_deduction: number;
+  status: string; issue_flags?: string[];
 };
+type FilterMode = "all" | "negative" | "high_deduction" | "missing_base" | "zero_days" | "recurring";
 
 const baht = (v: unknown) => v == null ? "—" : `฿${Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
 const STATUS_TH: Record<string, { th: string; cls: string }> = {
@@ -43,6 +47,8 @@ export default function PayrollReviewPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const [issueCounts, setIssueCounts] = useState<IssueCounts | null>(null);
 
   useEffect(() => {
     apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
@@ -57,7 +63,7 @@ export default function PayrollReviewPage() {
       const j = await apiFetch(url).then((r) => r.json());
       if (j.error) { setErr(j.error); setTotals(null); setLines([]); }
       else {
-        setTotals(j.totals); setLines(j.data as Line[]); setRuns(j.runs as Run[]);
+        setTotals(j.totals); setIssueCounts(j.issue_counts ?? null); setLines(j.data as Line[]); setRuns(j.runs as Run[]);
         setRunId(j.run?.id ?? ""); setPeriodStatus(j.period_status ?? "");
       }
     } catch { setErr("โหลดไม่ได้"); }
@@ -66,9 +72,16 @@ export default function PayrollReviewPage() {
 
   useEffect(() => { if (periodId) load(periodId); }, [periodId, load]);
 
-  const shown = q.trim()
-    ? lines.filter((l) => `${l.employee_code} ${l.employee_name}`.toLowerCase().includes(q.trim().toLowerCase()))
-    : lines;
+  const shown = lines
+    .filter((l) => q.trim() ? `${l.employee_code} ${l.employee_name}`.toLowerCase().includes(q.trim().toLowerCase()) : true)
+    .filter((l) => {
+      if (filterMode === "negative") return l.net_pay < 0;
+      if (filterMode === "high_deduction") return l.gross_pay > 0 && l.total_deduction / l.gross_pay >= 0.5;
+      if (filterMode === "missing_base") return l.base_salary <= 0 && l.gross_pay <= 0;
+      if (filterMode === "zero_days") return l.attendance_days <= 0;
+      if (filterMode === "recurring") return l.recurring_earning_amount > 0 || l.recurring_deduction_amount > 0;
+      return true;
+    });
 
   function exportCsv() {
     const head = ["รหัส", "พนักงาน", "เงินเดือน", "วันทำงาน", "รายได้รวม", "หักรวม", "ปกส.", "ภาษี", "สุทธิ", "สถานะ"];
@@ -126,6 +139,17 @@ export default function PayrollReviewPage() {
         </div>
       )}
 
+      {issueCounts && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <FilterChip active={filterMode === "all"} onClick={() => setFilterMode("all")} label={`ทั้งหมด ${lines.length}`} />
+          <FilterChip active={filterMode === "negative"} onClick={() => setFilterMode("negative")} label={`สุทธิติดลบ ${issueCounts.negative_net}`} tone="red" />
+          <FilterChip active={filterMode === "high_deduction"} onClick={() => setFilterMode("high_deduction")} label={`หักเกิน 50% ${issueCounts.high_deduction}`} tone="amber" />
+          <FilterChip active={filterMode === "missing_base"} onClick={() => setFilterMode("missing_base")} label={`ไม่มีฐานเงิน ${issueCounts.missing_base}`} tone="slate" />
+          <FilterChip active={filterMode === "zero_days"} onClick={() => setFilterMode("zero_days")} label={`วันทำงาน 0 ${issueCounts.zero_work_days}`} tone="slate" />
+          <FilterChip active={filterMode === "recurring"} onClick={() => setFilterMode("recurring")} label={`มีเงินประจำ ${issueCounts.has_recurring}`} tone="emerald" />
+        </div>
+      )}
+
       {loading ? (
         <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
       ) : (
@@ -137,6 +161,9 @@ export default function PayrollReviewPage() {
                 <th className="text-left px-3 py-2">พนักงาน</th>
                 <th className="text-right px-3 py-2">เงินเดือน</th>
                 <th className="text-right px-3 py-2">วันทำงาน</th>
+                <th className="text-right px-3 py-2">ประจำ +/-</th>
+                <th className="text-right px-3 py-2">สาย/ขาด/ลา</th>
+                <th className="text-right px-3 py-2">OT</th>
                 <th className="text-right px-3 py-2">รายได้รวม</th>
                 <th className="text-right px-3 py-2">หักรวม</th>
                 <th className="text-right px-3 py-2">ปกส.</th>
@@ -152,6 +179,14 @@ export default function PayrollReviewPage() {
                   <td className="px-3 py-2">{l.employee_name}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{baht(l.base_salary)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-500">{l.attendance_days || "—"}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <span className="text-emerald-700">{l.recurring_earning_amount ? baht(l.recurring_earning_amount) : "—"}</span>
+                    {l.recurring_deduction_amount ? <span className="block text-red-600">-{baht(l.recurring_deduction_amount).replace("฿", "")}</span> : null}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-red-600">
+                    {l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction ? baht(l.late_deduction + l.absence_deduction + l.unpaid_leave_deduction) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{l.overtime_amount ? baht(l.overtime_amount) : "—"}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{baht(l.gross_pay)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-700">{baht(l.total_deduction)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-slate-500">{baht(l.social_security_employee)}</td>
@@ -161,7 +196,7 @@ export default function PayrollReviewPage() {
                 </tr>
               ))}
               {shown.length === 0 && (
-                <tr><td colSpan={10} className="px-3 py-10 text-center text-slate-400 text-sm">
+                <tr><td colSpan={13} className="px-3 py-10 text-center text-slate-400 text-sm">
                   {lines.length === 0 ? "งวดนี้ยังไม่มีผลคำนวณ — ไปที่หน้า “คำนวณงวด” เพื่อคำนวณและบันทึก" : "ไม่พบพนักงานที่ค้นหา"}
                 </td></tr>
               )}
@@ -175,4 +210,15 @@ export default function PayrollReviewPage() {
 
 function Card({ label, value, cls }: { label: string; value: React.ReactNode; cls: string }) {
   return <div className={`rounded-xl border px-4 py-3 ${cls}`}><div className="text-lg font-bold tabular-nums truncate">{value}</div><div className="text-xs opacity-80">{label}</div></div>;
+}
+
+function FilterChip({ active, onClick, label, tone = "blue" }: { active: boolean; onClick: () => void; label: string; tone?: "blue" | "red" | "amber" | "slate" | "emerald" }) {
+  const on = {
+    blue: "border-blue-300 bg-blue-50 text-blue-700",
+    red: "border-red-300 bg-red-50 text-red-700",
+    amber: "border-amber-300 bg-amber-50 text-amber-700",
+    slate: "border-slate-300 bg-slate-50 text-slate-700",
+    emerald: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  }[tone];
+  return <button onClick={onClick} className={`h-8 px-3 rounded-lg border text-xs font-medium ${active ? on : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>{label}</button>;
 }

@@ -13,7 +13,7 @@ import { money } from "@/lib/payroll-calc";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const LINE_COLS = "id, employee_id, payroll_run_id, base_salary, gross_pay, total_deduction, social_security_employee, withholding_tax, net_pay, attendance_days, status";
+const LINE_COLS = "id, employee_id, payroll_run_id, base_salary, gross_pay, total_deduction, social_security_employee, withholding_tax, net_pay, attendance_days, attendance_hours, recurring_earning_amount, recurring_deduction_amount, late_deduction, absence_deduction, unpaid_leave_deduction, overtime_amount, other_deduction, status";
 
 export async function GET(req: NextRequest) {
   const denied = await guardPayroll(req); if (denied) return denied;
@@ -61,6 +61,13 @@ export async function GET(req: NextRequest) {
       withholding_tax: round2(sum("withholding_tax")),
       net_pay: round2(sum("net_pay")),
     };
+    const issueCounts = {
+      negative_net: lines.filter((l) => money(l.net_pay) < 0).length,
+      high_deduction: lines.filter((l) => money(l.gross_pay) > 0 && money(l.total_deduction) / money(l.gross_pay) >= 0.5).length,
+      missing_base: lines.filter((l) => money(l.base_salary) <= 0 && money(l.gross_pay) <= 0).length,
+      zero_work_days: lines.filter((l) => money(l.attendance_days) <= 0).length,
+      has_recurring: lines.filter((l) => money(l.recurring_earning_amount) > 0 || money(l.recurring_deduction_amount) > 0).length,
+    };
 
     const data = lines
       .map((l) => ({
@@ -74,7 +81,22 @@ export async function GET(req: NextRequest) {
         withholding_tax: money(l.withholding_tax),
         net_pay: money(l.net_pay),
         attendance_days: money(l.attendance_days),
+        attendance_hours: money(l.attendance_hours),
+        recurring_earning_amount: money(l.recurring_earning_amount),
+        recurring_deduction_amount: money(l.recurring_deduction_amount),
+        late_deduction: money(l.late_deduction),
+        absence_deduction: money(l.absence_deduction),
+        unpaid_leave_deduction: money(l.unpaid_leave_deduction),
+        overtime_amount: money(l.overtime_amount),
+        other_deduction: money(l.other_deduction),
         status: l.status,
+        issue_flags: [
+          money(l.net_pay) < 0 ? "negative_net" : null,
+          money(l.gross_pay) > 0 && money(l.total_deduction) / money(l.gross_pay) >= 0.5 ? "high_deduction" : null,
+          money(l.base_salary) <= 0 && money(l.gross_pay) <= 0 ? "missing_base" : null,
+          money(l.attendance_days) <= 0 ? "zero_work_days" : null,
+          money(l.recurring_earning_amount) > 0 || money(l.recurring_deduction_amount) > 0 ? "has_recurring" : null,
+        ].filter(Boolean),
       }))
       .sort((x, y) => x.employee_code.localeCompare(y.employee_code));
 
@@ -82,7 +104,7 @@ export async function GET(req: NextRequest) {
       period_name: period.period_name, period_status: period.status,
       run: run ? { id: run.id, run_no: run.run_no, status: run.status, calculated_at: run.calculated_at } : null,
       runs: runList.map((r) => ({ id: r.id, run_no: r.run_no, calculated_at: r.calculated_at })),
-      totals, data, error: null,
+      totals, issue_counts: issueCounts, data, error: null,
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });

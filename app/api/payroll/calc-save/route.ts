@@ -15,6 +15,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { computePeriodPreview } from "@/lib/payroll-calc-engine";
 import { writeAudit } from "@/lib/audit";
+import { validatePayrollPeriod } from "@/lib/payroll-validation";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,6 +44,8 @@ export async function POST(req: NextRequest) {
     if (!EDITABLE.has(String(period.status))) {
       return NextResponse.json({ error: `บันทึกไม่ได้ — งวดสถานะ "${period.status}" ถูกล็อกแล้ว (บันทึกได้เฉพาะ draft/review)` }, { status: 409 });
     }
+    const validation = await validatePayrollPeriod(periodId);
+    if (!validation.ready) return NextResponse.json({ error: "งวดยังไม่พร้อมบันทึกผลคำนวณ", validation }, { status: 409 });
 
     // คำนวณ (เครื่องเดียวกับหน้าพรีวิว)
     const { lines } = await computePeriodPreview(periodId);
