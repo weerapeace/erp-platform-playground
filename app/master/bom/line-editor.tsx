@@ -198,6 +198,22 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
   );
 }
 
+// patch สำหรับ "เปลี่ยนวัตถุดิบทั้งกลุ่ม" (คงบล็อก/กว้าง/ยาว/จำนวนเดิม เปลี่ยนแค่ตัววัตถุดิบ)
+function replacePatch(c: BomComponent): Partial<EditorLine> {
+  return {
+    component_id: c.id, component_sku: c.code, component_name: c.name, image_key: c.image_key ?? null,
+    material_group_id: c.material_group_id, material_type: c.material_type ?? "",
+    face_width_cm: c.fabric_width_cm ?? 0, waste_percent: c.loss_percent ?? 0,
+    uom: c.uom_name ?? "", uom_id: c.uom_id ?? null,
+  };
+}
+// ปุ่มเปลี่ยนวัตถุดิบทั้งกลุ่ม (โผล่ที่หัวกลุ่มเมื่อจัดกลุ่มตามวัตถุดิบ)
+function GroupReplacePicker({ onPick }: { onPick: (c: BomComponent) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <button type="button" onClick={() => setOpen(true)} className="text-[11px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100">🔁 เปลี่ยนทั้งกลุ่ม</button>;
+  return <span className="inline-block w-64 align-middle"><ComponentPicker sku="" name="" placeholder="เลือกวัตถุดิบใหม่..." onPick={(c) => { onPick(c); setOpen(false); }} /></span>;
+}
+
 // ============================================================
 // CutBlockPicker — เลือกบล็อกตัด (/api/bom/cutting-blocks)
 // ============================================================
@@ -289,6 +305,35 @@ export function BomLineEditor({
   }, []);
   const toggleSet = (set: Set<string>, key: string, on: boolean) => { const n = new Set(set); if (on) n.add(key); else n.delete(key); return n; };
 
+  // ---- undo / redo (เฉพาะตารางวัตถุดิบ) ----
+  const [undoStack, setUndoStack] = useState<EditorLine[][]>([]);
+  const [redoStack, setRedoStack] = useState<EditorLine[][]>([]);
+  const undo = () => {
+    if (!undoStack.length) return;
+    const prev = undoStack[undoStack.length - 1];
+    setRedoStack((r) => [lines, ...r].slice(0, 50));
+    setUndoStack((u) => u.slice(0, -1));
+    onChange(prev);
+  };
+  const redo = () => {
+    if (!redoStack.length) return;
+    const next = redoStack[0];
+    setUndoStack((u) => [...u, lines].slice(-50));
+    setRedoStack((r) => r.slice(1));
+    onChange(next);
+  };
+  const undoRef = useRef(undo); undoRef.current = undo;
+  const redoRef = useRef(redo); redoRef.current = redo;
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) return; // ไม่แย่ง undo ของช่องพิมพ์
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redoRef.current(); else undoRef.current(); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
   // กฎคำนวณของชนิด (จากตาราง material_groups)
   const groupOf = (name: string): GroupInfo | undefined => {
     const g = groups.find((x) => x.name === name);
@@ -305,6 +350,12 @@ export function BomLineEditor({
 
   // คิดปริมาณใหม่ทุกครั้งที่แก้ (เว้นกลุ่ม manual ที่พิมพ์เอง)
   const recalc = (l: EditorLine): EditorLine => { const c = lineCalc(l); return c == null ? l : { ...l, qty: c }; };
+  // ทุกการเปลี่ยนผ่านตาราง → บันทึก undo + คิดปริมาณใหม่
+  const handleGridChange = (rows: EditorLine[]) => {
+    setUndoStack((u) => [...u, lines].slice(-50));
+    setRedoStack([]);
+    onChange(rows.map(recalc));
+  };
 
   // เลือกวัตถุดิบ → autofill ชนิด/หน้ากว้าง/เผื่อเสีย
   const pickComponent = (l: EditorLine, c: BomComponent): Partial<EditorLine> => ({
@@ -350,6 +401,8 @@ export function BomLineEditor({
     {
       key: "component", header: "วัตถุดิบ", minWidth: 250, sortable: true,
       getValue: (l) => l.component_name || l.component_sku,
+      groupLabel: (l) => l.component_sku ? `${l.component_sku} ${l.component_name}` : "— ไม่ระบุวัตถุดิบ —",
+      groupEditNode: (apply) => <GroupReplacePicker onPick={(c) => apply(replacePatch(c))} />,
       render: (l, u) => (
         <div className="flex items-center gap-1">
           <div className="flex-1 min-w-0"><ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} /></div>
@@ -493,10 +546,18 @@ export function BomLineEditor({
 
   return (
     <>
+      {!readonly && (
+        <div className="flex items-center justify-end gap-1 mb-1">
+          <button type="button" onClick={undo} disabled={!undoStack.length} title="ย้อนกลับ (Ctrl+Z)"
+            className="h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">↶ ย้อน</button>
+          <button type="button" onClick={redo} disabled={!redoStack.length} title="ทำซ้ำ (Ctrl+Shift+Z)"
+            className="h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">↷ ทำซ้ำ</button>
+        </div>
+      )}
       <LineItemsGrid<EditorLine>
         rows={lines}
         columns={columns}
-        onChange={(rows) => onChange(rows.map(recalc))}
+        onChange={handleGridChange}
         rowId={(l) => l.key}
         readonly={readonly}
         storageKey="bom-lines"
@@ -505,7 +566,7 @@ export function BomLineEditor({
         onAdd={emptyLine}
         addLabel="＋ เพิ่มวัตถุดิบ"
         emptyText="ยังไม่มีวัตถุดิบในสูตรนี้"
-        groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "uom", label: "หน่วย" }]}
+        groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "component", label: "วัตถุดิบ (เปลี่ยนทั้งกลุ่มได้)" }, { key: "uom", label: "หน่วย" }]}
         footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
       />
 

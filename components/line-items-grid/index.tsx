@@ -37,6 +37,8 @@ export type LineColumn<T> = {
   groupLabel?: (row: T) => string;
   /** แก้ค่าที่ "หัวกลุ่ม" → ทุกบรรทัดในกลุ่มใช้ patch นี้ (เปิด cascade edit เมื่อ group ด้วยคอลัมน์นี้) */
   setValue?: (row: T, value: string) => Partial<T>;
+  /** ตัวแก้ที่หัวกลุ่มแบบ custom (เช่น picker) — apply(patch) จะใส่ patch ให้ทุกบรรทัดในกลุ่ม */
+  groupEditNode?: (apply: (patch: Partial<T>) => void) => React.ReactNode;
   render?:   (row: T, update: (patch: Partial<T>) => void, readonly: boolean) => React.ReactNode;
 };
 
@@ -177,11 +179,14 @@ export function LineItemsGrid<T>({
   const colCount = (canDrag ? 1 : 0) + columns.length + (readonly ? 0 : 1);
 
   // cascade edit ที่หัวกลุ่ม (เมื่อ group ด้วยคอลัมน์ที่มี setValue)
+  const groupKeyOf = (r: T) => (groupCol?.groupLabel ? groupCol.groupLabel(r) : String(colValue(groupCol!, r) ?? "— ไม่ระบุ —")) || "— ไม่ระบุ —";
   const applyGroupEdit = (groupLabel: string, value: string) => {
     if (!groupCol?.setValue) return;
-    const keyOf = (r: T) => (groupCol.groupLabel ? groupCol.groupLabel(r) : String(colValue(groupCol, r) ?? "— ไม่ระบุ —")) || "— ไม่ระบุ —";
-    onChange(rows.map((r) => (keyOf(r) === groupLabel ? { ...r, ...groupCol.setValue!(r, value) } : r)));
+    onChange(rows.map((r) => (groupKeyOf(r) === groupLabel ? { ...r, ...groupCol.setValue!(r, value) } : r)));
   };
+  // ใส่ patch ให้ทุกบรรทัดในกลุ่ม (ใช้กับ groupEditNode เช่น เปลี่ยนวัตถุดิบทั้งกลุ่ม)
+  const applyGroupPatch = (groupLabel: string, patch: Partial<T>) =>
+    onChange(rows.map((r) => (groupKeyOf(r) === groupLabel ? { ...r, ...patch } : r)));
 
   return (
     <div className="space-y-2">
@@ -259,6 +264,7 @@ export function LineItemsGrid<T>({
                         <span className="font-semibold text-slate-700">{d.label}</span>
                       )}
                       <span className="text-slate-400">· {d.count} รายการ</span>
+                      {groupCol?.groupEditNode && !readonly && groupCol.groupEditNode((patch) => applyGroupPatch(d.label, patch))}
                       {d.sums.filter((s) => s.total).map((s) => (
                         <span key={s.header} className="text-slate-500">· รวม{s.header} <span className="font-semibold text-slate-700 tabular-nums">{fmtNum(s.total)}</span></span>
                       ))}
