@@ -1128,10 +1128,15 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
           </div>
         );
       })}
-      {editable && editApi && (
-        <button type="button" onClick={()=>editApi.addSection((cur?.key ?? "").startsWith("tab_") ? cur!.label : "")}
+      {editable && editApi && cur && (
+        <button type="button" onClick={()=>{
+          // เพิ่มกล่องในแท็บปัจจุบัน: ทำให้กล่องในแท็บนี้ใช้ชื่อแท็บเดียวกัน แล้วเพิ่มกล่องใหม่เข้าแท็บนั้น
+          const tname = cur.label;
+          cur.entries.forEach(([s])=>{ if ((s.tab ?? "").trim() !== tname) editApi.setSectionTab(s.key, tname); });
+          editApi.addSection(tname);
+        }}
           className="w-full h-9 text-sm border border-dashed border-slate-300 rounded-lg text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50/40">
-          ➕ เพิ่มกล่อง (section){cur && cur.key.startsWith("tab_") ? ` ในแท็บ "${cur.label}"` : ""}
+          ➕ เพิ่มกล่อง (section) ในแท็บ &quot;{cur.label}&quot;
         </button>
       )}
     </div>
