@@ -17,9 +17,12 @@ export const revalidate = 0;
 export type WorkOrder = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
   stage: string; assignee_type: string; assignee_id: string | null; assignee_name: string | null;
+  department_id: string | null; department_name: string | null;
   qty: number; uom: string | null; received_qty: number;
   dispatch_date: string | null; due_date: string | null; status: string; note: string | null;
   created_at: string; updated_at: string; is_active: boolean;
+  // เสริมจาก board API
+  image_url?: string | null; brand?: string | null; brand_color?: string | null;
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -50,6 +53,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type CreateBody = {
   mo_no?: string; product_sku?: string | null; product_name?: string | null;
   stage?: string; assignee_type?: string; assignee_id?: string | null; assignee_name?: string | null;
+  department_id?: string | null; department_name?: string | null;
   qty?: number; uom?: string | null; dispatch_date?: string | null; due_date?: string | null; note?: string | null;
 };
 
@@ -70,6 +74,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     wo_no: woNo, mo_no: body.mo_no, product_sku: body.product_sku ?? null, product_name: body.product_name ?? null,
     stage: body.stage || "cut", assignee_type: body.assignee_type || "craftsman",
     assignee_id: body.assignee_id ?? null, assignee_name: body.assignee_name ?? null,
+    department_id: body.department_id ?? null, department_name: body.department_name ?? null,
     qty, uom: body.uom ?? null, received_qty: 0,
     dispatch_date: body.dispatch_date || new Date().toISOString().slice(0, 10),
     due_date: body.due_date || null, status: "dispatched", note: body.note ?? null,

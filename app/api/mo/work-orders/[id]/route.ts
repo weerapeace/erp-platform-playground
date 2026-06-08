@@ -18,6 +18,7 @@ const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; }
 type PatchBody = {
   status?: string; received_qty?: number; qty?: number;
   assignee_type?: string; assignee_id?: string | null; assignee_name?: string | null;
+  department_id?: string | null; department_name?: string | null;
   stage?: string; due_date?: string | null; note?: string | null;
 };
 
@@ -38,6 +39,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.assignee_type != null) patch.assignee_type = body.assignee_type;
   if (body.assignee_id !== undefined)   patch.assignee_id = body.assignee_id ?? null;
   if (body.assignee_name !== undefined) patch.assignee_name = body.assignee_name ?? null;
+  if (body.department_id !== undefined)   patch.department_id = body.department_id ?? null;
+  if (body.department_name !== undefined) patch.department_name = body.department_name ?? null;
   if (body.due_date !== undefined) patch.due_date = body.due_date || null;
   if (body.note !== undefined)     patch.note = body.note ?? null;
 

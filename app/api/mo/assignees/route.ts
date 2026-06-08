@@ -9,13 +9,13 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type Assignee = { id: string; name: string; code: string | null };
+export type Assignee = { id: string; name: string; code: string | null; department_id?: string | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const supabase = supabaseFromRequest(request);
   const [{ data: emps }, { data: deps }] = await Promise.all([
     supabase.from("employees")
-      .select("id, employee_code, nickname, first_name_th, last_name_th, first_name, last_name, resign_date")
+      .select("id, employee_code, nickname, first_name_th, last_name_th, first_name, last_name, resign_date, department_id")
       .is("resign_date", null).limit(1000),
     supabase.from("departments").select("id, code, name, status").limit(500),
   ]);
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const en = [e.first_name, e.last_name].filter(Boolean).join(" ").trim();
     const nick = (e.nickname as string) || "";
     const name = [th || en, nick && `(${nick})`].filter(Boolean).join(" ") || (e.employee_code as string) || "—";
-    return { id: String(e.id), name, code: (e.employee_code as string) ?? null };
+    return { id: String(e.id), name, code: (e.employee_code as string) ?? null, department_id: (e.department_id as string) ?? null };
   }).sort((a, b) => a.name.localeCompare(b.name, "th"));
 
   const departments: Assignee[] = (deps ?? [])
