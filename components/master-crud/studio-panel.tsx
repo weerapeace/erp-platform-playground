@@ -984,7 +984,7 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onPatch }: {
       {editable && (
         <span title="กดค้างที่กล่องเพื่อลากย้าย" className="absolute top-0.5 left-0.5 text-slate-300 select-none text-xs leading-none pointer-events-none">⋮⋮</span>
       )}
-      <div className={`text-[11px] text-slate-500 ${editable&&!labelLeft?"pl-3":""} ${labelLeft?"shrink-0 pt-0.5":""}`} style={{ ...labelCss, ...(labelLeft?{ width: "33%" }:{}) }}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
+      <div className={`text-[11px] text-slate-500 ${editable&&!labelLeft?"pl-3":""} ${labelLeft?"shrink-0 w-32 pt-0.5":""}`} style={labelCss}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
         {editable && <span className="ml-1 text-[9px] text-slate-300">{gw}/12{isTextarea&&rows?` · ${rows} บรรทัด`:""}</span>}</div>
       <div className={`text-sm text-slate-800 break-words whitespace-pre-wrap ${labelLeft?"flex-1":""}`} style={{ ...valueCss, minHeight: isTextarea && rows ? `${rows*1.4}em` : "1.25rem" }}>{val || <span className="text-slate-300">—</span>}</div>
       {editable && (

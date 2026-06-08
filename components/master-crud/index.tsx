@@ -2425,7 +2425,7 @@ function DetailSections({
         return (
           <div key={f.key} style={{ gridColumn: `span ${gw12(f, cols)}`, ...(hl ? { background: hlColor, borderColor: hlColor } : {}) }}
             className={`${hl ? "border rounded-md p-1.5 -m-0.5" : ""} ${labelLeft ? "flex items-baseline gap-2" : ""}`}>
-            <dt className="text-[11px] text-slate-400 mb-0.5" style={{ ...labelCss, ...(labelLeft ? { width: "33%", flexShrink: 0 } : {}) }}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
+            <dt className={`text-[11px] text-slate-400 mb-0.5 ${labelLeft ? "w-32 shrink-0" : ""}`} style={labelCss}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
             <dd style={valueCss} className={labelLeft ? "flex-1 min-w-0" : ""}>{renderValue(f)}</dd>
           </div>
         );
