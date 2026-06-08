@@ -1,5 +1,11 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { normalizePayrollGlobalRules, type PayrollGlobalRules } from "@/lib/payroll-global-rules";
+import {
+  getPrimaryPayrollRules,
+  normalizePayrollGlobalRules,
+  normalizePayrollRuleSets,
+  type PayrollGlobalRules,
+  type PayrollRuleSet,
+} from "@/lib/payroll-global-rules";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -15,6 +21,7 @@ export type PayrollGlobalRulesRecord = {
   storageReason: string;
   module: { id: string; key: string; label: string } | null;
   rules: PayrollGlobalRules;
+  ruleSets: PayrollRuleSet[];
   updatedAt: string | null;
 };
 
@@ -43,29 +50,39 @@ export async function getPayrollGlobalRules(admin: Admin): Promise<PayrollGlobal
       storageReason: "ยังไม่พบ erp_modules ของ Payroll จึงใช้ค่า default ให้ดูก่อน",
       module: null,
       rules: normalizePayrollGlobalRules(null),
+      ruleSets: normalizePayrollRuleSets(null),
       updatedAt: null,
     };
   }
 
   const config = (mod.config ?? {}) as Record<string, unknown>;
+  const ruleSets = normalizePayrollRuleSets(config.payroll_rule_sets, config.payroll_rules);
   return {
     storageReady: true,
-    storageReason: "เก็บกฎกลางไว้ใน erp_modules.config.payroll_rules",
+    storageReason: "เก็บกฎกลางแยกตามประเภทสัญญาไว้ใน erp_modules.config.payroll_rule_sets",
     module: { id: mod.id, key: mod.module_key, label: mod.label ?? mod.module_key },
-    rules: normalizePayrollGlobalRules(config.payroll_rules),
+    rules: getPrimaryPayrollRules(ruleSets),
+    ruleSets,
     updatedAt: typeof config.payroll_rules_updated_at === "string" ? config.payroll_rules_updated_at : null,
   };
 }
 
-export async function updatePayrollGlobalRules(admin: Admin, rulesInput: unknown) {
+export async function updatePayrollGlobalRules(admin: Admin, input: { rules?: unknown; ruleSets?: unknown }) {
   const mod = await findPayrollModule(admin);
   if (!mod) throw new Error("ยังไม่พบ erp_modules ของ Payroll จึงยังบันทึกกฎกลางไม่ได้");
 
   const currentConfig = (mod.config ?? {}) as Record<string, unknown>;
-  const previous = normalizePayrollGlobalRules(currentConfig.payroll_rules);
-  const next = normalizePayrollGlobalRules(rulesInput);
+  const previousRuleSets = normalizePayrollRuleSets(currentConfig.payroll_rule_sets, currentConfig.payroll_rules);
+  const nextRuleSets = normalizePayrollRuleSets(input.ruleSets, input.rules ?? currentConfig.payroll_rules);
+  const previous = getPrimaryPayrollRules(previousRuleSets);
+  const next = getPrimaryPayrollRules(nextRuleSets);
   const updatedAt = new Date().toISOString();
-  const config = { ...currentConfig, payroll_rules: next, payroll_rules_updated_at: updatedAt };
+  const config = {
+    ...currentConfig,
+    payroll_rules: next,
+    payroll_rule_sets: nextRuleSets,
+    payroll_rules_updated_at: updatedAt,
+  };
 
   const { error } = await admin.from("erp_modules").update({ config }).eq("id", mod.id);
   if (error) throw new Error(error.message);
@@ -73,8 +90,9 @@ export async function updatePayrollGlobalRules(admin: Admin, rulesInput: unknown
   return {
     module: { id: mod.id, key: mod.module_key, label: mod.label ?? mod.module_key },
     previous,
+    previousRuleSets,
     rules: next,
+    ruleSets: nextRuleSets,
     updatedAt,
   };
 }
-

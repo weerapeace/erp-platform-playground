@@ -34,7 +34,7 @@ export async function PATCH(req: NextRequest) {
   const denied = await requireAdmin(req);
   if (denied) return denied;
 
-  let body: { rules?: unknown; actor?: string };
+  let body: { rules?: unknown; ruleSets?: unknown; actor?: string };
   try {
     body = await req.json();
   } catch {
@@ -44,7 +44,7 @@ export async function PATCH(req: NextRequest) {
   try {
     const admin = supabaseAdmin();
     const { data: { user } } = await supabaseFromRequest(req).auth.getUser();
-    const result = await updatePayrollGlobalRules(admin, body.rules);
+    const result = await updatePayrollGlobalRules(admin, { rules: body.rules, ruleSets: body.ruleSets });
 
     await writeAudit(admin, {
       action: "payroll.global_rules.update",
@@ -55,7 +55,9 @@ export async function PATCH(req: NextRequest) {
       metadata: {
         module: result.module.key,
         previous: result.previous,
+        previousRuleSets: result.previousRuleSets,
         next: result.rules,
+        ruleSets: result.ruleSets,
       },
     });
 
@@ -63,9 +65,10 @@ export async function PATCH(req: NextRequest) {
       ok: true,
       data: {
         storageReady: true,
-        storageReason: "เก็บกฎกลางไว้ใน erp_modules.config.payroll_rules",
+        storageReason: "เก็บกฎกลางแยกตามประเภทสัญญาไว้ใน erp_modules.config.payroll_rule_sets",
         module: result.module,
         rules: result.rules,
+        ruleSets: result.ruleSets,
         updatedAt: result.updatedAt,
       },
       error: null,
@@ -77,4 +80,3 @@ export async function PATCH(req: NextRequest) {
     );
   }
 }
-
