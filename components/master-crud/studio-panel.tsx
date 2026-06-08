@@ -545,7 +545,7 @@ export function StudioPanel({
               groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
               row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
               editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
-              onResizeSpan={(k,span)=>patchItem(k,{formSpan:span})} onPatch={patchItem} sensors={sensors} onDragEnd={onDragEnd}
+              onPatch={patchItem} sensors={sensors} onDragEnd={onDragEnd}
               editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}) }} />
           )}
         </div>
@@ -730,12 +730,12 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
   );
   return (
     <div className="mt-1 mb-1 ml-7 mr-1 p-3 rounded-lg border border-orange-200 bg-orange-50/40 space-y-2.5 text-xs">
-      {/* แถว 1: ความกว้าง + required + readonly */}
+      {/* แถว 1: ความกว้าง (กริด 12) + required + readonly */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-slate-500">ความกว้าง:</span>
-        <Toggle on={(field.formSpan??1)===1} label="1 ช่อง" onClick={()=>onPatch({formSpan:1})} />
-        <Toggle on={(field.formSpan??1)===2} label="2 ช่อง" onClick={()=>onPatch({formSpan:2})} />
-        <Toggle on={(field.formSpan??1)===3} label="3 ช่อง" onClick={()=>onPatch({formSpan:3})} />
+        {([[3,"¼"],[4,"⅓"],[6,"ครึ่ง"],[8,"⅔"],[12,"เต็ม"]] as [number,string][]).map(([n,lbl])=>(
+          <Toggle key={n} on={Number(us.gw)===n} label={lbl} onClick={()=>setUi("gw",n)} />
+        ))}
         <span className="ml-2 text-slate-300">|</span>
         <Toggle on={!!field.required} label="บังคับกรอก" onClick={()=>onPatch({required:!field.required})} />
         <Toggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />
@@ -889,9 +889,9 @@ function previewVal(row: Record<string, unknown> | undefined, f: StudioField): s
 }
 
 // ฟิลด์ 1 ช่องบน preview (โหมดแก้ไข: ลาก ⋮⋮ ย้าย/สลับ · คลิก=เลือก · มุมขวาล่าง=ปรับกว้าง/สูง)
-function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan, onPatch }: {
+function PreviewField({ f, cols, row, editable, selected, onSelect, onPatch }: {
   f: StudioField; cols: number; row?: Record<string, unknown>; editable?: boolean;
-  selected?: boolean; onSelect?: (k: string)=>void; onResizeSpan?: (k: string, span: number)=>void;
+  selected?: boolean; onSelect?: (k: string)=>void;
   onPatch?: (k: string, patch: Partial<StudioField>)=>void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: f.key, disabled: !editable });
@@ -900,22 +900,26 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan
   const css = uiStyleCss(us);
   const hl = !!us.highlight;
   const val = previewVal(row, f);
-  const rawSpan = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
-  const span = Math.min(rawSpan, cols);
-  const spanCls = span>=3 ? "col-span-3" : span===2 ? "col-span-2" : "";
+  // ความกว้างบนกริด 12 ช่อง — ui_style.gw (1-12) ถ้ามี ; ไม่งั้นแปลงจาก span/คอลัมน์เดิม
+  const gwDerive = (() => { const g = Number(us.gw); if (g>=1 && g<=12) return Math.round(g);
+    const eff = f.formSpan && f.formSpan>1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
+    return Math.max(1, Math.min(12, Math.round((12*Math.min(eff,cols))/(cols||2)))); })();
+  const gw = gwDerive;
   const isTextarea = f.type === "textarea";
   const rows = Number(us.rows ?? 0) || 0;
-  const dndStyle: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.5:1, zIndex: isDragging?10:undefined };
+  const dndStyle: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.5:1, zIndex: isDragging?10:undefined, gridColumn: `span ${gw}` };
 
-  // ลากมุมขวาล่าง: แกน X = จำนวนช่อง (กว้าง), แกน Y = จำนวนบรรทัด (สูง — เฉพาะ textarea)
+  // ลากมุมขวาล่าง: แกน X = จำนวนช่อง 1-12 (กว้าง), แกน Y = จำนวนบรรทัด (สูง — เฉพาะ textarea)
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault(); e.stopPropagation();
-    const el = boxRef.current; if (!el) return;
-    const colW = el.offsetWidth / span;
-    const startX = e.clientX, startY = e.clientY, startSpan = span, startRows = rows || 3;
+    const el = boxRef.current; if (!el || !onPatch) return;
+    const colW = el.offsetWidth / gw;
+    const startX = e.clientX, startY = e.clientY, startGw = gw, startRows = rows || 3;
     const move = (ev: PointerEvent) => {
-      if (onResizeSpan) { const next = Math.max(1, Math.min(cols, startSpan + Math.round((ev.clientX - startX) / colW))); if (next !== (f.formSpan ?? 1)) onResizeSpan(f.key, next); }
-      if (isTextarea && onPatch) { const nr = Math.max(2, Math.min(20, startRows + Math.round((ev.clientY - startY) / 22))); if (nr !== rows) onPatch(f.key, { uiStyle: { ...us, rows: nr } }); }
+      const ng = Math.max(1, Math.min(12, startGw + Math.round((ev.clientX - startX) / colW)));
+      const patch: Record<string, unknown> = { ...us, gw: ng };
+      if (isTextarea) patch.rows = Math.max(2, Math.min(20, startRows + Math.round((ev.clientY - startY) / 22)));
+      onPatch(f.key, { uiStyle: patch });
     };
     const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); document.body.style.cursor=""; };
     document.addEventListener("pointermove", move); document.addEventListener("pointerup", up); document.body.style.cursor = isTextarea ? "nwse-resize" : "ew-resize";
@@ -924,13 +928,13 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan
   return (
     <div ref={(el)=>{ setNodeRef(el); boxRef.current = el; }} style={dndStyle} {...attributes}
       onClick={editable ? (e)=>{ e.stopPropagation(); onSelect?.(f.key); } : undefined}
-      className={`relative space-y-0.5 ${spanCls} rounded p-1.5 ${hl?"bg-amber-50 border border-amber-200":selected?"ring-2 ring-orange-400 bg-orange-50/40":editable?"border border-transparent hover:border-orange-200 hover:bg-orange-50/20 cursor-pointer":""}`}>
+      className={`relative space-y-0.5 rounded p-1.5 ${hl?"bg-amber-50 border border-amber-200":selected?"ring-2 ring-orange-400 bg-orange-50/40":editable?"border border-transparent hover:border-orange-200 hover:bg-orange-50/20 cursor-pointer":""}`}>
       {editable && (
         <span {...listeners} onClick={(e)=>e.stopPropagation()} title="ลากเพื่อย้าย/สลับตำแหน่ง"
           className="absolute top-0.5 left-0.5 text-slate-300 hover:text-orange-400 cursor-grab active:cursor-grabbing select-none text-xs leading-none">⋮⋮</span>
       )}
       <div className={`text-[11px] text-slate-500 ${editable?"pl-3":""}`} style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
-        {editable && <span className="ml-1 text-[9px] text-slate-300">{span} ช่อง{isTextarea&&rows?` · ${rows} บรรทัด`:""}</span>}</div>
+        {editable && <span className="ml-1 text-[9px] text-slate-300">{gw}/12{isTextarea&&rows?` · ${rows} บรรทัด`:""}</span>}</div>
       <div className="text-sm text-slate-800 break-words whitespace-pre-wrap" style={{ ...css, minHeight: isTextarea && rows ? `${rows*1.4}em` : "1.25rem" }}>{val || <span className="text-slate-300">—</span>}</div>
       {editable && (
         <div onPointerDown={startResize} title={isTextarea?"ลากปรับกว้าง (ซ้าย-ขวา) / สูง (บน-ล่าง)":"ลากปรับความกว้าง (ช่อง)"}
@@ -954,10 +958,10 @@ type EditApi = {
   moveField: (fieldKey: string, groupKey: string)=>void;
 };
 
-function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onResizeSpan, onPatch, editApi, sensors, onDragEnd }: {
+function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, editApi, sensors, onDragEnd }: {
   groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string;
   editable?: boolean; selectedKey?: string | null; onSelectField?: (k: string)=>void;
-  onResizeSpan?: (k: string, span: number)=>void; onPatch?: (k: string, patch: Partial<StudioField>)=>void;
+  onPatch?: (k: string, patch: Partial<StudioField>)=>void;
   editApi?: EditApi; sensors?: ReturnType<typeof useSensors>; onDragEnd?: (e: DragEndEvent)=>void;
 }) {
   const allTabNames = editApi ? [...new Set(editApi.sections.map((s)=>(s.tab??"").trim()).filter(Boolean))] : [];
@@ -1023,7 +1027,6 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
       <DndContext sensors={sensors ?? undefined} collisionDetection={closestCorners} onDragEnd={onDragEnd ?? (()=>{})}>
       {(cur?.entries ?? []).map(([sec, fs])=>{
         const cols = sec.columns || 2;
-        const gridCls = cols===1 ? "grid-cols-1" : cols===3 ? "grid-cols-3" : "grid-cols-2";
         return (
           <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden mb-4">
             <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
@@ -1048,10 +1051,10 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
               ) : sec.label}
             </div>
             <SortableContext items={fs.map(f=>f.key)} strategy={rectSortingStrategy}>
-              <div className={`p-3 grid ${gridCls} gap-3`}>
+              <div className="p-3 grid grid-cols-12 gap-3">
                 {fs.map(f=>(
                   <PreviewField key={f.key} f={f} cols={cols} row={row} editable={editable}
-                    selected={selectedKey===f.key} onSelect={onSelectField} onResizeSpan={onResizeSpan} onPatch={onPatch} />
+                    selected={selectedKey===f.key} onSelect={onSelectField} onPatch={onPatch} />
                 ))}
               </div>
             </SortableContext>

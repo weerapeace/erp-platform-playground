@@ -1424,7 +1424,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // ฟิลด์ที่มี control หลายตัว (m2m/o2m) ห้ามครอบด้วย <label> — เพราะคลิกที่ชื่อ label เบราว์เซอร์จะไปกด control ตัวแรก (แท็กอันแรกหลุด)
     const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many") ? "div" : "label";
     return (
-      <FieldWrap key={f.key} className={`block ${(() => { const s = Math.min(f.formSpan ?? 1, maxSpan); return s === 3 ? "col-span-3" : s === 2 ? "col-span-2" : ""; })()} ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
+      <FieldWrap key={f.key} style={{ gridColumn: `span ${gw12(f, maxSpan)}` }} className={`block ${highlight ? "bg-amber-50 border border-amber-200 rounded-lg p-2" : ""}`}>
         <span className="text-xs font-medium text-slate-600" style={tStyle}>
           {f.label}
           {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
@@ -2148,6 +2148,15 @@ function QuickEditCell({ field, value, onSave, siblingValues }: { field: FieldDe
 // กลุ่ม B: คลาส grid ต่อจำนวน column (static string → Tailwind ไม่ purge)
 const COLS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
 
+// ความกว้าง field บนกริด 12 ช่อง: ใช้ ui_style.gw (1-12) ถ้ามี ; ไม่งั้นแปลงจาก span/คอลัมน์เดิม (คงหน้าตาเดิม)
+function gw12(f: { uiStyle?: Record<string, unknown>; formSpan?: number; type?: string }, cols: number): number {
+  const g = Number((f.uiStyle ?? {}).gw);
+  if (g >= 1 && g <= 12) return Math.round(g);
+  const c = cols || 2;
+  const eff = (f.formSpan && f.formSpan > 1) ? f.formSpan : ((f.type === "textarea" || f.type === "image") && c > 1 ? c : 1);
+  return Math.max(1, Math.min(12, Math.round((12 * Math.min(eff, c)) / c)));
+}
+
 // คำอธิบายสูตร/คำนวณ (tooltip ภาษาคน) สำหรับ computed / readonly-ที่มี help text
 function fieldHelpTip(f: FieldDef): string | null {
   if (f.type === "computed") {
@@ -2272,7 +2281,7 @@ function FormSections({
   // กลุ่ม B: ถ้ามี layout → ใช้ Tab → Section → columns
   if (layout?.tabs?.length) {
     return <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={(fs, cols) => (
-      <div className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-3`}>{fs.map((f) => renderField(f, cols))}</div>
+      <div className="grid grid-cols-12 gap-3">{fs.map((f) => renderField(f, cols))}</div>
     )} />;
   }
 
@@ -2283,7 +2292,7 @@ function FormSections({
     <div>
       {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
       {current && (
-        <div className="grid grid-cols-2 gap-3 pt-3">
+        <div className="grid grid-cols-12 gap-3 pt-3">
           {current[1].map((f) => renderField(f, 2))}
         </div>
       )}
@@ -2397,18 +2406,13 @@ function DetailSections({
 
   // dl grid ตามจำนวน column
   const renderDl = (fs: FieldDef[], cols: number) => (
-    <dl className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-x-4 gap-y-3`}>
+    <dl className="grid grid-cols-12 gap-x-4 gap-y-3">
       {fs.map((f) => {
         const labelCss = fieldStyleCss(f.uiStyle, "label_size");
         const valueCss = fieldStyleCss(f.uiStyle, "value_size");
         const hl = !!(f.uiStyle ?? {}).highlight;
-        // ความกว้าง field ตามที่ตั้ง (1/2/3) — textarea/image กินเต็มถ้าไม่ได้ตั้ง span
-        // clamp ไม่ให้เกินจำนวนคอลัมน์ของ section (กัน grid 1 คอลัมน์แตกเป็น 2)
-        const rawSpan = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type === "textarea" || f.type === "image") && cols > 1 ? 2 : 1);
-        const span = Math.min(rawSpan, cols);
-        const spanCls = span >= 3 ? "col-span-3" : span === 2 ? "col-span-2" : "";
         return (
-          <div key={f.key} className={`${spanCls} ${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
+          <div key={f.key} style={{ gridColumn: `span ${gw12(f, cols)}` }} className={`${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
             <dt className="text-[11px] text-slate-400 mb-0.5" style={labelCss}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
             <dd style={valueCss}>{renderValue(f)}</dd>
           </div>
