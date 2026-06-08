@@ -272,7 +272,7 @@ export function StudioPanel({
   }, [moduleKey]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
@@ -978,12 +978,11 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onPatch }: {
   };
 
   return (
-    <div ref={(el)=>{ setNodeRef(el); boxRef.current = el; }} style={{ ...dndStyle, ...(hl?{ background: hlColor, borderColor: hlColor }:{}) }} {...attributes}
+    <div ref={(el)=>{ setNodeRef(el); boxRef.current = el; }} style={{ ...dndStyle, ...(hl?{ background: hlColor, borderColor: hlColor }:{}) }} {...attributes} {...(editable?listeners:{})}
       onClick={editable ? (e)=>{ e.stopPropagation(); onSelect?.(f.key); } : undefined}
-      className={`relative rounded p-2 ${hl?"border":selected?"ring-2 ring-orange-400 bg-orange-50":editable?"bg-white border border-slate-200 shadow-sm hover:border-orange-300 cursor-pointer":""} ${labelLeft?"flex items-baseline gap-2":"space-y-0.5"}`}>
+      className={`relative rounded p-2 ${hl?"border":selected?"ring-2 ring-orange-400 bg-orange-50":editable?"bg-white border border-slate-200 shadow-sm hover:border-orange-300 cursor-grab active:cursor-grabbing":""} ${labelLeft?"flex items-baseline gap-2":"space-y-0.5"}`}>
       {editable && (
-        <span {...listeners} onClick={(e)=>e.stopPropagation()} title="ลากเพื่อย้าย/สลับตำแหน่ง"
-          className="absolute top-0.5 left-0.5 text-slate-300 hover:text-orange-400 cursor-grab active:cursor-grabbing select-none text-xs leading-none z-10">⋮⋮</span>
+        <span title="กดค้างที่กล่องเพื่อลากย้าย" className="absolute top-0.5 left-0.5 text-slate-300 select-none text-xs leading-none pointer-events-none">⋮⋮</span>
       )}
       <div className={`text-[11px] text-slate-500 ${editable&&!labelLeft?"pl-3":""} ${labelLeft?"shrink-0 pt-0.5":""}`} style={{ ...labelCss, ...(labelLeft?{ width: "33%" }:{}) }}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
         {editable && <span className="ml-1 text-[9px] text-slate-300">{gw}/12{isTextarea&&rows?` · ${rows} บรรทัด`:""}</span>}</div>
