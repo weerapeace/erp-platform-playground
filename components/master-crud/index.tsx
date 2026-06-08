@@ -364,6 +364,8 @@ export type MasterCRUDConfig = {
   /** ซ่อนคอลัมน์ "สถานะ เปิด/ปิดใช้งาน" + แท็บ เปิดอยู่/ปิดอยู่ — ใช้กับตารางผลลัพธ์ที่ไม่มีฟิลด์ active
    *  (เช่น payroll_lines/payslips ที่มีแต่ status เอกสาร ไม่มี active boolean) */
   hideActiveStatus?: boolean;
+  /** ปิดปุ่มลบถาวรสำหรับเอกสารที่ต้องเก็บประวัติ เช่น Payroll Periods */
+  allowPermanentDelete?: boolean;
   /** จำนวน row ที่ดึงตอนโหลด (client mode, default 200) */
   pageLimit?: number;
   /**
@@ -418,6 +420,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const apiBase    = config.apiBase ?? "/api/master/";
   const activeField = config.activeField ?? "active";
   const isRest     = (config.apiBase ?? "").includes("master-v2");
+  const allowPermanentDelete = config.allowPermanentDelete !== false;
 
   // ---- Dynamic field loading (Sprint 2) ----
   // ถ้ามี moduleKey — load fields config จาก Field Registry
@@ -1041,6 +1044,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ลบชั่วคราว (soft) / ลบถาวร (hard) — จากกล่อง deleteTarget
   const doDelete = async () => {
     if (!deleteTarget) return;
+    if (deleteMode === "hard" && !allowPermanentDelete) { setError("ตารางนี้ไม่อนุญาตให้ลบถาวร"); return; }
     if (deleteMode === "hard" && deleteText.trim() !== "ลบ") { setError('พิมพ์คำว่า "ลบ" เพื่อยืนยันการลบถาวร'); return; }
     setDeleting(true); setError(null);
     try {
@@ -1228,7 +1232,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     ] : [];
 
     // ล้างถังขยะ — ลบถาวร "ทุกใบที่อยู่ในถัง" (ปิดอยู่) ทีเดียว · เฉพาะตารางที่มี soft-delete
-    const emptyTrash: BulkAction<Row>[] = (canEdit && !config.hideActiveStatus) ? [{
+    const effectiveBase = allowPermanentDelete ? base : base.filter((a) => !a.label.includes("ถาวร"));
+
+    const emptyTrash: BulkAction<Row>[] = (canEdit && allowPermanentDelete && !config.hideActiveStatus) ? [{
       label: "🧹 ล้างถังขยะ (ลบถาวรทุกใบในถัง)",
       variant: "danger",
       onClick: async () => {
@@ -1256,9 +1262,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       },
     }] : [];
 
-    return [...extra, ...base, ...emptyTrash];
+    return [...extra, ...effectiveBase, ...emptyTrash];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canEdit, user?.name, apiBase, config.apiPath, config.extraBulkActions, refreshData, activeField, isRest, config.hideActiveStatus]);
+  }, [canEdit, user?.name, apiBase, config.apiPath, config.extraBulkActions, refreshData, activeField, isRest, config.hideActiveStatus, allowPermanentDelete]);
 
   // ---- Sprint 12: Inline editing ----
   // เปิดเฉพาะ field ที่ admin tick is_inline_editable + user มีสิทธิ์ edit + ไม่ใช่ sensitive
@@ -1951,11 +1957,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 <div><div className="text-sm font-medium text-slate-800">🟡 ลบชั่วคราว (แนะนำ)</div>
                   <div className="text-xs text-slate-500 mt-0.5">ซ่อนจากตาราง แต่ข้อมูลยังอยู่ — กู้คืนได้ภายหลัง</div></div>
               </label>
-              <label className={`flex gap-3 items-start p-3 rounded-lg border cursor-pointer ${deleteMode === "hard" ? "border-red-300 bg-red-50" : "border-slate-200 hover:bg-slate-50"}`}>
+              {allowPermanentDelete && <label className={`flex gap-3 items-start p-3 rounded-lg border cursor-pointer ${deleteMode === "hard" ? "border-red-300 bg-red-50" : "border-slate-200 hover:bg-slate-50"}`}>
                 <input type="radio" name="delmode" checked={deleteMode === "hard"} onChange={() => setDeleteMode("hard")} className="mt-0.5" />
                 <div><div className="text-sm font-medium text-red-700">🔴 ลบถาวร (กู้คืนไม่ได้)</div>
                   <div className="text-xs text-slate-500 mt-0.5">ลบจริงออกจากฐานข้อมูล Supabase — ไม่สามารถกู้คืน</div></div>
-              </label>
+              </label>}
               {deleteMode === "hard" && (
                 <div className="pt-1">
                   <label className="text-xs text-slate-600">พิมพ์ <code className="px-1 bg-slate-100 rounded text-red-600 font-mono">ลบ</code> เพื่อยืนยัน</label>

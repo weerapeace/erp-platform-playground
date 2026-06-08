@@ -1139,8 +1139,9 @@ export function DataTable<T extends Record<string, unknown>>({
     if (!el) return;
     const recalc = () => {
       const top = el.getBoundingClientRect().top;          // ระยะจากบนจอถึงหัวตาราง
-      const h = Math.round(window.innerHeight - top - 12);  // เผื่อขอบล่างนิดหน่อย
-      setTableMaxH(h > 240 ? h : 240);
+      const baseH = Math.round(window.innerHeight - top - 12);  // เผื่อขอบล่างนิดหน่อย
+      const h = baseH * 3;
+      setTableMaxH(h > 720 ? h : 720);
     };
     const raf = requestAnimationFrame(recalc);
     window.addEventListener("resize", recalc);
