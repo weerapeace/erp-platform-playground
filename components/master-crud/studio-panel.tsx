@@ -749,99 +749,96 @@ function FormEditor({
 const STYLE_COLORS = ["", "#0f172a", "#dc2626", "#ea580c", "#16a34a", "#2563eb", "#7c3aed", "#64748b"];
 const HL_COLORS = ["#fef08a", "#bbf7d0", "#bfdbfe", "#fbcfe8", "#ddd6fe", "#fecaca", "#fed7aa"];
 const SIZE_OPTS: [string,string][] = [["","อัตโนมัติ"],["sm","เล็ก"],["base","ปกติ"],["lg","ใหญ่"],["xl","ใหญ่มาก"]];
+// component ย่อยของกล่องตั้งค่า — ต้องอยู่ระดับนอก ไม่งั้น React remount ทุกครั้งที่กด (scroll เด้ง/โฟกัสหลุด)
+function FSToggle({ on, label, onClick, title }: { on: boolean; label: string; onClick: ()=>void; title?: string }) {
+  return <button type="button" title={title} onClick={onClick} className={`px-2 py-1 rounded border text-xs ${on?"bg-orange-100 border-orange-300 text-orange-700 font-medium":"bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{label}</button>;
+}
+function FSRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="flex flex-wrap items-center gap-1.5"><span className="text-slate-500 w-[68px] shrink-0">{label}</span>{children}</div>;
+}
+function FSGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return <div className="space-y-1.5 pt-2.5 first:pt-0 border-t first:border-t-0 border-slate-100">
+    <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{title}</div>{children}</div>;
+}
 function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch: Partial<StudioField>)=>void }) {
   const us = (field.uiStyle ?? {}) as Record<string, unknown>;
   const setUi = (k: string, v: unknown) => onPatch({ uiStyle: { ...us, [k]: v } });
-  const Toggle = ({ on, label, onClick, title }: { on: boolean; label: string; onClick: ()=>void; title?: string }) => (
-    <button type="button" title={title} onClick={onClick} className={`px-2 py-1 rounded border text-xs ${on?"bg-orange-100 border-orange-300 text-orange-700 font-medium":"bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{label}</button>
-  );
-  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-slate-500 w-[68px] shrink-0">{label}</span>{children}
-    </div>
-  );
-  const Group = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div className="space-y-1.5 pt-2.5 first:pt-0 border-t first:border-t-0 border-slate-100">
-      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">{title}</div>
-      {children}
-    </div>
-  );
   const labelPos = String(us.labelPos ?? "top");
   const selStyle = "h-7 px-1.5 border border-slate-200 rounded bg-white text-slate-600";
   return (
     <div className="p-3 space-y-2 text-xs">
-      <Group title="เลย์เอาต์">
-        <Row label="ความกว้าง">
+      <FSGroup title="เลย์เอาต์">
+        <FSRow label="ความกว้าง">
           {([[3,"¼"],[4,"⅓"],[6,"ครึ่ง"],[8,"⅔"],[12,"เต็ม"]] as [number,string][]).map(([n,lbl])=>(
-            <Toggle key={n} on={Number(us.gw)===n} label={lbl} onClick={()=>setUi("gw",n)} />
+            <FSToggle key={n} on={Number(us.gw)===n} label={lbl} onClick={()=>setUi("gw",n)} />
           ))}
-        </Row>
-        <Row label="ตำแหน่งหัวข้อ">
-          <Toggle on={labelPos!=="left"} label="⬆ บน" onClick={()=>setUi("labelPos","top")} />
-          <Toggle on={labelPos==="left"} label="⬅ ข้างหน้า" onClick={()=>setUi("labelPos","left")} />
-        </Row>
-        <Row label="ตัวเลือก">
-          <Toggle on={!!field.required} label="บังคับกรอก" onClick={()=>onPatch({required:!field.required})} />
-          <Toggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />
-          <Toggle on={!!us.count} label="📊 นับความครบ" onClick={()=>setUi("count",!us.count)} />
-        </Row>
-      </Group>
+        </FSRow>
+        <FSRow label="ตำแหน่งหัวข้อ">
+          <FSToggle on={labelPos!=="left"} label="⬆ บน" onClick={()=>setUi("labelPos","top")} />
+          <FSToggle on={labelPos==="left"} label="⬅ ข้างหน้า" onClick={()=>setUi("labelPos","left")} />
+        </FSRow>
+        <FSRow label="ตัวเลือก">
+          <FSToggle on={!!field.required} label="บังคับกรอก" onClick={()=>onPatch({required:!field.required})} />
+          <FSToggle on={field.editable===false} label="อ่านอย่างเดียว" onClick={()=>onPatch({editable:field.editable===false?true:false})} />
+          <FSToggle on={!!us.count} label="📊 นับความครบ" onClick={()=>setUi("count",!us.count)} />
+        </FSRow>
+      </FSGroup>
 
-      <Group title="ข้อความช่วย">
+      <FSGroup title="ข้อความช่วย">
         <input value={field.helpText ?? ""} onChange={(e)=>onPatch({helpText:e.target.value})} placeholder="ข้อความช่วย (help text)" className="w-full h-8 px-2 border border-slate-200 rounded" />
         <div className="grid grid-cols-2 gap-1.5">
           <input value={field.placeholder ?? ""} onChange={(e)=>onPatch({placeholder:e.target.value})} placeholder="placeholder" className="h-8 px-2 border border-slate-200 rounded" />
           <input value={String(field.defaultValue ?? "")} onChange={(e)=>onPatch({defaultValue:e.target.value})} placeholder="ค่าเริ่มต้น" className="h-8 px-2 border border-slate-200 rounded" />
         </div>
-      </Group>
+      </FSGroup>
 
-      <Group title="ตัวอักษร">
-        <Row label="ขนาดหัวข้อ">
+      <FSGroup title="ตัวอักษร">
+        <FSRow label="ขนาดหัวข้อ">
           <select value={String(us.label_size ?? "")} onChange={(e)=>setUi("label_size", e.target.value)} className={selStyle}>
             {SIZE_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
           </select>
-        </Row>
-        <Row label="ขนาดค่า">
+        </FSRow>
+        <FSRow label="ขนาดค่า">
           <select value={String(us.value_size ?? "")} onChange={(e)=>setUi("value_size", e.target.value)} className={selStyle}>
             {SIZE_OPTS.map(([v,l])=><option key={v} value={v}>{l}</option>)}
           </select>
-        </Row>
-        <Row label="สไตล์">
-          <Toggle on={!!us.bold} label="B" onClick={()=>setUi("bold",!us.bold)} title="ตัวหนา" />
-          <Toggle on={!!us.italic} label="I" onClick={()=>setUi("italic",!us.italic)} title="ตัวเอียง" />
-          <Toggle on={!!us.underline} label="U" onClick={()=>setUi("underline",!us.underline)} title="ขีดเส้นใต้" />
+        </FSRow>
+        <FSRow label="สไตล์">
+          <FSToggle on={!!us.bold} label="B" onClick={()=>setUi("bold",!us.bold)} title="ตัวหนา" />
+          <FSToggle on={!!us.italic} label="I" onClick={()=>setUi("italic",!us.italic)} title="ตัวเอียง" />
+          <FSToggle on={!!us.underline} label="U" onClick={()=>setUi("underline",!us.underline)} title="ขีดเส้นใต้" />
           <span className="text-slate-300">|</span>
           {(["left","center","right"] as const).map(al=>(
-            <Toggle key={al} on={String(us.align??"left")===al} label={al==="left"?"⬅":al==="center"?"↔":"➡"} onClick={()=>setUi("align",al)} />
+            <FSToggle key={al} on={String(us.align??"left")===al} label={al==="left"?"⬅":al==="center"?"↔":"➡"} onClick={()=>setUi("align",al)} />
           ))}
-        </Row>
-        <Row label="ฟอนต์">
+        </FSRow>
+        <FSRow label="ฟอนต์">
           {(["","serif","mono"] as const).map(ff=>(
-            <Toggle key={ff||"sans"} on={String(us.font??"")===ff} label={ff===""?"ปกติ":ff==="serif"?"มีหัว":"mono"} onClick={()=>setUi("font",ff)} />
+            <FSToggle key={ff||"sans"} on={String(us.font??"")===ff} label={ff===""?"ปกติ":ff==="serif"?"มีหัว":"mono"} onClick={()=>setUi("font",ff)} />
           ))}
-        </Row>
-        <Row label="สีตัวอักษร">
+        </FSRow>
+        <FSRow label="สีตัวอักษร">
           {STYLE_COLORS.map(c=>(
             <button key={c||"default"} type="button" onClick={()=>setUi("color",c)}
               className={`w-6 h-6 rounded-full border-2 ${String(us.color??"")===c?"border-orange-500":"border-slate-200"} ${c===""?"bg-white text-[9px] text-slate-400 flex items-center justify-center":""}`}
               style={c?{background:c}:undefined} title={c||"ค่าเริ่มต้น"}>{c===""?"—":""}</button>
           ))}
-        </Row>
-      </Group>
+        </FSRow>
+      </FSGroup>
 
-      <Group title="เน้น / อื่นๆ">
-        <Row label="ไฮไลต์">
-          <Toggle on={!!us.highlight} label={us.highlight?"เปิด":"ปิด"} onClick={()=>setUi("highlight",!us.highlight)} />
+      <FSGroup title="เน้น / อื่นๆ">
+        <FSRow label="ไฮไลต์">
+          <FSToggle on={!!us.highlight} label={us.highlight?"เปิด":"ปิด"} onClick={()=>setUi("highlight",!us.highlight)} />
           {us.highlight ? HL_COLORS.map(c=>(
             <button key={c} type="button" onClick={()=>setUi("highlightColor",c)}
               className={`w-6 h-6 rounded-full border-2 ${String(us.highlightColor??HL_COLORS[0])===c?"border-orange-500":"border-slate-200"}`}
               style={{background:c}} title="สีไฮไลต์" />
           )) : <span className="text-slate-300 text-[11px]">(เปิดก่อนถึงเลือกสีได้)</span>}
-        </Row>
-        <Row label="ค่า">
-          <Toggle on={!!us.copyable} label="📋 ปุ่มคัดลอกค่า" onClick={()=>setUi("copyable",!us.copyable)} />
-        </Row>
-      </Group>
+        </FSRow>
+        <FSRow label="ค่า">
+          <FSToggle on={!!us.copyable} label="📋 ปุ่มคัดลอกค่า" onClick={()=>setUi("copyable",!us.copyable)} />
+        </FSRow>
+      </FSGroup>
     </div>
   );
 }
