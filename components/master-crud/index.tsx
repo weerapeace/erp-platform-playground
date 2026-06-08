@@ -1428,7 +1428,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         <span className="text-xs font-medium text-slate-600" style={tStyle}>
           {f.label}
           {tplRequired(f) && <span className="text-red-500 ml-0.5">*</span>}
-          {f.readonly && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
+          {f.readonly && f.type !== "one2many" && f.type !== "many2many" && <span className="ml-1 text-[10px] text-slate-400">(read-only)</span>}
           {fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}
         </span>
         {f.helpText && <div className="text-[11px] text-slate-400 mt-0.5">{f.helpText}</div>}

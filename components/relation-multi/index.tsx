@@ -588,9 +588,33 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   // ปุ่มเพิ่มรายการลูก (สร้าง record ใหม่ในตารางลูก โดยผูก FK กลับมาหา record นี้ให้อัตโนมัติ)
   const [creating, setCreating] = useState(false);
   const canAdd = canEditRows && !!recordId && !!fk && !!moduleKey;
+  // inline add-row: พิมพ์ในแถวว่างท้ายตารางแล้วสร้างลูกได้เลย (ไม่ต้องเปิด popup)
+  const [newRow, setNewRow] = useState<Record<string, string>>({});
+  const [adding, setAdding] = useState(false);
+  const submitNewRow = async () => {
+    const code = (newRow[titleField] ?? "").trim();
+    if (!code || !recordId || !fk) return;
+    setAdding(true);
+    try {
+      const body: Record<string, unknown> = { [fk]: recordId, [titleField]: code, is_active: true };
+      subFields.forEach((f) => {
+        if (!isEditableCol(f)) return;
+        const raw = newRow[f];
+        if (raw != null && raw !== "") body[f] = parseByType(f, raw);
+      });
+      const res = await apiFetch(`/api/master-v2/${moduleKey}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { alert("เพิ่มไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      setNewRow({});
+      load();
+    } catch (e) { alert("เพิ่มไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    finally { setAdding(false); }
+  };
   const addBtn = canAdd ? (
-    <button type="button" onClick={() => setCreating(true)} title="เพิ่มรายการลูกใหม่"
-      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-blue-200 text-blue-600 hover:bg-blue-50 inline-flex items-center gap-1">+ เพิ่ม</button>
+    <button type="button" onClick={() => setCreating(true)} title="เพิ่มแบบกรอกครบทุกช่อง (popup)"
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-blue-200 text-blue-600 hover:bg-blue-50 inline-flex items-center gap-1">+ เพิ่มแบบเต็ม</button>
   ) : null;
   const createModal = creating ? (
     <RelationPeekModal moduleKey={moduleKey} recordId={null}
@@ -610,11 +634,13 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     </div>
   ) : null;
 
+  const rich = !!(imageField || subFields.length > 0);
+  const showInlineAdd = canAdd && rich;   // แถวเพิ่มแบบ inline (เฉพาะโหมดตาราง)
+
   if (!recordId) return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>{pickerModal}</>;
   if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div>{pickerModal}</>;
-  if (rows.length === 0) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}{createModal}</>;
-
-  const rich = !!(imageField || subFields.length > 0);
+  // ว่าง + เพิ่ม inline ไม่ได้ → โชว์ข้อความ; ถ้าเพิ่ม inline ได้ → ตกลงไปเรนเดอร์ตาราง (มีแถวว่างให้พิมพ์)
+  if (rows.length === 0 && !showInlineAdd) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}{createModal}</>;
 
   const list = !rich ? (
     <ul className="space-y-1">
@@ -709,6 +735,39 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
                 </td>
               </tr>
             ))}
+            {showInlineAdd && (
+              <tr className="bg-amber-50/50">
+                {imageField && <td className="px-2 py-1.5 text-center text-slate-300 text-xs">＋</td>}
+                <td className="px-2 py-1">
+                  <input value={newRow[titleField] ?? ""} disabled={adding}
+                    onChange={(e) => setNewRow((p) => ({ ...p, [titleField]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") void submitNewRow(); }}
+                    placeholder={`+ ${labelOf(titleField)} ใหม่…`}
+                    className="w-full h-7 px-1.5 text-sm border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                </td>
+                {subFields.map((f) => {
+                  const editable = isEditableCol(f);
+                  if (!editable) return <td key={f} className="px-2 py-1.5 text-center text-slate-300 text-xs">—</td>;
+                  const isNum = ["number", "currency"].includes(typeByField[f] ?? "");
+                  return (
+                    <td key={f} className="px-2 py-1">
+                      <input value={newRow[f] ?? ""} disabled={adding} type={isNum ? "number" : "text"}
+                        onChange={(e) => setNewRow((p) => ({ ...p, [f]: e.target.value }))}
+                        onKeyDown={(e) => { if (e.key === "Enter") void submitNewRow(); }}
+                        placeholder={labelOf(f)}
+                        className={`w-full h-7 px-1.5 text-sm border border-amber-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 ${isNum ? "text-right" : ""}`} />
+                    </td>
+                  );
+                })}
+                <td className="px-2 py-1.5 text-right">
+                  <button type="button" onClick={() => void submitNewRow()} title="เพิ่ม (หรือกด Enter)"
+                    disabled={adding || !(newRow[titleField] ?? "").trim()}
+                    className="h-7 px-2 rounded-md text-xs font-medium bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-40">
+                    {adding ? "…" : "เพิ่ม"}
+                  </button>
+                </td>
+              </tr>
+            )}
           </tbody>
           {anySum && (
             <tfoot className="bg-slate-50 font-semibold text-slate-700">
