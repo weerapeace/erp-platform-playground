@@ -34,16 +34,33 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
   const rows = (lines ?? []) as Array<Record<string, unknown>>;
   if (rows.length === 0) return;
+
+  // ดึง "ประเภท" (กลุ่มวัตถุดิบ) จาก SKU ของแต่ละ component
+  const codes = [...new Set(rows.map((l) => l.component_sku).filter(Boolean) as string[])];
+  const typeMap = new Map<string, string>();
+  if (codes.length > 0) {
+    const { data: skus } = await admin.from("skus_v2").select("code, grp:material_groups!material_group_id ( name )").in("code", codes);
+    for (const s of (skus ?? []) as Array<Record<string, unknown>>) {
+      const g = (Array.isArray(s.grp) ? s.grp[0] : s.grp) as { name?: string } | null;
+      if (g?.name) typeMap.set(String(s.code), g.name);
+    }
+  }
+
   const mats = rows.map((l, i) => {
     const qtyPer = Number(l.qty) || 0;
+    const sku = (l.component_sku as string) ?? null;
     return {
       mo_no: moNo,
-      component_sku:  (l.component_sku as string) ?? null,
+      component_sku:  sku,
       component_name: (l.component_name as string) ?? null,
-      material_type:  (l.material_type as string) ?? null,
+      material_type:  (sku && typeMap.get(sku)) || (l.material_type as string) || null,
       qty_per:        qtyPer,
       required_qty:   Math.round(qtyPer * (moQty || 0) * 10000) / 10000,
       uom:            (l.uom as string) ?? null,
+      cut_block_code: (l.cut_block_code as string) ?? null,
+      cut_width:      l.cut_width != null ? Number(l.cut_width) : null,
+      cut_length:     l.cut_length != null ? Number(l.cut_length) : null,
+      pieces:         l.pieces != null ? Number(l.pieces) : null,
       sequence:       (l.sequence as number) ?? i + 1,
       is_active:      true,
     };

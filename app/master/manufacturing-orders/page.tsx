@@ -13,10 +13,15 @@ import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ComponentPicker } from "../bom/line-editor";
+import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import type { MoListItem } from "@/app/api/mo/route";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
-type PreviewMat = { component_sku: string | null; component_name: string | null; qty_per: number; uom: string | null };
+type PreviewMat = {
+  key: string; component_sku: string | null; component_name: string | null; material_type: string | null;
+  qty_per: number; uom: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null;
+};
+type MatRow = PreviewMat & { required: number };
 type FormState = {
   id: string | null; mo_no: string;
   product_sku: string; product_name: string; product_image: string | null;
@@ -53,6 +58,7 @@ export default function MoWorkspacePage() {
   const [loadingForm, setLoadingForm] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<MoListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [matTab, setMatTab] = useState<"sum" | "block">("sum");
 
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
@@ -70,9 +76,12 @@ export default function MoWorkspacePage() {
   const loadBomLines = async (bomId: string): Promise<PreviewMat[]> => {
     try {
       const res = await apiFetch(`/api/bom/${bomId}`); const j = await res.json();
-      return ((j.data?.lines ?? []) as Array<Record<string, unknown>>).map((l) => ({
-        component_sku: (l.component_sku as string) ?? null, component_name: (l.component_name as string) ?? null,
-        qty_per: Number(l.qty) || 0, uom: (l.uom as string) ?? null,
+      return ((j.data?.lines ?? []) as Array<Record<string, unknown>>).map((l, i) => ({
+        key: `m${i}`, component_sku: (l.component_sku as string) ?? null, component_name: (l.component_name as string) ?? null,
+        material_type: (l.material_type as string) ?? null, qty_per: Number(l.qty) || 0, uom: (l.uom as string) ?? null,
+        cut_block_code: (l.cut_block_code as string) ?? null,
+        cut_width: l.cut_width != null ? Number(l.cut_width) : null, cut_length: l.cut_length != null ? Number(l.cut_length) : null,
+        pieces: l.pieces != null ? Number(l.pieces) : null,
       }));
     } catch { return []; }
   };
@@ -101,9 +110,12 @@ export default function MoWorkspacePage() {
       const res = await apiFetch(`/api/mo/${row.id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
       const d = j.data;
-      const mats: PreviewMat[] = (d.materials ?? []).map((m: Record<string, unknown>) => ({
-        component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
-        qty_per: Number(m.qty_per) || 0, uom: (m.uom as string) ?? null,
+      const mats: PreviewMat[] = (d.materials ?? []).map((m: Record<string, unknown>, i: number) => ({
+        key: `m${i}`, component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
+        material_type: (m.material_type as string) ?? null, qty_per: Number(m.qty_per) || 0, uom: (m.uom as string) ?? null,
+        cut_block_code: (m.cut_block_code as string) ?? null,
+        cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
+        pieces: m.pieces != null ? Number(m.pieces) : null,
       }));
       setForm({
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
@@ -184,7 +196,7 @@ export default function MoWorkspacePage() {
         />
       </div>
 
-      <ERPModal open={form !== null} onClose={() => !saving && setForm(null)} size="lg"
+      <ERPModal open={form !== null} onClose={() => !saving && setForm(null)} size="xl"
         title={form?.id ? `แก้ใบสั่งผลิต: ${form.mo_no}` : "สร้างใบสั่งผลิตใหม่"}
         footer={<>
           <button onClick={() => setForm(null)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
@@ -242,37 +254,48 @@ export default function MoWorkspacePage() {
                 className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </label>
 
-            {/* preview กางสูตร */}
-            <div className="pt-2 border-t border-slate-100">
-              <div className="flex items-center justify-between mb-1">
-                <h3 className="text-sm font-semibold text-slate-700">วัตถุดิบที่ต้องใช้ (กางสูตร × {fmt(form.qty || 0)})</h3>
-                <span className="text-xs text-slate-400">{form.materials.length} รายการ</span>
-              </div>
-              {form.materials.length === 0 ? (
-                <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">
-                  {form.product_sku ? "สินค้านี้ยังไม่มีสูตร BOM" : "เลือกสินค้าก่อน ระบบจะกางสูตรให้"}
+            {/* preview กางสูตร — 2 แท็บ */}
+            {(() => {
+              const matRows: MatRow[] = form.materials.map((m) => ({ ...m, required: Math.round(m.qty_per * (form.qty || 0) * 10000) / 10000 }));
+              const codeCol: LineColumn<MatRow> = {
+                key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
+                getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
+                render: (r) => <span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>,
+              };
+              const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
+              const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 100, align: "right", sortable: true, summable: true, getValue: (r) => r.required, render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };
+              const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 64, getValue: (r) => r.uom };
+              const sumCols: LineColumn<MatRow>[] = [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
+              const blockCols: LineColumn<MatRow>[] = [codeCol, typeCol,
+                { key: "cut_block_code", header: "บล็อกตัด", width: 130, getValue: (r) => r.cut_block_code },
+                { key: "cut_width", header: "กว้าง", width: 64, align: "right", getValue: (r) => r.cut_width ?? "" },
+                { key: "cut_length", header: "ยาว", width: 64, align: "right", getValue: (r) => r.cut_length ?? "" },
+                { key: "pieces", header: "ชิ้น", width: 56, align: "right", getValue: (r) => r.pieces ?? "" },
+                reqCol, uomCol];
+              return (
+                <div className="pt-2 border-t border-slate-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
+                      <button type="button" onClick={() => setMatTab("sum")} className={`h-7 px-3 ${matTab === "sum" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>วัตถุดิบที่ต้องใช้</button>
+                      <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
+                    </div>
+                    <span className="text-xs text-slate-400">กางสูตร × {fmt(form.qty || 0)} · {matRows.length} รายการ</span>
+                  </div>
+                  {matRows.length === 0 ? (
+                    <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">
+                      {form.product_sku ? "สินค้านี้ยังไม่มีสูตร BOM" : "เลือกสินค้าก่อน ระบบจะกางสูตรให้"}
+                    </div>
+                  ) : (
+                    <LineItemsGrid<MatRow>
+                      rows={matRows} columns={matTab === "sum" ? sumCols : blockCols} onChange={() => {}}
+                      rowId={(r) => r.key} readonly stickyHeader maxHeight="38vh"
+                      groupByOptions={[{ key: "material_type", label: "ประเภท" }, { key: "component", label: "วัตถุดิบ" }]}
+                    />
+                  )}
+                  <p className="text-[11px] text-slate-400 mt-1">เช็ครายการเตรียม/ขอซื้อ จะเพิ่มในเฟสถัดไป</p>
                 </div>
-              ) : (
-                <div className="max-h-60 overflow-auto border border-slate-200 rounded-lg">
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50 text-xs text-slate-500 sticky top-0">
-                      <tr><th className="text-left px-2 py-1.5">วัตถุดิบ</th><th className="text-right px-2 py-1.5 w-20">ต่อชิ้น</th><th className="text-right px-2 py-1.5 w-24">รวมต้องใช้</th><th className="text-left px-2 py-1.5 w-16">หน่วย</th></tr>
-                    </thead>
-                    <tbody>
-                      {form.materials.map((m, i) => (
-                        <tr key={i} className="border-t border-slate-100">
-                          <td className="px-2 py-1"><code className="text-[10px] text-slate-400">{m.component_sku}</code> <span className="text-slate-700">{m.component_name}</span></td>
-                          <td className="px-2 py-1 text-right tabular-nums text-slate-500">{fmt(m.qty_per)}</td>
-                          <td className="px-2 py-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(m.qty_per * (form.qty || 0))}</td>
-                          <td className="px-2 py-1 text-slate-500">{m.uom}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              <p className="text-[11px] text-slate-400 mt-1">เช็ครายการเตรียม/ขอซื้อ จะเพิ่มในเฟสถัดไป</p>
-            </div>
+              );
+            })()}
           </div>
         )}
       </ERPModal>
