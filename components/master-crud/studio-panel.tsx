@@ -26,7 +26,7 @@ import {
 } from "@dnd-kit/core";
 import {
   SortableContext, sortableKeyboardCoordinates, useSortable,
-  verticalListSortingStrategy, arrayMove,
+  verticalListSortingStrategy, rectSortingStrategy, arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
@@ -502,7 +502,7 @@ export function StudioPanel({
             <FormEditor
               formGroups={formGroups} sectionOptions={sectionOptions} sensors={sensors} onDragEnd={onDragEnd}
               onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
-              settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)} onPatch={patchItem}
+              settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)}
               onSetCols={setCols} onRename={renameSection} onSetIcon={setSectionIcon} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
               onSetTab={setSectionTab} tabNames={[...new Set(sections.map((s) => (s.tab ?? "").trim()).filter(Boolean))]}
               paletteFields={items.filter((i) => !i.showInForm)} onAddToForm={(k) => toggleForm(k)} onAddNew={moduleKey ? () => setCreatorOpen(true) : undefined}
@@ -545,7 +545,7 @@ export function StudioPanel({
               groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]]).filter(([,fs])=>fs.length>0)}
               row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
               editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
-              onResizeSpan={(k,span)=>patchItem(k,{formSpan:span})} onPatch={patchItem}
+              onResizeSpan={(k,span)=>patchItem(k,{formSpan:span})} onPatch={patchItem} sensors={sensors} onDragEnd={onDragEnd}
               editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}) }} />
           )}
         </div>
@@ -637,7 +637,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection, onSetTab, tabNames, paletteFields, onAddToForm, onAddNew,
+  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection, onSetTab, tabNames, paletteFields, onAddToForm, onAddNew,
 }: {
   formGroups: [SectionDef, StudioField[]][];
   sectionOptions: { key: string; label: string }[];
@@ -657,7 +657,6 @@ function FormEditor({
   tabNames: string[];
   settingsKey: string | null;
   onToggleSettings: (key: string)=>void;
-  onPatch: (key: string, patch: Partial<StudioField>)=>void;
   paletteFields: StudioField[];
   onAddToForm: (key: string)=>void;
   onAddNew?: ()=>void;
@@ -682,11 +681,8 @@ function FormEditor({
                 onDelete={()=>onDelete(sec.key)}>
                 {inForm.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ยังไม่มีฟิลด์ในหมวดนี้ (เพิ่มจากคลังด้านล่าง) —</div>}
                 {inForm.map(f=>(
-                  <div key={f.key}>
-                    <FormFieldRow field={f} sectionOptions={sectionOptions} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)}
-                      settingsOpen={settingsKey===f.key} onToggleSettings={()=>onToggleSettings(f.key)} />
-                    {settingsKey===f.key && <FieldSettings field={f} onPatch={(patch)=>onPatch(f.key,patch)} />}
-                  </div>
+                  <FormFieldRow key={f.key} field={f} sectionOptions={sectionOptions} onToggle={()=>onToggleForm(f.key)} onToggleInline={()=>onToggleInline(f.key)} onToggleBulk={()=>onToggleBulk(f.key)} onMoveGroup={(g)=>onMoveGroup(f.key,g)}
+                    selected={settingsKey===f.key} onSelect={()=>onToggleSettings(f.key)} />
                 ))}
               </FormSectionZone>
               );
@@ -835,7 +831,7 @@ function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, onSetI
   );
 }
 
-function FormFieldRow({ field, sectionOptions, onToggle, onToggleInline, onToggleBulk, onMoveGroup, settingsOpen, onToggleSettings }: { field: StudioField; sectionOptions: { key: string; label: string }[]; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void; settingsOpen: boolean; onToggleSettings: ()=>void }) {
+function FormFieldRow({ field, sectionOptions, onToggle, onToggleInline, onToggleBulk, onMoveGroup, selected, onSelect }: { field: StudioField; sectionOptions: { key: string; label: string }[]; onToggle: ()=>void; onToggleInline: ()=>void; onToggleBulk: ()=>void; onMoveGroup: (g:string)=>void; selected: boolean; onSelect: ()=>void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
   // ชนิดที่ quick-edit ได้ (text/number/boolean/select/textarea/relation)
@@ -843,10 +839,10 @@ function FormFieldRow({ field, sectionOptions, onToggle, onToggleInline, onToggl
   // ชนิดที่ bulk-edit ได้ (รวม relation ด้วย — เลือกค่าเดียวให้ทุกแถว)
   const bulkable = inlineable || field.type === "relation";
   return (
-    <div ref={setNodeRef} style={style}
-      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${field.showInForm?"border-blue-200 bg-blue-50/40":"border-slate-200 bg-white"} ${isDragging?"shadow-lg":""}`}>
-      <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-slate-400 select-none px-1">⋮⋮</span>
-      <input type="checkbox" checked={!!field.showInForm} onChange={onToggle} className="rounded accent-blue-500" title="โชว์ในฟอร์ม" />
+    <div ref={setNodeRef} style={style} onClick={onSelect}
+      className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border cursor-pointer ${selected?"border-orange-300 bg-orange-50/60 ring-1 ring-orange-200":field.showInForm?"border-blue-200 bg-blue-50/40":"border-slate-200 bg-white"} ${isDragging?"shadow-lg":""}`}>
+      <span {...attributes} {...listeners} onClick={(e)=>e.stopPropagation()} className="cursor-grab active:cursor-grabbing text-slate-400 select-none px-1">⋮⋮</span>
+      <input type="checkbox" checked={!!field.showInForm} onChange={onToggle} onClick={(e)=>e.stopPropagation()} className="rounded accent-blue-500" title="โชว์ในฟอร์ม" />
       <span className="flex-1 text-sm text-slate-700 truncate">{field.label}
         <code className="ml-1.5 text-[10px] text-slate-400">{field.key}</code></span>
       {inlineable && (
@@ -863,9 +859,6 @@ function FormFieldRow({ field, sectionOptions, onToggle, onToggleInline, onToggl
         className="text-[10px] px-1 py-0.5 border border-slate-200 rounded bg-white" title="ย้ายหมวด">
         {sectionOptions.map(o=><option key={o.key} value={o.key}>{o.label}</option>)}
       </select>
-      <button type="button" onClick={(e)=>{ e.stopPropagation(); onToggleSettings(); }}
-        title="ตั้งค่า/สไตล์ field"
-        className={`text-xs px-1.5 py-0.5 rounded border ${settingsOpen?"bg-orange-100 border-orange-300 text-orange-700":"bg-white border-slate-200 text-slate-400"}`}>⚙️</button>
     </div>
   );
 }
@@ -895,12 +888,14 @@ function previewVal(row: Record<string, unknown> | undefined, f: StudioField): s
   return String(v);
 }
 
-// ฟิลด์ 1 ช่องบน preview (โหมดแก้ไข: คลิก=เลือก, ลากขอบขวา=ปรับช่อง 1/2/3)
-function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan }: {
+// ฟิลด์ 1 ช่องบน preview (โหมดแก้ไข: ลาก ⋮⋮ ย้าย/สลับ · คลิก=เลือก · มุมขวาล่าง=ปรับกว้าง/สูง)
+function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan, onPatch }: {
   f: StudioField; cols: number; row?: Record<string, unknown>; editable?: boolean;
   selected?: boolean; onSelect?: (k: string)=>void; onResizeSpan?: (k: string, span: number)=>void;
+  onPatch?: (k: string, patch: Partial<StudioField>)=>void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: f.key, disabled: !editable });
+  const boxRef = useRef<HTMLDivElement | null>(null);
   const us = (f.uiStyle ?? {}) as Record<string, unknown>;
   const css = uiStyleCss(us);
   const hl = !!us.highlight;
@@ -908,30 +903,39 @@ function PreviewField({ f, cols, row, editable, selected, onSelect, onResizeSpan
   const rawSpan = f.formSpan && f.formSpan > 1 ? f.formSpan : ((f.type==="textarea"||f.type==="image") && cols>1 ? cols : 1);
   const span = Math.min(rawSpan, cols);
   const spanCls = span>=3 ? "col-span-3" : span===2 ? "col-span-2" : "";
+  const isTextarea = f.type === "textarea";
+  const rows = Number(us.rows ?? 0) || 0;
+  const dndStyle: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.5:1, zIndex: isDragging?10:undefined };
 
+  // ลากมุมขวาล่าง: แกน X = จำนวนช่อง (กว้าง), แกน Y = จำนวนบรรทัด (สูง — เฉพาะ textarea)
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault(); e.stopPropagation();
-    const el = ref.current; if (!el || !onResizeSpan) return;
-    const colW = el.offsetWidth / span;            // ความกว้างต่อ 1 ช่อง (โดยประมาณ)
-    const startX = e.clientX, startSpan = span;
+    const el = boxRef.current; if (!el) return;
+    const colW = el.offsetWidth / span;
+    const startX = e.clientX, startY = e.clientY, startSpan = span, startRows = rows || 3;
     const move = (ev: PointerEvent) => {
-      const next = Math.max(1, Math.min(cols, startSpan + Math.round((ev.clientX - startX) / colW)));
-      if (next !== (f.formSpan ?? 1)) onResizeSpan(f.key, next);
+      if (onResizeSpan) { const next = Math.max(1, Math.min(cols, startSpan + Math.round((ev.clientX - startX) / colW))); if (next !== (f.formSpan ?? 1)) onResizeSpan(f.key, next); }
+      if (isTextarea && onPatch) { const nr = Math.max(2, Math.min(20, startRows + Math.round((ev.clientY - startY) / 22))); if (nr !== rows) onPatch(f.key, { uiStyle: { ...us, rows: nr } }); }
     };
     const up = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", up); document.body.style.cursor=""; };
-    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up); document.body.style.cursor = "ew-resize";
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", up); document.body.style.cursor = isTextarea ? "nwse-resize" : "ew-resize";
   };
 
   return (
-    <div ref={ref} onClick={editable ? (e)=>{ e.stopPropagation(); onSelect?.(f.key); } : undefined}
+    <div ref={(el)=>{ setNodeRef(el); boxRef.current = el; }} style={dndStyle} {...attributes}
+      onClick={editable ? (e)=>{ e.stopPropagation(); onSelect?.(f.key); } : undefined}
       className={`relative space-y-0.5 ${spanCls} rounded p-1.5 ${hl?"bg-amber-50 border border-amber-200":selected?"ring-2 ring-orange-400 bg-orange-50/40":editable?"border border-transparent hover:border-orange-200 hover:bg-orange-50/20 cursor-pointer":""}`}>
-      <div className="text-[11px] text-slate-500" style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
-        {editable && <span className="ml-1 text-[9px] text-slate-300">{span} ช่อง</span>}</div>
-      <div className="text-sm text-slate-800 min-h-[1.25rem] break-words whitespace-pre-wrap" style={css}>{val || <span className="text-slate-300">—</span>}</div>
-      {editable && onResizeSpan && (
-        <div onPointerDown={startResize} title="ลากเพื่อปรับความกว้าง (ช่อง)"
-          className="absolute top-0 right-0 h-full w-2 cursor-ew-resize group flex items-center justify-center">
-          <div className="w-0.5 h-6 rounded bg-slate-200 group-hover:bg-orange-400" />
+      {editable && (
+        <span {...listeners} onClick={(e)=>e.stopPropagation()} title="ลากเพื่อย้าย/สลับตำแหน่ง"
+          className="absolute top-0.5 left-0.5 text-slate-300 hover:text-orange-400 cursor-grab active:cursor-grabbing select-none text-xs leading-none">⋮⋮</span>
+      )}
+      <div className={`text-[11px] text-slate-500 ${editable?"pl-3":""}`} style={css}>{f.label}{f.required && <span className="text-red-400 ml-0.5">*</span>}
+        {editable && <span className="ml-1 text-[9px] text-slate-300">{span} ช่อง{isTextarea&&rows?` · ${rows} บรรทัด`:""}</span>}</div>
+      <div className="text-sm text-slate-800 break-words whitespace-pre-wrap" style={{ ...css, minHeight: isTextarea && rows ? `${rows*1.4}em` : "1.25rem" }}>{val || <span className="text-slate-300">—</span>}</div>
+      {editable && (
+        <div onPointerDown={startResize} title={isTextarea?"ลากปรับกว้าง (ซ้าย-ขวา) / สูง (บน-ล่าง)":"ลากปรับความกว้าง (ช่อง)"}
+          className="absolute bottom-0 right-0 w-3.5 h-3.5 flex items-end justify-end cursor-nwse-resize group">
+          <svg width="10" height="10" viewBox="0 0 10 10" className="text-slate-300 group-hover:text-orange-500"><path d="M9 3 3 9M9 6 6 9" stroke="currentColor" strokeWidth="1.2" fill="none"/></svg>
         </div>
       )}
     </div>
@@ -950,11 +954,11 @@ type EditApi = {
   moveField: (fieldKey: string, groupKey: string)=>void;
 };
 
-function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onResizeSpan, onPatch, editApi }: {
+function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onResizeSpan, onPatch, editApi, sensors, onDragEnd }: {
   groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string;
   editable?: boolean; selectedKey?: string | null; onSelectField?: (k: string)=>void;
   onResizeSpan?: (k: string, span: number)=>void; onPatch?: (k: string, patch: Partial<StudioField>)=>void;
-  editApi?: EditApi;
+  editApi?: EditApi; sensors?: ReturnType<typeof useSensors>; onDragEnd?: (e: DragEndEvent)=>void;
 }) {
   const allTabNames = editApi ? [...new Set(editApi.sections.map((s)=>(s.tab??"").trim()).filter(Boolean))] : [];
   // จัด section เข้าแท็บ (ตรงกับฟอร์มจริง): tab เดียวกัน = แท็บเดียว, เว้นว่าง = แท็บเดี่ยว
@@ -974,11 +978,11 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
   if (groups.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
   const cur = tabs[curIdx];
   return (
-    <div className="space-y-4 w-full relative">
+    <div className="space-y-4 w-full relative" onClick={editable && selectedKey ? ()=>onSelectField?.(selectedKey) : undefined}>
       <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}{editable && <span className="ml-2 text-[11px] font-normal text-orange-500">✏️ คลิกที่ field เพื่อตั้งค่า · ลากขอบปรับความกว้าง</span>}</div>
       {/* กล่องตั้งค่า field ที่เลือก (ลอยมุมขวาบน) */}
       {editable && selField && onPatch && (
-        <div className="absolute right-0 top-7 z-20 w-[360px] max-w-[90%] bg-white rounded-lg border border-orange-200 shadow-xl">
+        <div onClick={(e)=>e.stopPropagation()} className="absolute right-0 top-7 z-20 w-[360px] max-w-[90%] bg-white rounded-lg border border-orange-200 shadow-xl">
           <div className="flex items-center justify-between px-3 py-1.5 border-b border-orange-100 bg-orange-50/60">
             <span className="text-xs font-semibold text-slate-700 truncate">⚙️ {selField.label}</span>
             <button type="button" onClick={()=>onSelectField?.(selField.key)} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
@@ -1016,11 +1020,12 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
           )}
         </div>
       )}
+      <DndContext sensors={sensors ?? undefined} collisionDetection={closestCorners} onDragEnd={onDragEnd ?? (()=>{})}>
       {(cur?.entries ?? []).map(([sec, fs])=>{
         const cols = sec.columns || 2;
         const gridCls = cols===1 ? "grid-cols-1" : cols===3 ? "grid-cols-3" : "grid-cols-2";
         return (
-          <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden">
+          <div key={sec.key} className="border border-slate-200 rounded-lg overflow-hidden mb-4">
             <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 text-sm font-medium text-slate-700 flex items-center gap-1.5 flex-wrap">
               {iconNode(sec.icon)}
               {editable && editApi ? (
@@ -1042,15 +1047,18 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
                 </>
               ) : sec.label}
             </div>
-            <div className={`p-3 grid ${gridCls} gap-3`}>
-              {fs.map(f=>(
-                <PreviewField key={f.key} f={f} cols={cols} row={row} editable={editable}
-                  selected={selectedKey===f.key} onSelect={onSelectField} onResizeSpan={onResizeSpan} />
-              ))}
-            </div>
+            <SortableContext items={fs.map(f=>f.key)} strategy={rectSortingStrategy}>
+              <div className={`p-3 grid ${gridCls} gap-3`}>
+                {fs.map(f=>(
+                  <PreviewField key={f.key} f={f} cols={cols} row={row} editable={editable}
+                    selected={selectedKey===f.key} onSelect={onSelectField} onResizeSpan={onResizeSpan} onPatch={onPatch} />
+                ))}
+              </div>
+            </SortableContext>
           </div>
         );
       })}
+      </DndContext>
       {editable && editApi && (
         <button type="button" onClick={()=>editApi.addSection((cur?.key ?? "").startsWith("tab_") ? cur!.label : "")}
           className="w-full h-9 text-sm border border-dashed border-slate-300 rounded-lg text-slate-500 hover:border-orange-300 hover:text-orange-600 hover:bg-orange-50/40">

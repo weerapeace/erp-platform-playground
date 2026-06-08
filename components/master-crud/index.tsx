@@ -1482,7 +1482,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         ) : f.type === "textarea" ? (
           <textarea value={(v as string) || ""} disabled={disabled}
             onChange={e => updateForm({ [f.key]: e.target.value })}
-            rows={3} placeholder={f.placeholder} style={tStyle}
+            rows={Number((f.uiStyle ?? {}).rows) || 3} placeholder={f.placeholder} style={tStyle}
             className={`w-full mt-0.5 px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-1 ${
               hasErr ? "border-red-300 focus:ring-red-500"
               : disabled ? "border-slate-200 bg-slate-50 text-slate-500 cursor-not-allowed"
