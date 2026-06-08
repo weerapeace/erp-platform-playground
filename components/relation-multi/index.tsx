@@ -585,21 +585,34 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       current={subFields} onSave={saveColumns} onClose={() => setPickerOpen(false)} />
   ) : null;
 
+  // ปุ่มเพิ่มรายการลูก (สร้าง record ใหม่ในตารางลูก โดยผูก FK กลับมาหา record นี้ให้อัตโนมัติ)
+  const [creating, setCreating] = useState(false);
+  const canAdd = canEditRows && !!recordId && !!fk && !!moduleKey;
+  const addBtn = canAdd ? (
+    <button type="button" onClick={() => setCreating(true)} title="เพิ่มรายการลูกใหม่"
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-blue-200 text-blue-600 hover:bg-blue-50 inline-flex items-center gap-1">+ เพิ่ม</button>
+  ) : null;
+  const createModal = creating ? (
+    <RelationPeekModal moduleKey={moduleKey} recordId={null}
+      createDefaults={{ [fk]: recordId, is_active: true }}
+      createTitle={title ? `เพิ่ม ${title}` : "เพิ่มรายการใหม่"}
+      onChanged={load} onClose={() => setCreating(false)} />
+  ) : null;
+
   // หัวข้อ + จำนวน (สำหรับ 360 view)
-  const header = title ? (
+  const header = (title || gearBtn || addBtn) ? (
     <div className="flex items-center gap-1.5 mb-1.5">
-      <span className="text-sm font-medium text-slate-700">{title}</span>
-      {loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
+      {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
+      {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />
+      {addBtn}
       {gearBtn}
     </div>
-  ) : gearBtn ? (
-    <div className="flex justify-end mb-1">{gearBtn}</div>
   ) : null;
 
   if (!recordId) return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>{pickerModal}</>;
   if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div>{pickerModal}</>;
-  if (rows.length === 0) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}</>;
+  if (rows.length === 0) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}{createModal}</>;
 
   const rich = !!(imageField || subFields.length > 0);
 
@@ -727,6 +740,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           onChanged={load} onClose={() => setPeek(null)} />
       )}
       {pickerModal}
+      {createModal}
     </>
   );
 }

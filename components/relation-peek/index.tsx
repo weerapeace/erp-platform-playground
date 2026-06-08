@@ -22,14 +22,17 @@ type RF = {
 const img = (k: unknown) => (k ? `/api/r2-image?key=${encodeURIComponent(String(k))}` : null);
 
 export function RelationPeekModal({
-  moduleKey, recordId, onClose, startInEdit, onChanged,
+  moduleKey, recordId, onClose, startInEdit, onChanged, createDefaults, createTitle,
 }: {
   moduleKey: string;
-  recordId: string;
+  recordId?: string | null;       // ว่าง/null = โหมดสร้างใหม่ (POST)
   onClose: () => void;
   startInEdit?: boolean;          // เปิดมาในโหมดแก้ไขเลย (กดปุ่ม ✎ จากการ์ด)
   onChanged?: () => void;         // เรียกหลังบันทึกสำเร็จ → ให้ตัวเรียกรีเฟรชรายการ
+  createDefaults?: Record<string, unknown>;  // โหมดสร้าง: ค่าตั้งต้น เช่น { parent_sku_id, is_active:true }
+  createTitle?: string;           // โหมดสร้าง: หัวข้อ popup
 }) {
+  const isCreate = !recordId;
   const { user } = useAuth();
   const [fields, setFields] = useState<RF[]>([]);
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
@@ -44,15 +47,17 @@ export function RelationPeekModal({
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const [reg, rec] = await Promise.all([
-        apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json()),
-        apiFetch(`/api/master-v2/${moduleKey}/${recordId}`).then((r) => r.json()),
-      ]);
+      const reg = await apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json());
       setFields((reg.fields ?? []).filter((f: RF) => (f.is_visible || f.show_in_form) && !["one2many", "many2many"].includes(f.ui_field_type)));
-      setRow((rec.data ?? null) as Record<string, unknown> | null);
+      if (isCreate) {
+        setRow({});               // โหมดสร้าง: ไม่มี record เดิม ใช้ object ว่าง (กัน "ไม่พบข้อมูล")
+      } else {
+        const rec = await apiFetch(`/api/master-v2/${moduleKey}/${recordId}`).then((r) => r.json());
+        setRow((rec.data ?? null) as Record<string, unknown> | null);
+      }
     } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, [moduleKey, recordId]);
+  }, [moduleKey, recordId, isCreate]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -68,20 +73,32 @@ export function RelationPeekModal({
       const v = row[fd.field_key];
       f[fd.field_key] = v == null ? (fd.ui_field_type === "boolean" ? false : "") : v;
     });
+    if (isCreate) Object.assign(f, createDefaults ?? {});   // โหมดสร้าง: ทับด้วยค่าตั้งต้น (เช่น FK)
     setForm(f); setErr(null); setEditing(true);
   };
 
-  // เข้าโหมดแก้ไขทันทีถ้าสั่งมา (หลังโหลด row เสร็จ)
+  // เข้าโหมดแก้ไขทันทีถ้าสั่งมา (หลังโหลด row เสร็จ) — โหมดสร้างเข้าฟอร์มเลย
   useEffect(() => {
-    if (startInEdit && !loading && row && !editing) enterEdit();
+    if ((startInEdit || isCreate) && !loading && row && !editing) enterEdit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startInEdit, loading, row]);
+  }, [startInEdit, isCreate, loading, row]);
 
   const save = async () => {
     setSaving(true); setErr(null);
     try {
       const body: Record<string, unknown> = { actor: user?.name };
       editableFields.forEach((fd) => { body[fd.field_key] = form[fd.field_key]; });
+      if (isCreate) {
+        Object.assign(body, createDefaults ?? {});   // กัน FK/ค่าตั้งต้นหลุด แม้ไม่ใช่ field ที่แก้ได้
+        const res = await apiFetch(`/api/master-v2/${moduleKey}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) { setErr(j.error ?? `บันทึกไม่สำเร็จ (HTTP ${res.status})`); return; }
+        onChanged?.();        // ให้รายการต้นทางรีเฟรช
+        onClose();            // สร้างเสร็จ → ปิด popup
+        return;
+      }
       const res = await apiFetch(`/api/master-v2/${moduleKey}/${recordId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
@@ -150,7 +167,9 @@ export function RelationPeekModal({
     );
   };
 
-  const title = row ? String(row["name_th"] ?? row["name"] ?? row["code"] ?? "รายละเอียด") : "รายละเอียด";
+  const title = isCreate
+    ? (createTitle ?? "เพิ่มรายการใหม่")
+    : (row ? String(row["name_th"] ?? row["name"] ?? row["code"] ?? "รายละเอียด") : "รายละเอียด");
   const cover = row ? (row["cover_image_r2_key"] ?? row["image_key"]) : null;
   // ปิดด้วย backdrop ได้เฉพาะตอน "ดู" — โหมดแก้ไขกันปิดพลาด
   const dismiss = useBackdropDismiss(editing ? () => {} : onClose);
@@ -159,7 +178,7 @@ export function RelationPeekModal({
     <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
-          <h3 className="text-base font-semibold text-slate-800 line-clamp-1">{editing ? "✎ " : "🔗 "}{title}</h3>
+          <h3 className="text-base font-semibold text-slate-800 line-clamp-1">{isCreate ? "➕ " : editing ? "✎ " : "🔗 "}{title}</h3>
           <div className="flex items-center gap-2 flex-shrink-0">
             {!editing && !loading && row && editableFields.length > 0 && (
               <button onClick={enterEdit} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
