@@ -23,9 +23,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   return NextResponse.json({ data: { ...header, materials: materials ?? [] }, error: null });
 }
 
+type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };
 type SaveBody = {
   product_sku?: string; product_name?: string; qty?: number; due_date?: string | null;
   bom_code?: string | null; bom_version?: string | null; status?: string; note?: string; reexplode?: boolean;
+  materials?: MatEdit[];   // แก้ checklist เตรียม/จำนวนที่มี/ขอซื้อ (เฟส B)
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -52,7 +54,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // กางสูตรใหม่เมื่อจำนวน/สูตรเปลี่ยน หรือสั่ง reexplode
   const qtyChanged = newQty !== (existing as { qty: number }).qty;
   const bomChanged = newBom !== (existing as { bom_code: string | null }).bom_code;
-  if (body.reexplode || qtyChanged || bomChanged) await explodeBom(admin, newBom ?? null, moNo, newQty);
+  const reexploded = body.reexplode || qtyChanged || bomChanged;
+  if (reexploded) {
+    await explodeBom(admin, newBom ?? null, moNo, newQty);
+  } else if (Array.isArray(body.materials)) {
+    // อัปเดต checklist เตรียม/จำนวนที่มี/ขอซื้อ (เฉพาะเมื่อไม่ได้กางสูตรใหม่)
+    for (const m of body.materials) {
+      await admin.from("mo_materials").update({
+        on_hand_qty: Number(m.on_hand_qty) || 0,
+        is_ready: !!m.is_ready,
+        to_purchase_qty: Number(m.to_purchase_qty) || 0,
+      }).eq("id", m.id).eq("mo_no", moNo);
+    }
+  }
 
   await admin.from("audit_logs").insert({ actor_user_id: user.id, action: "update", entity_type: "mo", entity_id: id, metadata: { mo_no: moNo, qty: newQty } }).then(() => {}, () => {});
   return NextResponse.json({ id, error: null });

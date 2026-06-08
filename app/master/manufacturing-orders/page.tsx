@@ -18,10 +18,11 @@ import type { MoListItem } from "@/app/api/mo/route";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {
-  key: string; component_sku: string | null; component_name: string | null; material_type: string | null;
+  key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
   qty_per: number; uom: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null;
+  on_hand_qty: number; is_ready: boolean;
 };
-type MatRow = PreviewMat & { required: number };
+type MatRow = PreviewMat & { required: number; to_purchase: number };
 type FormState = {
   id: string | null; mo_no: string;
   product_sku: string; product_name: string; product_image: string | null;
@@ -77,11 +78,11 @@ export default function MoWorkspacePage() {
     try {
       const res = await apiFetch(`/api/bom/${bomId}`); const j = await res.json();
       return ((j.data?.lines ?? []) as Array<Record<string, unknown>>).map((l, i) => ({
-        key: `m${i}`, component_sku: (l.component_sku as string) ?? null, component_name: (l.component_name as string) ?? null,
+        key: `m${i}`, id: null, component_sku: (l.component_sku as string) ?? null, component_name: (l.component_name as string) ?? null,
         material_type: (l.material_type as string) ?? null, qty_per: Number(l.qty) || 0, uom: (l.uom as string) ?? null,
         cut_block_code: (l.cut_block_code as string) ?? null,
         cut_width: l.cut_width != null ? Number(l.cut_width) : null, cut_length: l.cut_length != null ? Number(l.cut_length) : null,
-        pieces: l.pieces != null ? Number(l.pieces) : null,
+        pieces: l.pieces != null ? Number(l.pieces) : null, on_hand_qty: 0, is_ready: false,
       }));
     } catch { return []; }
   };
@@ -111,11 +112,12 @@ export default function MoWorkspacePage() {
       if (j.error) throw new Error(j.error);
       const d = j.data;
       const mats: PreviewMat[] = (d.materials ?? []).map((m: Record<string, unknown>, i: number) => ({
-        key: `m${i}`, component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
+        key: `m${i}`, id: (m.id as string) ?? null, component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
         material_type: (m.material_type as string) ?? null, qty_per: Number(m.qty_per) || 0, uom: (m.uom as string) ?? null,
         cut_block_code: (m.cut_block_code as string) ?? null,
         cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
         pieces: m.pieces != null ? Number(m.pieces) : null,
+        on_hand_qty: Number(m.on_hand_qty) || 0, is_ready: !!m.is_ready,
       }));
       setForm({
         id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
@@ -136,8 +138,12 @@ export default function MoWorkspacePage() {
     if (!form.product_sku) { setFormErr("กรุณาเลือกสินค้า"); return; }
     if (!(form.qty > 0)) { setFormErr("จำนวนต้องมากกว่า 0"); return; }
     setSaving(true); setFormErr(null);
-    const payload = { product_sku: form.product_sku, product_name: form.product_name || null, qty: form.qty,
+    const payload: Record<string, unknown> = { product_sku: form.product_sku, product_name: form.product_name || null, qty: form.qty,
       due_date: form.due_date || null, bom_code: form.bom_code, bom_version: form.bom_version, status: form.status, note: form.note || null };
+    if (form.id) payload.materials = form.materials.filter((m) => m.id).map((m) => {
+      const req = m.qty_per * (form.qty || 0);
+      return { id: m.id, on_hand_qty: m.on_hand_qty || 0, is_ready: !!m.is_ready, to_purchase_qty: Math.max(0, Math.round((req - (m.on_hand_qty || 0)) * 10000) / 10000) };
+    });
     try {
       const res = form.id
         ? await apiFetch(`/api/mo/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -155,6 +161,22 @@ export default function MoWorkspacePage() {
       toast.success("ย้ายเข้าคลังเก็บแล้ว"); setArchiveTarget(null); refresh();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
     finally { setArchiving(false); }
+  };
+
+  // สร้างใบขอซื้อ (PR) จากวัตถุดิบที่ขาด (ขอซื้อ > 0)
+  const createPR = async () => {
+    if (!form) return;
+    const need = form.materials
+      .map((m) => ({ m, tp: Math.max(0, Math.round((m.qty_per * (form.qty || 0) - (m.on_hand_qty || 0)) * 10000) / 10000) }))
+      .filter((x) => x.tp > 0);
+    if (need.length === 0) { toast.info("ไม่มีรายการที่ต้องขอซื้อ (มีของครบแล้ว)"); return; }
+    try {
+      const lines = need.map((x) => ({ sku: x.m.component_sku, product_name: x.m.component_name ?? "", qty: x.tp, unit: x.m.uom ?? "", unit_price: 0 }));
+      const res = await apiFetch("/api/purchase-requests", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: `ขอซื้อวัตถุดิบ ${form.mo_no}`, note: `จากใบสั่งผลิต ${form.mo_no}`, lines }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(`สร้างใบขอซื้อแล้ว (${need.length} รายการ) — ดูที่เมนูใบขอซื้อ`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างใบขอซื้อไม่สำเร็จ"); }
   };
 
   const columns: ColumnDef<MoListItem>[] = useMemo(() => [
@@ -254,24 +276,38 @@ export default function MoWorkspacePage() {
                 className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </label>
 
-            {/* preview กางสูตร — 2 แท็บ */}
+            {/* preview/checklist กางสูตร — 2 แท็บ */}
             {(() => {
-              const matRows: MatRow[] = form.materials.map((m) => ({ ...m, required: Math.round(m.qty_per * (form.qty || 0) * 10000) / 10000 }));
+              const editable = !!form.id;  // เช็ค/ขอซื้อ ได้เฉพาะตอนเปิดใบที่บันทึกแล้ว
+              const numCls = "w-full h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
+              const matRows: MatRow[] = form.materials.map((m) => {
+                const required = Math.round(m.qty_per * (form.qty || 0) * 10000) / 10000;
+                return { ...m, required, to_purchase: Math.max(0, Math.round((required - (m.on_hand_qty || 0)) * 10000) / 10000) };
+              });
               const codeCol: LineColumn<MatRow> = {
                 key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
                 getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
                 render: (r) => <span className="block truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> <span className="text-slate-700">{r.component_name}</span></span>,
               };
               const typeCol: LineColumn<MatRow> = { key: "material_type", header: "ประเภท", width: 110, sortable: true, getValue: (r) => r.material_type, groupLabel: (r) => r.material_type || "— ไม่ระบุ —" };
-              const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 100, align: "right", sortable: true, summable: true, getValue: (r) => r.required, render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };
-              const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 64, getValue: (r) => r.uom };
-              const sumCols: LineColumn<MatRow>[] = [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
+              const reqCol: LineColumn<MatRow> = { key: "required", header: "รวมต้องใช้", width: 96, align: "right", sortable: true, summable: true, getValue: (r) => r.required, render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmt(r.required)}</span> };
+              const uomCol: LineColumn<MatRow> = { key: "uom", header: "หน่วย", width: 60, getValue: (r) => r.uom };
+              const onhandCol: LineColumn<MatRow> = { key: "on_hand_qty", header: "จำนวนที่มี", width: 92, align: "right", getValue: (r) => r.on_hand_qty,
+                render: (r, u) => <input type="number" min={0} step="any" value={r.on_hand_qty} onChange={(e) => u({ on_hand_qty: Number(e.target.value) })} className={numCls} /> };
+              const buyCol: LineColumn<MatRow> = { key: "to_purchase", header: "ต้องขอซื้อ", width: 90, align: "right", summable: true, getValue: (r) => r.to_purchase,
+                render: (r) => <span className={`block px-1 text-right tabular-nums ${r.to_purchase > 0 ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{r.to_purchase > 0 ? fmt(r.to_purchase) : "—"}</span> };
+              const readyCol: LineColumn<MatRow> = { key: "is_ready", header: "เตรียมครบ", width: 80, align: "center", getValue: (r) => (r.is_ready ? 1 : 0),
+                render: (r, u) => <input type="checkbox" checked={r.is_ready} onChange={(e) => u({ is_ready: e.target.checked })} className="rounded border-slate-300" /> };
+              const sumCols: LineColumn<MatRow>[] = editable
+                ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol]
+                : [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
               const blockCols: LineColumn<MatRow>[] = [codeCol, typeCol,
                 { key: "cut_block_code", header: "บล็อกตัด", width: 130, getValue: (r) => r.cut_block_code },
-                { key: "cut_width", header: "กว้าง", width: 64, align: "right", getValue: (r) => r.cut_width ?? "" },
-                { key: "cut_length", header: "ยาว", width: 64, align: "right", getValue: (r) => r.cut_length ?? "" },
-                { key: "pieces", header: "ชิ้น", width: 56, align: "right", getValue: (r) => r.pieces ?? "" },
+                { key: "cut_width", header: "กว้าง", width: 60, align: "right", getValue: (r) => r.cut_width ?? "" },
+                { key: "cut_length", header: "ยาว", width: 60, align: "right", getValue: (r) => r.cut_length ?? "" },
+                { key: "pieces", header: "ชิ้น", width: 54, align: "right", getValue: (r) => r.pieces ?? "" },
                 reqCol, uomCol];
+              const needCount = matRows.filter((r) => r.to_purchase > 0).length;
               return (
                 <div className="pt-2 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-1">
@@ -279,7 +315,9 @@ export default function MoWorkspacePage() {
                       <button type="button" onClick={() => setMatTab("sum")} className={`h-7 px-3 ${matTab === "sum" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>วัตถุดิบที่ต้องใช้</button>
                       <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
                     </div>
-                    <span className="text-xs text-slate-400">กางสูตร × {fmt(form.qty || 0)} · {matRows.length} รายการ</span>
+                    {editable && matTab === "sum" && needCount > 0 && canEdit && (
+                      <button type="button" onClick={createPR} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
+                    )}
                   </div>
                   {matRows.length === 0 ? (
                     <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">
@@ -287,12 +325,13 @@ export default function MoWorkspacePage() {
                     </div>
                   ) : (
                     <LineItemsGrid<MatRow>
-                      rows={matRows} columns={matTab === "sum" ? sumCols : blockCols} onChange={() => {}}
-                      rowId={(r) => r.key} readonly stickyHeader maxHeight="38vh"
+                      rows={matRows} columns={matTab === "sum" ? sumCols : blockCols}
+                      onChange={(rows) => patch({ materials: rows })}
+                      rowId={(r) => r.key} readonly={!editable || matTab === "block"} stickyHeader maxHeight="38vh"
                       groupByOptions={[{ key: "material_type", label: "ประเภท" }, { key: "component", label: "วัตถุดิบ" }]}
                     />
                   )}
-                  <p className="text-[11px] text-slate-400 mt-1">เช็ครายการเตรียม/ขอซื้อ จะเพิ่มในเฟสถัดไป</p>
+                  {!editable && <p className="text-[11px] text-slate-400 mt-1">บันทึกใบสั่งผลิตก่อน แล้วเปิดใหม่เพื่อเช็ค &ldquo;เตรียมครบ&rdquo; / ขอซื้อ</p>}
                 </div>
               );
             })()}
