@@ -72,7 +72,8 @@ const GROUP_META: Record<string, { label: string; icon: string; order: number }>
 function gmeta(k: string) { return GROUP_META[k] ?? { label: k, icon: "📁", order: 99 }; }
 
 type Tab = "table" | "form" | "registry";
-type SectionDef = { key: string; label: string; icon: string; columns: number };
+// tab = ชื่อแท็บที่ section นี้อยู่ ("" = แท็บเดี่ยวของตัวเอง) → หลาย section ที่ tab เดียวกันอยู่แท็บเดียวกัน
+type SectionDef = { key: string; label: string; icon: string; columns: number; tab?: string };
 
 // ไอคอนพื้นฐานให้เลือก + ตัวเรนเดอร์ (รองรับ emoji หรือรูปอัปโหลด "r2:<key>")
 const PRESET_ICONS = ["📋","📦","🔗","📝","📐","🏭","💰","🖼️","🟢","⚙️","🏷️","🧬","🤝","🧩","📊","🗂️","🛒","📍","🧾","🚚","🏗️","✂️","📁","⭐","🔢","🧰","🔀","🧷","📅","🔖","🧮","🏢","🪪","🎨","📒","🔧","📏","🧵","🧑‍💼","🔋"];
@@ -182,16 +183,21 @@ export function StudioPanel({
   const [tab, setTab] = useState<Tab>("table");
   // หมวด (section) — แก้ชื่อ/ลบ/สร้าง/เรียง/คอลัมน์ได้ · init จาก layout เดิม ไม่งั้น derive จาก group ของ field
   const [sections, setSections] = useState<SectionDef[]>(() => {
-    const fromLayout: SectionDef[] = (layout?.tabs ?? []).map((t) => ({
-      key: t.key, label: t.label, icon: t.icon ?? gmeta(t.key).icon, columns: t.sections[0]?.columns ?? 2,
-    }));
+    // แตกทุก section จากทุกแท็บ — ถ้าแท็บมีหลาย section (หรือ key แท็บ≠section) → จำชื่อแท็บไว้ (tab)
+    const fromLayout: SectionDef[] = (layout?.tabs ?? []).flatMap((t) =>
+      (t.sections ?? []).map((s) => ({
+        key: s.key, label: s.label, icon: gmeta(s.key).icon, columns: s.columns ?? 2,
+        tab: t.key === s.key ? "" : t.label,
+      })),
+    );
     const have = new Set(fromLayout.map((s) => s.key));
     const extra: SectionDef[] = Array.from(new Set(fields.map((f) => f.groupKey ?? "other")))
       .filter((k) => !have.has(k))
       .sort((a, b) => gmeta(a).order - gmeta(b).order)
-      .map((k) => ({ key: k, label: gmeta(k).label, icon: gmeta(k).icon, columns: 2 }));
+      .map((k) => ({ key: k, label: gmeta(k).label, icon: gmeta(k).icon, columns: 2, tab: "" }));
     return [...fromLayout, ...extra];
   });
+  const setSectionTab = (key: string, tab: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, tab } : s)); setDirty(true); };
   const setCols = (key: string, n: number) => { setSections((p) => p.map((s) => s.key === key ? { ...s, columns: n } : s)); setDirty(true); };
   const renameSection = (key: string, label: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, label } : s)); setDirty(true); };
   const setSectionIcon = (key: string, icon: string) => { setSections((p) => p.map((s) => s.key === key ? { ...s, icon } : s)); setDirty(true); };
@@ -341,12 +347,18 @@ export function StudioPanel({
         })
       ));
 
-      // 8. layout ฟอร์ม (หมวด: ชื่อ/ไอคอน/ลำดับ/คอลัมน์) → erp_modules.config.layout
+      // 8. layout ฟอร์ม → erp_modules.config.layout (Tab → Section)
+      //    section ที่ตั้งชื่อแท็บเดียวกัน → รวมอยู่แท็บเดียว ; ไม่ตั้งแท็บ → เป็นแท็บเดี่ยวของตัวเอง
       if (moduleKey) {
-        const tabs = sections.map((s) => ({
-          key: s.key, label: s.label, icon: s.icon,
-          sections: [{ key: s.key, label: s.label, columns: s.columns }],
-        }));
+        const tabMap = new Map<string, { key: string; label: string; icon: string; sections: { key: string; label: string; columns: number }[] }>();
+        for (const s of sections) {
+          const tname = (s.tab ?? "").trim();
+          const tk = tname ? `tab_${tname}` : s.key;
+          const ent = tabMap.get(tk) ?? { key: tk, label: tname || s.label, icon: s.icon, sections: [] };
+          ent.sections.push({ key: s.key, label: s.label, columns: s.columns });
+          tabMap.set(tk, ent);
+        }
+        const tabs = [...tabMap.values()];
         const r = await apiFetch("/api/admin/module-layout", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ module_key: moduleKey, layout: { tabs } }),
@@ -458,6 +470,7 @@ export function StudioPanel({
               onToggleForm={toggleForm} onToggleInline={toggleInline} onToggleBulk={toggleBulk} onMoveGroup={(k,g)=>patchItem(k,{groupKey:g})}
               settingsKey={settingsKey} onToggleSettings={(k)=>setSettingsKey(s=>s===k?null:k)} onPatch={patchItem}
               onSetCols={setCols} onRename={renameSection} onSetIcon={setSectionIcon} onMove={moveSection} onDelete={deleteSection} onAddSection={addSection}
+              onSetTab={setSectionTab} tabNames={[...new Set(sections.map((s) => (s.tab ?? "").trim()).filter(Boolean))]}
             />
           )}
         </div>
@@ -581,7 +594,7 @@ function TablePreview({ cols }: { cols: StudioField[] }) {
 // ============================================================
 
 function FormEditor({
-  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection,
+  formGroups, sectionOptions, sensors, onDragEnd, onToggleForm, onToggleInline, onToggleBulk, onMoveGroup, settingsKey, onToggleSettings, onPatch, onSetCols, onRename, onSetIcon, onMove, onDelete, onAddSection, onSetTab, tabNames,
 }: {
   formGroups: [SectionDef, StudioField[]][];
   sectionOptions: { key: string; label: string }[];
@@ -597,6 +610,8 @@ function FormEditor({
   onMove: (group: string, dir: -1 | 1)=>void;
   onDelete: (group: string)=>void;
   onAddSection: ()=>void;
+  onSetTab: (group: string, tab: string)=>void;
+  tabNames: string[];
   settingsKey: string | null;
   onToggleSettings: (key: string)=>void;
   onPatch: (key: string, patch: Partial<StudioField>)=>void;
@@ -612,6 +627,7 @@ function FormEditor({
                 cols={sec.columns} onSetCols={(n)=>onSetCols(sec.key,n)} onSetIcon={(ic)=>onSetIcon(sec.key,ic)}
                 onRename={(l)=>onRename(sec.key,l)} onUp={idx>0?()=>onMove(sec.key,-1):undefined}
                 onDown={idx<formGroups.length-1?()=>onMove(sec.key,1):undefined}
+                tab={sec.tab ?? ""} onSetTab={(t)=>onSetTab(sec.key,t)} tabNames={tabNames}
                 onDelete={()=>onDelete(sec.key)}>
                 {fs.length===0 && <div className="text-[11px] text-slate-300 italic px-2 py-2">— ลากฟิลด์มาวางที่นี่ —</div>}
                 {fs.map(f=>(
@@ -672,6 +688,19 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
         <Toggle on={!!us.italic} label="I" onClick={()=>setUi("italic",!us.italic)} />
         <Toggle on={!!us.underline} label="U" onClick={()=>setUi("underline",!us.underline)} />
       </div>
+      {/* แถว 3b: ขนาดหัวข้อ/ค่า แยกกัน + นับความครบ */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-slate-500">ขนาดหัวข้อ:</span>
+        <select value={String(us.label_size ?? "")} onChange={(e)=>setUi("label_size", e.target.value)} className="h-7 px-1 border border-slate-200 rounded bg-white">
+          <option value="">อัตโนมัติ</option><option value="sm">เล็ก</option><option value="base">ปกติ</option><option value="lg">ใหญ่</option><option value="xl">ใหญ่มาก</option>
+        </select>
+        <span className="text-slate-500 ml-1">ขนาดค่า:</span>
+        <select value={String(us.value_size ?? "")} onChange={(e)=>setUi("value_size", e.target.value)} className="h-7 px-1 border border-slate-200 rounded bg-white">
+          <option value="">อัตโนมัติ</option><option value="sm">เล็ก</option><option value="base">ปกติ</option><option value="lg">ใหญ่</option><option value="xl">ใหญ่มาก</option>
+        </select>
+        <span className="ml-1 text-slate-300">|</span>
+        <Toggle on={!!us.count} label="📊 นับความครบ" onClick={()=>setUi("count",!us.count)} />
+      </div>
       {/* แถว 4: ฟอนต์ + จัดชิด + ไฮไลต์ */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-slate-500">ฟอนต์:</span>
@@ -699,16 +728,22 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
   );
 }
 
-function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, onSetIcon, onRename, onUp, onDown, onDelete, children }: { groupKey: string; label: string; icon: string; count: number; cols: number; onSetCols: (n: number)=>void; onSetIcon: (icon: string)=>void; onRename: (label: string)=>void; onUp?: ()=>void; onDown?: ()=>void; onDelete: ()=>void; children: React.ReactNode }) {
+function FormSectionZone({ groupKey, label, icon, count, cols, onSetCols, onSetIcon, onRename, onUp, onDown, onDelete, tab, onSetTab, tabNames, children }: { groupKey: string; label: string; icon: string; count: number; cols: number; onSetCols: (n: number)=>void; onSetIcon: (icon: string)=>void; onRename: (label: string)=>void; onUp?: ()=>void; onDown?: ()=>void; onDelete: ()=>void; tab: string; onSetTab: (tab: string)=>void; tabNames: string[]; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useSortable({ id: `group:${groupKey}` });
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div ref={setNodeRef} className={`px-3 py-2 flex items-center gap-2 border-b border-slate-100 ${isOver?"bg-orange-50":"bg-slate-50"}`}>
+      <div ref={setNodeRef} className={`px-3 py-2 flex items-center gap-2 border-b border-slate-100 flex-wrap ${isOver?"bg-orange-50":"bg-slate-50"}`}>
         <IconPicker value={icon} onChange={onSetIcon} />
         {/* แก้ชื่อหมวดได้ */}
-        <input value={label} onChange={(e)=>onRename(e.target.value)} title="แก้ชื่อหมวด"
-          className="text-sm font-semibold text-slate-700 bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 py-0.5 w-40 focus:outline-none" />
+        <input value={label} onChange={(e)=>onRename(e.target.value)} title="แก้ชื่อหมวด (กล่อง section)"
+          className="text-sm font-semibold text-slate-700 bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 py-0.5 w-36 focus:outline-none" />
         <span className="text-xs text-slate-400">({count})</span>
+        {/* แท็บ: section ที่ใส่ชื่อแท็บเดียวกัน = อยู่แท็บเดียวกัน (เว้นว่าง = แท็บเดี่ยว) */}
+        <label className="flex items-center gap-1 text-[11px] text-slate-400">📑 แท็บ:
+          <input list="studio-tabs" value={tab} onChange={(e)=>onSetTab(e.target.value)} placeholder="(เดี่ยว)" title="พิมพ์ชื่อแท็บ — section ที่แท็บเดียวกันจะรวมอยู่แท็บเดียว"
+            className="w-28 h-6 px-1.5 text-[11px] border border-slate-200 rounded bg-white text-slate-600 focus:border-orange-300 focus:outline-none" />
+          <datalist id="studio-tabs">{tabNames.map((t)=><option key={t} value={t} />)}</datalist>
+        </label>
         <div className="ml-auto flex items-center gap-1">
           <span className="text-[11px] text-slate-400">คอลัมน์:</span>
           {[1,2,3].map((n)=>(
@@ -787,11 +822,35 @@ function previewVal(row: Record<string, unknown> | undefined, f: StudioField): s
 }
 
 function FormPreview({ groups, row, moduleLabel }: { groups: [SectionDef, StudioField[]][]; row?: Record<string, unknown>; moduleLabel: string }) {
+  // จัด section เข้าแท็บ (ตรงกับฟอร์มจริง): tab เดียวกัน = แท็บเดียว, เว้นว่าง = แท็บเดี่ยว
+  const tabs = useMemo(() => {
+    const m = new Map<string, { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] }>();
+    for (const [sec, fs] of groups) {
+      const tname = (sec.tab ?? "").trim();
+      const tk = tname ? `tab_${tname}` : sec.key;
+      const ent = m.get(tk) ?? { key: tk, label: tname || sec.label, icon: sec.icon, entries: [] };
+      ent.entries.push([sec, fs]); m.set(tk, ent);
+    }
+    return [...m.values()];
+  }, [groups]);
+  const [active, setActive] = useState(0);
+  const curIdx = active < tabs.length ? active : 0;
   if (groups.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก field — ติ๊กด้านซ้าย</div>;
+  const cur = tabs[curIdx];
   return (
     <div className="space-y-4 w-full">
       <div className="text-sm font-semibold text-slate-800">📄 {moduleLabel} — รายละเอียด {row ? "" : <span className="text-xs font-normal text-slate-300">(ไม่มีข้อมูลตัวอย่าง)</span>}</div>
-      {groups.map(([sec, fs])=>{
+      {tabs.length > 1 && (
+        <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
+          {tabs.map((t, i)=>(
+            <button key={t.key} type="button" onClick={()=>setActive(i)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 ${i===curIdx?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"}`}>
+              {iconNode(t.icon)}<span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {(cur?.entries ?? []).map(([sec, fs])=>{
         const cols = sec.columns || 2;
         const gridCls = cols===1 ? "grid-cols-1" : cols===3 ? "grid-cols-3" : "grid-cols-2";
         return (

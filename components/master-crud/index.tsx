@@ -1828,7 +1828,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 )}
                 {/* Layout คุมทุก field (รวม core) */}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} />
+                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />}
               </div>
             );
@@ -1848,7 +1848,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                   <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
                 )}
                 {drawerMode === "view"
-                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} />
+                  ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
                   : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />}
               </div>
             );
@@ -1886,7 +1886,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 )}
                 {visibleFields.length > 0 ? (
                   drawerMode === "view"
-                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} />
+                    ? <DetailSections fields={visibleFields} renderValue={renderDetailValue} layout={registryLayout} values={form} />
                     : <FormSections fields={visibleFields} renderField={renderField} layout={registryLayout} />
                 ) : (
                   <div className="text-sm text-slate-300 py-8 text-center">ไม่มีข้อมูลเพิ่มเติม</div>
@@ -2333,12 +2333,14 @@ function SectionTabBar({
 // ============================================================
 
 // ui_style preset → CSS (ใช้ทั้ง form, detail, preview)
-function fieldStyleCss(uiStyle?: Record<string, unknown>): React.CSSProperties {
+// sizeKey: "label_size"/"value_size" → ปรับขนาดหัวข้อ/ค่า แยกกัน (fallback ไป us.size)
+function fieldStyleCss(uiStyle?: Record<string, unknown>, sizeKey?: "label_size" | "value_size"): React.CSSProperties {
   const us = uiStyle ?? {};
   const SZ: Record<string, string> = { sm: "12px", base: "14px", lg: "16px", xl: "20px" };
   const FF: Record<string, string> = { serif: "Georgia, 'Times New Roman', serif", mono: "ui-monospace, 'Courier New', monospace" };
+  const sizeVal = sizeKey ? (us[sizeKey] ?? us.size) : us.size;
   return {
-    fontSize: SZ[String(us.size ?? "")] || undefined,
+    fontSize: SZ[String(sizeVal ?? "")] || undefined,
     fontWeight: us.bold ? 700 : undefined,
     fontStyle: us.italic ? "italic" : undefined,
     textDecoration: us.underline ? "underline" : undefined,
@@ -2348,12 +2350,41 @@ function fieldStyleCss(uiStyle?: Record<string, unknown>): React.CSSProperties {
   };
 }
 
+// แถบความครบของข้อมูล — นับจากฟิลด์ที่มาร์ก ui_style.count = true
+function CompletenessBar({ fields, values }: { fields: FieldDef[]; values: Record<string, unknown> }) {
+  const marked = fields.filter((f) => (f.uiStyle ?? {}).count === true);
+  if (marked.length === 0) return null;
+  const isFilled = (f: FieldDef) => {
+    const v = values[f.key];
+    if (v == null) return false;
+    if (typeof v === "string") return v.trim() !== "";
+    if (Array.isArray(v)) return v.length > 0;
+    return true;
+  };
+  const filled = marked.filter(isFilled);
+  const pct = Math.round((filled.length / marked.length) * 100);
+  const txt = pct >= 100 ? "text-emerald-600" : pct >= 50 ? "text-amber-600" : "text-rose-600";
+  const bar = pct >= 100 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-rose-500";
+  const missing = marked.filter((f) => !isFilled(f));
+  return (
+    <div className="rounded-lg border border-slate-200 p-3">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs font-medium text-slate-600">📊 ความครบของข้อมูล</span>
+        <span className={`text-xs font-bold ${txt}`}>{pct}% ({filled.length}/{marked.length})</span>
+      </div>
+      <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className={`h-full ${bar} transition-all`} style={{ width: `${pct}%` }} /></div>
+      {missing.length > 0 && <div className="mt-1.5 text-[11px] text-slate-400">ยังขาด: {missing.map((f) => f.label).join(", ")}</div>}
+    </div>
+  );
+}
+
 function DetailSections({
-  fields, renderValue, layout,
+  fields, renderValue, layout, values,
 }: {
   fields: FieldDef[];
   renderValue: (f: FieldDef) => React.ReactNode;
   layout?: FormLayout;
+  values?: Record<string, unknown>;
 }) {
   const byGroup = useMemo(() => groupByKey(fields), [fields]);
   const grouped = useMemo(() =>
@@ -2368,7 +2399,8 @@ function DetailSections({
   const renderDl = (fs: FieldDef[], cols: number) => (
     <dl className={`grid ${COLS[cols] ?? "grid-cols-2"} gap-x-4 gap-y-3`}>
       {fs.map((f) => {
-        const css = fieldStyleCss(f.uiStyle);
+        const labelCss = fieldStyleCss(f.uiStyle, "label_size");
+        const valueCss = fieldStyleCss(f.uiStyle, "value_size");
         const hl = !!(f.uiStyle ?? {}).highlight;
         // ความกว้าง field ตามที่ตั้ง (1/2/3) — textarea/image กินเต็มถ้าไม่ได้ตั้ง span
         // clamp ไม่ให้เกินจำนวนคอลัมน์ของ section (กัน grid 1 คอลัมน์แตกเป็น 2)
@@ -2377,8 +2409,8 @@ function DetailSections({
         const spanCls = span >= 3 ? "col-span-3" : span === 2 ? "col-span-2" : "";
         return (
           <div key={f.key} className={`${spanCls} ${hl ? "bg-amber-50 border border-amber-200 rounded-md p-1.5 -m-0.5" : ""}`}>
-            <dt className="text-[11px] text-slate-400 mb-0.5" style={css}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
-            <dd style={css}>{renderValue(f)}</dd>
+            <dt className="text-[11px] text-slate-400 mb-0.5" style={labelCss}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
+            <dd style={valueCss}>{renderValue(f)}</dd>
           </div>
         );
       })}
@@ -2387,16 +2419,24 @@ function DetailSections({
 
   // กลุ่ม B: layout mode
   if (layout?.tabs?.length) {
-    return <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={renderDl} />;
+    return (
+      <div className="space-y-4">
+        {values && <CompletenessBar fields={fields} values={values} />}
+        <LayoutTabs layout={layout} byGroup={byGroup} renderGrid={renderDl} />
+      </div>
+    );
   }
 
   // fallback (เดิม)
   const single = grouped.length <= 1;
   const current = grouped.find(([k]) => k === activeTab) ?? grouped[0];
   return (
-    <div>
-      {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
-      {current && <div className="pt-4">{renderDl(current[1], 2)}</div>}
+    <div className="space-y-4">
+      {values && <CompletenessBar fields={fields} values={values} />}
+      <div>
+        {!single && <SectionTabBar grouped={grouped} active={activeTab} onSelect={setActiveTab} />}
+        {current && <div className="pt-4">{renderDl(current[1], 2)}</div>}
+      </div>
     </div>
   );
 }
