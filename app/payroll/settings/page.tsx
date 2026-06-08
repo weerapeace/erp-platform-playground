@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
 
 type SettingsCenter = {
   latestPeriod: {
@@ -137,7 +138,7 @@ export default function PayrollSettingsCenterPage() {
 
   useEffect(() => {
     let alive = true;
-    fetch("/api/payroll/settings-center", { cache: "no-store" })
+    apiFetch("/api/payroll/settings-center", { cache: "no-store" })
       .then((r) => r.json())
       .then((json) => {
         if (!alive) return;
