@@ -319,6 +319,29 @@ export type FieldDef = {
   inlineEditable?: boolean;
   /** Sprint 13: เงื่อนไขแสดงในฟอร์ม — {show_if: {field, operator, value}} */
   conditionRules?: Record<string, unknown> | null;
+  /** render field พิเศษในฟอร์ม เช่น รายการลูกที่ต้องเก็บชั่วคราวก่อนบันทึก parent */
+  renderForm?: (ctx: {
+    value: unknown;
+    onChange: (value: unknown) => void;
+    recordId: string | null;
+    disabled: boolean;
+    mode: "view" | "edit";
+    form: Record<string, unknown>;
+  }) => React.ReactNode;
+  /** render field พิเศษในหน้า detail */
+  renderDetail?: (ctx: {
+    value: unknown;
+    recordId: string | null;
+    editable: boolean;
+    form: Record<string, unknown>;
+  }) => React.ReactNode;
+};
+
+export type MasterCRUDSaveContext = {
+  id: string;
+  form: Record<string, unknown>;
+  isCreate: boolean;
+  actor?: string | null;
 };
 
 export type MasterCRUDConfig = {
@@ -368,6 +391,8 @@ export type MasterCRUDConfig = {
   allowPermanentDelete?: boolean;
   /** จำนวน row ที่ดึงตอนโหลด (client mode, default 200) */
   pageLimit?: number;
+  /** hook หลังบันทึก parent สำเร็จ ใช้กับข้อมูลลูกที่มากับฟอร์ม เช่น วันหยุดประจำงวด */
+  afterSave?: (ctx: MasterCRUDSaveContext) => Promise<void> | void;
   /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
@@ -483,7 +508,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   const effectiveFields: FieldDef[] = useMemo(() => {
     if (registryFields && registryFields.length > 0) {
-      return registryFields
+      const fromRegistry = registryFields
         .filter((rf) => {
           if (rf.is_sensitive && rf.sensitive_permission && !can(rf.sensitive_permission as Parameters<typeof can>[0])) return false;
           if (!roleOk(rf.view_roles)) return false;   // role นี้ไม่มีสิทธิ์เห็น → ซ่อนคอลัมน์/ฟิลด์
@@ -494,6 +519,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           if (!roleOk(rf.edit_roles)) fd.readonly = true;   // แก้ไม่ได้ → read-only ในฟอร์ม
           return fd;
         });
+      const registryKeys = new Set(fromRegistry.map((f) => f.key));
+      const configOnlyFields = (config.fields ?? []).filter((f) => (f.renderForm || f.renderDetail) && !registryKeys.has(f.key));
+      return [...fromRegistry, ...configOnlyFields];
     }
     return config.fields ?? [];
   }, [registryFields, config.fields, config.cellRenderers, can, roleOk]);
@@ -1011,6 +1039,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           }
         }
       }
+      if (srcId && config.afterSave) {
+        await config.afterSave({
+          id: srcId,
+          form: formRef.current,
+          isCreate: !editingId,
+          actor: user?.name ?? null,
+        });
+      }
 
       // F11: แก้ของเดิม → กลับไปโหมดดู (ไม่ปิด) | สร้างใหม่ → ปิด drawer
       if (editingId) {
@@ -1429,6 +1465,25 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const labelStyle: React.CSSProperties = { ...baseStyle, fontSize: SZ[String(us.label_size ?? us.size ?? "")] || undefined };  // หัวข้อ
     const highlight = !!us.highlight;
     const hlColor = (us.highlightColor as string) || "#fef08a";
+    if (f.renderForm) {
+      return (
+        <div key={f.key} style={{ gridColumn: `span ${gw12(f, maxSpan)}` }}>
+          {f.renderForm({
+            value: v,
+            onChange: (val) => updateForm({ [f.key]: val }),
+            recordId: editingId,
+            disabled,
+            mode: drawerMode,
+            form,
+          })}
+          {hasErr && (
+            <div className="text-[11px] text-red-600 mt-1 space-y-0.5 flex flex-col">
+              {errs.map((m, i) => <span key={i} className="flex items-center gap-1">⚠ <span>{m}</span></span>)}
+            </div>
+          )}
+        </div>
+      );
+    }
     // ฟิลด์ที่มี control หลายตัว (m2m/o2m) ห้ามครอบด้วย <label> — เพราะคลิกที่ชื่อ label เบราว์เซอร์จะไปกด control ตัวแรก (แท็กอันแรกหลุด)
     const FieldWrap: "label" | "div" = (f.type === "many2many" || f.type === "one2many") ? "div" : "label";
     return (
@@ -1551,6 +1606,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const renderDetailValueInner = (f: FieldDef): React.ReactNode => {
     const v = form[f.key];
     const vs = fieldStyleCss(f.uiStyle);   // สไตล์จาก Studio (ใช้กับค่าในหน้า detail)
+    if (f.renderDetail) {
+      return f.renderDetail({
+        value: v,
+        recordId: editingId,
+        editable: !!(drawerMode === "view" && editingId && canEdit && !f.readonly),
+        form,
+      });
+    }
     // Quick edit: field ที่ตั้ง inline + แก้ได้ + ชนิดง่ายๆ → กดแก้ได้เลยในหน้า detail
     if (drawerMode === "view" && editingId && canEdit && f.inlineEditable && !f.readonly
         && (f.type === "text" || f.type === "number" || f.type === "boolean" || f.type === "select" || f.type === "textarea" || (f.type === "relation" && !!f.relationConfig))) {

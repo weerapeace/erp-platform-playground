@@ -7,6 +7,11 @@
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { apiFetch } from "@/lib/api";
+import {
+  PeriodHolidaysPanel,
+  savePeriodHolidayDrafts,
+  type PeriodHolidayDraft,
+} from "@/components/payroll/period-holidays-panel";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -30,6 +35,8 @@ const renderStatus = (v: unknown) => {
   return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${s.cls}`}>{s.th}</span>;
 };
 
+const editablePeriod = (status: unknown) => !status || ["draft", "review"].includes(String(status));
+
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/master/", apiPath: "periods", tableId: "payroll-periods-master",
   moduleKey: "payroll-periods",
@@ -40,6 +47,10 @@ const CONFIG: MasterCRUDConfig = {
   permissions: { view: "employees.view", create: "employees.create", edit: "employees.edit" },
   defaultShowAllColumns: true,
   allowPermanentDelete: false,
+  afterSave: async ({ id, form, isCreate, actor }) => {
+    if (!isCreate) return;
+    await savePeriodHolidayDrafts(id, (form.period_holidays as PeriodHolidayDraft[] | undefined) ?? [], actor);
+  },
   extraBulkActions: [
     {
       label: "🗑 ลบงวดพร้อมข้อมูลคำนวณ",
@@ -91,6 +102,34 @@ const CONFIG: MasterCRUDConfig = {
     { key: "payment_date", label: "วันจ่าย",   type: "date", colSize: 110, groupKey: "core", order: 50 },
     { key: "default_work_days",     label: "วันทำงาน", type: "number", colSize: 90, groupKey: "calc", order: 60 },
     { key: "default_hours_per_day", label: "ชม./วัน",  type: "number", colSize: 80, groupKey: "calc", order: 70 },
+    {
+      key: "period_holidays",
+      label: "วันหยุดพิเศษประจำงวด",
+      type: "one2many",
+      formSpan: 2,
+      groupKey: "calc",
+      order: 75,
+      renderForm: ({ value, onChange, recordId, disabled, form }) => (
+        <PeriodHolidaysPanel
+          periodId={recordId}
+          editable={!disabled && editablePeriod(form.status)}
+          value={(value as PeriodHolidayDraft[] | undefined) ?? []}
+          onChange={(items) => onChange(items)}
+          periodStart={form.start_date}
+          periodEnd={form.end_date}
+        />
+      ),
+      renderDetail: ({ value, recordId, editable, form }) => (
+        <PeriodHolidaysPanel
+          periodId={recordId}
+          editable={editable && editablePeriod(form.status)}
+          value={(value as PeriodHolidayDraft[] | undefined) ?? []}
+          onChange={() => {}}
+          periodStart={form.start_date}
+          periodEnd={form.end_date}
+        />
+      ),
+    },
     { key: "status", label: "สถานะ", type: "select", colSize: 110, options: PERIOD_STATUS, filterable: true, groupKey: "core", order: 80,
       cellRender: (v) => {
         const s = STATUS_LABEL[String(v)] ?? { th: String(v), cls: "bg-slate-100 text-slate-600" };
