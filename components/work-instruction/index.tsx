@@ -123,7 +123,9 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
     apiFetch(`/api/product-attributes?sku=${encodeURIComponent(sku)}`).then((r) => r.json()).then((d: EditData) => {
       if (d.error) { toast.error(d.error); return; }
       setData(d);
-      setFamily(d.parent?.product_family || d.families[0] || "");
+      // ตั้งประเภทเริ่มต้นเป็นตัวที่ "มีชุดฟิลด์" (d.families = ประเภทที่มี definitions) ถ้า parent ยังเป็น general/ไม่มีฟิลด์
+      const pf = d.parent?.product_family;
+      setFamily(pf && d.families.includes(pf) ? pf : (d.families[0] ?? pf ?? ""));
       const init: Record<string, unknown> = {}; const names: Record<string, string> = {};
       for (const def of d.definitions) {
         const k = `${def.scope}:${def.id}`;
@@ -183,6 +185,9 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
               <input value={size} onChange={(e) => setSize(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
           </div>
 
+          {family && defsOf("model").length === 0 && defsOf("sku").length === 0 && (
+            <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">ประเภท “{family}” ยังไม่มีชุดฟิลด์ — เลือกประเภทอื่น (เช่น belt) หรือกรอกที่ “ช่องเดิม” ด้านล่าง</div>
+          )}
           {family && defsOf("model").length > 0 && (
             <div className="border border-slate-100 rounded-lg p-2.5">
               <div className="text-xs font-semibold text-slate-600 mb-1.5">สเปกร่วม (ใช้ทุกสี)</div>
