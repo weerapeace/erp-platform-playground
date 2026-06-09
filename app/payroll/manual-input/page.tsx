@@ -19,7 +19,9 @@ type Row = {
   hours_per_day?: number; paid_minutes?: number; base_pay_minutes?: number; deducted_pay_minutes?: number;
   late_baht: number; late_minutes: number; absence_baht: number; absence_days: number; absence_hours: number;
   leave_baht: number; leave_days: number; leave_hours: number; ot_baht: number; ot_hours: number;
-  piecework_baht: number; special_add: number; other_deduct: number; net_estimate: number; has_manual: boolean;
+  piecework_baht: number; special_add: number; other_deduct: number;
+  social_security_baht?: number; withholding_tax_baht?: number; system_deduct_baht?: number;
+  net_estimate: number; has_manual: boolean;
 };
 type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
 type RecurringItem = { id: string; employee_id: string; item_name: string; item_type: string; applied_amount: number; amount_per_period?: number; duration_type?: string | null; start_date?: string | null; end_date?: string | null };
@@ -274,6 +276,9 @@ export default function ManualInputPage() {
       piecework_baht: 0,
       special_add: 0,
       other_deduct: 0,
+      social_security_baht: 0,
+      withholding_tax_baht: 0,
+      system_deduct_baht: 0,
       net_estimate: gridRow.net_estimate,
       has_manual: gridRow.manual_days > 0,
     };
@@ -386,6 +391,7 @@ export default function ManualInputPage() {
                 <th className="text-right px-3 py-2">งานเหมา</th>
                 <th className="text-right px-3 py-2">เพิ่มพิเศษ</th>
                 <th className="text-right px-3 py-2">หักอื่น</th>
+                <th className="text-right px-3 py-2">หักตามระบบ</th>
                 <th className="text-right px-3 py-2">สุทธิประมาณ</th>
                 <th className="text-center px-3 py-2">แก้</th>
               </tr>
@@ -430,6 +436,9 @@ export default function ManualInputPage() {
                       <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openQuickAdjust(r, "deduction")} tooltip={adjustmentTooltip("หักอื่น", deductionItems, "-")} />
                     </td>
                     <td className="px-3 py-2 text-right">
+                      <SystemDeductCell row={r} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
                       <span className="inline-flex items-center justify-end gap-1 tabular-nums font-medium" title={netTooltip(r, employeeRecurring)}>
                         {baht(r.net_estimate)}
                         <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>
@@ -441,7 +450,7 @@ export default function ManualInputPage() {
                   </tr>
                 );
               })}
-              {shown.length === 0 && <tr><td colSpan={12} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={13} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
             </tbody>
           </table>
         </div>
@@ -506,6 +515,25 @@ function AdjustmentCell({ value, mode, editable, onClick, tooltip }: { value: nu
       {hasValue ? baht(value) : isDeduction ? "+ หัก" : isPiecework ? "+ งานเหมา" : "+ เพิ่ม"}
       {hasValue ? <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-white/70 text-[10px] cursor-help">?</span> : null}
     </button>
+  );
+}
+
+function SystemDeductCell({ row }: { row: Row }) {
+  const total = Number(row.system_deduct_baht || 0);
+  if (!total) return <span className="text-slate-300">-</span>;
+  const title = [
+    "หักตามระบบ",
+    `ประกันสังคม: ${baht(Number(row.social_security_baht || 0))}`,
+    `ภาษีหัก ณ ที่จ่าย: ${baht(Number(row.withholding_tax_baht || 0))}`,
+  ].join("\n");
+  return (
+    <span
+      className="inline-flex h-8 min-w-[86px] items-center justify-end gap-1 rounded-lg border border-red-100 bg-red-50 px-2 text-xs font-medium tabular-nums text-red-700"
+      title={title}
+    >
+      {baht(total)}
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-white/70 text-[10px] cursor-help">?</span>
+    </span>
   );
 }
 
@@ -597,6 +625,9 @@ function netTooltip(row: Row, recurring: RecurringItem[]) {
     `งานเหมา: +${baht(row.piecework_baht)}`,
     `เพิ่มพิเศษ: +${baht(row.special_add)}`,
     `หักอื่น: -${baht(row.other_deduct)}`,
+    `หักตามระบบ: -${baht(Number(row.system_deduct_baht || 0))}`,
+    `  ประกันสังคม: -${baht(Number(row.social_security_baht || 0))}`,
+    `  ภาษี: -${baht(Number(row.withholding_tax_baht || 0))}`,
   ];
   const recurringNet = totalRecurring(recurring, "earning") - totalRecurring(recurring, "deduction");
   if (recurringNet) lines.push(`รายการประจำ: ${recurringNet > 0 ? "+" : "-"}${baht(Math.abs(recurringNet))}`);
