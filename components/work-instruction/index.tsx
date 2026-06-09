@@ -27,7 +27,7 @@ function Row({ f, bomSkus }: { f: SpecField; bomSkus?: string[] }) {
   );
 }
 
-export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, className = "" }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; className?: string }) {
+export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, refreshKey, className = "" }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; refreshKey?: number | string; className?: string }) {
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
@@ -37,7 +37,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
     if (!sku) { setSpec(null); return; }
     setLoading(true);
     apiFetch(`/api/product-spec?sku=${encodeURIComponent(sku)}`).then((r) => r.json()).then((j) => setSpec(j as ProductSpec)).catch(() => setSpec(null)).finally(() => setLoading(false));
-  }, [sku]);
+  }, [sku, refreshKey]);   // refreshKey เปลี่ยน → โหลดสเปกใหม่ (เช่น หลังบันทึก BOM)
   useEffect(() => { loadSpec(); }, [loadSpec]);
 
   if (!sku) return null;

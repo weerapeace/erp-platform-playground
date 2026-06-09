@@ -48,6 +48,12 @@ function enabledText(value: boolean) {
   return value ? "เปิด" : "ปิด";
 }
 
+function taxMethodLabel(value: string) {
+  if (value === "progressive") return "คำนวณขั้นบันได";
+  if (value === "none") return "ไม่คิดภาษี";
+  return "กรอกเอง";
+}
+
 export function PayrollEmployeeSettingTemplatesCard() {
   const [record, setRecord] = useState<ApiRecord | null>(null);
   const [templates, setTemplates] = useState<PayrollEmployeeSettingTemplate[]>([]);
@@ -55,6 +61,7 @@ export function PayrollEmployeeSettingTemplatesCard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pendingApply, setPendingApply] = useState<PayrollEmployeeSettingTemplate | null>(null);
@@ -77,6 +84,7 @@ export function PayrollEmployeeSettingTemplatesCard() {
       setRecord(next);
       setTemplates(next.templates ?? []);
       setActiveKey((current) => current || next.templates?.[0]?.key || "");
+      setEditing(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "โหลด template ไม่สำเร็จ");
     } finally {
@@ -116,6 +124,7 @@ export function PayrollEmployeeSettingTemplatesCard() {
       const next = json.data as ApiRecord;
       setRecord(next);
       setTemplates(next.templates ?? []);
+      setEditing(false);
       setNotice("บันทึก template แล้ว");
     } catch (e) {
       setError(e instanceof Error ? e.message : "บันทึก template ไม่สำเร็จ");
@@ -146,6 +155,11 @@ export function PayrollEmployeeSettingTemplatesCard() {
     } finally {
       setApplying(false);
     }
+  }
+
+  function cancelEdit() {
+    if (record?.templates) setTemplates(record.templates);
+    setEditing(false);
   }
 
   if (loading) {
@@ -187,14 +201,34 @@ export function PayrollEmployeeSettingTemplatesCard() {
               >
                 ดูตั้งค่ารายคน
               </Link>
-              <button
-                type="button"
-                onClick={saveTemplates}
-                disabled={saving}
-                className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-              >
-                {saving ? "กำลังบันทึก..." : "บันทึก template"}
-              </button>
+              {editing ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={cancelEdit}
+                    disabled={saving}
+                    className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveTemplates}
+                    disabled={saving}
+                    className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {saving ? "กำลังบันทึก..." : "บันทึก template"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  แก้ไข template
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -207,7 +241,7 @@ export function PayrollEmployeeSettingTemplatesCard() {
                 <button
                   key={template.key}
                   type="button"
-                  onClick={() => setActiveKey(template.key)}
+                  onClick={() => { setActiveKey(template.key); setEditing(false); }}
                   className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
                     selected ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   }`}
@@ -231,61 +265,86 @@ export function PayrollEmployeeSettingTemplatesCard() {
                 title="ข้อมูล template"
                 text="ตั้งชื่อและวิธีคิดภาษีหลักของประเภทสัญญานี้"
               />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-500">ชื่อ template</span>
-                  <input
-                    value={active.label}
-                    onChange={(e) => updateActive({ label: e.target.value })}
-                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-400"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-500">วิธีคิดภาษี</span>
-                  <select
-                    value={active.values.tax_calculation_method}
-                    onChange={(e) => updateValue("tax_calculation_method", e.target.value)}
-                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-400"
-                  >
-                    <option value="manual">กรอกเอง</option>
-                    <option value="progressive">คำนวณขั้นบันได</option>
-                    <option value="none">ไม่คิดภาษี</option>
-                  </select>
-                </label>
-              </div>
+              {editing ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-500">ชื่อ template</span>
+                      <input
+                        value={active.label}
+                        onChange={(e) => updateActive({ label: e.target.value })}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-400"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-500">วิธีคิดภาษี</span>
+                      <select
+                        value={active.values.tax_calculation_method}
+                        onChange={(e) => updateValue("tax_calculation_method", e.target.value)}
+                        className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-400"
+                      >
+                        <option value="manual">กรอกเอง</option>
+                        <option value="progressive">คำนวณขั้นบันได</option>
+                        <option value="none">ไม่คิดภาษี</option>
+                      </select>
+                    </label>
+                  </div>
 
-              <label className="block">
-                <span className="text-xs font-medium text-slate-500">คำอธิบาย</span>
-                <input
-                  value={active.description}
-                  onChange={(e) => updateActive({ description: e.target.value })}
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-400"
-                />
-              </label>
+                  <label className="block">
+                    <span className="text-xs font-medium text-slate-500">คำอธิบาย</span>
+                    <input
+                      value={active.description}
+                      onChange={(e) => updateActive({ description: e.target.value })}
+                      className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-slate-400"
+                    />
+                  </label>
+                </>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <DetailField label="ชื่อ template" value={active.label} />
+                  <DetailField label="วิธีคิดภาษี" value={taxMethodLabel(active.values.tax_calculation_method)} />
+                  <div className="sm:col-span-2">
+                    <DetailField label="คำอธิบาย" value={active.description || "-"} />
+                  </div>
+                </div>
+              )}
 
               <SectionHeader
                 title="หักตามระบบ / เบิกกลางเดือน"
                 text="กำหนดยอดเงินหรืออัตราที่เครื่องคำนวณจะนำไปใช้กับพนักงานกลุ่มนี้"
               />
-              <div className="grid gap-3 md:grid-cols-2">
-                {NUMBER_FIELDS.map((field) => (
-                  <label key={field.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <span className="text-xs font-semibold text-slate-600">{field.label}</span>
-                    <div className="mt-2 flex overflow-hidden rounded-lg border border-slate-200 bg-white">
-                      <input
-                        type="number"
-                        value={Number(active.values[field.key] ?? 0)}
-                        onChange={(e) => updateValue(field.key, Number(e.target.value) as never)}
-                        className="h-10 min-w-0 flex-1 px-3 text-sm outline-none"
-                      />
-                      <span className="flex h-10 items-center border-l border-slate-200 bg-slate-50 px-3 text-xs text-slate-400">
-                        {field.suffix}
-                      </span>
-                    </div>
-                    <span className="mt-1 block text-xs text-slate-400">{field.help}</span>
-                  </label>
-                ))}
-              </div>
+              {editing ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {NUMBER_FIELDS.map((field) => (
+                    <label key={field.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <span className="text-xs font-semibold text-slate-600">{field.label}</span>
+                      <div className="mt-2 flex overflow-hidden rounded-lg border border-slate-200 bg-white">
+                        <input
+                          type="number"
+                          value={Number(active.values[field.key] ?? 0)}
+                          onChange={(e) => updateValue(field.key, Number(e.target.value) as never)}
+                          className="h-10 min-w-0 flex-1 px-3 text-sm outline-none"
+                        />
+                        <span className="flex h-10 items-center border-l border-slate-200 bg-slate-50 px-3 text-xs text-slate-400">
+                          {field.suffix}
+                        </span>
+                      </div>
+                      <span className="mt-1 block text-xs text-slate-400">{field.help}</span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {NUMBER_FIELDS.map((field) => (
+                    <DetailField
+                      key={field.key}
+                      label={field.label}
+                      value={field.suffix === "%" ? `${money(Number(active.values[field.key] ?? 0))}%` : `฿${money(Number(active.values[field.key] ?? 0))}`}
+                      help={field.help}
+                    />
+                  ))}
+                </div>
+              )}
 
               <SectionHeader
                 title="ตัวเลือกการคำนวณ"
@@ -293,6 +352,7 @@ export function PayrollEmployeeSettingTemplatesCard() {
               />
               <div className="grid gap-3 md:grid-cols-2">
                 {BOOLEAN_FIELDS.map((field) => (
+                  editing ? (
                   <label key={field.key} className={`flex cursor-pointer items-center justify-between gap-4 rounded-lg border p-3 transition ${
                     active.values[field.key]
                       ? "border-emerald-200 bg-emerald-50/70"
@@ -313,6 +373,14 @@ export function PayrollEmployeeSettingTemplatesCard() {
                       <span className="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
                     </span>
                   </label>
+                  ) : (
+                    <DetailToggle
+                      key={field.key}
+                      label={field.label}
+                      help={field.help}
+                      enabled={Boolean(active.values[field.key])}
+                    />
+                  )
                 ))}
               </div>
             </div>
@@ -421,6 +489,36 @@ function ImpactMetric({ label, value, tone }: { label: string; value: number; to
     <div className={`rounded-lg border px-3 py-2 text-center ${toneClass}`}>
       <div className="text-[11px] font-medium opacity-70">{label}</div>
       <div className="mt-0.5 text-lg font-bold tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function DetailField({ label, value, help }: { label: string; value: string; help?: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+      <div className="text-xs font-medium text-slate-400">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-slate-900">{value}</div>
+      {help && <div className="mt-1 text-xs leading-5 text-slate-400">{help}</div>}
+    </div>
+  );
+}
+
+function DetailToggle({ label, help, enabled }: { label: string; help: string; enabled: boolean }) {
+  return (
+    <div className={`rounded-lg border px-4 py-3 ${
+      enabled ? "border-emerald-200 bg-emerald-50/70" : "border-slate-200 bg-slate-50"
+    }`}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">{label}</div>
+          <div className="mt-1 text-xs leading-5 text-slate-400">{help}</div>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+          enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"
+        }`}>
+          {enabled ? "เปิด" : "ปิด"}
+        </span>
+      </div>
     </div>
   );
 }

@@ -418,7 +418,7 @@ export default function BomWorkspacePage() {
             </div>
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
-            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} bomSkus={form.lines.map((l) => l.component_sku).filter(Boolean) as string[]}
+            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} refreshKey={refreshKey} bomSkus={form.lines.map((l) => l.component_sku).filter(Boolean) as string[]}
               onAddMaterials={canEdit ? (mats) => {
                 const newLines = mats.map((m) => ({ ...emptyLine(), component_sku: m.code, component_name: m.name, qty: 1 }));
                 patchForm({ lines: [...form.lines, ...newLines] });
