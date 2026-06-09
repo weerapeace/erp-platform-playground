@@ -1154,9 +1154,10 @@ export function DataTable<T extends Record<string, unknown>>({
     if (!el) return;
     const recalc = () => {
       const top = el.getBoundingClientRect().top;          // ระยะจากบนจอถึงหัวตาราง
-      const baseH = Math.round(window.innerHeight - top - 12);  // เผื่อขอบล่างนิดหน่อย
-      const h = baseH * 3;
-      setTableMaxH(h > 720 ? h : 720);
+      const baseH = Math.round(window.innerHeight - top - 12);  // พื้นที่ที่เหลือถึงล่างจอ
+      // ให้พื้นที่ตาราง "พอดีจอ" → ตาราง scroll ในตัว → หัวตาราง (thead sticky) ค้างจริง
+      // (เดิมคูณ 3 ทำให้ตารางสูงเกินจอ → หน้าเลื่อนทั้งหน้า → header ไม่ค้าง)
+      setTableMaxH(Math.max(280, baseH));
     };
     const raf = requestAnimationFrame(recalc);
     window.addEventListener("resize", recalc);
