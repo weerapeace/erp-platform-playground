@@ -22,9 +22,9 @@ export function applyContractLifecycle<T extends Record<string, unknown>>(row: T
   return row;
 }
 
-export async function closeEmployeesWithoutActiveCurrentContract(admin: Admin, employeeIds: string[]): Promise<number> {
+async function employeesWithoutActiveCurrentContract(admin: Admin, employeeIds: string[]): Promise<string[]> {
   const uniqueIds = Array.from(new Set(employeeIds.filter(Boolean)));
-  if (uniqueIds.length === 0) return 0;
+  if (uniqueIds.length === 0) return [];
 
   const { data: activeContracts, error: activeError } = await admin
     .from("employee_contracts")
@@ -37,7 +37,11 @@ export async function closeEmployeesWithoutActiveCurrentContract(admin: Admin, e
   const stillActive = new Set(((activeContracts ?? []) as { employee_id: string | null }[])
     .map((row) => row.employee_id)
     .filter((id): id is string => Boolean(id)));
-  const employeesToClose = uniqueIds.filter((id) => !stillActive.has(id));
+  return uniqueIds.filter((id) => !stillActive.has(id));
+}
+
+export async function closeEmployeesWithoutActiveCurrentContract(admin: Admin, employeeIds: string[]): Promise<number> {
+  const employeesToClose = await employeesWithoutActiveCurrentContract(admin, employeeIds);
   if (employeesToClose.length === 0) return 0;
 
   const { error: employeeError } = await admin
@@ -48,6 +52,29 @@ export async function closeEmployeesWithoutActiveCurrentContract(admin: Admin, e
   if (employeeError) throw new Error(employeeError.message);
 
   return employeesToClose.length;
+}
+
+export async function resignEmployeesWithoutActiveCurrentContract(
+  admin: Admin,
+  employeeResignDates: Record<string, string | null | undefined>,
+): Promise<number> {
+  const employeeIds = Object.keys(employeeResignDates);
+  const employeesToResign = await employeesWithoutActiveCurrentContract(admin, employeeIds);
+  if (employeesToResign.length === 0) return 0;
+
+  let resignedCount = 0;
+  for (const employeeId of employeesToResign) {
+    const resignDate = String(employeeResignDates[employeeId] ?? todayBangkokISO()).slice(0, 10);
+    const { error: employeeError } = await admin
+      .from("employees")
+      .update({ employment_status: "resigned", resign_date: resignDate })
+      .eq("id", employeeId)
+      .eq("employment_status", "active");
+    if (employeeError) throw new Error(employeeError.message);
+    resignedCount += 1;
+  }
+
+  return resignedCount;
 }
 
 export async function syncEndedCurrentContracts(admin: Admin, employeeIds?: string[]): Promise<{ contractsEnded: number; employeesClosed: number }> {
@@ -70,6 +97,12 @@ export async function syncEndedCurrentContracts(admin: Admin, employeeIds?: stri
 
   const expiredIds = expired.map((row) => row.id);
   const affectedEmployeeIds = Array.from(new Set(expired.map((row) => row.employee_id).filter((id): id is string => Boolean(id))));
+  const resignDates = expired.reduce<Record<string, string>>((acc, row) => {
+    if (!row.employee_id || !row.end_date) return acc;
+    const date = row.end_date.slice(0, 10);
+    if (!acc[row.employee_id] || date > acc[row.employee_id]) acc[row.employee_id] = date;
+    return acc;
+  }, {});
 
   const { error: contractError } = await admin
     .from("employee_contracts")
@@ -79,7 +112,7 @@ export async function syncEndedCurrentContracts(admin: Admin, employeeIds?: stri
 
   if (affectedEmployeeIds.length === 0) return { contractsEnded: expired.length, employeesClosed: 0 };
 
-  const employeesClosed = await closeEmployeesWithoutActiveCurrentContract(admin, affectedEmployeeIds);
+  const employeesClosed = await resignEmployeesWithoutActiveCurrentContract(admin, resignDates);
 
   return { contractsEnded: expired.length, employeesClosed };
 }

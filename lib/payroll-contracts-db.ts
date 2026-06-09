@@ -11,6 +11,7 @@ import { nullifyEmpty } from "@/lib/payroll-coerce";
 import {
   applyContractLifecycle,
   closeEmployeesWithoutActiveCurrentContract,
+  resignEmployeesWithoutActiveCurrentContract,
   syncEndedCurrentContracts,
 } from "@/lib/payroll-contract-lifecycle";
 
@@ -117,7 +118,7 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
   const employeeId = body.employee_id ?? (body.employee_code ? await codeToEmployeeId(String(body.employee_code)) : null);
   if (!employeeId) throw new Error("ต้องระบุพนักงาน (employee_code) ที่มีอยู่จริง");
   const cols = await toColumns(body);
-  const insert = {
+  const insert: Record<string, unknown> = {
     employee_id:   employeeId,
     contract_no:   cols.contract_no ?? `CON-${Date.now()}`,
     wage_type:     cols.wage_type ?? "monthly",
@@ -131,9 +132,13 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     ...cols,
   };
   const admin = supabaseAdmin();
-  const { data, error } = await admin.from(TABLE).insert(applyContractLifecycle(insert)).select(SELECT).limit(1);
+  const insertWithLifecycle = applyContractLifecycle(insert);
+  const { data, error } = await admin.from(TABLE).insert(insertWithLifecycle).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   await syncEndedCurrentContracts(admin, [String(employeeId)]);
+  if (insertWithLifecycle.status === "ended") {
+    await resignEmployeesWithoutActiveCurrentContract(admin, { [String(employeeId)]: String(insertWithLifecycle.end_date ?? "") });
+  }
   const { em, cm, wm } = await maps();
   return decorate(data![0] as Record<string, unknown>, em, cm, wm);
 }
@@ -152,10 +157,13 @@ export async function updateContract(id: string, body: Record<string, unknown>):
   if (!data?.[0]) return null;
   const employeeId = String((data[0] as Record<string, unknown>).employee_id ?? "");
   if (employeeId) await syncEndedCurrentContracts(admin, [employeeId]);
-  if (employeeId && previous?.is_current === true && update.status !== "active") {
+  const endedCurrentContract = employeeId && previous?.is_current === true && update.status === "ended";
+  if (endedCurrentContract) {
+    await resignEmployeesWithoutActiveCurrentContract(admin, { [employeeId]: String(update.end_date ?? previous?.end_date ?? "") });
+  } else if (employeeId && previous?.is_current === true && update.status !== "active") {
     await closeEmployeesWithoutActiveCurrentContract(admin, [employeeId]);
   }
-  if (employeeId && previous?.is_current === true && update.is_current === false) {
+  if (employeeId && previous?.is_current === true && update.is_current === false && update.status !== "ended") {
     await closeEmployeesWithoutActiveCurrentContract(admin, [employeeId]);
   }
   const { em, cm, wm } = await maps();
