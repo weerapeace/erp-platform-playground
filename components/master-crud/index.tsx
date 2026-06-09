@@ -193,6 +193,7 @@ const GROUP_CONFIG: Record<string, { label: string; icon: string; defaultOpen: b
   content:   { label: "เนื้อหา",        icon: "📝", defaultOpen: true, order: 40 },
   pricing:   { label: "ราคา & ต้นทุน",  icon: "💰", defaultOpen: true, order: 50 },
   media:     { label: "รูปภาพ/ไฟล์",    icon: "🖼️", defaultOpen: true, order: 55 },
+  bom:       { label: "BOM (สูตรผลิต)", icon: "📐", defaultOpen: true, order: 58 },
   status:    { label: "สถานะ",          icon: "🟢", defaultOpen: true, order: 60 },
   other:     { label: "อื่น ๆ",         icon: "📦", defaultOpen: true, order: 80 },
   system:    { label: "ระบบ",           icon: "⚙️", defaultOpen: false, order: 90 },

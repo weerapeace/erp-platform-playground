@@ -72,6 +72,7 @@ const GROUP_META: Record<string, { label: string; icon: string; order: number }>
   content:   { label: "เนื้อหา",       icon: "📝", order: 40 },
   pricing:   { label: "ราคา",          icon: "💰", order: 50 },
   media:     { label: "รูปภาพ/ไฟล์",   icon: "🖼️", order: 55 },
+  bom:       { label: "BOM (สูตรผลิต)", icon: "📐", order: 58 },
   status:    { label: "สถานะ",         icon: "🟢", order: 60 },
   other:     { label: "อื่น ๆ",        icon: "📦", order: 80 },
   system:    { label: "ระบบ",          icon: "⚙️", order: 90 },
