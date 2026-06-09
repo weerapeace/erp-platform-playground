@@ -90,6 +90,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ success: data?.length ?? 0, failed: 0, error: null });
 }
 
+// PUT = อัปเดตหลายแถว ค่าต่างกันได้ในคำขอเดียว (ใช้ตอน Studio บันทึก — แทนการ PATCH ทีละ field)
+//   body: { updates: { id: string, patch: Record<string, unknown> }[] }
+const ALLOWED_ROW_FIELDS = [
+  ...ALLOWED_BULK_FIELDS,
+  "display_order", "form_column_span", "help_text", "placeholder", "default_value", "ui_style",
+];
+export async function PUT(request: NextRequest): Promise<NextResponse> {
+  let body: { updates?: unknown };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+
+  const updates = Array.isArray(body.updates) ? (body.updates as Array<{ id: string; patch: Record<string, unknown> }>) : null;
+  if (!updates || updates.length === 0) return NextResponse.json({ error: "ต้องระบุ updates[]" }, { status: 400 });
+  if (updates.length > 300)            return NextResponse.json({ error: "เกิน 300 row ต่อครั้ง" }, { status: 400 });
+
+  const userClient = supabaseFromRequest(request);
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+
+  const admin = supabaseAdmin();
+
+  // อัปเดตทีละแถวแบบขนาน (แต่ละแถว = 1 id, ไม่ทับกัน → ไม่มี lock contention/deadlock)
+  const results = await Promise.all(updates.map((u) => {
+    if (!u?.id) return Promise.resolve({ error: { message: "missing id" } } as { error: { message: string } | null });
+    const patch: Record<string, unknown> = {};
+    for (const k of ALLOWED_ROW_FIELDS) if (u.patch?.[k] !== undefined) patch[k] = u.patch[k];
+    if (Object.keys(patch).length === 0) return Promise.resolve({ error: null } as { error: { message: string } | null });
+    return admin.from("erp_module_fields").update(patch).eq("id", u.id).select("id");
+  }));
+
+  const failed = results.filter((r) => r.error).length;
+  const success = updates.length - failed;
+
+  // audit สรุป 1 row (เลี่ยง before/after รายแถว → เร็ว)
+  admin.from("erp_field_registry_audit").insert({
+    module_field_id: updates[0]?.id ?? null,
+    actor_email: user.email,
+    action: "studio_save",
+    changes: { updated_count: updates.length },
+  }).then(() => {}, () => {});
+
+  return NextResponse.json({ success, failed, error: failed > 0 ? `${failed} row failed` : null });
+}
+
 // PATCH = reorder
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   let body: { reorder?: unknown };

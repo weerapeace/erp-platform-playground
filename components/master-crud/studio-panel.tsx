@@ -172,14 +172,14 @@ function SamplePicker({ label, searchSample, onPick, onClear }: { label: string;
 }
 
 export function StudioPanel({
-  fields, moduleLabel, moduleKey, layout, onClose, onSaved, sampleRows = [], searchSample, loadSample,
+  fields, moduleLabel, moduleKey, layout, onClose, sampleRows = [], searchSample, loadSample,
 }: {
   fields:      StudioField[];
   moduleLabel: string;
   moduleKey?:  string;
   layout?:     FormLayout;
   onClose:     () => void;
-  onSaved:     () => void;
+  onSaved?:    () => void;   // (เลิกใช้) — บันทึกแล้วไม่ปิด ให้กด "ปิด" เอง
   sampleRows?: Record<string, unknown>[];
   searchSample?: (q: string) => Promise<{ id: string; label: string }[]>;
   loadSample?:   (id: string) => Promise<Record<string, unknown> | null>;
@@ -323,97 +323,37 @@ export function StudioPanel({
     try {
       const withId = items.filter((i) => i.fieldId);
 
-      // 1. reorder (display_order — global, step 10)
-      //    แบ่งเป็นก้อนละ 30 — กัน Cloudflare Worker (แผนฟรี) จำกัด 50 subrequest/คำขอ
-      const reorder = withId.map((i, idx) => ({ id: i.fieldId!, display_order: (idx + 1) * 10 }));
-      for (let s = 0; s < reorder.length; s += 30) {
-        const chunk = reorder.slice(s, s + 30);
-        const r1 = await apiFetch("/api/admin/field-registry-v2/bulk", {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reorder: chunk }),
-        });
-        const j1 = await r1.json();
-        if (j1.error) throw new Error("reorder: " + j1.error);
-      }
-
-      // 2. group_key (ทีละ value)
-      const byGroup = new Map<string, string[]>();
-      for (const i of withId) {
-        const g = byGroup.get(i.groupKey) ?? []; g.push(i.fieldId!); byGroup.set(i.groupKey, g);
-      }
-      for (const [group, ids] of byGroup) {
+      // 1. บันทึกทุก field ในคำขอเดียว (ของกลาง PUT) — เร็วกว่าเดิมมาก (เคยยิงทีละ field ~หลายสิบครั้ง)
+      //    รวม: order / group / visible / form / inline / bulk / ความกว้าง / help / required / readonly / default / สไตล์
+      const updates = withId.map((i, idx) => ({
+        id: i.fieldId!,
+        patch: {
+          display_order:      (idx + 1) * 10,
+          group_key:          i.groupKey,
+          is_visible:         !!i.isVisible,
+          show_in_form:       !!i.showInForm,
+          is_inline_editable: !!i.inlineEditable,
+          is_bulk_editable:   !!i.bulkEditable,
+          form_column_span:   i.formSpan ?? 1,
+          help_text:          i.helpText || null,
+          placeholder:        i.placeholder || null,
+          is_required:        !!i.required,
+          is_editable:        i.editable !== false,
+          default_value:      (i.defaultValue ?? "") || null,
+          ui_style:           i.uiStyle ?? {},
+        },
+      }));
+      for (let s = 0; s < updates.length; s += 100) {
+        const chunk = updates.slice(s, s + 100);
         const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids, patch: { group_key: group } }),
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: chunk }),
         });
-        if ((await r.json()).error) throw new Error("group_key failed");
+        const j = await r.json();
+        if (j.error) throw new Error("บันทึก field: " + j.error);
       }
 
-      // 3. is_visible (column show) — แยก 2 กลุ่ม true/false
-      const visTrue  = withId.filter((i) => i.isVisible).map((i) => i.fieldId!);
-      const visFalse = withId.filter((i) => !i.isVisible).map((i) => i.fieldId!);
-      for (const [ids, val] of [[visTrue, true], [visFalse, false]] as [string[], boolean][]) {
-        if (ids.length === 0) continue;
-        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids, patch: { is_visible: val } }),
-        });
-        if ((await r.json()).error) throw new Error("is_visible failed");
-      }
-
-      // 4. show_in_form (field ในฟอร์ม)
-      const formTrue  = withId.filter((i) => i.showInForm).map((i) => i.fieldId!);
-      const formFalse = withId.filter((i) => !i.showInForm).map((i) => i.fieldId!);
-      for (const [ids, val] of [[formTrue, true], [formFalse, false]] as [string[], boolean][]) {
-        if (ids.length === 0) continue;
-        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids, patch: { show_in_form: val } }),
-        });
-        if ((await r.json()).error) throw new Error("show_in_form failed");
-      }
-
-      // 5. is_inline_editable (แก้ไขเร็วในหน้า detail)
-      const inlineTrue  = withId.filter((i) => i.inlineEditable).map((i) => i.fieldId!);
-      const inlineFalse = withId.filter((i) => !i.inlineEditable).map((i) => i.fieldId!);
-      for (const [ids, val] of [[inlineTrue, true], [inlineFalse, false]] as [string[], boolean][]) {
-        if (ids.length === 0) continue;
-        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids, patch: { is_inline_editable: val } }),
-        });
-        if ((await r.json()).error) throw new Error("is_inline_editable failed");
-      }
-
-      // 6. is_bulk_editable (แก้หลายรายการพร้อมกัน)
-      const bulkTrue  = withId.filter((i) => i.bulkEditable).map((i) => i.fieldId!);
-      const bulkFalse = withId.filter((i) => !i.bulkEditable).map((i) => i.fieldId!);
-      for (const [ids, val] of [[bulkTrue, true], [bulkFalse, false]] as [string[], boolean][]) {
-        if (ids.length === 0) continue;
-        const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids, patch: { is_bulk_editable: val } }),
-        });
-        if ((await r.json()).error) throw new Error("is_bulk_editable failed");
-      }
-
-      // 7. ตั้งค่า field รายตัว (ความกว้าง/help/placeholder/required/readonly/default/สไตล์) — PATCH ทีละ field
-      await Promise.all(withId.map((i) =>
-        apiFetch(`/api/admin/field-registry-v2/${i.fieldId}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            form_column_span: i.formSpan ?? 1,
-            help_text: i.helpText || null,
-            placeholder: i.placeholder || null,
-            is_required: !!i.required,
-            is_editable: i.editable !== false,
-            default_value: (i.defaultValue ?? "") || null,
-            ui_style: i.uiStyle ?? {},
-          }),
-        })
-      ));
-
-      // 8. layout ฟอร์ม → erp_modules.config.layout (Tab → Section)
+      // 2. layout ฟอร์ม → erp_modules.config.layout (Tab → Section)
       //    section ที่ตั้งชื่อแท็บเดียวกัน → รวมอยู่แท็บเดียว ; ไม่ตั้งแท็บ → เป็นแท็บเดี่ยวของตัวเอง
       if (moduleKey) {
         const tabMap = new Map<string, { key: string; label: string; icon: string; sections: { key: string; label: string; columns: number }[] }>();
@@ -432,9 +372,10 @@ export function StudioPanel({
         if ((await r.json()).error) throw new Error("layout failed");
       }
 
-      setMsg("✓ บันทึก layout สำเร็จ");
+      setMsg("✓ บันทึกแล้ว — แก้ต่อได้เลย (กด \"ปิด\" เมื่อเสร็จ)");
       setDirty(false);
-      setTimeout(() => onSaved(), 600);
+      setTimeout(() => setMsg(null), 4000);
+      // ไม่ปิดอัตโนมัติ — ให้ผู้ใช้ทำงานต่อ แล้วกด "ปิด" เอง (onClose จะรีเฟรชหน้าให้)
     } catch (e) {
       setMsg("❌ " + (e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"));
     } finally {
