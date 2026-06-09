@@ -1,8 +1,9 @@
+/* @import ต้องอยู่บนสุด ก่อน @tailwind (ไม่งั้น Turbopack ฟ้อง: @import must precede all rules) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap');
 
 * {
   box-sizing: border-box;
