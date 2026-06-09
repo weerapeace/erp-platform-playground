@@ -184,6 +184,17 @@ export function StudioPanel({
   searchSample?: (q: string) => Promise<{ id: string; label: string }[]>;
   loadSample?:   (id: string) => Promise<Record<string, unknown> | null>;
 }) {
+  // group ที่ "รู้จัก" = อยู่ใน GROUP_META มาตรฐาน หรือใน layout (tab/section) ที่บันทึกไว้
+  // group แปลก (orphan เช่น "รายละเอียดเข็มขัด") → แสดงรวมใต้กล่อง "อื่น ๆ" (ตรงกับฟอร์มจริง + หาเจอง่าย)
+  const recognizedGroupKeys = new Set<string>([
+    ...Object.keys(GROUP_META),
+    ...(layout?.tabs ?? []).flatMap((t) => (t.sections ?? []).map((s) => s.key)),
+  ]);
+  const effGroup = (g?: string | null): string => {
+    const k = g ?? "other";
+    return recognizedGroupKeys.has(k) ? k : "other";
+  };
+
   // เลือกรายการจริงมาโชว์ใน preview (pickup)
   const [pickedRow, setPickedRow] = useState<Record<string, unknown> | null>(null);
   const [pickedLabel, setPickedLabel] = useState<string>("");
@@ -198,7 +209,8 @@ export function StudioPanel({
       })),
     );
     const have = new Set(fromLayout.map((s) => s.key));
-    const extra: SectionDef[] = Array.from(new Set(fields.map((f) => f.groupKey ?? "other")))
+    // group แปลก (orphan) ถูก map เป็น "other" → ไม่สร้างกล่องแยก แต่ต้องมีกล่อง "other" รองรับเสมอ
+    const extra: SectionDef[] = Array.from(new Set(fields.map((f) => effGroup(f.groupKey))))
       .filter((k) => !have.has(k))
       .sort((a, b) => gmeta(a).order - gmeta(b).order)
       .map((k) => ({ key: k, label: gmeta(k).label, icon: gmeta(k).icon, columns: 2, tab: "" }));
@@ -265,7 +277,7 @@ export function StudioPanel({
     });
     setSections((prev) => {
       const have = new Set(prev.map((s) => s.key));
-      const extra = [...new Set(regs.map((r) => String(r.group_key ?? "other")).filter((g) => !have.has(g)))]
+      const extra = [...new Set(regs.map((r) => effGroup(String(r.group_key ?? "other"))).filter((g) => !have.has(g)))]
         .map((g) => ({ key: g, label: gmeta(g).label, icon: gmeta(g).icon, columns: 2, tab: "" }));
       return extra.length ? [...prev, ...extra] : prev;
     });
@@ -450,13 +462,16 @@ export function StudioPanel({
   // ---- group สำหรับ form tab ----
   const grouped = useMemo(() => {
     const map = new Map<string, StudioField[]>();
-    for (const it of items) { const k = it.groupKey ?? "other"; const l = map.get(k) ?? []; l.push(it); map.set(k, l); }
+    for (const it of items) { const k = effGroup(it.groupKey); const l = map.get(k) ?? []; l.push(it); map.set(k, l); }
     return Array.from(map.entries()).sort(([a], [b]) => gmeta(a).order - gmeta(b).order);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 
   // form tab: เรียงตามลำดับ sections (รวมหมวดว่างเป็น drop zone) + ตัวเลือกหมวดสำหรับ dropdown
+  // — field กลุ่ม orphan ถูกจัดเข้ากล่อง "other" ผ่าน effGroup (แสดงใต้แท็บ "อื่น ๆ")
   const formGroups = useMemo<[SectionDef, StudioField[]][]>(
-    () => sections.map((s) => [s, items.filter((i) => (i.groupKey ?? "other") === s.key)]),
+    () => sections.map((s) => [s, items.filter((i) => effGroup(i.groupKey) === s.key)]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sections, items],
   );
   const sectionOptions = useMemo(() => sections.map((s) => ({ key: s.key, label: s.label })), [sections]);
