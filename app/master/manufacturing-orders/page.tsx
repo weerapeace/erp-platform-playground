@@ -17,6 +17,7 @@ import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import type { MoListItem } from "@/app/api/mo/route";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
+import { WorkInstructionPanel } from "@/components/work-instruction";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {
@@ -448,6 +449,9 @@ export default function MoWorkspacePage() {
               <input value={form.note} onChange={(e) => patch({ note: e.target.value })}
                 className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </label>
+
+            {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
+            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} />}
 
             {/* preview/checklist กางสูตร — 2 แท็บ */}
             {(() => {
