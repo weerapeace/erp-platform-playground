@@ -102,6 +102,14 @@ const featureCards = [
     next: "เพิ่ม storage สำหรับกฎกลางทั้งระบบด้วย migration",
   },
   {
+    no: "7A",
+    title: "Employee Setting Templates",
+    href: "/payroll/employee-setting-templates",
+    tone: "violet",
+    description: "Template ตั้งค่ารายคนตามประเภทสัญญา เช่น ประกันสังคม ภาษี OT เบิกกลางเดือน",
+    next: "บันทึก template แล้วกดนำไปใช้กับพนักงานตามประเภทสัญญาปัจจุบัน",
+  },
+  {
     no: "8",
     title: "Lock Period",
     href: "/payroll/periods",
