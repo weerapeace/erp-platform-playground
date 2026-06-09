@@ -1418,11 +1418,12 @@ export function DataTable<T extends Record<string, unknown>>({
             {/* คลิกรอบนอกเพื่อปิด */}
             <div className="fixed inset-0 z-10" onClick={() => setShowColumnMgr(false)} />
             <div className="absolute right-0 top-10 z-20 w-60 bg-white border border-slate-200 rounded-lg shadow-lg py-2 max-h-[420px] overflow-y-auto">
-              <div className="px-3 pb-2 flex items-center justify-between">
+              <div className="px-3 pb-1 flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">คอลัมน์</span>
                 <button onClick={() => table.getAllColumns().filter(c => c.getCanHide()).forEach(c => c.toggleVisibility(true))}
                   className="text-xs text-blue-600 hover:underline">Reset</button>
               </div>
+              <div className="px-3 pb-2 text-[10px] text-slate-400">👤 ปรับเฉพาะของคุณ · ไม่กระทบคนอื่น (ตั้ง default ทั้งระบบที่ &ldquo;ออกแบบหน้า&rdquo;)</div>
 
               {Array.from(groupedHidableColumns.entries()).map(([groupName, cols]) => (
                 <div key={groupName}>

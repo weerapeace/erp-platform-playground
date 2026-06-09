@@ -168,7 +168,6 @@ export const navGroups = [
       // Schema + Field config (sprint 1+)
       { href: "/admin/schema-sync",       icon: "🗂️", labelTH: "Schema Sync + Field Registry" },
       { href: "/admin/lookups",           icon: "📚", labelTH: "Lookups (relation values)" },
-      { href: "/admin/field-registry",    icon: "📋", labelTH: "Field Registry (legacy)" },
       { href: "/admin/form-builder",      icon: "🧩", labelTH: "ออกแบบฟอร์ม" },
       { href: "/admin/table-layouts",     icon: "🎚️", labelTH: "Table Layouts" },
       { href: "/admin/saved-views",       icon: "📑", labelTH: "Saved Views" },

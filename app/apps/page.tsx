@@ -157,11 +157,6 @@ const APPS: AppEntry[] = [
     color: "from-neutral-600 to-neutral-700", status: "live",
   },
   {
-    key: "field-registry", icon: "🗂️", name: "ทะเบียน Field", subtitle: "Field Registry",
-    href: "/admin/field-registry", category: "Admin",
-    color: "from-gray-600 to-gray-700", status: "live",
-  },
-  {
     key: "form-builder", icon: "🧩", name: "ออกแบบฟอร์ม", subtitle: "Form Builder",
     href: "/admin/form-builder", category: "Admin",
     color: "from-slate-600 to-slate-700", status: "live",
