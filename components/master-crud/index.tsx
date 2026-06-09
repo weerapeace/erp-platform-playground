@@ -1570,7 +1570,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       return <div className="text-sm text-slate-700 whitespace-pre-wrap break-words" style={vs}>{String(v)}</div>;
     }
     if (f.type === "many2many") {
-      return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={false}
+      // inline edit: เปิดแก้แท็กได้เลยในหน้า detail (ผูก/ถอดลิงก์บันทึกทันที ไม่ต้องกดเซฟ)
+      const inlineM2M = drawerMode === "view" && !!editingId && canEdit && !!f.inlineEditable && !f.readonly;
+      return <RelationMany2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} editable={inlineM2M}
         value={Array.isArray(form[f.key]) ? (form[f.key] as string[]) : undefined}
         onChange={(ids) => updateForm({ [f.key]: ids })} />;
     }
