@@ -181,7 +181,7 @@ export function PayrollEmployeeSettingTemplatesCard() {
       )}
 
       <div className="rounded-xl border border-slate-200 bg-white">
-        <div className="sticky top-0 z-20 rounded-t-xl border-b border-slate-100 bg-white/95 shadow-sm backdrop-blur">
+        <div className="sticky top-3 z-30 -mx-px -mt-px rounded-xl border border-slate-200 bg-white/95 shadow-md shadow-slate-200/70 backdrop-blur">
           <div className="px-4 py-4 sm:px-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
