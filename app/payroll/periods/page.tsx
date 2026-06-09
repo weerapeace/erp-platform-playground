@@ -42,34 +42,6 @@ const CONFIG: MasterCRUDConfig = {
   allowPermanentDelete: false,
   extraBulkActions: [
     {
-      label: "🧪 ลบงวดทดสอบ",
-      variant: "danger",
-      onClick: async (selected) => {
-        if (selected.length === 0) return;
-        const names = selected.map((r) => String(r.period_name ?? r.name ?? r.id)).slice(0, 5).join("\n- ");
-        const ans = window.prompt(`ลบงวดทดสอบ ${selected.length} รายการ\n\nระบบจะลบได้เฉพาะงวดที่เป็น test/demo/ทดสอบ และไม่มีข้อมูลเงินเดือนผูกอยู่\n\n- ${names}${selected.length > 5 ? "\n- ..." : ""}\n\nพิมพ์ "ลบงวดทดสอบ" เพื่อยืนยัน:`);
-        if (ans == null) return;
-        if (ans.trim() !== "ลบงวดทดสอบ") {
-          window.alert('ยกเลิก: ต้องพิมพ์ "ลบงวดทดสอบ" ให้ตรง');
-          return;
-        }
-        const res = await apiFetch("/api/payroll/periods/test-delete", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: selected.map((r) => r.id) }),
-        });
-        const json = await res.json();
-        if (json.error && !json.data) throw new Error(json.error);
-        const deleted = json.data?.deleted?.length ?? 0;
-        const failed = json.data?.failed ?? [];
-        if (failed.length) {
-          window.alert(`ลบงวดทดสอบได้ ${deleted} รายการ\nลบไม่ได้ ${failed.length} รายการ\n\nรายการแรก: ${failed[0]?.name ?? failed[0]?.id}\nเหตุผล: ${failed[0]?.reason}`);
-          return;
-        }
-        window.alert(`ลบงวดทดสอบแล้ว ${deleted} รายการ`);
-      },
-    },
-    {
       label: "🗑 ลบงวดพร้อมข้อมูลคำนวณ",
       variant: "danger",
       onClick: async (selected) => {
