@@ -5,7 +5,7 @@
  * เลือกงวด → ตารางพนักงาน + ยอดสรุป (สาย/ขาด/ลา/OT/เพิ่มพิเศษ/หักอื่น) + สุทธิประมาณ (เครื่องจริง)
  * แก้ "เพิ่มพิเศษ/หักอื่น" ต่อคนผ่าน drawer → บันทึก → สุทธิประมาณอัปเดต → ไปคำนวณ+บันทึก
  */
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { Drawer, ERPModal } from "@/components/modal";
@@ -38,6 +38,8 @@ type DurationPreset = "full" | "half" | "custom";
 type LeaveReason = "medical_certificate" | "sick_paid" | "sick_unpaid" | "unpaid";
 type TimeItem = { id: string; kind: TimeKind; value: number; amount: number; paid_leave?: boolean; work_date?: string; note?: string };
 type TabKey = "summary" | "special" | "piecework" | "timestamp" | "import" | "attendance";
+type SummaryFilter = "all" | "manual" | "time" | "earning" | "deduction" | "piecework" | "system" | "negative_net";
+type SummaryGroupBy = "none" | "contract" | "activity" | "net";
 type TimeSummarySelection = { row: Row; kind: TimeKind };
 type TimePreview = {
   kind: TimeKind;
@@ -126,6 +128,22 @@ const DRAWER_TABS: { key: DrawerTab; label: string }[] = [
   { key: "leave", label: "ลา" },
   { key: "ot", label: "OT" },
 ];
+const SUMMARY_FILTERS: { key: SummaryFilter; label: string }[] = [
+  { key: "all", label: "ทั้งหมด" },
+  { key: "manual", label: "มีรายการ" },
+  { key: "time", label: "สาย/ขาด/ลา/OT" },
+  { key: "earning", label: "มีเพิ่มพิเศษ" },
+  { key: "deduction", label: "มีหักอื่น" },
+  { key: "piecework", label: "มีงานเหมา" },
+  { key: "system", label: "มีหักตามระบบ" },
+  { key: "negative_net", label: "สุทธิติดลบ" },
+];
+const SUMMARY_GROUPS: { key: SummaryGroupBy; label: string }[] = [
+  { key: "none", label: "ไม่จัดกลุ่ม" },
+  { key: "contract", label: "ประเภทสัญญา" },
+  { key: "activity", label: "สถานะรายการ" },
+  { key: "net", label: "สุทธิประมาณ" },
+];
 const STANDARD_HOURS_PER_DAY = 8;
 const CONTRACT_BADGE: Record<string, { label: string; cls: string }> = {
   permanent: { label: "ประจำ", cls: "border-indigo-200 bg-indigo-50 text-indigo-700" },
@@ -164,6 +182,39 @@ function ContractBadge({ contractType, wageType }: { contractType?: string | nul
   );
 }
 
+function rowHasTimeActivity(row: Row) {
+  return Boolean(row.late_minutes || row.absence_days || row.absence_hours || row.leave_days || row.leave_hours || row.ot_hours);
+}
+
+function rowMatchesSummaryFilter(row: Row, filter: SummaryFilter) {
+  if (filter === "all") return true;
+  if (filter === "manual") return row.has_manual;
+  if (filter === "time") return rowHasTimeActivity(row);
+  if (filter === "earning") return Number(row.special_add || 0) > 0;
+  if (filter === "deduction") return Number(row.other_deduct || 0) > 0;
+  if (filter === "piecework") return Number(row.piecework_baht || 0) > 0;
+  if (filter === "system") return Number(row.system_deduct_baht || 0) > 0;
+  if (filter === "negative_net") return Number(row.net_estimate || 0) < 0;
+  return true;
+}
+
+function summaryGroupLabel(row: Row, groupBy: SummaryGroupBy) {
+  if (groupBy === "contract") return contractBadgeMeta(row.contract_type, row.wage_type)?.label ?? "ไม่ระบุสัญญา";
+  if (groupBy === "net") {
+    if (Number(row.net_estimate || 0) < 0) return "สุทธิติดลบ";
+    if (Number(row.net_estimate || 0) === 0) return "สุทธิ 0";
+    return "สุทธิปกติ";
+  }
+  if (groupBy === "activity") {
+    if (rowHasTimeActivity(row)) return "มีสาย/ขาด/ลา/OT";
+    if (Number(row.piecework_baht || 0) > 0) return "มีงานเหมา";
+    if (Number(row.special_add || 0) > 0 || Number(row.other_deduct || 0) > 0) return "มีเพิ่ม/หักพิเศษ";
+    if (Number(row.system_deduct_baht || 0) > 0) return "มีหักตามระบบ";
+    return "ปกติ";
+  }
+  return "ทั้งหมด";
+}
+
 function EmployeeIdentity({ code, name, contractType, wageType }: { code: string; name: string; contractType?: string | null; wageType?: string | null }) {
   return (
     <div className="min-w-0">
@@ -188,6 +239,8 @@ export default function ManualInputPage() {
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [onlyManual, setOnlyManual] = useState(false);
+  const [summaryFilter, setSummaryFilter] = useState<SummaryFilter>("all");
+  const [summaryGroupBy, setSummaryGroupBy] = useState<SummaryGroupBy>("none");
   const [editRow, setEditRow] = useState<Row | null>(null);
   const [editDate, setEditDate] = useState<string | undefined>();
   const [editKind, setEditKind] = useState<TimeKind | undefined>();
@@ -239,9 +292,24 @@ export default function ManualInputPage() {
   useEffect(() => { if (periodId && activeTab === "attendance") loadGrid(periodId); }, [periodId, activeTab, loadGrid]);
 
   const editable = EDITABLE(periodStatus);
-  const shown = rows
-    .filter((r) => !onlyManual || r.has_manual)
-    .filter((r) => !q.trim() || `${r.employee_code} ${r.employee_name}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return rows
+      .filter((r) => !onlyManual || r.has_manual)
+      .filter((r) => rowMatchesSummaryFilter(r, summaryFilter))
+      .filter((r) => !needle || `${r.employee_code} ${r.employee_name} ${r.contract_type ?? ""} ${r.wage_type ?? ""}`.toLowerCase().includes(needle));
+  }, [onlyManual, q, rows, summaryFilter]);
+  const summaryGroups = useMemo(() => {
+    if (summaryGroupBy === "none") return [{ key: "all", label: "ทั้งหมด", rows: shown }];
+    const m = new Map<string, Row[]>();
+    for (const row of shown) {
+      const label = summaryGroupLabel(row, summaryGroupBy);
+      const cur = m.get(label) ?? [];
+      cur.push(row);
+      m.set(label, cur);
+    }
+    return Array.from(m.entries()).map(([label, groupRows]) => ({ key: label, label, rows: groupRows }));
+  }, [shown, summaryGroupBy]);
 
   const totalNet = rows.reduce((t, r) => t + r.net_estimate, 0);
   const adjustmentsByEmployee = useMemo(() => {
@@ -393,7 +461,42 @@ export default function ManualInputPage() {
       ) : loading ? (
         <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <div className="rounded-xl border border-slate-200 bg-white">
+          <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 bg-white px-3 py-3">
+            <div className="min-w-[220px] flex-1">
+              <label className="mb-1 block text-xs font-medium text-slate-500">ค้นหาในตาราง</label>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="รหัส / ชื่อ / ประเภทสัญญา"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none transition focus:border-slate-400"
+              />
+            </div>
+            <div className="min-w-[170px]">
+              <label className="mb-1 block text-xs font-medium text-slate-500">Filter</label>
+              <select
+                value={summaryFilter}
+                onChange={(e) => setSummaryFilter(e.target.value as SummaryFilter)}
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+              >
+                {SUMMARY_FILTERS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+              </select>
+            </div>
+            <div className="min-w-[170px]">
+              <label className="mb-1 block text-xs font-medium text-slate-500">Group by</label>
+              <select
+                value={summaryGroupBy}
+                onChange={(e) => setSummaryGroupBy(e.target.value as SummaryGroupBy)}
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+              >
+                {SUMMARY_GROUPS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+              </select>
+            </div>
+            <div className="pb-1 text-xs text-slate-400">
+              แสดง {shown.length.toLocaleString("th-TH")} จาก {rows.length.toLocaleString("th-TH")} คน
+            </div>
+          </div>
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
@@ -413,7 +516,16 @@ export default function ManualInputPage() {
               </tr>
             </thead>
             <tbody>
-              {shown.map((r) => {
+              {summaryGroups.map((group) => (
+                <Fragment key={group.key}>
+                  {summaryGroupBy !== "none" && (
+                    <tr className="border-t border-slate-100 bg-slate-50/80">
+                      <td colSpan={13} className="px-3 py-2 text-xs font-semibold text-slate-500">
+                        {group.label} <span className="font-normal text-slate-400">({group.rows.length.toLocaleString("th-TH")} คน)</span>
+                      </td>
+                    </tr>
+                  )}
+              {group.rows.map((r) => {
                 const employeeAdjustments = adjustmentsByEmployee.get(r.employee_id) ?? [];
                 const employeeRecurring = recurringByEmployee.get(r.employee_id) ?? [];
                 const pieceworkItems = employeeAdjustments.filter((item) => matchesMode(item, "piecework"));
@@ -466,9 +578,12 @@ export default function ManualInputPage() {
                   </tr>
                 );
               })}
+                </Fragment>
+              ))}
               {shown.length === 0 && <tr><td colSpan={13} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -1206,8 +1321,8 @@ function WorkDaysCell({ row }: { row: Row }) {
     row.late_minutes ? `สาย/ออกก่อน: ${minutesQty(row.late_minutes)}` : "",
   ].filter(Boolean).join("\n");
   return (
-    <span className="inline-flex items-center justify-end gap-1 tabular-nums text-slate-600" title={title}>
-      {formatPaidDuration(paidMinutes, hoursPerDay)}
+    <span className="inline-flex max-w-[112px] items-center justify-end gap-1 text-right text-xs leading-snug tabular-nums text-slate-500" title={title}>
+      <span className="whitespace-normal break-words">{formatPaidDuration(paidMinutes, hoursPerDay)}</span>
       <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>
     </span>
   );
