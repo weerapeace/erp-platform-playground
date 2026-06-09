@@ -80,7 +80,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
                   {spec.bom_materials.map((g) => (
                     <div key={g.slot} className="flex gap-2 text-xs py-0.5">
                       <span className="text-slate-400 w-24 shrink-0">{g.label}</span>
-                      <span className="text-slate-700 flex-1">{g.items.map((it) => it.name).join(", ")}</span>
+                      <span className="text-slate-700 flex-1">{g.items.map((it) => it.count > 1 ? `${it.name} (${it.count} บล็อก)` : it.name).join(", ")}</span>
                     </div>
                   ))}
                 </div>

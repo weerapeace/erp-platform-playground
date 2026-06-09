@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export type SpecField = { key: string; label: string; value: string; order: number; sku_code?: string | null };
-export type BomMatGroup = { slot: string; label: string; items: { code: string; name: string }[] };
+export type BomMatGroup = { slot: string; label: string; items: { code: string; name: string; count: number }[] };
 export type ProductSpec = {
   parent: { code: string | null; name: string | null; family: string | null; size_summary: string | null; work_instruction_notes: string | null; image_url: string | null } | null;
   legacy: SpecField[];          // ช่องเดิมบน Parent (materials/zipper/...)
@@ -112,13 +112,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (hdr) {
     bom_version = hdr.version ?? null;
     const { data: lines } = await admin.from("bom_lines").select("slot_code, component_sku, component_name").eq("bom_code", hdr.bom_code).eq("is_active", true).not("slot_code", "is", null);
-    const bySlot = new Map<string, { code: string; name: string }[]>();
+    // รวมวัตถุดิบที่ซ้ำ (ตัวเดียวกันหลายบล็อก) → เหลือชื่อเดียว + นับจำนวนบล็อก
+    const bySlot = new Map<string, Map<string, { code: string; name: string; count: number }>>();
     for (const l of (lines ?? []) as Record<string, unknown>[]) {
       const slot = str(l.slot_code); if (!slot) continue;
-      const arr = bySlot.get(slot) ?? bySlot.set(slot, []).get(slot)!;
-      arr.push({ code: str(l.component_sku), name: str(l.component_name) || str(l.component_sku) });
+      const code = str(l.component_sku);
+      const m = bySlot.get(slot) ?? bySlot.set(slot, new Map()).get(slot)!;
+      const e = m.get(code);
+      if (e) e.count += 1; else m.set(code, { code, name: str(l.component_name) || code, count: 1 });
     }
-    bom_materials = [...bySlot.entries()].map(([slot, items]) => ({ slot, label: SLOT_LABEL[slot] ?? slot, items }))
+    bom_materials = [...bySlot.entries()].map(([slot, m]) => ({ slot, label: SLOT_LABEL[slot] ?? slot, items: [...m.values()] }))
       .sort((a, b) => (SLOT_ORDER.indexOf(a.slot) + 99) - (SLOT_ORDER.indexOf(b.slot) + 99));
   }
 
