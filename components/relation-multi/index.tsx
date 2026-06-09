@@ -25,8 +25,9 @@ type RelConfig = {
   list_image_field?: string;          // column ที่เป็น R2 key รูป
   list_title_field?: string;          // column ชื่อหลัก (default = target_label_field)
   list_sub_fields?: string[];         // columns ข้อมูลย่อย แสดงต่อท้าย คั่นด้วย ·
-  list_display_mode?: string;         // 'table' | 'tags' | 'cards' — รูปแบบแสดงรายการลูก
+  list_display_mode?: string;         // 'table' | 'tags' | 'cards' | 'master_detail'
   parent_match_field?: string;        // ฟิลด์ของพ่อที่ใช้จับคู่ (default 'id'; เช่น 'code' = เชื่อมด้วยรหัส)
+  detail_field?: string;              // master_detail: field_key ของ o2m ชั้น 2 บน target module (เช่น bom_lines บน bom-headers)
 };
 
 type Opt = { id: string; label: string; group_id?: string | null; sort_order?: number };
@@ -925,5 +926,106 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       {pickerModal}
       {createModal}
     </>
+  );
+}
+
+// ============================================================
+// MasterDetailRelation — o2m 2 ชั้น (เช่น BOM Builder)
+//   ชั้น 1: เลือก "ใบ" (เช่น BOM version) เป็นแท็บด้านบน
+//   ชั้น 2: รายการลูกของใบที่เลือก โชว์/แก้ inline ข้างล่าง (reuse RelationOne2Many)
+// config: o2m ชั้น 1 ปกติ + detail_field = field_key ของ o2m ชั้น 2 บน target module
+// ============================================================
+export function MasterDetailRelation({ config, recordId, configurable, parentValues }: {
+  config: RelConfig; recordId?: string | null; configurable?: boolean; parentValues?: Record<string, unknown>;
+}) {
+  const l1ModuleKey = config.target_module_key ?? config.target_table ?? "";  // เช่น bom-headers
+  const l1Fk = config.target_fk_column ?? "";                                  // เช่น product_sku
+  const l1MatchField = config.parent_match_field || "id";                      // เช่น code
+  const l1MatchValue = l1MatchField === "id" ? recordId : ((parentValues?.[l1MatchField] as string | number | null | undefined) ?? null);
+  const l1TitleField = config.list_title_field ?? config.target_label_field ?? "code";
+  const detailFieldKey = config.detail_field ?? "";
+
+  const [headers, setHeaders] = useState<Record<string, unknown>[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [selId, setSelId] = useState<string | null>(null);
+  const [detailCfg, setDetailCfg] = useState<RelConfig | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const matchCond = l1MatchField === "id"
+    ? { type: "text", value: String(l1MatchValue ?? "") }
+    : { type: "select", selected: [String(l1MatchValue ?? "")] };
+
+  // โหลด "ใบ" ชั้น 1 (เช่น BOM versions)
+  const loadHeaders = useCallback(() => {
+    if (l1MatchValue == null || l1MatchValue === "" || !l1Fk || !l1ModuleKey) return;
+    const flt = encodeURIComponent(JSON.stringify({ [l1Fk]: matchCond }));
+    apiFetch(`/api/master-v2/${l1ModuleKey}?limit=100&filters=${flt}`).then((r) => r.json()).then((j) => {
+      const rows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
+      setHeaders(rows);
+      setSelId((prev) => (prev && rows.some((r) => String(r.id) === prev)) ? prev : (rows[0] ? String(rows[0].id) : null));
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [l1ModuleKey, l1Fk, l1MatchValue]);
+  useEffect(() => { loadHeaders(); }, [loadHeaders]);
+
+  // โหลด config ของ o2m ชั้น 2 จากทะเบียน field ของ target module (เช่น bom_lines บน bom-headers)
+  useEffect(() => {
+    if (!l1ModuleKey || !detailFieldKey) return;
+    apiFetch(`/api/admin/field-registry-v2?module=${encodeURIComponent(l1ModuleKey)}`).then((r) => r.json()).then((j) => {
+      const f = ((j.fields ?? []) as Record<string, unknown>[]).find((x) => String(x.field_key) === detailFieldKey);
+      if (f?.relation_config) setDetailCfg(f.relation_config as RelConfig);
+    }).catch(() => {});
+  }, [l1ModuleKey, detailFieldKey]);
+
+  const selected = headers.find((h) => String(h.id) === selId) ?? null;
+  const canAdd = !!configurable && l1MatchValue != null && l1MatchValue !== "" && !!l1Fk;
+
+  if (l1MatchValue == null || l1MatchValue === "") return <div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>;
+  if (!loaded) return <div className="text-xs text-slate-400">กำลังโหลด…</div>;
+
+  return (
+    <div className="space-y-2">
+      {/* ชั้น 1: เลือกใบ (version) เป็นแท็บ */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {headers.length === 0 && <span className="text-xs text-slate-300">— ยังไม่มี —</span>}
+        {headers.map((h) => {
+          const isSel = String(h.id) === selId;
+          const isDefault = h.is_default === true;
+          return (
+            <button key={String(h.id)} type="button" onClick={() => setSelId(String(h.id))}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border transition-colors ${
+                isSel ? "border-orange-400 bg-orange-50 text-orange-700 font-medium" : "border-slate-200 bg-white text-slate-600 hover:border-orange-300"
+              }`}>
+              <span>{String(h[l1TitleField] ?? h.id)}</span>
+              {h.version != null && h.version !== "" && <span className="text-[10px] text-slate-400">{String(h.version)}</span>}
+              {isDefault && <span className="text-[10px] text-emerald-500" title="ค่าเริ่มต้น">★</span>}
+            </button>
+          );
+        })}
+        {canAdd && (
+          <button type="button" onClick={() => setCreating(true)}
+            className="px-2.5 py-1 text-xs rounded-lg border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50">+ เพิ่ม version</button>
+        )}
+      </div>
+
+      {/* ชั้น 2: รายการลูกของใบที่เลือก (reuse RelationOne2Many — มี inline add/edit ครบ) */}
+      {selected && detailCfg ? (
+        <div className="border border-slate-150 rounded-lg p-2 bg-slate-50/40">
+          <RelationOne2Many config={detailCfg} recordId={String(selected.id)} parentValues={selected}
+            configurable={configurable} parentCode={String(selected[l1TitleField] ?? "")} />
+        </div>
+      ) : selected && !detailCfg ? (
+        <div className="text-xs text-amber-600">— ยังไม่ได้ตั้งค่ารายการลูกชั้นใน (detail_field) —</div>
+      ) : null}
+
+      {/* เพิ่มใบใหม่ (version) */}
+      {creating && (
+        <RelationPeekModal moduleKey={l1ModuleKey} recordId={null}
+          createDefaults={{ [l1Fk]: l1MatchValue, is_active: true }}
+          createTitle="เพิ่ม BOM version ใหม่"
+          onChanged={loadHeaders} onClose={() => setCreating(false)} />
+      )}
+    </div>
   );
 }

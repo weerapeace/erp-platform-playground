@@ -25,7 +25,7 @@ import { RelationPeekModal } from "@/components/relation-peek";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
-import { RelationMany2Many, RelationOne2Many } from "@/components/relation-multi";
+import { RelationMany2Many, RelationOne2Many, MasterDetailRelation } from "@/components/relation-multi";
 import { ImportWizard } from "@/components/import-wizard";
 import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
@@ -1548,7 +1548,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           </div>
         ) : f.type === "one2many" ? (
           <div className="mt-0.5">
-            <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} fieldId={f.fieldId} configurable={canEdit} parentCode={detailCode} parentValues={form} />
+            {((f.relationConfig ?? {}) as Record<string, unknown>).list_display_mode === "master_detail" ? (
+              <MasterDetailRelation config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} configurable={canEdit} parentValues={form} />
+            ) : (
+              <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} fieldId={f.fieldId} configurable={canEdit} parentCode={detailCode} parentValues={form} />
+            )}
           </div>
         ) : f.type === "select" ? (
           <select value={(v as string) || ""} disabled={disabled}
@@ -1656,7 +1660,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         onChange={(ids) => updateForm({ [f.key]: ids })} />;
     }
     if (f.type === "one2many") {
-      return <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} fieldId={f.fieldId} configurable={canEdit} parentCode={detailCode} parentValues={form} />;
+      return ((f.relationConfig ?? {}) as Record<string, unknown>).list_display_mode === "master_detail"
+        ? <MasterDetailRelation config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} configurable={canEdit} parentValues={form} />
+        : <RelationOne2Many config={(f.relationConfig ?? {}) as Record<string, string>} recordId={editingId} fieldId={f.fieldId} configurable={canEdit} parentCode={detailCode} parentValues={form} />;
     }
     if (f.type === "boolean") {
       return v
