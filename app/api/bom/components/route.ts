@@ -29,13 +29,26 @@ type GroupEmbed = { name: string | null; loss_percent: number | null } | null;
 type UomEmbed = { name: string | null } | null;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const search = (new URL(request.url).searchParams.get("search") ?? "").trim();
-  let q = supabaseFromRequest(request)
+  const sp = new URL(request.url).searchParams;
+  const search = (sp.get("search") ?? "").trim();
+  const groups = (sp.get("groups") ?? "").split(",").map((s) => s.trim()).filter(Boolean);   // กรองตามกลุ่มวัตถุดิบ (code)
+  const supabase = supabaseFromRequest(request);
+
+  // แปลง group code → id (สำหรับกรอง material_group_id)
+  let groupIds: string[] | null = null;
+  if (groups.length) {
+    const { data: g } = await supabase.from("material_groups").select("id").in("code", groups);
+    groupIds = (g ?? []).map((x: Record<string, unknown>) => String(x.id));
+    if (groupIds.length === 0) return NextResponse.json({ data: [], error: null });   // กลุ่มไม่พบ → ว่าง
+  }
+
+  let q = supabase
     .from("skus_v2")
     .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
     .eq("is_active", true)
     .order("code", { ascending: true })
     .limit(30);
+  if (groupIds) q = q.in("material_group_id", groupIds);
   if (search) {
     const t = `%${search}%`;
     q = q.or(`code.ilike.${t},name_th.ilike.${t}`);

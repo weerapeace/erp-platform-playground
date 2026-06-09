@@ -61,6 +61,17 @@ export const SLOT_ROLES: [string, string][] = [
   ["MATERIALS", "วัตถุดิบหลัก"], ["LINING", "ซับใน"], ["ZIPPER", "ซิป"], ["LOGO", "โลโก้/พิมพ์"],
   ["STRAP", "สาย"], ["THREAD", "ด้าย"], ["HARDWARE", "อะไหล่"], ["OTHER", "อื่นๆ"],
 ];
+// ช่อง → กลุ่มวัตถุดิบ (code) ที่อนุญาตให้เลือก (ปรับได้) · [] = ไม่จำกัด
+export const SLOT_GROUP_CODES: Record<string, string[]> = {
+  MATERIALS: ["leather", "fabric", "fabric_piece", "pu", "reinforce"],
+  LINING:    ["fabric", "fabric_piece", "pu"],
+  ZIPPER:    ["zip"],
+  LOGO:      ["print", "accessory"],
+  STRAP:     ["tape", "leather"],
+  THREAD:    ["accessory"],
+  HARDWARE:  ["accessory", "reinforce"],
+  OTHER:     [],
+};
 
 // ---- helper คำนวณ (กฎมาจากตาราง material_groups; calc_method = area_face|area_100|length|count) ----
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -161,18 +172,25 @@ export function SkuPicker({
 // ============================================================
 // ComponentPicker — เลือกวัตถุดิบ (คืนกลุ่ม+หน้ากว้าง+loss) ผ่าน /api/bom/components
 // ============================================================
-export function ComponentPicker({ sku, name, imageKey, placeholder = "— เลือกวัตถุดิบ —", onPick }: { sku: string; name: string; imageKey?: string | null; placeholder?: string; onPick: (c: BomComponent) => void }) {
+export function ComponentPicker({ sku, name, imageKey, placeholder = "— เลือกวัตถุดิบ —", onPick, allowedGroupCodes }: { sku: string; name: string; imageKey?: string | null; placeholder?: string; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[] }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState<BomComponent[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showAll, setShowAll] = useState(false);   // ข้ามตัวกรองกลุ่ม
   const boxRef = useRef<HTMLDivElement>(null);
-  const load = useCallback(async (q: string) => {
+  const filtered = !!(allowedGroupCodes && allowedGroupCodes.length > 0 && !showAll);
+  const load = useCallback(async (q: string, grps: string[] | undefined) => {
     setLoading(true);
-    try { const res = await apiFetch(`/api/bom/components${q ? `?search=${encodeURIComponent(q)}` : ""}`); const json = await res.json(); setOptions((json.data ?? []) as BomComponent[]); }
-    finally { setLoading(false); }
+    try {
+      const params = new URLSearchParams();
+      if (q) params.set("search", q);
+      if (grps && grps.length) params.set("groups", grps.join(","));
+      const res = await apiFetch(`/api/bom/components${params.toString() ? `?${params}` : ""}`);
+      const json = await res.json(); setOptions((json.data ?? []) as BomComponent[]);
+    } finally { setLoading(false); }
   }, []);
-  useEffect(() => { if (!open) return; const t = setTimeout(() => load(search), 250); return () => clearTimeout(t); }, [open, search, load]);
+  useEffect(() => { if (!open) return; const t = setTimeout(() => load(search, filtered ? allowedGroupCodes : undefined), 250); return () => clearTimeout(t); }, [open, search, load, filtered, allowedGroupCodes]);
   useEffect(() => { const f = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener("mousedown", f); return () => document.removeEventListener("mousedown", f); }, []);
   return (
     <div ref={boxRef} className="relative">
@@ -184,6 +202,13 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
         <div className="bg-white border border-slate-200 rounded-lg shadow-xl">
           <div className="p-2 border-b border-slate-100">
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            {allowedGroupCodes && allowedGroupCodes.length > 0 && (
+              <label className="flex items-center gap-1.5 mt-1.5 text-[11px] text-slate-500 cursor-pointer">
+                <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded border-slate-300" />
+                ดูทั้งหมด (ข้ามการกรองตามช่อง)
+                {!showAll && <span className="text-slate-400">· แสดงเฉพาะกลุ่มที่ตรงช่อง</span>}
+              </label>
+            )}
           </div>
           <div className="max-h-72 overflow-auto py-1">
             {loading && <div className="px-3 py-2 text-xs text-slate-400">กำลังค้นหา...</div>}
@@ -422,7 +447,7 @@ export function BomLineEditor({
       groupEditNode: (apply) => <GroupReplacePicker onPick={(c) => apply(replacePatch(c))} />,
       render: (l, u) => (
         <div className="flex items-center gap-1">
-          <div className="flex-1 min-w-0"><ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} /></div>
+          <div className="flex-1 min-w-0"><ComponentPicker sku={l.component_sku} name={l.component_name} imageKey={l.image_key} onPick={(c) => u(pickComponent(l, c))} allowedGroupCodes={l.slot_code ? SLOT_GROUP_CODES[l.slot_code] : undefined} /></div>
           {l.component_sku && (
             <button type="button" title="รายละเอียดวัตถุดิบ" onClick={() => setDetail(l)}
               className="shrink-0 h-7 w-6 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded">ℹ</button>
