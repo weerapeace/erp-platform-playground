@@ -8,6 +8,11 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { nullifyEmpty } from "@/lib/payroll-coerce";
+import {
+  applyContractLifecycle,
+  closeEmployeesWithoutActiveCurrentContract,
+  syncEndedCurrentContracts,
+} from "@/lib/payroll-contract-lifecycle";
 
 const TABLE = "employee_contracts";
 // ดึงทุกคอลัมน์ (เหมือนแอปเก่า)
@@ -23,19 +28,6 @@ const WRITABLE = new Set([
 const NUMERIC = ["base_salary", "daily_wage", "hourly_wage", "piece_rate_default", "payroll_register_base_salary"];
 
 export type ContractRow = Record<string, unknown> & { id: string };
-
-const todayBangkokISO = () => new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
-const isExpiredEndDate = (date: unknown) => {
-  const s = String(date ?? "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayBangkokISO();
-};
-
-function applyContractLifecycle<T extends Record<string, unknown>>(row: T): T {
-  if (isExpiredEndDate(row.end_date) && row.status !== "cancelled") {
-    return { ...row, status: "ended", is_current: false };
-  }
-  return row;
-}
 
 async function empMap(): Promise<Record<string, string>> {
   const { data } = await supabaseAdmin().from("employees").select("id, employee_code, first_name, last_name, nickname");
@@ -88,7 +80,9 @@ function decorate(row: Record<string, unknown>, em: Record<string, string>, cm: 
 }
 
 export async function listContracts(includeInactive: boolean, employeeId?: string | null): Promise<ContractRow[]> {
-  let q = supabaseAdmin().from(TABLE).select(SELECT).order("contract_no", { ascending: true });
+  const admin = supabaseAdmin();
+  await syncEndedCurrentContracts(admin, employeeId ? [employeeId] : undefined);
+  let q = admin.from(TABLE).select(SELECT).order("contract_no", { ascending: true });
   if (!includeInactive) q = q.eq("status", "active");
   if (employeeId) q = q.eq("employee_id", employeeId);
   const { data, error } = await q;
@@ -98,7 +92,9 @@ export async function listContracts(includeInactive: boolean, employeeId?: strin
 }
 
 export async function getContract(id: string): Promise<ContractRow | null> {
-  const { data, error } = await supabaseAdmin().from(TABLE).select(SELECT).eq("id", id).limit(1);
+  const admin = supabaseAdmin();
+  await syncEndedCurrentContracts(admin);
+  const { data, error } = await admin.from(TABLE).select(SELECT).eq("id", id).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
   const { em, cm, wm } = await maps();
@@ -134,8 +130,10 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     status:        cols.status ?? "active",
     ...cols,
   };
-  const { data, error } = await supabaseAdmin().from(TABLE).insert(applyContractLifecycle(insert)).select(SELECT).limit(1);
+  const admin = supabaseAdmin();
+  const { data, error } = await admin.from(TABLE).insert(applyContractLifecycle(insert)).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
+  await syncEndedCurrentContracts(admin, [String(employeeId)]);
   const { em, cm, wm } = await maps();
   return decorate(data![0] as Record<string, unknown>, em, cm, wm);
 }
@@ -143,19 +141,37 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
 export async function updateContract(id: string, body: Record<string, unknown>): Promise<ContractRow | null> {
   const cols = await toColumns(body);
   if (Object.keys(cols).length === 0) return getContract(id);
-  const { data: existing, error: existingError } = await supabaseAdmin().from(TABLE).select("end_date, status, is_current").eq("id", id).limit(1);
+  const admin = supabaseAdmin();
+  const { data: existing, error: existingError } = await admin.from(TABLE).select("employee_id, end_date, status, is_current").eq("id", id).limit(1);
   if (existingError) throw new Error(existingError.message);
-  const merged = { ...(existing?.[0] as Record<string, unknown> | undefined), ...cols };
+  const previous = existing?.[0] as Record<string, unknown> | undefined;
+  const merged = { ...previous, ...cols };
   const update = applyContractLifecycle(merged);
-  const { data, error } = await supabaseAdmin().from(TABLE).update(update).eq("id", id).select(SELECT).limit(1);
+  const { data, error } = await admin.from(TABLE).update(update).eq("id", id).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
+  const employeeId = String((data[0] as Record<string, unknown>).employee_id ?? "");
+  if (employeeId) await syncEndedCurrentContracts(admin, [employeeId]);
+  if (employeeId && previous?.is_current === true && update.status !== "active") {
+    await closeEmployeesWithoutActiveCurrentContract(admin, [employeeId]);
+  }
+  if (employeeId && previous?.is_current === true && update.is_current === false) {
+    await closeEmployeesWithoutActiveCurrentContract(admin, [employeeId]);
+  }
   const { em, cm, wm } = await maps();
   return decorate(data[0] as Record<string, unknown>, em, cm, wm);
 }
 
 export async function softDeleteContract(id: string): Promise<boolean> {
-  const { error } = await supabaseAdmin().from(TABLE).update({ status: "cancelled" }).eq("id", id);
+  const admin = supabaseAdmin();
+  const { data: existing, error: existingError } = await admin.from(TABLE).select("employee_id, is_current").eq("id", id).limit(1);
+  if (existingError) throw new Error(existingError.message);
+  const { error } = await admin.from(TABLE).update({ status: "cancelled" }).eq("id", id);
   if (error) throw new Error(error.message);
+  const employeeId = String((existing?.[0] as Record<string, unknown> | undefined)?.employee_id ?? "");
+  if (employeeId) await syncEndedCurrentContracts(admin, [employeeId]);
+  if (employeeId && (existing?.[0] as Record<string, unknown> | undefined)?.is_current === true) {
+    await closeEmployeesWithoutActiveCurrentContract(admin, [employeeId]);
+  }
   return true;
 }

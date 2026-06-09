@@ -12,6 +12,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { nullifyEmpty } from "@/lib/payroll-coerce";
+import { syncEndedCurrentContracts } from "@/lib/payroll-contract-lifecycle";
 
 const TABLE = "employees";
 // ดึงทุกคอลัมน์ (เหมือนแอปเก่า) — field ใหม่ที่เพิ่มใน DB ก็ติดมาอัตโนมัติ
@@ -63,7 +64,9 @@ type ContractInfo = { no: string; salary: number };
 async function contractMap(): Promise<Record<string, ContractInfo>> {
   const { data } = await supabaseAdmin()
     .from("employee_contracts")
-    .select("employee_id, contract_no, base_salary, is_current, start_date")
+    .select("employee_id, contract_no, base_salary, is_current, status, start_date")
+    .eq("is_current", true)
+    .eq("status", "active")
     .order("start_date", { ascending: false });
   const m: Record<string, ContractInfo> = {};
   (data ?? []).forEach((c) => {
@@ -129,7 +132,9 @@ function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cm
 }
 
 export async function listEmployees(includeInactive: boolean): Promise<EmployeeRow[]> {
-  let q = supabaseAdmin().from(TABLE).select(SELECT).order("employee_code", { ascending: true });
+  const admin = supabaseAdmin();
+  await syncEndedCurrentContracts(admin);
+  let q = admin.from(TABLE).select(SELECT).order("employee_code", { ascending: true });
   if (!includeInactive) q = q.eq("employment_status", "active");
   const { data, error } = await q;
   if (error) throw new Error(error.message);
@@ -138,7 +143,9 @@ export async function listEmployees(includeInactive: boolean): Promise<EmployeeR
 }
 
 export async function getEmployee(id: string): Promise<EmployeeRow | null> {
-  const { data, error } = await supabaseAdmin().from(TABLE).select(SELECT).eq("id", id).limit(1);
+  const admin = supabaseAdmin();
+  await syncEndedCurrentContracts(admin, [id]);
+  const { data, error } = await admin.from(TABLE).select(SELECT).eq("id", id).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
   const [dmap, cmap, smap, bmap, pmap, ccmap] = await Promise.all([deptMap(), contractMap(), selfMap(), bankMap(), idNameMap("positions"), idNameMap("cost_centers")]);
