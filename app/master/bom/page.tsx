@@ -242,8 +242,11 @@ export default function BomWorkspacePage() {
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       toast.success(form.id ? "บันทึกสูตรแล้ว" : "สร้างสูตรใหม่แล้ว");
-      setForm(null); setDirty(false);
+      setDirty(false);
       refresh();
+      // ไม่ปิดหน้าต่าง — โหลดข้อมูลล่าสุดมาแสดงต่อ (รองรับสร้างใหม่ → เข้าสู่โหมดแก้)
+      const savedId = form.id ?? (json.id as string | undefined);
+      if (savedId) { try { const f = await loadFormById(savedId); setForm(f); } catch { /* คงฟอร์มเดิมไว้ */ } }
     } catch (e) { setFormErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
