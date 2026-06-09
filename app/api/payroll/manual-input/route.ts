@@ -23,8 +23,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const a = supabaseAdmin();
-    const { data: pdata } = await a.from("payroll_periods").select("id, period_name, status, default_hours_per_day").eq("id", periodId).limit(1);
-    const period = pdata?.[0] as { id: string; period_name: string; status: string; default_hours_per_day?: number | null } | undefined;
+    const { data: pdata } = await a.from("payroll_periods").select("id, period_name, status, default_work_days, default_hours_per_day").eq("id", periodId).limit(1);
+    const period = pdata?.[0] as { id: string; period_name: string; status: string; default_work_days?: number | null; default_hours_per_day?: number | null } | undefined;
     if (!period) return NextResponse.json({ error: "ไม่พบงวด" }, { status: 404 });
 
     // เครื่องคำนวณจริง → รายชื่อพนักงานที่เข้าเงื่อนไข + สุทธิประมาณ + วันทำงาน
@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
     ]);
     const add = (m: Map<string, number>, id: string, v: unknown) => m.set(id, (m.get(id) ?? 0) + money(v));
     const hoursPerDay = money(period.default_hours_per_day) || 8;
+    const workDaysBase = money(period.default_work_days) || 26;
+    const basePayMinutes = Math.round(workDaysBase * hoursPerDay * 60);
     const lateBy = new Map<string, number>(), absBy = new Map<string, number>(), leaveBy = new Map<string, number>();
     const otBy = new Map<string, number>(), pieceBy = new Map<string, number>(), addBy = new Map<string, number>(), dedBy = new Map<string, number>();
     const lateMinBy = new Map<string, number>(), absHoursBy = new Map<string, number>(), leaveDaysBy = new Map<string, number>(), leaveHoursBy = new Map<string, number>(), otHoursBy = new Map<string, number>();
@@ -80,20 +82,29 @@ export async function GET(req: NextRequest) {
       const id = String(l.employee_id);
       const late = lateBy.get(id) ?? 0, absence = absBy.get(id) ?? 0, leave = leaveBy.get(id) ?? 0;
       const ot = otBy.get(id) ?? 0, piecework = pieceBy.get(id) ?? 0, special = addBy.get(id) ?? 0, other = dedBy.get(id) ?? 0;
+      const lateMinutes = lateMinBy.get(id) ?? 0;
+      const absenceHours = absHoursBy.get(id) ?? 0;
+      const leaveHours = leaveHoursBy.get(id) ?? (leaveDaysBy.get(id) ?? 0) * hoursPerDay;
+      const deductedMinutes = Math.round((absenceHours + leaveHours) * 60 + lateMinutes);
+      const paidMinutes = Math.max(basePayMinutes - deductedMinutes, 0);
       const hasManual = late || absence || leave || ot || piecework || special || other;
       return {
         id, employee_id: id, employee_code: l.employee_code, employee_name: nameBy[id] ?? "",
         contract_type: l.contract_type ?? null,
         wage_type: l.wage_type ?? null,
         work_days: money(l.attendance_days),
+        hours_per_day: hoursPerDay,
+        paid_minutes: paidMinutes,
+        base_pay_minutes: basePayMinutes,
+        deducted_pay_minutes: deductedMinutes,
         late_baht: Math.round(late * 100) / 100,
-        late_minutes: Math.round((lateMinBy.get(id) ?? 0) * 100) / 100,
+        late_minutes: Math.round(lateMinutes * 100) / 100,
         absence_baht: Math.round(absence * 100) / 100,
-        absence_days: Math.round((((absHoursBy.get(id) ?? 0) / hoursPerDay) || 0) * 100) / 100,
-        absence_hours: Math.round((absHoursBy.get(id) ?? 0) * 100) / 100,
+        absence_days: Math.round(((absenceHours / hoursPerDay) || 0) * 100) / 100,
+        absence_hours: Math.round(absenceHours * 100) / 100,
         leave_baht: Math.round(leave * 100) / 100,
         leave_days: Math.round((leaveDaysBy.get(id) ?? 0) * 100) / 100,
-        leave_hours: Math.round((leaveHoursBy.get(id) ?? 0) * 100) / 100,
+        leave_hours: Math.round(leaveHours * 100) / 100,
         ot_baht: Math.round(ot * 100) / 100,
         ot_hours: Math.round((otHoursBy.get(id) ?? 0) * 100) / 100,
         piecework_baht: Math.round(piecework * 100) / 100,

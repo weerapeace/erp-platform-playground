@@ -16,6 +16,7 @@ type Period = { id: string; period_name: string; status: string };
 type Row = {
   id: string; employee_id: string; employee_code: string; employee_name: string; work_days: number;
   contract_type?: string | null; wage_type?: string | null;
+  hours_per_day?: number; paid_minutes?: number; base_pay_minutes?: number; deducted_pay_minutes?: number;
   late_baht: number; late_minutes: number; absence_baht: number; absence_days: number; absence_hours: number;
   leave_baht: number; leave_days: number; leave_hours: number; ot_baht: number; ot_hours: number;
   piecework_baht: number; special_add: number; other_deduct: number; net_estimate: number; has_manual: boolean;
@@ -64,6 +65,20 @@ const TIME_META: Record<TimeKind, { label: string; unit: string; sign: "+" | "-"
 
 const baht = (v: number) => v ? `฿${v.toLocaleString("th-TH", { minimumFractionDigits: 2 })}` : "—";
 const dash = (v: number, cls = "") => v ? <span className={`tabular-nums ${cls}`}>{baht(v)}</span> : <span className="text-slate-300">-</span>;
+function formatPaidDuration(totalMinutes?: number, hoursPerDay = STANDARD_HOURS_PER_DAY) {
+  if (totalMinutes == null || Number.isNaN(totalMinutes)) return "-";
+  const minutes = Math.max(Math.round(totalMinutes), 0);
+  const dayMinutes = Math.max(Math.round(hoursPerDay * 60), 1);
+  const days = Math.floor(minutes / dayMinutes);
+  const remainder = minutes % dayMinutes;
+  const hours = Math.floor(remainder / 60);
+  const mins = remainder % 60;
+  const parts = [];
+  if (days) parts.push(`${days} วัน`);
+  if (hours) parts.push(`${hours} ชม.`);
+  if (mins) parts.push(`${mins} นาที`);
+  return parts.length ? parts.join(" ") : "0 วัน";
+}
 const EDITABLE = (s: string) => s === "draft" || s === "review";
 const pickDefaultPeriod = (periods: Period[]) => periods.find((p) => EDITABLE(p.status)) ?? periods.find((p) => p.status !== "cancelled") ?? periods[0];
 const isPieceworkItem = (item: Adj) => item.source_type === "piecework" || item.item_code === "PIECEWORK";
@@ -618,16 +633,20 @@ function rowTimeAmount(row: Row, kind: TimeKind) {
 }
 
 function WorkDaysCell({ row }: { row: Row }) {
+  const hoursPerDay = row.hours_per_day || STANDARD_HOURS_PER_DAY;
+  const paidMinutes = row.paid_minutes ?? Math.round((row.work_days || 0) * hoursPerDay * 60);
   const title = [
     "วันจ่ายจริงจากเครื่องคำนวณของงวดนี้",
     "เริ่มจากวันทำงานตั้งต้นของงวด แล้วหักขาด/ลาไม่รับเงิน และคิดสายเป็นนาที",
+    row.base_pay_minutes != null ? `ฐาน: ${formatPaidDuration(row.base_pay_minutes, hoursPerDay)}` : "",
+    row.deducted_pay_minutes ? `หักรวม: ${formatPaidDuration(row.deducted_pay_minutes, hoursPerDay)}` : "",
     row.absence_days ? `ขาด: ${formatQty(row.absence_days, "วัน")}` : "",
     row.leave_days ? `ลาหักเงิน: ${formatQty(row.leave_days, "วัน")}` : "",
     row.late_minutes ? `สาย/ออกก่อน: ${minutesQty(row.late_minutes)}` : "",
   ].filter(Boolean).join("\n");
   return (
-    <span className="inline-flex items-center justify-end gap-1 tabular-nums text-slate-500" title={title}>
-      {row.work_days || "-"}
+    <span className="inline-flex items-center justify-end gap-1 tabular-nums text-slate-600" title={title}>
+      {formatPaidDuration(paidMinutes, hoursPerDay)}
       <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 cursor-help">?</span>
     </span>
   );
