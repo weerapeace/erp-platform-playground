@@ -225,6 +225,20 @@ export function StudioPanel({
     if (i < 0 || j < 0 || j >= p.length) return p;
     const n = [...p]; [n[i], n[j]] = [n[j], n[i]]; setDirty(true); return n;
   });
+  // สลับ/เรียงลำดับ "แท็บ" — ย้ายทั้งบล็อก section ของแท็บนั้นไปสลับกับแท็บข้างเคียง
+  // tabKey = key ที่ FormPreview ใช้ ("tab_<ชื่อ>" สำหรับแท็บมีชื่อ หรือ section.key สำหรับแท็บเดี่ยว)
+  const moveTab = (tabKey: string, dir: -1 | 1) => setSections((p) => {
+    const tabKeyOf = (s: SectionDef) => ((s.tab ?? "").trim() ? `tab_${(s.tab ?? "").trim()}` : s.key);
+    const order: string[] = [];
+    for (const s of p) { const tk = tabKeyOf(s); if (!order.includes(tk)) order.push(tk); }
+    const i = order.indexOf(tabKey); const j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return p;
+    [order[i], order[j]] = [order[j], order[i]];
+    const byTab = new Map<string, SectionDef[]>();
+    for (const s of p) { const tk = tabKeyOf(s); const l = byTab.get(tk) ?? []; l.push(s); byTab.set(tk, l); }
+    setDirty(true);
+    return order.flatMap((tk) => byTab.get(tk) ?? []);
+  });
   const addSection = (tab = "") => {
     const nums = sections.filter((s) => /^sec_\d+$/.test(s.key)).map((s) => parseInt(s.key.slice(4), 10));
     const n = (nums.length ? Math.max(...nums) : 0) + 1;
@@ -459,20 +473,26 @@ export function StudioPanel({
     });
   }, [sections]);
 
+  // จัด field เข้ากล่อง: ถ้า groupKey ตรงกับ section ที่ "มีอยู่จริงตอนนี้" (รวมที่เพิ่งสร้าง/เปลี่ยนชื่อ) → กล่องนั้น
+  // ไม่งั้น (กลุ่ม orphan ที่ไม่มีกล่องรองรับ) → "other" (แท็บ "อื่น ๆ")
+  const sectionKeySet = useMemo(() => new Set(sections.map((s) => s.key)), [sections]);
+  const groupOf = useCallback(
+    (g?: string | null) => { const k = g ?? "other"; return sectionKeySet.has(k) ? k : "other"; },
+    [sectionKeySet],
+  );
+
   // ---- group สำหรับ form tab ----
   const grouped = useMemo(() => {
     const map = new Map<string, StudioField[]>();
-    for (const it of items) { const k = effGroup(it.groupKey); const l = map.get(k) ?? []; l.push(it); map.set(k, l); }
+    for (const it of items) { const k = groupOf(it.groupKey); const l = map.get(k) ?? []; l.push(it); map.set(k, l); }
     return Array.from(map.entries()).sort(([a], [b]) => gmeta(a).order - gmeta(b).order);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items]);
+  }, [items, groupOf]);
 
   // form tab: เรียงตามลำดับ sections (รวมหมวดว่างเป็น drop zone) + ตัวเลือกหมวดสำหรับ dropdown
-  // — field กลุ่ม orphan ถูกจัดเข้ากล่อง "other" ผ่าน effGroup (แสดงใต้แท็บ "อื่น ๆ")
+  // — field กลุ่ม orphan ถูกจัดเข้ากล่อง "other" (แสดงใต้แท็บ "อื่น ๆ") แต่ย้ายเข้ากล่อง/แท็บอื่นได้ปกติ
   const formGroups = useMemo<[SectionDef, StudioField[]][]>(
-    () => sections.map((s) => [s, items.filter((i) => effGroup(i.groupKey) === s.key)]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sections, items],
+    () => sections.map((s) => [s, items.filter((i) => groupOf(i.groupKey) === s.key)]),
+    [sections, items, groupOf],
   );
   const sectionOptions = useMemo(() => sections.map((s) => ({ key: s.key, label: s.label })), [sections]);
 
@@ -579,7 +599,7 @@ export function StudioPanel({
               row={pickedRow ?? sampleRows[previewIdx]} moduleLabel={moduleLabel}
               editable selectedKey={settingsKey} onSelectField={(k)=>setSettingsKey((s)=>s===k?null:k)}
               onPatch={patchItem} onRemoveField={(k)=>toggleForm(k)}
-              editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}) }} />
+              editApi={{ sections, renameSection, setCols, setSectionTab, deleteSection, addSection, addTab, renameTab, moveField: (k,g)=>patchItem(k,{groupKey:g}), moveTab }} />
           )}
         </div>
       </div>
@@ -1015,21 +1035,32 @@ function GridDrop({ id, children }: { id: string; children: React.ReactNode }) {
   return <div ref={setNodeRef} className={`p-3 grid grid-cols-12 gap-3 min-h-[3rem] ${isOver?"bg-orange-50 ring-1 ring-orange-200":""}`}>{children}</div>;
 }
 // หัวแท็บ — drop zone (id tab:<key>) ลาก field มาจ่อ = ย้ายเข้าแท็บนั้น
-function CanvasTab({ t, active, editable, editApi, onClick }: {
+function CanvasTab({ t, active, editable, editApi, onClick, first, last }: {
   t: { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] };
-  active: boolean; editable?: boolean; editApi?: EditApi; onClick: ()=>void;
+  active: boolean; editable?: boolean; editApi?: EditApi; onClick: ()=>void; first?: boolean; last?: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `tab:${t.key}` });
   const named = t.key.startsWith("tab_");
   return (
     <div ref={setNodeRef} onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${active?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"} ${isOver?"bg-orange-100 ring-1 ring-orange-300 rounded-t":""}`}>
+      className={`flex items-center gap-1 px-2 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${active?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"} ${isOver?"bg-orange-100 ring-1 ring-orange-300 rounded-t":""}`}>
+      {/* ◀▶ เรียง/สลับแท็บ */}
+      {editable && editApi && (
+        <button type="button" title="เลื่อนแท็บไปทางซ้าย" disabled={first}
+          onClick={(e)=>{ e.stopPropagation(); editApi.moveTab(t.key, -1); }}
+          className="text-slate-300 hover:text-orange-600 disabled:opacity-0 text-xs leading-none">◀</button>
+      )}
       {iconNode(t.icon)}
       {editable && editApi
         ? <input value={t.label} onClick={(e)=>e.stopPropagation()}
             onChange={(e)=> named ? editApi.renameTab(t.label, e.target.value) : editApi.renameSection(t.entries[0][0].key, e.target.value)}
             className="bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 w-24 focus:outline-none" />
         : <span>{t.label}</span>}
+      {editable && editApi && (
+        <button type="button" title="เลื่อนแท็บไปทางขวา" disabled={last}
+          onClick={(e)=>{ e.stopPropagation(); editApi.moveTab(t.key, 1); }}
+          className="text-slate-300 hover:text-orange-600 disabled:opacity-0 text-xs leading-none">▶</button>
+      )}
     </div>
   );
 }
@@ -1044,6 +1075,7 @@ type EditApi = {
   addTab: ()=>void;
   renameTab: (oldTab: string, newTab: string)=>void;
   moveField: (fieldKey: string, groupKey: string)=>void;
+  moveTab: (tabKey: string, dir: -1 | 1)=>void;
 };
 
 function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelectField, onPatch, onRemoveField, editApi }: {
@@ -1094,7 +1126,7 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
       {(tabs.length > 1 || (editable && editApi)) && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
           {tabs.map((t, i)=>(
-            <CanvasTab key={t.key} t={t} active={i===curIdx} editable={editable} editApi={editApi} onClick={()=>setActive(i)} />
+            <CanvasTab key={t.key} t={t} active={i===curIdx} editable={editable} editApi={editApi} onClick={()=>setActive(i)} first={i===0} last={i===tabs.length-1} />
           ))}
           {editable && editApi && (
             <button type="button" onClick={()=>editApi.addTab()} title="เพิ่มแท็บใหม่"
