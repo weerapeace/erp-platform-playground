@@ -1686,30 +1686,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const detailTitle = (form["name_th"] ?? form["name"] ?? form["sku_name"] ?? form[config.uniqueKey ?? ""] ?? form["code"] ?? config.title) as string;
   const detailCode  = (form["code"] ?? form["sku"] ?? "") as string;
   const coverKey    = (form["cover_image_r2_key"] as string) || null;
-  const renderDetailHero = (visibleFields: FieldDef[]) => {
-    const titleValue = String(detailTitle || config.title);
-    const statusDef = visibleFields.find((f) => f.key === "status") ?? statusField ?? null;
-    const statusNode = statusDef ? renderDetailValue(statusDef) : null;
-    return (
-      <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-3 shadow-sm">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="min-w-0">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">ข้อมูลที่กำลังดู</div>
-            <div className="mt-1 truncate text-xl font-semibold text-slate-900">{titleValue}</div>
-            {detailCode && (
-              <code className="mt-2 inline-flex rounded-md bg-white px-2 py-1 text-xs text-slate-500 ring-1 ring-slate-200">{detailCode}</code>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 md:justify-end">
-            {statusNode && <div className="inline-flex items-center rounded-full bg-white px-2.5 py-1 ring-1 ring-slate-200">{statusNode}</div>}
-            {form[activeField]
-              ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-100"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
-              : <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200"><span className="h-1.5 w-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // หัว detail แบบ compact (บรรทัดเดียว: code + สถานะ) — ไม่เอา hero box ใหญ่
+  const renderDetailHero = (_visibleFields: FieldDef[]) => (
+    <div className="flex items-center gap-3">
+      {detailCode && <code className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600">{detailCode}</code>}
+      {form[activeField]
+        ? <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />เปิดอยู่</span>
+        : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
+    </div>
+  );
 
   // F14: early return AFTER all hooks — กัน React error #310
   // ข้อ 3: ถ้าอยู่ใต้ layout ร่วม (มี shell แล้ว) → ไม่เรนเดอร์ shell ซ้อน (sidebar นิ่ง ไม่เด้ง)
@@ -2321,11 +2306,11 @@ function LayoutTabs({
   return (
     <div>
       {tabs.length > 1 && (
-        <div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1 scrollbar-hide">
+        <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
           {tabs.map((t) => (
             <button key={t.key} type="button" onClick={() => setActive(t.key)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors ${
-                t.key === active ? "bg-white text-orange-600 font-semibold shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:bg-white/70 hover:text-slate-700"
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
+                t.key === active ? "border-orange-500 text-orange-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}>
               {sectionIconNode(t.icon)}<span>{t.label}</span>
             </button>
@@ -2405,7 +2390,7 @@ function SectionTabBar({
   onSelect: (k: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1 scrollbar-hide">
+    <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto scrollbar-hide">
       {grouped.map(([groupKey, groupFields]) => {
         const cfg = getGroupConfig(groupKey);
         const isActive = groupKey === active;
@@ -2414,15 +2399,15 @@ function SectionTabBar({
             key={groupKey}
             type="button"
             onClick={() => onSelect(groupKey)}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm whitespace-nowrap transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
               isActive
-                ? "bg-white text-orange-600 font-semibold shadow-sm ring-1 ring-slate-200"
-                : "text-slate-500 hover:bg-white/70 hover:text-slate-700"
+                ? "border-orange-500 text-orange-600 font-medium"
+                : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >
             <span>{cfg.icon}</span>
             <span>{cfg.label}</span>
-            <span className={`rounded-full px-1.5 text-[10px] ${isActive ? "bg-orange-50 text-orange-500" : "bg-white text-slate-400"}`}>{groupFields.length}</span>
+            <span className={`text-[10px] ${isActive ? "text-orange-400" : "text-slate-400"}`}>{groupFields.length}</span>
           </button>
         );
       })}
@@ -2499,7 +2484,7 @@ function DetailSections({
 
   // dl grid ตามจำนวน column
   const renderDl = (fs: FieldDef[], cols: number) => (
-    <dl className="grid grid-cols-12 gap-3">
+    <dl className="grid grid-cols-12 gap-x-4 gap-y-3">
       {fs.map((f) => {
         const us = (f.uiStyle ?? {}) as Record<string, unknown>;
         const labelCss = fieldStyleCss(f.uiStyle, "label_size");
@@ -2509,13 +2494,9 @@ function DetailSections({
         const labelLeft = String(us.labelPos ?? "top") === "left";
         return (
           <div key={f.key} style={{ gridColumn: `span ${gw12(f, cols)}`, ...(hl ? { background: hlColor, borderColor: hlColor } : {}) }}
-            className={`min-h-[72px] rounded-xl border px-3 py-2.5 transition-colors ${
-              hl ? "shadow-sm" : "border-slate-200 bg-white hover:border-slate-300"
-            } ${labelLeft ? "flex items-start gap-3" : ""}`}>
-            <dt className={`text-[11px] font-semibold text-slate-400 ${labelLeft ? "w-32 shrink-0 pt-0.5" : "mb-1.5"}`} style={labelCss}>
-              {f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}
-            </dt>
-            <dd style={valueCss} className={`min-w-0 text-sm leading-6 ${labelLeft ? "flex-1" : ""}`}>{renderValue(f)}</dd>
+            className={`${hl ? "border rounded-md p-1.5 -m-0.5" : ""} ${labelLeft ? "flex items-baseline gap-2" : ""}`}>
+            <dt className={`text-[11px] text-slate-400 mb-0.5 ${labelLeft ? "w-32 shrink-0" : ""}`} style={labelCss}>{f.label}{fieldHelpTip(f) && <InfoTip tip={fieldHelpTip(f)!} />}</dt>
+            <dd style={valueCss} className={labelLeft ? "flex-1 min-w-0" : ""}>{renderValue(f)}</dd>
           </div>
         );
       })}
