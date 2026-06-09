@@ -22,6 +22,7 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import { SearchableSelect } from "@/components/searchable-select";
 import { IconPicker } from "@/components/icon-picker";
 import { apiFetch } from "@/lib/api";
+import { invalidateCache } from "@/lib/client-cache";
 import { useRoleOptions } from "@/lib/use-roles";
 import type { SchemaSyncResponse, RegistryField } from "@/app/api/admin/schema-sync/route";
 import {
@@ -117,6 +118,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
       if (j.error) { flash("❌ " + j.error); return; }
       setDeleteTarget(null); setDeleteText(""); setDeleteDropCol(true);
       flash("✓ ลบ field แล้ว");
+      invalidateCache("/api/admin/field-registry-v2");   // ล้าง cache กลาง → หน้าฟอร์ม/ตารางเห็นผลทันที
       load();
     } catch (e) { flash("❌ " + (e instanceof Error ? e.message : "ลบไม่สำเร็จ")); }
     finally { setDeleting(false); }
@@ -243,6 +245,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
         ...prev,
         registry: prev.registry.map((f) => f.id === id ? { ...f, ...patch } : f),
       } : prev);
+      invalidateCache("/api/admin/field-registry-v2");   // ล้าง cache กลาง → ฟอร์ม/ตารางเห็นผลทันที
     } finally { setSavingId(null); }
   };
 
@@ -267,6 +270,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
           registry: prev.registry.map((f) => selected.has(f.id) ? { ...f, ...patch } : f),
         } : prev);
         setSelected(new Set());
+        invalidateCache("/api/admin/field-registry-v2");
       }
     } finally { setBulkSaving(false); }
   };
@@ -304,7 +308,7 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
       });
       const json = await res.json();
       if (json.error) flash("❌ reorder failed: " + json.error);
-      else flash(`✓ เรียงลำดับใหม่ ${json.success} field`);
+      else { flash(`✓ เรียงลำดับใหม่ ${json.success} field`); invalidateCache("/api/admin/field-registry-v2"); }
     } finally { setReordering(false); }
   };
 

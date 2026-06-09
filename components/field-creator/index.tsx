@@ -11,6 +11,7 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { invalidateCache } from "@/lib/client-cache";
 import { SearchableSelect } from "@/components/searchable-select";
 import { useBackdropDismiss } from "@/components/modal";
 import { validateFormula } from "@/lib/formula";
@@ -297,6 +298,7 @@ export function FieldCreatorModal({
       });
       const json = await res.json();
       if (json.error) { setErr(json.error); return; }
+      invalidateCache("/api/admin/field-registry-v2");   // ล้าง cache กลาง → ฟอร์ม/ตารางเห็น field ใหม่ทันที
       onCreated();
       onClose();
     } catch (e) {
