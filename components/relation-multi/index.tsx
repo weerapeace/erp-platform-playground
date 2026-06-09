@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { RelationPeekModal } from "@/components/relation-peek";
 import { ImageInput } from "@/components/image-input";
+import { TagOrganizerModal } from "@/components/tag-organizer";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
 
 type RelConfig = {
@@ -26,7 +27,7 @@ type RelConfig = {
   list_sub_fields?: string[];         // columns ข้อมูลย่อย แสดงต่อท้าย คั่นด้วย ·
 };
 
-type Opt = { id: string; label: string; group_id?: string | null };
+type Opt = { id: string; label: string; group_id?: string | null; sort_order?: number };
 type Grp = { id: string; name: string; parent_group_id: string | null; single_select: boolean; sort_order: number };
 
 async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[]> {
@@ -36,6 +37,7 @@ async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[
     id: String(row.id),
     label: String(row[labelField] ?? row.name ?? row.id),
     group_id: row.group_id ? String(row.group_id) : null,
+    sort_order: row.sort_order != null ? Number(row.sort_order) : undefined,
   }));
 }
 
@@ -219,8 +221,9 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const byOrder = (a: Grp, b: Grp) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "th");
   const topGroups = groups.filter((g) => !g.parent_group_id).sort(byOrder);
   const subsOf = (gid: string) => groups.filter((g) => g.parent_group_id === gid).sort(byOrder);
-  const tagsOf = (gid: string) => filteredOpts.filter((o) => o.group_id === gid);
-  const ungrouped = filteredOpts.filter((o) => !o.group_id || !groupById.has(o.group_id));
+  const byTagOrder = (a: Opt, b: Opt) => (a.sort_order ?? 100) - (b.sort_order ?? 100) || a.label.localeCompare(b.label, "th");
+  const tagsOf = (gid: string) => filteredOpts.filter((o) => o.group_id === gid).sort(byTagOrder);
+  const ungrouped = filteredOpts.filter((o) => !o.group_id || !groupById.has(o.group_id)).sort(byTagOrder);
 
   // แถวแท็ก 1 อันใน popup (single = อยู่ในกลุ่มเลือกเดียว → วงกลม, ปกติ → ติ๊กถูก)
   const tagRow = (o: Opt) => {
@@ -321,11 +324,16 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
         document.body,
       )}
 
-      {mgrOpen && (
+      {mgrOpen && (usesGroups ? (
+        // แท็กที่มีระบบกลุ่ม → ตัวจัดการแบบลากวาง (ย้ายกลุ่ม/หมวดย่อย + เรียงลำดับ)
+        <TagOrganizerModal moduleKey={moduleKey} labelField={labelField}
+          onClose={() => setMgrOpen(false)}
+          onChanged={() => { reloadOpts(); fetchGroups().then(setGroups).catch(() => {}); }} />
+      ) : (
         <TagsManagerModal moduleKey={moduleKey} labelField={labelField}
           onClose={() => setMgrOpen(false)}
-          onChanged={() => { reloadOpts(); if (usesGroups) fetchGroups().then(setGroups).catch(() => {}); }} />
-      )}
+          onChanged={() => { reloadOpts(); }} />
+      ))}
     </div>
   );
 }
