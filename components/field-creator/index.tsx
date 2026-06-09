@@ -81,6 +81,12 @@ export function FieldCreatorModal({
   const [targetTable, setTargetTable] = useState("");
   const [targetLabelField, setTargetLabelField] = useState("name");
   const [targetFkColumn, setTargetFkColumn] = useState("");
+  // one2many: ตารางลูกที่ชี้กลับมา (auto จาก FK) + คอลัมน์ของตารางลูก + รูปแบบแสดง
+  const [o2mLinks, setO2mLinks] = useState<{ child_table: string; fk_column: string; child_label: string; child_is_module: boolean }[]>([]);
+  const [targetColumns, setTargetColumns] = useState<{ column: string; type: string }[]>([]);
+  const [o2mDisplayMode, setO2mDisplayMode] = useState<"table" | "tags" | "cards">("table");
+  const [o2mSubFields, setO2mSubFields] = useState<string[]>([]);
+  const [o2mImageField, setO2mImageField] = useState("");
   const [isVisible, setIsVisible]       = useState(true);
   const [isFilterable, setIsFilterable] = useState(false);
   const [isSearchable, setIsSearchable] = useState(false);
@@ -157,6 +163,32 @@ export function FieldCreatorModal({
     }).catch(() => {});
   }, [uiType, tables.length]);
 
+  // one2many: โหลด "ตารางลูก + FK" ที่ชี้กลับมาหาโมดูลนี้ (กรองตาราง + เติม FK อัตโนมัติ)
+  useEffect(() => {
+    if (uiType !== "one2many" || !moduleKey) return;
+    apiFetch(`/api/admin/schema/referencing-fks?module=${encodeURIComponent(moduleKey)}`).then(r => r.json()).then(j => {
+      if (!j.error) setO2mLinks(j.links ?? []);
+    }).catch(() => {});
+  }, [uiType, moduleKey]);
+
+  // one2many: เมื่อเลือกตารางลูก → เติม FK อัตโนมัติ (ถ้ามีตัวเดียว) + โหลดคอลัมน์มาทำ dropdown
+  useEffect(() => {
+    if (uiType !== "one2many" || !targetTable) { setTargetColumns([]); return; }
+    const fks = o2mLinks.filter(l => l.child_table === targetTable);
+    if (fks.length === 1) setTargetFkColumn(fks[0].fk_column);
+    else if (fks.length > 1 && !fks.some(f => f.fk_column === targetFkColumn)) setTargetFkColumn("");
+    apiFetch(`/api/admin/schema/columns?table=${encodeURIComponent(targetTable)}`).then(r => r.json()).then(j => {
+      const cols = (j.columns ?? []) as { column: string; type: string }[];
+      setTargetColumns(cols);
+      // เดาชื่อแสดง: code → name → name_th → คอลัมน์แรก
+      if (!cols.some(c => c.column === targetLabelField)) {
+        const guess = ["code", "name", "name_th", "title"].find(g => cols.some(c => c.column === g)) ?? cols[0]?.column ?? "name";
+        setTargetLabelField(guess);
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiType, targetTable, o2mLinks]);
+
   // related: โหลด field ความสัมพันธ์ (many2one) ที่มีอยู่ใน module นี้
   useEffect(() => {
     if (uiType !== "related") return;
@@ -226,6 +258,10 @@ export function FieldCreatorModal({
           target_table: uiType === "related" ? vf?.targetTable : (isRel ? targetTable : undefined),
           target_label_field: isRel ? targetLabelField : undefined,
           target_fk_column: uiType === "one2many" ? targetFkColumn.trim() : undefined,
+          // one2many: รูปแบบการแสดงรายการลูก
+          list_display_mode: uiType === "one2many" ? o2mDisplayMode : undefined,
+          list_image_field:  uiType === "one2many" ? (o2mImageField || null) : undefined,
+          list_sub_fields:   uiType === "one2many" && o2mDisplayMode === "table" ? o2mSubFields : undefined,
           // related
           via_field:    uiType === "related" ? viaField : undefined,
           via_column:   uiType === "related" ? vf?.column : undefined,
@@ -321,7 +357,8 @@ export function FieldCreatorModal({
             </div>
           )}
 
-          {REL_TYPES.includes(uiType) && (
+          {/* relation (many2one) + many2many — เลือก table ปลายทางอิสระ */}
+          {(uiType === "relation" || uiType === "many2many") && (
             <div className="space-y-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
               <div>
                 <label className="text-xs font-medium text-slate-600">เชื่อมไป table ไหน *</label>
@@ -336,19 +373,105 @@ export function FieldCreatorModal({
                 <input value={targetLabelField} onChange={e => setTargetLabelField(e.target.value)} placeholder="name"
                   className="mt-1 w-full h-9 px-3 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
               </div>
-              {uiType === "one2many" && (
-                <div>
-                  <label className="text-xs font-medium text-slate-600">column FK บน target ที่ชี้กลับมา *</label>
-                  <input value={targetFkColumn} onChange={e => setTargetFkColumn(e.target.value)} placeholder="เช่น order_id"
-                    className="mt-1 w-full h-9 px-3 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
-                  <p className="text-[11px] text-slate-400 mt-0.5">column ใน target ที่เก็บ id ของระเบียนนี้ (ปลายของ many2one)</p>
-                </div>
-              )}
               {uiType === "many2many" && (
                 <p className="text-[11px] text-emerald-700">จะสร้างตารางเชื่อม (junction) ให้อัตโนมัติ + เลือกได้หลายค่า</p>
               )}
             </div>
           )}
+
+          {/* one2many — รายการลูกที่ชี้กลับมา (auto FK + dropdown + รูปแบบแสดง) */}
+          {uiType === "one2many" && (() => {
+            const distinctTables = [...new Map(o2mLinks.map(l => [l.child_table, l])).values()];
+            const fks = o2mLinks.filter(l => l.child_table === targetTable);
+            const selCls = "mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500";
+            const imgCols = targetColumns.filter(c => /image|cover|photo|r2|รูป/i.test(c.column));
+            const subCandidates = targetColumns.filter(c => ![targetLabelField, targetFkColumn, "id", "created_at", "updated_at"].includes(c.column));
+            const toggleSub = (col: string) => setO2mSubFields(p => p.includes(col) ? p.filter(x => x !== col) : [...p, col]);
+            return (
+              <div className="space-y-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
+                {/* ตารางลูก */}
+                <div>
+                  <label className="text-xs font-medium text-slate-600">รายการลูกมาจากตารางไหน *</label>
+                  {distinctTables.length === 0 ? (
+                    <p className="text-[11px] text-amber-600 mt-1">— ยังไม่มีตารางไหน &quot;ชี้กลับมา&quot; หาโมดูลนี้ — ต้องมีช่อง FK ในตารางลูกก่อน (สร้างความสัมพันธ์ที่ตารางลูก)</p>
+                  ) : (
+                    <select value={targetTable} onChange={e => setTargetTable(e.target.value)} className={selCls}>
+                      <option value="">— เลือกตารางลูก —</option>
+                      {distinctTables.map(l => (
+                        <option key={l.child_table} value={l.child_table}>{l.child_label}{l.child_is_module ? " ⭐" : ""} ({l.child_table})</option>
+                      ))}
+                    </select>
+                  )}
+                  <p className="text-[11px] text-slate-400 mt-0.5">โชว์เฉพาะตารางที่มีช่องชี้กลับมาหาโมดูลนี้ (ระบบหาให้อัตโนมัติ)</p>
+                </div>
+
+                {/* FK — auto ถ้าตัวเดียว / เลือกถ้าหลายตัว */}
+                {targetTable && (fks.length > 1 ? (
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">เชื่อมผ่านช่องไหน (ตารางนี้ชี้กลับมาหลายช่อง) *</label>
+                    <select value={targetFkColumn} onChange={e => setTargetFkColumn(e.target.value)} className={selCls}>
+                      <option value="">— เลือกช่อง FK —</option>
+                      {fks.map(f => <option key={f.fk_column} value={f.fk_column}>{f.fk_column}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-emerald-700">🔗 เชื่อมผ่านช่อง <code className="font-mono bg-white px-1 rounded">{targetFkColumn || "—"}</code> (เติมให้อัตโนมัติ)</div>
+                ))}
+
+                {/* ชื่อแสดง — dropdown */}
+                {targetTable && targetColumns.length > 0 && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">ใช้คอลัมน์ไหนเป็นชื่อแสดง</label>
+                    <select value={targetLabelField} onChange={e => setTargetLabelField(e.target.value)} className={selCls}>
+                      {targetColumns.map(c => <option key={c.column} value={c.column}>{c.column}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {/* รูปแบบแสดง */}
+                {targetTable && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">แสดงรายการลูกเป็นแบบไหน</label>
+                    <div className="mt-1 grid grid-cols-3 gap-2">
+                      {([["table", "📊 ตาราง", "หลายคอลัมน์"], ["tags", "🏷️ tag-ชิป", "ชื่อสั้นๆ"], ["cards", "🖼️ การ์ดมีรูป", "มีรูปปก"]] as [typeof o2mDisplayMode, string, string][]).map(([v, l, h]) => (
+                        <button key={v} type="button" onClick={() => setO2mDisplayMode(v)}
+                          className={`px-2 py-1.5 rounded-lg border text-center ${o2mDisplayMode === v ? "border-emerald-400 bg-emerald-100 text-emerald-800" : "border-slate-200 bg-white text-slate-600 hover:border-emerald-300"}`}>
+                          <div className="text-sm">{l}</div>
+                          <div className="text-[10px] text-slate-400">{h}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* รูปปก (table/cards) */}
+                {targetTable && (o2mDisplayMode === "table" || o2mDisplayMode === "cards") && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">คอลัมน์รูปปก {o2mDisplayMode === "cards" ? "*" : "(ถ้ามี)"}</label>
+                    <select value={o2mImageField} onChange={e => setO2mImageField(e.target.value)} className={selCls}>
+                      <option value="">— ไม่ใช้รูป —</option>
+                      {(imgCols.length ? imgCols : targetColumns).map(c => <option key={c.column} value={c.column}>{c.column}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                {/* คอลัมน์ย่อย (เฉพาะตาราง) */}
+                {targetTable && o2mDisplayMode === "table" && subCandidates.length > 0 && (
+                  <div>
+                    <label className="text-xs font-medium text-slate-600">คอลัมน์ย่อยที่จะโชว์ในตาราง (เลือกได้หลายอัน)</label>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {subCandidates.map(c => (
+                        <button key={c.column} type="button" onClick={() => toggleSub(c.column)}
+                          className={`px-2 py-1 rounded-md text-xs border ${o2mSubFields.includes(c.column) ? "border-emerald-400 bg-emerald-100 text-emerald-800" : "border-slate-200 bg-white text-slate-500 hover:border-emerald-300"}`}>
+                          {c.column}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {uiType === "related" && (
             <div className="space-y-3 p-3 bg-sky-50/60 border border-sky-100 rounded-lg">

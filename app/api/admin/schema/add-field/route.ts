@@ -27,6 +27,10 @@ type Body = {
   target_table?: string;
   target_label_field?: string;
   target_fk_column?: string;       // สำหรับ one2many — column บน target ที่ชี้กลับมา
+  // one2many: รูปแบบการแสดงรายการลูก
+  list_display_mode?: string;      // 'table' | 'tags' | 'cards'
+  list_image_field?: string | null;  // คอลัมน์รูปปก (R2 key)
+  list_sub_fields?: string[];        // คอลัมน์ย่อยที่จะโชว์
   // related: ดึงค่าจากตารางที่เชื่อม มาโชว์ (read-only, ไม่มี column จริง)
   via_field?: string;              // field_key ของ relation (FK) บน module นี้ที่จะเดินผ่าน
   via_column?: string;             // column FK จริงบนตารางนี้ (ปกติ = via_field)
@@ -120,7 +124,17 @@ export async function POST(request: NextRequest) {
     relationConfig = { kind: "many2many", junction_table: junction, target_table: b.target_table, target_module_key: targetModuleKey, target_label_field: labelField };
   } else if (b.ui_type === "one2many" && b.target_table) {
     if (!b.target_fk_column) return NextResponse.json({ error: "one2many ต้องระบุ column FK บน target" }, { status: 400 });
-    relationConfig = { kind: "one2many", target_table: b.target_table, target_module_key: targetModuleKey, target_fk_column: b.target_fk_column, target_label_field: labelField };
+    const mode = ["table", "tags", "cards"].includes(b.list_display_mode ?? "") ? b.list_display_mode : "table";
+    relationConfig = {
+      kind: "one2many",
+      target_table: b.target_table, target_module_key: targetModuleKey,
+      target_fk_column: b.target_fk_column,
+      target_label_field: labelField,
+      list_title_field: labelField,
+      list_display_mode: mode,
+      ...(b.list_image_field ? { list_image_field: b.list_image_field } : {}),
+      ...(Array.isArray(b.list_sub_fields) && b.list_sub_fields.length ? { list_sub_fields: b.list_sub_fields } : {}),
+    };
   } else if (isRelated) {
     if (!b.via_field || !b.target_field) return NextResponse.json({ error: "related ต้องระบุ via_field + target_field" }, { status: 400 });
     relationConfig = {

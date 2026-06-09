@@ -25,6 +25,7 @@ type RelConfig = {
   list_image_field?: string;          // column ที่เป็น R2 key รูป
   list_title_field?: string;          // column ชื่อหลัก (default = target_label_field)
   list_sub_fields?: string[];         // columns ข้อมูลย่อย แสดงต่อท้าย คั่นด้วย ·
+  list_display_mode?: string;         // 'table' | 'tags' | 'cards' — รูปแบบแสดงรายการลูก
 };
 
 type Opt = { id: string; label: string; group_id?: string | null; sort_order?: number };
@@ -665,11 +666,83 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     </div>
   ) : null;
 
-  const rich = !!(imageField || subFields.length > 0);
+  const displayMode = config.list_display_mode;     // 'table' | 'tags' | 'cards'
+  const rich = displayMode === "tags" ? false : !!(imageField || subFields.length > 0);
   const showInlineAdd = canAdd && rich;   // แถวเพิ่มแบบ inline (เฉพาะโหมดตาราง)
 
   if (!recordId) return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>{pickerModal}</>;
   if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div>{pickerModal}</>;
+
+  // โหมด tag-ชิป — แสดงแต่ละลูกเป็นชิป (เพิ่มผ่านปุ่ม "+ เพิ่มแบบเต็ม")
+  if (displayMode === "tags") {
+    return (
+      <>
+        {header}
+        {rows.length === 0 ? (
+          <div className="text-xs text-slate-300">— ไม่มีรายการ —</div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {rows.map((r) => (
+              <button key={String(r.id)} type="button" onClick={() => setPeek({ id: String(r.id), edit: false })}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-slate-100 text-slate-700 border border-slate-200 hover:border-blue-300 hover:bg-blue-50">
+                {String(r[titleField] ?? r.name ?? r.id)}
+              </button>
+            ))}
+            {rows.length < total && (
+              <button type="button" onClick={loadMore} disabled={loadingMore}
+                className="px-2 py-1 text-xs rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+                {loadingMore ? "…" : `+${total - rows.length}`}
+              </button>
+            )}
+          </div>
+        )}
+        {peek && moduleKey && (
+          <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
+        )}
+        {pickerModal}{createModal}
+      </>
+    );
+  }
+
+  // โหมดการ์ด — รูป + ชื่อ + ข้อมูลย่อย (กริด)
+  if (displayMode === "cards") {
+    return (
+      <>
+        {header}
+        {rows.length === 0 ? (
+          <div className="text-xs text-slate-300">— ไม่มีรายการ —</div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {rows.map((r) => (
+              <button key={String(r.id)} type="button" onClick={() => setPeek({ id: String(r.id), edit: false })}
+                className="text-left border border-slate-200 rounded-lg overflow-hidden hover:border-blue-300 hover:shadow-sm">
+                <div className="aspect-square bg-slate-50 flex items-center justify-center">
+                  {imageField && r2img(r[imageField])
+                    ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2img(r[imageField])!} alt="" className="w-full h-full object-cover" />
+                    : <span className="text-slate-300 text-2xl">📦</span>}
+                </div>
+                <div className="p-1.5">
+                  <div className="text-xs font-medium text-slate-700 truncate">{String(r[titleField] ?? r.name ?? r.id)}</div>
+                  {subFields.map((f) => <div key={f} className="text-[10px] text-slate-400 truncate">{cellValue(r, f) ?? "—"}</div>)}
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        {rows.length < total && (
+          <button type="button" onClick={loadMore} disabled={loadingMore}
+            className="mt-1.5 w-full h-8 text-xs font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+            {loadingMore ? "กำลังโหลด…" : `ดูเพิ่ม (เหลืออีก ${total - rows.length})`}
+          </button>
+        )}
+        {peek && moduleKey && (
+          <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
+        )}
+        {pickerModal}{createModal}
+      </>
+    );
+  }
+
   // ว่าง + เพิ่ม inline ไม่ได้ → โชว์ข้อความ; ถ้าเพิ่ม inline ได้ → ตกลงไปเรนเดอร์ตาราง (มีแถวว่างให้พิมพ์)
   if (rows.length === 0 && !showInlineAdd) return <>{header}<div className="text-xs text-slate-300">— ไม่มีรายการ —</div>{pickerModal}{createModal}</>;
 
