@@ -56,7 +56,7 @@ async function findPayrollModule(admin: Admin): Promise<PayrollModuleRow | null>
   return (fallback.data?.[0] as PayrollModuleRow | undefined) ?? null;
 }
 
-async function currentContractCounts(admin: Admin): Promise<{ keys: string[]; counts: Record<string, number> }> {
+async function currentContractStats(admin: Admin): Promise<{ keys: string[]; counts: Record<string, number>; settingCounts: Record<string, number> }> {
   const { data, error } = await admin
     .from("employee_contracts")
     .select("employee_id, contract_type")
@@ -65,35 +65,59 @@ async function currentContractCounts(admin: Admin): Promise<{ keys: string[]; co
   if (error) throw new Error(error.message);
 
   const employeesByType: Record<string, Set<string>> = {};
+  const typeByEmployee = new Map<string, string>();
   for (const row of (data ?? []) as ContractRow[]) {
     const key = String(row.contract_type ?? "").trim();
     const employeeId = String(row.employee_id ?? "").trim();
     if (!key || !employeeId) continue;
     if (!employeesByType[key]) employeesByType[key] = new Set<string>();
     employeesByType[key].add(employeeId);
+    typeByEmployee.set(employeeId, key);
   }
 
   const counts: Record<string, number> = {};
   for (const [key, employees] of Object.entries(employeesByType)) counts[key] = employees.size;
-  return { keys: Object.keys(counts).sort(), counts };
+  const settingCounts: Record<string, number> = {};
+  const employeeIds = Array.from(typeByEmployee.keys());
+  if (employeeIds.length > 0) {
+    const { data: settings, error: settingsError } = await admin
+      .from("employee_payroll_settings")
+      .select("employee_id")
+      .in("employee_id", employeeIds);
+    if (settingsError) throw new Error(settingsError.message);
+    for (const row of (settings ?? []) as Pick<SettingRow, "employee_id">[]) {
+      const key = typeByEmployee.get(row.employee_id);
+      if (!key) continue;
+      settingCounts[key] = (settingCounts[key] ?? 0) + 1;
+    }
+  }
+  return { keys: Object.keys(counts).sort(), counts, settingCounts };
 }
 
 export async function getPayrollEmployeeSettingTemplates(admin: Admin): Promise<PayrollEmployeeSettingTemplatesRecord> {
   const mod = await findPayrollModule(admin);
-  const { keys, counts } = await currentContractCounts(admin);
+  const { keys, counts, settingCounts } = await currentContractStats(admin);
   if (!mod) {
     return {
       storageReady: false,
       storageReason: "ยังไม่พบ erp_modules ของ Payroll จึงใช้ template default ให้ดูก่อน",
       module: null,
-      templates: normalizeEmployeeSettingTemplates(null, keys).map((t) => ({ ...t, employeeCount: counts[t.key] ?? 0 })),
+      templates: normalizeEmployeeSettingTemplates(null, keys).map((t) => ({
+        ...t,
+        employeeCount: counts[t.key] ?? 0,
+        existingSettingCount: settingCounts[t.key] ?? 0,
+      })),
       updatedAt: null,
     };
   }
 
   const config = (mod.config ?? {}) as Record<string, unknown>;
   const templates = normalizeEmployeeSettingTemplates(config.payroll_employee_setting_templates, keys)
-    .map((t) => ({ ...t, employeeCount: counts[t.key] ?? 0 }));
+    .map((t) => ({
+      ...t,
+      employeeCount: counts[t.key] ?? 0,
+      existingSettingCount: settingCounts[t.key] ?? 0,
+    }));
 
   return {
     storageReady: true,
@@ -110,12 +134,20 @@ export async function updatePayrollEmployeeSettingTemplates(admin: Admin, input:
   const mod = await findPayrollModule(admin);
   if (!mod) throw new Error("ยังไม่พบ erp_modules ของ Payroll จึงยังบันทึก template ไม่ได้");
 
-  const { keys, counts } = await currentContractCounts(admin);
+  const { keys, counts, settingCounts } = await currentContractStats(admin);
   const currentConfig = (mod.config ?? {}) as Record<string, unknown>;
   const previous = normalizeEmployeeSettingTemplates(currentConfig.payroll_employee_setting_templates, keys)
-    .map((t) => ({ ...t, employeeCount: counts[t.key] ?? 0 }));
+    .map((t) => ({
+      ...t,
+      employeeCount: counts[t.key] ?? 0,
+      existingSettingCount: settingCounts[t.key] ?? 0,
+    }));
   const templates = normalizeEmployeeSettingTemplates(input, keys)
-    .map((t) => ({ ...t, employeeCount: counts[t.key] ?? 0 }));
+    .map((t) => ({
+      ...t,
+      employeeCount: counts[t.key] ?? 0,
+      existingSettingCount: settingCounts[t.key] ?? 0,
+    }));
   const updatedAt = new Date().toISOString();
   const config = {
     ...currentConfig,

@@ -62,6 +62,9 @@ export function PayrollEmployeeSettingTemplatesCard() {
   const active = useMemo(() => {
     return templates.find((t) => t.key === activeKey) ?? templates[0] ?? null;
   }, [activeKey, templates]);
+  const existingSettingCount = active?.existingSettingCount ?? 0;
+  const willCreateCount = Math.max((active?.employeeCount ?? 0) - existingSettingCount, 0);
+  const willUpdateCount = Math.min(existingSettingCount, active?.employeeCount ?? 0);
 
   async function load() {
     setLoading(true);
@@ -170,7 +173,12 @@ export function PayrollEmployeeSettingTemplatesCard() {
               <p className="mt-1 text-sm text-slate-500">
                 ตั้งค่าตามประเภทสัญญา แล้วค่อยกดนำไปใช้กับพนักงานที่มีสัญญาปัจจุบันประเภทนั้น
               </p>
-              {record?.storageReason && <p className="mt-1 text-xs text-slate-400">{record.storageReason}</p>}
+              {record?.storageReason && (
+                <details className="mt-2 text-xs text-slate-400">
+                  <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-600">รายละเอียดระบบ</summary>
+                  <p className="mt-1">{record.storageReason}</p>
+                </details>
+              )}
             </div>
             <div className="flex flex-wrap gap-2">
               <Link
@@ -219,6 +227,10 @@ export function PayrollEmployeeSettingTemplatesCard() {
         {active ? (
           <div className="grid gap-0 lg:grid-cols-[1.45fr_1fr]">
             <div className="space-y-5 px-4 py-5 sm:px-5">
+              <SectionHeader
+                title="ข้อมูล template"
+                text="ตั้งชื่อและวิธีคิดภาษีหลักของประเภทสัญญานี้"
+              />
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block">
                   <span className="text-xs font-medium text-slate-500">ชื่อ template</span>
@@ -251,6 +263,10 @@ export function PayrollEmployeeSettingTemplatesCard() {
                 />
               </label>
 
+              <SectionHeader
+                title="หักตามระบบ / เบิกกลางเดือน"
+                text="กำหนดยอดเงินหรืออัตราที่เครื่องคำนวณจะนำไปใช้กับพนักงานกลุ่มนี้"
+              />
               <div className="grid gap-3 md:grid-cols-2">
                 {NUMBER_FIELDS.map((field) => (
                   <label key={field.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -271,18 +287,30 @@ export function PayrollEmployeeSettingTemplatesCard() {
                 ))}
               </div>
 
+              <SectionHeader
+                title="ตัวเลือกการคำนวณ"
+                text="เปิดเฉพาะกฎที่ใช้จริง เพื่อลดความสับสนตอนคำนวณเงินเดือน"
+              />
               <div className="grid gap-3 md:grid-cols-2">
                 {BOOLEAN_FIELDS.map((field) => (
-                  <label key={field.key} className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 hover:bg-slate-50">
+                  <label key={field.key} className={`flex cursor-pointer items-center justify-between gap-4 rounded-lg border p-3 transition ${
+                    active.values[field.key]
+                      ? "border-emerald-200 bg-emerald-50/70"
+                      : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}>
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-700">{field.label}</span>
+                      <span className="block text-xs text-slate-400">{field.help}</span>
+                    </span>
+                    <span className="relative inline-flex shrink-0 items-center">
                     <input
                       type="checkbox"
                       checked={Boolean(active.values[field.key])}
                       onChange={(e) => updateValue(field.key, e.target.checked as never)}
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                      className="peer sr-only"
                     />
-                    <span>
-                      <span className="block text-sm font-semibold text-slate-700">{field.label}</span>
-                      <span className="block text-xs text-slate-400">{field.help}</span>
+                      <span className="h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-emerald-500" />
+                      <span className="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5" />
                     </span>
                   </label>
                 ))}
@@ -292,10 +320,16 @@ export function PayrollEmployeeSettingTemplatesCard() {
             <aside className="border-t border-slate-100 bg-slate-50 px-4 py-5 sm:px-5 lg:border-l lg:border-t-0">
               <div className="sticky top-16 space-y-4">
                 <div>
-                  <div className="text-sm font-semibold text-slate-900">ตัวอย่างที่จะนำไปใช้</div>
+                  <div className="text-sm font-semibold text-slate-900">สรุปก่อนนำไปใช้</div>
                   <p className="mt-1 text-sm text-slate-500">
                     มีพนักงานสัญญา “{active.label}” อยู่ {active.employeeCount} คน
                   </p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <ImpactMetric label="ทั้งหมด" value={active.employeeCount} tone="slate" />
+                  <ImpactMetric label="แก้เดิม" value={willUpdateCount} tone="amber" />
+                  <ImpactMetric label="สร้างใหม่" value={willCreateCount} tone="emerald" />
                 </div>
 
                 <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 text-sm">
@@ -364,6 +398,29 @@ function PreviewRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between gap-3 border-b border-slate-100 py-2 last:border-b-0">
       <span className="text-slate-500">{label}</span>
       <span className="font-semibold text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+function SectionHeader({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="border-t border-slate-100 pt-5 first:border-t-0 first:pt-0">
+      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+      <p className="mt-1 text-xs leading-5 text-slate-400">{text}</p>
+    </div>
+  );
+}
+
+function ImpactMetric({ label, value, tone }: { label: string; value: number; tone: "slate" | "amber" | "emerald" }) {
+  const toneClass = tone === "emerald"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : tone === "amber"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : "border-slate-200 bg-white text-slate-700";
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-center ${toneClass}`}>
+      <div className="text-[11px] font-medium opacity-70">{label}</div>
+      <div className="mt-0.5 text-lg font-bold tabular-nums">{value}</div>
     </div>
   );
 }

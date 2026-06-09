@@ -19,6 +19,7 @@ export type PayrollEmployeeSettingTemplate = {
   label: string;
   description: string;
   employeeCount: number;
+  existingSettingCount: number;
   values: PayrollEmployeeSettingTemplateValues;
 };
 
@@ -103,6 +104,7 @@ export function createEmployeeSettingTemplate(key: string, overrides: Partial<Pa
     label: overrides.label ?? contractTypeLabel(normalizedKey),
     description: overrides.description ?? "ค่าเริ่มต้นสำหรับพนักงานที่มีสัญญาประเภทนี้",
     employeeCount: overrides.employeeCount ?? 0,
+    existingSettingCount: overrides.existingSettingCount ?? 0,
     values: normalizeTemplateValues(overrides.values),
   };
 }
@@ -127,6 +129,7 @@ export function normalizeEmployeeSettingTemplates(input: unknown, contractKeys: 
         label: typeof raw.label === "string" ? raw.label : contractTypeLabel(key),
         description: typeof raw.description === "string" ? raw.description : undefined,
         employeeCount: typeof raw.employeeCount === "number" ? raw.employeeCount : 0,
+        existingSettingCount: typeof raw.existingSettingCount === "number" ? raw.existingSettingCount : 0,
         values: normalizeTemplateValues(raw.values),
       }));
     }
