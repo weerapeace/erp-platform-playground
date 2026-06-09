@@ -181,81 +181,83 @@ export function PayrollEmployeeSettingTemplatesCard() {
       )}
 
       <div className="rounded-xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-100 px-4 py-4 sm:px-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Template ตั้งค่าเงินเดือนรายคน</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                ตั้งค่าตามประเภทสัญญา แล้วค่อยกดนำไปใช้กับพนักงานที่มีสัญญาปัจจุบันประเภทนั้น
-              </p>
-              {record?.storageReason && (
-                <details className="mt-2 text-xs text-slate-400">
-                  <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-600">รายละเอียดระบบ</summary>
-                  <p className="mt-1">{record.storageReason}</p>
-                </details>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/payroll/employee-settings"
-                className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
-              >
-                ดูตั้งค่ารายคน
-              </Link>
-              {editing ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={cancelEdit}
-                    disabled={saving}
-                    className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    ยกเลิก
-                  </button>
-                  <button
-                    type="button"
-                    onClick={saveTemplates}
-                    disabled={saving}
-                    className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-                  >
-                    {saving ? "กำลังบันทึก..." : "บันทึก template"}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setEditing(true)}
-                  className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+        <div className="sticky top-0 z-20 rounded-t-xl border-b border-slate-100 bg-white/95 shadow-sm backdrop-blur">
+          <div className="px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Template ตั้งค่าเงินเดือนรายคน</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  ตั้งค่าตามประเภทสัญญา แล้วค่อยกดนำไปใช้กับพนักงานที่มีสัญญาปัจจุบันประเภทนั้น
+                </p>
+                {record?.storageReason && (
+                  <details className="mt-2 text-xs text-slate-400">
+                    <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-600">รายละเอียดระบบ</summary>
+                    <p className="mt-1">{record.storageReason}</p>
+                  </details>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/payroll/employee-settings"
+                  className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
                 >
-                  แก้ไข template
-                </button>
-              )}
+                  ดูตั้งค่ารายคน
+                </Link>
+                {editing ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      disabled={saving}
+                      className="inline-flex h-10 items-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveTemplates}
+                      disabled={saving}
+                      className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {saving ? "กำลังบันทึก..." : "บันทึก template"}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="inline-flex h-10 items-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+                  >
+                    แก้ไข template
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="border-b border-slate-100 px-4 py-3 sm:px-5">
-          <div className="flex gap-2 overflow-x-auto">
-            {templates.map((template) => {
-              const selected = template.key === active?.key;
-              return (
-                <button
-                  key={template.key}
-                  type="button"
-                  onClick={() => { setActiveKey(template.key); setEditing(false); }}
-                  className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-                    selected ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  {template.label}
-                  <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
-                    selected ? "bg-white/15 text-white" : "bg-slate-100 text-slate-500"
-                  }`}>
-                    {template.employeeCount} คน
-                  </span>
-                </button>
-              );
-            })}
+          <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
+            <div className="flex gap-2 overflow-x-auto">
+              {templates.map((template) => {
+                const selected = template.key === active?.key;
+                return (
+                  <button
+                    key={template.key}
+                    type="button"
+                    onClick={() => { setActiveKey(template.key); setEditing(false); }}
+                    className={`shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                      selected ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {template.label}
+                    <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                      selected ? "bg-white/15 text-white" : "bg-slate-100 text-slate-500"
+                    }`}>
+                      {template.employeeCount} คน
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
