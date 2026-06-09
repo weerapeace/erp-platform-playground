@@ -56,6 +56,12 @@ export function emptyLine(): EditorLine {
   };
 }
 
+// ช่องวัตถุดิบ (บทบาทในสินค้า) — เก็บใน bom_lines.slot_code · ใช้จัดกลุ่ม "รายละเอียดสั่งงาน"
+export const SLOT_ROLES: [string, string][] = [
+  ["MATERIALS", "วัตถุดิบหลัก"], ["LINING", "ซับใน"], ["ZIPPER", "ซิป"], ["LOGO", "โลโก้/พิมพ์"],
+  ["STRAP", "สาย"], ["THREAD", "ด้าย"], ["HARDWARE", "อะไหล่"], ["OTHER", "อื่นๆ"],
+];
+
 // ---- helper คำนวณ (กฎมาจากตาราง material_groups; calc_method = area_face|area_100|length|count) ----
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -398,6 +404,17 @@ export function BomLineEditor({
   };
 
   const columns: LineColumn<EditorLine>[] = [
+    {
+      key: "slot_code", header: "ช่อง", width: 116, sortable: true,
+      getValue: (l) => l.slot_code ?? "",
+      groupLabel: (l) => SLOT_ROLES.find((s) => s[0] === l.slot_code)?.[1] || "— ไม่ระบุช่อง —",
+      render: (l, u, ro) => ro
+        ? <span className="text-xs text-slate-600">{SLOT_ROLES.find((s) => s[0] === l.slot_code)?.[1] ?? <span className="text-slate-300">—</span>}</span>
+        : <select value={l.slot_code ?? ""} onChange={(e) => u({ slot_code: e.target.value || null })} className={inputCls} title="บทบาทวัตถุดิบในสินค้า">
+            <option value="">— ช่อง —</option>
+            {SLOT_ROLES.map(([v, lab]) => <option key={v} value={v}>{lab}</option>)}
+          </select>,
+    },
     {
       key: "component", header: "วัตถุดิบ", minWidth: 250, sortable: true,
       getValue: (l) => l.component_name || l.component_sku,

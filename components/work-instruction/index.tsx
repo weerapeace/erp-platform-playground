@@ -41,7 +41,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   useEffect(() => { loadSpec(); }, [loadSpec]);
 
   if (!sku) return null;
-  const empty = spec && !spec.parent && spec.legacy.length === 0 && spec.model_attrs.length === 0 && spec.sku_attrs.length === 0;
+  const empty = spec && !spec.parent && spec.legacy.length === 0 && spec.model_attrs.length === 0 && spec.sku_attrs.length === 0 && (spec.bom_materials?.length ?? 0) === 0;
   const shared = [...(spec?.model_attrs ?? []), ...(spec?.legacy ?? [])];
   // วัตถุดิบในสเปกที่ยังไม่อยู่ใน BOM (สำหรับปุ่มดึงลง BOM)
   const missing = onAddMaterials && bomSkus
@@ -74,6 +74,17 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
               )}
               {shared.length > 0 && <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>{shared.map((f, i) => <Row key={`m${i}`} f={f} bomSkus={bomSkus} />)}</div>}
               {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} bomSkus={bomSkus} />)}</div>}
+              {(spec.bom_materials?.length ?? 0) > 0 && (
+                <div className="pt-1 border-t border-slate-50">
+                  <div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ (จาก BOM{spec.bom_version ? ` ${spec.bom_version}` : ""})</div>
+                  {spec.bom_materials.map((g) => (
+                    <div key={g.slot} className="flex gap-2 text-xs py-0.5">
+                      <span className="text-slate-400 w-24 shrink-0">{g.label}</span>
+                      <span className="text-slate-700 flex-1">{g.items.map((it) => it.name).join(", ")}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {spec.parent?.work_instruction_notes && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วิธีทำ / หมายเหตุ</div><p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent.work_instruction_notes}</p></div>}
             </div>
           )}

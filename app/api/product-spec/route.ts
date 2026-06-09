@@ -14,13 +14,20 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export type SpecField = { key: string; label: string; value: string; order: number; sku_code?: string | null };
+export type BomMatGroup = { slot: string; label: string; items: { code: string; name: string }[] };
 export type ProductSpec = {
   parent: { code: string | null; name: string | null; family: string | null; size_summary: string | null; work_instruction_notes: string | null; image_url: string | null } | null;
-  legacy: SpecField[];        // ช่องเดิมบน Parent (materials/zipper/...)
-  model_attrs: SpecField[];   // attribute ระดับ Parent (สเปกร่วม)
-  sku_attrs: SpecField[];     // attribute ระดับ SKU (ต่อสี/แบบ)
+  legacy: SpecField[];          // ช่องเดิมบน Parent (materials/zipper/...)
+  model_attrs: SpecField[];     // attribute ระดับ Parent (สเปกร่วม)
+  sku_attrs: SpecField[];       // attribute ระดับ SKU (ต่อสี/แบบ)
+  bom_materials: BomMatGroup[]; // วัตถุดิบจาก BOM เวอร์ชั่นหลัก จัดกลุ่มตามช่อง (slot_code)
+  bom_version: string | null;
   error: string | null;
 };
+
+// ช่องวัตถุดิบ (slot_code) → ป้ายชื่อ (ตรงกับ SLOT_ROLES ใน bom/line-editor)
+const SLOT_LABEL: Record<string, string> = { MATERIALS: "วัตถุดิบหลัก", LINING: "ซับใน", ZIPPER: "ซิป", LOGO: "โลโก้/พิมพ์", STRAP: "สาย", THREAD: "ด้าย", HARDWARE: "อะไหล่", OTHER: "อื่นๆ" };
+const SLOT_ORDER = ["MATERIALS", "LINING", "ZIPPER", "LOGO", "STRAP", "THREAD", "HARDWARE", "OTHER"];
 
 const LEGACY: { col: string; label: string }[] = [
   { col: "materials", label: "วัตถุดิบ" }, { col: "lining", label: "ซับใน" }, { col: "zipper", label: "ซิป" },
@@ -98,6 +105,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const pkey = parent ? (parent as Record<string, unknown>).cover_image_r2_key as string | null : null;
   const imgKey = pkey ?? skuRow.cover_image_r2_key ?? null;
 
+  // วัตถุดิบจาก BOM เวอร์ชั่นหลัก (is_default) → จัดกลุ่มตามช่อง (slot_code)
+  let bom_materials: BomMatGroup[] = []; let bom_version: string | null = null;
+  const { data: hdrs } = await admin.from("bom_headers").select("bom_code, version, is_default").eq("product_sku", sku).eq("is_active", true).order("is_default", { ascending: false }).order("created_at", { ascending: true });
+  const hdr = (hdrs ?? [])[0] as { bom_code: string; version: string | null } | undefined;
+  if (hdr) {
+    bom_version = hdr.version ?? null;
+    const { data: lines } = await admin.from("bom_lines").select("slot_code, component_sku, component_name").eq("bom_code", hdr.bom_code).eq("is_active", true).not("slot_code", "is", null);
+    const bySlot = new Map<string, { code: string; name: string }[]>();
+    for (const l of (lines ?? []) as Record<string, unknown>[]) {
+      const slot = str(l.slot_code); if (!slot) continue;
+      const arr = bySlot.get(slot) ?? bySlot.set(slot, []).get(slot)!;
+      arr.push({ code: str(l.component_sku), name: str(l.component_name) || str(l.component_sku) });
+    }
+    bom_materials = [...bySlot.entries()].map(([slot, items]) => ({ slot, label: SLOT_LABEL[slot] ?? slot, items }))
+      .sort((a, b) => (SLOT_ORDER.indexOf(a.slot) + 99) - (SLOT_ORDER.indexOf(b.slot) + 99));
+  }
+
   return NextResponse.json({
     parent: parent ? {
       code: (parent as Record<string, unknown>).code as string ?? null,
@@ -107,6 +131,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       work_instruction_notes: str((parent as Record<string, unknown>).work_instruction_notes) || null,
       image_url: imgKey ? `/api/r2-image?key=${encodeURIComponent(imgKey)}` : null,
     } : null,
-    legacy, model_attrs, sku_attrs, error: null,
+    legacy, model_attrs, sku_attrs, bom_materials, bom_version, error: null,
   });
 }
