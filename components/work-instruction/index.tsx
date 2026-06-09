@@ -1,17 +1,18 @@
 "use client";
 
 /**
- * WorkInstructionPanel — แผงรายละเอียดสั่งงาน (ของกลาง · อ่านอย่างเดียว · เฟส 1)
- *
- * ใช้ทำอะไร: รับรหัส SKU → ดึงสเปก/วิธีทำจาก Parent (read-through) มาแสดง
- *   - สเปกร่วม (Parent): attribute ระดับ model + ช่องเดิม (วัตถุดิบ/ซับใน/ซิป/ด้าย...) + โน้ตวิธีทำ + ขนาด
- *   - วัตถุดิบต่อสี/แบบ (SKU): attribute ระดับ sku
- * ใช้ที่ไหน: หน้าแก้ BOM, ใบสั่งผลิต (MO), ใบจ่ายงาน/พิมพ์ (ภายหลัง)
- * ไม่ทำ: ไม่แก้ข้อมูล (แก้ที่ทะเบียน Parent/attribute) — กันข้อมูลซ้ำ
+ * WorkInstructionPanel — แผงรายละเอียดสั่งงาน (ของกลาง)
+ * เฟส 1: แสดง read-through (SKU → Parent: attribute model+sku + ช่องเดิม + วิธีทำ)
+ * เฟส 2: ปุ่ม "✎ แก้ไข" → ฟอร์มแก้ไขสร้างอัตโนมัติจาก product_attribute_definitions
+ *        บันทึกลงระบบ attribute (แหล่งจริง) + ช่องเดิม (ระหว่างย้าย) — ไม่แตะ schema
+ * ใช้ที่: หน้าแก้ BOM, ใบสั่งผลิต (MO), (ภายหลัง) ใบจ่ายงาน/พิมพ์
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
+import { ERPModal } from "@/components/modal";
+import { useToast } from "@/components/toast";
 import type { ProductSpec, SpecField } from "@/app/api/product-spec/route";
+import type { AttrDef, AttrVal } from "@/app/api/product-attributes/route";
 
 function Row({ f }: { f: SpecField }) {
   return (
@@ -22,22 +23,18 @@ function Row({ f }: { f: SpecField }) {
   );
 }
 
-export function WorkInstructionPanel({ sku, className = "" }: { sku: string | null | undefined; className?: string }) {
+export function WorkInstructionPanel({ sku, editable = false, className = "" }: { sku: string | null | undefined; editable?: boolean; className?: string }) {
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
 
-  useEffect(() => {
+  const loadSpec = useCallback(() => {
     if (!sku) { setSpec(null); return; }
-    let cancelled = false;
     setLoading(true);
-    apiFetch(`/api/product-spec?sku=${encodeURIComponent(sku)}`)
-      .then((r) => r.json())
-      .then((j) => { if (!cancelled) setSpec(j as ProductSpec); })
-      .catch(() => { if (!cancelled) setSpec(null); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    apiFetch(`/api/product-spec?sku=${encodeURIComponent(sku)}`).then((r) => r.json()).then((j) => setSpec(j as ProductSpec)).catch(() => setSpec(null)).finally(() => setLoading(false));
   }, [sku]);
+  useEffect(() => { loadSpec(); }, [loadSpec]);
 
   if (!sku) return null;
   const empty = spec && !spec.parent && spec.legacy.length === 0 && spec.model_attrs.length === 0 && spec.sku_attrs.length === 0;
@@ -45,14 +42,16 @@ export function WorkInstructionPanel({ sku, className = "" }: { sku: string | nu
 
   return (
     <div className={`border border-slate-200 rounded-lg bg-white ${className}`}>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-t-lg">
-        <span>📋 รายละเอียดสั่งงาน</span>
-        <span className="text-slate-400 text-xs">{open ? "▾" : "▸"}</span>
-      </button>
+      <div className="w-full flex items-center justify-between px-3 py-2 rounded-t-lg hover:bg-slate-50">
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex-1 flex items-center gap-2 text-sm font-semibold text-slate-700 text-left">
+          <span>📋 รายละเอียดสั่งงาน</span><span className="text-slate-400 text-xs">{open ? "▾" : "▸"}</span>
+        </button>
+        {editable && <button type="button" onClick={() => setEditOpen(true)} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ แก้ไข</button>}
+      </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-slate-100">
           {loading ? <div className="text-xs text-slate-400 py-3 text-center">กำลังโหลด…</div>
-          : empty || !spec ? <div className="text-xs text-slate-300 py-3 text-center">ยังไม่มีรายละเอียดสั่งงานของสินค้านี้</div>
+          : empty || !spec ? <div className="text-xs text-slate-300 py-3 text-center">ยังไม่มีรายละเอียดสั่งงาน{editable ? " — กด ✎ แก้ไข เพื่อเพิ่ม" : ""}</div>
           : (
             <div className="space-y-2.5">
               {spec.parent && (
@@ -64,31 +63,124 @@ export function WorkInstructionPanel({ sku, className = "" }: { sku: string | nu
                   </div>
                 </div>
               )}
-
-              {shared.length > 0 && (
-                <div>
-                  <div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>
-                  {shared.map((f, i) => <Row key={`m${i}`} f={f} />)}
-                </div>
-              )}
-
-              {spec.sku_attrs.length > 0 && (
-                <div className="pt-1 border-t border-slate-50">
-                  <div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>
-                  {spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} />)}
-                </div>
-              )}
-
-              {spec.parent?.work_instruction_notes && (
-                <div className="pt-1 border-t border-slate-50">
-                  <div className="text-[11px] font-semibold text-slate-500 mb-0.5">วิธีทำ / หมายเหตุ</div>
-                  <p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent.work_instruction_notes}</p>
-                </div>
-              )}
+              {shared.length > 0 && <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>{shared.map((f, i) => <Row key={`m${i}`} f={f} />)}</div>}
+              {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} />)}</div>}
+              {spec.parent?.work_instruction_notes && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วิธีทำ / หมายเหตุ</div><p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent.work_instruction_notes}</p></div>}
             </div>
           )}
         </div>
       )}
+      {editOpen && <WorkInstructionEditor sku={sku} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); loadSpec(); }} />}
     </div>
+  );
+}
+
+// ===== ตัวแก้ไข (config-driven จาก product_attribute_definitions) =====
+type EditData = {
+  sku: { id: string; code: string };
+  parent: { id: string; name: string | null; product_family: string | null; size_summary: string; work_instruction_notes: string } | null;
+  families: string[]; definitions: AttrDef[];
+  model_values: Record<string, AttrVal>; sku_values: Record<string, AttrVal>;
+  legacy: Record<string, string>; error?: string;
+};
+const LEGACY_LABELS: Record<string, string> = { materials: "วัตถุดิบ", lining: "ซับใน", zipper: "ซิป", strap: "สาย/สายสะพาย", thread: "ด้าย", spares: "อะไหล่", logo: "โลโก้/พิมพ์" };
+
+function initVal(def: AttrDef, v: AttrVal | undefined): unknown {
+  if (def.input_type === "many2one") return v?.option_id ?? "";
+  if (def.input_type === "multiselect") return v?.option_ids ?? [];
+  if (def.input_type === "number") return v?.number_value != null ? String(v.number_value) : "";
+  if (def.input_type === "boolean") return v?.boolean_value ?? false;
+  return v?.text_value ?? "";
+}
+
+function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [data, setData] = useState<EditData | null>(null);
+  const [family, setFamily] = useState("");
+  const [vals, setVals] = useState<Record<string, unknown>>({});   // key = scope+":"+defId
+  const [legacy, setLegacy] = useState<Record<string, string>>({});
+  const [size, setSize] = useState(""); const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiFetch(`/api/product-attributes?sku=${encodeURIComponent(sku)}`).then((r) => r.json()).then((d: EditData) => {
+      if (d.error) { toast.error(d.error); return; }
+      setData(d);
+      setFamily(d.parent?.product_family || d.families[0] || "");
+      const init: Record<string, unknown> = {};
+      for (const def of d.definitions) init[`${def.scope}:${def.id}`] = initVal(def, (def.scope === "model" ? d.model_values : d.sku_values)[def.id]);
+      setVals(init);
+      setLegacy({ ...d.legacy }); setSize(d.parent?.size_summary ?? ""); setNotes(d.parent?.work_instruction_notes ?? "");
+    }).catch(() => toast.error("โหลดไม่สำเร็จ"));
+  }, [sku]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const defsOf = (scope: string) => (data?.definitions ?? []).filter((d) => d.scope === scope && d.product_family === family).sort((a, b) => a.display_order - b.display_order);
+  const setV = (k: string, v: unknown) => setVals((s) => ({ ...s, [k]: v }));
+
+  const renderInput = (def: AttrDef, scope: string) => {
+    const k = `${scope}:${def.id}`; const v = vals[k];
+    const cls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
+    if (def.input_type === "many2one") return <select value={String(v ?? "")} onChange={(e) => setV(k, e.target.value)} className={cls}><option value="">— ไม่ระบุ —</option>{def.options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>;
+    if (def.input_type === "multiselect") { const arr = (v as string[]) ?? []; return <div className="flex flex-wrap gap-1.5 pt-1">{def.options.map((o) => { const on = arr.includes(o.id); return <button type="button" key={o.id} onClick={() => setV(k, on ? arr.filter((x) => x !== o.id) : [...arr, o.id])} className={`text-xs px-2 py-1 rounded-full border ${on ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>; })}{def.options.length === 0 && <span className="text-[11px] text-slate-300">ยังไม่มีตัวเลือก</span>}</div>; }
+    if (def.input_type === "number") return <input type="number" value={String(v ?? "")} onChange={(e) => setV(k, e.target.value)} className={cls} />;
+    if (def.input_type === "boolean") return <label className="flex items-center gap-2 text-sm text-slate-600 h-8"><input type="checkbox" checked={!!v} onChange={(e) => setV(k, e.target.checked)} className="rounded border-slate-300" /> ใช่</label>;
+    return <input value={String(v ?? "")} onChange={(e) => setV(k, e.target.value)} className={cls} />;
+  };
+
+  const save = async () => {
+    if (!data) return;
+    setSaving(true);
+    const model = defsOf("model").map((d) => ({ definition_id: d.id, input_type: d.input_type, value: vals[`model:${d.id}`] }));
+    const sku_vals = defsOf("sku").map((d) => ({ definition_id: d.id, input_type: d.input_type, value: vals[`sku:${d.id}`] }));
+    try {
+      const res = await apiFetch("/api/product-attributes", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku, family, size_summary: size, work_instruction_notes: notes, legacy, model, sku_vals }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("บันทึกรายละเอียดสั่งงานแล้ว"); onSaved();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <ERPModal open onClose={() => !saving && onClose()} size="lg" title="✎ แก้รายละเอียดสั่งงาน"
+      footer={<>
+        <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+        <button onClick={save} disabled={saving || !data} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+      </>}>
+      {!data ? <div className="py-10 text-center text-slate-400">กำลังโหลด…</div> : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block"><span className="text-[11px] text-slate-500">ประเภทสินค้า (ชุดฟิลด์)</span>
+              <select value={family} onChange={(e) => setFamily(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">— ไม่ระบุ —</option>{data.families.map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </label>
+            <label className="block"><span className="text-[11px] text-slate-500">ขนาด (สรุป)</span>
+              <input value={size} onChange={(e) => setSize(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
+          </div>
+
+          {family && defsOf("model").length > 0 && (
+            <div className="border border-slate-100 rounded-lg p-2.5">
+              <div className="text-xs font-semibold text-slate-600 mb-1.5">สเปกร่วม (ใช้ทุกสี)</div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2">{defsOf("model").map((d) => <div key={d.id}><span className="text-[11px] text-slate-500">{d.label}</span><div className="mt-0.5">{renderInput(d, "model")}</div></div>)}</div>
+            </div>
+          )}
+          {family && defsOf("sku").length > 0 && (
+            <div className="border border-slate-100 rounded-lg p-2.5">
+              <div className="text-xs font-semibold text-slate-600 mb-1.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2">{defsOf("sku").map((d) => <div key={d.id}><span className="text-[11px] text-slate-500">{d.label}</span><div className="mt-0.5">{renderInput(d, "sku")}</div></div>)}</div>
+            </div>
+          )}
+
+          <div className="border border-slate-100 rounded-lg p-2.5">
+            <div className="text-xs font-semibold text-slate-600 mb-1.5">ช่องเดิม (Parent) — ใช้ระหว่างย้ายเข้า attribute</div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2">{Object.keys(LEGACY_LABELS).map((c) => <div key={c}><span className="text-[11px] text-slate-500">{LEGACY_LABELS[c]}</span><input value={legacy[c] ?? ""} onChange={(e) => setLegacy((s) => ({ ...s, [c]: e.target.value }))} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>)}</div>
+          </div>
+
+          <label className="block"><span className="text-[11px] text-slate-500">วิธีทำ / หมายเหตุ</span>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
+        </div>
+      )}
+    </ERPModal>
   );
 }

@@ -451,7 +451,7 @@ export default function MoWorkspacePage() {
             </label>
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
-            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} />}
+            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} />}
 
             {/* preview/checklist กางสูตร — 2 แท็บ */}
             {(() => {

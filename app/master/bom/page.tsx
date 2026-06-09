@@ -415,7 +415,7 @@ export default function BomWorkspacePage() {
             </div>
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
-            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} />}
+            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} />}
 
             {/* lines */}
             <div className="pt-2 border-t border-slate-100">
