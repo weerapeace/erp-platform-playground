@@ -566,6 +566,7 @@ function DetailAmountRow({ label, amount, sign = "-", muted = false }: { label: 
 
 function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; items: RecurringItem[]; onClose: () => void; onChanged: () => void }) {
   const [localItems, setLocalItems] = useState<RecurringItem[]>(items);
+  const [quickAddType, setQuickAddType] = useState<"earning" | "deduction" | null>(null);
   const [itemType, setItemType] = useState<"earning" | "deduction">("earning");
   const [itemName, setItemName] = useState("");
   const [amount, setAmount] = useState("");
@@ -582,6 +583,17 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
   const earningTotal = totalRecurring(localItems, "earning");
   const deductionTotal = totalRecurring(localItems, "deduction");
   const net = earningTotal - deductionTotal;
+
+  function openQuickAdd(type: "earning" | "deduction") {
+    setErr(null);
+    setMsg(null);
+    setItemType(type);
+    setItemName("");
+    setAmount("");
+    setStartDate(todayIso());
+    setEndDate("");
+    setQuickAddType(type);
+  }
 
   async function addRecurringItem() {
     const name = itemName.trim();
@@ -623,6 +635,7 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
       setItemName("");
       setAmount("");
       setEndDate("");
+      setQuickAddType(null);
       setMsg("เพิ่มรายการประจำแล้ว รายการนี้จะถูกนำไปคำนวณในงวดถัด ๆ ไปด้วย");
       onChanged();
     } catch {
@@ -678,6 +691,29 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
           <DetailAmountRow label="หักประจำ" amount={deductionTotal} sign="-" />
           <DetailAmountRow label="สุทธิจากรายการประจำ" amount={Math.abs(net)} sign={net >= 0 ? "+" : "-"} muted={!net} />
         </div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs leading-5 text-amber-700">
+              หมายเหตุ: รายการที่เพิ่มตรงนี้เป็นรายการประจำของพนักงาน จะใช้กับทุกเดือน/ทุกงวดถัดไป ไม่ใช่เฉพาะงวดเดือนนี้
+            </p>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => openQuickAdd("earning")}
+                className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                + เพิ่มประจำ
+              </button>
+              <button
+                type="button"
+                onClick={() => openQuickAdd("deduction")}
+                className="h-9 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700"
+              >
+                + หักประจำ
+              </button>
+            </div>
+          </div>
+        </div>
         <div className="grid gap-4 md:grid-cols-2">
           <section>
             <div className="mb-2 text-sm font-semibold text-slate-800">รายการเพิ่ม</div>
@@ -688,7 +724,16 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
             {renderItems(deduction, "-")}
           </section>
         </div>
-        <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+        {quickAddType && (
+        <ERPModal
+          open
+          onClose={() => setQuickAddType(null)}
+          title={quickAddType === "earning" ? "เพิ่มรายการเพิ่มประจำ" : "เพิ่มรายการหักประจำ"}
+          description={`${row.employee_code} · ${row.employee_name}`}
+          size="md"
+          storageKey="payroll-recurring-quick-add"
+        >
+        <section className="space-y-4">
           <div className="mb-3">
             <div className="text-sm font-semibold text-slate-800">เพิ่มรายการประจำ</div>
             <p className="mt-1 text-xs leading-5 text-amber-700">หมายเหตุ: รายการที่เพิ่มตรงนี้เป็นรายการประจำของพนักงาน จะใช้กับทุกเดือน/ทุกงวดถัดไป ไม่ใช่เฉพาะงวดเดือนนี้</p>
@@ -696,7 +741,7 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
           {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
           {msg && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{msg}</div>}
           <div className="grid gap-3 md:grid-cols-2">
-            <div>
+            <div className="hidden">
               <label className="mb-1 block text-xs font-medium text-slate-500">ประเภท</label>
               <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-white p-1">
                 {(["earning", "deduction"] as const).map((type) => (
@@ -711,7 +756,7 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
                 ))}
               </div>
             </div>
-            <div>
+            <div className="md:col-span-2">
               <label className="mb-1 block text-xs font-medium text-slate-500">จำนวนเงิน/งวด</label>
               <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" placeholder="เช่น 500"
                 className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
@@ -731,9 +776,11 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
             </div>
           </div>
           <button onClick={addRecurringItem} disabled={busy} className="mt-3 h-10 w-full rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
-            {busy ? "กำลังเพิ่ม..." : "เพิ่มเป็นรายการประจำ"}
+            {busy ? "กำลังบันทึก..." : itemType === "earning" ? "บันทึกเพิ่มประจำ" : "บันทึกหักประจำ"}
           </button>
         </section>
+        </ERPModal>
+        )}
       </div>
     </ERPModal>
   );
