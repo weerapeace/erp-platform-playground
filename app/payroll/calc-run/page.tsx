@@ -7,8 +7,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { PeriodHolidaysPanel } from "@/components/payroll/period-holidays-panel";
+import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
-type Period = { id: string; period_name: string; status: string };
 type Row = { id: string; employee_name: string; gross_new: number; gross_old: number | null; net_new: number; net_old: number | null; diff_net: number | null; status: string; ok: boolean };
 type ColumnDiff = { column: string; count: number };
 type Summary = { total: number; match: number; diff: number; fresh: number; columnDiffs: ColumnDiff[] };
@@ -60,8 +60,7 @@ const BTN_LABEL = (from: string, to: string): { label: string; cls: string } => 
 };
 
 export default function PayrollCalcRunPage() {
-  const [periods, setPeriods] = useState<Period[]>([]);
-  const [periodId, setPeriodId] = useState<string>("");
+  const { periods, periodId, selectedPeriod: curPeriod, setPeriodId, refreshPeriods } = usePayrollPeriod();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -76,18 +75,6 @@ export default function PayrollCalcRunPage() {
   const [progress, setProgress] = useState<string | null>(null);   // Phase 2 — สถานะคำนวณเบื้องหลัง
   const [validation, setValidation] = useState<Validation | null>(null);
   const [validationLoading, setValidationLoading] = useState(false);
-
-  async function loadPeriods(keepSelected = false) {
-    try {
-      const j = await apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json());
-      const ps = (j.data ?? []) as Period[];
-      setPeriods(ps);
-      if (!keepSelected && ps[0]) setPeriodId(ps[0].id);
-    } catch { /* ignore */ }
-  }
-  useEffect(() => { loadPeriods(); }, []);
-
-  const curPeriod = periods.find((p) => p.id === periodId);
 
   const loadValidation = useCallback(async (pid: string) => {
     if (!pid) { setValidation(null); return null; }
@@ -117,7 +104,7 @@ export default function PayrollCalcRunPage() {
         body: JSON.stringify({ period_id: periodId, to_status: toStatus }),
       }).then((r) => r.json());
       if (j.error) setErr(j.error);
-      else { setSaveMsg(`✅ เปลี่ยนสถานะงวดเป็น "${STATUS_TH[toStatus] ?? toStatus}" แล้ว`); await loadPeriods(true); await run(); }
+      else { setSaveMsg(`✅ เปลี่ยนสถานะงวดเป็น "${STATUS_TH[toStatus] ?? toStatus}" แล้ว`); await refreshPeriods(); await run(); }
     } catch { setErr("เปลี่ยนสถานะไม่สำเร็จ"); }
   }
 

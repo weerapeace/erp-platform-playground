@@ -11,8 +11,8 @@ import { apiFetch } from "@/lib/api";
 import { Drawer, ERPModal } from "@/components/modal";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
+import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
-type Period = { id: string; period_name: string; status: string };
 type Row = {
   id: string; employee_id: string; employee_code: string; employee_name: string; work_days: number;
   contract_type?: string | null; wage_type?: string | null;
@@ -82,7 +82,6 @@ function formatPaidDuration(totalMinutes?: number, hoursPerDay = STANDARD_HOURS_
   return parts.length ? parts.join(" ") : "0 วัน";
 }
 const EDITABLE = (s: string) => s === "draft" || s === "review";
-const pickDefaultPeriod = (periods: Period[]) => periods.find((p) => EDITABLE(p.status)) ?? periods.find((p) => p.status !== "cancelled") ?? periods[0];
 const isPieceworkItem = (item: Adj) => item.source_type === "piecework" || item.item_code === "PIECEWORK";
 const todayIso = () => new Date().toISOString().slice(0, 10);
 const DOW_TH = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
@@ -153,8 +152,7 @@ function EmployeeIdentity({ code, name, contractType, wageType }: { code: string
 }
 
 export default function ManualInputPage() {
-  const [periods, setPeriods] = useState<Period[]>([]);
-  const [periodId, setPeriodId] = useState("");
+  const { periods, periodId, setPeriodId } = usePayrollPeriod();
   const [periodStatus, setPeriodStatus] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [adjustments, setAdjustments] = useState<Adj[]>([]);
@@ -174,16 +172,6 @@ export default function ManualInputPage() {
   const [grid, setGrid] = useState<GridData | null>(null);
   const [gridLoading, setGridLoading] = useState(false);
   const [gridErr, setGridErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
-      .then((j) => {
-        const ps = (j.data ?? []) as Period[];
-        setPeriods(ps);
-        const initial = pickDefaultPeriod(ps);
-        if (initial) setPeriodId(initial.id);
-      }).catch(() => {});
-  }, []);
 
   const load = useCallback(async (pid: string) => {
     if (!pid) return;

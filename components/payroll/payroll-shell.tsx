@@ -12,6 +12,7 @@ import { useState } from "react";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
+import { PayrollPeriodProvider, usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
 const NAV: { group: string; items: { href: string; icon: string; label: string }[] }[] = [
   { group: "ภาพรวม", items: [
@@ -47,7 +48,34 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
   ] },
 ];
 
-export function PayrollShell({ children }: { children: React.ReactNode }) {
+function PayrollPeriodSwitcher() {
+  const { periods, periodId, selectedPeriod, setPeriodId, loading } = usePayrollPeriod();
+  if (!periods.length && !loading) return null;
+
+  return (
+    <div className="hidden md:flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1">
+      <span className="text-[10px] font-medium text-slate-400 whitespace-nowrap">งวดปัจจุบัน</span>
+      <select
+        value={periodId}
+        onChange={(e) => setPeriodId(e.target.value)}
+        disabled={loading || !periods.length}
+        className="h-7 max-w-[220px] bg-transparent text-xs font-semibold text-slate-700 outline-none disabled:opacity-50"
+      >
+        {!periodId && <option value="">เลือกงวด</option>}
+        {periods.map((p) => (
+          <option key={p.id} value={p.id}>{p.period_name} ({p.status})</option>
+        ))}
+      </select>
+      {selectedPeriod && (
+        <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500">
+          {selectedPeriod.status}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PayrollShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -92,6 +120,7 @@ export function PayrollShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <PayrollPeriodSwitcher />
             <NotificationBell />
             {user && (
               <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200">
@@ -124,5 +153,13 @@ export function PayrollShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
       </div>
     </div>
+  );
+}
+
+export function PayrollShell({ children }: { children: React.ReactNode }) {
+  return (
+    <PayrollPeriodProvider>
+      <PayrollShellInner>{children}</PayrollShellInner>
+    </PayrollPeriodProvider>
   );
 }

@@ -7,8 +7,8 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
+import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
-type Period = { id: string; period_name: string; status: string };
 type Run = { id: string; run_no: number; calculated_at: string | null };
 type Totals = { count: number; gross_pay: number; total_deduction: number; social_security_employee: number; withholding_tax: number; net_pay: number };
 type IssueCounts = { negative_net: number; high_deduction: number; missing_base: number; zero_work_days: number; has_recurring: number };
@@ -70,8 +70,7 @@ const badge = (s: string) => {
 };
 
 export default function PayrollReviewPage() {
-  const [periods, setPeriods] = useState<Period[]>([]);
-  const [periodId, setPeriodId] = useState("");
+  const { periods, periodId, selectedPeriod: curPeriod, setPeriodId, refreshPeriods } = usePayrollPeriod();
   const [runId, setRunId] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
@@ -84,11 +83,6 @@ export default function PayrollReviewPage() {
   const [issueCounts, setIssueCounts] = useState<IssueCounts | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiFetch("/api/payroll/master/periods?include_inactive=true").then((r) => r.json())
-      .then((j) => { const ps = (j.data ?? []) as Period[]; setPeriods(ps); if (ps[0]) setPeriodId(ps[0].id); }).catch(() => {});
-  }, []);
 
   const load = useCallback(async (pid: string, rid?: string) => {
     if (!pid) return;
@@ -127,7 +121,6 @@ export default function PayrollReviewPage() {
     a.download = `payroll-${periods.find((p) => p.id === periodId)?.period_name ?? "review"}.csv`; a.click();
   }
 
-  const curPeriod = periods.find((p) => p.id === periodId);
   const currentStatus = periodStatus || curPeriod?.status || "";
   const nextStatuses = TRANSITIONS[currentStatus] ?? [];
 
@@ -150,7 +143,7 @@ export default function PayrollReviewPage() {
       const j = await res.json();
       if (!res.ok || j.error) { setErr(j.error ?? `เปลี่ยนสถานะไม่สำเร็จ (HTTP ${res.status})`); return; }
       setPeriodStatus(toStatus);
-      setPeriods((prev) => prev.map((p) => p.id === periodId ? { ...p, status: toStatus } : p));
+      await refreshPeriods();
       setActionMsg(`เปลี่ยนสถานะเป็น "${toLabel}" แล้ว`);
       await load(periodId, runId || undefined);
     } catch { setErr("เปลี่ยนสถานะไม่สำเร็จ"); }

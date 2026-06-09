@@ -415,6 +415,8 @@ export type MasterCRUDConfig = {
    * รูปแบบเดียวกับ column filter ที่ส่งให้ API: { col: { type, value/min/max/selected } }
    */
   baseFilter?: Record<string, unknown>;
+  /** query string เพิ่มเติมที่ต้องส่งไปกับ list API เช่น period_id ของหน้า payroll */
+  extraQuery?: Record<string, string | number | boolean | null | undefined>;
   /**
    * ค่าเริ่มต้นตอนกดสร้างใหม่ (ทับค่า default จาก Field Registry)
    * เช่น สร้างจากหน้า Customers → ตั้ง is_customer=true ให้อัตโนมัติ
@@ -446,6 +448,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const activeField = config.activeField ?? "active";
   const isRest     = (config.apiBase ?? "").includes("master-v2");
   const allowPermanentDelete = config.allowPermanentDelete !== false;
+  const extraQueryString = useMemo(() => {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(config.extraQuery ?? {})) {
+      if (value == null || value === "") continue;
+      qs.set(key, String(value));
+    }
+    const s = qs.toString();
+    return s ? `&${s}` : "";
+  }, [config.extraQuery]);
 
   // ---- Dynamic field loading (Sprint 2) ----
   // ถ้ามี moduleKey — load fields config จาก Field Registry
@@ -789,7 +800,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const mergedBf = { ...urlFilter, ...(config.baseFilter ?? {}) };
       const bf = Object.keys(mergedBf).length > 0
         ? `&filters=${encodeURIComponent(JSON.stringify(mergedBf))}` : "";
-      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}`);
+      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}${extraQueryString}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       const raw = (json.data ?? []) as Row[];
@@ -797,7 +808,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       setRows(enrichRelated(raw));
     } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
-  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, urlFilter, enrichRelated, ensureRelatedMaps]);
+  }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, extraQueryString, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
@@ -822,13 +833,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     if (Object.keys(merged).length > 0) {
       qs.set("filters", JSON.stringify(merged));
     }
+    for (const [key, value] of Object.entries(config.extraQuery ?? {})) {
+      if (value == null || value === "") continue;
+      qs.set(key, String(value));
+    }
     const res = await apiFetch(`${apiBase}${config.apiPath}?${qs}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
     const raw = (json.data ?? []) as Row[];
     await ensureRelatedMaps(raw);
     return { rows: enrichRelated(raw), total: (json.total as number) ?? 0 };
-  }, [apiBase, config.apiPath, config.baseFilter, urlFilter, enrichRelated, ensureRelatedMaps]);
+  }, [apiBase, config.apiPath, config.baseFilter, config.extraQuery, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
   // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'

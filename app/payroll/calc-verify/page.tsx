@@ -6,9 +6,10 @@
  * ใช้ของกลาง: Universal DataTable (master-crud) + แถบสรุป
  */
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { usePayrollPeriod, type PayrollPeriod } from "@/components/payroll/payroll-period-context";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
@@ -20,17 +21,20 @@ const money = (v: unknown) => {
   return Number.isFinite(n) ? <span className="tabular-nums text-slate-700">฿{n.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span> : <span className="text-slate-300">—</span>;
 };
 
-function VerifySummary() {
+function VerifySummary({ periodId, period }: { periodId: string; period: PayrollPeriod | null }) {
   const [s, setS] = useState<{ total: number; match: number; mismatch: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
-    apiFetch("/api/payroll/calc-verify?summary_only=1").then((r) => r.json())
+    if (!periodId) return;
+    setS(null); setErr(null);
+    apiFetch(`/api/payroll/calc-verify?summary_only=1&period_id=${encodeURIComponent(periodId)}`).then((r) => r.json())
       .then((j) => { if (j.error) setErr(j.error); else setS(j.summary); }).catch(() => setErr("เทียบไม่ได้"));
-  }, []);
+  }, [periodId]);
   return (
     <div className="px-6 pt-5">
       <h1 className="text-xl font-bold text-slate-800">🧮 เทียบยอดเครื่องคำนวณ (เหมือนเดิม)</h1>
       <p className="text-sm text-slate-500 mb-3">รันสูตรใหม่บนข้อมูลจริงทุกบรรทัด เทียบกับที่แอปเก่าคำนวณ — อ่านอย่างเดียว ไม่เขียนทับ</p>
+      {period && <div className="text-xs font-medium text-slate-500 mb-3">งวดที่กำลังเทียบ: <span className="text-slate-800">{period.period_name}</span> ({period.status})</div>}
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-2 text-sm mb-3">{err}</div>}
       {!s && !err && <div className="text-slate-400 text-sm mb-3">กำลังเทียบ...</div>}
       {s && (
@@ -87,10 +91,16 @@ const CONFIG: MasterCRUDConfig = {
 };
 
 export default function PayrollCalcVerifyPage() {
+  const { periodId, selectedPeriod } = usePayrollPeriod();
+  const config = useMemo<MasterCRUDConfig>(() => ({
+    ...CONFIG,
+    extraQuery: periodId ? { period_id: periodId } : undefined,
+  }), [periodId]);
+
   return (
     <div>
-      <VerifySummary />
-      <MasterCRUDPage config={CONFIG} />
+      <VerifySummary periodId={periodId} period={selectedPeriod} />
+      {periodId ? <MasterCRUDPage key={periodId} config={config} /> : <div className="p-10 text-center text-slate-400 text-sm">กำลังเลือกงวด...</div>}
     </div>
   );
 }
