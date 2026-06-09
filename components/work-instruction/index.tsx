@@ -29,10 +29,17 @@ function Row({ f, bomSkus, onEdit }: { f: SpecField; bomSkus?: string[]; onEdit?
 }
 
 export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, refreshKey, className = "" }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; refreshKey?: number | string; className?: string }) {
+  const toast = useToast();
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
+  // inline edit (กด ✎ → แก้เฉพาะช่องนั้น)
+  const [editData, setEditData] = useState<EditData | null>(null);
+  const [editField, setEditField] = useState<{ section: string; key: string } | null>(null);
+  const [editVal, setEditVal] = useState<unknown>("");
+  const [editName, setEditName] = useState("");
+  const [savingField, setSavingField] = useState(false);
 
   const loadSpec = useCallback(() => {
     if (!sku) { setSpec(null); return; }
@@ -40,11 +47,77 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
     apiFetch(`/api/product-spec?sku=${encodeURIComponent(sku)}`).then((r) => r.json()).then((j) => setSpec(j as ProductSpec)).catch(() => setSpec(null)).finally(() => setLoading(false));
   }, [sku, refreshKey]);   // refreshKey เปลี่ยน → โหลดสเปกใหม่ (เช่น หลังบันทึก BOM)
   useEffect(() => { loadSpec(); }, [loadSpec]);
+  useEffect(() => { setEditData(null); setEditField(null); }, [sku, refreshKey]);
+
+  const ensureEditData = async (): Promise<EditData | null> => {
+    if (editData) return editData;
+    try { const r = await apiFetch(`/api/product-attributes?sku=${encodeURIComponent(sku!)}`); const d = (await r.json()) as EditData; setEditData(d); return d; } catch { return null; }
+  };
+  const beginEdit = async (section: string, key: string) => {
+    const d = await ensureEditData(); if (!d) return;
+    setEditName("");
+    if (section === "notes") setEditVal(d.parent?.work_instruction_notes ?? "");
+    else if (section === "legacy") setEditVal(d.legacy[key] ?? "");
+    else {
+      const def = d.definitions.find((x) => x.id === key);
+      const v = (section === "model" ? d.model_values : d.sku_values)[key];
+      if (def && isSkuRef(def)) { setEditVal(v?.text_value ?? ""); setEditName((d.sku_labels?.[v?.text_value ?? ""] ?? v?.text_value ?? "").replace(/^\[[^\]]*\]\s*/, "")); }
+      else if (def?.input_type === "many2one") setEditVal(v?.option_id ?? "");
+      else if (def?.input_type === "multiselect") setEditVal(v?.option_ids ?? []);
+      else if (def?.input_type === "number") setEditVal(v?.number_value != null ? String(v.number_value) : "");
+      else if (def?.input_type === "boolean") setEditVal(v?.boolean_value ?? false);
+      else setEditVal(v?.text_value ?? "");
+    }
+    setEditField({ section, key });
+  };
+  const saveField = async () => {
+    if (!editField || !sku) return;
+    const { section, key } = editField;
+    const body: Record<string, unknown> = { sku };
+    if (section === "notes") body.work_instruction_notes = String(editVal ?? "");
+    else if (section === "legacy") body.legacy = { [key]: String(editVal ?? "") };
+    else {
+      const def = editData?.definitions.find((x) => x.id === key);
+      const it = { definition_id: key, input_type: def && isSkuRef(def) ? "text" : (def?.input_type ?? "text"), value: editVal };
+      if (section === "model") body.model = [it]; else body.sku_vals = [it];
+    }
+    setSavingField(true);
+    try {
+      const r = await apiFetch("/api/product-attributes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success("บันทึกแล้ว"); setEditField(null); setEditData(null); loadSpec();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSavingField(false); }
+  };
+
+  const editInput = (section: string, key: string) => {
+    const cls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
+    if (section === "notes") return <textarea autoFocus value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} rows={2} className="w-full px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />;
+    if (section === "legacy") return <input autoFocus value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} className={cls} />;
+    const def = editData?.definitions.find((x) => x.id === key);
+    if (def && isSkuRef(def)) return <ComponentPicker sku={String(editVal ?? "")} name={editName} placeholder="— เลือกวัตถุดิบ —" onPick={(c) => { setEditVal(c.code); setEditName(c.name); }} />;
+    if (def?.input_type === "many2one") return <select autoFocus value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} className={cls}><option value="">— ไม่ระบุ —</option>{def.options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>;
+    if (def?.input_type === "multiselect") { const arr = (editVal as string[]) ?? []; return <div className="flex flex-wrap gap-1">{def.options.map((o) => { const on = arr.includes(o.id); return <button type="button" key={o.id} onClick={() => setEditVal(on ? arr.filter((x) => x !== o.id) : [...arr, o.id])} className={`text-[11px] px-1.5 py-0.5 rounded-full border ${on ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600"}`}>{o.label}</button>; })}</div>; }
+    if (def?.input_type === "boolean") return <label className="flex items-center gap-1 text-xs h-8"><input type="checkbox" checked={!!editVal} onChange={(e) => setEditVal(e.target.checked)} className="rounded border-slate-300" /> ใช่</label>;
+    if (def?.input_type === "number") return <input autoFocus type="number" value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} className={cls} />;
+    return <input autoFocus value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} className={cls} />;
+  };
+  const specRow = (f: SpecField, section: string) => {
+    const editing = editField?.section === section && editField?.key === f.key;
+    if (editing) return (
+      <div key={`${section}:${f.key}`} className="flex gap-2 text-xs py-1 items-start">
+        <span className="text-slate-400 w-24 shrink-0 pt-1.5">{f.label}</span>
+        <div className="flex-1 min-w-0">{editInput(section, f.key)}</div>
+        <button type="button" onClick={saveField} disabled={savingField} title="บันทึก" className="shrink-0 h-7 w-7 flex items-center justify-center text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-40">✓</button>
+        <button type="button" onClick={() => setEditField(null)} disabled={savingField} title="ยกเลิก" className="shrink-0 h-7 w-7 flex items-center justify-center text-slate-400 hover:bg-slate-100 rounded">✕</button>
+      </div>
+    );
+    return <Row key={`${section}:${f.key}`} f={f} bomSkus={bomSkus} onEdit={editable ? () => beginEdit(section, f.key) : undefined} />;
+  };
 
   if (!sku) return null;
   const empty = spec && !spec.parent && spec.legacy.length === 0 && spec.model_attrs.length === 0 && spec.sku_attrs.length === 0 && (spec.bom_materials?.length ?? 0) === 0;
-  const shared = [...(spec?.model_attrs ?? []), ...(spec?.legacy ?? [])];
-  // วัตถุดิบในสเปกที่ยังไม่อยู่ใน BOM (สำหรับปุ่มดึงลง BOM)
+  const notesEditing = editField?.section === "notes";
   const missing = onAddMaterials && bomSkus
     ? [...(spec?.model_attrs ?? []), ...(spec?.sku_attrs ?? [])].filter((f) => f.sku_code && !bomSkus.includes(f.sku_code)).map((f) => ({ code: f.sku_code as string, name: f.value }))
     : [];
@@ -56,12 +129,12 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
         <button type="button" onClick={() => setOpen((o) => !o)} className="flex-1 flex items-center gap-2 text-sm font-semibold text-slate-700 text-left">
           <span>📋 รายละเอียดสั่งงาน</span><span className="text-slate-400 text-xs">{open ? "▾" : "▸"}</span>
         </button>
-        {editable && <button type="button" onClick={() => setEditOpen(true)} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ แก้ไข</button>}
+        {editable && <button type="button" onClick={() => setEditOpen(true)} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ แก้ไขทั้งหมด</button>}
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-slate-100">
           {loading ? <div className="text-xs text-slate-400 py-3 text-center">กำลังโหลด…</div>
-          : empty || !spec ? <div className="text-xs text-slate-300 py-3 text-center">ยังไม่มีรายละเอียดสั่งงาน{editable ? " — กด ✎ แก้ไข เพื่อเพิ่ม" : ""}</div>
+          : empty || !spec ? <div className="text-xs text-slate-300 py-3 text-center">ยังไม่มีรายละเอียดสั่งงาน{editable ? " — กด ✎ แก้ไขทั้งหมด เพื่อเพิ่ม" : ""}</div>
           : (
             <div className="space-y-2.5">
               {spec.parent && (
@@ -73,8 +146,13 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
                   </div>
                 </div>
               )}
-              {shared.length > 0 && <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>{shared.map((f, i) => <Row key={`m${i}`} f={f} bomSkus={bomSkus} onEdit={editable ? () => setEditOpen(true) : undefined} />)}</div>}
-              {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} bomSkus={bomSkus} onEdit={editable ? () => setEditOpen(true) : undefined} />)}</div>}
+              {(spec.model_attrs.length > 0 || spec.legacy.length > 0) && (
+                <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>
+                  {spec.model_attrs.map((f) => specRow(f, "model"))}
+                  {spec.legacy.map((f) => specRow(f, "legacy"))}
+                </div>
+              )}
+              {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f) => specRow(f, "sku"))}</div>}
               {(spec.bom_materials?.length ?? 0) > 0 && (
                 <div className="pt-1 border-t border-slate-50">
                   <div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ (จาก BOM{spec.bom_version ? ` ${spec.bom_version}` : ""})</div>
@@ -90,9 +168,15 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
                 <div className="group pt-1 border-t border-slate-50">
                   <div className="flex items-center gap-1 mb-0.5">
                     <span className="text-[11px] font-semibold text-slate-500">วิธีทำ / หมายเหตุ</span>
-                    {editable && <button type="button" onClick={() => setEditOpen(true)} title="แก้ไข" className="h-5 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100">✎</button>}
+                    {editable && !notesEditing && <button type="button" onClick={() => beginEdit("notes", "notes")} title="แก้ไข" className="h-5 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100">✎</button>}
                   </div>
-                  <p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent?.work_instruction_notes || <span className="text-slate-300">—</span>}</p>
+                  {notesEditing ? (
+                    <div className="flex gap-2 items-start">
+                      <div className="flex-1">{editInput("notes", "notes")}</div>
+                      <button type="button" onClick={saveField} disabled={savingField} className="shrink-0 h-7 w-7 flex items-center justify-center text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-40">✓</button>
+                      <button type="button" onClick={() => setEditField(null)} className="shrink-0 h-7 w-7 flex items-center justify-center text-slate-400 hover:bg-slate-100 rounded">✕</button>
+                    </div>
+                  ) : <p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent?.work_instruction_notes || <span className="text-slate-300">—</span>}</p>}
                 </div>
               )}
             </div>
@@ -105,7 +189,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
           )}
         </div>
       )}
-      {editOpen && <WorkInstructionEditor sku={sku} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); loadSpec(); }} />}
+      {editOpen && <WorkInstructionEditor sku={sku} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); setEditData(null); loadSpec(); }} />}
     </div>
   );
 }
