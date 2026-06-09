@@ -13,7 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type SpecField = { key: string; label: string; value: string; order: number };
+export type SpecField = { key: string; label: string; value: string; order: number; sku_code?: string | null };
 export type ProductSpec = {
   parent: { code: string | null; name: string | null; family: string | null; size_summary: string | null; work_instruction_notes: string | null; image_url: string | null } | null;
   legacy: SpecField[];        // ช่องเดิมบน Parent (materials/zipper/...)
@@ -61,8 +61,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ดึง definitions + options ที่เกี่ยวข้อง
   const defIds = [...new Set(allVals.map((v) => v.definition_id).filter(Boolean) as string[])];
   const optIds = [...new Set(allVals.flatMap((v) => [v.option_id as string, ...((Array.isArray(v.option_ids) ? v.option_ids : []) as string[])]).filter(Boolean))];
-  const defMap = new Map<string, { label: string; order: number }>();
-  if (defIds.length) { const { data } = await admin.from("product_attribute_definitions").select("id, label, display_order").in("id", defIds); for (const d of (data ?? []) as Record<string, unknown>[]) defMap.set(String(d.id), { label: str(d.label), order: Number(d.display_order) || 0 }); }
+  const defMap = new Map<string, { label: string; order: number; external: string | null }>();
+  if (defIds.length) { const { data } = await admin.from("product_attribute_definitions").select("id, label, display_order, external_table").in("id", defIds); for (const d of (data ?? []) as Record<string, unknown>[]) defMap.set(String(d.id), { label: str(d.label), order: Number(d.display_order) || 0, external: (d.external_table as string) ?? null }); }
   const optMap = new Map<string, string>();
   if (optIds.length) { const { data } = await admin.from("product_attribute_options").select("id, label").in("id", optIds); for (const o of (data ?? []) as Record<string, unknown>[]) optMap.set(String(o.id), str(o.label)); }
 
@@ -80,8 +80,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const v of allVals) {
     const def = defMap.get(String(v.definition_id)); if (!def) continue;
     const val = resolve(v); if (!val) continue;
-    const field: SpecField = { key: String(v.definition_id), label: def.label, value: val, order: def.order };
+    const isSku = def.external === "skus_v2";
+    const field: SpecField = { key: String(v.definition_id), label: def.label, value: val, order: def.order, sku_code: isSku ? val : null };
     (v._scope === "model" ? model_attrs : sku_attrs).push(field);
+  }
+  // ฟิลด์อ้างวัตถุดิบ: แปลงรหัส → ชื่อ SKU จริง
+  const refCodes = [...new Set([...model_attrs, ...sku_attrs].filter((f) => f.sku_code).map((f) => f.sku_code as string))];
+  if (refCodes.length) {
+    const { data } = await admin.from("skus_v2").select("code, attribute_values").in("code", refCodes);
+    const nameMap = new Map<string, string>();
+    for (const s of (data ?? []) as Record<string, unknown>[]) { const dn = str((s.attribute_values as Record<string, unknown>)?.display_name).replace(/^\[[^\]]*\]\s*/, ""); nameMap.set(String(s.code), dn || String(s.code)); }
+    for (const f of [...model_attrs, ...sku_attrs]) if (f.sku_code) f.value = nameMap.get(f.sku_code) ?? f.sku_code;
   }
   model_attrs.sort((a, b) => a.order - b.order);
   sku_attrs.sort((a, b) => a.order - b.order);

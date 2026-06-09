@@ -11,19 +11,23 @@ import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
+import { ComponentPicker } from "@/app/master/bom/line-editor";
 import type { ProductSpec, SpecField } from "@/app/api/product-spec/route";
 import type { AttrDef, AttrVal } from "@/app/api/product-attributes/route";
 
-function Row({ f }: { f: SpecField }) {
+function Row({ f, bomSkus }: { f: SpecField; bomSkus?: string[] }) {
+  const inBom = f.sku_code && bomSkus ? bomSkus.includes(f.sku_code) : null;
   return (
-    <div className="flex gap-2 text-xs py-0.5">
+    <div className="flex gap-2 text-xs py-0.5 items-center">
       <span className="text-slate-400 w-24 shrink-0">{f.label}</span>
       <span className="text-slate-700 flex-1">{f.value}</span>
+      {inBom === true && <span className="text-[10px] text-emerald-600 shrink-0">✓ อยู่ใน BOM</span>}
+      {inBom === false && <span className="text-[10px] text-amber-600 shrink-0">✗ ยังไม่อยู่</span>}
     </div>
   );
 }
 
-export function WorkInstructionPanel({ sku, editable = false, className = "" }: { sku: string | null | undefined; editable?: boolean; className?: string }) {
+export function WorkInstructionPanel({ sku, editable = false, bomSkus, className = "" }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; className?: string }) {
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
@@ -63,8 +67,8 @@ export function WorkInstructionPanel({ sku, editable = false, className = "" }: 
                   </div>
                 </div>
               )}
-              {shared.length > 0 && <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>{shared.map((f, i) => <Row key={`m${i}`} f={f} />)}</div>}
-              {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} />)}</div>}
+              {shared.length > 0 && <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>{shared.map((f, i) => <Row key={`m${i}`} f={f} bomSkus={bomSkus} />)}</div>}
+              {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} bomSkus={bomSkus} />)}</div>}
               {spec.parent?.work_instruction_notes && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วิธีทำ / หมายเหตุ</div><p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent.work_instruction_notes}</p></div>}
             </div>
           )}
@@ -81,8 +85,9 @@ type EditData = {
   parent: { id: string; name: string | null; product_family: string | null; size_summary: string; work_instruction_notes: string } | null;
   families: string[]; definitions: AttrDef[];
   model_values: Record<string, AttrVal>; sku_values: Record<string, AttrVal>;
-  legacy: Record<string, string>; error?: string;
+  legacy: Record<string, string>; sku_labels: Record<string, string>; error?: string;
 };
+const isSkuRef = (d: AttrDef) => d.external_table === "skus_v2";
 const LEGACY_LABELS: Record<string, string> = { materials: "วัตถุดิบ", lining: "ซับใน", zipper: "ซิป", strap: "สาย/สายสะพาย", thread: "ด้าย", spares: "อะไหล่", logo: "โลโก้/พิมพ์" };
 
 function initVal(def: AttrDef, v: AttrVal | undefined): unknown {
@@ -98,6 +103,7 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
   const [data, setData] = useState<EditData | null>(null);
   const [family, setFamily] = useState("");
   const [vals, setVals] = useState<Record<string, unknown>>({});   // key = scope+":"+defId
+  const [skuNames, setSkuNames] = useState<Record<string, string>>({});   // key → ชื่อ SKU ที่เลือก (โชว์ในตัวเลือก)
   const [legacy, setLegacy] = useState<Record<string, string>>({});
   const [size, setSize] = useState(""); const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -107,9 +113,14 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
       if (d.error) { toast.error(d.error); return; }
       setData(d);
       setFamily(d.parent?.product_family || d.families[0] || "");
-      const init: Record<string, unknown> = {};
-      for (const def of d.definitions) init[`${def.scope}:${def.id}`] = initVal(def, (def.scope === "model" ? d.model_values : d.sku_values)[def.id]);
-      setVals(init);
+      const init: Record<string, unknown> = {}; const names: Record<string, string> = {};
+      for (const def of d.definitions) {
+        const k = `${def.scope}:${def.id}`;
+        const cur = (def.scope === "model" ? d.model_values : d.sku_values)[def.id];
+        init[k] = isSkuRef(def) ? (cur?.text_value ?? "") : initVal(def, cur);
+        if (isSkuRef(def) && cur?.text_value) names[k] = (d.sku_labels?.[cur.text_value] ?? cur.text_value).replace(/^\[[^\]]*\]\s*/, "");
+      }
+      setVals(init); setSkuNames(names);
       setLegacy({ ...d.legacy }); setSize(d.parent?.size_summary ?? ""); setNotes(d.parent?.work_instruction_notes ?? "");
     }).catch(() => toast.error("โหลดไม่สำเร็จ"));
   }, [sku]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -120,6 +131,8 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
   const renderInput = (def: AttrDef, scope: string) => {
     const k = `${scope}:${def.id}`; const v = vals[k];
     const cls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
+    if (isSkuRef(def)) return <ComponentPicker sku={String(v ?? "")} name={skuNames[k] ?? ""} placeholder="— เลือกวัตถุดิบ —"
+      onPick={(c) => { setV(k, c.code); setSkuNames((s) => ({ ...s, [k]: c.name })); }} />;
     if (def.input_type === "many2one") return <select value={String(v ?? "")} onChange={(e) => setV(k, e.target.value)} className={cls}><option value="">— ไม่ระบุ —</option>{def.options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>;
     if (def.input_type === "multiselect") { const arr = (v as string[]) ?? []; return <div className="flex flex-wrap gap-1.5 pt-1">{def.options.map((o) => { const on = arr.includes(o.id); return <button type="button" key={o.id} onClick={() => setV(k, on ? arr.filter((x) => x !== o.id) : [...arr, o.id])} className={`text-xs px-2 py-1 rounded-full border ${on ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{o.label}</button>; })}{def.options.length === 0 && <span className="text-[11px] text-slate-300">ยังไม่มีตัวเลือก</span>}</div>; }
     if (def.input_type === "number") return <input type="number" value={String(v ?? "")} onChange={(e) => setV(k, e.target.value)} className={cls} />;
@@ -130,8 +143,8 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
   const save = async () => {
     if (!data) return;
     setSaving(true);
-    const model = defsOf("model").map((d) => ({ definition_id: d.id, input_type: d.input_type, value: vals[`model:${d.id}`] }));
-    const sku_vals = defsOf("sku").map((d) => ({ definition_id: d.id, input_type: d.input_type, value: vals[`sku:${d.id}`] }));
+    const model = defsOf("model").map((d) => ({ definition_id: d.id, input_type: isSkuRef(d) ? "text" : d.input_type, value: vals[`model:${d.id}`] }));
+    const sku_vals = defsOf("sku").map((d) => ({ definition_id: d.id, input_type: isSkuRef(d) ? "text" : d.input_type, value: vals[`sku:${d.id}`] }));
     try {
       const res = await apiFetch("/api/product-attributes", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sku, family, size_summary: size, work_instruction_notes: notes, legacy, model, sku_vals }) });

@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type AttrDef = { id: string; product_family: string | null; key: string; label: string; scope: string; input_type: string; allow_custom_value: boolean; display_order: number; options: { id: string; label: string }[] };
+export type AttrDef = { id: string; product_family: string | null; key: string; label: string; scope: string; input_type: string; external_table: string | null; allow_custom_value: boolean; display_order: number; options: { id: string; label: string }[] };
 export type AttrVal = { option_id: string | null; option_ids: string[]; text_value: string | null; number_value: number | null; boolean_value: boolean | null };
 export const LEGACY_COLS = ["materials", "lining", "zipper", "strap", "thread", "spares", "logo"] as const;
 
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? await admin.from("parent_skus_v2").select("id, code, sku_name, name_th, product_family, size_summary, work_instruction_notes, materials, lining, zipper, strap, thread, spares, logo").eq("id", skuRow.parent_sku_id).maybeSingle()
     : { data: null };
 
-  const { data: defsRaw } = await admin.from("product_attribute_definitions").select("id, product_family, key, label, scope, input_type, allow_custom_value, display_order").eq("is_active", true).order("display_order", { ascending: true });
+  const { data: defsRaw } = await admin.from("product_attribute_definitions").select("id, product_family, key, label, scope, input_type, external_table, allow_custom_value, display_order").eq("is_active", true).order("display_order", { ascending: true });
   const defs = (defsRaw ?? []) as Record<string, unknown>[];
   const defIds = defs.map((d) => String(d.id));
   const optByDef = new Map<string, { id: string; label: string }[]>();
@@ -41,13 +41,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: opts } = await admin.from("product_attribute_options").select("id, definition_id, label, display_order").in("definition_id", defIds).eq("is_active", true).order("display_order", { ascending: true });
     for (const o of (opts ?? []) as Record<string, unknown>[]) { const k = String(o.definition_id); (optByDef.get(k) ?? optByDef.set(k, []).get(k)!).push({ id: String(o.id), label: str(o.label) }); }
   }
-  const definitions: AttrDef[] = defs.map((d) => ({ id: String(d.id), product_family: (d.product_family as string) ?? null, key: str(d.key), label: str(d.label), scope: str(d.scope), input_type: str(d.input_type), allow_custom_value: !!d.allow_custom_value, display_order: Number(d.display_order) || 0, options: optByDef.get(String(d.id)) ?? [] }));
+  const definitions: AttrDef[] = defs.map((d) => ({ id: String(d.id), product_family: (d.product_family as string) ?? null, key: str(d.key), label: str(d.label), scope: str(d.scope), input_type: str(d.input_type), external_table: (d.external_table as string) ?? null, allow_custom_value: !!d.allow_custom_value, display_order: Number(d.display_order) || 0, options: optByDef.get(String(d.id)) ?? [] }));
+  const skuRefDefIds = new Set(definitions.filter((d) => d.external_table === "skus_v2").map((d) => d.id));
 
   const valOf = (r: Record<string, unknown>): AttrVal => ({ option_id: (r.option_id as string) ?? null, option_ids: Array.isArray(r.option_ids) ? (r.option_ids as string[]) : [], text_value: (r.text_value as string) ?? null, number_value: r.number_value == null ? null : Number(r.number_value), boolean_value: r.boolean_value == null ? null : !!r.boolean_value });
   const model_values: Record<string, AttrVal> = {};
   const sku_values: Record<string, AttrVal> = {};
   if (parent) { const { data } = await admin.from("product_model_attribute_values").select("*").eq("product_model_id", (parent as { id: string }).id); for (const r of (data ?? []) as Record<string, unknown>[]) model_values[String(r.definition_id)] = valOf(r); }
   { const { data } = await admin.from("product_sku_attribute_values").select("*").eq("product_sku_id", skuRow.id); for (const r of (data ?? []) as Record<string, unknown>[]) sku_values[String(r.definition_id)] = valOf(r); }
+
+  // ป้ายชื่อ SKU ปัจจุบันของฟิลด์อ้างวัตถุดิบ (code → "[code] ชื่อ")
+  const sku_labels: Record<string, string> = {};
+  const codes = [...new Set([...Object.entries(model_values), ...Object.entries(sku_values)]
+    .filter(([defId, v]) => skuRefDefIds.has(defId) && v.text_value).map(([, v]) => v.text_value as string))];
+  if (codes.length) { const { data } = await admin.from("skus_v2").select("code, attribute_values").in("code", codes); for (const s of (data ?? []) as Record<string, unknown>[]) sku_labels[String(s.code)] = ((s.attribute_values as Record<string, unknown>)?.display_name as string) ?? String(s.code); }
 
   const families = [...new Set(definitions.map((d) => d.product_family).filter(Boolean) as string[])];
   const legacy: Record<string, string> = {};
@@ -56,7 +63,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     sku: { id: skuRow.id, code: skuRow.code },
     parent: parent ? { id: (parent as { id: string }).id, name: ((parent as Record<string, unknown>).sku_name as string) ?? ((parent as Record<string, unknown>).name_th as string) ?? null, product_family: (parent as Record<string, unknown>).product_family as string ?? null, size_summary: str((parent as Record<string, unknown>).size_summary), work_instruction_notes: str((parent as Record<string, unknown>).work_instruction_notes) } : null,
-    families, definitions, model_values, sku_values, legacy, error: null,
+    families, definitions, model_values, sku_values, legacy, sku_labels, error: null,
   });
 }
 
