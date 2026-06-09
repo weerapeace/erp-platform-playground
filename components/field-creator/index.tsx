@@ -87,6 +87,9 @@ export function FieldCreatorModal({
   const [o2mDisplayMode, setO2mDisplayMode] = useState<"table" | "tags" | "cards">("table");
   const [o2mSubFields, setO2mSubFields] = useState<string[]>([]);
   const [o2mImageField, setO2mImageField] = useState("");
+  // one2many: โหมด "เชื่อมด้วยรหัส/ข้อความ" (ตารางลูกอ้างถึงเราด้วยรหัส ไม่ใช่ลิงก์ id)
+  const [o2mTextMode, setO2mTextMode] = useState(false);
+  const [parentMatchField, setParentMatchField] = useState("code");
   const [isVisible, setIsVisible]       = useState(true);
   const [isFilterable, setIsFilterable] = useState(false);
   const [isSearchable, setIsSearchable] = useState(false);
@@ -258,6 +261,7 @@ export function FieldCreatorModal({
           target_table: uiType === "related" ? vf?.targetTable : (isRel ? targetTable : undefined),
           target_label_field: isRel ? targetLabelField : undefined,
           target_fk_column: uiType === "one2many" ? targetFkColumn.trim() : undefined,
+          parent_match_field: uiType === "one2many" ? (o2mTextMode ? (parentMatchField || "code") : "id") : undefined,
           // one2many: รูปแบบการแสดงรายการลูก
           list_display_mode: uiType === "one2many" ? o2mDisplayMode : undefined,
           list_image_field:  uiType === "one2many" ? (o2mImageField || null) : undefined,
@@ -387,13 +391,26 @@ export function FieldCreatorModal({
             const imgCols = targetColumns.filter(c => /image|cover|photo|r2|รูป/i.test(c.column));
             const subCandidates = targetColumns.filter(c => ![targetLabelField, targetFkColumn, "id", "created_at", "updated_at"].includes(c.column));
             const toggleSub = (col: string) => setO2mSubFields(p => p.includes(col) ? p.filter(x => x !== col) : [...p, col]);
+            const moduleTables = tables.filter(t => t.is_module);
             return (
               <div className="space-y-3 p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg">
+                {/* โหมดเชื่อมด้วยรหัส/ข้อความ */}
+                <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                  <input type="checkbox" checked={o2mTextMode}
+                    onChange={e => { setO2mTextMode(e.target.checked); setTargetTable(""); setTargetFkColumn(""); }} />
+                  🔤 เชื่อมด้วยรหัส/ข้อความ <span className="text-slate-400">(ตารางลูกอ้างถึงเราด้วยรหัส ไม่ใช่ลิงก์ id — เช่น BOM)</span>
+                </label>
+
                 {/* ตารางลูก */}
                 <div>
                   <label className="text-xs font-medium text-slate-600">รายการลูกมาจากตารางไหน *</label>
-                  {distinctTables.length === 0 ? (
-                    <p className="text-[11px] text-amber-600 mt-1">— ยังไม่มีตารางไหน &quot;ชี้กลับมา&quot; หาโมดูลนี้ — ต้องมีช่อง FK ในตารางลูกก่อน (สร้างความสัมพันธ์ที่ตารางลูก)</p>
+                  {o2mTextMode ? (
+                    <select value={targetTable} onChange={e => setTargetTable(e.target.value)} className={selCls}>
+                      <option value="">— เลือกตารางลูก —</option>
+                      {moduleTables.map(t => <option key={t.table_name} value={t.table_name}>{t.table_name} ⭐</option>)}
+                    </select>
+                  ) : distinctTables.length === 0 ? (
+                    <p className="text-[11px] text-amber-600 mt-1">— ยังไม่มีตารางที่ &quot;ลิงก์ด้วย id&quot; ชี้กลับมา — ถ้าตารางลูกอ้างถึงด้วยรหัส ให้ติ๊ก &quot;เชื่อมด้วยรหัส/ข้อความ&quot; ด้านบน</p>
                   ) : (
                     <select value={targetTable} onChange={e => setTargetTable(e.target.value)} className={selCls}>
                       <option value="">— เลือกตารางลูก —</option>
@@ -402,11 +419,28 @@ export function FieldCreatorModal({
                       ))}
                     </select>
                   )}
-                  <p className="text-[11px] text-slate-400 mt-0.5">โชว์เฉพาะตารางที่มีช่องชี้กลับมาหาโมดูลนี้ (ระบบหาให้อัตโนมัติ)</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">{o2mTextMode ? "เลือกตารางลูกเอง แล้วระบุช่องรหัส + ฟิลด์ที่จับคู่ด้านล่าง" : "โชว์เฉพาะตารางที่ลิงก์ด้วย id ชี้กลับมา (ระบบหาให้อัตโนมัติ)"}</p>
                 </div>
 
-                {/* FK — auto ถ้าตัวเดียว / เลือกถ้าหลายตัว */}
-                {targetTable && (fks.length > 1 ? (
+                {/* การเชื่อม */}
+                {targetTable && (o2mTextMode ? (
+                  <>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">ช่องในตารางลูกที่เก็บรหัส *</label>
+                      <select value={targetFkColumn} onChange={e => setTargetFkColumn(e.target.value)} className={selCls}>
+                        <option value="">— เลือกช่อง —</option>
+                        {targetColumns.map(c => <option key={c.column} value={c.column}>{c.column} ({c.type})</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-600">จับคู่กับฟิลด์ไหนของโมดูลนี้ *</label>
+                      <select value={parentMatchField} onChange={e => setParentMatchField(e.target.value)} className={selCls}>
+                        {advFields.map(f => <option key={f.value} value={f.value}>{f.label} ({f.value})</option>)}
+                      </select>
+                      <p className="text-[11px] text-slate-400 mt-0.5">เช่น จับ <code className="font-mono bg-white px-1 rounded">{targetFkColumn || "component_sku"}</code> (ตารางลูก) = <code className="font-mono bg-white px-1 rounded">{parentMatchField}</code> (โมดูลนี้)</p>
+                    </div>
+                  </>
+                ) : (fks.length > 1 ? (
                   <div>
                     <label className="text-xs font-medium text-slate-600">เชื่อมผ่านช่องไหน (ตารางนี้ชี้กลับมาหลายช่อง) *</label>
                     <select value={targetFkColumn} onChange={e => setTargetFkColumn(e.target.value)} className={selCls}>
@@ -416,7 +450,7 @@ export function FieldCreatorModal({
                   </div>
                 ) : (
                   <div className="text-[11px] text-emerald-700">🔗 เชื่อมผ่านช่อง <code className="font-mono bg-white px-1 rounded">{targetFkColumn || "—"}</code> (เติมให้อัตโนมัติ)</div>
-                ))}
+                )))}
 
                 {/* ชื่อแสดง — dropdown */}
                 {targetTable && targetColumns.length > 0 && (

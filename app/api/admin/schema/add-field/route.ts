@@ -27,6 +27,7 @@ type Body = {
   target_table?: string;
   target_label_field?: string;
   target_fk_column?: string;       // สำหรับ one2many — column บน target ที่ชี้กลับมา
+  parent_match_field?: string;     // one2many: ฟิลด์ของพ่อที่ใช้จับคู่ (default 'id' = ลิงก์ id; เช่น 'code' = เชื่อมด้วยรหัส)
   // one2many: รูปแบบการแสดงรายการลูก
   list_display_mode?: string;      // 'table' | 'tags' | 'cards'
   list_image_field?: string | null;  // คอลัมน์รูปปก (R2 key)
@@ -129,6 +130,7 @@ export async function POST(request: NextRequest) {
       kind: "one2many",
       target_table: b.target_table, target_module_key: targetModuleKey,
       target_fk_column: b.target_fk_column,
+      parent_match_field: (b.parent_match_field && /^[a-z_][a-z0-9_]*$/i.test(b.parent_match_field)) ? b.parent_match_field : "id",
       target_label_field: labelField,
       list_title_field: labelField,
       list_display_mode: mode,

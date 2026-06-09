@@ -26,6 +26,7 @@ type RelConfig = {
   list_title_field?: string;          // column ชื่อหลัก (default = target_label_field)
   list_sub_fields?: string[];         // columns ข้อมูลย่อย แสดงต่อท้าย คั่นด้วย ·
   list_display_mode?: string;         // 'table' | 'tags' | 'cards' — รูปแบบแสดงรายการลูก
+  parent_match_field?: string;        // ฟิลด์ของพ่อที่ใช้จับคู่ (default 'id'; เช่น 'code' = เชื่อมด้วยรหัส)
 };
 
 type Opt = { id: string; label: string; group_id?: string | null; sort_order?: number };
@@ -415,11 +416,18 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
   );
 }
 
-export function RelationOne2Many({ config, recordId, title, fieldId, configurable, parentCode }: { config: RelConfig; recordId?: string | null; title?: string; fieldId?: string; configurable?: boolean; parentCode?: string }) {
+export function RelationOne2Many({ config, recordId, title, fieldId, configurable, parentCode, parentValues }: { config: RelConfig; recordId?: string | null; title?: string; fieldId?: string; configurable?: boolean; parentCode?: string; parentValues?: Record<string, unknown> }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const fk = config.target_fk_column ?? "";
   const titleField = config.list_title_field ?? config.target_label_field ?? "name";
   const imageField = config.list_image_field;
+  // จับคู่ด้วยฟิลด์ไหนของพ่อ: 'id' = ลิงก์ id ปกติ (ใช้ recordId) · อื่นๆ เช่น 'code' = เชื่อมด้วยรหัส (ใช้ค่าจาก parentValues)
+  const matchField = config.parent_match_field || "id";
+  const matchValue = matchField === "id" ? recordId : ((parentValues?.[matchField] as string | number | null | undefined) ?? null);
+  // เงื่อนไข filter สำหรับจับลูก: id → eq (uuid) · รหัส/ข้อความ → in (ตรงเป๊ะ)
+  const matchCond = matchField === "id"
+    ? { type: "text", value: String(matchValue ?? "") }
+    : { type: "select", selected: [String(matchValue ?? "")] };
   // คอลัมน์ที่โชว์ (list_sub_fields) — เก็บเป็น state เพื่อให้ปุ่ม "เลือกคอลัมน์" อัปเดตทันทีไม่ต้อง refresh
   const [subFields, setSubFields] = useState<string[]>(config.list_sub_fields ?? []);
   useEffect(() => { setSubFields(config.list_sub_fields ?? []); }, [config.list_sub_fields]);
@@ -437,19 +445,20 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     setSort((p) => (p && p.col === col ? { col, dir: p.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" }));
   const sortArrow = (col: string) => (sort?.col === col ? (sort.dir === "asc" ? " ▲" : " ▼") : "");
 
-  // ดึงทีละหน้า (filter fk ที่ server)
+  // ดึงทีละหน้า (filter fk ที่ server) — จับคู่ด้วย id (ilike/eq) หรือรหัส/ข้อความ (select = ตรงเป๊ะ)
   const fetchPage = useCallback(async (offset: number) => {
-    const flt = encodeURIComponent(JSON.stringify({ [fk]: { type: "text", value: recordId } }));
+    const flt = encodeURIComponent(JSON.stringify({ [fk]: matchCond }));
     const sortQ = sort ? `&sort_by=${encodeURIComponent(sort.col)}&sort_dir=${sort.dir}` : "";
     const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=${PAGE}&offset=${offset}&filters=${flt}${sortQ}`).then((r) => r.json());
     return { data: (j.data ?? j.rows ?? []) as Record<string, unknown>[], total: Number(j.total ?? 0) };
-  }, [moduleKey, fk, recordId, sort]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleKey, fk, matchField, matchValue, sort]);
 
   const load = useCallback(() => {
-    if (!recordId || !fk) return;
+    if (matchValue == null || matchValue === "" || !fk) return;
     setLoaded(false);
     fetchPage(0).then(({ data, total }) => { setRows(data); setTotal(total); setLoaded(true); }).catch(() => setLoaded(true));
-  }, [recordId, fk, fetchPage]);
+  }, [matchValue, fk, fetchPage]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -504,14 +513,14 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     } catch (e) { alert("บันทึกไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); load(); }
   };
   const fillColumn = async (field: string) => {
-    if (!recordId || !fkCol) return;
-    const raw = window.prompt(`เติมค่า "${labelOf(field)}" ให้ SKU ลูกทุกตัวของใบนี้:`, "");
+    if (matchValue == null || !fkCol) return;
+    const raw = window.prompt(`เติมค่า "${labelOf(field)}" ให้รายการลูกทุกตัวของใบนี้:`, "");
     if (raw == null) return;
     const val = parseByType(field, raw);
     try {
       const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ changes: { [field]: val }, filters: { [fkCol]: { type: "text", value: recordId } } }),
+        body: JSON.stringify({ changes: { [field]: val }, filters: { [fkCol]: matchCond } }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) { alert("เติมไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
@@ -605,9 +614,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   // ไล่เลข code อัตโนมัติ = {parentCode}-{NN} (หาเลขถัดไปจากลูกที่มีอยู่ของ parent นี้)
   const genNextCode = async () => {
-    if (!parentCode || !recordId || !fk) return;
+    if (!parentCode || matchValue == null || !fk) return;
     try {
-      const flt = encodeURIComponent(JSON.stringify({ [fk]: { type: "text", value: recordId } }));
+      const flt = encodeURIComponent(JSON.stringify({ [fk]: matchCond }));
       const j = await apiFetch(`/api/master-v2/${moduleKey}?limit=500&offset=0&filters=${flt}`).then((r) => r.json());
       const childRows = (j.data ?? j.rows ?? []) as Record<string, unknown>[];
       const esc = parentCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -623,10 +632,10 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
 
   const submitNewRow = async () => {
     const code = (newRow[titleField] ?? "").trim();
-    if (!code || !recordId || !fk) return;
+    if (!code || matchValue == null || !fk) return;
     setAdding(true);
     try {
-      const body: Record<string, unknown> = { [fk]: recordId, [titleField]: code, is_active: true };
+      const body: Record<string, unknown> = { [fk]: matchValue, [titleField]: code, is_active: true };
       if (imageField && newImg) body[imageField] = newImg;
       subFields.forEach((f) => {
         if (!isEditableCol(f)) return;
@@ -650,7 +659,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   ) : null;
   const createModal = creating ? (
     <RelationPeekModal moduleKey={moduleKey} recordId={null}
-      createDefaults={{ [fk]: recordId, is_active: true }}
+      createDefaults={{ [fk]: matchValue, is_active: true }}
       createTitle={title ? `เพิ่ม ${title}` : "เพิ่มรายการใหม่"}
       onChanged={load} onClose={() => setCreating(false)} />
   ) : null;
@@ -670,7 +679,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const rich = displayMode === "tags" ? false : !!(imageField || subFields.length > 0);
   const showInlineAdd = canAdd && rich;   // แถวเพิ่มแบบ inline (เฉพาะโหมดตาราง)
 
-  if (!recordId) return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>{pickerModal}</>;
+  if (matchValue == null || matchValue === "") return <>{header}<div className="text-xs text-slate-400 italic">บันทึกระเบียนก่อน จึงเห็นรายการที่เกี่ยวข้อง</div>{pickerModal}</>;
   if (!loaded) return <>{header}<div className="text-xs text-slate-400">กำลังโหลด…</div>{pickerModal}</>;
 
   // โหมด tag-ชิป — แสดงแต่ละลูกเป็นชิป (เพิ่มผ่านปุ่ม "+ เพิ่มแบบเต็ม")
