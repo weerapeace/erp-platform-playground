@@ -7,24 +7,50 @@
  * บังคับแนบ "ใบรับของ + บิล" (รูป/PDF) ทุกครั้งก่อนบันทึก
  * รับไม่ครบ (แท็บ A) จะเด้งถามว่าจบงาน/รอของ · รับเกินได้
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
-import { useBackdropDismiss } from "@/components/modal";
+import { useBackdropDismiss, ERPModal } from "@/components/modal";
+import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
 import { FileInput } from "@/components/file-input";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
 type Line = { id: string; item_name: string; qty: number; uom: string; qty_received: number };
 type Input = { recv: string; def: string };
 type PayloadLine = { po_line_id: string; qty_received: number; qty_defective: number; case_type: string };
-// แท็บ B: บรรทัดรอเข้า + ข้อมูล PO ต้นทาง
-type PendItem = { id: string; po_id: string; po_no: string; seller_name: string; item_name: string; uom: string; remaining: number; eta: string };
+// แท็บ B: บรรทัดรอเข้า (ข้อมูลครบจาก /api/purchasing/receivable — รูป/รหัส/วันสั่ง/วันคาด/วันเหลือ)
+type PendItem = {
+  id: string; po_id: string; po_no: string; seller_name: string;
+  item_sku_id: string | null; item_name: string; code: string; image_url: string | null;
+  uom: string; remaining: number; currency: string;
+  order_date: string | null; expected_date: string | null;
+  expected_source: "po" | "lead" | null; lead_time_days: number | null;
+  days_remaining: number | null;
+};
+type PendSort = "eta" | "order" | "name";
+type PendGroup = "none" | "shop" | "eta" | "po";
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
+// ตัด [code] นำหน้าชื่อสินค้าออก (รหัสโชว์เป็น chip แยกอยู่แล้ว)
+const stripCode = (name: string) => name?.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
+
+// ป้าย "วันที่เหลือ" จนถึงวันคาดการณ์ของเข้า → สี + ข้อความ
+function etaBadge(days: number | null): { text: string; cls: string } {
+  if (days == null) return { text: "ยังไม่ระบุ", cls: "bg-slate-100 text-slate-500 border-slate-200" };
+  if (days < 0) return { text: `เลยกำหนด ${Math.abs(days)} วัน`, cls: "bg-red-50 text-red-700 border-red-200" };
+  if (days === 0) return { text: "ถึงกำหนดวันนี้", cls: "bg-orange-50 text-orange-700 border-orange-200" };
+  if (days <= 3) return { text: `เหลือ ${days} วัน`, cls: "bg-orange-50 text-orange-700 border-orange-200" };
+  return { text: `เหลือ ${days} วัน`, cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+}
+
+const PEND_VIEW_KEY = "recv_pend_view", PEND_COLS_KEY = "recv_pend_cols", PEND_SORT_KEY = "recv_pend_sort", PEND_GROUP_KEY = "recv_pend_group";
+const COL_OPTIONS = [3, 4, 5, 6, 8, 10];
 
 export default function ReceiveGoodsPage() {
   const { user } = useAuth();
+  const toast = useToast();
   const [tab, setTab] = useState<"po" | "pending">("po");
   const [pos, setPos] = useState<PO[]>([]);
   const [poId, setPoId] = useState("");
@@ -46,6 +72,26 @@ export default function ReceiveGoodsPage() {
   const [pendInputs, setPendInputs] = useState<Record<string, Input>>({});
   const [pendQ, setPendQ] = useState("");
   const [pendLoading, setPendLoading] = useState(false);
+  const [pendView, setPendView] = useState<"card" | "table">("card");
+  const [pendCols, setPendCols] = useState(6);
+  const [pendSort, setPendSort] = useState<PendSort>("eta");
+  const [pendGroup, setPendGroup] = useState<PendGroup>("none");
+  const [etaEdit, setEtaEdit] = useState<{ po_id: string; po_no: string; seller_name: string; value: string } | null>(null);
+  const [etaSaving, setEtaSaving] = useState(false);
+  const [qtyEdit, setQtyEdit] = useState<PendItem | null>(null);   // คลิกการ์ด → popup กรอกจำนวน
+
+  // โหลดค่า view/cols/sort/group ที่จำไว้
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const v = localStorage.getItem(PEND_VIEW_KEY); if (v === "card" || v === "table") setPendView(v);
+    const c = Number(localStorage.getItem(PEND_COLS_KEY)); if (COL_OPTIONS.includes(c)) setPendCols(c);
+    const s = localStorage.getItem(PEND_SORT_KEY); if (s === "eta" || s === "order" || s === "name") setPendSort(s as PendSort);
+    const g = localStorage.getItem(PEND_GROUP_KEY); if (g === "none" || g === "shop" || g === "eta" || g === "po") setPendGroup(g as PendGroup);
+  }, []);
+  const changePendView = (v: "card" | "table") => { setPendView(v); localStorage.setItem(PEND_VIEW_KEY, v); };
+  const changePendCols = (n: number) => { setPendCols(n); localStorage.setItem(PEND_COLS_KEY, String(n)); };
+  const changePendSort = (s: PendSort) => { setPendSort(s); localStorage.setItem(PEND_SORT_KEY, s); };
+  const changePendGroup = (g: PendGroup) => { setPendGroup(g); localStorage.setItem(PEND_GROUP_KEY, g); };
 
   useEffect(() => {
     apiFetch("/api/master-v2/purchase-orders-v2?limit=200").then((r) => r.json()).then((j) => {
@@ -75,44 +121,81 @@ export default function ReceiveGoodsPage() {
   const setInput = (id: string, patch: Partial<Input>) => setInputs((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
   const selectedPo = useMemo(() => pos.find((p) => p.id === poId), [pos, poId]);
 
-  // ---- แท็บ B: โหลดบรรทัดที่ยังรับไม่ครบจากทุก PO ----
+  // ---- แท็บ B: โหลดบรรทัดที่ยังรับไม่ครบ (API กลาง — รูป/รหัส/วันคาดครบ) ----
   const loadPending = useCallback(async () => {
     setPendLoading(true); setErr(null);
     try {
-      const poMap = new Map(pos.map((p) => [p.id, p]));
-      const j = await apiFetch(`/api/master-v2/purchase-order-lines-v2?limit=500`).then((r) => r.json());
-      const items: PendItem[] = ((j.data ?? []) as (Line & { po_id: string })[])
-        .filter((l) => poMap.has(l.po_id) && Math.max(0, num(l.qty) - num(l.qty_received)) > 0)
-        .map((l) => {
-          const po = poMap.get(l.po_id)!;
-          return {
-            id: l.id, po_id: l.po_id, po_no: po.po_no, seller_name: po.seller_name,
-            item_name: l.item_name, uom: l.uom, remaining: Math.max(0, num(l.qty) - num(l.qty_received)),
-            eta: String(po.expected_date || po.order_date || ""),
-          };
-        });
-      // sort: ETA (ว่าง = ท้ายสุด) → ชื่อสินค้า
-      items.sort((a, b) => {
-        const ea = a.eta || "9999-12-31", eb = b.eta || "9999-12-31";
-        if (ea !== eb) return ea < eb ? -1 : 1;
-        return a.item_name.localeCompare(b.item_name, "th");
-      });
+      const j = await apiFetch(`/api/purchasing/receivable`).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const items = (j.data ?? []) as PendItem[];
       setPend(items);
       const init: Record<string, Input> = {};
       items.forEach((it) => { init[it.id] = { recv: String(it.remaining), def: "0" }; });
       setPendInputs(init);
     } catch (e) { setErr(String(e)); }
     finally { setPendLoading(false); }
-  }, [pos]);
+  }, []);
 
   useEffect(() => { if (tab === "pending") void loadPending(); }, [tab, loadPending]);
   const setPendInput = (id: string, patch: Partial<Input>) => setPendInputs((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
 
+  // ค้นหา + เรียงลำดับ (วันคาด / วันสั่ง / ชื่อ) — ค่าว่างไปท้ายสุดเสมอ
   const shownPend = useMemo(() => {
     const ql = pendQ.trim().toLowerCase();
-    if (!ql) return pend;
-    return pend.filter((it) => it.item_name.toLowerCase().includes(ql) || it.po_no.toLowerCase().includes(ql) || it.seller_name.toLowerCase().includes(ql));
-  }, [pend, pendQ]);
+    const filtered = !ql ? pend : pend.filter((it) =>
+      it.item_name.toLowerCase().includes(ql) || it.code.toLowerCase().includes(ql) ||
+      it.po_no.toLowerCase().includes(ql) || it.seller_name.toLowerCase().includes(ql));
+    const byName = (a: PendItem, b: PendItem) => a.item_name.localeCompare(b.item_name, "th");
+    const byDate = (ka: keyof PendItem) => (a: PendItem, b: PendItem) => {
+      const va = (a[ka] as string) || "9999-12-31", vb = (b[ka] as string) || "9999-12-31";
+      return va !== vb ? (va < vb ? -1 : 1) : byName(a, b);
+    };
+    const cmp = pendSort === "name" ? byName : pendSort === "order" ? byDate("order_date") : byDate("expected_date");
+    return [...filtered].sort(cmp);
+  }, [pend, pendQ, pendSort]);
+
+  // จัดกลุ่ม (ร้าน / วันคาดเข้า / PO) — คงลำดับ sort ภายในกลุ่ม
+  const groupedPend = useMemo<{ key: string; label: string; items: PendItem[] }[]>(() => {
+    if (pendGroup === "none") return [{ key: "_all", label: "", items: shownPend }];
+    const keyOf = (it: PendItem) =>
+      pendGroup === "shop" ? (it.seller_name || "—")
+      : pendGroup === "po" ? (it.po_no || "—")
+      : (it.expected_date || "");   // eta
+    const labelOf = (it: PendItem) =>
+      pendGroup === "shop" ? `🏪 ${it.seller_name || "—"}`
+      : pendGroup === "po" ? `📋 ${it.po_no || "—"} · ${it.seller_name || "—"}`
+      : (it.expected_date ? `🚚 คาดเข้า ${formatDate(it.expected_date)}` : "🚚 ยังไม่ระบุวันคาด");
+    const m = new Map<string, { key: string; label: string; items: PendItem[] }>();
+    for (const it of shownPend) {
+      const k = keyOf(it);
+      const g = m.get(k); if (g) g.items.push(it);
+      else m.set(k, { key: k, label: labelOf(it), items: [it] });
+    }
+    const groups = [...m.values()];
+    // เรียงหัวกลุ่ม: eta ตามวันที่ (ว่าง=ท้าย), อื่นๆ ตามชื่อ
+    groups.sort((a, b) => pendGroup === "eta"
+      ? ((a.key || "9999-12-31") < (b.key || "9999-12-31") ? -1 : 1)
+      : a.label.localeCompare(b.label, "th"));
+    return groups;
+  }, [shownPend, pendGroup]);
+
+  // บันทึกวันคาดการณ์ของเข้าลงใบ PO (ผ่าน API กลาง — มี audit/guard) → ใช้กับทุกบรรทัดของใบนั้น
+  const saveEta = async () => {
+    if (!etaEdit) return;
+    setEtaSaving(true);
+    try {
+      const res = await apiFetch(`/api/master-v2/purchase-orders-v2/${etaEdit.po_id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_date: etaEdit.value || null, actor: user?.name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      toast.success(`บันทึกวันคาดการณ์ของเข้า — ${etaEdit.po_no} แล้ว`);
+      setEtaEdit(null);
+      await loadPending();
+    } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
+    finally { setEtaSaving(false); }
+  };
 
   // ---- ยิง API (1 PO) ----
   const postReceive = async (poIdArg: string, payloadLines: PayloadLine[]) => {
@@ -209,7 +292,7 @@ export default function ReceiveGoodsPage() {
 
   return (
     <PlaygroundShell>
-      <div className="p-6 max-w-5xl mx-auto">
+      <div className="p-6 max-w-7xl mx-auto">
         <h1 className="text-xl font-bold text-slate-800">📥 รับสินค้าเข้า</h1>
         <p className="text-sm text-slate-500 mt-0.5 mb-4">เลือกวิธีรับ → กรอกจำนวนที่รับจริง → แนบใบรับ/บิล → บันทึก (รับเกินได้ · ถ้ารับไม่ครบจะถามว่าจบงานหรือรอของ)</p>
 
@@ -290,39 +373,134 @@ export default function ReceiveGoodsPage() {
           </>
         ) : (
           /* แท็บ B: สินค้าที่รอเข้า */
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3">
+          <div>
+            {/* แถบเครื่องมือ: ค้นหา / เรียงลำดับ / การ์ด-แถว / สลับมุมมอง */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3 mb-4 flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-slate-700">สินค้าที่รอเข้า ({pend.length})</span>
-              <input value={pendQ} onChange={(e) => setPendQ(e.target.value)} placeholder="ค้นหา ชื่อสินค้า / PO / ร้าน..."
-                className="ml-auto w-72 h-8 px-3 text-sm border border-slate-200 rounded-md" />
+              <input value={pendQ} onChange={(e) => setPendQ(e.target.value)} placeholder="🔎 ค้นหา ชื่อ / รหัส / PO / ร้าน..."
+                className="ml-auto w-64 h-9 px-3 text-sm border border-slate-200 rounded-md" />
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">เรียงตาม
+                <select value={pendSort} onChange={(e) => changePendSort(e.target.value as PendSort)} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                  <option value="eta">วันคาดการณ์ของเข้า</option>
+                  <option value="order">วันที่สั่ง</option>
+                  <option value="name">ชื่อสินค้า</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดกลุ่ม
+                <select value={pendGroup} onChange={(e) => changePendGroup(e.target.value as PendGroup)} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                  <option value="none">ไม่จัดกลุ่ม</option>
+                  <option value="shop">ร้าน</option>
+                  <option value="eta">วันคาดการณ์ของเข้า</option>
+                  <option value="po">ใบสั่งซื้อ (PO)</option>
+                </select>
+              </label>
+              {pendView === "card" && (
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
+                  <select value={pendCols} onChange={(e) => changePendCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{COL_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                </label>
+              )}
+              <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+                <button onClick={() => changePendView("card")} className={`h-9 px-3 ${pendView === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
+                <button onClick={() => changePendView("table")} className={`h-9 px-3 border-l border-slate-200 ${pendView === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
+              </div>
             </div>
+
             {pendLoading ? (
-              <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+              <div className="py-16 text-center text-slate-400 text-sm">กำลังโหลด…</div>
             ) : pend.length === 0 ? (
-              <div className="py-10 text-center text-slate-300 text-sm">— ไม่มีสินค้าค้างรับ —</div>
+              <div className="py-16 text-center text-slate-300 text-sm">— ไม่มีสินค้าค้างรับ —</div>
+            ) : shownPend.length === 0 ? (
+              <div className="py-16 text-center text-slate-300 text-sm">— ไม่พบรายการที่ค้นหา —</div>
+            ) : pendView === "card" ? (
+              /* มุมมองการ์ด — แตะการ์ดเพื่อกรอกจำนวนใน popup */
+              <div className="space-y-5">
+                {groupedPend.map((g) => (
+                  <section key={g.key}>
+                    {g.label && <h3 className="text-sm font-semibold text-slate-700 mb-2">{g.label} <span className="text-xs font-normal text-slate-400">({g.items.length})</span></h3>}
+                    <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${pendCols}, minmax(0, 1fr))` }}>
+                      {g.items.map((it) => {
+                        const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
+                        const recv = num(inp.recv), def = num(inp.def);
+                        const hasQty = recv > 0 || def > 0;
+                        const short = recv > 0 && recv < it.remaining;
+                        const b = etaBadge(it.days_remaining);
+                        return (
+                          <div key={it.id} onClick={() => setQtyEdit(it)}
+                            className={`bg-white border rounded-xl overflow-hidden flex flex-col cursor-pointer transition-all ${hasQty ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}>
+                            <div className="aspect-square bg-slate-50 flex items-center justify-center relative">
+                              <span className={`absolute top-1.5 left-1.5 z-10 text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
+                              {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
+                            </div>
+                            <div className="p-2.5 flex flex-col flex-1">
+                              <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug" title={it.item_name}>{stripCode(it.item_name)}</div>
+                              {it.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{it.code}</div>}
+                              <div className="mt-1.5 text-2xl font-bold text-slate-900 tabular-nums leading-none">{it.remaining.toLocaleString()} <span className="text-xs font-normal text-slate-400">{it.uom}</span></div>
+                              <div className="text-[11px] text-slate-400">คงเหลือรอรับ</div>
+                              <div className="text-[11px] text-slate-500 mt-1 truncate" title={`${it.seller_name} · ${it.po_no}`}>🏪 {it.seller_name} · {it.po_no}</div>
+                              <div className="text-[11px] text-slate-500 mt-1 space-y-0.5">
+                                <div>📅 สั่ง: {it.order_date ? formatDate(it.order_date) : "—"}</div>
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <span>🚚 คาดเข้า: {it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}</span>
+                                  {it.expected_source === "lead" && <span title="ประเมินจากลีดไทม์ร้าน (แก้ได้)" className="text-[10px] text-indigo-500">~ลีดไทม์</span>}
+                                  <button onClick={(e) => { e.stopPropagation(); setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" }); }}
+                                    title="แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO)" className="text-slate-400 hover:text-blue-600 text-xs">✎</button>
+                                </div>
+                              </div>
+                              {/* สรุปจำนวนที่จะรับ (กรอกใน popup) */}
+                              <div className={`mt-2 h-8 px-2 text-xs font-medium rounded-md flex items-center justify-center ${hasQty ? (short ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-blue-100 text-blue-700 border border-blue-200") : "bg-slate-50 text-slate-400 border border-slate-200"}`}>
+                                {hasQty ? <>✓ รับ {recv.toLocaleString()} {it.uom}{def > 0 ? ` · เสีย ${def.toLocaleString()}` : ""}{short ? " (ไม่ครบ)" : ""}</> : "แตะเพื่อกรอกจำนวน"}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))}
+              </div>
             ) : (
-              <>
+              /* มุมมองตาราง */
+              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 text-slate-500 text-xs">
                       <tr>
-                        <th className="text-left px-4 py-2 font-medium">สินค้า</th>
+                        <th className="px-3 py-2 font-medium w-14">รูป</th>
+                        <th className="text-left px-3 py-2 font-medium">สินค้า</th>
                         <th className="text-left px-3 py-2 font-medium">ร้าน / PO</th>
-                        <th className="text-left px-3 py-2 font-medium">วันที่จะถึง</th>
+                        <th className="text-left px-3 py-2 font-medium">วันที่สั่ง</th>
+                        <th className="text-left px-3 py-2 font-medium">คาดเข้า</th>
                         <th className="text-right px-3 py-2 font-medium">คงเหลือ</th>
                         <th className="px-3 py-2 font-medium">รับครั้งนี้</th>
                         <th className="px-3 py-2 font-medium">เสีย/ผิด</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {shownPend.map((it) => {
+                      {groupedPend.map((g) => (
+                        <Fragment key={g.key}>
+                          {g.label && <tr className="bg-slate-50/70"><td colSpan={8} className="px-3 py-1.5 text-xs font-semibold text-slate-600">{g.label} <span className="font-normal text-slate-400">({g.items.length})</span></td></tr>}
+                          {g.items.map((it) => {
                         const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
                         const short = num(inp.recv) > 0 && num(inp.recv) < it.remaining;
+                        const b = etaBadge(it.days_remaining);
                         return (
                           <tr key={it.id}>
-                            <td className="px-4 py-2 text-slate-700">{it.item_name}</td>
+                            <td className="px-3 py-2">
+                              <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
+                                {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2"><div className="text-slate-700">{stripCode(it.item_name)}</div>{it.code && <div className="text-[11px] font-mono text-slate-400">{it.code}</div>}</td>
                             <td className="px-3 py-2 text-slate-500"><div className="text-slate-700">{it.seller_name}</div><div className="text-[11px] text-slate-400">{it.po_no}</div></td>
-                            <td className="px-3 py-2 text-slate-500">{it.eta || <span className="text-slate-300">—</span>}</td>
+                            <td className="px-3 py-2 text-slate-500 text-xs whitespace-nowrap">{it.order_date ? formatDate(it.order_date) : "—"}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <div className="text-xs text-slate-500">{it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}{it.expected_source === "lead" && <span className="text-[10px] text-indigo-500 ml-1">~ลีดไทม์</span>}</div>
+                              <div className="flex items-center gap-1">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
+                                <button onClick={() => setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" })}
+                                  title="แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO)" className="text-slate-400 hover:text-blue-600 text-xs">✎</button>
+                              </div>
+                            </td>
                             <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">{it.remaining.toLocaleString()} {it.uom}</td>
                             <td className="px-3 py-2">
                               <input type="number" step="any" min={0} value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })}
@@ -334,23 +512,91 @@ export default function ReceiveGoodsPage() {
                             </td>
                           </tr>
                         );
-                      })}
-                      {shownPend.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-300">— ไม่พบรายการที่ค้นหา —</td></tr>}
+                          })}
+                        </Fragment>
+                      ))}
                     </tbody>
                   </table>
                 </div>
-                <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">บรรทัดที่รับไม่ครบจะตั้งเป็น &quot;รอของ&quot; อัตโนมัติ</span>
-                  <button onClick={savePending} disabled={saving || !attachReady} title={!attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
-                    className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                    {saving ? "กำลังบันทึก…" : "บันทึกรับสินค้า →"}
-                  </button>
-                </div>
-              </>
+              </div>
+            )}
+
+            {/* แถบบันทึก (โชว์เมื่อมีรายการ) */}
+            {shownPend.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 mt-4 flex items-center justify-between gap-3 flex-wrap">
+                <span className="text-xs text-slate-400">บรรทัดที่รับไม่ครบจะตั้งเป็น &quot;รอของ&quot; อัตโนมัติ</span>
+                <button onClick={savePending} disabled={saving || !attachReady} title={!attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
+                  className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
+                  {saving ? "กำลังบันทึก…" : "บันทึกรับสินค้า →"}
+                </button>
+              </div>
             )}
           </div>
         )}
       </div>
+
+      {/* popup กรอกจำนวนรับ (คลิกจากการ์ด) */}
+      {qtyEdit && (() => {
+        const it = qtyEdit;
+        const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
+        const recv = num(inp.recv), def = num(inp.def);
+        const short = recv > 0 && recv < it.remaining;
+        const over = recv > it.remaining;
+        return (
+          <ERPModal open onClose={() => setQtyEdit(null)} size="sm" storageKey="recv-qty"
+            title="กรอกจำนวนที่รับ"
+            description={`🏪 ${it.seller_name} · ${it.po_no}`}
+            footer={<>
+              <button onClick={() => { setPendInput(it.id, { recv: "0", def: "0" }); setQtyEdit(null); }} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ล้าง (ไม่รับ)</button>
+              <button onClick={() => setQtyEdit(null)} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">ตกลง</button>
+            </>}>
+            <div className="flex gap-3">
+              <div className="w-20 h-20 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100 shrink-0">
+                {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-2xl">📦</span>}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-800 leading-snug">{stripCode(it.item_name)}</div>
+                {it.code && <div className="text-[11px] font-mono text-slate-500 mt-0.5">{it.code}</div>}
+                <div className="text-sm text-slate-600 mt-1">คงเหลือรอรับ <b className="text-slate-900">{it.remaining.toLocaleString()}</b> {it.uom}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">รับครั้งนี้ ({it.uom})</label>
+                <input type="number" step="any" min={0} autoFocus value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })}
+                  onFocus={(e) => e.target.select()}
+                  className={`w-full h-11 px-3 text-lg text-right border rounded-md ${short || over ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">เสีย / ผิด ({it.uom})</label>
+                <input type="number" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })}
+                  className="w-full h-11 px-3 text-lg text-right border border-slate-200 rounded-md" />
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <button onClick={() => setPendInput(it.id, { recv: String(it.remaining) })} className="h-8 px-3 text-xs font-medium rounded-md border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100">รับครบ ({it.remaining.toLocaleString()})</button>
+              {short && <span className="text-[11px] text-amber-600">รับไม่ครบ → ส่วนที่เหลือจะตั้งเป็น &quot;รอของ&quot;</span>}
+              {over && <span className="text-[11px] text-amber-600">รับเกินจำนวนคงเหลือ</span>}
+            </div>
+          </ERPModal>
+        );
+      })()}
+
+      {/* popup แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO) */}
+      {etaEdit && (
+        <ERPModal open onClose={() => !etaSaving && setEtaEdit(null)} size="sm" storageKey="recv-eta"
+          title="📅 วันคาดการณ์ของเข้า"
+          description={`ใบสั่งซื้อ ${etaEdit.po_no} · ${etaEdit.seller_name} (มีผลกับทุกบรรทัดในใบนี้)`}
+          footer={<>
+            <button onClick={() => setEtaEdit(null)} disabled={etaSaving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button onClick={() => void saveEta()} disabled={etaSaving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{etaSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+          </>}>
+          <label className="block text-xs font-medium text-slate-600 mb-1">วันที่คาดว่าของจะเข้า</label>
+          <input type="date" value={etaEdit.value} onChange={(e) => setEtaEdit((p) => p ? { ...p, value: e.target.value } : p)}
+            className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
+          <p className="text-[11px] text-slate-400 mt-2">เว้นว่างไว้ = กลับไปใช้ค่าประเมินจากลีดไทม์ร้าน (ถ้ามี)</p>
+        </ERPModal>
+      )}
 
       {/* popup ถามกรณีรับไม่ครบ (แท็บ A) */}
       {shortDialog && (
