@@ -93,9 +93,21 @@ const text = (v: unknown) => {
 const boolText = (v: unknown) => (v === true || v === "true" ? "เปิด" : "ปิด");
 const toInput = (v: unknown) => (v == null ? "" : String(v));
 const toNumber = (v: string) => Number(v || 0);
+const todayBangkokISO = () => new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const isExpiredEndDate = (date: unknown) => {
+  const s = String(date ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayBangkokISO();
+};
+
+function applyEndDateRuleToDraft(d: Draft): Draft {
+  if (isExpiredEndDate(d.end_date) && d.status !== "cancelled") {
+    return { ...d, status: "ended", is_current: false };
+  }
+  return d;
+}
 
 function contractToDraft(c: Contract): Draft {
-  return {
+  return applyEndDateRuleToDraft({
     contract_no: toInput(c.contract_no),
     company_name: toInput(c.company_name),
     contract_type: toInput(c.contract_type),
@@ -117,32 +129,33 @@ function contractToDraft(c: Contract): Draft {
     include_pnd3_export: Boolean(c.include_pnd3_export),
     include_payroll_register_export: Boolean(c.include_payroll_register_export),
     attendance_scan_exempt: Boolean(c.attendance_scan_exempt),
-  };
+  });
 }
 
 function draftToPayload(d: Draft) {
+  const normalized = applyEndDateRuleToDraft(d);
   return {
-    contract_no: d.contract_no,
-    company_name: d.company_name,
-    contract_type: d.contract_type,
-    employment_type: d.employment_type,
-    wage_type: d.wage_type,
-    base_salary: toNumber(d.base_salary),
-    daily_wage: toNumber(d.daily_wage),
-    hourly_wage: toNumber(d.hourly_wage),
-    piece_rate_default: toNumber(d.piece_rate_default),
-    payroll_register_base_salary: toNumber(d.payroll_register_base_salary),
-    payment_cycle: d.payment_cycle,
-    start_date: d.start_date,
-    end_date: d.end_date,
-    is_current: d.is_current,
-    status: d.status,
-    work_schedule_id: d.work_schedule_id,
-    overtime_policy_id: d.overtime_policy_id,
-    leave_policy_id: d.leave_policy_id,
-    include_pnd3_export: d.include_pnd3_export,
-    include_payroll_register_export: d.include_payroll_register_export,
-    attendance_scan_exempt: d.attendance_scan_exempt,
+    contract_no: normalized.contract_no,
+    company_name: normalized.company_name,
+    contract_type: normalized.contract_type,
+    employment_type: normalized.employment_type,
+    wage_type: normalized.wage_type,
+    base_salary: toNumber(normalized.base_salary),
+    daily_wage: toNumber(normalized.daily_wage),
+    hourly_wage: toNumber(normalized.hourly_wage),
+    piece_rate_default: toNumber(normalized.piece_rate_default),
+    payroll_register_base_salary: toNumber(normalized.payroll_register_base_salary),
+    payment_cycle: normalized.payment_cycle,
+    start_date: normalized.start_date,
+    end_date: normalized.end_date,
+    is_current: normalized.is_current,
+    status: normalized.status,
+    work_schedule_id: normalized.work_schedule_id,
+    overtime_policy_id: normalized.overtime_policy_id,
+    leave_policy_id: normalized.leave_policy_id,
+    include_pnd3_export: normalized.include_pnd3_export,
+    include_payroll_register_export: normalized.include_payroll_register_export,
+    attendance_scan_exempt: normalized.attendance_scan_exempt,
   };
 }
 
@@ -437,7 +450,9 @@ function EditContractForm({
   onChange: (draft: Draft) => void;
   onSubmit: (e: React.FormEvent) => void;
 }) {
-  const set = (key: keyof Draft, value: Draft[keyof Draft]) => onChange({ ...draft, [key]: value });
+  const set = (key: keyof Draft, value: Draft[keyof Draft]) => {
+    onChange(applyEndDateRuleToDraft({ ...draft, [key]: value }));
+  };
 
   return (
     <form onSubmit={onSubmit} className="space-y-5 p-5">
@@ -463,6 +478,11 @@ function EditContractForm({
         <TextInput label="สิ้นสุด" type="date" value={draft.end_date} onChange={(v) => set("end_date", v)} />
         <SelectInput label="สถานะ" value={draft.status} options={STATUSES} labels={{ active: "ใช้งาน", ended: "สิ้นสุด", cancelled: "ยกเลิก" }} onChange={(v) => set("status", v)} />
         <CheckInput label="สัญญาปัจจุบัน" checked={draft.is_current} onChange={(v) => set("is_current", v)} />
+        {isExpiredEndDate(draft.end_date) && draft.status !== "cancelled" && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 md:col-span-2">
+            วันสิ้นสุดถึงแล้ว ระบบจะตั้งสถานะเป็น “สิ้นสุด” และเอาเครื่องหมายสัญญาปัจจุบันออกตอนบันทึก
+          </div>
+        )}
       </FormSection>
 
       <FormSection title="นโยบาย / ส่งออก">

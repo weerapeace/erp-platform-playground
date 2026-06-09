@@ -24,6 +24,19 @@ const NUMERIC = ["base_salary", "daily_wage", "hourly_wage", "piece_rate_default
 
 export type ContractRow = Record<string, unknown> & { id: string };
 
+const todayBangkokISO = () => new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const isExpiredEndDate = (date: unknown) => {
+  const s = String(date ?? "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayBangkokISO();
+};
+
+function applyContractLifecycle<T extends Record<string, unknown>>(row: T): T {
+  if (isExpiredEndDate(row.end_date) && row.status !== "cancelled") {
+    return { ...row, status: "ended", is_current: false };
+  }
+  return row;
+}
+
 async function empMap(): Promise<Record<string, string>> {
   const { data } = await supabaseAdmin().from("employees").select("id, employee_code, first_name, last_name, nickname");
   const m: Record<string, string> = {};
@@ -63,13 +76,14 @@ async function maps() {
 }
 
 function decorate(row: Record<string, unknown>, em: Record<string, string>, cm: Record<string, string>, wm: Record<string, string> = {}): ContractRow {
+  const lifecycleRow = applyContractLifecycle(row);
   return {
-    ...row,
-    id: row.id as string,
-    employee_name: row.employee_id ? (em[row.employee_id as string] ?? "") : "",
-    company_name:  row.company_id ? (cm[row.company_id as string] ?? "") : "",
-    work_time_profile_name: row.work_time_profile_id ? (wm[row.work_time_profile_id as string] ?? "") : "",
-    active:        row.status === "active",
+    ...lifecycleRow,
+    id: lifecycleRow.id as string,
+    employee_name: lifecycleRow.employee_id ? (em[lifecycleRow.employee_id as string] ?? "") : "",
+    company_name:  lifecycleRow.company_id ? (cm[lifecycleRow.company_id as string] ?? "") : "",
+    work_time_profile_name: lifecycleRow.work_time_profile_id ? (wm[lifecycleRow.work_time_profile_id as string] ?? "") : "",
+    active:        lifecycleRow.status === "active",
   };
 }
 
@@ -100,7 +114,7 @@ async function toColumns(body: Record<string, unknown>): Promise<Record<string, 
   }
   if ("company_name" in body) out.company_id = await nameToCompanyId(String(body.company_name ?? ""));
   nullifyEmpty(out);   // '' → null สำหรับ uuid(_id)/date/timestamp ทั้งหมด
-  return out;
+  return applyContractLifecycle(out);
 }
 
 export async function createContract(body: Record<string, unknown>): Promise<ContractRow> {
@@ -120,7 +134,7 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
     status:        cols.status ?? "active",
     ...cols,
   };
-  const { data, error } = await supabaseAdmin().from(TABLE).insert(insert).select(SELECT).limit(1);
+  const { data, error } = await supabaseAdmin().from(TABLE).insert(applyContractLifecycle(insert)).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   const { em, cm, wm } = await maps();
   return decorate(data![0] as Record<string, unknown>, em, cm, wm);
@@ -129,7 +143,11 @@ export async function createContract(body: Record<string, unknown>): Promise<Con
 export async function updateContract(id: string, body: Record<string, unknown>): Promise<ContractRow | null> {
   const cols = await toColumns(body);
   if (Object.keys(cols).length === 0) return getContract(id);
-  const { data, error } = await supabaseAdmin().from(TABLE).update(cols).eq("id", id).select(SELECT).limit(1);
+  const { data: existing, error: existingError } = await supabaseAdmin().from(TABLE).select("end_date, status, is_current").eq("id", id).limit(1);
+  if (existingError) throw new Error(existingError.message);
+  const merged = { ...(existing?.[0] as Record<string, unknown> | undefined), ...cols };
+  const update = applyContractLifecycle(merged);
+  const { data, error } = await supabaseAdmin().from(TABLE).update(update).eq("id", id).select(SELECT).limit(1);
   if (error) throw new Error(error.message);
   if (!data?.[0]) return null;
   const { em, cm, wm } = await maps();
