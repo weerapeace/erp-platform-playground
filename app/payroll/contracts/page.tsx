@@ -11,6 +11,7 @@ import { relLink } from "@/components/payroll/cells";
 
 // UI constants (กำหนดในหน้า — ไม่ import จาก db lib ที่มี service-role เพื่อกัน bundle รั่วเข้า client)
 const WAGE_TYPES = ["monthly", "daily", "hourly", "piece_rate", "mixed"];
+const CONTRACT_TYPES = ["permanent", "regular_external", "daily", "contractor", "hourly"];
 const CONTRACT_STATUS = ["active", "ended", "cancelled"];
 const COMPANY_NAMES = ["ไอ.เอส.จี. เทรดดิ้ง", "หลุยส์ มอนตินี่"];
 
@@ -27,6 +28,13 @@ const STATUS_LABEL: Record<string, { th: string; cls: string }> = {
 const WAGE_LABEL: Record<string, string> = {
   monthly: "รายเดือน", daily: "รายวัน", hourly: "รายชั่วโมง", piece_rate: "รายชิ้น", mixed: "ผสม",
 };
+const CONTRACT_TYPE_LABEL: Record<string, { th: string; cls: string }> = {
+  permanent: { th: "ประจำ", cls: "border-indigo-200 bg-indigo-50 text-indigo-700" },
+  regular_external: { th: "ประจำนอกระบบ", cls: "border-sky-200 bg-sky-50 text-sky-700" },
+  daily: { th: "รายวัน", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  contractor: { th: "งานเหมา", cls: "border-violet-200 bg-violet-50 text-violet-700" },
+  hourly: { th: "รายชั่วโมง", cls: "border-amber-200 bg-amber-50 text-amber-700" },
+};
 const fmtBaht = (v: unknown) => {
   const n = Number(v);
   return Number.isFinite(n) && n > 0
@@ -36,6 +44,11 @@ const fmtBaht = (v: unknown) => {
 
 // ของพิเศษหน้าสัญญา — registry mode merge ตาม field key
 const contractCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
+  contract_type: (v) => {
+    const raw = String(v ?? "");
+    const meta = CONTRACT_TYPE_LABEL[raw] ?? { th: raw || "—", cls: "border-slate-200 bg-slate-50 text-slate-600" };
+    return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.th}</span>;
+  },
   wage_type: (v) => <span className="text-sm">{WAGE_LABEL[String(v)] ?? String(v)}</span>,
   base_salary: fmtBaht,
   daily_wage: fmtBaht,
@@ -76,7 +89,12 @@ const CONFIG: MasterCRUDConfig = {
     { key: "employee_code", label: "รหัสพนักงาน (ตอนสร้างใหม่)", type: "text", colSize: 0, hideInForm: false, groupKey: "core", order: 25,
       helpText: "ใช้เฉพาะตอนสร้างสัญญาใหม่ — ระบุรหัสพนักงานที่จะผูก" },
     { key: "company_name",  label: "บริษัท",       type: "select", colSize: 140, options: COMPANY_NAMES, filterable: true, groupKey: "core", order: 30 },
-    { key: "contract_type", label: "ประเภทสัญญา", type: "text", colSize: 120, groupKey: "core", order: 40 },
+    { key: "contract_type", label: "ประเภทสัญญา", type: "select", colSize: 150, options: CONTRACT_TYPES, filterable: true, groupKey: "core", order: 40,
+      cellRender: (v) => {
+        const raw = String(v ?? "");
+        const meta = CONTRACT_TYPE_LABEL[raw] ?? { th: raw || "—", cls: "border-slate-200 bg-slate-50 text-slate-600" };
+        return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${meta.cls}`}>{meta.th}</span>;
+      } },
     { key: "employment_type", label: "ประเภทการจ้าง", type: "text", colSize: 120, groupKey: "core", order: 42 },
     { key: "wage_type",     label: "ประเภทค่าจ้าง", type: "select", colSize: 110, options: WAGE_TYPES, filterable: true, groupKey: "pay", order: 50,
       cellRender: (v) => <span className="text-sm">{WAGE_LABEL[String(v)] ?? String(v)}</span> },
