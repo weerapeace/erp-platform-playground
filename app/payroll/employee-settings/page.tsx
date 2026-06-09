@@ -29,6 +29,7 @@ const settingsCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
   default_mid_month_advance_amount: fmtBaht,
   social_security_enabled: yesNo,
   withholding_tax_enabled: yesNo,
+  withholding_tax_company_paid: yesNo,
   overtime_enabled: yesNo,
   piece_rate_enabled: yesNo,
   attendance_bonus_enabled: yesNo,
@@ -61,6 +62,7 @@ const CONFIG: MasterCRUDConfig = {
     // เปิด/ปิด
     { key: "social_security_enabled", label: "ประกันสังคม", type: "boolean", colSize: 100, groupKey: "เปิด/ปิด", order: 60, cellRender: yesNo },
     { key: "withholding_tax_enabled", label: "ภาษีหัก ณ ที่จ่าย", type: "boolean", colSize: 120, groupKey: "เปิด/ปิด", order: 62, cellRender: yesNo },
+    { key: "withholding_tax_company_paid", label: "บริษัทจ่ายภาษีให้", type: "boolean", colSize: 130, groupKey: "เปิด/ปิด", order: 63, cellRender: yesNo },
     { key: "overtime_enabled", label: "คำนวณ OT", type: "boolean", colSize: 90, groupKey: "เปิด/ปิด", order: 64, cellRender: yesNo },
     { key: "piece_rate_enabled", label: "รายชิ้น", type: "boolean", colSize: 80, groupKey: "เปิด/ปิด", order: 66, cellRender: yesNo },
     { key: "attendance_bonus_enabled", label: "เบี้ยขยัน", type: "boolean", colSize: 90, groupKey: "เปิด/ปิด", order: 68, cellRender: yesNo },

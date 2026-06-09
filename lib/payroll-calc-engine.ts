@@ -187,7 +187,8 @@ function buildLine(period: Row, employee: Row, contract: Row, setting: Row, manu
       : (taxRate > 0 && taxRate < 1 ? roundMoney(roundMoney(withholdingBase / (1 - taxRate)) - withholdingBase) : 0);
   } else values.withholding_tax = 0;
 
-  const totalDeduction = preTax + money(values.withholding_tax);
+  const companyPaidWithholding = setting.withholding_tax_company_paid === true;
+  const totalDeduction = preTax + (companyPaidWithholding ? 0 : money(values.withholding_tax));
   const netPay = roundMoney(grossPay - totalDeduction);
   // คืน "เต็มทุกคอลัมน์" ตรงกับ worker.js เดิม (1951-1974) — เพื่อบันทึกลง payroll_lines ได้
   return {

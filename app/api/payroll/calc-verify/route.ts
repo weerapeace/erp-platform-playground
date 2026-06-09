@@ -27,7 +27,7 @@ async function fetchLines(periodId: string | null): Promise<Record<string, unkno
     if (periodId) q = q.eq("payroll_period_id", periodId);
     const { data, error } = await q;
     if (error) throw new Error(error.message);
-    out.push(...((data ?? []) as Record<string, unknown>[]));
+    out.push(...((data ?? []) as unknown as Record<string, unknown>[]));
     if (!data || data.length < size) break;
     from += size;
   }
@@ -57,11 +57,25 @@ export async function GET(req: NextRequest) {
     const periodId = req.nextUrl.searchParams.get("period_id");
     const mismatchOnly = req.nextUrl.searchParams.get("mismatch_only") === "1";
     const summaryOnly = req.nextUrl.searchParams.get("summary_only") === "1";
-    const [lines, { em, pm }] = await Promise.all([fetchLines(periodId), summaryOnly ? Promise.resolve({ em: {}, pm: {} }) : nameMaps()]);
+    const emptyMaps: { em: Record<string, string>; pm: Record<string, string> } = { em: {}, pm: {} };
+    const [lines, { em, pm }] = await Promise.all([fetchLines(periodId), summaryOnly ? Promise.resolve(emptyMaps) : nameMaps()]);
+    const employeeIds = Array.from(new Set(lines.map((line) => String(line.employee_id ?? "")).filter(Boolean)));
+    const companyPaidTaxBy: Record<string, boolean> = {};
+    if (employeeIds.length > 0) {
+      const { data: settings, error: settingsError } = await supabaseAdmin()
+        .from("employee_payroll_settings")
+        .select("employee_id, withholding_tax_company_paid")
+        .in("employee_id", employeeIds);
+      if (settingsError) throw new Error(settingsError.message);
+      (settings ?? []).forEach((s) => {
+        const row = s as { employee_id: string; withholding_tax_company_paid: boolean | null };
+        companyPaidTaxBy[row.employee_id] = row.withholding_tax_company_paid === true;
+      });
+    }
 
     let match = 0, mismatch = 0;
     const rows = lines.map((line) => {
-      const c = computeLineTotals(line); // ใช้ withholding_tax ที่เก็บไว้ (เทียบสูตรรวม)
+      const c = computeLineTotals(line, undefined, { withholdingTaxCompanyPaid: companyPaidTaxBy[String(line.employee_id ?? "")] === true });
       const ok = NEAR(c.gross_pay, money(line.gross_pay)) && NEAR(c.total_deduction, money(line.total_deduction)) && NEAR(c.net_pay, money(line.net_pay));
       if (ok) match++; else mismatch++;
       return {

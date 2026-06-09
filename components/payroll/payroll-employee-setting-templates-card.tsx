@@ -26,6 +26,7 @@ type ApplyResult = {
 const BOOLEAN_FIELDS: { key: keyof PayrollEmployeeSettingTemplateValues; label: string; help: string }[] = [
   { key: "social_security_enabled", label: "ประกันสังคม", help: "เปิด/ปิดการหักประกันสังคมรายคน" },
   { key: "withholding_tax_enabled", label: "ภาษีหัก ณ ที่จ่าย", help: "เปิด/ปิดการคำนวณภาษีรายคน" },
+  { key: "withholding_tax_company_paid", label: "บริษัทจ่ายภาษีให้", help: "ติ๊กแล้วภาษีจะไม่ถูกหักจากหักตามระบบของพนักงาน" },
   { key: "overtime_enabled", label: "คำนวณ OT", help: "เปิด/ปิดการจ่าย OT สำหรับสัญญาประเภทนี้" },
   { key: "piece_rate_enabled", label: "รายชิ้น", help: "เปิดถ้าคิดเงินจากจำนวนชิ้นงาน" },
   { key: "attendance_bonus_enabled", label: "เบี้ยขยัน", help: "เปิดถ้ามีเงื่อนไขเบี้ยขยัน" },
@@ -405,6 +406,7 @@ export function PayrollEmployeeSettingTemplatesCard() {
                   <PreviewRow label="หักประกันสังคม" value={`฿${money(active.values.social_security_employee_amount)}`} />
                   <PreviewRow label="นายจ้างสมทบ" value={`฿${money(active.values.social_security_employer_amount)}`} />
                   <PreviewRow label="ภาษี" value={`${money(active.values.withholding_tax_rate)}%`} />
+                  <PreviewRow label="บริษัทจ่ายภาษีให้" value={active.values.withholding_tax_company_paid ? "ใช่ ไม่หักจากพนักงาน" : "ไม่ใช่ หักจากพนักงาน"} />
                   <PreviewRow label="เบิกกลางเดือนสูงสุด" value={`฿${money(active.values.max_advance_amount)}`} />
                 </div>
 

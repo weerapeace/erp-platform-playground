@@ -2,6 +2,7 @@ export type PayrollEmployeeSettingTemplateValues = {
   tax_calculation_method: string;
   social_security_enabled: boolean;
   withholding_tax_enabled: boolean;
+  withholding_tax_company_paid: boolean;
   overtime_enabled: boolean;
   piece_rate_enabled: boolean;
   attendance_bonus_enabled: boolean;
@@ -45,6 +46,7 @@ const DEFAULT_TEMPLATE_VALUES: PayrollEmployeeSettingTemplateValues = {
   tax_calculation_method: "manual",
   social_security_enabled: true,
   withholding_tax_enabled: true,
+  withholding_tax_company_paid: false,
   overtime_enabled: true,
   piece_rate_enabled: false,
   attendance_bonus_enabled: false,
@@ -84,6 +86,7 @@ export function normalizeTemplateValues(input: unknown): PayrollEmployeeSettingT
     tax_calculation_method: String(raw.tax_calculation_method ?? DEFAULT_TEMPLATE_VALUES.tax_calculation_method),
     social_security_enabled: asBoolean(raw.social_security_enabled, DEFAULT_TEMPLATE_VALUES.social_security_enabled),
     withholding_tax_enabled: asBoolean(raw.withholding_tax_enabled, DEFAULT_TEMPLATE_VALUES.withholding_tax_enabled),
+    withholding_tax_company_paid: asBoolean(raw.withholding_tax_company_paid, DEFAULT_TEMPLATE_VALUES.withholding_tax_company_paid),
     overtime_enabled: asBoolean(raw.overtime_enabled, DEFAULT_TEMPLATE_VALUES.overtime_enabled),
     piece_rate_enabled: asBoolean(raw.piece_rate_enabled, DEFAULT_TEMPLATE_VALUES.piece_rate_enabled),
     attendance_bonus_enabled: asBoolean(raw.attendance_bonus_enabled, DEFAULT_TEMPLATE_VALUES.attendance_bonus_enabled),
@@ -147,6 +150,7 @@ export function templateValuesToSettingsPatch(values: PayrollEmployeeSettingTemp
     tax_calculation_method: values.tax_calculation_method,
     social_security_enabled: values.social_security_enabled,
     withholding_tax_enabled: values.withholding_tax_enabled,
+    withholding_tax_company_paid: values.withholding_tax_company_paid,
     overtime_enabled: values.overtime_enabled,
     piece_rate_enabled: values.piece_rate_enabled,
     attendance_bonus_enabled: values.attendance_bonus_enabled,

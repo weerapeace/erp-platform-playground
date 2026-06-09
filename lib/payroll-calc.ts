@@ -55,13 +55,13 @@ export function computeWithholdingTax(grossPay: number, preTaxDeduction: number,
  *   total_deduction = round(preTax + withholding_tax)
  *   net = round(gross_raw - total_deduction_raw)
  */
-export function computeLineTotals(line: LineComponents, withholdingTax?: number): {
+export function computeLineTotals(line: LineComponents, withholdingTax?: number, opts: { withholdingTaxCompanyPaid?: boolean } = {}): {
   gross_pay: number; total_deduction: number; net_pay: number; withholding_tax: number;
 } {
   const grossRaw = sumEarnings(line);
   const preTax = sumPreTaxDeductions(line);
   const tax = withholdingTax !== undefined ? money(withholdingTax) : money(line.withholding_tax);
-  const totalRaw = preTax + tax;
+  const totalRaw = preTax + (opts.withholdingTaxCompanyPaid ? 0 : tax);
   return {
     gross_pay: roundMoney(grossRaw),
     total_deduction: roundMoney(totalRaw),

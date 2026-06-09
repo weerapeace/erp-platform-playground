@@ -70,11 +70,20 @@ export async function GET(req: NextRequest) {
     // ชื่อ + สถานะพนักงาน
     const empIds = lines.map((l) => String(l.employee_id));
     const nameBy: Record<string, string> = {};
+    const companyPaidTaxBy: Record<string, boolean> = {};
     if (empIds.length) {
-      const { data: emps } = await a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds);
+      const [empsRes, settingsRes] = await Promise.all([
+        a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds),
+        a.from("employee_payroll_settings").select("employee_id, withholding_tax_company_paid").in("employee_id", empIds),
+      ]);
+      const emps = empsRes.data;
       (emps ?? []).forEach((e) => {
         const r = e as { id: string; first_name: string; last_name: string | null; nickname: string | null };
         nameBy[r.id] = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() + (r.nickname ? ` (${r.nickname})` : "");
+      });
+      (settingsRes.data ?? []).forEach((s) => {
+        const r = s as { employee_id: string; withholding_tax_company_paid: boolean | null };
+        companyPaidTaxBy[r.employee_id] = r.withholding_tax_company_paid === true;
       });
     }
 
@@ -112,7 +121,7 @@ export async function GET(req: NextRequest) {
         other_deduct: Math.round(other * 100) / 100,
         social_security_baht: money(l.social_security_employee),
         withholding_tax_baht: money(l.withholding_tax),
-        system_deduct_baht: Math.round((money(l.social_security_employee) + money(l.withholding_tax)) * 100) / 100,
+        system_deduct_baht: Math.round((money(l.social_security_employee) + (companyPaidTaxBy[id] ? 0 : money(l.withholding_tax))) * 100) / 100,
         net_estimate: money(l.net_pay),
         has_manual: !!hasManual,
         entry_count: cntBy.get(id) ?? 0,

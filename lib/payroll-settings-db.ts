@@ -13,6 +13,7 @@ const SELECT = "*";
 const WRITABLE = new Set([
   "payroll_group_id", "tax_calculation_method",
   "social_security_enabled", "withholding_tax_enabled", "overtime_enabled",
+  "withholding_tax_company_paid",
   "piece_rate_enabled", "attendance_bonus_enabled", "advance_payment_allowed",
   "max_advance_amount", "default_mid_month_advance_amount",
   "social_security_employee_amount", "social_security_employer_amount", "withholding_tax_rate",
@@ -80,6 +81,7 @@ export async function createSettings(body: Record<string, unknown>): Promise<Set
     tax_calculation_method: cols.tax_calculation_method ?? "manual",
     social_security_enabled: cols.social_security_enabled ?? true,
     withholding_tax_enabled: cols.withholding_tax_enabled ?? false,
+    withholding_tax_company_paid: cols.withholding_tax_company_paid ?? false,
     overtime_enabled: cols.overtime_enabled ?? false,
     piece_rate_enabled: cols.piece_rate_enabled ?? false,
     attendance_bonus_enabled: cols.attendance_bonus_enabled ?? false,
