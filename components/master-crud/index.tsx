@@ -1748,10 +1748,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                 {toolsOpen && (
                   <>
                     <div className="fixed inset-0 z-30" onClick={() => setToolsOpen(false)} />
-                    <div className="absolute right-0 z-40 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
-                      <button onClick={() => { setToolsOpen(false); setStudioOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">🎨 ออกแบบหน้า</button>
-                      <button onClick={() => { setToolsOpen(false); setLayoutEditorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">🗂️ จัด Layout (Tab/Section)</button>
-                      <button onClick={() => { setToolsOpen(false); setFieldCreatorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">＋ เพิ่ม Field ใหม่</button>
+                    <div className="absolute right-0 z-40 mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+                      {/* ประตูหลัก: ออกแบบหน้า (ตาราง+ฟอร์ม+ฟิลด์ มี preview) */}
+                      <button onClick={() => { setToolsOpen(false); setStudioOpen(true); }} className="w-full text-left px-3 py-2.5 hover:bg-orange-50 border-b border-slate-100">
+                        <div className="text-sm font-semibold text-orange-600 inline-flex items-center gap-2">🎨 ออกแบบหน้า</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">จัดตาราง · ฟอร์ม · ฟิลด์ ที่เดียว — เห็น preview สด</div>
+                      </button>
+                      <button onClick={() => { setToolsOpen(false); setFieldCreatorOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2">＋ เพิ่ม Field ใหม่ <span className="text-[11px] text-slate-400">(ทางลัด)</span></button>
                       {familyM2mFields.length > 0 && (
                         <a href="/admin/family-template" onClick={() => setToolsOpen(false)} className="w-full text-left px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100">🧩 เทมเพลตประเภทสินค้า</a>
                       )}
@@ -2103,6 +2106,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         <StudioPanel
           moduleLabel={config.title}
           moduleKey={config.moduleKey}
+          tableId={config.tableId}
           layout={registryLayout}
           sampleRows={rows.slice(0, 5) as Record<string, unknown>[]}
           searchSample={async (q: string) => {
@@ -2130,6 +2134,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               order:      f.order ?? 999,
               type:       f.type,
               isVisible:  f.isVisible ?? false,   // F23: column toggle
+              width:      f.width,                // ความกว้างคอลัมน์ (ลากปรับใน Studio preview)
               showInForm: f.showInForm ?? false,  // F23: form toggle
               inlineEditable: f.inlineEditable ?? false,  // ⚡ quick edit toggle
               bulkEditable: f.bulkEditable ?? false,      // ∑ bulk edit toggle

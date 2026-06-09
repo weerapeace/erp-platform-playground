@@ -94,7 +94,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 //   body: { updates: { id: string, patch: Record<string, unknown> }[] }
 const ALLOWED_ROW_FIELDS = [
   ...ALLOWED_BULK_FIELDS,
-  "display_order", "form_column_span", "help_text", "placeholder", "default_value", "ui_style",
+  "display_order", "form_column_span", "help_text", "placeholder", "default_value", "ui_style", "width",
 ];
 export async function PUT(request: NextRequest): Promise<NextResponse> {
   let body: { updates?: unknown };

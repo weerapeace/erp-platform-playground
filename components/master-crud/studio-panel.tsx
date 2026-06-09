@@ -18,6 +18,7 @@ import { useState, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { FieldCreatorModal } from "@/components/field-creator";
+import { TableLayoutPanel, type SummaryMap } from "@/components/table-layout-panel";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { Popover } from "@/components/popover";
 import {
@@ -61,6 +62,7 @@ export type StudioField = {
   editable?:     boolean;           // false = อ่านอย่างเดียว
   defaultValue?: string | null;
   uiStyle?:      Record<string, unknown>;   // {size,bold,italic,underline,color,font,align,highlight}
+  width?:        number;                    // ความกว้างคอลัมน์ (px) — ลากปรับใน preview
 };
 
 const GROUP_META: Record<string, { label: string; icon: string; order: number }> = {
@@ -173,11 +175,12 @@ function SamplePicker({ label, searchSample, onPick, onClear }: { label: string;
 }
 
 export function StudioPanel({
-  fields, moduleLabel, moduleKey, layout, onClose, sampleRows = [], searchSample, loadSample,
+  fields, moduleLabel, moduleKey, tableId, layout, onClose, sampleRows = [], searchSample, loadSample,
 }: {
   fields:      StudioField[];
   moduleLabel: string;
   moduleKey?:  string;
+  tableId?:    string;        // สำหรับบันทึก Saved View จากแท็บตาราง
   layout?:     FormLayout;
   onClose:     () => void;
   onSaved?:    () => void;   // (เลิกใช้) — บันทึกแล้วไม่ปิด ให้กด "ปิด" เอง
@@ -272,6 +275,48 @@ export function StudioPanel({
   const [msg,    setMsg]    = useState<string | null>(null);
   const [settingsKey, setSettingsKey] = useState<string | null>(null);   // field ที่กำลังเปิด ⚙️ ตั้งค่า
   const [creatorOpen, setCreatorOpen] = useState(false);                  // เปิดฟอร์มสร้างฟิลด์ใหม่
+  // บันทึกชุดคอลัมน์ปัจจุบันเป็น Saved View (จากแท็บตาราง)
+  const [viewName, setViewName] = useState("");
+  const [viewVis, setViewVis] = useState<"personal" | "team" | "system">("system");
+  const [viewDefault, setViewDefault] = useState(true);
+  const [viewSaving, setViewSaving] = useState(false);
+  const [viewMsg, setViewMsg] = useState<string | null>(null);
+  // ค่าเริ่มต้นตาราง (sort/group/สี/สรุป) — ของกลาง TableLayoutPanel: รวมปุ่มบันทึก + ยกค่าสรุปมาโชว์ inline
+  const tlSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const [tlSummaries, setTlSummaries] = useState<SummaryMap>({});
+  const tlSetSummaryRef = useRef<((col: string, val: string) => void) | null>(null);
+  const handleTlSummaries = useCallback((s: SummaryMap, set: (col: string, val: string) => void) => {
+    setTlSummaries(s); tlSetSummaryRef.current = set;
+  }, []);
+  const saveAsView = async () => {
+    if (!tableId || !viewName.trim()) return;
+    setViewSaving(true); setViewMsg(null);
+    try {
+      // คอลัมน์ตาราง = item ที่ไม่ใช่ o2m/m2m · เก็บ visibility + ลำดับตามที่จัดใน Studio
+      const tableItems = items.filter((i) => !["one2many", "many2many"].includes(i.type));
+      const columnVisibility: Record<string, boolean> = {};
+      tableItems.forEach((i) => { columnVisibility[i.key] = !!i.isVisible; });
+      const columnOrder = tableItems.map((i) => i.key);
+      const config = { baseViewId: "all", columnVisibility, columnOrder, colFilterValues: {}, globalSearch: "" };
+      const res = await apiFetch("/api/saved-views", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table_id: tableId, label: viewName.trim(), visibility: viewVis, config }),
+      });
+      const j = await res.json();
+      if (j.error) { setViewMsg("❌ " + j.error); return; }
+      const newId = (j.data?.id ?? j.data) as string | undefined;
+      if (viewDefault && newId) {
+        await apiFetch(`/api/saved-views?id=${encodeURIComponent(newId)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_default: true }),
+        });
+      }
+      setViewName("");
+      setViewMsg(`✓ บันทึกมุมมอง "${viewName.trim()}" แล้ว${viewDefault ? " · ตั้งเป็นค่าเริ่มต้น" : ""}`);
+      setTimeout(() => setViewMsg(null), 5000);
+    } catch (e) { setViewMsg("❌ " + (e instanceof Error ? e.message : "บันทึกไม่สำเร็จ")); }
+    finally { setViewSaving(false); }
+  };
 
   // โหลด field ใหม่ที่เพิ่งสร้าง (เพิ่มคอลัมน์ DB) เข้ามาในตัวออกแบบ โดยไม่ทับ edit เดิม
   const reloadNewFields = useCallback(async () => {
@@ -283,7 +328,7 @@ export function StudioPanel({
       order: Number(r.display_order ?? 999), type: String(r.ui_field_type ?? "text"), isVisible: !!r.is_visible, showInForm: !!r.show_in_form,
       inlineEditable: !!r.is_inline_editable, bulkEditable: !!r.is_bulk_editable, formSpan: Number(r.form_column_span ?? 1),
       helpText: (r.help_text as string) ?? "", placeholder: (r.placeholder as string) ?? "", required: !!r.is_required,
-      editable: r.is_editable !== false, defaultValue: (r.default_value as string) ?? null, uiStyle: (r.ui_style as Record<string, unknown>) ?? {},
+      editable: r.is_editable !== false, defaultValue: (r.default_value as string) ?? null, uiStyle: (r.ui_style as Record<string, unknown>) ?? {}, width: Number(r.width) || undefined,
     });
     setItems((prev) => {
       const have = new Set(prev.map((i) => i.key));
@@ -311,6 +356,11 @@ export function StudioPanel({
 
   const toggleVisible = (key: string) =>
     setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, isVisible: !i.isVisible } : i); });
+  // ตั้งโชว์/ซ่อนหลายคอลัมน์พร้อมกัน (ปุ่มเลือกทั้งหมด/ไม่เลือก)
+  const setVisibleFor = (keys: string[], vis: boolean) => {
+    const set = new Set(keys);
+    setItems((prev) => { setDirty(true); return prev.map((i) => set.has(i.key) ? { ...i, isVisible: vis } : i); });
+  };
   const toggleForm = (key: string) =>
     setItems((prev) => { setDirty(true); return prev.map((i) => i.key === key ? { ...i, showInForm: !i.showInForm } : i); });
   const toggleInline = (key: string) =>
@@ -342,6 +392,7 @@ export function StudioPanel({
           is_editable:        i.editable !== false,
           default_value:      (i.defaultValue ?? "") || null,
           ui_style:           i.uiStyle ?? {},
+          ...(i.width ? { width: i.width } : {}),
         },
       }));
       for (let s = 0; s < updates.length; s += 100) {
@@ -372,6 +423,9 @@ export function StudioPanel({
         });
         if ((await r.json()).error) throw new Error("layout failed");
       }
+
+      // บันทึกค่าเริ่มต้นตาราง (sort/group/จำนวน/สี/สรุป) ด้วยปุ่มเดียวกัน
+      if (tlSaveRef.current) { try { await tlSaveRef.current(); } catch { /* TableLayoutPanel โชว์ error เอง */ } }
 
       setMsg("✓ บันทึกแล้ว — แก้ต่อได้เลย (กด \"ปิด\" เมื่อเสร็จ)");
       setDirty(false);
@@ -487,11 +541,49 @@ export function StudioPanel({
         {/* ---- LEFT: editor ---- */}
         <div className={`${previewFull ? "hidden" : (tab === "form" ? "w-64" : "w-2/5")} overflow-y-auto border-r border-slate-200 p-4 bg-slate-50`}>
           {tab === "table" ? (
-            <TableEditor
-              items={items} sensors={sensors}
-              onReorder={(a,b)=>{ setItems((p)=>arrayMove(p,a,b)); setDirty(true); }}
-              onToggleVisible={toggleVisible}
-            />
+            <>
+              {/* บันทึกชุดคอลัมน์ปัจจุบันเป็น Saved View + ตั้ง default */}
+              {tableId && (
+                <div className="mb-3 p-3 rounded-lg border border-indigo-100 bg-indigo-50/50 space-y-2">
+                  <div className="text-xs font-semibold text-indigo-700">📑 บันทึกชุดคอลัมน์นี้เป็นมุมมอง</div>
+                  <input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="ชื่อมุมมอง เช่น มุมมองเงินเดือน"
+                    onKeyDown={(e) => { if (e.key === "Enter") void saveAsView(); }}
+                    className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-slate-500">ใครเห็น:</span>
+                    <select value={viewVis} onChange={(e) => setViewVis(e.target.value as "personal" | "team" | "system")}
+                      className="h-7 px-1.5 text-xs border border-slate-200 rounded bg-white">
+                      <option value="system">ทั้งระบบ</option>
+                      <option value="team">ทีม</option>
+                      <option value="personal">ส่วนตัว</option>
+                    </select>
+                    <label className="flex items-center gap-1 text-slate-600 cursor-pointer ml-auto">
+                      <input type="checkbox" checked={viewDefault} onChange={(e) => setViewDefault(e.target.checked)} /> ตั้งเป็นค่าเริ่มต้น ⭐
+                    </label>
+                  </div>
+                  <button type="button" onClick={() => void saveAsView()} disabled={viewSaving || !viewName.trim()}
+                    className="w-full h-8 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">
+                    {viewSaving ? "กำลังบันทึก..." : "💾 บันทึกเป็นมุมมอง"}
+                  </button>
+                  {viewMsg && <div className={`text-[11px] ${viewMsg.startsWith("✓") ? "text-emerald-600" : "text-red-600"}`}>{viewMsg}</div>}
+                  <div className="text-[10px] text-slate-400">บันทึกเฉพาะ &ldquo;คอลัมน์ + ลำดับ&rdquo; · ถ้าต้องการ view ที่มีตัวกรอง ให้สร้างจากตารางจริง (ปุ่ม + View)</div>
+                </div>
+              )}
+              <TableEditor
+                items={items} sensors={sensors} sections={sections} groupOf={groupOf}
+                onReorder={(a,b)=>{ setItems((p)=>arrayMove(p,a,b)); setDirty(true); }}
+                onToggleVisible={toggleVisible} onSetVisible={setVisibleFor}
+                summaries={tlSummaries} onSetSummary={(col,val)=>tlSetSummaryRef.current?.(col,val)}
+              />
+              {/* ค่าเริ่มต้นตาราง (sort/จัดกลุ่ม/จำนวนต่อหน้า/สีแถว) — ของกลาง · สรุปไปโชว์ inline ในรายการคอลัมน์ · ใช้ปุ่ม "บันทึก" หลักร่วมกัน */}
+              {tableId && moduleKey && (
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                  <div className="text-xs font-semibold text-slate-500 mb-2">⚙ ค่าเริ่มต้นตาราง (บันทึกพร้อมปุ่ม &ldquo;บันทึก&rdquo; ด้านบน)</div>
+                  <TableLayoutPanel tableId={tableId} moduleKey={moduleKey} showColumns={false} showSummaries={false} embedded
+                    saveRef={tlSaveRef} onSummaries={handleTlSummaries} />
+                </div>
+              )}
+            </>
           ) : (
             <FormEditor
               formGroups={formGroups} sectionOptions={sectionOptions} sensors={sensors} onDragEnd={onDragEnd}
@@ -534,7 +626,7 @@ export function StudioPanel({
             )}
           </div>
           {tab === "table" ? (
-            <TablePreview cols={visibleCols} />
+            <TablePreview cols={visibleCols} onResize={(k,w)=>patchItem(k,{width:w})} />
           ) : (
             <FormPreview
               groups={formGroups.map(([s,fs])=>[s,fs.filter(f=>f.showInForm)] as [SectionDef,StudioField[]])}
@@ -561,25 +653,67 @@ export function StudioPanel({
 // ============================================================
 
 function TableEditor({
-  items, sensors, onReorder, onToggleVisible,
+  items, sensors, sections, groupOf, onReorder, onToggleVisible, onSetVisible, summaries, onSetSummary,
 }: {
   items: StudioField[];
   sensors: ReturnType<typeof useSensors>;
+  sections: SectionDef[];
+  groupOf: (g?: string | null) => string;   // จัดกลุ่มแบบเดียวกับฟอร์ม (ดึงจากฟอร์ม ไม่ hardcode)
   onReorder: (from: number, to: number) => void;
   onToggleVisible: (key: string) => void;
+  onSetVisible: (keys: string[], vis: boolean) => void;
+  summaries: Record<string, string>;                            // สรุปท้ายคอลัมน์ (inline)
+  onSetSummary: (col: string, val: string) => void;
 }) {
+  // แบ่งกลุ่มคอลัมน์ตาม "section ของฟอร์ม" — เรียงตามลำดับ section, คงลำดับ field เดิมในแต่ละกลุ่ม
+  const grouped = useMemo(() => {
+    const byKey = new Map<string, StudioField[]>();
+    for (const it of items) { const k = groupOf(it.groupKey); const l = byKey.get(k) ?? []; l.push(it); byKey.set(k, l); }
+    const out: [SectionDef, StudioField[]][] = [];
+    const used = new Set<string>();
+    for (const s of sections) if (byKey.has(s.key)) { out.push([s, byKey.get(s.key)!]); used.add(s.key); }
+    // กลุ่มที่ไม่มีใน sections (เช่น other เมื่อโมดูลไม่มี section นั้น) — กัน field หลุด
+    for (const [k, fs] of byKey) if (!used.has(k)) out.push([{ key: k, label: gmeta(k).label, icon: gmeta(k).icon, columns: 2 }, fs]);
+    return out;
+  }, [items, groupOf, sections]);
+  const allKeys = items.map((i) => i.key);
+  const orderedKeys = grouped.flatMap(([, fs]) => fs.map((f) => f.key));
   return (
     <div>
-      <p className="text-xs text-slate-500 mb-3">ติ๊ก = โชว์ใน column ตาราง • ลาก ⋮⋮ เรียงลำดับ column</p>
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <p className="text-xs text-slate-500">ติ๊ก = โชว์ใน column • ลาก ⋮⋮ เรียง • แบ่งกลุ่มตามฟอร์ม</p>
+        <div className="flex gap-1.5 text-[11px] shrink-0">
+          <button type="button" onClick={() => onSetVisible(allKeys, true)} className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">เลือกทั้งหมด</button>
+          <button type="button" onClick={() => onSetVisible(allKeys, false)} className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50">ไม่เลือก</button>
+        </div>
+      </div>
       <DndContext sensors={sensors} collisionDetection={closestCorners}
         onDragEnd={(e: DragEndEvent)=>{ const {active,over}=e; if(!over||active.id===over.id)return;
           const a=items.findIndex(i=>i.key===active.id), b=items.findIndex(i=>i.key===over.id);
           if(a>=0&&b>=0) onReorder(a,b); }}>
-        <SortableContext items={items.map(i=>i.key)} strategy={verticalListSortingStrategy}>
-          <div className="space-y-1">
-            {items.map((f)=>(
-              <ColRow key={f.key} field={f} onToggle={()=>onToggleVisible(f.key)} />
-            ))}
+        <SortableContext items={orderedKeys} strategy={verticalListSortingStrategy}>
+          <div className="space-y-3">
+            {grouped.map(([sec, fs]) => {
+              const gkeys = fs.map((f) => f.key);
+              const onCount = fs.filter((f) => f.isVisible).length;
+              return (
+                <div key={sec.key}>
+                  <div className="flex items-center gap-1.5 mb-1 px-1">
+                    {iconNode(sec.icon)}
+                    <span className="text-xs font-semibold text-slate-500">{sec.label}</span>
+                    <span className="text-[10px] text-slate-400">{onCount}/{fs.length}</span>
+                    <div className="flex-1" />
+                    <button type="button" onClick={() => onSetVisible(gkeys, true)} className="text-[10px] text-slate-400 hover:text-emerald-600">ทั้งหมด</button>
+                    <span className="text-slate-300 text-[10px]">·</span>
+                    <button type="button" onClick={() => onSetVisible(gkeys, false)} className="text-[10px] text-slate-400 hover:text-red-500">ไม่เลือก</button>
+                  </div>
+                  <div className="space-y-1">
+                    {fs.map((f) => <ColRow key={f.key} field={f} onToggle={() => onToggleVisible(f.key)}
+                      summary={summaries[f.key] ?? ""} onSetSummary={(v) => onSetSummary(f.key, v)} />)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </SortableContext>
       </DndContext>
@@ -587,7 +721,7 @@ function TableEditor({
   );
 }
 
-function ColRow({ field, onToggle }: { field: StudioField; onToggle: ()=>void }) {
+function ColRow({ field, onToggle, summary, onSetSummary }: { field: StudioField; onToggle: ()=>void; summary?: string; onSetSummary?: (v: string)=>void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.key });
   const style: React.CSSProperties = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging?0.4:1 };
   return (
@@ -595,28 +729,56 @@ function ColRow({ field, onToggle }: { field: StudioField; onToggle: ()=>void })
       className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${field.isVisible?"border-emerald-200 bg-emerald-50/40":"border-slate-200 bg-white"} ${isDragging?"shadow-lg":""}`}>
       <span {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-slate-400 select-none px-1">⋮⋮</span>
       <input type="checkbox" checked={!!field.isVisible} onChange={onToggle} className="rounded accent-emerald-500" />
-      <span className="flex-1 text-sm text-slate-700 truncate">{field.label}
+      <span className="flex-1 min-w-0 text-sm text-slate-700 truncate">{field.label}
         <code className="ml-1.5 text-[10px] text-slate-400">{field.key}</code></span>
-      <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded">{field.type}</span>
+      {/* สรุปท้ายคอลัมน์ inline */}
+      {onSetSummary && (
+        <select value={summary ?? ""} onChange={(e)=>onSetSummary(e.target.value)} title="สรุปท้ายคอลัมน์"
+          className={`shrink-0 h-6 text-[10px] rounded border ${summary ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-400"}`}>
+          <option value="">Σ —</option>
+          <option value="sum">Σ รวม</option>
+          <option value="count">Σ นับ</option>
+          <option value="avg">Σ เฉลี่ย</option>
+        </select>
+      )}
+      <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-100 rounded shrink-0">{field.type}</span>
     </div>
   );
 }
 
-function TablePreview({ cols }: { cols: StudioField[] }) {
+function TablePreview({ cols, onResize }: { cols: StudioField[]; onResize?: (key: string, width: number) => void }) {
   if (cols.length === 0) return <div className="text-sm text-slate-300 py-8 text-center">ยังไม่เลือก column — ติ๊กด้านซ้าย</div>;
+  // ลากขอบขวาของหัวคอลัมน์เพื่อปรับความกว้าง (อัปเดตสด)
+  const startResize = (e: React.MouseEvent, key: string, startW: number) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX;
+    const move = (ev: MouseEvent) => { const w = Math.max(60, Math.round(startW + (ev.clientX - startX))); onResize?.(key, w); };
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); document.body.style.cursor = ""; };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+  };
   return (
     <div className="border border-slate-200 rounded-lg overflow-x-auto">
-      <table className="w-full text-xs">
+      {onResize && <div className="px-3 py-1 text-[10px] text-slate-400 border-b border-slate-100">ลากขอบหัวคอลัมน์เพื่อปรับความกว้าง · กด &ldquo;บันทึก&rdquo; เพื่อใช้เป็นค่าเริ่มต้น</div>}
+      <table className="text-xs" style={{ tableLayout: "fixed", minWidth: "100%" }}>
         <thead className="bg-slate-50 border-b border-slate-200">
           <tr>{cols.map(c=>(
-            <th key={c.key} className="px-3 py-2 text-left font-medium text-slate-600 whitespace-nowrap">{c.label}</th>
+            <th key={c.key} style={{ width: c.width ?? 120 }}
+              className="relative px-3 py-2 text-left font-medium text-slate-600 truncate">
+              {c.label}
+              {c.width && <span className="ml-1 text-[9px] text-slate-300">{c.width}px</span>}
+              {onResize && (
+                <span onMouseDown={(e)=>startResize(e, c.key, c.width ?? 120)} title="ลากปรับความกว้าง"
+                  className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-orange-300 active:bg-orange-400" />
+              )}
+            </th>
           ))}</tr>
         </thead>
         <tbody>
           {[1,2,3].map(r=>(
             <tr key={r} className="border-b border-slate-100">
               {cols.map(c=>(
-                <td key={c.key} className="px-3 py-2 text-slate-400 whitespace-nowrap">
+                <td key={c.key} className="px-3 py-2 text-slate-400 truncate">
                   {c.type==="boolean"?"✓":c.type==="number"?"123":c.type==="image"?"🖼":"ตัวอย่าง"}
                 </td>
               ))}
