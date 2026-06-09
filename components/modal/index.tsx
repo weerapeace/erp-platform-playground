@@ -12,8 +12,12 @@ import { createPortal } from "react-dom";
 export function useBackdropDismiss(onClose?: () => void) {
   const downOnBackdrop = useRef(false);
   return {
-    onMouseDown: (e: React.MouseEvent) => { downOnBackdrop.current = e.target === e.currentTarget; },
+    onMouseDown: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      downOnBackdrop.current = e.target === e.currentTarget;
+    },
     onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
       if (onClose && downOnBackdrop.current && e.target === e.currentTarget) onClose();
       downOnBackdrop.current = false;
     },
