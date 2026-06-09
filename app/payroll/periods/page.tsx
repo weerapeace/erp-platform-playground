@@ -114,9 +114,9 @@ const CONFIG: MasterCRUDConfig = {
   fields: [
     { key: "period_name",  label: "ชื่องวด",   type: "text", colSize: 200, required: true, formSpan: 2, groupKey: "core", order: 10 },
     { key: "company_name", label: "บริษัท",    type: "select", colSize: 150, options: COMPANY_NAMES, filterable: true, groupKey: "core", order: 20 },
-    { key: "start_date",   label: "เริ่มงวด",  type: "text", colSize: 110, placeholder: "YYYY-MM-DD", required: true, groupKey: "core", order: 30 },
-    { key: "end_date",     label: "สิ้นงวด",   type: "text", colSize: 110, placeholder: "YYYY-MM-DD", required: true, groupKey: "core", order: 40 },
-    { key: "payment_date", label: "วันจ่าย",   type: "text", colSize: 110, placeholder: "YYYY-MM-DD", groupKey: "core", order: 50 },
+    { key: "start_date",   label: "เริ่มงวด",  type: "date", colSize: 110, required: true, groupKey: "core", order: 30 },
+    { key: "end_date",     label: "สิ้นงวด",   type: "date", colSize: 110, required: true, groupKey: "core", order: 40 },
+    { key: "payment_date", label: "วันจ่าย",   type: "date", colSize: 110, groupKey: "core", order: 50 },
     { key: "default_work_days",     label: "วันทำงาน", type: "number", colSize: 90, groupKey: "calc", order: 60 },
     { key: "default_hours_per_day", label: "ชม./วัน",  type: "number", colSize: 80, groupKey: "calc", order: 70 },
     { key: "status", label: "สถานะ", type: "select", colSize: 110, options: PERIOD_STATUS, filterable: true, groupKey: "core", order: 80,
