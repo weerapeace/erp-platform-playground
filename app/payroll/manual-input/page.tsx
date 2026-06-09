@@ -482,6 +482,7 @@ export default function ManualInputPage() {
           row={detailModal.row}
           items={detailModal.items}
           onClose={() => setDetailModal(null)}
+          onChanged={() => load(periodId)}
         />
       )}
       {detailModal?.type === "system" && (
@@ -563,12 +564,74 @@ function DetailAmountRow({ label, amount, sign = "-", muted = false }: { label: 
   );
 }
 
-function RecurringDetailModal({ row, items, onClose }: { row: Row; items: RecurringItem[]; onClose: () => void }) {
-  const earning = items.filter((item) => item.item_type === "earning");
-  const deduction = items.filter((item) => item.item_type === "deduction");
-  const earningTotal = totalRecurring(items, "earning");
-  const deductionTotal = totalRecurring(items, "deduction");
+function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; items: RecurringItem[]; onClose: () => void; onChanged: () => void }) {
+  const [localItems, setLocalItems] = useState<RecurringItem[]>(items);
+  const [itemType, setItemType] = useState<"earning" | "deduction">("earning");
+  const [itemName, setItemName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [startDate, setStartDate] = useState(todayIso());
+  const [endDate, setEndDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => { setLocalItems(items); }, [items]);
+
+  const earning = localItems.filter((item) => item.item_type === "earning");
+  const deduction = localItems.filter((item) => item.item_type === "deduction");
+  const earningTotal = totalRecurring(localItems, "earning");
+  const deductionTotal = totalRecurring(localItems, "deduction");
   const net = earningTotal - deductionTotal;
+
+  async function addRecurringItem() {
+    const name = itemName.trim();
+    const amt = Number(amount);
+    if (!name) { setErr("กรุณาระบุชื่อรายการ"); return; }
+    if (!Number.isFinite(amt) || amt <= 0) { setErr("กรุณาระบุจำนวนเงินมากกว่า 0"); return; }
+    if (!startDate) { setErr("กรุณาระบุวันที่เริ่ม"); return; }
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const res = await apiFetch("/api/payroll/recurring", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employee_id: row.employee_id,
+          item_name: name,
+          item_type: itemType,
+          amount_per_period: amt,
+          duration_type: "permanent",
+          calculation_method: "fixed",
+          start_date: startDate,
+          end_date: endDate || null,
+          status: "active",
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.error) { setErr(j.error ?? "เพิ่มรายการประจำไม่สำเร็จ"); return; }
+      const created = j.data as Partial<RecurringItem> & { amount_per_period?: number };
+      setLocalItems((prev) => [{
+        id: String(created.id ?? crypto.randomUUID()),
+        employee_id: row.employee_id,
+        item_name: name,
+        item_type: itemType,
+        applied_amount: Number(created.amount_per_period ?? amt),
+        amount_per_period: Number(created.amount_per_period ?? amt),
+        duration_type: "permanent",
+        start_date: startDate,
+        end_date: endDate || null,
+      }, ...prev]);
+      setItemName("");
+      setAmount("");
+      setEndDate("");
+      setMsg("เพิ่มรายการประจำแล้ว รายการนี้จะถูกนำไปคำนวณในงวดถัด ๆ ไปด้วย");
+      onChanged();
+    } catch {
+      setErr("เพิ่มรายการประจำไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const renderItems = (list: RecurringItem[], sign: "+" | "-") => (
     list.length ? (
       <div className="space-y-2">
@@ -625,6 +688,52 @@ function RecurringDetailModal({ row, items, onClose }: { row: Row; items: Recurr
             {renderItems(deduction, "-")}
           </section>
         </div>
+        <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <div className="mb-3">
+            <div className="text-sm font-semibold text-slate-800">เพิ่มรายการประจำ</div>
+            <p className="mt-1 text-xs leading-5 text-amber-700">หมายเหตุ: รายการที่เพิ่มตรงนี้เป็นรายการประจำของพนักงาน จะใช้กับทุกเดือน/ทุกงวดถัดไป ไม่ใช่เฉพาะงวดเดือนนี้</p>
+          </div>
+          {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+          {msg && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{msg}</div>}
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">ประเภท</label>
+              <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-white p-1">
+                {(["earning", "deduction"] as const).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setItemType(type)}
+                    className={`h-9 rounded-md text-sm font-medium transition ${itemType === type ? (type === "earning" ? "bg-emerald-600 text-white" : "bg-red-600 text-white") : "text-slate-600 hover:bg-slate-50"}`}
+                  >
+                    {type === "earning" ? "เพิ่มประจำ" : "หักประจำ"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">จำนวนเงิน/งวด</label>
+              <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" placeholder="เช่น 500"
+                className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs font-medium text-slate-500">ชื่อรายการ</label>
+              <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder={itemType === "earning" ? "เช่น ค่าเดินทาง / เบี้ยขยัน" : "เช่น ค่าโทรศัพท์ / หักเงินกู้"}
+                className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">เริ่มใช้ตั้งแต่</label>
+              <DateInput value={startDate} onChange={setStartDate} className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">สิ้นสุด (ถ้ามี)</label>
+              <DateInput value={endDate} onChange={setEndDate} className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+            </div>
+          </div>
+          <button onClick={addRecurringItem} disabled={busy} className="mt-3 h-10 w-full rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
+            {busy ? "กำลังเพิ่ม..." : "เพิ่มเป็นรายการประจำ"}
+          </button>
+        </section>
       </div>
     </ERPModal>
   );
