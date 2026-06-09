@@ -22,8 +22,9 @@ const STATUS: Record<string, { th: string; cls: string }> = {
 };
 const baht = (n: unknown) => `฿${Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
 
-export function ContractPeekCell({ employeeId, employeeCode, employeeName }: {
+export function ContractPeekCell({ employeeId, employeeCode, employeeName, label, btnClass, variant = "drawer" }: {
   employeeId: string; employeeCode?: string; employeeName?: string;
+  label?: string; btnClass?: string; variant?: "drawer" | "modal";
 }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Contract[] | null>(null);
@@ -48,14 +49,16 @@ export function ContractPeekCell({ employeeId, employeeCode, employeeName }: {
   return (
     <>
       <button onClick={(e) => { e.stopPropagation(); setOpen(true); }}
-        className="text-xs px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 whitespace-nowrap">
-        📄 สัญญา
+        className={btnClass ?? "text-xs px-2 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 whitespace-nowrap"}>
+        {label ?? "📄 สัญญา"}
       </button>
 
       {open && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-[100]" onClick={() => setOpen(false)}>
           <div className="absolute inset-0 bg-black/30" />
-          <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-xl flex flex-col"
+          <div className={variant === "modal"
+              ? "absolute left-1/2 top-[7vh] max-h-[86vh] w-[min(720px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-2xl bg-white shadow-xl flex flex-col"
+              : "absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-xl flex flex-col"}
                onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between">
               <div>

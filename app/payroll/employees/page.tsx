@@ -77,11 +77,47 @@ const fmtBaht = (v: unknown) => {
     ? <span className="tabular-nums text-slate-700">฿{n.toLocaleString("th-TH")}</span>
     : <span className="text-slate-300">—</span>;
 };
+const peekBtn = "inline-flex h-8 items-center rounded-lg border px-2.5 text-xs font-medium whitespace-nowrap transition";
+const contractBtn = `${peekBtn} border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100`;
+const recurringBtn = `${peekBtn} border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`;
 
 // ของพิเศษทั้งหมดของหน้าพนักงาน — registry mode merge ตาม field key (ไม่หาย)
 const employeeCellRenderers: NonNullable<MasterCRUDConfig["cellRenderers"]> = {
-  current_contract_no: (v) =>
-    v ? <span className="font-mono text-xs">{String(v)}</span> : <span className="text-slate-300">— ไม่มีสัญญา —</span>,
+  current_contract_no: (v, row) => {
+    const id = String(row?.id ?? "");
+    const code = String(row?.employee_code ?? "");
+    const name = String(row?.full_name ?? "");
+    const label = v ? `📄 ${String(v)}` : "📄 ดูสัญญา";
+    return (
+      <ContractPeekCell
+        employeeId={id}
+        employeeCode={code}
+        employeeName={name}
+        label={label}
+        btnClass={contractBtn}
+        variant="modal"
+      />
+    );
+  },
+  payroll_recurring_popup: (_v, row) => {
+    const id = String(row?.id ?? "");
+    const code = String(row?.employee_code ?? "");
+    const name = String(row?.full_name ?? "");
+    return (
+      <RecordPeekCell
+        label="🔁 รายการประจำ"
+        title="รายการประจำ"
+        employeeId={id}
+        employeeCode={code}
+        employeeName={name}
+        apiPath="/api/payroll/view/recurring"
+        empty="ไม่มีรายการประจำ"
+        renderRow={peekRecurring}
+        btnClass={recurringBtn}
+        variant="modal"
+      />
+    );
+  },
   current_contract_salary: fmtBaht,
   payroll_register_base_salary: fmtBaht,
   employment_status: (v) => {
@@ -135,8 +171,10 @@ const CONFIG: MasterCRUDConfig = {
     { key: "department_name", label: "แผนก",       type: "select", colSize: 120, options: DEPARTMENT_NAMES, filterable: true, groupKey: "core", order: 50,
       helpText: "เลือกแผนก — ระบบจะผูกกับ department_id ให้อัตโนมัติ" },
     // สัญญาปัจจุบันของพนักงาน (จาก employee_contracts) — โชว์ความสัมพันธ์พนักงาน ↔ สัญญา
-    { key: "current_contract_no", label: "สัญญาปัจจุบัน", type: "text", colSize: 160, readonly: true, hideInForm: true, groupKey: "contract", order: 54,
-      cellRender: (v) => v ? <span className="font-mono text-xs">{String(v)}</span> : <span className="text-slate-300">— ไม่มีสัญญา —</span> },
+    { key: "current_contract_no", label: "สัญญาจ้าง", type: "text", colSize: 160, readonly: true, hideInForm: true, groupKey: "contract", order: 54,
+      cellRender: employeeCellRenderers.current_contract_no, renderDetail: () => null },
+    { key: "payroll_recurring_popup", label: "รายการประจำ", type: "text", colSize: 150, readonly: true, hideInForm: true, sortable: false, groupKey: "contract", order: 54.5,
+      cellRender: employeeCellRenderers.payroll_recurring_popup, renderDetail: () => null },
     { key: "current_contract_salary", label: "เงินเดือน(สัญญา)", type: "number", colSize: 120, readonly: true, hideInForm: true, groupKey: "contract", order: 55, cellRender: fmtBaht },
     { key: "employment_status", label: "สถานะ",    type: "select", colSize: 110, options: EMPLOYMENT_STATUS, filterable: true, groupKey: "core", order: 60,
       cellRender: (v) => {

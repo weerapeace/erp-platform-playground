@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 
 export function RecordPeekCell({
-  label, btnClass, title, employeeId, employeeCode, employeeName, apiPath, renderRow, empty = "ไม่มีข้อมูล",
+  label, btnClass, title, employeeId, employeeCode, employeeName, apiPath, renderRow, empty = "ไม่มีข้อมูล", variant = "drawer",
 }: {
   label: string;
   btnClass?: string;
@@ -20,6 +20,7 @@ export function RecordPeekCell({
   apiPath: string;
   renderRow: (row: Record<string, unknown>) => React.ReactNode;
   empty?: string;
+  variant?: "drawer" | "modal";
 }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
@@ -51,7 +52,12 @@ export function RecordPeekCell({
       {open && typeof document !== "undefined" && createPortal(
         <div className="fixed inset-0 z-[100]" onClick={() => setOpen(false)}>
           <div className="absolute inset-0 bg-black/30" />
-          <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+          <div
+            className={variant === "modal"
+              ? "absolute left-1/2 top-[7vh] max-h-[86vh] w-[min(720px,calc(100vw-32px))] -translate-x-1/2 overflow-hidden rounded-2xl bg-white shadow-xl flex flex-col"
+              : "absolute right-0 top-0 bottom-0 w-full max-w-md bg-white shadow-xl flex flex-col"}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between">
               <div>
                 <div className="text-xs text-slate-400">{title}</div>
