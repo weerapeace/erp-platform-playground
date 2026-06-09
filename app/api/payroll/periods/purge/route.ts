@@ -16,6 +16,7 @@ const CONFIRM_TEXT = "ลบงวดพร้อมข้อมูล";
 const BLOCKED_STATUSES = new Set(["paid"]);
 
 const PERIOD_TABLES = [
+  { table: "payroll_audit_logs", label: "audit เดิมของ payroll" },
   { table: "payroll_payslips", label: "สลิปเงินเดือน" },
   { table: "payroll_lines", label: "รายการเงินเดือน" },
   { table: "payroll_runs", label: "รอบคำนวณ" },
