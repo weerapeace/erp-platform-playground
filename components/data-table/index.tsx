@@ -933,7 +933,9 @@ export function DataTable<T extends Record<string, unknown>>({
     // แบบ A: เก็บหน้าตาตารางครบ
     const config = {
       baseViewId: activeView, colFilterValues, globalSearch, columnVisibility, groupBy,
-      columnOrder, columnSizing, columnPinning, sorting, density, viewMode,
+      // เก็บเฉพาะลำดับคอลัมน์ข้อมูล (ไม่เก็บ __select__/__actions__ — บังคับตำแหน่งคงที่อยู่แล้ว)
+      columnOrder: columnOrder.filter((id) => id !== "__select__" && id !== "__actions__"),
+      columnSizing, columnPinning, sorting, density, viewMode,
       pageSize: isServer ? srvPageSize : table.getState().pagination.pageSize,
     };
     const res = await apiFetch("/api/saved-views", {
@@ -1107,12 +1109,25 @@ export function DataTable<T extends Record<string, unknown>>({
     ];
   }, [withSelectCol, rowActions, layoutSettings]);
 
+  // ของกลาง: บังคับ checkbox (__select__) ซ้ายสุด และปุ่ม ⋮ (__actions__) ขวาสุดเสมอ
+  // กัน columnOrder ที่ถูกบันทึก/จัดเรียงไว้ (ซึ่งมักไม่รวมคอลัมน์พิเศษ 2 ตัวนี้)
+  // ทำให้ checkbox หลุดไปอยู่ท้ายตาราง
+  const effectiveColumnOrder = useMemo<ColumnOrderState>(() => {
+    if (!columnOrder.length) return columnOrder;   // ไม่มี order → ใช้ลำดับตาม definition (select แรกอยู่แล้ว)
+    const rest = columnOrder.filter((id) => id !== "__select__" && id !== "__actions__");
+    return [
+      ...(showSelectCol ? ["__select__"] : []),
+      ...rest,
+      ...(rowActions.length > 0 ? ["__actions__"] : []),
+    ];
+  }, [columnOrder, showSelectCol, rowActions]);
+
   // ---- TanStack Table instance ----
   const table = useReactTable({
     data: filteredData,
     columns: tableColumns,
     columnResizeMode: "onChange",  // column resize
-    state: { sorting, columnFilters, columnVisibility, rowSelection, columnSizing, columnOrder, columnPinning },
+    state: { sorting, columnFilters, columnVisibility, rowSelection, columnSizing, columnOrder: effectiveColumnOrder, columnPinning },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
