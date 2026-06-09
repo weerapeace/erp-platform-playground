@@ -521,19 +521,24 @@ function AdjustmentCell({ value, mode, editable, onClick, tooltip }: { value: nu
 function SystemDeductCell({ row }: { row: Row }) {
   const total = Number(row.system_deduct_baht || 0);
   if (!total) return <span className="text-slate-300">-</span>;
+  const filters = encodeURIComponent(JSON.stringify({ employee_id: { value: row.employee_id } }));
+  const href = `/payroll/employee-settings?flt=${filters}`;
   const title = [
     "หักตามระบบ",
     `ประกันสังคม: ${baht(Number(row.social_security_baht || 0))}`,
     `ภาษีหัก ณ ที่จ่าย: ${baht(Number(row.withholding_tax_baht || 0))}`,
+    "กดเพื่อไปแก้ต้นทางในหน้าตั้งค่าเงินเดือนรายคน",
   ].join("\n");
   return (
-    <span
-      className="inline-flex h-8 min-w-[86px] items-center justify-end gap-1 rounded-lg border border-red-100 bg-red-50 px-2 text-xs font-medium tabular-nums text-red-700"
+    <button
+      type="button"
+      onClick={() => { window.location.href = href; }}
+      className="inline-flex h-8 min-w-[86px] items-center justify-end gap-1 rounded-lg border border-red-100 bg-red-50 px-2 text-xs font-medium tabular-nums text-red-700 transition hover:border-red-200 hover:bg-red-100"
       title={title}
     >
       {baht(total)}
       <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-white/70 text-[10px] cursor-help">?</span>
-    </span>
+    </button>
   );
 }
 
