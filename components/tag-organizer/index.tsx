@@ -256,7 +256,13 @@ export function TagOrganizerModal({
   const TagChip = ({ t, container, index }: { t: Tag; container: string; index: number }) => (
     <span
       draggable={!busy}
-      onDragStart={() => { dragRef.current = { kind: "tag", id: t.id }; setDragKind("tag"); }}
+      onDragStart={(e) => {
+        dragRef.current = { kind: "tag", id: t.id };
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", t.id); } catch { /* ไม่รองรับ */ }
+        // เลื่อน setState ออกไป ไม่งั้น re-render ทันทีทำให้ลากถูกยกเลิก
+        setTimeout(() => setDragKind("tag"), 0);
+      }}
       onDragEnd={cleanupDrag}
       onDragOver={(e) => {
         if (dragRef.current?.kind !== "tag") return;
@@ -308,7 +314,12 @@ export function TagOrganizerModal({
   const GroupHeader = ({ g, isSub }: { g: Grp; isSub?: boolean }) => (
     <div
       draggable={!busy}
-      onDragStart={() => { dragRef.current = { kind: "group", id: g.id }; setDragKind("group"); }}
+      onDragStart={(e) => {
+        dragRef.current = { kind: "group", id: g.id };
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", g.id); } catch { /* ไม่รองรับ */ }
+        setTimeout(() => setDragKind("group"), 0);
+      }}
       onDragEnd={cleanupDrag}
       className={`group/h flex items-center gap-2 px-2 py-1.5 cursor-grab active:cursor-grabbing ${isSub ? "" : "bg-slate-50 rounded-t-lg border-b border-slate-100"}`}
     >
