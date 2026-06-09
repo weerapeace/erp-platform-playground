@@ -15,14 +15,15 @@ import { ComponentPicker } from "@/app/master/bom/line-editor";
 import type { ProductSpec, SpecField } from "@/app/api/product-spec/route";
 import type { AttrDef, AttrVal } from "@/app/api/product-attributes/route";
 
-function Row({ f, bomSkus }: { f: SpecField; bomSkus?: string[] }) {
+function Row({ f, bomSkus, onEdit }: { f: SpecField; bomSkus?: string[]; onEdit?: () => void }) {
   const inBom = f.sku_code && bomSkus ? bomSkus.includes(f.sku_code) : null;
   return (
-    <div className="flex gap-2 text-xs py-0.5 items-center">
+    <div className="group flex gap-2 text-xs py-0.5 items-center">
       <span className="text-slate-400 w-24 shrink-0">{f.label}</span>
       <span className="text-slate-700 flex-1">{f.value}</span>
       {inBom === true && <span className="text-[10px] text-emerald-600 shrink-0">✓ อยู่ใน BOM</span>}
       {inBom === false && <span className="text-[10px] text-amber-600 shrink-0">✗ ยังไม่อยู่</span>}
+      {onEdit && <button type="button" onClick={onEdit} title="แก้ไข" className="shrink-0 h-5 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100">✎</button>}
     </div>
   );
 }
@@ -72,8 +73,8 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
                   </div>
                 </div>
               )}
-              {shared.length > 0 && <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>{shared.map((f, i) => <Row key={`m${i}`} f={f} bomSkus={bomSkus} />)}</div>}
-              {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} bomSkus={bomSkus} />)}</div>}
+              {shared.length > 0 && <div><div className="text-[11px] font-semibold text-slate-500 mb-0.5">สเปกร่วม</div>{shared.map((f, i) => <Row key={`m${i}`} f={f} bomSkus={bomSkus} onEdit={editable ? () => setEditOpen(true) : undefined} />)}</div>}
+              {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} bomSkus={bomSkus} onEdit={editable ? () => setEditOpen(true) : undefined} />)}</div>}
               {(spec.bom_materials?.length ?? 0) > 0 && (
                 <div className="pt-1 border-t border-slate-50">
                   <div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ (จาก BOM{spec.bom_version ? ` ${spec.bom_version}` : ""})</div>
@@ -85,7 +86,15 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
                   ))}
                 </div>
               )}
-              {spec.parent?.work_instruction_notes && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วิธีทำ / หมายเหตุ</div><p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent.work_instruction_notes}</p></div>}
+              {(spec.parent?.work_instruction_notes || editable) && (
+                <div className="group pt-1 border-t border-slate-50">
+                  <div className="flex items-center gap-1 mb-0.5">
+                    <span className="text-[11px] font-semibold text-slate-500">วิธีทำ / หมายเหตุ</span>
+                    {editable && <button type="button" onClick={() => setEditOpen(true)} title="แก้ไข" className="h-5 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100">✎</button>}
+                  </div>
+                  <p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent?.work_instruction_notes || <span className="text-slate-300">—</span>}</p>
+                </div>
+              )}
             </div>
           )}
           {onAddMaterials && missingUniq.length > 0 && (
