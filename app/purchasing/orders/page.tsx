@@ -40,6 +40,8 @@ const money = (v: number, cur: string) => `${v.toLocaleString(undefined, { maxim
 const today = () => new Date().toISOString().slice(0, 10);
 const isCNY = (c: string) => c === "RMB" || c === "YUAN" || c === "CNY";
 const noShop = (r: Row) => !r.seller_name || r.seller_name === "—" || r.seller_name === "ไม่ระบุร้าน";
+// ตัด [code] นำหน้าชื่อสินค้าออก (code โชว์เป็น chip ข้างล่างอยู่แล้ว) — ถ้าตัดแล้วว่างให้คงชื่อเดิมไว้
+const stripCode = (name: string) => name?.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
 const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate";
 
 const COLUMNS: ColumnDef<Row>[] = [
@@ -345,7 +347,7 @@ export default function PurchaseOrdersPage() {
                                 {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
                               </div>
                               <div className="p-2.5">
-                                <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug" title={r.item_name}>{r.item_name}</div>
+                                <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug" title={r.item_name}>{stripCode(r.item_name)}</div>
                                 {r.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{r.code}</div>}
                                 <div className="text-xs text-slate-500 mt-1">ขอซื้อ <b className="text-slate-700">{r.qty.toLocaleString()}</b> {r.uom}</div>
                                 <div className="text-sm font-semibold text-blue-600 mt-0.5">{money(r.line_total, r.currency)}{isCNY(r.currency) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(r.line_total * rate).toLocaleString()}</span>}</div>
@@ -416,7 +418,7 @@ export default function PurchaseOrdersPage() {
                                       {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                      <div className="text-sm text-slate-700 line-clamp-2 leading-snug">{r.item_name}</div>
+                                      <div className="text-sm text-slate-700 line-clamp-2 leading-snug">{stripCode(r.item_name)}</div>
                                       <div className="text-[11px] text-slate-400">{r.code}</div>
                                     </div>
                                     <button onClick={() => toggleCart(r)} className="text-slate-400 hover:text-red-500 text-xs self-start">✕</button>
@@ -513,7 +515,7 @@ export default function PurchaseOrdersPage() {
                             {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">📦</span>}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm text-slate-700 truncate">{r.item_name}</div>
+                            <div className="text-sm text-slate-700 truncate">{stripCode(r.item_name)}</div>
                             <div className="text-[11px] text-slate-400">{r.code || "—"}{partial ? <span className="text-amber-600"> · สั่งไม่ครบ (ที่เหลือเปิดใบใหม่)</span> : ""}{!r.approved ? <span className="text-amber-600"> · ยังไม่อนุมัติ (อนุมัติให้อัตโนมัติ)</span> : ""}</div>
                           </div>
                           <div className="text-right shrink-0">
@@ -672,7 +674,7 @@ function LinkModal({ row, onClose, onSaved }: { row: Row; onClose: () => void; o
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึกลิงก์"}</button>
       </>}>
       <div className="space-y-2">
-        <div className="text-sm font-medium text-slate-800">{row.item_name}</div>
+        <div className="text-sm font-medium text-slate-800">{stripCode(row.item_name)}</div>
         <div className="text-xs text-slate-400">{row.code || "—"}</div>
         <label className="block text-xs font-medium text-slate-600 mt-2">ลิงก์ร้าน/สินค้า (เก็บเข้า SKU จริง)</label>
         <input value={url} onChange={(e) => setUrl(e.target.value)} autoFocus
@@ -714,7 +716,7 @@ function BuyAllModal({ shop, rows, rate, onClose, onConfirm }: {
                 {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm text-slate-700 line-clamp-1" title={r.item_name}>{r.item_name}</div>
+                <div className="text-sm text-slate-700 line-clamp-1" title={r.item_name}>{stripCode(r.item_name)}</div>
                 <div className="text-[11px] text-slate-400">{r.code} · @ {money(r.price_est, r.currency)}</div>
               </div>
               <input type="number" min={1} value={l?.qty ?? r.qty}
@@ -811,7 +813,7 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
       </>}>
       <div className="space-y-3">
         <div>
-          <div className="text-sm font-medium text-slate-800">{row.item_name}</div>
+          <div className="text-sm font-medium text-slate-800">{stripCode(row.item_name)}</div>
           <div className="text-xs text-slate-400">{row.code || "—"} · ขอซื้อ {row.qty.toLocaleString()} {row.uom}</div>
         </div>
         <div>
@@ -918,7 +920,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
       </>}>
       <div className="space-y-3">
         <div>
-          <div className="text-sm font-medium text-slate-800">{row.item_name}</div>
+          <div className="text-sm font-medium text-slate-800">{stripCode(row.item_name)}</div>
           <div className="text-xs text-slate-400">{row.code || "—"}</div>
         </div>
         <div>
