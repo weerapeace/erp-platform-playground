@@ -24,7 +24,13 @@ type Row = {
   net_estimate: number; has_manual: boolean;
 };
 type Adj = { id: string; employee_id: string; adjustment_type: string; item_name: string; amount: number; source_type?: string | null; item_code?: string | null };
-type RecurringItem = { id: string; employee_id: string; item_name: string; item_type: string; applied_amount: number; amount_per_period?: number; duration_type?: string | null; start_date?: string | null; end_date?: string | null };
+type RecurringItem = {
+  id: string; employee_id: string; item_name: string; item_type: string; applied_amount: number;
+  amount_per_period?: number; duration_type?: string | null; target_total_amount?: number | null;
+  paid_or_deducted_amount?: number | null; start_date?: string | null; end_date?: string | null;
+};
+type RecurringLookupItem = { id: string; lookup_type?: string; name: string; is_active?: boolean; sort_order?: number; metadata?: Record<string, unknown> };
+type RecurringDurationType = "unlimited" | "until_amount";
 type TimeKind = "ot" | "late" | "absence" | "leave";
 type AdjustMode = "earning" | "deduction" | "piecework";
 type DrawerTab = TimeKind;
@@ -71,6 +77,23 @@ const TIME_META: Record<TimeKind, { label: string; unit: string; sign: "+" | "-"
 
 const baht = (v: number) => v ? `฿${v.toLocaleString("th-TH", { minimumFractionDigits: 2 })}` : "—";
 const dash = (v: number, cls = "") => v ? <span className={`tabular-nums ${cls}`}>{baht(v)}</span> : <span className="text-slate-300">-</span>;
+const RECURRING_LOOKUP_TYPES = {
+  earning: "payroll_recurring_earning_item",
+  deduction: "payroll_recurring_deduction_item",
+} as const;
+const RECURRING_LOOKUP_LABELS = {
+  earning: "ชื่อรายการเพิ่มประจำ",
+  deduction: "ชื่อรายการหักประจำ",
+} as const;
+const RECURRING_DURATION_LABEL: Record<RecurringDurationType, string> = {
+  unlimited: "ไม่จำกัด",
+  until_amount: "จนกว่าจะครบยอด",
+};
+
+function recurringLookupType(type: "earning" | "deduction") {
+  return RECURRING_LOOKUP_TYPES[type];
+}
+
 function formatPaidDuration(totalMinutes?: number, hoursPerDay = STANDARD_HOURS_PER_DAY) {
   if (totalMinutes == null || Number.isNaN(totalMinutes)) return "-";
   const minutes = Math.max(Math.round(totalMinutes), 0);
@@ -568,8 +591,13 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
   const [localItems, setLocalItems] = useState<RecurringItem[]>(items);
   const [quickAddType, setQuickAddType] = useState<"earning" | "deduction" | null>(null);
   const [itemType, setItemType] = useState<"earning" | "deduction">("earning");
-  const [itemName, setItemName] = useState("");
+  const [lookupItems, setLookupItems] = useState<RecurringLookupItem[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [selectedLookupId, setSelectedLookupId] = useState("");
+  const [manageLookupOpen, setManageLookupOpen] = useState(false);
   const [amount, setAmount] = useState("");
+  const [durationType, setDurationType] = useState<RecurringDurationType>("unlimited");
+  const [targetTotalAmount, setTargetTotalAmount] = useState("");
   const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState("");
   const [busy, setBusy] = useState(false);
@@ -578,28 +606,68 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
 
   useEffect(() => { setLocalItems(items); }, [items]);
 
+  const loadRecurringLookupItems = useCallback(async (type: "earning" | "deduction", preferredId?: string) => {
+    setLookupLoading(true);
+    try {
+      const qs = new URLSearchParams({ type: recurringLookupType(type), limit: "200" });
+      const res = await apiFetch(`/api/lookups?${qs.toString()}`);
+      const j = await res.json();
+      if (!res.ok || j.error) {
+        setLookupItems([]);
+        setSelectedLookupId("");
+        setErr(j.error ?? "โหลดชื่อรายการไม่สำเร็จ");
+        return [];
+      }
+      const rows = (j.data ?? []) as RecurringLookupItem[];
+      setLookupItems(rows);
+      const nextId = preferredId && rows.some((item) => item.id === preferredId)
+        ? preferredId
+        : rows[0]?.id ?? "";
+      setSelectedLookupId(nextId);
+      return rows;
+    } catch {
+      setLookupItems([]);
+      setSelectedLookupId("");
+      setErr("โหลดชื่อรายการไม่สำเร็จ");
+      return [];
+    } finally {
+      setLookupLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (quickAddType) void loadRecurringLookupItems(itemType);
+  }, [itemType, loadRecurringLookupItems, quickAddType]);
+
   const earning = localItems.filter((item) => item.item_type === "earning");
   const deduction = localItems.filter((item) => item.item_type === "deduction");
   const earningTotal = totalRecurring(localItems, "earning");
   const deductionTotal = totalRecurring(localItems, "deduction");
   const net = earningTotal - deductionTotal;
+  const selectedLookup = lookupItems.find((item) => item.id === selectedLookupId);
 
   function openQuickAdd(type: "earning" | "deduction") {
     setErr(null);
     setMsg(null);
+    setManageLookupOpen(false);
     setItemType(type);
-    setItemName("");
+    setSelectedLookupId("");
+    setLookupItems([]);
     setAmount("");
+    setDurationType("unlimited");
+    setTargetTotalAmount("");
     setStartDate(todayIso());
     setEndDate("");
     setQuickAddType(type);
   }
 
   async function addRecurringItem() {
-    const name = itemName.trim();
+    const name = selectedLookup?.name.trim() ?? "";
     const amt = Number(amount);
-    if (!name) { setErr("กรุณาระบุชื่อรายการ"); return; }
+    const targetAmt = Number(targetTotalAmount);
+    if (!name) { setErr("กรุณาเลือกชื่อรายการ หรือกดจัดการเพื่อเพิ่มชื่อรายการ"); return; }
     if (!Number.isFinite(amt) || amt <= 0) { setErr("กรุณาระบุจำนวนเงินมากกว่า 0"); return; }
+    if (durationType === "until_amount" && (!Number.isFinite(targetAmt) || targetAmt <= 0)) { setErr("กรุณาระบุยอดรวมที่ต้องครบมากกว่า 0"); return; }
     if (!startDate) { setErr("กรุณาระบุวันที่เริ่ม"); return; }
     setBusy(true); setErr(null); setMsg(null);
     try {
@@ -611,7 +679,8 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
           item_name: name,
           item_type: itemType,
           amount_per_period: amt,
-          duration_type: "unlimited",
+          duration_type: durationType,
+          target_total_amount: durationType === "until_amount" ? targetAmt : null,
           calculation_method: "fixed",
           start_date: startDate,
           end_date: endDate || null,
@@ -628,12 +697,15 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
         item_type: itemType,
         applied_amount: Number(created.amount_per_period ?? amt),
         amount_per_period: Number(created.amount_per_period ?? amt),
-        duration_type: "unlimited",
+        duration_type: durationType,
+        target_total_amount: durationType === "until_amount" ? targetAmt : null,
         start_date: startDate,
         end_date: endDate || null,
       }, ...prev]);
-      setItemName("");
+      setSelectedLookupId("");
       setAmount("");
+      setDurationType("unlimited");
+      setTargetTotalAmount("");
       setEndDate("");
       setQuickAddType(null);
       setMsg("เพิ่มรายการประจำแล้ว รายการนี้จะถูกนำไปคำนวณในงวดถัด ๆ ไปด้วย");
@@ -649,7 +721,9 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
     list.length ? (
       <div className="space-y-2">
         {list.map((item) => {
-          const range = item.end_date ? `${item.start_date ?? "-"} ถึง ${item.end_date}` : `${item.start_date ?? "-"} ถึงไม่จำกัด`;
+          const range = item.duration_type === "until_amount" && item.target_total_amount
+            ? `${item.start_date ?? "-"} ถึงครบยอด ${baht(Number(item.target_total_amount || 0))}`
+            : item.end_date ? `${item.start_date ?? "-"} ถึง ${item.end_date}` : `${item.start_date ?? "-"} ถึงไม่จำกัด`;
           return (
             <div key={item.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
               <div className="flex items-start justify-between gap-3">
@@ -727,7 +801,7 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
         {quickAddType && (
         <ERPModal
           open
-          onClose={() => setQuickAddType(null)}
+          onClose={() => { setManageLookupOpen(false); setQuickAddType(null); }}
           title={quickAddType === "earning" ? "เพิ่มรายการเพิ่มประจำ" : "เพิ่มรายการหักประจำ"}
           description={`${row.employee_code} · ${row.employee_name}`}
           size="md"
@@ -740,31 +814,57 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
           {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
           {msg && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{msg}</div>}
           <div className="grid gap-3 md:grid-cols-2">
-            <div className="hidden">
-              <label className="mb-1 block text-xs font-medium text-slate-500">ประเภท</label>
-              <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-white p-1">
-                {(["earning", "deduction"] as const).map((type) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => setItemType(type)}
-                    className={`h-9 rounded-md text-sm font-medium transition ${itemType === type ? (type === "earning" ? "bg-emerald-600 text-white" : "bg-red-600 text-white") : "text-slate-600 hover:bg-slate-50"}`}
-                  >
-                    {type === "earning" ? "เพิ่มประจำ" : "หักประจำ"}
-                  </button>
-                ))}
-              </div>
-            </div>
             <div className="md:col-span-2">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <label className="block text-xs font-medium text-slate-500">ชื่อรายการ</label>
+                <button
+                  type="button"
+                  onClick={() => setManageLookupOpen(true)}
+                  className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                >
+                  จัดการชื่อรายการ
+                </button>
+              </div>
+              <select
+                value={selectedLookupId}
+                onChange={(e) => setSelectedLookupId(e.target.value)}
+                disabled={lookupLoading || lookupItems.length === 0}
+                className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                {lookupLoading && <option value="">กำลังโหลดชื่อรายการ...</option>}
+                {!lookupLoading && lookupItems.length === 0 && <option value="">ยังไม่มีชื่อรายการ</option>}
+                {!lookupLoading && lookupItems.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
+              {!lookupLoading && lookupItems.length === 0 && (
+                <p className="mt-1 text-xs leading-5 text-slate-400">กด “จัดการชื่อรายการ” เพื่อเพิ่มชื่อแรก แล้วค่อยเลือกจาก dropdown</p>
+              )}
+            </div>
+            <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">จำนวนเงิน/งวด</label>
               <input value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" placeholder="เช่น 500"
                 className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
             </div>
-            <div className="md:col-span-2">
-              <label className="mb-1 block text-xs font-medium text-slate-500">ชื่อรายการ</label>
-              <input value={itemName} onChange={(e) => setItemName(e.target.value)} placeholder={itemType === "earning" ? "เช่น ค่าเดินทาง / เบี้ยขยัน" : "เช่น ค่าโทรศัพท์ / หักเงินกู้"}
-                className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-500">ระยะเวลา</label>
+              <select
+                value={durationType}
+                onChange={(e) => setDurationType(e.target.value as RecurringDurationType)}
+                className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              >
+                <option value="unlimited">{RECURRING_DURATION_LABEL.unlimited}</option>
+                <option value="until_amount">{RECURRING_DURATION_LABEL.until_amount}</option>
+              </select>
             </div>
+            {durationType === "until_amount" && (
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-xs font-medium text-slate-500">ยอดรวมที่ต้องครบ</label>
+                <input value={targetTotalAmount} onChange={(e) => setTargetTotalAmount(e.target.value)} type="number" min="0" placeholder="เช่น 5000"
+                  className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500" />
+                <p className="mt-1 text-xs leading-5 text-slate-400">ใช้กับรายการที่หัก/จ่ายเป็นงวด ๆ แล้วหยุดเมื่อยอดรวมครบ เช่น หักเงินกู้</p>
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-slate-500">เริ่มใช้ตั้งแต่</label>
               <DateInput value={startDate} onChange={setStartDate} className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm" />
@@ -777,9 +877,157 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
           <button onClick={addRecurringItem} disabled={busy} className="mt-3 h-10 w-full rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50">
             {busy ? "กำลังบันทึก..." : itemType === "earning" ? "บันทึกเพิ่มประจำ" : "บันทึกหักประจำ"}
           </button>
+          {manageLookupOpen && (
+            <RecurringLookupManagerModal
+              type={itemType}
+              items={lookupItems}
+              onClose={() => setManageLookupOpen(false)}
+              onChanged={(preferredId) => loadRecurringLookupItems(itemType, preferredId)}
+            />
+          )}
         </section>
         </ERPModal>
         )}
+      </div>
+    </ERPModal>
+  );
+}
+
+function RecurringLookupManagerModal({
+  type,
+  items,
+  onClose,
+  onChanged,
+}: {
+  type: "earning" | "deduction";
+  items: RecurringLookupItem[];
+  onClose: () => void;
+  onChanged: (preferredId?: string) => Promise<unknown>;
+}) {
+  const [name, setName] = useState("");
+  const [editItem, setEditItem] = useState<RecurringLookupItem | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const lookupType = recurringLookupType(type);
+  const title = `จัดการ${RECURRING_LOOKUP_LABELS[type]}`;
+
+  function startEdit(item: RecurringLookupItem) {
+    setEditItem(item);
+    setName(item.name);
+    setErr(null);
+    setMsg(null);
+  }
+
+  function resetForm() {
+    setEditItem(null);
+    setName("");
+  }
+
+  async function saveLookupItem() {
+    const trimmed = name.trim();
+    if (!trimmed) { setErr("กรุณาระบุชื่อรายการ"); return; }
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const res = await apiFetch(editItem ? `/api/lookups/${editItem.id}` : "/api/lookups", {
+        method: editItem ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editItem ? { name: trimmed } : {
+          lookup_type: lookupType,
+          name: trimmed,
+          metadata: { payroll_item_type: type },
+        }),
+      });
+      const j = await res.json();
+      if (!res.ok || j.error) { setErr(j.error ?? "บันทึกชื่อรายการไม่สำเร็จ"); return; }
+      const saved = j.data as RecurringLookupItem | undefined;
+      await onChanged(saved?.id ?? editItem?.id);
+      resetForm();
+      setMsg(editItem ? "แก้ชื่อรายการแล้ว" : "เพิ่มชื่อรายการแล้ว");
+    } catch {
+      setErr("บันทึกชื่อรายการไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disableLookupItem(item: RecurringLookupItem) {
+    if (!window.confirm(`ปิดใช้งาน "${item.name}" ใช่ไหม? รายการเดิมที่เคยบันทึกไว้จะยังอยู่`)) return;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const res = await apiFetch(`/api/lookups/${item.id}`, { method: "DELETE" });
+      const j = await res.json();
+      if (!res.ok || j.error) { setErr(j.error ?? "ปิดใช้งานชื่อรายการไม่สำเร็จ"); return; }
+      await onChanged();
+      if (editItem?.id === item.id) resetForm();
+      setMsg("ปิดใช้งานชื่อรายการแล้ว");
+    } catch {
+      setErr("ปิดใช้งานชื่อรายการไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ERPModal
+      open
+      onClose={onClose}
+      title={title}
+      description="ชื่อในรายการนี้จะเอาไปใช้ใน dropdown เวลาบันทึกรายการประจำ"
+      size="sm"
+      storageKey={`payroll-recurring-lookup-${type}`}
+    >
+      <div className="space-y-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <label className="mb-1 block text-xs font-medium text-slate-500">{editItem ? "แก้ชื่อรายการ" : "เพิ่มชื่อรายการ"}</label>
+          <div className="flex gap-2">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={type === "earning" ? "เช่น ค่าเดินทาง / เบี้ยขยัน" : "เช่น ค่าโทรศัพท์ / หักเงินกู้"}
+              className="h-10 min-w-0 flex-1 rounded-lg border border-slate-300 px-3 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+            />
+            <button
+              type="button"
+              onClick={saveLookupItem}
+              disabled={busy}
+              className="h-10 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {editItem ? "บันทึก" : "เพิ่ม"}
+            </button>
+          </div>
+          {editItem && (
+            <button type="button" onClick={resetForm} className="mt-2 text-xs font-medium text-slate-500 hover:text-slate-800">
+              ยกเลิกการแก้ไข
+            </button>
+          )}
+        </div>
+
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        {msg && <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{msg}</div>}
+
+        <div>
+          <div className="mb-2 text-sm font-semibold text-slate-800">ชื่อที่ใช้งานอยู่</div>
+          {items.length ? (
+            <div className="max-h-72 space-y-2 overflow-auto pr-1">
+              {items.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                  <div className="min-w-0 truncate text-sm font-medium text-slate-800">{item.name}</div>
+                  <div className="flex shrink-0 gap-1">
+                    <button type="button" onClick={() => startEdit(item)} className="h-8 rounded-md border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
+                      แก้
+                    </button>
+                    <button type="button" onClick={() => disableLookupItem(item)} disabled={busy} className="h-8 rounded-md border border-red-100 px-3 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">
+                      ปิดใช้
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-slate-200 px-3 py-5 text-center text-sm text-slate-400">ยังไม่มีชื่อรายการ</div>
+          )}
+        </div>
       </div>
     </ERPModal>
   );

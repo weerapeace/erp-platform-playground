@@ -11,7 +11,7 @@ type RecurringRow = Record<string, unknown> & { id: string };
 
 const WRITABLE = new Set([
   "employee_id", "contract_id", "item_name", "item_type", "amount_per_period",
-  "duration_type", "calculation_method", "quantity_default", "rate_default",
+  "duration_type", "target_total_amount", "paid_or_deducted_amount", "calculation_method", "quantity_default", "rate_default",
   "start_date", "end_date", "status",
 ]);
 
@@ -55,12 +55,13 @@ function toColumns(body: Record<string, unknown>): Record<string, unknown> {
   }
   if ("active" in body && !("status" in out)) out.status = body.active === true || body.active === "true" ? "active" : "inactive";
   if (out.status === "inactive") out.status = "cancelled";
-  for (const k of ["amount_per_period", "quantity_default", "rate_default"]) {
+  for (const k of ["amount_per_period", "target_total_amount", "paid_or_deducted_amount", "quantity_default", "rate_default"]) {
     if (k in out) out[k] = money(out[k]);
   }
   if (!out.calculation_method) out.calculation_method = "fixed";
   if (out.duration_type === "permanent") out.duration_type = "unlimited";
   if (!out.duration_type) out.duration_type = "unlimited";
+  if (out.duration_type === "unlimited") out.target_total_amount = null;
   if (!out.status) out.status = "active";
   return out;
 }
@@ -70,6 +71,7 @@ function validate(cols: Record<string, unknown>): string | null {
   if (!cols.item_name || String(cols.item_name).trim() === "") return "ต้องระบุชื่อรายการ";
   if (!["earning", "deduction"].includes(String(cols.item_type))) return "ต้องเลือกประเภท เพิ่ม/หัก";
   if (!["unlimited", "until_amount"].includes(String(cols.duration_type ?? "unlimited"))) return "ต้องเลือกระยะเวลาเป็น ไม่จำกัด หรือ จนกว่าจะครบยอด";
+  if (String(cols.duration_type ?? "unlimited") === "until_amount" && money(cols.target_total_amount) <= 0) return "ต้องระบุยอดรวมที่ต้องครบมากกว่า 0";
   if (!["active", "paused", "completed", "cancelled"].includes(String(cols.status ?? "active"))) return "ต้องเลือกสถานะรายการประจำให้ถูกต้อง";
   if (String(cols.calculation_method ?? "fixed") === "fixed" && money(cols.amount_per_period) <= 0) return "ยอด/งวดต้องมากกว่า 0";
   if (String(cols.calculation_method ?? "fixed") !== "fixed" && (money(cols.quantity_default) <= 0 || money(cols.rate_default) <= 0)) return "จำนวนและอัตราต้องมากกว่า 0";
@@ -96,7 +98,7 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(Math.max(parseInt(req.nextUrl.searchParams.get("limit") ?? "1000", 10) || 1000, 1), 2000);
     const includeInactive = req.nextUrl.searchParams.get("include_inactive") === "true";
     let q = supabaseAdmin().from("employee_recurring_pay_items")
-      .select("id, employee_id, contract_id, item_name, item_type, amount_per_period, duration_type, calculation_method, quantity_default, rate_default, status, start_date, end_date, created_at")
+      .select("id, employee_id, contract_id, item_name, item_type, amount_per_period, duration_type, target_total_amount, paid_or_deducted_amount, calculation_method, quantity_default, rate_default, status, start_date, end_date, created_at")
       .order("created_at", { ascending: false })
       .limit(limit);
     if (!includeInactive) q = q.eq("status", "active");
@@ -118,7 +120,7 @@ export async function POST(req: NextRequest) {
     const v = validate(cols);
     if (v) return NextResponse.json({ error: v }, { status: 400 });
     const { data, error } = await supabaseAdmin().from("employee_recurring_pay_items")
-      .insert(cols).select("id, employee_id, contract_id, item_name, item_type, amount_per_period, duration_type, calculation_method, quantity_default, rate_default, status, start_date, end_date, created_at").limit(1);
+      .insert(cols).select("id, employee_id, contract_id, item_name, item_type, amount_per_period, duration_type, target_total_amount, paid_or_deducted_amount, calculation_method, quantity_default, rate_default, status, start_date, end_date, created_at").limit(1);
     if (error) throw new Error(error.message);
     const row = (data?.[0] ?? null) as RecurringRow | null;
     if (row) await writeAudit(supabaseAdmin(), { action: "create", entityType: "employee_recurring_pay_items", entityId: row.id, actorName: (body.actor as string) ?? null, metadata: { item_name: row.item_name, item_type: row.item_type } });

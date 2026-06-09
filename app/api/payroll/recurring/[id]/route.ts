@@ -11,7 +11,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 const WRITABLE = new Set([
   "employee_id", "contract_id", "item_name", "item_type", "amount_per_period",
-  "duration_type", "calculation_method", "quantity_default", "rate_default",
+  "duration_type", "target_total_amount", "paid_or_deducted_amount", "calculation_method", "quantity_default", "rate_default",
   "start_date", "end_date", "status",
 ]);
 
@@ -22,10 +22,11 @@ function toColumns(body: Record<string, unknown>): Record<string, unknown> {
   }
   if ("active" in body && !("status" in out)) out.status = body.active === true || body.active === "true" ? "active" : "inactive";
   if (out.status === "inactive") out.status = "cancelled";
-  for (const k of ["amount_per_period", "quantity_default", "rate_default"]) {
+  for (const k of ["amount_per_period", "target_total_amount", "paid_or_deducted_amount", "quantity_default", "rate_default"]) {
     if (k in out) out[k] = money(out[k]);
   }
   if (out.duration_type === "permanent") out.duration_type = "unlimited";
+  if (out.duration_type === "unlimited") out.target_total_amount = null;
   return out;
 }
 
@@ -34,6 +35,7 @@ function validate(cols: Record<string, unknown>, partial = false): string | null
   if ("item_name" in cols && (!cols.item_name || String(cols.item_name).trim() === "")) return "ต้องระบุชื่อรายการ";
   if ("item_type" in cols && !["earning", "deduction"].includes(String(cols.item_type))) return "ต้องเลือกประเภท เพิ่ม/หัก";
   if ("duration_type" in cols && !["unlimited", "until_amount"].includes(String(cols.duration_type))) return "ต้องเลือกระยะเวลาเป็น ไม่จำกัด หรือ จนกว่าจะครบยอด";
+  if (cols.duration_type === "until_amount" && money(cols.target_total_amount) <= 0) return "ต้องระบุยอดรวมที่ต้องครบมากกว่า 0";
   if ("status" in cols && !["active", "paused", "completed", "cancelled"].includes(String(cols.status))) return "ต้องเลือกสถานะรายการประจำให้ถูกต้อง";
   if ("amount_per_period" in cols && String(cols.calculation_method ?? "fixed") === "fixed" && money(cols.amount_per_period) <= 0) return "ยอด/งวดต้องมากกว่า 0";
   if (cols.end_date && cols.start_date && String(cols.end_date) < String(cols.start_date)) return "วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่ม";
