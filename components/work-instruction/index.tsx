@@ -27,7 +27,7 @@ function Row({ f, bomSkus }: { f: SpecField; bomSkus?: string[] }) {
   );
 }
 
-export function WorkInstructionPanel({ sku, editable = false, bomSkus, className = "" }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; className?: string }) {
+export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMaterials, className = "" }: { sku: string | null | undefined; editable?: boolean; bomSkus?: string[]; onAddMaterials?: (mats: { code: string; name: string }[]) => void; className?: string }) {
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
@@ -43,6 +43,11 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, className
   if (!sku) return null;
   const empty = spec && !spec.parent && spec.legacy.length === 0 && spec.model_attrs.length === 0 && spec.sku_attrs.length === 0;
   const shared = [...(spec?.model_attrs ?? []), ...(spec?.legacy ?? [])];
+  // วัตถุดิบในสเปกที่ยังไม่อยู่ใน BOM (สำหรับปุ่มดึงลง BOM)
+  const missing = onAddMaterials && bomSkus
+    ? [...(spec?.model_attrs ?? []), ...(spec?.sku_attrs ?? [])].filter((f) => f.sku_code && !bomSkus.includes(f.sku_code)).map((f) => ({ code: f.sku_code as string, name: f.value }))
+    : [];
+  const missingUniq = [...new Map(missing.map((m) => [m.code, m])).values()];
 
   return (
     <div className={`border border-slate-200 rounded-lg bg-white ${className}`}>
@@ -71,6 +76,12 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, className
               {spec.sku_attrs.length > 0 && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ/รายละเอียดของรุ่นสีนี้</div>{spec.sku_attrs.map((f, i) => <Row key={`s${i}`} f={f} bomSkus={bomSkus} />)}</div>}
               {spec.parent?.work_instruction_notes && <div className="pt-1 border-t border-slate-50"><div className="text-[11px] font-semibold text-slate-500 mb-0.5">วิธีทำ / หมายเหตุ</div><p className="text-xs text-slate-700 whitespace-pre-wrap">{spec.parent.work_instruction_notes}</p></div>}
             </div>
+          )}
+          {onAddMaterials && missingUniq.length > 0 && (
+            <button type="button" onClick={() => onAddMaterials(missingUniq)}
+              className="mt-2 w-full h-8 text-xs font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50">
+              ➕ ดึงวัตถุดิบจากสเปกลง BOM ({missingUniq.length})
+            </button>
           )}
         </div>
       )}
