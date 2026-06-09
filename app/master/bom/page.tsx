@@ -17,6 +17,7 @@ import { apiFetch } from "@/lib/api";
 import { BomLineEditor, ComponentPicker, emptyLine, type EditorLine } from "./line-editor";
 import type { BomComponent } from "@/app/api/bom/components/route";
 import { CopyBomModal } from "./copy-bom-modal";
+import { WorkInstructionPanel } from "@/components/work-instruction";
 
 // ---- types (ตรงกับ /api/bom) ----
 type BomListItem = {
@@ -412,6 +413,9 @@ export default function BomWorkspacePage() {
                   className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </label>
             </div>
+
+            {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
+            {form.product_sku && <WorkInstructionPanel sku={form.product_sku} />}
 
             {/* lines */}
             <div className="pt-2 border-t border-slate-100">
