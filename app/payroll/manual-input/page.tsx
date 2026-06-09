@@ -362,7 +362,7 @@ export default function ManualInputPage() {
             <thead className="bg-slate-50 text-slate-500 text-xs">
               <tr>
                 <th className="text-left px-3 py-2">พนักงาน</th>
-                <th className="text-right px-3 py-2">วันทำงาน</th>
+                <th className="text-right px-3 py-2">วันจ่ายจริง</th>
                 <th className="text-right px-3 py-2">สาย/ออกก่อน</th>
                 <th className="text-right px-3 py-2">ขาด</th>
                 <th className="text-right px-3 py-2">ลา</th>
@@ -619,8 +619,8 @@ function rowTimeAmount(row: Row, kind: TimeKind) {
 
 function WorkDaysCell({ row }: { row: Row }) {
   const title = [
-    "วันทำงานจากเครื่องคำนวณจริงของงวดนี้",
-    "รวมวันทำงานตามสัญญาและวันหยุดพิเศษที่ยังต้องจ่ายเงิน",
+    "วันจ่ายจริงจากเครื่องคำนวณของงวดนี้",
+    "เริ่มจากวันทำงานตั้งต้นของงวด แล้วหักขาด/ลาไม่รับเงิน และคิดสายเป็นนาที",
     row.absence_days ? `ขาด: ${formatQty(row.absence_days, "วัน")}` : "",
     row.leave_days ? `ลาหักเงิน: ${formatQty(row.leave_days, "วัน")}` : "",
     row.late_minutes ? `สาย/ออกก่อน: ${minutesQty(row.late_minutes)}` : "",

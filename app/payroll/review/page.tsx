@@ -119,7 +119,7 @@ export default function PayrollReviewPage() {
     });
 
   function exportCsv() {
-    const head = ["รหัส", "พนักงาน", "เงินเดือน", "วันทำงาน", "รายได้รวม", "หักรวม", "ปกส.", "ภาษี", "สุทธิ", "สถานะ"];
+    const head = ["รหัส", "พนักงาน", "เงินเดือน", "วันจ่ายจริง", "รายได้รวม", "หักรวม", "ปกส.", "ภาษี", "สุทธิ", "สถานะ"];
     const rows = shown.map((l) => [l.employee_code, l.employee_name, l.base_salary, l.attendance_days, l.gross_pay, l.total_deduction, l.social_security_employee, l.withholding_tax, l.net_pay, l.status]);
     const csv = [head, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
@@ -252,7 +252,7 @@ export default function PayrollReviewPage() {
           <FilterChip active={filterMode === "negative"} onClick={() => setFilterMode("negative")} label={`สุทธิติดลบ ${issueCounts.negative_net}`} tone="red" />
           <FilterChip active={filterMode === "high_deduction"} onClick={() => setFilterMode("high_deduction")} label={`หักเกิน 50% ${issueCounts.high_deduction}`} tone="amber" />
           <FilterChip active={filterMode === "missing_base"} onClick={() => setFilterMode("missing_base")} label={`ไม่มีฐานเงิน ${issueCounts.missing_base}`} tone="slate" />
-          <FilterChip active={filterMode === "zero_days"} onClick={() => setFilterMode("zero_days")} label={`วันทำงาน 0 ${issueCounts.zero_work_days}`} tone="slate" />
+          <FilterChip active={filterMode === "zero_days"} onClick={() => setFilterMode("zero_days")} label={`วันจ่ายจริง 0 ${issueCounts.zero_work_days}`} tone="slate" />
           <FilterChip active={filterMode === "recurring"} onClick={() => setFilterMode("recurring")} label={`มีเงินประจำ ${issueCounts.has_recurring}`} tone="emerald" />
         </div>
       )}
@@ -267,7 +267,7 @@ export default function PayrollReviewPage() {
                 <th className="text-left px-3 py-2">รหัส</th>
                 <th className="text-left px-3 py-2">พนักงาน</th>
                 <th className="text-right px-3 py-2">เงินเดือน</th>
-                <th className="text-right px-3 py-2">วันทำงาน</th>
+                <th className="text-right px-3 py-2">วันจ่ายจริง</th>
                 <th className="text-right px-3 py-2">ประจำ +/-</th>
                 <th className="text-right px-3 py-2">สาย/ขาด/ลา</th>
                 <th className="text-right px-3 py-2">OT</th>

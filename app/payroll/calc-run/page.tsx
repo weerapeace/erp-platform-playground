@@ -30,7 +30,7 @@ const COL_TH: Record<string, string> = {
   other_deduction: "หักอื่นๆ", mid_month_paid: "จ่ายกลางเดือน", gross_pay: "รายได้รวm",
   total_deduction: "หักรวม", net_pay: "สุทธิ", recurring_earning_amount: "ค่าประจำ(เพิ่ม)",
   recurring_deduction_amount: "ค่าประจำ(หัก)", remaining_to_pay: "คงเหลือจ่าย",
-  attendance_days: "วันทำงาน", attendance_hours: "ชม.ทำงาน", company_cost_total: "ต้นทุนบริษัท",
+  attendance_days: "วันจ่ายจริง", attendance_hours: "ชม.จ่ายจริง", company_cost_total: "ต้นทุนบริษัท",
 };
 
 const baht = (v: unknown) => v == null ? "—" : `฿${Number(v).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`;
