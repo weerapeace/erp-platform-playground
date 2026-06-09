@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { lineToRow, type BomHeader, type BomLine } from "../route";
+import { lineToRow, saveBomSizes, type BomHeader, type BomLine, type BomSize } from "../route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -89,11 +89,14 @@ export async function GET(
     };
   });
 
-  return NextResponse.json({ data: { ...header, lines: enriched }, error: null });
+  const { data: sizes } = await supabase.from("bom_sizes").select("label, sort")
+    .eq("bom_code", (header as BomHeader).bom_code).order("sort", { ascending: true });
+
+  return NextResponse.json({ data: { ...header, lines: enriched, sizes: sizes ?? [] }, error: null });
 }
 
 // ---- PATCH — save header + replace lines ----
-type SaveBody = Partial<BomHeader> & { lines?: BomLine[]; actor?: string };
+type SaveBody = Partial<BomHeader> & { lines?: BomLine[]; sizes?: BomSize[]; actor?: string };
 
 export async function PATCH(
   request: NextRequest,
@@ -150,6 +153,10 @@ export async function PATCH(
     // ไม่ได้แก้ lines แต่เปลี่ยนรหัส → ย้าย bom_code ของ lines เดิมให้ตามไปด้วย
     await admin.from("bom_lines").update({ bom_code: newCode }).eq("bom_code", oldCode);
   }
+
+  // ไซส์ (เฟส 4)
+  if (Array.isArray(body.sizes)) await saveBomSizes(admin, newCode, body.sizes);
+  else if (newCode !== oldCode) await admin.from("bom_sizes").update({ bom_code: newCode }).eq("bom_code", oldCode);
 
   await audit(admin, user.id, "update", id, newCode, { line_count: body.lines?.length ?? null });
   return NextResponse.json({ id, error: null });

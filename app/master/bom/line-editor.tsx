@@ -44,7 +44,12 @@ export type EditorLine = {
   slot_code:      string | null;
   source?:        string | null;
   odoo_bom_line_id?: number | null;
+  // เฟส 4: ผันตามไซส์
+  size_variant:   boolean;
+  size_dim:       string;                     // cut_length | cut_width | pieces | qty
+  size_values:    Record<string, number>;     // { "40\"": 100 } คีย์ = ชื่อไซส์
 };
+export const SIZE_DIMS: [string, string][] = [["cut_length", "ยาว"], ["cut_width", "กว้าง"], ["pieces", "ชิ้น"], ["qty", "จำนวน"]];
 
 let _seq = 0;
 const genKey = () => `l${Date.now()}_${_seq++}`;
@@ -53,6 +58,7 @@ export function emptyLine(): EditorLine {
     key: genKey(), component_id: null, component_sku: "", component_name: "", image_key: null,
     material_group_id: null, material_type: "", qty: 0, uom: "หลา", uom_id: null, waste_percent: 0, is_optional: false,
     cut_block_id: null, cut_block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, slot_code: null,
+    size_variant: false, size_dim: "cut_length", size_values: {},
   };
 }
 
@@ -322,8 +328,8 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
 // BomLineEditor
 // ============================================================
 export function BomLineEditor({
-  lines, onChange, readonly,
-}: { lines: EditorLine[]; onChange: (lines: EditorLine[]) => void; readonly?: boolean }) {
+  lines, onChange, readonly, sizes = [],
+}: { lines: EditorLine[]; onChange: (lines: EditorLine[]) => void; readonly?: boolean; sizes?: string[] }) {
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
   const [detail, setDetail] = useState<EditorLine | null>(null);
@@ -584,6 +590,15 @@ export function BomLineEditor({
       render: (l, u, ro) => <input type="checkbox" checked={l.is_optional} disabled={ro}
         onChange={(e) => u({ is_optional: e.target.checked })} className="rounded border-slate-300" />,
     },
+    ...(sizes.length > 0 ? [{
+      key: "size_variant", header: "ผันไซส์", width: 92, align: "center" as const,
+      render: (l: EditorLine, u: (p: Partial<EditorLine>) => void, ro: boolean) => ro
+        ? <span className="text-xs text-slate-500">{l.size_variant ? (SIZE_DIMS.find((d) => d[0] === l.size_dim)?.[1] ?? "✓") : "—"}</span>
+        : <select value={l.size_variant ? l.size_dim : ""} onChange={(e) => u(e.target.value ? { size_variant: true, size_dim: e.target.value } : { size_variant: false })} className={inputCls} title="บรรทัดนี้เปลี่ยนตามไซส์ไหม + ค่าไหน">
+            <option value="">—</option>
+            {SIZE_DIMS.map(([v, lab]) => <option key={v} value={v}>{lab}</option>)}
+          </select>,
+    } as LineColumn<EditorLine>] : []),
   ];
 
   return (
@@ -611,6 +626,36 @@ export function BomLineEditor({
         groupByOptions={[{ key: "material_type", label: "ชนิดวัตถุดิบ" }, { key: "component", label: "วัตถุดิบ (เปลี่ยนทั้งกลุ่มได้)" }, { key: "uom", label: "หน่วย" }]}
         footer={<span className="text-sm text-slate-600">รวม <span className="font-bold text-slate-900">{lines.length}</span> รายการ</span>}
       />
+
+      {/* ตารางค่าต่อไซส์ — เฉพาะบรรทัดที่ผันตามไซส์ (เฟส 4) */}
+      {sizes.length > 0 && lines.some((l) => l.size_variant) && (
+        <div className="mt-3 border border-slate-200 rounded-lg overflow-auto">
+          <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-600">📐 ค่าต่อไซส์ (เฉพาะบรรทัดที่ผันตามไซส์)</div>
+          <table className="w-full text-xs">
+            <thead><tr className="text-slate-400 border-b border-slate-100">
+              <th className="text-left px-3 py-1.5 font-medium">วัตถุดิบ</th>
+              <th className="text-center px-2 py-1.5 font-medium">ค่าที่ผัน</th>
+              {sizes.map((s) => <th key={s} className="text-right px-2 py-1.5 font-medium">{s}</th>)}
+            </tr></thead>
+            <tbody>
+              {lines.filter((l) => l.size_variant).map((l) => (
+                <tr key={l.key} className="border-b border-slate-50 last:border-0">
+                  <td className="px-3 py-1 text-slate-700"><code className="text-[10px] text-slate-400">{l.component_sku}</code> {l.component_name}</td>
+                  <td className="px-2 py-1 text-center text-slate-500">{SIZE_DIMS.find((d) => d[0] === l.size_dim)?.[1] ?? l.size_dim}</td>
+                  {sizes.map((s) => (
+                    <td key={s} className="px-2 py-1">
+                      <input type="number" step="any" disabled={readonly} value={l.size_values?.[s] ?? ""}
+                        onChange={(e) => { const v = e.target.value; onChange(lines.map((x) => x.key === l.key ? { ...x, size_values: { ...x.size_values, [s]: v === "" ? 0 : Number(v) } } : x)); }}
+                        className="w-16 h-7 px-1.5 text-right border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[10px] text-slate-400 px-3 py-1.5">ค่าที่กรอกจะแทนค่าตามช่องที่เลือก (ยาว/กว้าง/ชิ้น/จำนวน) เมื่อเลือกไซส์นั้นตอนสั่งผลิต</p>
+        </div>
+      )}
 
       <ERPModal open={detail !== null} onClose={() => setDetail(null)} size="sm" title="รายละเอียดวัตถุดิบ">
         {detail && (

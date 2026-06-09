@@ -42,7 +42,20 @@ export type BomLine = {
   cut_length?:     number | null;
   face_width_cm?:  number | null;
   material_type?:  string | null;
+  // เฟส 4: ผันตามไซส์
+  size_variant?:   boolean;
+  size_dim?:       string | null;                 // cut_length | cut_width | pieces | qty
+  size_values?:    Record<string, number> | null; // { "40\"": 100, ... } คีย์ = ชื่อไซส์
 };
+
+export type BomSize = { label: string; sort?: number };
+
+/** แทนที่ไซส์ทั้งชุดของสูตร (bom_sizes) */
+export async function saveBomSizes(admin: ReturnType<typeof supabaseAdmin>, bomCode: string, sizes: BomSize[]) {
+  await admin.from("bom_sizes").delete().eq("bom_code", bomCode);
+  const rows = sizes.filter((s) => (s.label ?? "").trim()).map((s, i) => ({ bom_code: bomCode, label: s.label.trim(), sort: s.sort ?? i }));
+  if (rows.length) await admin.from("bom_sizes").insert(rows);
+}
 
 export type BomHeader = {
   id:             string;
@@ -121,7 +134,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 // ---- POST — create header + lines ----
-type CreateBody = Partial<BomHeader> & { lines?: BomLine[]; actor?: string };
+type CreateBody = Partial<BomHeader> & { lines?: BomLine[]; sizes?: BomSize[]; actor?: string };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -167,6 +180,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  if (Array.isArray(body.sizes)) await saveBomSizes(admin, bomCode, body.sizes);
+
   await audit(admin, user.id, "create", header.id, bomCode, { line_count: lines.length });
   return NextResponse.json({ id: header.id, error: null });
 }
@@ -194,6 +209,9 @@ export function lineToRow(l: BomLine, bomCode: string, idx: number): Record<stri
     cut_length:       l.cut_length != null ? Number(l.cut_length) : null,
     face_width_cm:    l.face_width_cm != null ? Number(l.face_width_cm) : null,
     material_type:    l.material_type || null,
+    size_variant:     !!l.size_variant,
+    size_dim:         l.size_dim || "cut_length",
+    size_values:      l.size_values && typeof l.size_values === "object" ? l.size_values : {},
     is_active:        true,
   };
 }

@@ -33,7 +33,9 @@ type BomLineRow = {
   pieces: number | null; cut_width: number | null; cut_length: number | null;
   face_width_cm: number | null; material_type: string | null;
   sku_id: string | null; image_key: string | null; uom_id: string | null;
+  size_variant?: boolean; size_dim?: string | null; size_values?: Record<string, number> | null;
 };
+type BomSizeRow = { label: string; sort?: number };
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   draft:    { label: "ร่าง",       cls: "bg-slate-100 text-slate-600" },
@@ -55,10 +57,11 @@ type FormState = {
   status: string;
   note: string;
   lines: EditorLine[];
+  sizes: BomSizeRow[];
 };
 
 function emptyForm(): FormState {
-  return { id: null, bom_code: "", product_sku: "", product_name: "", product_image: null, version: "v1", bom_type: "normal", status: "active", note: "", lines: [] };
+  return { id: null, bom_code: "", product_sku: "", product_name: "", product_image: null, version: "v1", bom_type: "normal", status: "active", note: "", lines: [], sizes: [] };
 }
 
 // ---- versioning helpers ----
@@ -110,17 +113,18 @@ export default function BomWorkspacePage() {
     pieces: Number(l.pieces) || 1, cut_width: Number(l.cut_width) || 0, cut_length: Number(l.cut_length) || 0,
     face_width_cm: Number(l.face_width_cm) || 0,
     source: l.source, odoo_bom_line_id: l.odoo_bom_line_id,
+    size_variant: !!l.size_variant, size_dim: l.size_dim ?? "cut_length", size_values: (l.size_values ?? {}) as Record<string, number>,
   }));
 
   const loadFormById = async (id: string): Promise<FormState> => {
     const res = await apiFetch(`/api/bom/${id}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
-    const d = json.data as BomListItem & { lines: BomLineRow[]; note?: string };
+    const d = json.data as BomListItem & { lines: BomLineRow[]; note?: string; sizes?: BomSizeRow[] };
     return {
       id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
       version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: d.note ?? "",
-      lines: mapLines(d.lines),
+      lines: mapLines(d.lines), sizes: d.sizes ?? [],
     };
   };
 
@@ -175,11 +179,11 @@ export default function BomWorkspacePage() {
     const sku = form.product_sku;
     if (!sku) { setFormErr("ต้องเลือกสินค้าก่อนจึงสร้างเวอร์ชั่นได้"); setNewVerOpen(false); return; }
     const n = versions.length ? Math.max(...versions.map((v) => verNum(v.version))) + 1 : verNum(form.version) + 1;
-    let lines: EditorLine[] = [];
-    if (copyId) { try { const f = await loadFormById(copyId); lines = f.lines; } catch { /* ignore */ } }
+    let lines: EditorLine[] = []; let sizes: BomSizeRow[] = [];
+    if (copyId) { try { const f = await loadFormById(copyId); lines = f.lines; sizes = f.sizes; } catch { /* ignore */ } }
     setForm({
       id: null, product_sku: sku, product_name: form.product_name, product_image: form.product_image, version: `v${n}`, bom_code: verCode(sku, n),
-      bom_type: form.bom_type, status: "active", note: "", lines,
+      bom_type: form.bom_type, status: "active", note: "", lines, sizes,
     });
     setDirty(true); setNewVerOpen(false); setCopyFromId("");
   };
@@ -233,7 +237,9 @@ export default function BomWorkspacePage() {
         calc_mode: l.cut_block_id ? "block" : "manual", cut_block_id: l.cut_block_id, cut_block_code: l.cut_block_code || null,
         pieces: l.pieces, cut_width: l.cut_width, cut_length: l.cut_length,
         face_width_cm: l.face_width_cm, material_type: l.material_type || null,
+        size_variant: l.size_variant, size_dim: l.size_dim, size_values: l.size_values,
       })),
+      sizes: form.sizes,
     };
     try {
       const res = form.id
@@ -425,6 +431,25 @@ export default function BomWorkspacePage() {
                 toast.success(`เพิ่มวัตถุดิบจากสเปก ${newLines.length} รายการลง BOM แล้ว — กรอกจำนวน/บล็อกตัดต่อ`);
               } : undefined} />}
 
+            {/* ไซส์ (เฟส 4) */}
+            <div className="pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-semibold text-slate-700">📐 ไซส์</span>
+                {form.sizes.length === 0 && <span className="text-[11px] text-slate-400">ไม่มีไซส์ (สูตรนี้ใช้ขนาดเดียว)</span>}
+                {form.sizes.map((s, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {s.label}
+                    {canEdit && <button type="button" onClick={() => patchForm({ sizes: form.sizes.filter((_, j) => j !== i) })} className="text-indigo-400 hover:text-rose-500">✕</button>}
+                  </span>
+                ))}
+                {canEdit && (
+                  <input placeholder="+ เพิ่มไซส์ (เช่น 40&quot; / M) แล้ว Enter" className="h-7 px-2 text-xs border border-slate-200 rounded-lg w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const v = (e.target as HTMLInputElement).value.trim(); if (v && !form.sizes.some((s) => s.label === v)) { patchForm({ sizes: [...form.sizes, { label: v, sort: form.sizes.length }] }); (e.target as HTMLInputElement).value = ""; } } }} />
+                )}
+              </div>
+              {form.sizes.length > 0 && <p className="text-[11px] text-slate-400 mt-1">ติ๊กช่อง “ผันไซส์” ที่บรรทัดวัตถุดิบ แล้วกรอกค่าต่อไซส์ในตารางด้านล่าง</p>}
+            </div>
+
             {/* lines */}
             <div className="pt-2 border-t border-slate-100">
               <div className="flex items-center justify-between mb-2">
@@ -434,7 +459,7 @@ export default function BomWorkspacePage() {
                     className="h-8 px-3 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600">📋 คัดลอก BOM</button>
                 )}
               </div>
-              <BomLineEditor lines={form.lines} onChange={(lines) => patchForm({ lines })} readonly={!canEdit} />
+              <BomLineEditor lines={form.lines} onChange={(lines) => patchForm({ lines })} readonly={!canEdit} sizes={form.sizes.map((s) => s.label)} />
             </div>
 
             <CopyBomModal open={copyOpen} onClose={() => setCopyOpen(false)}
