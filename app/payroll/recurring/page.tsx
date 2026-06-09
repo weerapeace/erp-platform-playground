@@ -12,7 +12,7 @@ const MasterCRUDPage = dynamic(
 );
 
 const ITEM_TYPE: Record<string, string> = { earning: "เงินเพิ่ม", deduction: "เงินหัก" };
-const DURATION: Record<string, string> = { permanent: "ถาวร", single_period: "งวดเดียว", multi_period: "หลายงวด" };
+const DURATION: Record<string, string> = { unlimited: "ไม่จำกัด", until_amount: "จนกว่าจะครบยอด" };
 
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/", apiPath: "recurring", tableId: "payroll-recurring",
@@ -21,7 +21,7 @@ const CONFIG: MasterCRUDConfig = {
   hideActiveStatus: false, allowPermanentDelete: false, pageLimit: 1000, exportEntityType: "recurring_pay_item",
   permissions: { view: "employees.view", create: "employees.edit", edit: "employees.edit" },
   defaultShowAllColumns: true, searchKeys: ["employee_name", "contract_no", "item_name"],
-  createDefaults: { item_type: "earning", duration_type: "permanent", calculation_method: "fixed", status: "active" },
+  createDefaults: { item_type: "earning", duration_type: "unlimited", calculation_method: "fixed", status: "active" },
   fields: [
     { key: "employee_id", label: "พนักงาน", type: "relation", colSize: 220, required: true, formSpan: 2, filterable: true,
       relationConfig: { target_table: "employees", target_label_field: "first_name", target_search_fields: ["employee_code", "first_name", "last_name", "nickname"], secondary_label_field: "employee_code" } },
@@ -39,13 +39,13 @@ const CONFIG: MasterCRUDConfig = {
     { key: "item_name",        label: "รายการ",     type: "text", colSize: 160, required: true, formSpan: 2 },
     { key: "item_type",        label: "ประเภท",     type: "select", colSize: 90, options: ["earning", "deduction"], required: true, cellRender: (v) => <span className="text-sm">{ITEM_TYPE[String(v)] ?? String(v)}</span> },
     { key: "amount_per_period", label: "ยอด/งวด",   type: "number", colSize: 110, required: true, cellRender: money },
-    { key: "duration_type",    label: "ระยะเวลา",   type: "select", colSize: 100, options: ["permanent", "single_period", "multi_period", "until_amount"], cellRender: (v) => <span className="text-sm">{DURATION[String(v)] ?? String(v)}</span> },
-    { key: "calculation_method", label: "วิธีคิด", type: "select", colSize: 100, options: ["fixed", "quantity_rate"], hideInForm: false },
+    { key: "duration_type",    label: "ระยะเวลา",   type: "select", colSize: 100, options: ["unlimited"], cellRender: (v) => <span className="text-sm">{DURATION[String(v)] ?? String(v)}</span> },
+    { key: "calculation_method", label: "วิธีคิด", type: "select", colSize: 100, options: ["fixed", "days_rate", "times_rate", "units_rate"], hideInForm: false },
     { key: "quantity_default", label: "จำนวน", type: "number", colSize: 90 },
     { key: "rate_default", label: "อัตรา", type: "number", colSize: 90 },
     { key: "start_date",       label: "เริ่ม",      type: "date", colSize: 110, required: true },
     { key: "end_date",         label: "สิ้นสุด",    type: "text", colSize: 110 },
-    { key: "status",           label: "สถานะ",      type: "select", colSize: 100, options: ["active", "inactive"], cellRender: statusBadge(PAY_STATUS) },
+    { key: "status",           label: "สถานะ",      type: "select", colSize: 100, options: ["active", "paused", "completed", "cancelled"], cellRender: statusBadge(PAY_STATUS) },
   ],
 };
 

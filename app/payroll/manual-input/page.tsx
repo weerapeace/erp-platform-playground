@@ -611,7 +611,7 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
           item_name: name,
           item_type: itemType,
           amount_per_period: amt,
-          duration_type: "permanent",
+          duration_type: "unlimited",
           calculation_method: "fixed",
           start_date: startDate,
           end_date: endDate || null,
@@ -628,7 +628,7 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
         item_type: itemType,
         applied_amount: Number(created.amount_per_period ?? amt),
         amount_per_period: Number(created.amount_per_period ?? amt),
-        duration_type: "permanent",
+        duration_type: "unlimited",
         start_date: startDate,
         end_date: endDate || null,
       }, ...prev]);
@@ -734,10 +734,9 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
           storageKey="payroll-recurring-quick-add"
         >
         <section className="space-y-4">
-          <div className="mb-3">
-            <div className="text-sm font-semibold text-slate-800">เพิ่มรายการประจำ</div>
-            <p className="mt-1 text-xs leading-5 text-amber-700">หมายเหตุ: รายการที่เพิ่มตรงนี้เป็นรายการประจำของพนักงาน จะใช้กับทุกเดือน/ทุกงวดถัดไป ไม่ใช่เฉพาะงวดเดือนนี้</p>
-          </div>
+          <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">
+            หมายเหตุ: รายการนี้จะใช้กับทุกเดือน/ทุกงวดถัดไป ไม่ใช่เฉพาะงวดเดือนนี้
+          </p>
           {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
           {msg && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{msg}</div>}
           <div className="grid gap-3 md:grid-cols-2">

@@ -49,4 +49,6 @@ export const PAY_STATUS: Record<string, { th: string; cls: string }> = {
   void:      { th: "ยกเลิกเอกสาร", cls: "bg-red-100 text-red-700" },
   rejected:  { th: "ปฏิเสธ",     cls: "bg-red-100 text-red-700" },
   active:    { th: "ใช้งาน",     cls: "bg-emerald-100 text-emerald-700" },
+  paused:    { th: "พักไว้",      cls: "bg-orange-100 text-orange-700" },
+  completed: { th: "ครบแล้ว",     cls: "bg-blue-100 text-blue-700" },
 };

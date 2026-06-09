@@ -21,9 +21,11 @@ function toColumns(body: Record<string, unknown>): Record<string, unknown> {
     if (WRITABLE.has(k)) out[k] = v === "" ? null : v;
   }
   if ("active" in body && !("status" in out)) out.status = body.active === true || body.active === "true" ? "active" : "inactive";
+  if (out.status === "inactive") out.status = "cancelled";
   for (const k of ["amount_per_period", "quantity_default", "rate_default"]) {
     if (k in out) out[k] = money(out[k]);
   }
+  if (out.duration_type === "permanent") out.duration_type = "unlimited";
   return out;
 }
 
@@ -31,9 +33,23 @@ function validate(cols: Record<string, unknown>, partial = false): string | null
   if (!partial && !cols.employee_id) return "ต้องเลือกพนักงาน";
   if ("item_name" in cols && (!cols.item_name || String(cols.item_name).trim() === "")) return "ต้องระบุชื่อรายการ";
   if ("item_type" in cols && !["earning", "deduction"].includes(String(cols.item_type))) return "ต้องเลือกประเภท เพิ่ม/หัก";
+  if ("duration_type" in cols && !["unlimited", "until_amount"].includes(String(cols.duration_type))) return "ต้องเลือกระยะเวลาเป็น ไม่จำกัด หรือ จนกว่าจะครบยอด";
+  if ("status" in cols && !["active", "paused", "completed", "cancelled"].includes(String(cols.status))) return "ต้องเลือกสถานะรายการประจำให้ถูกต้อง";
   if ("amount_per_period" in cols && String(cols.calculation_method ?? "fixed") === "fixed" && money(cols.amount_per_period) <= 0) return "ยอด/งวดต้องมากกว่า 0";
   if (cols.end_date && cols.start_date && String(cols.end_date) < String(cols.start_date)) return "วันที่สิ้นสุดต้องไม่ก่อนวันที่เริ่ม";
   return null;
+}
+
+function friendlyError(e: unknown, fallback: string): string {
+  const message = e instanceof Error ? e.message : String(e ?? "");
+  if (
+    message.includes("employee_recurring_pay_items_check") ||
+    message.includes("duration_type") ||
+    message.includes("target_total_amount")
+  ) {
+    return "บันทึกรายการประจำไม่ได้ เพราะรูปแบบระยะเวลาไม่ตรงกับกฎเงินประจำ กรุณาลองใหม่อีกครั้ง";
+  }
+  return message || fallback;
 }
 
 export async function GET(req: NextRequest, ctx: Ctx) {
@@ -66,7 +82,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     await writeAudit(supabaseAdmin(), { action: "update", entityType: "employee_recurring_pay_items", entityId: id, actorName: (body.actor as string) ?? null, metadata: { fields: Object.keys(cols) } });
     return NextResponse.json({ data: data?.[0] ?? { id }, error: null });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "บันทึกรายการไม่สำเร็จ" }, { status: 500 });
+    return NextResponse.json({ error: friendlyError(e, "บันทึกรายการไม่สำเร็จ") }, { status: 500 });
   }
 }
 
@@ -77,7 +93,7 @@ export async function DELETE(req: NextRequest, ctx: Ctx) {
     return NextResponse.json({ error: "รายการประจำไม่อนุญาตให้ลบถาวร ให้ปิดใช้งานแทนเพื่อเก็บประวัติ" }, { status: 400 });
   }
   try {
-    const { error } = await supabaseAdmin().from("employee_recurring_pay_items").update({ status: "inactive" }).eq("id", id);
+    const { error } = await supabaseAdmin().from("employee_recurring_pay_items").update({ status: "cancelled" }).eq("id", id);
     if (error) throw new Error(error.message);
     await writeAudit(supabaseAdmin(), { action: "archive", entityType: "employee_recurring_pay_items", entityId: id, actorName: req.nextUrl.searchParams.get("actor") });
     return NextResponse.json({ data: { id }, error: null });
