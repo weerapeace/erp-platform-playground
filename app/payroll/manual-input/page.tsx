@@ -58,6 +58,10 @@ type GridRow = {
   employee_id: string; employee_code: string; employee_name: string; contract_type?: string | null; wage_type?: string | null; net_estimate: number; manual_days: number; cells: GridCell[];
 };
 type GridData = { days: GridDay[]; rows: GridRow[]; period?: { default_hours_per_day?: number } };
+type DetailModal =
+  | { type: "recurring"; row: Row; items: RecurringItem[] }
+  | { type: "system"; row: Row }
+  | null;
 const TIME_META: Record<TimeKind, { label: string; unit: string; sign: "+" | "-"; cls: string }> = {
   ot:      { label: "OT",            unit: "ชม.",  sign: "+", cls: "text-emerald-600" },
   late:    { label: "มาสาย",         unit: "นาที", sign: "-", cls: "text-red-600" },
@@ -168,6 +172,7 @@ export default function ManualInputPage() {
   const [editTimeOnly, setEditTimeOnly] = useState(false);
   const [quickAdjust, setQuickAdjust] = useState<{ row?: Row; mode: AdjustMode } | null>(null);
   const [timeSummary, setTimeSummary] = useState<TimeSummarySelection | null>(null);
+  const [detailModal, setDetailModal] = useState<DetailModal>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("summary");
   const [grid, setGrid] = useState<GridData | null>(null);
   const [gridLoading, setGridLoading] = useState(false);
@@ -412,7 +417,7 @@ export default function ManualInputPage() {
                       <TimeSummaryCell row={r} kind="ot" tone="text-emerald-600" onClick={() => setTimeSummary({ row: r, kind: "ot" })} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <RecurringCell items={employeeRecurring} editable={editable} onClick={() => { window.location.href = "/payroll/recurring"; }} />
+                      <RecurringCell items={employeeRecurring} editable={editable} onClick={() => setDetailModal({ type: "recurring", row: r, items: employeeRecurring })} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <AdjustmentCell value={r.piecework_baht} mode="piecework" editable={editable} onClick={() => openQuickAdjust(r, "piecework")} tooltip={adjustmentTooltip("งานเหมา", pieceworkItems, "+")} />
@@ -424,7 +429,7 @@ export default function ManualInputPage() {
                       <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openQuickAdjust(r, "deduction")} tooltip={adjustmentTooltip("หักอื่น", deductionItems, "-")} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <SystemDeductCell row={r} />
+                      <SystemDeductCell row={r} onClick={() => setDetailModal({ type: "system", row: r })} />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <span className="inline-flex items-center justify-end gap-1 tabular-nums font-medium" title={netTooltip(r, employeeRecurring)}>
@@ -472,6 +477,19 @@ export default function ManualInputPage() {
           onChanged={() => { load(periodId); loadAdjustments(periodId); if (activeTab === "attendance") loadGrid(periodId); }}
         />
       )}
+      {detailModal?.type === "recurring" && (
+        <RecurringDetailModal
+          row={detailModal.row}
+          items={detailModal.items}
+          onClose={() => setDetailModal(null)}
+        />
+      )}
+      {detailModal?.type === "system" && (
+        <SystemDeductDetailModal
+          row={detailModal.row}
+          onClose={() => setDetailModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -506,27 +524,143 @@ function AdjustmentCell({ value, mode, editable, onClick, tooltip }: { value: nu
   );
 }
 
-function SystemDeductCell({ row }: { row: Row }) {
+function SystemDeductCell({ row, onClick }: { row: Row; onClick: () => void }) {
   const total = Number(row.system_deduct_baht || 0);
   if (!total) return <span className="text-slate-300">-</span>;
-  const filters = encodeURIComponent(JSON.stringify({ employee_id: { value: row.employee_id } }));
-  const href = `/payroll/employee-settings?flt=${filters}`;
   const title = [
     "หักตามระบบ",
     `ประกันสังคม: ${baht(Number(row.social_security_baht || 0))}`,
     `ภาษีหัก ณ ที่จ่าย: ${baht(Number(row.withholding_tax_baht || 0))}`,
-    "กดเพื่อไปแก้ต้นทางในหน้าตั้งค่าเงินเดือนรายคน",
+    "กดเพื่อดูรายละเอียด",
   ].join("\n");
   return (
     <button
       type="button"
-      onClick={() => { window.location.href = href; }}
+      onClick={onClick}
       className="inline-flex h-8 min-w-[86px] items-center justify-end gap-1 rounded-lg border border-red-100 bg-red-50 px-2 text-xs font-medium tabular-nums text-red-700 transition hover:border-red-200 hover:bg-red-100"
       title={title}
     >
       {baht(total)}
       <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-white/70 text-[10px] cursor-help">?</span>
     </button>
+  );
+}
+
+function employeeSettingsHref(row: Row) {
+  const filters = encodeURIComponent(JSON.stringify({ employee_id: { value: row.employee_id } }));
+  return `/payroll/employee-settings?flt=${filters}`;
+}
+
+function DetailAmountRow({ label, amount, sign = "-", muted = false }: { label: string; amount: number; sign?: "+" | "-"; muted?: boolean }) {
+  const abs = Math.abs(Number(amount || 0));
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+      <span className={muted ? "text-sm text-slate-400" : "text-sm font-medium text-slate-700"}>{label}</span>
+      <span className={`text-sm font-semibold tabular-nums ${muted ? "text-slate-400" : sign === "+" ? "text-emerald-700" : "text-red-700"}`}>
+        {abs ? `${sign} ${baht(abs)}` : baht(0)}
+      </span>
+    </div>
+  );
+}
+
+function RecurringDetailModal({ row, items, onClose }: { row: Row; items: RecurringItem[]; onClose: () => void }) {
+  const earning = items.filter((item) => item.item_type === "earning");
+  const deduction = items.filter((item) => item.item_type === "deduction");
+  const earningTotal = totalRecurring(items, "earning");
+  const deductionTotal = totalRecurring(items, "deduction");
+  const net = earningTotal - deductionTotal;
+  const renderItems = (list: RecurringItem[], sign: "+" | "-") => (
+    list.length ? (
+      <div className="space-y-2">
+        {list.map((item) => {
+          const range = item.end_date ? `${item.start_date ?? "-"} ถึง ${item.end_date}` : `${item.start_date ?? "-"} ถึงไม่จำกัด`;
+          return (
+            <div key={item.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-slate-800">{item.item_name || "-"}</div>
+                  <div className="mt-0.5 text-xs text-slate-400">{range}</div>
+                </div>
+                <div className={sign === "+" ? "text-sm font-semibold tabular-nums text-emerald-700" : "text-sm font-semibold tabular-nums text-red-700"}>
+                  {sign} {baht(Number(item.applied_amount || 0))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    ) : (
+      <div className="rounded-lg border border-dashed border-slate-200 px-3 py-5 text-center text-sm text-slate-400">ไม่มีรายการ</div>
+    )
+  );
+
+  return (
+    <ERPModal
+      open
+      onClose={onClose}
+      title="รายละเอียดรายการประจำ"
+      description={`${row.employee_code} · ${row.employee_name}`}
+      size="lg"
+      storageKey="payroll-recurring-detail"
+      footer={(
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50">ปิด</button>
+          <a href="/payroll/recurring" className="h-9 px-4 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 inline-flex items-center">ไปแก้รายการประจำ</a>
+        </div>
+      )}
+    >
+      <div className="space-y-4">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <DetailAmountRow label="เพิ่มประจำ" amount={earningTotal} sign="+" />
+          <DetailAmountRow label="หักประจำ" amount={deductionTotal} sign="-" />
+          <DetailAmountRow label="สุทธิจากรายการประจำ" amount={Math.abs(net)} sign={net >= 0 ? "+" : "-"} muted={!net} />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <section>
+            <div className="mb-2 text-sm font-semibold text-slate-800">รายการเพิ่ม</div>
+            {renderItems(earning, "+")}
+          </section>
+          <section>
+            <div className="mb-2 text-sm font-semibold text-slate-800">รายการหัก</div>
+            {renderItems(deduction, "-")}
+          </section>
+        </div>
+      </div>
+    </ERPModal>
+  );
+}
+
+function SystemDeductDetailModal({ row, onClose }: { row: Row; onClose: () => void }) {
+  const socialSecurity = Number(row.social_security_baht || 0);
+  const withholdingTax = Number(row.withholding_tax_baht || 0);
+  const total = Number(row.system_deduct_baht || 0);
+  const other = Math.max(total - socialSecurity - withholdingTax, 0);
+  return (
+    <ERPModal
+      open
+      onClose={onClose}
+      title="รายละเอียดหักตามระบบ"
+      description={`${row.employee_code} · ${row.employee_name}`}
+      size="md"
+      storageKey="payroll-system-deduct-detail"
+      footer={(
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50">ปิด</button>
+          <a href={employeeSettingsHref(row)} className="h-9 px-4 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 inline-flex items-center">ไปแก้ตั้งค่ารายคน</a>
+        </div>
+      )}
+    >
+      <div className="space-y-3">
+        <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+          <div className="text-xs font-medium text-red-500">รวมหักตามระบบ</div>
+          <div className="mt-1 text-2xl font-bold tabular-nums text-red-700">- {baht(total)}</div>
+        </div>
+        <DetailAmountRow label="ประกันสังคม" amount={socialSecurity} sign="-" />
+        <DetailAmountRow label="ภาษีหัก ณ ที่จ่าย" amount={withholdingTax} sign="-" />
+        {other > 0 && <DetailAmountRow label="รายการระบบอื่น ๆ" amount={other} sign="-" />}
+        <p className="text-xs leading-5 text-slate-400">ยอดนี้เป็นยอดที่ระบบคำนวณให้จากข้อมูลพนักงาน/กฎเงินเดือน ถ้าต้องแก้ให้ไปแก้ที่หน้าตั้งค่าเงินเดือนรายคน ไม่แก้ตรงตารางนี้โดยตรง</p>
+      </div>
+    </ERPModal>
   );
 }
 
