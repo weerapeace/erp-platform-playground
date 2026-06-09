@@ -19,11 +19,13 @@ function Row({ f, bomSkus, onEdit }: { f: SpecField; bomSkus?: string[]; onEdit?
   const inBom = f.sku_code && bomSkus ? bomSkus.includes(f.sku_code) : null;
   return (
     <div className="group flex gap-2 text-xs py-0.5 items-center">
-      <span className="text-slate-400 w-24 shrink-0">{f.label}</span>
+      <span className="w-28 shrink-0 flex items-center gap-1">
+        <span className="text-slate-400 truncate">{f.label}</span>
+        {onEdit && <button type="button" onClick={onEdit} title="แก้ไข" className="shrink-0 h-4 w-4 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100">✎</button>}
+      </span>
       <span className="text-slate-700 flex-1">{f.value}</span>
       {inBom === true && <span className="text-[10px] text-emerald-600 shrink-0">✓ อยู่ใน BOM</span>}
       {inBom === false && <span className="text-[10px] text-amber-600 shrink-0">✗ ยังไม่อยู่</span>}
-      {onEdit && <button type="button" onClick={onEdit} title="แก้ไข" className="shrink-0 h-5 w-5 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded opacity-0 group-hover:opacity-100">✎</button>}
     </div>
   );
 }
@@ -106,7 +108,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
     const editing = editField?.section === section && editField?.key === f.key;
     if (editing) return (
       <div key={`${section}:${f.key}`} className="flex gap-2 text-xs py-1 items-start">
-        <span className="text-slate-400 w-24 shrink-0 pt-1.5">{f.label}</span>
+        <span className="text-slate-400 w-28 shrink-0 pt-1.5">{f.label}</span>
         <div className="flex-1 min-w-0">{editInput(section, f.key)}</div>
         <button type="button" onClick={saveField} disabled={savingField} title="บันทึก" className="shrink-0 h-7 w-7 flex items-center justify-center text-emerald-600 hover:bg-emerald-50 rounded disabled:opacity-40">✓</button>
         <button type="button" onClick={() => setEditField(null)} disabled={savingField} title="ยกเลิก" className="shrink-0 h-7 w-7 flex items-center justify-center text-slate-400 hover:bg-slate-100 rounded">✕</button>
@@ -158,7 +160,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
                   <div className="text-[11px] font-semibold text-slate-500 mb-0.5">วัตถุดิบ (จาก BOM{spec.bom_version ? ` ${spec.bom_version}` : ""})</div>
                   {spec.bom_materials.map((g) => (
                     <div key={g.slot} className="flex gap-2 text-xs py-0.5">
-                      <span className="text-slate-400 w-24 shrink-0">{g.label}</span>
+                      <span className="text-slate-400 w-28 shrink-0">{g.label}</span>
                       <span className="text-slate-700 flex-1">{g.items.map((it) => it.count > 1 ? `${it.name} (${it.count} บล็อก)` : it.name).join(", ")}</span>
                     </div>
                   ))}
