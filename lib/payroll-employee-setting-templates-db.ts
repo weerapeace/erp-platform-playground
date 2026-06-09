@@ -10,6 +10,7 @@ type Admin = ReturnType<typeof supabaseAdmin>;
 type PayrollModuleRow = {
   id: string;
   module_key: string;
+  table_name: string | null;
   label: string | null;
   config: Record<string, unknown> | null;
 };
@@ -39,21 +40,51 @@ export type ApplyEmployeeSettingTemplateResult = {
   updated: number;
 };
 
-async function findPayrollModule(admin: Admin): Promise<PayrollModuleRow | null> {
+const TEMPLATE_CONFIG_KEY = "payroll_employee_setting_templates";
+const TEMPLATE_UPDATED_AT_KEY = "payroll_employee_setting_templates_updated_at";
+
+function getTemplateUpdatedAt(row: PayrollModuleRow): number {
+  const raw = row.config?.[TEMPLATE_UPDATED_AT_KEY];
+  if (typeof raw !== "string") return 0;
+  const time = Date.parse(raw);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function hasStoredTemplates(row: PayrollModuleRow): boolean {
+  return Array.isArray(row.config?.[TEMPLATE_CONFIG_KEY]);
+}
+
+function pickTemplateStorageModule(rows: PayrollModuleRow[]): PayrollModuleRow | null {
+  return rows.find((row) => row.module_key === "payroll-employee-settings")
+    ?? rows.find((row) => row.table_name === "employee_payroll_settings")
+    ?? rows.find((row) => row.module_key === "payroll-employees")
+    ?? rows.find((row) => row.module_key === "payroll")
+    ?? rows[0]
+    ?? null;
+}
+
+function pickTemplateSourceModule(rows: PayrollModuleRow[], storage: PayrollModuleRow | null): PayrollModuleRow | null {
+  const withTemplates = rows
+    .filter(hasStoredTemplates)
+    .sort((a, b) => getTemplateUpdatedAt(b) - getTemplateUpdatedAt(a));
+  return withTemplates[0] ?? storage;
+}
+
+async function listPayrollModules(admin: Admin): Promise<PayrollModuleRow[]> {
   const primary = await admin
     .from("erp_modules")
-    .select("id, module_key, label, config")
-    .or("module_key.eq.payroll,table_name.eq.payroll")
-    .limit(1);
-  if (!primary.error && primary.data?.[0]) return primary.data[0] as PayrollModuleRow;
+    .select("id, module_key, table_name, label, config")
+    .or("module_key.ilike.%payroll%,table_name.eq.payroll,table_name.eq.employee_payroll_settings")
+    .order("module_key", { ascending: true });
+  if (!primary.error) return (primary.data ?? []) as PayrollModuleRow[];
 
   const fallback = await admin
     .from("erp_modules")
-    .select("id, module_key, label, config")
+    .select("id, module_key, table_name, label, config")
     .ilike("module_key", "%payroll%")
-    .limit(1);
+    .order("module_key", { ascending: true });
   if (fallback.error) throw new Error(fallback.error.message);
-  return (fallback.data?.[0] as PayrollModuleRow | undefined) ?? null;
+  return (fallback.data ?? []) as PayrollModuleRow[];
 }
 
 async function currentContractStats(admin: Admin): Promise<{ keys: string[]; counts: Record<string, number>; settingCounts: Record<string, number> }> {
@@ -95,7 +126,9 @@ async function currentContractStats(admin: Admin): Promise<{ keys: string[]; cou
 }
 
 export async function getPayrollEmployeeSettingTemplates(admin: Admin): Promise<PayrollEmployeeSettingTemplatesRecord> {
-  const mod = await findPayrollModule(admin);
+  const modules = await listPayrollModules(admin);
+  const mod = pickTemplateStorageModule(modules);
+  const source = pickTemplateSourceModule(modules, mod);
   const { keys, counts, settingCounts } = await currentContractStats(admin);
   if (!mod) {
     return {
@@ -111,8 +144,8 @@ export async function getPayrollEmployeeSettingTemplates(admin: Admin): Promise<
     };
   }
 
-  const config = (mod.config ?? {}) as Record<string, unknown>;
-  const templates = normalizeEmployeeSettingTemplates(config.payroll_employee_setting_templates, keys)
+  const config = (source?.config ?? mod.config ?? {}) as Record<string, unknown>;
+  const templates = normalizeEmployeeSettingTemplates(config[TEMPLATE_CONFIG_KEY], keys)
     .map((t) => ({
       ...t,
       employeeCount: counts[t.key] ?? 0,
@@ -121,22 +154,27 @@ export async function getPayrollEmployeeSettingTemplates(admin: Admin): Promise<
 
   return {
     storageReady: true,
-    storageReason: "เก็บ template รายคนตามประเภทสัญญาไว้ใน erp_modules.config.payroll_employee_setting_templates",
+    storageReason: source && source.id !== mod.id
+      ? `โหลดค่าล่าสุดจาก ${source.module_key} แล้วจะบันทึกกลับเข้าที่หลัก ${mod.module_key}`
+      : `เก็บ template รายคนตามประเภทสัญญาไว้ใน ${mod.module_key}.config.${TEMPLATE_CONFIG_KEY}`,
     module: { id: mod.id, key: mod.module_key, label: mod.label ?? mod.module_key },
     templates,
-    updatedAt: typeof config.payroll_employee_setting_templates_updated_at === "string"
-      ? config.payroll_employee_setting_templates_updated_at
+    updatedAt: typeof config[TEMPLATE_UPDATED_AT_KEY] === "string"
+      ? config[TEMPLATE_UPDATED_AT_KEY]
       : null,
   };
 }
 
 export async function updatePayrollEmployeeSettingTemplates(admin: Admin, input: unknown) {
-  const mod = await findPayrollModule(admin);
+  const modules = await listPayrollModules(admin);
+  const mod = pickTemplateStorageModule(modules);
+  const source = pickTemplateSourceModule(modules, mod);
   if (!mod) throw new Error("ยังไม่พบ erp_modules ของ Payroll จึงยังบันทึก template ไม่ได้");
 
   const { keys, counts, settingCounts } = await currentContractStats(admin);
-  const currentConfig = (mod.config ?? {}) as Record<string, unknown>;
-  const previous = normalizeEmployeeSettingTemplates(currentConfig.payroll_employee_setting_templates, keys)
+  const storageConfig = (mod.config ?? {}) as Record<string, unknown>;
+  const sourceConfig = (source?.config ?? storageConfig) as Record<string, unknown>;
+  const previous = normalizeEmployeeSettingTemplates(sourceConfig[TEMPLATE_CONFIG_KEY], keys)
     .map((t) => ({
       ...t,
       employeeCount: counts[t.key] ?? 0,
@@ -150,9 +188,9 @@ export async function updatePayrollEmployeeSettingTemplates(admin: Admin, input:
     }));
   const updatedAt = new Date().toISOString();
   const config = {
-    ...currentConfig,
-    payroll_employee_setting_templates: templates,
-    payroll_employee_setting_templates_updated_at: updatedAt,
+    ...storageConfig,
+    [TEMPLATE_CONFIG_KEY]: templates,
+    [TEMPLATE_UPDATED_AT_KEY]: updatedAt,
   };
 
   const { error } = await admin.from("erp_modules").update({ config }).eq("id", mod.id);
