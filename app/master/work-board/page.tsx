@@ -16,19 +16,24 @@ import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
-type Dept = { id: string; name: string };
+type Dept = { id: string; name: string; note?: string | null; show_note?: boolean };
+type DeptFull = { id: string; name: string; status: string | null; note: string | null; show_note: boolean; display_order: number | null };
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; dispatched: number; remaining: number; due_date: string | null; status: string;
   image_url: string | null; brand: string | null; brand_color: string | null;
+  prep_done: boolean; cut_done: boolean;
+  // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
+  has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; ready: boolean;
 };
+type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
 type Viewport = { x: number; y: number; scale: number };
 type Inter =
   | { type: "pan"; sx: number; sy: number; ox: number; oy: number }
-  | { type: "zone"; key: string; sx: number; sy: number; ox: number; oy: number }
+  | { type: "zone"; key: string; sx: number; sy: number; ox: number; oy: number; cards: { cid: string; ox: number; oy: number }[] }
   | { type: "resize"; key: string; sx: number; sy: number; ow: number; oh: number }
   | { type: "card"; cid: string; kind: "mo" | "wo"; id: string; sx: number; sy: number; ox: number; oy: number }
   | null;
@@ -41,8 +46,8 @@ const WO_STATUS: Record<string, { label: string; cls: string }> = {
 };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 
-const ZONE_W = 240, HEADER_H = 48, CARD_W = 200, CARD_SLOT = 300, PAD = 12, GAP = 40;
-const ZONES_KEY = "erp-workboard-zones:v1", ZONESIZE_KEY = "erp-workboard-zonesizes:v1", CARDPOS_KEY = "erp-workboard-cards:v1";
+const ZONE_W = 220, HEADER_H = 44, NOTE_H = 26, CARD_W = 150, CARD_SLOT = 228, GAP_C = 14, PENDING_W = 3 * 150 + 2 * 14 + 24, PAD = 12, GAP = 40;
+const ZONES_KEY = "erp-workboard-zones:v2", ZONESIZE_KEY = "erp-workboard-zonesizes:v2", CARDPOS_KEY = "erp-workboard-cards:v2";
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 const PALETTE = ["#94a3b8", "#60a5fa", "#34d399", "#f472b6", "#fb923c", "#a78bfa", "#22d3ee", "#facc15"];
@@ -102,6 +107,7 @@ export default function WorkBoardPage() {
   const [dispCraftsman, setDispCraftsman] = useState("");
   const [dispDue, setDispDue] = useState("");
   const [dispSaving, setDispSaving] = useState(false);
+  const [warnDispatch, setWarnDispatch] = useState<{ mo: PendingMO; dept: Dept } | null>(null);  // Phase 3: เตือนจ่ายทั้งที่ยังไม่พร้อม
   const [colorOpen, setColorOpen] = useState(false);
   const [brands, setBrands] = useState<Brand[]>([]);
   // คลิกการ์ด = ดูรายละเอียด / รับงานคืน
@@ -109,6 +115,16 @@ export default function WorkBoardPage() {
   const [detailMO, setDetailMO] = useState<PendingMO | null>(null);
   const [recvQty, setRecvQty] = useState(0);
   const [recvSaving, setRecvSaving] = useState(false);
+  // Phase 2: ป๊อปอัปเช็กลิสต์วัตถุดิบ (เตรียม/ตัด รายชิ้น)
+  const [checklistMO, setChecklistMO] = useState<PendingMO | null>(null);
+  const [clRows, setClRows] = useState<MatRow[]>([]);
+  const [clLoading, setClLoading] = useState(false);
+  // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
+  const [deptMgrOpen, setDeptMgrOpen] = useState(false);
+  const [deptList, setDeptList] = useState<DeptFull[]>([]);
+  const [deptLoading, setDeptLoading] = useState(false);
+  const [newDeptName, setNewDeptName] = useState("");
+  const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,29 +157,49 @@ export default function WorkBoardPage() {
 
   const zones: Zone[] = useMemo(() => {
     const arr: Zone[] = [{ key: "pending", label: "📥 รอจ่าย", kind: "pending", accent: ACCENT[0], moCards: board.pending, woCards: [] }];
-    board.departments.forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
+    // เอาแผนก "ตัด/เตรียม" ออกจากบอร์ด — งานตัด/เตรียมย้ายไปเป็นเช็กลิสต์ในตัวการ์ดรอจ่าย
+    board.departments.filter((d) => stageOfDept(d.name) !== "cut").forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
     return arr;
   }, [board, wosByDept]);
 
-  const zoneIndex = useMemo(() => { const m: Record<string, number> = {}; zones.forEach((z, i) => { m[z.key] = i; }); return m; }, [zones]);
-  const posOfZone = useCallback((key: string): Pos => zonePos[key] ?? { x: (zoneIndex[key] ?? 0) * (ZONE_W + GAP), y: 0 }, [zonePos, zoneIndex]);
   const countOf = (z: Zone) => (z.kind === "pending" ? z.moCards.length : z.woCards.length);
-  const zoneWof = useCallback((key: string) => zoneSize[key]?.w ?? ZONE_W, [zoneSize]);
+  // หมายเหตุที่จะโชว์ใต้หัวแผนก (ถ้าเปิด "โชว์หมายเหตุ")
+  const noteOf = useCallback((z: Zone) => (z.kind === "dept" && z.dept?.show_note && z.dept?.note ? z.dept.note : null), []);
+  // ความกว้าง: "รอจ่าย" เป็นกล่องใหญ่ (หลายคอลัมน์) · แผนกอื่นกว้างมาตรฐาน
+  const defWof = useCallback((key: string) => (key === "pending" ? PENDING_W : ZONE_W), []);
+  const zoneWof = useCallback((key: string) => zoneSize[key]?.w ?? defWof(key), [zoneSize, defWof]);
+  const colsOf = useCallback((key: string) => Math.max(1, Math.floor((zoneWof(key) - PAD) / (CARD_W + GAP_C))), [zoneWof]);
+  // ตำแหน่งเริ่มต้นของโซน — เรียงซ้าย→ขวาแบบสะสมความกว้าง (กล่องรอจ่ายใหญ่อยู่ซ้ายสุด)
+  const defaultLayout = useMemo(() => {
+    const m: Record<string, Pos> = {}; let x = 0;
+    for (const z of zones) { m[z.key] = { x, y: 0 }; x += zoneWof(z.key) + GAP; }
+    return m;
+  }, [zones, zoneWof]);
+  const posOfZone = useCallback((key: string): Pos => zonePos[key] ?? defaultLayout[key] ?? { x: 0, y: 0 }, [zonePos, defaultLayout]);
   const zoneH = useCallback((z: Zone) => {
-    const auto = HEADER_H + Math.max(1, countOf(z)) * CARD_SLOT + PAD;
+    const rows = z.kind === "pending" ? Math.ceil(Math.max(1, countOf(z)) / colsOf(z.key)) : Math.max(1, countOf(z));
+    const auto = HEADER_H + (noteOf(z) ? NOTE_H : 0) + rows * CARD_SLOT + PAD;
     return Math.max(auto, zoneSize[z.key]?.h ?? 0);
-  }, [zoneSize]);
+  }, [zoneSize, colsOf, noteOf]);
 
-  // ตำแหน่ง "จัดเรียงสวย" อัตโนมัติ (ถ้าการ์ดยังไม่ถูกวางอิสระ) — เกาะตามตำแหน่งโซน
+  // ตำแหน่ง "จัดเรียงสวย" อัตโนมัติ — รอจ่าย=กริดหลายคอลัมน์ · แผนก=คอลัมน์เดียว
   const autoPos = useMemo(() => {
     const map: Record<string, Pos> = {};
     for (const z of zones) {
-      const p = posOfZone(z.key);
-      const cids = z.kind === "pending" ? z.moCards.map((m) => `mo:${m.id}`) : z.woCards.map((w) => `wo:${w.id}`);
-      cids.forEach((cid, i) => { map[cid] = { x: p.x + (zoneWof(z.key) - CARD_W) / 2, y: p.y + HEADER_H + 10 + i * CARD_SLOT }; });
+      const p = posOfZone(z.key); const zw = zoneWof(z.key);
+      if (z.kind === "pending") {
+        const cols = colsOf(z.key);
+        z.moCards.forEach((m, i) => {
+          const col = i % cols, row = Math.floor(i / cols);
+          map[`mo:${m.id}`] = { x: p.x + PAD + col * (CARD_W + GAP_C), y: p.y + HEADER_H + 10 + row * CARD_SLOT };
+        });
+      } else {
+        const noteY = noteOf(z) ? NOTE_H : 0;
+        z.woCards.forEach((w, i) => { map[`wo:${w.id}`] = { x: p.x + (zw - CARD_W) / 2, y: p.y + HEADER_H + 10 + noteY + i * CARD_SLOT }; });
+      }
     }
     return map;
-  }, [zones, posOfZone, zoneWof]);
+  }, [zones, posOfZone, zoneWof, colsOf, noteOf]);
   const posOfCard = useCallback((cid: string): Pos => cardPos[cid] ?? autoPos[cid] ?? { x: 0, y: 0 }, [cardPos, autoPos]);
 
   const screenToWorld = (cx: number, cy: number): Pos => {
@@ -193,6 +229,11 @@ export default function WorkBoardPage() {
   const tidy = () => setCardPos({});   // จัดเรียงการ์ดกลับเข้าโซนสวยๆ
   const resetZones = () => { setZonePos({}); setZoneSize({}); };
 
+  // เปิด popup จ่ายงาน (ตั้งค่าเริ่มต้นจาก MO)
+  const openDispatch = useCallback((mo: PendingMO, dept: Dept) => {
+    setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
+  }, []);
+
   // ---- pointer ----
   const onBoardDown = (e: RPE) => {
     boardRef.current?.setPointerCapture(e.pointerId);
@@ -203,7 +244,11 @@ export default function WorkBoardPage() {
     e.stopPropagation();
     boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false;
     const p = posOfZone(key);
-    interRef.current = { type: "zone", key, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
+    // จับการ์ดในแผนกนี้ที่ "เคยลากเอง" (มีตำแหน่งจำไว้) เพื่อให้เลื่อนตามแผนกไปด้วย
+    const z = zones.find((x) => x.key === key);
+    const cids = z ? (z.kind === "pending" ? z.moCards.map((m) => `mo:${m.id}`) : z.woCards.map((w) => `wo:${w.id}`)) : [];
+    const cards = cids.filter((cid) => cardPos[cid]).map((cid) => ({ cid, ox: cardPos[cid].x, oy: cardPos[cid].y }));
+    interRef.current = { type: "zone", key, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y, cards };
   };
   const onZoneResizeDown = (e: RPE, z: Zone) => {
     e.stopPropagation();
@@ -222,7 +267,10 @@ export default function WorkBoardPage() {
     const dx = e.clientX - it.sx, dy = e.clientY - it.sy;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
     if (it.type === "pan") setVp((v) => ({ ...v, x: it.ox + dx, y: it.oy + dy }));
-    else if (it.type === "zone") setZonePos((zp) => ({ ...zp, [it.key]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
+    else if (it.type === "zone") {
+      setZonePos((zp) => ({ ...zp, [it.key]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
+      if (it.cards.length) setCardPos((cp) => { const n = { ...cp }; for (const c of it.cards) n[c.cid] = { x: c.ox + dx / vp.scale, y: c.oy + dy / vp.scale }; return n; });
+    }
     else if (it.type === "resize") setZoneSize((zs) => ({ ...zs, [it.key]: { w: clamp(it.ow + dx / vp.scale, 180, 640), h: Math.max(160, it.oh + dy / vp.scale) } }));
     else if (it.type === "card") setCardPos((cp) => ({ ...cp, [it.cid]: { x: it.ox + dx / vp.scale, y: it.oy + dy / vp.scale } }));
   };
@@ -243,7 +291,10 @@ export default function WorkBoardPage() {
       if (target && target.kind === "dept" && target.dept) {
         const mo = board.pending.find((m) => m.id === it.id);
         setCardPos((cp) => { const n = { ...cp }; delete n[it.cid]; return n; });
-        if (mo) { setDispMO(mo); setDispDept(target.dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? ""); }
+        if (mo) {
+          if (mo.ready) openDispatch(mo, target.dept);
+          else setWarnDispatch({ mo, dept: target.dept });   // ยังไม่พร้อม → เตือนก่อน (แต่จ่ายต่อได้)
+        }
       }
       // วางที่อื่น = คงตำแหน่งอิสระไว้
     } else {
@@ -303,13 +354,109 @@ export default function WorkBoardPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
 
+  // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
+  useEffect(() => {
+    if (!checklistMO) { setClRows([]); return; }
+    let cancel = false; setClLoading(true);
+    void (async () => {
+      try {
+        const res = await apiFetch(`/api/mo/${checklistMO.id}`); const j = await res.json();
+        const summary = (j?.data?.summary ?? []) as Record<string, unknown>[];
+        const materials = (j?.data?.materials ?? []) as Record<string, unknown>[];
+        // ตัดครบของวัตถุดิบ = ทุกบล็อกที่ต้องตัดของมันตัดครบ (จาก mo_materials รายบล็อก)
+        const cutTotal = new Map<string, number>(), cutDone = new Map<string, number>();
+        for (const x of materials) {
+          if (!(x.cut_block_code != null || x.cut_length != null || x.pieces != null)) continue;
+          const k = String(x.component_sku);
+          cutTotal.set(k, (cutTotal.get(k) ?? 0) + 1);
+          if (x.cut_done) cutDone.set(k, (cutDone.get(k) ?? 0) + 1);
+        }
+        const rows: MatRow[] = summary.map((s) => {
+          const k = String(s.component_sku); const ct = cutTotal.get(k) ?? 0;
+          return { id: String(s.id), component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
+            required_qty: Number(s.required_qty) || 0, uom: (s.uom as string) ?? null,
+            is_ready: !!s.is_ready, needs_cut: ct > 0, cut_done: ct > 0 && (cutDone.get(k) ?? 0) >= ct };
+        });
+        if (!cancel) setClRows(rows);
+      } catch { if (!cancel) setClRows([]); }
+      finally { if (!cancel) setClLoading(false); }
+    })();
+    return () => { cancel = true; };
+  }, [checklistMO]);
+
+  // ติ๊กเตรียม/ตัด รายวัตถุดิบในป๊อปอัป (optimistic + audit)
+  const toggleMat = useCallback(async (rowId: string, field: "is_ready" | "cut_done") => {
+    if (!canEdit) return;
+    const cur = clRows.find((r) => r.id === rowId); if (!cur) return;
+    const next = !cur[field];
+    setClRows((rs) => rs.map((r) => r.id === rowId ? { ...r, [field]: next } : r));
+    try {
+      const res = await apiFetch(`/api/mo/material`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rowId, [field]: next }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+    } catch (e) {
+      setClRows((rs) => rs.map((r) => r.id === rowId ? { ...r, [field]: !next } : r));
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  }, [canEdit, clRows, toast]);
+  const closeChecklist = useCallback(() => { setChecklistMO(null); void load(); }, [load]);
+
+  // ---- จัดการแผนก (popup ตั้งค่าแผนก) ----
+  const loadDepts = useCallback(async () => {
+    setDeptLoading(true);
+    try { const res = await apiFetch("/api/mo/departments"); const j = await res.json(); setDeptList((j.data ?? []) as DeptFull[]); }
+    catch { /* ignore */ } finally { setDeptLoading(false); }
+  }, []);
+  const openDeptMgr = useCallback(() => { setConfirmDelId(null); setDeptMgrOpen(true); void loadDepts(); }, [loadDepts]);
+  const closeDeptMgr = useCallback(() => { setDeptMgrOpen(false); void load(); }, [load]);
+  const patchDept = useCallback(async (id: string, p: Partial<DeptFull>) => {
+    setDeptList((ls) => ls.map((d) => d.id === id ? { ...d, ...p } : d));
+    try { const res = await apiFetch("/api/mo/departments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...p }) }); const j = await res.json(); if (j.error) throw new Error(j.error); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); void loadDepts(); }
+  }, [toast, loadDepts]);
+  const addDept = useCallback(async () => {
+    const name = newDeptName.trim(); if (!name) return;
+    try { const res = await apiFetch("/api/mo/departments", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const j = await res.json(); if (j.error) throw new Error(j.error); setNewDeptName(""); await loadDepts(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
+  }, [newDeptName, toast, loadDepts]);
+  const delDept = useCallback(async (id: string) => {
+    try { const res = await apiFetch(`/api/mo/departments?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setConfirmDelId(null); await loadDepts(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); setConfirmDelId(null); }
+  }, [toast, loadDepts]);
+  const moveDept = useCallback((idx: number, dir: -1 | 1) => {
+    const j = idx + dir; if (j < 0 || j >= deptList.length) return;
+    const arr = [...deptList]; const tmp = arr[idx]; arr[idx] = arr[j]; arr[j] = tmp;
+    arr[idx] = { ...arr[idx], display_order: idx }; arr[j] = { ...arr[j], display_order: j };
+    setDeptList(arr);
+    void patchDept(arr[idx].id, { display_order: idx }); void patchDept(arr[j].id, { display_order: j });
+  }, [deptList, patchDept]);
+
+  // ติ๊ก "เตรียมครบ / ตัดครบ" บนการ์ดรอจ่าย → ไฟเขียวเมื่อครบทั้งคู่ (optimistic + audit) — ใช้กับใบที่ไม่มี BOM
+  const togglePrep = useCallback(async (mo: PendingMO, field: "prep_done" | "cut_done") => {
+    if (!canEdit) return;
+    const next = !mo[field];
+    const apply = (val: boolean) => setBoard((b) => ({ ...b, pending: b.pending.map((p) => {
+      if (p.id !== mo.id) return p;
+      const np = { ...p, [field]: val };
+      return { ...np, ready: np.has_bom ? np.ready : (np.prep_done && np.cut_done) };
+    }) }));
+    apply(next);
+    try {
+      const res = await apiFetch(`/api/mo/${mo.id}/prep`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [field]: next }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+    } catch (e) {
+      apply(!next);
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  }, [canEdit, toast]);
+
   // รายการการ์ดทั้งหมด (วาดแยกจากโซน เพื่อวางอิสระทับโซนได้)
+  // ซ่อนใบจ่ายงานสเตจ "ตัด" (ของเดิม) — งานตัดย้ายไปเป็นเช็กลิสต์ในการ์ดรอจ่าย
   const cards = useMemo(() => {
     const arr: { cid: string; kind: "mo" | "wo"; node: React.ReactNode }[] = [];
-    for (const m of board.pending) arr.push({ cid: `mo:${m.id}`, kind: "mo", node: <PendingBody mo={m} /> });
-    for (const w of board.workOrders) if (w.status !== "done") arr.push({ cid: `wo:${w.id}`, kind: "wo", node: <WOBody w={w} /> });
+    for (const m of board.pending) arr.push({ cid: `mo:${m.id}`, kind: "mo", node: <PendingBody mo={m} canEdit={canEdit} onToggle={togglePrep} onOpenChecklist={() => setChecklistMO(m)} /> });
+    for (const w of board.workOrders) if (w.status !== "done" && w.stage !== "cut") arr.push({ cid: `wo:${w.id}`, kind: "wo", node: <WOBody w={w} /> });
     return arr;
-  }, [board]);
+  }, [board, canEdit, togglePrep]);
 
   if (!canView) return <AccessDenied />;
 
@@ -318,7 +465,7 @@ export default function WorkBoardPage() {
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">📋 บอร์ดจ่ายงาน</h1>
-          <p className="text-sm text-slate-500 mt-0.5">ลากการ์ดวางได้อิสระ · ปล่อยในโซนแผนก = จ่าย/ย้าย · ลากหัวโซน = ย้าย · ลากมุมโซน = ขยาย · ปุ่ม ▦ จัดเรียง</p>
+          <p className="text-sm text-slate-500 mt-0.5">ติ๊ก <b>เตรียม/ตัด</b> บนการ์ด → ครบทั้งคู่ <b className="text-emerald-600">ไฟเขียว</b> = พร้อมจ่าย → ลากไปวางที่แผนกช่างเพื่อจ่ายงาน</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
@@ -339,6 +486,8 @@ export default function WorkBoardPage() {
         <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
         <ToolBtn onClick={resetZones} title="รีเซ็ตตำแหน่ง/ขนาดโซน">↺</ToolBtn>
         <ToolBtn onClick={() => void load()} title="โหลดใหม่">⟳</ToolBtn>
+        <Sep />
+        <ToolBtn onClick={openDeptMgr} title="ตั้งค่าแผนก (เพิ่ม/แก้/ลบ/ซ่อน/หมายเหตุ)">⚙️</ToolBtn>
         <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
       </div>
 
@@ -357,6 +506,7 @@ export default function WorkBoardPage() {
                     <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ background: z.accent }} /><span className="text-base font-bold text-slate-700 truncate">{z.label}</span></div>
                     <span className="text-xs font-medium text-slate-500 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
                   </div>
+                  {noteOf(z) && <div className="flex items-center gap-1 px-3 text-[11px] text-amber-700 bg-amber-50/70 border-b border-amber-100 truncate" style={{ height: NOTE_H }} title={noteOf(z) ?? ""}>📝 <span className="truncate">{noteOf(z)}</span></div>}
                   {count === 0 && <div className="flex items-center justify-center text-xs text-slate-300 mt-6">{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
                   <div onPointerDown={(e) => onZoneResizeDown(e, z)} title="ลากเพื่อขยาย/ย่อโซน"
                     className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize rounded-br-2xl" style={{ background: `linear-gradient(135deg, transparent 50%, ${z.accent}99 50%)` }} />
@@ -378,6 +528,30 @@ export default function WorkBoardPage() {
           </div>
         </div>
       )}
+
+      {/* Phase 3: เตือนเมื่อจ่ายทั้งที่ยังเตรียม/ตัดไม่ครบ (เตือนแต่จ่ายได้) */}
+      <ERPModal open={warnDispatch !== null} onClose={() => setWarnDispatch(null)} size="sm" title="⚠️ ยังไม่พร้อมจ่าย"
+        footer={<>
+          <button onClick={() => setWarnDispatch(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">กลับไปเตรียม/ตัด</button>
+          <button onClick={() => { if (warnDispatch) openDispatch(warnDispatch.mo, warnDispatch.dept); setWarnDispatch(null); }} className="h-9 px-4 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600">จ่ายงานต่อ</button>
+        </>}>
+        {warnDispatch && (
+          <div className="space-y-2 text-sm">
+            <p className="text-slate-700">งานนี้<b className="text-amber-600"> ยังเตรียม/ตัดไม่ครบ</b></p>
+            <p className="font-medium text-slate-800">{warnDispatch.mo.product_name ?? warnDispatch.mo.product_sku}</p>
+            <div className="flex gap-4 text-[12px]">
+              {warnDispatch.mo.has_bom ? <>
+                <span className={warnDispatch.mo.prep_ready >= warnDispatch.mo.prep_total ? "text-emerald-600" : "text-amber-600"}>เตรียม {warnDispatch.mo.prep_ready}/{warnDispatch.mo.prep_total}</span>
+                <span className={warnDispatch.mo.cut_ready >= warnDispatch.mo.cut_total ? "text-emerald-600" : "text-amber-600"}>ตัด {warnDispatch.mo.cut_ready}/{warnDispatch.mo.cut_total}</span>
+              </> : <>
+                <span className={warnDispatch.mo.prep_done ? "text-emerald-600" : "text-amber-600"}>เตรียม {warnDispatch.mo.prep_done ? "ครบ ✓" : "ยังไม่ครบ"}</span>
+                <span className={warnDispatch.mo.cut_done ? "text-emerald-600" : "text-amber-600"}>ตัด {warnDispatch.mo.cut_done ? "ครบ ✓" : "ยังไม่ครบ"}</span>
+              </>}
+            </div>
+            <p className="text-[11px] text-slate-400 pt-1">ถ้าแน่ใจ กด “จ่ายงานต่อ” เพื่อจ่ายให้ <b>{warnDispatch.dept.name}</b> เลย</p>
+          </div>
+        )}
+      </ERPModal>
 
       {/* popup จ่ายงาน */}
       <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
@@ -472,7 +646,115 @@ export default function WorkBoardPage() {
           </div>
         )}
       </ERPModal>
+
+      {/* เช็กลิสต์วัตถุดิบ เตรียม/ตัด (Phase 2 — จาก BOM) */}
+      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="md" title={`📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
+        footer={<button onClick={closeChecklist} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>}>
+        {checklistMO && (() => {
+          const prepTotal = clRows.length, prepDone = clRows.filter((r) => r.is_ready).length;
+          const cutTotal = clRows.filter((r) => r.needs_cut).length, cutDone = clRows.filter((r) => r.needs_cut && r.cut_done).length;
+          const ready = prepTotal > 0 && prepDone >= prepTotal && cutDone >= cutTotal;
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
+                <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
+              </div>
+              <div className="flex gap-4 text-[11px] text-slate-500">
+                <span>เตรียม <b className="text-slate-700">{prepDone}/{prepTotal}</b></span>
+                <span>ตัด <b className="text-slate-700">{cutDone}/{cutTotal}</b></span>
+              </div>
+              {clLoading ? <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
+                : clRows.length === 0 ? <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ยังไม่มีรายการวัตถุดิบจาก BOM<br />ใช้ปุ่มติ๊กรวมบนการ์ดแทนได้</div>
+                  : (
+                    <div className="border border-slate-100 rounded-lg overflow-hidden">
+                      <div className="grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500">
+                        <span>วัตถุดิบ</span><span className="text-center">เตรียม</span><span className="text-center">ตัด</span>
+                      </div>
+                      <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+                        {clRows.map((r) => (
+                          <div key={r.id} className="grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 px-3 py-2 items-center">
+                            <div className="min-w-0">
+                              <p className="text-sm text-slate-800 truncate">{r.component_name ?? r.component_sku}</p>
+                              <p className="text-[10px] text-slate-400">ต้องใช้ {fmt(r.required_qty)} {r.uom ?? ""}</p>
+                            </div>
+                            <div className="flex justify-center"><CheckBtn done={r.is_ready} disabled={!canEdit} onClick={() => toggleMat(r.id, "is_ready")} /></div>
+                            <div className="flex justify-center" title="ติ๊กตัดที่หน้าใบสั่งผลิต (แท็บบล็อก)">{r.needs_cut ? <span className={`text-base ${r.cut_done ? "text-emerald-600" : "text-slate-300"}`}>{r.cut_done ? "✓" : "○"}</span> : <span className="text-[11px] text-slate-300">—</span>}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+              <p className="text-[11px] text-slate-400">ช่อง <b>เตรียม</b> ติ๊กได้ที่นี่ · ช่อง <b>ตัด</b> ติ๊กรายบล็อกที่หน้าใบสั่งผลิต (แท็บบล็อก) · ครบทั้งหมด → การ์ด<b className="text-emerald-600">ไฟเขียว</b></p>
+            </div>
+          );
+        })()}
+      </ERPModal>
+
+      {/* ⚙️ ตั้งค่าแผนก — จบในที่เดียว (สร้าง/แก้/ลบ/ซ่อน/หมายเหตุ/เรียงลำดับ) */}
+      <ERPModal open={deptMgrOpen} onClose={closeDeptMgr} size="md" title="⚙️ ตั้งค่าแผนก"
+        footer={<button onClick={closeDeptMgr} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>}>
+        <div className="space-y-3">
+          <p className="text-[11px] text-slate-400">เพิ่ม/แก้ไข/ลบแผนก · เปิด-ปิดการโชว์บนบอร์ด · ใส่หมายเหตุ · เรียงลำดับด้วย ▲▼</p>
+          <div className="flex gap-2">
+            <input value={newDeptName} onChange={(e) => setNewDeptName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addDept(); }}
+              placeholder="ชื่อแผนกใหม่…" className="flex-1 h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <button onClick={() => void addDept()} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap">＋ เพิ่มแผนก</button>
+          </div>
+          {deptLoading ? <div className="text-center py-6 text-slate-400 text-sm">กำลังโหลด…</div>
+            : deptList.length === 0 ? <div className="text-center py-6 text-slate-300 text-sm">ยังไม่มีแผนก</div>
+              : (
+                <div className="border border-slate-100 rounded-lg divide-y divide-slate-50 max-h-[54vh] overflow-y-auto">
+                  {deptList.map((d, i) => {
+                    const shown = (d.status ?? "active") === "active";
+                    const isCut = d.name.includes("ตัด") || d.name.includes("เตรียม");
+                    return (
+                      <div key={d.id} className="p-2.5 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex flex-col text-[10px] leading-none">
+                            <button onClick={() => moveDept(i, -1)} disabled={i === 0} className="h-4 text-slate-400 hover:text-slate-700 disabled:opacity-20">▲</button>
+                            <button onClick={() => moveDept(i, 1)} disabled={i === deptList.length - 1} className="h-4 text-slate-400 hover:text-slate-700 disabled:opacity-20">▼</button>
+                          </div>
+                          <input defaultValue={d.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== d.name) void patchDept(d.id, { name: v }); }}
+                            className="flex-1 h-8 px-2 text-sm font-medium border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                          {confirmDelId === d.id ? (
+                            <div className="flex gap-1 shrink-0">
+                              <button onClick={() => void delDept(d.id)} className="h-8 px-2 text-xs bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบ</button>
+                              <button onClick={() => setConfirmDelId(null)} className="h-8 px-2 text-xs border border-slate-200 rounded-lg">ยกเลิก</button>
+                            </div>
+                          ) : (
+                            <button onClick={() => setConfirmDelId(d.id)} title="ลบแผนก" className="shrink-0 h-8 w-8 flex items-center justify-center text-slate-300 hover:text-rose-600 rounded-lg hover:bg-rose-50">🗑</button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 pl-7">
+                          <Toggle label="โชว์ในบอร์ด" on={shown} onClick={() => void patchDept(d.id, { status: shown ? "inactive" : "active" })} />
+                          <Toggle label="โชว์หมายเหตุ" on={d.show_note} onClick={() => void patchDept(d.id, { show_note: !d.show_note })} />
+                          {isCut && <span className="text-[10px] text-amber-600">ℹ️ แผนกตัด/เตรียม จะไม่ขึ้นบอร์ด (อยู่ในตัวการ์ด)</span>}
+                        </div>
+                        <div className="pl-7">
+                          <input defaultValue={d.note ?? ""} onBlur={(e) => { const v = e.target.value; if (v !== (d.note ?? "")) void patchDept(d.id, { note: v }); }}
+                            placeholder="หมายเหตุของแผนก (เช่น เบอร์ติดต่อ, เงื่อนไข)…" className="w-full h-8 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+          <p className="text-[11px] text-slate-400">ปิด “โชว์ในบอร์ด” = ซ่อนแผนกจากบอร์ด (ไม่ลบ) · ลบได้เฉพาะแผนกที่ไม่มีงานค้าง</p>
+        </div>
+      </ERPModal>
     </div>
+  );
+}
+
+function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex items-center gap-1.5 text-[11px] text-slate-600">
+      <span className={`relative inline-block h-4 w-7 rounded-full transition-colors ${on ? "bg-emerald-500" : "bg-slate-300"}`}>
+        <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${on ? "left-3.5" : "left-0.5"}`} />
+      </span>
+      {label}
+    </button>
   );
 }
 
@@ -481,24 +763,67 @@ function ToolBtn({ active, onClick, title, children }: { active?: boolean; onCli
   return <button onClick={onClick} title={title} className={`h-8 min-w-8 px-1.5 flex items-center justify-center rounded-md text-sm transition-colors ${active ? "bg-indigo-100 ring-1 ring-indigo-300" : "hover:bg-slate-100"}`}>{children}</button>;
 }
 
-// ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) ----
-function PendingBody({ mo }: { mo: PendingMO }) {
-  const urg = urgencyByDate(mo.due_date, false);
+// ---- ปุ่มติ๊กขั้นตอน (เตรียม / ตัด) ----
+function StepChip({ label, done, disabled, onClick }: { label: string; done: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick} title={done ? `${label}ครบแล้ว — กดเพื่อยกเลิก` : `กดเมื่อ${label}ครบ`}
+      className={`h-6 rounded-md text-[10px] font-medium border flex items-center justify-center gap-0.5 transition-colors ${done ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"} ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}>
+      <span className="text-[11px] leading-none">{done ? "✓" : "○"}</span>{label}
+    </button>
+  );
+}
+
+// ---- ปุ่มติ๊กกลม (ในป๊อปอัปเช็กลิสต์) ----
+function CheckBtn({ done, disabled, onClick }: { done: boolean; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick}
+      className={`h-7 w-7 rounded-md border flex items-center justify-center text-sm transition-colors ${done ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-slate-300 border-slate-300 hover:border-emerald-400"} ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}>
+      {done ? "✓" : ""}
+    </button>
+  );
+}
+
+// ---- ชิปความคืบหน้า (เตรียม x/total) — คลิกเปิดเช็กลิสต์ ----
+function ProgressChip({ label, done, total, onClick }: { label: string; done: number; total: number; onClick: () => void }) {
+  const full = total > 0 && done >= total;
+  return (
+    <button type="button" onClick={onClick} title="กดดูเช็กลิสต์วัตถุดิบ"
+      className={`h-6 rounded-md text-[10px] font-medium border flex items-center justify-center gap-1 transition-colors cursor-pointer ${full ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`}>
+      <span className="text-[11px] leading-none">{full ? "✓" : "○"}</span>{label} {done}/{total}
+    </button>
+  );
+}
+
+// ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) — เช็กลิสต์ เตรียม/ตัด + ไฟเขียวเมื่อพร้อม ----
+function PendingBody({ mo, canEdit, onToggle, onOpenChecklist }: { mo: PendingMO; canEdit: boolean; onToggle: (mo: PendingMO, f: "prep_done" | "cut_done") => void; onOpenChecklist: () => void }) {
+  const ready = mo.ready;
+  const overdue = urgencyByDate(mo.due_date, false) === "red";
   const border = mo.brand_color || prodColor(mo.product_sku);
   return (
-    <div className="bg-white rounded-lg p-2.5 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${border}` }}>
-      <div className="relative w-full aspect-square rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
-        {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-3xl">📦</span>}
-        <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
+    <div className="bg-white rounded-lg p-2 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${ready ? "#10b981" : border}` }}>
+      <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5">
+        {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-2xl">📦</span>}
+        <span className={`absolute top-1 right-1 h-3 w-3 rounded-full ring-2 ring-white ${ready ? "bg-emerald-500" : "bg-rose-500"}`} title={ready ? "พร้อมจ่าย (เตรียม+ตัด ครบ)" : "ยังไม่พร้อม — เตรียม/ตัด ยังไม่ครบ"} />
       </div>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        {mo.brand ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border truncate max-w-[60%]" style={{ background: `${border}18`, color: border, borderColor: `${border}55` }}>{mo.brand}</span> : <span className="text-[10px] text-slate-400">ใบสั่งผลิต</span>}
-        <span className="font-mono text-[10px] text-slate-400">{mo.mo_no}</span>
+      <div className="flex items-center justify-between gap-1 mb-0.5">
+        {mo.brand ? <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium border truncate max-w-[58%]" style={{ background: `${border}18`, color: border, borderColor: `${border}55` }}>{mo.brand}</span> : <span className="text-[9px] text-slate-400">ใบสั่งผลิต</span>}
+        <span className="font-mono text-[9px] text-slate-400 truncate">{mo.mo_no}</span>
       </div>
-      <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.4em]">{mo.product_name ?? mo.product_sku}</p>
-      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100 text-[11px]">
+      <p className="text-xs font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.3em]">{mo.product_name ?? mo.product_sku}</p>
+      <div className="grid grid-cols-2 gap-1 mt-1.5" onPointerDown={(e) => e.stopPropagation()}>
+        {mo.has_bom ? <>
+          <ProgressChip label="เตรียม" done={mo.prep_ready} total={mo.prep_total} onClick={onOpenChecklist} />
+          {mo.cut_total > 0
+            ? <ProgressChip label="ตัด" done={mo.cut_ready} total={mo.cut_total} onClick={onOpenChecklist} />
+            : <button type="button" onClick={onOpenChecklist} className="h-6 rounded-md text-[10px] font-medium border border-slate-200 bg-slate-50 text-slate-400 flex items-center justify-center cursor-pointer hover:bg-slate-100" title="กดดูเช็กลิสต์">ไม่มีงานตัด</button>}
+        </> : <>
+          <StepChip label="เตรียม" done={mo.prep_done} disabled={!canEdit} onClick={() => onToggle(mo, "prep_done")} />
+          <StepChip label="ตัด" done={mo.cut_done} disabled={!canEdit} onClick={() => onToggle(mo, "cut_done")} />
+        </>}
+      </div>
+      <div className="flex items-center justify-between gap-1 mt-1.5 pt-1.5 border-t border-slate-100 text-[10px]">
         <span className="text-rose-600 font-semibold">เหลือ {fmt(mo.remaining)}/{fmt(mo.qty)}</span>
-        <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(mo.due_date)}</span>
+        <span className={overdue ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(mo.due_date)}</span>
       </div>
     </div>
   );
@@ -510,18 +835,18 @@ function WOBody({ w }: { w: WorkOrder }) {
   const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
   const border = w.brand_color || prodColor(w.product_sku);
   return (
-    <div className="bg-white rounded-lg p-2.5 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${border}` }}>
-      <div className="relative w-full aspect-square rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-2">
-        {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-3xl">📦</span>}
-        <span className={`absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
-        <span className={`absolute top-1.5 left-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${st.cls}`}>{st.label}</span>
+    <div className="bg-white rounded-lg p-2 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${border}` }}>
+      <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5">
+        {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-2xl">📦</span>}
+        <span className={`absolute top-1 right-1 h-3 w-3 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
+        <span className={`absolute top-1 left-1 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium border ${st.cls}`}>{st.label}</span>
       </div>
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="text-[11px] text-slate-500 truncate">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
-        <span className="font-mono text-[10px] text-slate-400">{w.wo_no}</span>
+      <div className="flex items-center justify-between gap-1 mb-0.5">
+        <span className="text-[10px] text-slate-500 truncate">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
+        <span className="font-mono text-[9px] text-slate-400 truncate">{w.wo_no}</span>
       </div>
-      <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.4em]">{w.product_name ?? w.product_sku}</p>
-      <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100 text-[11px]">
+      <p className="text-xs font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.3em]">{w.product_name ?? w.product_sku}</p>
+      <div className="flex items-center justify-between gap-1 mt-1.5 pt-1.5 border-t border-slate-100 text-[10px]">
         <span className="tabular-nums text-slate-600">{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
         <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(w.due_date)}</span>
       </div>

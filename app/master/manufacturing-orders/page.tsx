@@ -23,7 +23,7 @@ type Version = { id: string; version: string | null; bom_code: string; is_defaul
 type PreviewMat = {
   key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
   qty_per: number; uom: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null;
-  on_hand_qty: number; is_ready: boolean; purchase_override: number | null;
+  on_hand_qty: number; is_ready: boolean; purchase_override: number | null; cut_done: boolean;
 };
 type MatRow = PreviewMat & { required: number; to_purchase: number };
 type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null };
@@ -113,6 +113,29 @@ export default function MoWorkspacePage() {
 
   const patch = (p: Partial<FormState>) => setForm((f) => (f ? { ...f, ...p } : f));
 
+  // ติ๊ก "ตัดครบ" รายบล็อก → อัปเดตบรรทัด + คำนวณ "เตรียมครบ" ของวัตถุดิบนั้น (ลิงก์สองทาง)
+  const needsCutLine = (m: PreviewMat) => m.cut_block_code != null || m.cut_length != null || m.pieces != null;
+  const applyCut = (lineId: string, sku: string | null, val: boolean) => setForm((f) => {
+    if (!f) return f;
+    const materials = f.materials.map((m) => (m.id === lineId ? { ...m, cut_done: val } : m));
+    const cutLines = materials.filter((m) => m.component_sku === sku && needsCutLine(m));
+    const allCut = cutLines.length > 0 && cutLines.every((m) => m.cut_done);
+    const summary = f.summary.map((s) => (s.component_sku === sku ? { ...s, is_ready: allCut } : s));
+    return { ...f, materials, summary };
+  });
+  const toggleCutLine = async (row: MatRow) => {
+    if (!canEdit || !row.id) return;
+    const next = !row.cut_done;
+    applyCut(row.id, row.component_sku, next);
+    try {
+      const res = await apiFetch(`/api/mo/material-line`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id, cut_done: next }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+    } catch (e) {
+      applyCut(row.id, row.component_sku, !next);
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  };
+
   // ดึงสูตร (lines) ของ bom id มาทำ preview
   const loadBomLines = async (bomId: string): Promise<PreviewMat[]> => {
     try {
@@ -122,7 +145,7 @@ export default function MoWorkspacePage() {
         material_type: (l.material_type as string) ?? null, qty_per: Number(l.qty) || 0, uom: (l.uom as string) ?? null,
         cut_block_code: (l.cut_block_code as string) ?? null,
         cut_width: l.cut_width != null ? Number(l.cut_width) : null, cut_length: l.cut_length != null ? Number(l.cut_length) : null,
-        pieces: l.pieces != null ? Number(l.pieces) : null, on_hand_qty: 0, is_ready: false, purchase_override: null,
+        pieces: l.pieces != null ? Number(l.pieces) : null, on_hand_qty: 0, is_ready: false, purchase_override: null, cut_done: false,
       }));
     } catch { return []; }
   };
@@ -163,7 +186,7 @@ export default function MoWorkspacePage() {
           cut_block_code: (m.cut_block_code as string) ?? null,
           cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
           pieces: m.pieces != null ? Number(m.pieces) : null,
-          on_hand_qty: onHand, is_ready: !!m.is_ready, purchase_override: override,
+          on_hand_qty: onHand, is_ready: !!m.is_ready, purchase_override: override, cut_done: !!m.cut_done,
         };
       });
       const summ: SummaryMat[] = (d.summary ?? []).map((s: Record<string, unknown>, i: number) => {
@@ -463,7 +486,7 @@ export default function MoWorkspacePage() {
                 const base = Math.max(0, Math.round((required - (s.on_hand_qty || 0)) * 10000) / 10000);
                 return { key: s.key, id: s.id, component_sku: s.component_sku, component_name: s.component_name, material_type: s.material_type, uom: s.uom,
                   qty_per: s.qty_per, cut_block_code: null, cut_width: null, cut_length: null, pieces: null,
-                  on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override,
+                  on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false,
                   required, to_purchase: s.purchase_override != null ? s.purchase_override : base };
               });
               const blockRows: MatRow[] = form.materials.map((m) => ({ ...m, required: Math.round(m.qty_per * (form.qty || 0) * 10000) / 10000, to_purchase: 0 }));
@@ -503,12 +526,21 @@ export default function MoWorkspacePage() {
               const sumCols: LineColumn<MatRow>[] = editable
                 ? [codeCol, typeCol, reqCol, uomCol, onhandCol, buyCol, readyCol, orderedCol]
                 : [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
+              // ยอดรวมชิ้น = ชิ้นต่อชุด × จำนวนที่สั่ง
+              const totalPcsCol: LineColumn<MatRow> = { key: "total_pieces", header: "ยอดรวมชิ้น", width: 92, align: "right", summable: true,
+                getValue: (r) => (r.pieces ?? 0) * (form.qty || 0),
+                render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-slate-700">{r.pieces ? fmt((r.pieces ?? 0) * (form.qty || 0)) : "—"}</span> };
+              const cutDoneCol: LineColumn<MatRow> = { key: "cut_done", header: "ตัดครบแล้ว", width: 84, align: "center",
+                getValue: (r) => (r.cut_done ? 1 : 0),
+                render: (r) => needsCutLine(r)
+                  ? <input type="checkbox" checked={r.cut_done} disabled={!editable || !canEdit} onChange={() => toggleCutLine(r)} className="rounded border-slate-300 cursor-pointer disabled:cursor-not-allowed" />
+                  : <span className="text-slate-300 text-xs">—</span> };
               const blockCols: LineColumn<MatRow>[] = [codeCol, typeCol,
                 { key: "cut_block_code", header: "บล็อกตัด", width: 130, getValue: (r) => r.cut_block_code },
                 { key: "cut_width", header: "กว้าง", width: 60, align: "right", getValue: (r) => r.cut_width ?? "" },
                 { key: "cut_length", header: "ยาว", width: 60, align: "right", getValue: (r) => r.cut_length ?? "" },
                 { key: "pieces", header: "ชิ้น", width: 54, align: "right", getValue: (r) => r.pieces ?? "" },
-                reqCol, uomCol];
+                totalPcsCol, reqCol, uomCol, cutDoneCol];
               const needCount = sumRows.filter((r) => { const got = r.component_sku ? (reqMap[r.component_sku] ?? 0) : 0; return r.to_purchase - got > 0.0001; }).length;
               return (
                 <div className="pt-2 border-t border-slate-100">
