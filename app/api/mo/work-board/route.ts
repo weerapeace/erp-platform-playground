@@ -43,13 +43,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const [{ data: depts }, { data: wos }, { data: mos }] = await Promise.all([
-    admin.from("departments").select("id, name, status, display_order").order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true }),
+    admin.from("departments").select("id, name, status, note, show_note, display_order").order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true }),
     admin.from("mo_work_orders").select("*").eq("is_active", true).order("created_at", { ascending: true }).limit(2000),
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
   ]);
 
   const departments = (depts ?? []).filter((d: Record<string, unknown>) => !d.status || d.status === "active")
-    .map((d: Record<string, unknown>) => ({ id: String(d.id), name: (d.name as string) ?? "—" }));
+    .map((d: Record<string, unknown>) => ({ id: String(d.id), name: (d.name as string) ?? "—", note: (d.note as string) ?? null, show_note: !!d.show_note }));
 
   const workOrders = (wos ?? []) as Record<string, unknown>[];
 
@@ -76,8 +76,42 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const remaining = r2(Math.max(0, qty - dispatched));
     const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null };
     return { id: String(m.id), mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
-      qty, dispatched: r2(dispatched), remaining, due_date: m.due_date ?? null, status: m.status, ...inf };
+      qty, dispatched: r2(dispatched), remaining, due_date: m.due_date ?? null, status: m.status,
+      prep_done: !!m.prep_done, cut_done: !!m.cut_done, ...inf };
   }).filter((m) => m.remaining > 0.0001);   // ซ่อน MO ที่จ่ายครบแล้ว
 
-  return NextResponse.json({ departments, workOrders: enrichedWO, pending, error: null });
+  // เช็กลิสต์วัตถุดิบจาก BOM ต่อใบ — เตรียม = is_ready (เดิม), ตัด = cut_done (เฉพาะชิ้นที่ต้องตัด)
+  const moNos = pending.map((p) => String(p.mo_no));
+  const prog = new Map<string, { prepTotal: number; prepDone: number; cutTotal: number; cutDone: number }>();
+  if (moNos.length > 0) {
+    const [{ data: sums }, { data: mats }] = await Promise.all([
+      admin.from("mo_material_summary").select("mo_no, is_ready").in("mo_no", moNos).eq("is_active", true),
+      admin.from("mo_materials").select("mo_no, cut_block_code, cut_length, pieces, cut_done").in("mo_no", moNos).eq("is_active", true),
+    ]);
+    // เตรียม = สรุปต่อวัตถุดิบ (is_ready)
+    for (const s of (sums ?? []) as Record<string, unknown>[]) {
+      const k = String(s.mo_no);
+      const p = prog.get(k) ?? { prepTotal: 0, prepDone: 0, cutTotal: 0, cutDone: 0 };
+      p.prepTotal += 1; if (s.is_ready) p.prepDone += 1;
+      prog.set(k, p);
+    }
+    // ตัด = บล็อกที่ต้องตัด (มีข้อมูลบล็อก/ความยาว/จำนวนชิ้น)
+    for (const x of (mats ?? []) as Record<string, unknown>[]) {
+      if (!(x.cut_block_code != null || x.cut_length != null || x.pieces != null)) continue;
+      const k = String(x.mo_no);
+      const p = prog.get(k) ?? { prepTotal: 0, prepDone: 0, cutTotal: 0, cutDone: 0 };
+      p.cutTotal += 1; if (x.cut_done) p.cutDone += 1;
+      prog.set(k, p);
+    }
+  }
+  const pendingEnriched = pending.map((p) => {
+    const pr = prog.get(String(p.mo_no));
+    if (pr && pr.prepTotal > 0) {
+      const ready = pr.prepDone >= pr.prepTotal && pr.cutDone >= pr.cutTotal;
+      return { ...p, has_bom: true, prep_total: pr.prepTotal, prep_ready: pr.prepDone, cut_total: pr.cutTotal, cut_ready: pr.cutDone, ready };
+    }
+    return { ...p, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: p.prep_done && p.cut_done };
+  });
+
+  return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched, error: null });
 }
