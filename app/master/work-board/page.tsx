@@ -693,7 +693,10 @@ export default function WorkBoardPage() {
 
       {/* ⚙️ ตั้งค่าแผนก — จบในที่เดียว (สร้าง/แก้/ลบ/ซ่อน/หมายเหตุ/เรียงลำดับ) */}
       <ERPModal open={deptMgrOpen} onClose={closeDeptMgr} size="md" title="⚙️ ตั้งค่าแผนก"
-        footer={<button onClick={closeDeptMgr} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>}>
+        footer={<>
+          <a href="/admin/departments" className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center mr-auto">🏢 หน้าจัดการแผนกเต็ม</a>
+          <button onClick={closeDeptMgr} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>
+        </>}>
         <div className="space-y-3">
           <p className="text-[11px] text-slate-400">เพิ่ม/แก้ไข/ลบแผนก · เปิด-ปิดการโชว์บนบอร์ด · ใส่หมายเหตุ · เรียงลำดับด้วย ▲▼</p>
           <div className="flex gap-2">
