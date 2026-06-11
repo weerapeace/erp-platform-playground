@@ -302,6 +302,7 @@ export default function AdminReportTemplatesPage() {
           <div>
             <h1 className="text-2xl font-semibold text-slate-800">Report Template Designer</h1>
             <p className="text-sm text-slate-500 mt-1">เลือก field, สร้างตารางรายการ, preview และ publish template ได้เอง</p>
+            <a href="/admin/report-builder" className="inline-flex items-center gap-1 mt-2 text-sm font-medium text-blue-600 hover:text-blue-700">🎨 ลองตัวออกแบบแบบลากวาง (ใหม่) →</a>
           </div>
           {canEdit && (
             <div className="flex gap-2">
