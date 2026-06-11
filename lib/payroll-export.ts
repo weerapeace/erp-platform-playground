@@ -1,5 +1,4 @@
 ﻿import * as XLSX from "xlsx";
-import ExcelJS from "exceljs";
 import { writeAudit } from "@/lib/audit";
 import { money } from "@/lib/payroll-calc";
 import type { Pnd3AllocationPreview } from "@/lib/payroll-pnd3-allocation";
@@ -17,8 +16,6 @@ export const DEFAULT_PND3_INCOME_TYPE = "ค่าจ้าง";
 const MOJIBAKE_PATTERN = /(เธ|โ€|ยท|เธฟ)/;
 const PAYROLL_REGISTER_COMPANY_NAME = "ห้างหุ้นส่วนจำกัด ไอ.เอส.จี. เทรดดิ้ง ";
 export const PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT = '_-* #,##0.00_-;-* #,##0.00_-;_-* "-"??_-;_-@_-';
-const PAYROLL_REGISTER_FONT = "Angsana New";
-const PAYROLL_REGISTER_FONT_SIZE = 14;
 const PAYROLL_REGISTER_HEADERS = [
   "ลำดับ",
   "ชื่อ-นามสกุล",
@@ -619,46 +616,15 @@ function payrollRegisterMoney(value: unknown) {
   return round2(money(value));
 }
 
-export async function buildPayrollRegisterWorkbookBuffer(rows: PayrollExportRow[], paymentDate: string, periodName: string) {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "ERP Payroll";
-  workbook.created = new Date();
-  workbook.modified = new Date();
-  workbook.calcProperties.fullCalcOnLoad = true;
-
-  const worksheet = workbook.addWorksheet("Payroll Register", {
-    views: [{ showGridLines: false }],
-    pageSetup: {
-      orientation: "landscape",
-      fitToPage: true,
-      fitToWidth: 1,
-      fitToHeight: 0,
-      horizontalCentered: true,
-      margins: {
-        left: 0.25,
-        right: 0.25,
-        top: 0.25,
-        bottom: 0.25,
-        header: 0.1,
-        footer: 0.1,
-      },
-    },
-  });
-
-  PAYROLL_REGISTER_COLUMN_WIDTHS.forEach((width, index) => {
-    worksheet.getColumn(index + 1).width = width;
-  });
-
-  worksheet.mergeCells("A1:J1");
-  worksheet.mergeCells("A2:J2");
-  worksheet.getCell("A1").value = PAYROLL_REGISTER_COMPANY_NAME;
-  worksheet.getCell("A2").value = `  ทะเบียนเงินเดือน ${payrollRegisterMonthTitle(paymentDate, periodName)}`;
-  PAYROLL_REGISTER_HEADERS.forEach((header, index) => {
-    worksheet.getCell(3, index + 1).value = header;
-  });
-
-  rows.forEach((row, index) => {
-    worksheet.addRow([
+export function buildPayrollRegisterWorkbookBuffer(rows: PayrollExportRow[], paymentDate: string, periodName: string) {
+  const firstDataRow = 4;
+  const lastDataRow = firstDataRow + rows.length - 1;
+  const totalRowNumber = lastDataRow + 1;
+  const sheetRows = [
+    [PAYROLL_REGISTER_COMPANY_NAME],
+    [`  ทะเบียนเงินเดือน ${payrollRegisterMonthTitle(paymentDate, periodName)}`],
+    [...PAYROLL_REGISTER_HEADERS],
+    ...rows.map((row, index) => [
       index + 1,
       row.employee_name,
       payrollExportIdentityNo(row),
@@ -669,56 +635,46 @@ export async function buildPayrollRegisterWorkbookBuffer(rows: PayrollExportRow[
       payrollRegisterMoney(row.register_cash_pay),
       payrollRegisterMoney(row.register_social_security),
       payrollRegisterMoney(row.register_balance),
-    ]);
-  });
+    ]),
+    ["", "รวม", "", 0, 0, 0, 0, 0, 0, 0],
+  ];
 
-  const firstDataRow = 4;
-  const lastDataRow = firstDataRow + rows.length - 1;
-  const totalRowNumber = lastDataRow + 1;
-  const totalRow = worksheet.getRow(totalRowNumber);
-  totalRow.getCell(2).value = "รวม";
+  const workbook = XLSX.utils.book_new();
+  workbook.Props = {
+    Title: "Payroll Register",
+    Subject: "Payroll Register",
+    Author: "ERP Payroll",
+    CreatedDate: new Date(),
+  };
+  const worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+  worksheet["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 9 } },
+  ];
+  worksheet["!cols"] = PAYROLL_REGISTER_COLUMN_WIDTHS.map((width) => ({ wch: width }));
+  worksheet["!rows"] = Array.from({ length: totalRowNumber }, () => ({ hpt: 20.6 }));
+
   for (let columnNumber = 4; columnNumber <= 10; columnNumber += 1) {
-    const columnLetter = worksheet.getColumn(columnNumber).letter;
-    totalRow.getCell(columnNumber).value = {
-      formula: `SUM(${columnLetter}${firstDataRow}:${columnLetter}${lastDataRow})`,
-    };
+    const columnLetter = XLSX.utils.encode_col(columnNumber - 1);
+    const cellRef = `${columnLetter}${totalRowNumber}`;
+    worksheet[cellRef] = { t: "n", f: `SUM(${columnLetter}${firstDataRow}:${columnLetter}${lastDataRow})`, z: PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT };
   }
 
-  const thinBorder = { style: "thin" as const, color: { argb: "FF000000" } };
-  for (let rowNumber = 1; rowNumber <= totalRowNumber; rowNumber += 1) {
-    const excelRow = worksheet.getRow(rowNumber);
-    excelRow.height = 20.6;
-    for (let columnNumber = 1; columnNumber <= PAYROLL_REGISTER_HEADERS.length; columnNumber += 1) {
-      const cell = excelRow.getCell(columnNumber);
-      cell.font = {
-        name: PAYROLL_REGISTER_FONT,
-        size: PAYROLL_REGISTER_FONT_SIZE,
-        bold: rowNumber <= 3 || rowNumber === totalRowNumber,
-      };
-      cell.border = {
-        top: thinBorder,
-        left: thinBorder,
-        bottom: thinBorder,
-        right: thinBorder,
-      };
-      cell.alignment = {
-        vertical: "middle",
-        horizontal: rowNumber <= 2
-          ? "center"
-          : columnNumber === 1 || (columnNumber >= 4 && columnNumber <= 9)
-            ? "center"
-            : columnNumber === 10
-              ? "right"
-              : "left",
-      };
-      if (columnNumber >= 4 && columnNumber <= 10) {
-        cell.numFmt = PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT;
-      }
+  for (let rowNumber = firstDataRow; rowNumber <= totalRowNumber; rowNumber += 1) {
+    for (let columnNumber = 4; columnNumber <= 10; columnNumber += 1) {
+      const cellRef = XLSX.utils.encode_cell({ r: rowNumber - 1, c: columnNumber - 1 });
+      const cell = worksheet[cellRef];
+      if (cell) cell.z = PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT;
     }
   }
 
-  const buffer = await workbook.xlsx.writeBuffer();
-  return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Payroll Register");
+  return XLSX.write(workbook, {
+    type: "buffer",
+    bookType: "xlsx",
+    compression: true,
+    cellStyles: true,
+  }) as Buffer;
 }
 
 export function pnd3SheetRows(rows: PayrollExportRow[], paymentDate: string) {

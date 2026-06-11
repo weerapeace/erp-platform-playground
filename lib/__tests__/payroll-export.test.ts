@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from "vitest";
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import { DEFAULT_PND3_RANDOM_SPREAD_PERCENT, PND3_RANDOM_ALLOCATION_NOTE, applyPnd3AllocationToPreviewRows, distributePnd3Allocation, equalizePnd3Allocation, filterPnd3OutputRows, initializePnd3Allocation, randomizePnd3Allocation, randomizePnd3AllocationSelection } from "@/lib/payroll-pnd3-allocation";
 import { pnd3GrossUpFromNet } from "@/lib/payroll-pnd3-recurring-db";
 import {
@@ -142,25 +142,26 @@ describe("payroll export rules", () => {
         register_balance: 10602,
       },
     ], "2026-04-30", "Teststst");
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
-    const worksheet = workbook.getWorksheet("Payroll Register");
+    const workbook = XLSX.read(buffer, { type: "buffer", cellFormula: true, cellNF: true, cellStyles: true });
+    const worksheet = workbook.Sheets["Payroll Register"];
 
     expect(worksheet).toBeDefined();
-    expect(worksheet?.getCell("A1").value).toBe("ห้างหุ้นส่วนจำกัด ไอ.เอส.จี. เทรดดิ้ง ");
-    expect(worksheet?.getCell("A2").value).toBe("  ทะเบียนเงินเดือน เมษายน 2569");
-    expect(worksheet?.getCell("A3").value).toBe("ลำดับ");
-    expect(worksheet?.getCell("C3").value).toBe("เลขบัตร/Passport");
-    expect(worksheet?.getCell("J3").value).toBe("ยอดคงเหลือ");
-    expect(worksheet?.getCell("C4").value).toBe("3 3207 00553 10 1");
-    expect(worksheet?.getCell("D4").numFmt).toBe(PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT);
-    expect(worksheet?.getCell("D4").value).toBe(11160);
-    expect(worksheet?.getCell("J4").alignment?.horizontal).toBe("right");
-    expect(worksheet?.getCell("A1").font).toMatchObject({ name: "Angsana New", size: 14, bold: true });
-    expect(worksheet?.getCell("A4").border?.top?.style).toBe("thin");
-    expect(worksheet?.getCell("B5").value).toBe("รวม");
-    expect(worksheet?.getCell("D5").value).toMatchObject({ formula: "SUM(D4:D4)" });
-    expect(worksheet?.getCell("J5").value).toMatchObject({ formula: "SUM(J4:J4)" });
+    expect(worksheet.A1.v).toBe("ห้างหุ้นส่วนจำกัด ไอ.เอส.จี. เทรดดิ้ง ");
+    expect(worksheet.A2.v).toBe("  ทะเบียนเงินเดือน เมษายน 2569");
+    expect(worksheet.A3.v).toBe("ลำดับ");
+    expect(worksheet.C3.v).toBe("เลขบัตร/Passport");
+    expect(worksheet.J3.v).toBe("ยอดคงเหลือ");
+    expect(worksheet.C4.v).toBe("3 3207 00553 10 1");
+    expect(worksheet.D4.z).toBe(PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT);
+    expect(worksheet.D4.v).toBe(11160);
+    expect(worksheet.B5.v).toBe("รวม");
+    expect(worksheet.D5.f).toBe("SUM(D4:D4)");
+    expect(worksheet.J5.f).toBe("SUM(J4:J4)");
+    expect(worksheet["!merges"]).toEqual([
+      { s: { c: 0, r: 0 }, e: { c: 9, r: 0 } },
+      { s: { c: 0, r: 1 }, e: { c: 9, r: 1 } },
+    ]);
+    expect(worksheet["!cols"]?.[1]?.wch).toBeGreaterThan(26);
   });
 
   it("shows passport when payroll register row has no Thai national id", () => {
