@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useRef, useState } from "react";
 
 // ============================================================
 // PrintDocument — เอกสารสำหรับพิมพ์/บันทึก PDF (component กลาง)
@@ -136,6 +136,31 @@ export function PrintToolbar({ onBack }: { onBack?: () => void }) {
         className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
         🖨️ พิมพ์ / บันทึก PDF
       </button>
+    </div>
+  );
+}
+
+// ============================================================
+// PrintFrame — กรอบแสดง HTML เอกสารพิมพ์ (component กลาง)
+// ปรับความสูงตามเนื้อหาจริง (วัด scrollHeight ของ iframe) → ไม่มีช่องว่าง/หน้าว่างเกิน/scroll
+// ใช้แทน <iframe srcDoc=... minHeight=1180> เดิมในทุกหน้าพิมพ์ (PR/PO/SO/QT/Design Sheets ฯลฯ)
+// ============================================================
+
+export function PrintFrame({ html, maxWidth = 840 }: { html: string; maxWidth?: number }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const [h, setH] = useState(400);
+  // วัดความสูงเนื้อหาจริง — ซ้ำหลายรอบเผื่อฟอนต์/รูปจัดเสร็จช้า
+  const measure = () => {
+    const d = ref.current?.contentDocument;
+    if (!d) return;
+    const hh = Math.max(d.body?.scrollHeight ?? 0, d.documentElement?.scrollHeight ?? 0);
+    if (hh > 0) setH(hh);
+  };
+  const onLoad = () => { measure(); setTimeout(measure, 120); setTimeout(measure, 400); };
+  return (
+    <div className="mx-auto bg-white shadow-lg print-document" style={{ maxWidth }}>
+      <iframe ref={ref} srcDoc={html} onLoad={onLoad} scrolling="no"
+        className="w-full bg-white border-0 block" style={{ height: h }} title="Print preview" />
     </div>
   );
 }

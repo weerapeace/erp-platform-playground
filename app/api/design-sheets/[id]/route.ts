@@ -28,10 +28,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 // field ที่แก้ได้ (whitelist)
+type CostExtra = { label: string; amount: number };
 type PatchBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
   status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
-  is_active?: boolean; parent_sku_code?: string | null;
+  is_active?: boolean; parent_sku_code?: string | null; cost_extra?: CostExtra[];
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -55,6 +56,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.deadline !== undefined)   patch.deadline = body.deadline || null;
   if (body.drive_link !== undefined) patch.drive_link = body.drive_link?.trim() || null;
   if (body.is_active !== undefined)  patch.is_active = !!body.is_active;
+  if (body.cost_extra !== undefined) {
+    // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ) — sanitize: เก็บเฉพาะ {label, amount}
+    patch.cost_extra = (Array.isArray(body.cost_extra) ? body.cost_extra : [])
+      .map((c) => ({ label: String(c?.label ?? "").slice(0, 200), amount: Number(c?.amount) || 0 }))
+      .filter((c) => c.label.trim() !== "" || c.amount !== 0);
+  }
   if (body.status !== undefined) patch.status = body.status;   // ตรวจกับ workflow ด้านล่าง (หลังมี admin)
   const admin = supabaseAdmin();
 

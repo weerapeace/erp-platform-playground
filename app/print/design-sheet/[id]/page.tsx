@@ -6,7 +6,7 @@
  */
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PrintToolbar } from "@/components/report";
+import { PrintToolbar, PrintFrame } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
@@ -118,9 +118,7 @@ export default function PrintDesignSheetPage() {
             ⚠️ ยังไม่มี template ใบสั่งตัวอย่าง — สร้างที่ <a href="/admin/report-templates" className="underline">Admin · Report Templates</a>
           </div>
         ) : (
-          <div className="max-w-[840px] mx-auto bg-white shadow-lg">
-            <iframe srcDoc={html} className="w-full bg-white border-0" style={{ minHeight: "1180px" }} title="Print preview" />
-          </div>
+          <PrintFrame html={html} />
         )}
       </div>
     </div>

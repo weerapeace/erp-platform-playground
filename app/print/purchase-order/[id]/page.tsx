@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PrintToolbar } from "@/components/report";
+import { PrintToolbar, PrintFrame } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
 import type { PODetail } from "@/app/api/purchase-orders/route";
@@ -90,9 +90,7 @@ export default function PrintPOPage() {
          : error || !po ? <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
          : !template ? <div className="text-center py-20 text-amber-600">⚠️ ยังไม่มี template สำหรับ PO</div>
          : (
-          <div className="max-w-[840px] mx-auto bg-white shadow-lg">
-            <iframe srcDoc={html} className="w-full bg-white border-0" style={{ minHeight: "1180px" }} title="Print preview" />
-          </div>
+          <PrintFrame html={html} />
         )}
       </div>
     </div>

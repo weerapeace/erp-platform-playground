@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PrintToolbar } from "@/components/report";
+import { PrintToolbar, PrintFrame } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -370,9 +370,7 @@ export default function PrintQuotationPage() {
         ) : error || !quote ? (
           <div className="text-center py-20 text-red-500">⚠ {error ?? "ไม่พบเอกสาร"}</div>
         ) : (
-          <div className="max-w-[840px] mx-auto bg-white shadow-lg">
-            <iframe srcDoc={html} className="w-full bg-white border-0" style={{ minHeight: "1180px" }} title="Print quotation preview" />
-          </div>
+          <PrintFrame html={html} />
         )}
       </div>
     </div>

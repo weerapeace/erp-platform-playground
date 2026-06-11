@@ -10,6 +10,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
+import { PrintFrame } from "@/components/report";
 import { DEFAULT_WORKORDER_TEMPLATE, parseDesignerDescription } from "@/lib/report-designer";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Template, Font, Plugins, Schema } from "@pdfme/common";
@@ -155,7 +156,7 @@ export default function PrintWorkOrderPage() {
               ? (genMsg ? <div className="text-center py-20 text-slate-400">{genMsg}</div>
                 : pdfUrl ? <div className="max-w-[900px] mx-auto bg-white shadow-lg"><iframe src={pdfUrl} className="w-full border-0" style={{ height: "85vh" }} title="PDF preview" /></div>
                   : <div className="text-center py-20 text-slate-400">กำลังเตรียม…</div>)
-              : <div className="max-w-[840px] mx-auto bg-white shadow-lg"><iframe srcDoc={html} className="w-full bg-white border-0" style={{ minHeight: "1180px" }} title="Print preview" /></div>}
+              : <PrintFrame html={html} />}
       </div>
     </div>
   );

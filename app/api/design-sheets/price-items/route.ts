@@ -15,13 +15,14 @@ export const revalidate = 0;
 export type PriceItem = {
   id: string; code: string | null; name: string;
   price_per_unit: number | null; uom: string | null; face_width_cm: number | null;
-  group_name: string | null; calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
+  width_cm: number | null; length_cm: number | null;
+  group_name: string | null; group_code: string | null; calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { data, error } = await supabaseAdmin().from("design_price_items")
-    .select("id, code, name, price_per_unit, uom, face_width_cm, grp:material_groups!material_group_id ( name, calc_method, loss_percent, divisor, uom_default )")
+    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
     .eq("is_active", true).order("name", { ascending: true }).limit(1000);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 
@@ -32,7 +33,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       price_per_unit: r.price_per_unit != null ? Number(r.price_per_unit) : null,
       uom: (r.uom as string) ?? null,
       face_width_cm: r.face_width_cm != null ? Number(r.face_width_cm) : null,
+      width_cm: r.width_cm != null ? Number(r.width_cm) : null,
+      length_cm: r.length_cm != null ? Number(r.length_cm) : null,
       group_name: (g?.name as string) ?? null,
+      group_code: (g?.code as string) ?? null,
       calc_method: (g?.calc_method as string) ?? null,
       loss_percent: g?.loss_percent != null ? Number(g.loss_percent) : null,
       divisor: g?.divisor != null ? Number(g.divisor) : null,

@@ -1,0 +1,7 @@
+-- เทมเพลตใบพิมพ์ "ตีราคาต้นทุน" (เอกสารภายใน) — แก้ได้ที่ /admin/report-templates
+-- รันแล้วบน Supabase ผ่าน MCP apply_migration (design_sheet_cost_report_template) 2026-06-11
+-- seed erp_report_templates entity_type='design_sheet_cost' (where not exists)
+-- หัว+ข้อมูลงาน + กล่องสรุปต้นทุน (ต้นทุนแยกชนิด/วัสดุดิบรวม/ค่าใช้จ่ายเพิ่ม/ต้นทุนสินค้ารวม)
+-- + ตารางวัตถุดิบจัดกลุ่มตามชนิด (หัวกลุ่ม+ยอดรวมต่อกลุ่ม) + ช่องเซ็นผู้ตีราคา/ผู้อนุมัติ
+-- หน้าพิมพ์: app/print/design-sheet-cost/[id] (buildData จัดกลุ่ม + คำนวณสรุป)
+-- custom_css: .doc{min-height:0!important} ให้สูงตามเนื้อหา (พอดีหน้าเดียว ไม่มีหน้า 2 ว่าง) + tr ไม่ขาดกลางหน้า
