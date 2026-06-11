@@ -125,6 +125,29 @@ const quoteLineColumns: ReportTableColumnDef[] = [
   { key: "line_total", label: "จำนวนเงิน", sample: "52,000.00", align: "right", width: 11 },
 ];
 
+const woFields: ReportFieldDef[] = [
+  { key: "mo_number", label: "เลขที่ใบสั่งผลิต", group: "หัวเอกสาร", sample: "MO-2026-0001" },
+  { key: "status_label", label: "สถานะ", group: "หัวเอกสาร", sample: "ร่าง" },
+  { key: "created_at_th", label: "วันที่สั่ง", group: "หัวเอกสาร", sample: "1 มิ.ย. 2569" },
+  { key: "due_date_th", label: "กำหนดส่ง", group: "หัวเอกสาร", sample: "15 มิ.ย. 2569" },
+  { key: "product_sku", label: "รหัสสินค้า", group: "สินค้า", sample: "BBP13-02" },
+  { key: "product_name", label: "ชื่อสินค้า", group: "สินค้า", sample: "กระเป๋าเป้สะพายหลัง BBP13" },
+  { key: "qty", label: "จำนวนผลิต", group: "สินค้า", sample: "50" },
+  { key: "bom_version", label: "เวอร์ชันสูตร", group: "สินค้า", sample: "v1" },
+  { key: "note", label: "หมายเหตุ", group: "หมายเหตุ", sample: "—" },
+];
+const woLineColumns: ReportTableColumnDef[] = [
+  { key: "idx", label: "ลำดับ", sample: "1", align: "center", width: 6 },
+  { key: "component_name", label: "วัตถุดิบ", sample: "ผ้าซับในทอ Louis Montini", width: 28 },
+  { key: "material_type", label: "ชนิด", sample: "ผ้า", align: "center", width: 9 },
+  { key: "cut_block_code", label: "บล็อกตัด", sample: "C1-1-78", align: "center", width: 12 },
+  { key: "cut_size", label: "กว้าง×ยาว", sample: "8.6×23.4", align: "center", width: 12 },
+  { key: "pieces", label: "ชิ้น/ตัว", sample: "2", align: "right", width: 8 },
+  { key: "total_pieces", label: "ยอดรวมชิ้น", sample: "100", align: "right", width: 10 },
+  { key: "required", label: "รวมต้องใช้", sample: "1.86", align: "right", width: 8 },
+  { key: "uom", label: "หน่วย", sample: "หลา", align: "center", width: 7 },
+];
+
 export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
   qt: {
     key: "qt",
@@ -188,6 +211,28 @@ export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
       lines: [
         { idx: 1, sku: "SKU-001", product_name: "กระดาษ A4 80gsm", qty: 5, unit: "รีม", line_total: "600.00" },
         { idx: 2, sku: "SKU-002", product_name: "ปากกาลูกลื่น", qty: 12, unit: "กล่อง", line_total: "1,020.00" },
+      ],
+    },
+  },
+  wo: {
+    key: "wo",
+    label: "ใบสั่งงานผลิต",
+    fields: woFields,
+    tables: [{ key: "lines", label: "รายการวัตถุดิบ / บล็อกตัด", itemLabel: "วัตถุดิบ", columns: woLineColumns }],
+    sampleData: {
+      mo_number: "MO-2026-0001",
+      status_label: "ร่าง",
+      created_at_th: "1 มิ.ย. 2569",
+      due_date_th: "15 มิ.ย. 2569",
+      product_sku: "BBP13-02",
+      product_name: "กระเป๋าเป้สะพายหลัง ผ้าไนล่อน Unisex Backpack BBP13",
+      qty: "50",
+      bom_version: "v1",
+      note: "ตัดผ้าตามบล็อก ตรวจสีก่อนเย็บ",
+      lines: [
+        { idx: 1, component_name: "ผ้าไนลอนแผง 372", material_type: "ผ้า", cut_block_code: "C1-1-78", cut_size: "8.6×23.4", pieces: "2", total_pieces: "100", required: "1.86", uom: "หลา" },
+        { idx: 2, component_name: "ผ้าซับในทอ Louis Montini สีครีม", material_type: "ผ้า", cut_block_code: "C1-1-74", cut_size: "8.8×10.6", pieces: "1", total_pieces: "50", required: "0.43", uom: "หลา" },
+        { idx: 3, component_name: "ซิปไนลอน #5 D502", material_type: "ซิป", cut_block_code: "—", cut_size: "—", pieces: "1", total_pieces: "50", required: "50", uom: "เส้น" },
       ],
     },
   },
@@ -288,4 +333,32 @@ export const DEFAULT_QUOTATION_TEMPLATE = {
   <div class="signature">ลายเซ็นผู้มีอำนาจ</div>
 </section>`,
   custom_css: DEFAULT_REPORT_CSS,
+};
+
+export const DEFAULT_WORKORDER_TEMPLATE = {
+  header_html: `<div class="doc-header">
+  <div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง (สำนักงานใหญ่)</div>
+  <div class="company-address">41/243, 41/244 ถนนกัลปพฤกษ์ แขวงบางแค เขตบางแค กรุงเทพฯ 10160</div>
+</div>
+<div class="doc-title">ใบสั่งงานผลิต</div>
+<section class="info-grid">
+  <div class="info-box">
+    <div><span class="label">สินค้า:</span> {{product_name}}</div>
+    <div><span class="label">รหัส:</span> {{product_sku}}</div>
+    <div><span class="label">จำนวนผลิต:</span> {{qty}} &nbsp;·&nbsp; <span class="label">สูตร:</span> {{bom_version}}</div>
+  </div>
+  <div class="info-box">
+    <div><span class="label">เลขที่:</span> {{mo_number}}</div>
+    <div><span class="label">วันที่สั่ง:</span> {{created_at_th}}</div>
+    <div><span class="label">กำหนดส่ง:</span> {{due_date_th}} &nbsp;·&nbsp; {{status_label}}</div>
+  </div>
+</section>`,
+  body_html: `${buildTableHtml(REPORT_ENTITY_DEFS.wo.tables[0], ["idx", "component_name", "material_type", "cut_block_code", "cut_size", "pieces", "total_pieces", "required", "uom"])}
+<div class="wo-note"><span class="label">หมายเหตุ / วิธีทำ:</span> {{note}}</div>`,
+  footer_html: `<section class="signatures">
+  <div class="signature">ผู้สั่งผลิต</div>
+  <div class="signature">ผู้รับงานผลิต</div>
+</section>`,
+  custom_css: `${DEFAULT_REPORT_CSS}
+.wo-note { margin-top: 10px; font-size: 11px; min-height: 2.4em; }`,
 };

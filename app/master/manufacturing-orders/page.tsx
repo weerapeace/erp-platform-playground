@@ -409,6 +409,7 @@ export default function MoWorkspacePage() {
           onRowClick={canEdit ? openEdit : undefined}
           rowActions={canEdit ? [
             { label: "แก้", icon: "✏", onClick: openEdit },
+            { label: "พิมพ์ใบสั่งงาน", icon: "🖨️", onClick: (r) => window.open(`/print/work-order/${r.id}`, "_blank", "noopener") },
             { label: "ย้ายเข้าคลังเก็บ", icon: "🗑", variant: "danger", onClick: (r) => setArchiveTarget(r) },
           ] : []}
           pageSize={20}
@@ -418,6 +419,7 @@ export default function MoWorkspacePage() {
       <ERPModal open={form !== null} onClose={() => !saving && setForm(null)} size="xl"
         title={form?.id ? `แก้ใบสั่งผลิต: ${form.mo_no}` : "สร้างใบสั่งผลิตใหม่"}
         footer={<>
+          {form?.id && <button type="button" onClick={() => window.open(`/print/work-order/${form.id}`, "_blank", "noopener")} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 mr-auto inline-flex items-center gap-1">🖨️ พิมพ์ใบสั่งงาน</button>}
           <button onClick={() => setForm(null)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
           <button onClick={save} disabled={saving || !canEdit} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         </>}>
