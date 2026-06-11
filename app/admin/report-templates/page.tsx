@@ -94,6 +94,7 @@ export default function AdminReportTemplatesPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReportTemplateRow | null>(null);
   const [target, setTarget] = useState<EditorTarget>("body_html");
+  const [previewMax, setPreviewMax] = useState(false);   // ขยาย preview เต็มจอ
   const [tableKey, setTableKey] = useState("lines");
   const [selectedColumns, setSelectedColumns] = useState<string[]>([
     "idx",
@@ -362,7 +363,7 @@ export default function AdminReportTemplatesPage() {
             </div>
           </aside>
 
-          <main className="col-span-4 space-y-4">
+          <main className="col-span-3 space-y-4">
             {draft ? (
               <>
                 <section className="rounded-xl border border-slate-200 bg-white p-4">
@@ -494,16 +495,20 @@ export default function AdminReportTemplatesPage() {
             )}
           </main>
 
-          <section className="col-span-5 rounded-xl border border-slate-200 bg-slate-100 overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+          <section className="col-span-6 rounded-xl border border-slate-200 bg-slate-100 overflow-hidden">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
               <div>
                 <p className="text-sm font-semibold text-slate-700">Preview</p>
                 <p className="text-xs text-slate-400">ตัวอย่างจากข้อมูลจำลองของ {entityDef.label}</p>
               </div>
-              <button type="button" onClick={() => setAdvancedOpen(prev => !prev)}
-                className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">
-                {advancedOpen ? "ซ่อนโค้ดละเอียด" : "โหมดละเอียด"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setAdvancedOpen(prev => !prev)}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">
+                  {advancedOpen ? "ซ่อนโค้ดละเอียด" : "โหมดละเอียด"}
+                </button>
+                <button type="button" onClick={() => setPreviewMax(true)} disabled={!draft} title="ขยายดูเต็มจอ"
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50">⛶ ขยายเต็มจอ</button>
+              </div>
             </div>
 
             {advancedOpen && draft && (
@@ -527,6 +532,23 @@ export default function AdminReportTemplatesPage() {
 
         {toast && <div className="fixed bottom-6 right-6 z-50 rounded-lg bg-emerald-600 px-4 py-3 text-sm text-white shadow-lg">✓ {toast}</div>}
       </div>
+
+      {/* Preview เต็มจอ — ดู A4 ขนาดจริง */}
+      {previewMax && draft && (
+        <div className="fixed inset-0 z-[70] flex flex-col bg-slate-800/60 p-4" onClick={() => setPreviewMax(false)}>
+          <div className="mx-auto flex w-full max-w-[980px] flex-1 flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
+              <p className="text-sm font-semibold text-slate-700">Preview · {draft.label}</p>
+              <button type="button" onClick={() => setPreviewMax(false)} className="h-8 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">✕ ปิด</button>
+            </div>
+            <div className="flex flex-1 justify-center overflow-auto bg-slate-100 p-4">
+              <iframe srcDoc={previewHtml} title="Report preview fullscreen"
+                className="rounded border border-slate-200 bg-white shadow-lg"
+                style={{ width: draft.orientation === "landscape" ? 1123 : 794, minWidth: draft.orientation === "landscape" ? 1123 : 794, height: draft.orientation === "landscape" ? 794 : 1123 }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={deleteTarget !== null}
