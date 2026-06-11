@@ -206,6 +206,9 @@ type EditData = {
 };
 const isSkuRef = (d: AttrDef) => d.external_table === "skus_v2";
 const LEGACY_LABELS: Record<string, string> = { materials: "วัตถุดิบ", lining: "ซับใน", zipper: "ซิป", strap: "สาย/สายสะพาย", thread: "ด้าย", spares: "อะไหล่", logo: "โลโก้/พิมพ์" };
+// ป้ายประเภทสินค้า (ค่าใน DB → ชื่อไทย) + ประเภทที่ใช้ "ช่องกระเป๋า" (legacy) เป็นชุดฟิลด์
+const FAMILY_LABELS: Record<string, string> = { belt: "เข็มขัด", bag: "กระเป๋า", "กระเป๋า": "กระเป๋า" };
+const BAG_FAMILY = "กระเป๋า";
 
 function initVal(def: AttrDef, v: AttrVal | undefined): unknown {
   if (def.input_type === "many2one") return v?.option_id ?? "";
@@ -229,9 +232,8 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
     apiFetch(`/api/product-attributes?sku=${encodeURIComponent(sku)}`).then((r) => r.json()).then((d: EditData) => {
       if (d.error) { toast.error(d.error); return; }
       setData(d);
-      // ตั้งประเภทเริ่มต้นเป็นตัวที่ "มีชุดฟิลด์" (d.families = ประเภทที่มี definitions) ถ้า parent ยังเป็น general/ไม่มีฟิลด์
-      const pf = d.parent?.product_family;
-      setFamily(pf && d.families.includes(pf) ? pf : (d.families[0] ?? pf ?? ""));
+      // ประเภทเริ่มต้น = ตามที่บันทึกไว้ (ถ้ามี) ไม่งั้น "ไม่ระบุ"
+      setFamily(d.parent?.product_family ?? "");
       const init: Record<string, unknown> = {}; const names: Record<string, string> = {};
       for (const def of d.definitions) {
         const k = `${def.scope}:${def.id}`;
@@ -246,6 +248,10 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
 
   const defsOf = (scope: string) => (data?.definitions ?? []).filter((d) => d.scope === scope && d.product_family === family).sort((a, b) => a.display_order - b.display_order);
   const setV = (k: string, v: unknown) => setVals((s) => ({ ...s, [k]: v }));
+  // ประเภทนี้มี "ชุดฟิลด์" เฉพาะไหม (เช่น belt) → ถ้ามี ซ่อนช่องกระเป๋า · ถ้าไม่มี (กระเป๋า/ไม่ระบุ) ใช้ช่องกระเป๋า
+  const hasFieldSet = defsOf("model").length > 0 || defsOf("sku").length > 0;
+  // ตัวเลือกประเภท: รวม "กระเป๋า" (built-in) + ประเภทที่มีชุดฟิลด์ + ประเภทที่บันทึกไว้ปัจจุบัน
+  const familyOptions = [...new Set([BAG_FAMILY, ...(data?.families ?? []), family].filter(Boolean) as string[])];
 
   const renderInput = (def: AttrDef, scope: string) => {
     const k = `${scope}:${def.id}`; const v = vals[k];
@@ -284,16 +290,13 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
           <div className="grid grid-cols-2 gap-2">
             <label className="block"><span className="text-[11px] text-slate-500">ประเภทสินค้า (ชุดฟิลด์)</span>
               <select value={family} onChange={(e) => setFamily(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="">— ไม่ระบุ —</option>{data.families.map((f) => <option key={f} value={f}>{f}</option>)}
+                <option value="">— ไม่ระบุ —</option>{familyOptions.map((f) => <option key={f} value={f}>{FAMILY_LABELS[f] ?? f}</option>)}
               </select>
             </label>
             <label className="block"><span className="text-[11px] text-slate-500">ขนาด (สรุป)</span>
               <input value={size} onChange={(e) => setSize(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
           </div>
 
-          {family && defsOf("model").length === 0 && defsOf("sku").length === 0 && (
-            <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">ประเภท “{family}” ยังไม่มีชุดฟิลด์ — เลือกประเภทอื่น (เช่น belt) หรือกรอกที่ “ช่องเดิม” ด้านล่าง</div>
-          )}
           {family && defsOf("model").length > 0 && (
             <div className="border border-slate-100 rounded-lg p-2.5">
               <div className="text-xs font-semibold text-slate-600 mb-1.5">สเปกร่วม (ใช้ทุกสี)</div>
@@ -307,10 +310,13 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
             </div>
           )}
 
-          <div className="border border-slate-100 rounded-lg p-2.5">
-            <div className="text-xs font-semibold text-slate-600 mb-1.5">ช่องเดิม (Parent) — ใช้ระหว่างย้ายเข้า attribute</div>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-2">{Object.keys(LEGACY_LABELS).map((c) => <div key={c}><span className="text-[11px] text-slate-500">{LEGACY_LABELS[c]}</span><input value={legacy[c] ?? ""} onChange={(e) => setLegacy((s) => ({ ...s, [c]: e.target.value }))} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>)}</div>
-          </div>
+          {/* ช่องกระเป๋า — โชว์เฉพาะประเภทที่ยังไม่มีชุดฟิลด์เฉพาะ (กระเป๋า / ไม่ระบุ) · ประเภทอย่าง belt จะไม่เห็น */}
+          {!hasFieldSet && (
+            <div className="border border-slate-100 rounded-lg p-2.5">
+              <div className="text-xs font-semibold text-slate-600 mb-1.5">รายละเอียดกระเป๋า (วัตถุดิบหลัก)</div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2">{Object.keys(LEGACY_LABELS).map((c) => <div key={c}><span className="text-[11px] text-slate-500">{LEGACY_LABELS[c]}</span><input value={legacy[c] ?? ""} onChange={(e) => setLegacy((s) => ({ ...s, [c]: e.target.value }))} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>)}</div>
+            </div>
+          )}
 
           <label className="block"><span className="text-[11px] text-slate-500">วิธีทำ / หมายเหตุ</span>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
