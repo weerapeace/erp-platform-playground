@@ -138,7 +138,19 @@ export default function ReportBuilderPage() {
               <div ref={containerRef} style={{ width: "100%", height: "calc(100vh - 210px)", minHeight: 480 }} />
             </div>
           )}
-        <p className="text-[11px] text-slate-400 mt-2">ช่องในตารางใช้ชื่อให้ตรงกับข้อมูล MO (เช่น mo_number, product_name, qty, lines) เพื่อให้ B2 เติมข้อมูลจริงตอนพิมพ์ได้</p>
+        <div className="mt-2 text-[11px] text-slate-500 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-relaxed">
+          <b>วิธีให้ระบบเติมข้อมูลจริงตอนพิมพ์:</b> ตั้ง<b>ชื่อช่อง (name)</b> ให้ตรงตามนี้ —
+          <code className="mx-0.5">mo_number</code>(เลขที่) ·
+          <code className="mx-0.5">product_name</code>(สินค้า) ·
+          <code className="mx-0.5">product_sku</code>(รหัส) ·
+          <code className="mx-0.5">qty</code>(จำนวน) ·
+          <code className="mx-0.5">bom_version</code>(สูตร) ·
+          <code className="mx-0.5">due_date_th</code>(กำหนดส่ง) ·
+          <code className="mx-0.5">created_at_th</code>(วันที่สั่ง) ·
+          <code className="mx-0.5">status_label</code>(สถานะ) ·
+          <code className="mx-0.5">note</code>(หมายเหตุ).
+          วาง <b>ตาราง (Table)</b> 1 อัน ตั้ง 9 คอลัมน์ตามลำดับ: ลำดับ · วัตถุดิบ · ชนิด · บล็อกตัด · กว้าง×ยาว · ชิ้น · ยอดรวมชิ้น · รวมต้องใช้ · หน่วย → ระบบจะเติมรายการวัตถุดิบให้เอง
+        </div>
       </div>
     </PlaygroundShell>
   );
