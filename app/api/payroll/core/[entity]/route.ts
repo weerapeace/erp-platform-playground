@@ -11,11 +11,13 @@ import { listSettings, createSettings } from "@/lib/payroll-settings-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
+import { filterEmployeesMissingCurrentContract, getPayrollIssueFilter, payrollWageProblem } from "@/lib/payroll-issue-filters";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Ctx = { params: Promise<{ entity: string }> };
+type FilterMap = Record<string, { value?: string }>;
 
 const CORE: Record<string, {
   auditType: string;
@@ -41,6 +43,58 @@ const CORE: Record<string, {
   },
 };
 
+function parseFilters(raw: string | null): FilterMap {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed as FilterMap : {};
+  } catch {
+    return {};
+  }
+}
+
+async function getPeriodCompanyId(periodId: string | null): Promise<string | null> {
+  if (!periodId) return null;
+  const { data } = await supabaseAdmin().from("payroll_periods").select("company_id").eq("id", periodId).limit(1);
+  return (data?.[0] as { company_id?: string | null } | undefined)?.company_id ?? null;
+}
+
+async function currentContracts(): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await supabaseAdmin().from("employee_contracts")
+    .select("employee_id, company_id")
+    .eq("is_current", true)
+    .eq("status", "active");
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Array<Record<string, unknown>>;
+}
+
+async function applyPayrollIssueFilter(entity: string, rows: Array<Record<string, unknown>>, filters: FilterMap) {
+  const { issueCode, periodId } = getPayrollIssueFilter(filters);
+  if (!issueCode) return rows;
+  const companyId = await getPeriodCompanyId(periodId);
+
+  if (entity === "employees" && issueCode === "employees_without_contract") {
+    const allCurrentContracts = await currentContracts();
+    const periodContracts = companyId
+      ? allCurrentContracts.filter((contract) => String(contract.company_id ?? "") === companyId)
+      : allCurrentContracts;
+    const activeEmployees = rows.filter((r) => String(r.employment_status ?? "") === "active");
+    return filterEmployeesMissingCurrentContract(activeEmployees, periodContracts, allCurrentContracts, companyId);
+  }
+
+  if (entity === "contracts") {
+    const activeCurrent = (r: Record<string, unknown>) =>
+      String(r.status ?? "") === "active" &&
+      r.is_current === true &&
+      (!companyId || String(r.company_id ?? "") === companyId);
+
+    if (issueCode === "invalid_contract_wage") return rows.filter((r) => activeCurrent(r) && payrollWageProblem(r));
+    if (issueCode === "no_active_contracts") return rows.filter(activeCurrent);
+  }
+
+  return rows;
+}
+
 export async function GET(req: NextRequest, ctx: Ctx) {
   const denied = await guardPayroll(req); if (denied) return denied;
   const { entity } = await ctx.params;
@@ -50,15 +104,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const includeInactive = req.nextUrl.searchParams.get("include_inactive") !== "false";
     // รองรับกรองตามพนักงาน (จากลิงก์ ?flt={employee_id:...} ในหน้าพนักงาน)
     let employeeId: string | null = null;
-    const raw = req.nextUrl.searchParams.get("filters");
-    if (raw) {
-      try {
-        const f = JSON.parse(raw) as Record<string, { value?: string }>;
-        const v = f.employee_id?.value;
-        if (typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v)) employeeId = v;
-      } catch { /* ignore */ }
-    }
-    const rows = await cfg.list(includeInactive, employeeId);
+    const filters = parseFilters(req.nextUrl.searchParams.get("filters"));
+    const v = filters.employee_id?.value;
+    if (typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v)) employeeId = v;
+    const rows = await applyPayrollIssueFilter(entity, await cfg.list(includeInactive, employeeId), filters);
     return NextResponse.json({ data: rows, total: rows.length, error: null });
   } catch (e) {
     return NextResponse.json({ data: [], error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });

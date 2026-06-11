@@ -21,6 +21,7 @@ import { FieldCreatorModal } from "@/components/field-creator";
 import { TableLayoutPanel, type SummaryMap } from "@/components/table-layout-panel";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { Popover } from "@/components/popover";
+import { CURRENCIES, currencyLabel } from "@/lib/money";
 import {
   DndContext, type DragEndEvent, type CollisionDetection, PointerSensor, KeyboardSensor,
   useSensor, useSensors, closestCorners, pointerWithin, useDroppable,
@@ -63,6 +64,11 @@ export type StudioField = {
   defaultValue?: string | null;
   uiStyle?:      Record<string, unknown>;   // {size,bold,italic,underline,color,font,align,highlight}
   width?:        number;                    // ความกว้างคอลัมน์ (px) — ลากปรับใน preview
+  // สกุลเงินของฟิลด์ (เฉพาะ number/currency): ตายตัว (currency) หรือตามฟิลด์อื่น (currencyField)
+  currency?:      string;
+  currencyField?: string;
+  /** options ดิบจากทะเบียน — ไว้ merge ตอน save ไม่ให้ทับ select choices */
+  optionsRaw?:    Record<string, unknown>;
 };
 
 const GROUP_META: Record<string, { label: string; icon: string; order: number }> = {
@@ -329,6 +335,9 @@ export function StudioPanel({
       inlineEditable: !!r.is_inline_editable, bulkEditable: !!r.is_bulk_editable, formSpan: Number(r.form_column_span ?? 1),
       helpText: (r.help_text as string) ?? "", placeholder: (r.placeholder as string) ?? "", required: !!r.is_required,
       editable: r.is_editable !== false, defaultValue: (r.default_value as string) ?? null, uiStyle: (r.ui_style as Record<string, unknown>) ?? {}, width: Number(r.width) || undefined,
+      currency: ((r.options as Record<string, unknown>)?.currency as string) ?? "",
+      currencyField: ((r.options as Record<string, unknown>)?.currency_field as string) ?? "",
+      optionsRaw: (r.options as Record<string, unknown>) ?? {},
     });
     setItems((prev) => {
       const have = new Set(prev.map((i) => i.key));
@@ -376,7 +385,12 @@ export function StudioPanel({
 
       // 1. บันทึกทุก field ในคำขอเดียว (ของกลาง PUT) — เร็วกว่าเดิมมาก (เคยยิงทีละ field ~หลายสิบครั้ง)
       //    รวม: order / group / visible / form / inline / bulk / ความกว้าง / help / required / readonly / default / สไตล์
-      const updates = withId.map((i, idx) => ({
+      const updates = withId.map((i, idx) => {
+        // merge สกุลเงินลง options (คง select choices/ค่าอื่นเดิมไว้)
+        const opt = { ...(i.optionsRaw ?? {}) } as Record<string, unknown>;
+        if (i.currency) opt.currency = i.currency; else delete opt.currency;
+        if (i.currencyField) opt.currency_field = i.currencyField; else delete opt.currency_field;
+        return {
         id: i.fieldId!,
         patch: {
           display_order:      (idx + 1) * 10,
@@ -392,9 +406,11 @@ export function StudioPanel({
           is_editable:        i.editable !== false,
           default_value:      (i.defaultValue ?? "") || null,
           ui_style:           i.uiStyle ?? {},
+          options:            opt,
           ...(i.width ? { width: i.width } : {}),
         },
-      }));
+      };
+      });
       for (let s = 0; s < updates.length; s += 100) {
         const chunk = updates.slice(s, s + 100);
         const r = await apiFetch("/api/admin/field-registry-v2/bulk", {
@@ -930,6 +946,25 @@ function FieldSettings({ field, onPatch }: { field: StudioField; onPatch: (patch
           <input value={String(field.defaultValue ?? "")} onChange={(e)=>onPatch({defaultValue:e.target.value})} placeholder="ค่าเริ่มต้น" className="h-8 px-2 border border-slate-200 rounded" />
         </div>
       </FSGroup>
+
+      {(field.type === "number" || field.type === "currency") && (
+        <FSGroup title="สกุลเงิน">
+          <FSRow label="สกุลตายตัว">
+            <select value={field.currency ?? ""} className={selStyle}
+              onChange={(e)=>onPatch({ currency: e.target.value, ...(e.target.value ? { currencyField: "" } : {}) })}>
+              <option value="">— ไม่ระบุ —</option>
+              {Object.keys(CURRENCIES).map((c)=><option key={c} value={c}>{currencyLabel(c)}</option>)}
+            </select>
+          </FSRow>
+          <FSRow label="ตามฟิลด์">
+            <input value={field.currencyField ?? ""} placeholder="เช่น currency"
+              title="ชื่อฟิลด์ในรายการเดียวกันที่เก็บสกุลเงิน (เช่น currency) — ใช้กับเอกสารที่แต่ละใบคนละสกุล"
+              onChange={(e)=>onPatch({ currencyField: e.target.value, ...(e.target.value ? { currency: "" } : {}) })}
+              className="h-7 px-2 border border-slate-200 rounded w-36" />
+          </FSRow>
+          <div className="text-[10px] text-slate-400">ตั้งแล้วมีผลทุกที่ (ตาราง/ฟอร์ม/ป๊อปแก้เร็ว) กับทุกคน · เว้นว่างทั้งคู่ = เลขธรรมดา</div>
+        </FSGroup>
+      )}
 
       <FSGroup title="ตัวอักษร">
         <FSRow label="ขนาดหัวข้อ">

@@ -35,3 +35,5 @@ Thumbs.db
 # misc
 *.tsbuildinfo
 next-env.d.ts
+test-results/
+supabase/.temp/

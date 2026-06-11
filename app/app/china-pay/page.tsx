@@ -159,7 +159,7 @@ async function downloadOrSaveImage(blob: Blob, filename: string): Promise<void> 
 }
 
 // ขอเรท — ส่งข้อความเข้า LINE กลุ่มอัตโนมัติ (ไม่เด้ง share แล้ว) คืน true ถ้าส่งสำเร็จ
-async function requestRateViaLine(): Promise<boolean> {
+async function requestRateViaLine(toast: ReturnType<typeof useToast>): Promise<boolean> {
   const text = "ขอเรทเงินด้วยค่ะ";
   try {
     const res = await apiFetch("/api/china-pay/line-push", {
@@ -178,11 +178,12 @@ async function requestRateViaLine(): Promise<boolean> {
 
 // ปุ่มขอเรท (ของกลาง) — กดแล้วส่ง LINE, สำเร็จแล้วโชว์ "✓ ขอแล้ว" เล็ก ๆ ชั่วครู่
 function RateRequestButton() {
+  const toast = useToast();
   const [state, setState] = useState<"idle" | "sending" | "done">("idle");
   const click = async () => {
     if (state === "sending") return;
     setState("sending");
-    const ok = await requestRateViaLine();
+    const ok = await requestRateViaLine(toast);
     if (ok) { setState("done"); setTimeout(() => setState("idle"), 8000); }
     else setState("idle");
   };
@@ -2456,7 +2457,7 @@ async function pushTransferLine(t: Record<string, unknown>, toast: { success: (m
 }
 
 // ---------------- รายการที่โอนแล้ว (ประวัติการโอน) ----------------
-function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: string) => void }) {
+function TransferList({ canDelete, onGo }: { canDelete?: boolean; onGo?: (tab: Tab) => void }) {
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [pmap, setPmap] = useState<Record<string, Record<string, unknown>>>({});

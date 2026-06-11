@@ -24,7 +24,8 @@ const CONFIG: MasterCRUDConfig = {
   createDefaults: { item_type: "earning", duration_type: "unlimited", calculation_method: "fixed", status: "active" },
   fields: [
     { key: "employee_id", label: "พนักงาน", type: "relation", colSize: 220, required: true, formSpan: 2, filterable: true,
-      relationConfig: { target_table: "employees", target_label_field: "first_name", target_search_fields: ["employee_code", "first_name", "last_name", "nickname"], secondary_label_field: "employee_code" } },
+      relationConfig: { target_table: "employees", target_label_field: "first_name", target_search_fields: ["employee_code", "first_name", "last_name", "nickname"], secondary_label_field: "employee_code" },
+      cellRender: (_v, row) => <span className="text-sm text-slate-800">{String(row?.employee_name || row?.employee_id || "-")}</span> },
     // ผูกสัญญา (แก้ได้เฉพาะ field นี้ — เลือกสัญญาของพนักงานคนนั้น)
     { key: "contract_id", label: "สัญญา", type: "relation", colSize: 150, sortable: false,
       relationConfig: { target_table: "employee_contracts", target_label_field: "contract_no", target_search_fields: ["contract_no"], secondary_label_field: "status", depends_on: { parent_field: "employee_id", filter_column: "employee_id" } },

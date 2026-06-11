@@ -5,11 +5,12 @@
  * เลือกสัญญาของพนักงานคนนั้น → เขียน contract_id ผ่าน /api/payroll/recurring-bind
  * (หน้าเงินประจำเป็น read-only แต่ field "สัญญา" นี้แก้ได้เฉพาะ — เป็น metadata ไม่กระทบยอดเงิน)
  */
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useState, useRef, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 
 type Opt = { id: string; contract_no: string; status: string; wage_type: string };
+type MenuPosition = { top: number; left: number };
 
 export function ContractBindCell(props: {
   recurringId: string;
@@ -24,7 +25,19 @@ export function ContractBindCell(props: {
   const [opts, setOpts] = useState<Opt[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  const updateMenuPosition = useCallback(() => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = 224;
+    setMenuPosition({
+      top: rect.bottom + 4,
+      left: Math.max(8, Math.min(rect.left, window.innerWidth - menuWidth - 8)),
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -33,9 +46,21 @@ export function ContractBindCell(props: {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    document.addEventListener("scroll", updateMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      document.removeEventListener("scroll", updateMenuPosition, true);
+    };
+  }, [open, updateMenuPosition]);
+
   async function toggle(e: React.MouseEvent) {
     e.stopPropagation();
     if (open) { setOpen(false); return; }
+    updateMenuPosition();
     setOpen(true); setErr(null);
     if (!opts) {
       try {
@@ -61,12 +86,15 @@ export function ContractBindCell(props: {
 
   return (
     <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
-      <button onClick={toggle} disabled={saving}
+      <button ref={buttonRef} type="button" onClick={toggle} disabled={saving}
         className={`text-xs px-2 py-0.5 rounded border ${cid ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100"}`}>
         {saving ? "..." : cid ? `📄 ${no ?? "ผูกแล้ว"}` : "🔗 ผูกสัญญา"}
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 w-56 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg py-1 text-sm">
+        <div
+          className="fixed z-[80] w-56 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white shadow-xl py-1 text-sm"
+          style={{ top: menuPosition?.top ?? 0, left: menuPosition?.left ?? 0 }}
+        >
           {err && <div className="px-3 py-2 text-xs text-red-600">{err}</div>}
           {!opts && !err && <div className="px-3 py-2 text-xs text-slate-400">กำลังโหลด...</div>}
           {opts && opts.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">พนักงานนี้ไม่มีสัญญา</div>}

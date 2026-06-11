@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { writeAudit } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { money } from "@/lib/payroll-calc";
+import { getPayrollIssueFilter, isRecurringPayrollIssueRow } from "@/lib/payroll-issue-filters";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type RecurringRow = Record<string, unknown> & { id: string };
+type FilterMap = Record<string, { value?: string }>;
 
 const WRITABLE = new Set([
   "employee_id", "contract_id", "item_name", "item_type", "amount_per_period",
@@ -92,11 +94,56 @@ function friendlyError(e: unknown, fallback: string): string {
   return message || fallback;
 }
 
+function parseFilters(raw: string | null): FilterMap {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed as FilterMap : {};
+  } catch {
+    return {};
+  }
+}
+
+async function getPeriodRange(periodId: string | null): Promise<{ startDate: string; endDate: string } | null> {
+  if (!periodId) return null;
+  const { data } = await supabaseAdmin().from("payroll_periods").select("start_date, end_date").eq("id", periodId).limit(1);
+  const row = data?.[0] as { start_date?: string | null; end_date?: string | null } | undefined;
+  if (!row?.start_date || !row.end_date) return null;
+  return { startDate: row.start_date, endDate: row.end_date };
+}
+
+function inPeriod(row: RecurringRow, range: { startDate: string; endDate: string } | null): boolean {
+  if (!range) return true;
+  const start = String(row.start_date ?? "");
+  const end = row.end_date ? String(row.end_date) : "";
+  return (!start || start <= range.endDate) && (!end || end >= range.startDate);
+}
+
+async function applyFilters(rows: RecurringRow[], filters: FilterMap): Promise<RecurringRow[]> {
+  const { issueCode, periodId } = getPayrollIssueFilter(filters);
+  let out = rows;
+
+  for (const [field, cfg] of Object.entries(filters)) {
+    if (field.startsWith("__")) continue;
+    const value = cfg?.value;
+    if (value == null || String(value) === "") continue;
+    out = out.filter((row) => String(row[field] ?? "") === String(value));
+  }
+
+  if (!issueCode) return out;
+  const range = await getPeriodRange(periodId);
+  return out
+    .filter((row) => String(row.status ?? "active") === "active")
+    .filter((row) => inPeriod(row, range))
+    .filter((row) => isRecurringPayrollIssueRow(row, issueCode));
+}
+
 export async function GET(req: NextRequest) {
   const denied = await guardPayroll(req); if (denied) return denied;
   try {
     const limit = Math.min(Math.max(parseInt(req.nextUrl.searchParams.get("limit") ?? "1000", 10) || 1000, 1), 2000);
     const includeInactive = req.nextUrl.searchParams.get("include_inactive") === "true";
+    const filters = parseFilters(req.nextUrl.searchParams.get("filters"));
     let q = supabaseAdmin().from("employee_recurring_pay_items")
       .select("id, employee_id, contract_id, item_name, item_type, amount_per_period, duration_type, target_total_amount, paid_or_deducted_amount, calculation_method, quantity_default, rate_default, status, start_date, end_date, created_at")
       .order("created_at", { ascending: false })
@@ -104,7 +151,8 @@ export async function GET(req: NextRequest) {
     if (!includeInactive) q = q.eq("status", "active");
     const { data, error } = await q;
     if (error) throw new Error(error.message);
-    return NextResponse.json({ data: await decorate((data ?? []) as RecurringRow[]), error: null });
+    const rows = await applyFilters((data ?? []) as RecurringRow[], filters);
+    return NextResponse.json({ data: await decorate(rows), total: rows.length, error: null });
   } catch (e) {
     return NextResponse.json({ data: [], error: e instanceof Error ? e.message : "โหลดรายการประจำไม่สำเร็จ" }, { status: 500 });
   }

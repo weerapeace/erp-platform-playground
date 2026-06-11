@@ -9,6 +9,7 @@ import { ImageThumbnail } from "@/components/image-manager";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { readRelationLabel } from "@/lib/relation";
 import { formatDate } from "@/lib/date";
+import { formatAmount } from "@/lib/money";
 import type { TableLayoutSettings, RowColorRule } from "@/app/api/table-layouts/route";
 import {
   useReactTable,
@@ -432,8 +433,9 @@ function buildRegistryCell(uiType: string, fieldKey?: string) {
     if (val == null || val === "") return <span className="text-xs text-slate-400">—</span>;
     if ((uiType === "currency" || uiType === "number") && !isNaN(Number(val))) {
       const n = Number(val);
+      // currency: ใช้ formatter กลาง (lib/money) — สกุลรายฟิลด์จัดการที่ master-crud (options.currency)
       return <span className="text-sm tabular-nums text-slate-700">
-        {uiType === "currency" ? `฿${n.toLocaleString("th-TH")}` : n.toLocaleString("th-TH")}
+        {uiType === "currency" ? formatAmount(n) : n.toLocaleString("th-TH")}
       </span>;
     }
     if (uiType === "boolean") {

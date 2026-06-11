@@ -15,7 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
-import { CanvasSketch } from "@/components/canvas-sketch";
+import { CanvasSketch, type CanvasSketchControls } from "@/components/canvas-sketch";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
@@ -82,6 +82,12 @@ export default function DesignSheetsPage() {
   const [formErr, setFormErr] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<DesignSheetListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
+
+  // เตือนก่อนปิด เมื่อมีข้อมูลยังไม่บันทึก (กระดาน + ตีราคา)
+  const canvasControlsRef = useRef<CanvasSketchControls | null>(null);
+  const [canvasDirty, setCanvasDirty] = useState(false);
+  const [closeConfirm, setCloseConfirm] = useState(false);
+  const [closeSaving, setCloseSaving] = useState(false);
 
   // ---- เฟส 3: แท็บในป๊อปอัพ + comment ลูกค้า + รอบเสนอราคา ----
   const [modalTab, setModalTab] = useState<"info" | "board" | "comments" | "cost" | "quotes">("info");
@@ -224,6 +230,29 @@ export default function DesignSheetsPage() {
   const clearPend = useCallback(() => {
     setPendImgs((list) => { list.forEach((p) => URL.revokeObjectURL(p.url)); return []; });
   }, []);
+
+  // ---- เตือนก่อนปิด (มีข้อมูลยังไม่บันทึก: กระดาน หรือ ตีราคา) ----
+  const hasUnsavedClose = () => (canvasControlsRef.current?.isDirty() ?? false) || costDirty;
+  const doClose = useCallback(() => {
+    setForm(null); clearPend(); setCloseConfirm(false); setCanvasDirty(false);
+  }, [clearPend]);
+  const requestClose = () => {
+    if (saving) return;
+    if (hasUnsavedClose()) setCloseConfirm(true);
+    else doClose();
+  };
+  // "บันทึกแล้วปิด" — บันทึกกระดาน + ตีราคา ที่ค้าง แล้วปิด
+  const saveAndClose = async () => {
+    setCloseSaving(true);
+    try {
+      if (canvasControlsRef.current?.isDirty()) await canvasControlsRef.current.save();
+      if (costDirty) await saveCost();
+      doClose();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setCloseSaving(false); }
+  };
+  // "ออกโดยไม่บันทึก" — ทิ้งกระดานที่ค้าง (กัน auto-save ตอน unmount) แล้วปิด
+  const discardAndClose = () => { canvasControlsRef.current?.discard(); doClose(); };
 
   // Ctrl+V วางรูป — ทำงานเฉพาะตอนเปิดฟอร์มสร้างใหม่ (ยังไม่มี id)
   useEffect(() => {
@@ -750,7 +779,7 @@ export default function DesignSheetsPage() {
         )}
       </div>
 
-      <ERPModal open={form !== null} onClose={() => { if (!saving) { setForm(null); clearPend(); } }} size="xl"
+      <ERPModal open={form !== null} onClose={requestClose} size="xl"
         title={form?.id ? `ใบงานออกแบบ: ${form.code}` : "สร้างใบงานออกแบบใหม่"}
         footer={<>
           {form?.id && (
@@ -761,7 +790,7 @@ export default function DesignSheetsPage() {
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบเสนอราคา</a>
             </div>
           )}
-          <button onClick={() => { setForm(null); clearPend(); }} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
+          <button onClick={requestClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
           {canEdit && modalTab === "info" && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>}
         </>}>
         {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && (
@@ -911,7 +940,8 @@ export default function DesignSheetsPage() {
 
             {/* แท็บกระดานวาด (ของกลาง CanvasSketch — Excalidraw) */}
             {modalTab === "board" && form.id && (
-              <CanvasSketch entityType="design_sheet" entityId={form.id} editable={canEdit} height="56vh" />
+              <CanvasSketch entityType="design_sheet" entityId={form.id} editable={canEdit} height="56vh"
+                onDirtyChange={setCanvasDirty} controlsRef={canvasControlsRef} />
             )}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}
@@ -1088,6 +1118,19 @@ export default function DesignSheetsPage() {
       <ConfirmDialog open={delQuote !== null} onClose={() => setDelQuote(null)} onConfirm={doDeleteQuote}
         title="ลบรอบเสนอราคา" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
         message={`ลบรอบเสนอราคา ครั้งที่ ${delQuote?.round ?? ""} หรือไม่?`} />
+
+      {/* เตือนก่อนปิด เมื่อมีข้อมูลยังไม่บันทึก (กระดาน/ตีราคา) — 3 ทางเลือก */}
+      <ERPModal open={closeConfirm} onClose={() => !closeSaving && setCloseConfirm(false)} size="sm" title="ยังไม่ได้บันทึก"
+        footer={<>
+          <button onClick={() => setCloseConfirm(false)} disabled={closeSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">อยู่ต่อ</button>
+          <button onClick={discardAndClose} disabled={closeSaving} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-50">ออกโดยไม่บันทึก</button>
+          <button onClick={() => void saveAndClose()} disabled={closeSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{closeSaving ? "กำลังบันทึก..." : "บันทึกแล้วปิด"}</button>
+        </>}>
+        <p className="text-sm text-slate-600">
+          มีข้อมูลที่ยังไม่ได้บันทึก{canvasControlsRef.current?.isDirty() ? " (กระดาน)" : ""}{costDirty ? " (ตีราคา)" : ""} —
+          ต้องการบันทึกก่อนปิดหรือไม่?
+        </p>
+      </ERPModal>
 
       {/* ป๊อปเพิ่มแบรนด์ใหม่ (ปุ่ม ＋ ข้าง dropdown แบรนด์) */}
       <ERPModal open={brandModal} onClose={() => !brandSaving && setBrandModal(false)} size="sm" title="เพิ่มแบรนด์ใหม่"

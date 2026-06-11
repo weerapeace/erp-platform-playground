@@ -89,7 +89,7 @@ export function getViewCfg(entity: string): ViewCfg | null {
 async function buildMaps(kinds: Set<RelKind>): Promise<Record<RelKind, Record<string, string>>> {
   const a = supabaseAdmin();
   const maps: Record<RelKind, Record<string, string>> = { employee: {}, period: {}, company: {}, department: {}, contract: {} };
-  const jobs: Promise<void>[] = [];
+  const jobs: PromiseLike<void>[] = [];
   if (kinds.has("employee")) jobs.push(a.from("employees").select("id, employee_code, first_name, last_name, nickname").then(({ data }) => {
     (data ?? []).forEach((e) => {
       const r = e as { id: string; employee_code: string; first_name: string; last_name: string; nickname: string | null };
@@ -153,7 +153,7 @@ export async function listView(cfg: ViewCfg, p: ViewParams): Promise<{ data: Rec
   const kinds = new Set<RelKind>(cfg.relations.map((r) => r.kind));
   const maps = kinds.size ? await buildMaps(kinds) : null;
   const rows = (data ?? []).map((row) => {
-    const out: Record<string, unknown> = { ...(row as Record<string, unknown>) };
+    const out: Record<string, unknown> = { ...(row as unknown as Record<string, unknown>) };
     if (maps) for (const rel of cfg.relations) {
       const id = out[rel.field] as string | null;
       out[rel.as] = id ? (maps[rel.kind][id] ?? "") : "";

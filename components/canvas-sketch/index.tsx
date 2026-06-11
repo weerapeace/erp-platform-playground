@@ -15,7 +15,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type MutableRefObject } from "react";
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
 import { apiFetch } from "@/lib/api";
@@ -30,27 +30,38 @@ type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
 const AUTOSAVE_MS = 2500;   // หยุดวาดกี่ ms แล้วค่อยบันทึก
 
+/** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด) */
+export type CanvasSketchControls = { isDirty: () => boolean; save: () => Promise<void>; discard: () => void };
+
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh",
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef,
 }: {
   entityType: string;
   entityId:   string;
   editable?:  boolean;
   height?:    string;
+  /** แจ้งสถานะ "มีแก้ค้าง" ขึ้นไปข้างนอก (ใช้เตือนก่อนปิด popup) */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** ให้ภายนอกถือ handle เรียก save()/discard() ได้ */
+  controlsRef?: MutableRefObject<CanvasSketchControls | null>;
 }) {
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
 
   const apiRef     = useRef<any>(null);
+  const latestRef  = useRef<{ elements: any; appState: any; files: any } | null>(null);  // snapshot ล่าสุดจาก onChange
   const readyRef   = useRef(false);    // กัน onChange ตอน mount นับเป็น "มีแก้ไข"
   const dirtyRef   = useRef(false);
   const savingRef  = useRef(false);
   const pendingRef = useRef(false);    // มีแก้เพิ่มระหว่างกำลังบันทึก → บันทึกซ้ำต่อท้าย
+  const discardRef = useRef(false);    // true = ผู้ใช้เลือก "ทิ้ง" → ไม่ flush ตอน unmount
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
+  const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
 
   useEffect(() => {
     let alive = true;
-    readyRef.current = false; dirtyRef.current = false;
+    readyRef.current = false; dirtyRef.current = false; discardRef.current = false; latestRef.current = null;
     setScene("loading"); setSaveState("idle");
     apiFetch(`/api/canvas-sketch?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`)
       .then((r) => r.json())
@@ -65,16 +76,18 @@ export function CanvasSketch({
   }, [entityType, entityId]);
 
   const doSave = useCallback(async () => {
-    const api = apiRef.current;
-    if (!api) return;
+    // ใช้ snapshot ล่าสุดที่จับไว้ตอน onChange — ไม่อ่านจาก api สด
+    // (กัน bug: ตอนปิด/สลับแท็บ Excalidraw ถูกถอด → getSceneElements() คืนว่าง → ทับของดี)
+    const snap = latestRef.current;
+    if (!snap) return;
     if (savingRef.current) { pendingRef.current = true; return; }
-    savingRef.current = true; dirtyRef.current = false;
+    savingRef.current = true; markDirty(false);
     setSaveState("saving");
     try {
       const lib: any = await import("@excalidraw/excalidraw");
-      const elements = api.getSceneElements();
-      const appState = api.getAppState();
-      const files = api.getFiles();
+      const elements = snap.elements ?? [];
+      const appState = snap.appState ?? {};
+      const files = snap.files ?? {};
       const sceneJson = JSON.parse(lib.serializeAsJSON(elements, appState, files, "local"));
 
       // ถ่ายภาพกระดานเป็น PNG (ใบพิมพ์ใช้) — กระดานว่างถ่ายไม่ได้ ข้ามไป
@@ -102,7 +115,7 @@ export function CanvasSketch({
       setSaveState("saved");
     } catch (e) {
       console.error("[canvas-sketch] save failed:", e);
-      dirtyRef.current = true;
+      markDirty(true);
       setSaveState("error");
     } finally {
       savingRef.current = false;
@@ -112,16 +125,27 @@ export function CanvasSketch({
 
   // มีการแก้ → ตั้งเวลาบันทึกอัตโนมัติ (รีเซ็ตทุกครั้งที่ขยับ — บันทึกเมื่อหยุดวาด)
   const queueSave = useCallback(() => {
-    dirtyRef.current = true;
+    markDirty(true);
     setSaveState("dirty");
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void doSave(), AUTOSAVE_MS);
   }, [doSave]);
 
-  // flush ตอนปิดแท็บ/ปิด modal — ถ้ายังมีแก้ค้าง บันทึกให้เลยไม่ต้องรอครบเวลา
+  // ให้ภายนอกถือ handle: เช็คมีแก้ค้าง / สั่งบันทึก / สั่งทิ้ง (ใช้ตอนถามก่อนปิด popup)
+  useEffect(() => {
+    if (!controlsRef) return;
+    controlsRef.current = {
+      isDirty: () => dirtyRef.current,
+      save: doSave,
+      discard: () => { discardRef.current = true; markDirty(false); setSaveState("idle"); },
+    };
+    return () => { if (controlsRef) controlsRef.current = null; };
+  }, [controlsRef, doSave]);
+
+  // flush ตอนสลับแท็บ/ปิด modal — ถ้ายังมีแก้ค้าง บันทึกให้เลย (เว้นกรณีผู้ใช้เลือก "ทิ้ง")
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (editable && dirtyRef.current) void doSave();
+    if (editable && dirtyRef.current && !discardRef.current) void doSave();
   }, [doSave, editable]);
 
   if (scene === "loading") {
@@ -154,7 +178,10 @@ export function CanvasSketch({
           viewModeEnabled={!editable}
           excalidrawAPI={(a: any) => { apiRef.current = a; }}
           initialData={scene ? { elements: scene.elements as any, files: scene.files as any, scrollToContent: true } : undefined}
-          onChange={() => { if (readyRef.current && editable) queueSave(); }}
+          onChange={(elements: any, appState: any, files: any) => {
+            latestRef.current = { elements, appState, files };   // จับ snapshot เสมอ (รวมตอน load)
+            if (readyRef.current && editable) queueSave();
+          }}
         />
       </div>
     </div>

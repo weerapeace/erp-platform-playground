@@ -67,6 +67,8 @@ export type FieldRegistryV2Response = {
   layout:     FormLayout;
   /** กฎ section whitelist ตามแท็ก: sectionKey → tagId[] (ว่าง/ไม่มี = โชว์ทุกแท็ก) */
   section_tag_rules?: Record<string, string[]>;
+  /** ชุดฟิลด์ "แก้เร็ว" ของโมดูล (RelationPeek quick edit) — null = ยังไม่ตั้ง โชว์ทุกฟิลด์ */
+  quick_edit_fields?: string[] | null;
   error:      string | null;
 };
 
@@ -94,9 +96,10 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
       { status: 404 }
     );
   }
-  const cfg = (mod.config ?? {}) as { layout?: FormLayout; section_tag_rules?: Record<string, string[]> };
+  const cfg = (mod.config ?? {}) as { layout?: FormLayout; section_tag_rules?: Record<string, string[]>; quick_edit_fields?: string[] };
   const layout: FormLayout = cfg.layout ?? null;
   const sectionTagRules: Record<string, string[]> = cfg.section_tag_rules ?? {};
+  const quickEditFields: string[] | null = Array.isArray(cfg.quick_edit_fields) && cfg.quick_edit_fields.length > 0 ? cfg.quick_edit_fields : null;
 
   const { data, error } = await supabase
     .from("erp_module_fields")
@@ -118,6 +121,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
     fields: (data ?? []) as FormField[],
     layout,
     section_tag_rules: sectionTagRules,
+    quick_edit_fields: quickEditFields,
     error: null,
   }, { headers: { "Cache-Control": "private, max-age=300" } });
 }

@@ -20,6 +20,7 @@ import { DataTable } from "@/components/data-table";
 import { apiFetch } from "@/lib/api";
 import { internalEmail, isValidUsername, isValidPin } from "@/lib/internal-users";
 import type { AdminUser, AdminUsersResponse } from "@/app/api/admin/users/route";
+import type { PermCatalogItem, UserOverride } from "@/app/api/admin/user-permissions/route";
 
 type Role = "admin" | "manager" | "staff" | "viewer";
 const ROLES: { v: Role; label: string }[] = [
@@ -69,6 +70,49 @@ export default function AdminUsersPage() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const prevEditId = useRef<string | null>(null);
+
+  // สิทธิ์เฉพาะคน (เฟส 3) — เปิด/ปิดสิทธิ์ทับตำแหน่งรายคน
+  const [permUser, setPermUser] = useState<AdminUser | null>(null);
+  const [permCatalog, setPermCatalog] = useState<PermCatalogItem[]>([]);
+  const [permRolePerms, setPermRolePerms] = useState<Set<string>>(new Set());
+  const [permOverrides, setPermOverrides] = useState<Map<string, "grant" | "revoke">>(new Map());
+  const [permLoading, setPermLoading] = useState(false);
+
+  const openPerms = useCallback(async (u: AdminUser) => {
+    setPermUser(u); setPermLoading(true);
+    setPermCatalog([]); setPermRolePerms(new Set()); setPermOverrides(new Map());
+    try {
+      const res = await apiFetch(`/api/admin/user-permissions?user_id=${u.id}`);
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setPermCatalog((j.permissions ?? []) as PermCatalogItem[]);
+      setPermRolePerms(new Set((j.role_perms ?? []) as string[]));
+      setPermOverrides(new Map(((j.overrides ?? []) as UserOverride[]).map((o) => [o.permission_key, o.mode])));
+    } catch (e) { setError(e instanceof Error ? e.message : "โหลดสิทธิ์ไม่สำเร็จ"); }
+    finally { setPermLoading(false); }
+  }, []);
+
+  const setOverride = async (permKey: string, mode: "grant" | "revoke" | "default") => {
+    if (!permUser) return;
+    setPermOverrides((prev) => { const n = new Map(prev); if (mode === "default") n.delete(permKey); else n.set(permKey, mode); return n; });
+    try {
+      const res = await apiFetch("/api/admin/user-permissions", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: permUser.id, permission_key: permKey, mode }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+    } catch (e) { setError(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); void openPerms(permUser); }
+  };
+
+  // จัดกลุ่ม catalog ตามหมวด (เรียงตามลำดับที่เจอครั้งแรก)
+  const permGroups = useMemo(() => {
+    const order: string[] = [];
+    const by = new Map<string, PermCatalogItem[]>();
+    for (const p of permCatalog) {
+      const c = p.category || "อื่น ๆ";
+      if (!by.has(c)) { by.set(c, []); order.push(c); }
+      by.get(c)!.push(p);
+    }
+    return order.map((c) => ({ category: c, items: by.get(c)! }));
+  }, [permCatalog]);
+  const overrideCount = permOverrides.size;
 
   // เปิดผู้ใช้คนใหม่ → seed ชื่อ/รูป (ไม่ reset ตอน role/active เปลี่ยนของคนเดิม)
   useEffect(() => {
@@ -500,13 +544,20 @@ export default function AdminUsersPage() {
               <div>เข้าระบบล่าสุด: <span className="text-slate-700">{relTime(editUser.last_sign_in_at)}</span></div>
             </div>
             <label className="block">
-              <span className="text-xs font-medium text-slate-600">สิทธิ์</span>
+              <span className="text-xs font-medium text-slate-600">ตำแหน่ง (สิทธิ์หลัก)</span>
               <select value={editUser.role} disabled={editBusy || !editUser.active}
                 onChange={(e) => updateRole(editUser, e.target.value as Role)}
                 className={`w-full h-9 mt-0.5 px-2 text-sm rounded border ${roleColor(editUser.role)} disabled:opacity-60`}>
                 {ROLES.map(r => <option key={r.v} value={r.v}>{r.label}</option>)}
               </select>
             </label>
+
+            {/* สิทธิ์เฉพาะคน (เฟส 3) — เปิด/ปิดทับตำแหน่ง */}
+            <button type="button" onClick={() => void openPerms(editUser)} disabled={editBusy}
+              className="w-full h-9 text-sm font-medium border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50 disabled:opacity-50">
+              🔑 จัดการสิทธิ์เฉพาะคน (ยกเว้นจากตำแหน่ง)
+            </button>
+
             {/* บันทึกชื่อ/รูป */}
             <button onClick={saveProfile} disabled={editBusy || uploadBusy}
               className="w-full h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
@@ -526,6 +577,70 @@ export default function AdminUsersPage() {
                 className="flex-1 h-9 text-sm font-medium border border-slate-200 rounded text-slate-600 hover:bg-slate-50 disabled:opacity-50">
                 ปิด
               </button>
+            </div>
+          </div>
+        )}
+      </ERPModal>
+
+      {/* สิทธิ์เฉพาะคน (เฟส 3) */}
+      <ERPModal open={!!permUser} onClose={() => setPermUser(null)} size="lg"
+        title={permUser ? `สิทธิ์เฉพาะคน: ${permUser.display_name ?? permUser.email}` : ""}>
+        {permUser && (
+          <div className="space-y-3">
+            <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              ค่าเริ่มต้น = สิทธิ์ตาม <b>ตำแหน่ง ({roleLabel(permUser.role)})</b> · ตรงนี้ใช้ <b>เปิด/ปิดเฉพาะคนนี้</b> ทับตำแหน่ง
+              {overrideCount > 0 && <> · มีรายการยกเว้น <b className="text-violet-700">{overrideCount}</b></>}
+            </div>
+            {permUser.role === "admin" && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                ⚠ ผู้ดูแลระบบมีทุกสิทธิ์เสมอ (กันล็อกออก) — การตั้งค่าตรงนี้จะไม่มีผลกับ admin
+              </div>
+            )}
+            {permLoading ? <div className="py-10 text-center text-slate-400">กำลังโหลด...</div> : (
+              <div className="max-h-[55vh] overflow-y-auto space-y-3 pr-1">
+                {permGroups.map((g) => (
+                  <div key={g.category}>
+                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-1 sticky top-0 bg-white py-0.5">{g.category}</div>
+                    <div className="space-y-1">
+                      {g.items.map((p) => {
+                        const roleHas = permRolePerms.has(p.key);
+                        const ov = permOverrides.get(p.key);
+                        const effective = ov ? ov === "grant" : roleHas;
+                        const Btn = ({ m, label, cls }: { m: "default" | "grant" | "revoke"; label: string; cls: string }) => {
+                          const active = m === "default" ? !ov : ov === m;
+                          return (
+                            <button type="button" onClick={() => void setOverride(p.key, m)}
+                              className={`h-7 px-2 text-[11px] rounded border transition-colors ${active ? cls : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
+                              {label}</button>
+                          );
+                        };
+                        return (
+                          <div key={p.key} className="flex items-center gap-2 py-0.5">
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-slate-700 truncate flex items-center gap-1.5">
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${effective ? "bg-emerald-500" : "bg-slate-300"}`} />
+                                {p.label}{p.is_dangerous && <span className="text-rose-400" title="สิทธิ์อันตราย">⚠</span>}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate pl-3">
+                                <code>{p.key}</code> · ตำแหน่ง: {roleHas ? "มี" : "ไม่มี"}
+                              </div>
+                            </div>
+                            <div className="flex gap-1 shrink-0">
+                              <Btn m="default" label="ตามตำแหน่ง" cls="border-slate-300 bg-slate-100 text-slate-700" />
+                              <Btn m="grant" label="เปิด" cls="border-emerald-300 bg-emerald-50 text-emerald-700" />
+                              <Btn m="revoke" label="ปิด" cls="border-rose-300 bg-rose-50 text-rose-700" />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+              <span className="text-[11px] text-slate-400">บันทึกอัตโนมัติ · ผู้ใช้ต้อง login ใหม่เพื่อเห็นผลเต็มที่</span>
+              <button onClick={() => setPermUser(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>
             </div>
           </div>
         )}

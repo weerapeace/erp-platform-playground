@@ -72,6 +72,20 @@ export async function POST(req: NextRequest) {
         .eq("payroll_period_id", periodId);
       if (slipErr) return NextResponse.json({ error: `ตรวจสลิปไม่สำเร็จ: ${slipErr.message}` }, { status: 500 });
       if (!slipCount) return NextResponse.json({ error: "ยังไม่มีสลิปเงินเดือน — ออกสลิปก่อนทำเครื่องหมายว่าจ่ายแล้ว" }, { status: 409 });
+
+      const { count: paidBatchCount, error: paidBatchErr } = await a.from("payment_batches")
+        .select("id", { count: "exact", head: true })
+        .eq("payroll_period_id", periodId)
+        .eq("status", "paid");
+      if (paidBatchErr) return NextResponse.json({ error: `ตรวจชุดจ่ายไม่สำเร็จ: ${paidBatchErr.message}` }, { status: 500 });
+      if (!paidBatchCount) return NextResponse.json({ error: "ยังไม่มีชุดจ่ายที่บันทึกว่าจ่ายแล้ว — ให้สร้างชุดจ่ายและบันทึกจ่ายแล้วจากหน้ารอบจ่ายเงินก่อน" }, { status: 409 });
+
+      const { count: unpaidSlipCount, error: unpaidSlipErr } = await a.from("payroll_payslips")
+        .select("id", { count: "exact", head: true })
+        .eq("payroll_period_id", periodId)
+        .neq("status", "paid");
+      if (unpaidSlipErr) return NextResponse.json({ error: `ตรวจสลิปที่ยังไม่จ่ายไม่สำเร็จ: ${unpaidSlipErr.message}` }, { status: 500 });
+      if (unpaidSlipCount) return NextResponse.json({ error: `ยังมีสลิปที่ยังไม่จ่าย ${unpaidSlipCount} ใบ — ต้องจ่ายให้ครบก่อนปิดงวดเป็นจ่ายแล้ว` }, { status: 409 });
     }
 
     const patch: Record<string, unknown> = { status: toStatus, updated_at: new Date().toISOString() };

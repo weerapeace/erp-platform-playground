@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { computePeriodPreview } from "@/lib/payroll-calc-engine";
 import { money, roundMoney } from "@/lib/payroll-calc";
+import { isAttendanceScanExempt, shouldReceivePaidPeriodHoliday, shouldShowInAttendanceGrid } from "@/lib/payroll-attendance-rules";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
         ? a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds)
         : Promise.resolve({ data: [] as Row[] }),
       empIds.length
-        ? a.from("employee_contracts").select("employee_id, contract_type, wage_type, work_schedule_id, attendance_scan_exempt, status, is_current").in("employee_id", empIds).eq("is_current", true).eq("status", "active")
+        ? a.from("employee_contracts").select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, attendance_scan_exempt, status, is_current").in("employee_id", empIds).eq("is_current", true).eq("status", "active")
         : Promise.resolve({ data: [] as Row[] }),
       a.from("attendance_entries").select("employee_id, work_date, late_minutes, late_deduction, absence_hours, absence_deduction, status, note").eq("payroll_period_id", periodId),
       a.from("leave_entries").select("employee_id, leave_date, days, hours, unpaid_leave_deduction, status, note").eq("payroll_period_id", periodId),
@@ -132,31 +133,41 @@ export async function GET(req: NextRequest) {
     }
 
     const rows = lines
+      .filter((line) => {
+        const employeeId = String(line.employee_id);
+        const contract = { ...(contractBy.get(employeeId) ?? {}), contract_type: line.contract_type, wage_type: line.wage_type } as Row;
+        return shouldShowInAttendanceGrid(contract);
+      })
       .map((line) => {
         const employeeId = String(line.employee_id);
-        const contract = contractBy.get(employeeId) ?? {};
+        const contract = { ...(contractBy.get(employeeId) ?? {}), contract_type: line.contract_type, wage_type: line.wage_type } as Row;
         const schedule = scheduleWeekdays(contract.work_schedule_id);
         const cells = days.map((day) => {
           const scheduled = schedule.includes(day.dow);
           const holiday = day.is_holiday;
+          const paidHoliday = scheduled && holiday && shouldReceivePaidPeriodHoliday(contract);
           const input = inputByCell.get(key(employeeId, day.iso)) ?? {};
           const lateMinutes = money(input.late_minutes);
           const absenceHours = money(input.absence_hours);
           const leaveHours = money(input.leave_hours) || money(input.leave_days) * hoursPerDay;
           const otHours = money(input.ot_hours);
           const hasInput = lateMinutes || absenceHours || leaveHours || otHours;
-          const exempt = Boolean(contract.attendance_scan_exempt);
+          const exempt = isAttendanceScanExempt(contract);
 
           let status: string = "off";
           let label = "+ OT";
           let sublabel = "";
           let amount = 0;
 
-          if (scheduled && holiday) {
+          if (paidHoliday) {
             status = "paid_holiday";
             label = "หยุด";
             sublabel = "พิเศษ";
-          } else if (scheduled && exempt) {
+          } else if (scheduled && holiday) {
+            status = "off";
+            label = "+ OT";
+            sublabel = "";
+          } else if (scheduled && exempt && !lateMinutes && !absenceHours && !leaveHours) {
             status = "exempt";
             label = "ยกเว้น";
             sublabel = "ไม่สแกน";

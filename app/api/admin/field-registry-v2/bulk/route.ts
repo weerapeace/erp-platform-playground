@@ -95,6 +95,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 const ALLOWED_ROW_FIELDS = [
   ...ALLOWED_BULK_FIELDS,
   "display_order", "form_column_span", "help_text", "placeholder", "default_value", "ui_style", "width",
+  // ค่าตั้งของฟิลด์ (เช่น select choices, สกุลเงิน currency/currency_field)
+  "options",
 ];
 export async function PUT(request: NextRequest): Promise<NextResponse> {
   let body: { updates?: unknown };

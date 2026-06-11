@@ -8,7 +8,7 @@
  */
 import { useMemo, useState } from "react";
 
-export type SelectOption = { value: string; label: string; badge?: string; sub?: string };
+export type SelectOption = { value: string; label: string; badge?: string; sub?: string; searchText?: string };
 
 export function SearchableSelect({
   value, options, onChange, placeholder = "— เลือก —", disabled, className,
@@ -28,7 +28,10 @@ export function SearchableSelect({
     const s = q.trim().toLowerCase();
     if (!s) return options;
     return options.filter((o) =>
-      o.label.toLowerCase().includes(s) || o.value.toLowerCase().includes(s) || (o.sub ?? "").toLowerCase().includes(s));
+      o.label.toLowerCase().includes(s) ||
+      o.value.toLowerCase().includes(s) ||
+      (o.sub ?? "").toLowerCase().includes(s) ||
+      (o.searchText ?? "").toLowerCase().includes(s));
   }, [q, options]);
 
   const close = () => { setOpen(false); setQ(""); };

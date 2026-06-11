@@ -88,6 +88,8 @@ type PatchBody = {
   module?: {
     label?: string; description?: string; primary_field?: string; group_label?: string;
     icon?: string; is_active?: boolean; sort_order?: number;
+    /** ชุดฟิลด์ "แก้เร็ว" (RelationPeek quick edit) — [] / null = ล้างค่า กลับไปโชว์ทุกฟิลด์ */
+    quick_edit_fields?: string[] | null;
   };
   menu?: { app_keys?: string[]; show_in_sidebar?: boolean; show_in_launcher?: boolean };
   actor?: string;
@@ -117,6 +119,11 @@ export async function PATCH(
   const m = body.module ?? {};
   const cfg = { ...((mod.config ?? {}) as Record<string, unknown>) };
   if (typeof m.icon === "string" && m.icon.trim()) cfg.icon = m.icon.trim();
+  // ชุดฟิลด์แก้เร็ว — เก็บใน config (default ของทุก user) · ส่ง []/null = ล้างค่า
+  if (m.quick_edit_fields !== undefined) {
+    const list = Array.isArray(m.quick_edit_fields) ? m.quick_edit_fields.filter((s) => typeof s === "string" && s) : [];
+    if (list.length > 0) cfg.quick_edit_fields = list; else delete cfg.quick_edit_fields;
+  }
 
   const modPatch: Record<string, unknown> = { config: cfg };
   if (m.label !== undefined)         modPatch.label = String(m.label).trim() || mod.label;

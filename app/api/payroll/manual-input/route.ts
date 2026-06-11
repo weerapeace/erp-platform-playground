@@ -23,8 +23,16 @@ export async function GET(req: NextRequest) {
 
   try {
     const a = supabaseAdmin();
-    const { data: pdata } = await a.from("payroll_periods").select("id, period_name, status, default_work_days, default_hours_per_day").eq("id", periodId).limit(1);
-    const period = pdata?.[0] as { id: string; period_name: string; status: string; default_work_days?: number | null; default_hours_per_day?: number | null } | undefined;
+    const { data: pdata } = await a
+      .from("payroll_periods")
+      .select("id, period_name, status, company_id, start_date, end_date, default_work_days, default_hours_per_day, payroll_period_holidays(holiday_date)")
+      .eq("id", periodId)
+      .limit(1);
+    const period = pdata?.[0] as {
+      id: string; period_name: string; status: string; company_id?: string | null; start_date?: string | null; end_date?: string | null;
+      default_work_days?: number | null; default_hours_per_day?: number | null;
+      payroll_period_holidays?: { holiday_date?: string | null }[];
+    } | undefined;
     if (!period) return NextResponse.json({ error: "ไม่พบงวด" }, { status: 404 });
 
     // เครื่องคำนวณจริง → รายชื่อพนักงานที่เข้าเงื่อนไข + สุทธิประมาณ + วันทำงาน
@@ -70,20 +78,34 @@ export async function GET(req: NextRequest) {
     // ชื่อ + สถานะพนักงาน
     const empIds = lines.map((l) => String(l.employee_id));
     const nameBy: Record<string, string> = {};
+    const scannerCodeBy: Record<string, string | null> = {};
+    const contractMetaBy: Record<string, Record<string, unknown>> = {};
     const companyPaidTaxBy: Record<string, boolean> = {};
     if (empIds.length) {
-      const [empsRes, settingsRes] = await Promise.all([
-        a.from("employees").select("id, first_name, last_name, nickname").in("id", empIds),
+      let contractQuery = a.from("employee_contracts")
+        .select("employee_id, contract_type, employment_type, wage_type, work_schedule_id, attendance_scan_exempt, start_date, end_date")
+        .in("employee_id", empIds)
+        .eq("is_current", true)
+        .eq("status", "active");
+      if (period.company_id) contractQuery = contractQuery.eq("company_id", period.company_id);
+      const [empsRes, settingsRes, contractsRes] = await Promise.all([
+        a.from("employees").select("id, first_name, last_name, nickname, scanner_employee_code").in("id", empIds),
         a.from("employee_payroll_settings").select("employee_id, withholding_tax_company_paid").in("employee_id", empIds),
+        contractQuery,
       ]);
       const emps = empsRes.data;
       (emps ?? []).forEach((e) => {
-        const r = e as { id: string; first_name: string; last_name: string | null; nickname: string | null };
+        const r = e as { id: string; first_name: string; last_name: string | null; nickname: string | null; scanner_employee_code?: string | null };
         nameBy[r.id] = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() + (r.nickname ? ` (${r.nickname})` : "");
+        scannerCodeBy[r.id] = r.scanner_employee_code ?? null;
       });
       (settingsRes.data ?? []).forEach((s) => {
         const r = s as { employee_id: string; withholding_tax_company_paid: boolean | null };
         companyPaidTaxBy[r.employee_id] = r.withholding_tax_company_paid === true;
+      });
+      (contractsRes.data ?? []).forEach((c) => {
+        const r = c as Record<string, unknown> & { employee_id: string };
+        contractMetaBy[r.employee_id] = r;
       });
     }
 
@@ -99,8 +121,14 @@ export async function GET(req: NextRequest) {
       const hasManual = late || absence || leave || ot || piecework || special || other;
       return {
         id, employee_id: id, employee_code: l.employee_code, employee_name: nameBy[id] ?? "",
+        scanner_employee_code: scannerCodeBy[id] ?? null,
         contract_type: l.contract_type ?? null,
+        employment_type: contractMetaBy[id]?.employment_type ?? null,
         wage_type: l.wage_type ?? null,
+        work_schedule_id: contractMetaBy[id]?.work_schedule_id ?? null,
+        attendance_scan_exempt: contractMetaBy[id]?.attendance_scan_exempt === true,
+        contract_start_date: contractMetaBy[id]?.start_date ?? null,
+        contract_end_date: contractMetaBy[id]?.end_date ?? null,
         work_days: money(l.attendance_days),
         hours_per_day: hoursPerDay,
         paid_minutes: paidMinutes,
@@ -119,6 +147,7 @@ export async function GET(req: NextRequest) {
         piecework_baht: Math.round(piecework * 100) / 100,
         special_add: Math.round(special * 100) / 100,
         other_deduct: Math.round(other * 100) / 100,
+        mid_month_paid: money(l.mid_month_paid),
         social_security_baht: money(l.social_security_employee),
         withholding_tax_baht: money(l.withholding_tax),
         system_deduct_baht: Math.round((money(l.social_security_employee) + (companyPaidTaxBy[id] ? 0 : money(l.withholding_tax))) * 100) / 100,
@@ -128,7 +157,21 @@ export async function GET(req: NextRequest) {
       };
     }).sort((x, y) => String(x.employee_code).localeCompare(String(y.employee_code)));
 
-    return NextResponse.json({ period_name: period.period_name, period_status: period.status, count: rows.length, data: rows, recurring_items, error: null });
+    return NextResponse.json({
+      period_name: period.period_name,
+      period_status: period.status,
+      period: {
+        id: period.id,
+        start_date: period.start_date,
+        end_date: period.end_date,
+        default_hours_per_day: period.default_hours_per_day,
+        holidays: period.payroll_period_holidays ?? [],
+      },
+      count: rows.length,
+      data: rows,
+      recurring_items,
+      error: null,
+    });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "โหลดไม่ได้" }, { status: 500 });
   }

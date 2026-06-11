@@ -180,6 +180,36 @@ export function convert(m: Money, to: CurrencyCode, rate: number, mode: Rounding
 }
 
 // ============================================================
+// Currency normalize / display (ของกลาง — เลิกเขียน curLabel ซ้ำตามหน้า)
+// ============================================================
+
+/** แปลงรหัสที่เก็บในข้อมูลจริง (YUAN/RMB/CNY/฿/บาท ฯลฯ) → CurrencyCode มาตรฐาน */
+export function normalizeCurrency(raw: unknown): CurrencyCode {
+  const s = String(raw ?? "").trim().toUpperCase();
+  if (s === "YUAN" || s === "RMB" || s === "CNY" || s === "¥") return "CNY";
+  if (s === "" || s === "THB" || s === "บาท" || s === "฿") return "THB";
+  if (s in CURRENCIES) return s as CurrencyCode;
+  return DEFAULT_CURRENCY;
+}
+
+/** ป้ายแสดงผลที่ทีมคุ้น (CNY → "RMB", อื่นๆ → code ตรงๆ) */
+export function currencyLabel(raw: unknown): string {
+  const code = normalizeCurrency(raw);
+  return code === "CNY" ? "RMB" : code;
+}
+
+/**
+ * ฟอร์แมตจำนวนเงินสำหรับโชว์ (ตาราง/ฟอร์ม/การ์ด)
+ * THB → ฿1,234.5 · สกุลอื่น → 1,234.5 RMB (ใช้ code กันสับสน ¥ ญี่ปุ่น/จีน)
+ */
+export function formatAmount(value: number, raw: unknown = DEFAULT_CURRENCY): string {
+  const code = normalizeCurrency(raw);
+  const cur = CURRENCIES[code];
+  const numStr = value.toLocaleString(cur.locale, { maximumFractionDigits: cur.scale });
+  return code === "THB" ? `฿${numStr}` : `${numStr} ${currencyLabel(code)}`;
+}
+
+// ============================================================
 // Format
 // ============================================================
 

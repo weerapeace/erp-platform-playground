@@ -58,21 +58,29 @@ async function idNameMap(table: string): Promise<Record<string, string>> {
   return m;
 }
 
-type ContractInfo = { no: string; salary: number };
+type ContractInfo = { no: string; salary: number; contract_type: string | null; employment_type: string | null; wage_type: string | null };
 
 /** map พนักงาน → สัญญาปัจจุบัน (เลือก is_current ก่อน ไม่งั้นใบล่าสุด) */
 async function contractMap(): Promise<Record<string, ContractInfo>> {
   const { data } = await supabaseAdmin()
     .from("employee_contracts")
-    .select("employee_id, contract_no, base_salary, is_current, status, start_date")
+    .select("employee_id, contract_no, base_salary, contract_type, employment_type, wage_type, is_current, status, start_date")
     .eq("is_current", true)
     .eq("status", "active")
     .order("start_date", { ascending: false });
   const m: Record<string, ContractInfo> = {};
   (data ?? []).forEach((c) => {
-    const r = c as { employee_id: string; contract_no: string; base_salary: number; is_current: boolean };
+    const r = c as { employee_id: string; contract_no: string; base_salary: number; contract_type: string | null; employment_type: string | null; wage_type: string | null; is_current: boolean };
     if (!r.employee_id) return;
-    if (!m[r.employee_id] || r.is_current) m[r.employee_id] = { no: r.contract_no, salary: Number(r.base_salary) };
+    if (!m[r.employee_id] || r.is_current) {
+      m[r.employee_id] = {
+        no: r.contract_no,
+        salary: Number(r.base_salary),
+        contract_type: r.contract_type ?? null,
+        employment_type: r.employment_type ?? null,
+        wage_type: r.wage_type ?? null,
+      };
+    }
   });
   return m;
 }
@@ -123,6 +131,9 @@ function decorate(row: Record<string, unknown>, dmap: Record<string, string>, cm
     cost_center_name: row.cost_center_id ? (ccmap[row.cost_center_id as string] ?? "") : "",
     current_contract_no:     con?.no ?? "",
     current_contract_salary: con?.salary ?? null,
+    current_contract_type:   con?.contract_type ?? "",
+    current_employment_type: con?.employment_type ?? "",
+    current_wage_type:       con?.wage_type ?? "",
     bank_name:         bank?.bank ?? "",
     bank_branch:       bank?.branch ?? "",
     bank_account_no:   bank?.account_no ?? "",

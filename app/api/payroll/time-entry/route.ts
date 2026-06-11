@@ -13,6 +13,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { writeAudit } from "@/lib/audit";
 import { money, roundMoney, salaryDayDivisor, lateDeduction, absenceDeduction, overtimeAmount } from "@/lib/payroll-calc";
+import { isPayrollContractor } from "@/lib/payroll-attendance-rules";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -146,6 +147,9 @@ export async function POST(req: NextRequest) {
     const { data: cd } = await a.from("employee_contracts").select("*").eq("employee_id", employeeId).eq("is_current", true).eq("status", "active").limit(1);
     const contract = cd?.[0] as Row | undefined;
     if (!contract) return NextResponse.json({ error: "พนักงานนี้ไม่มีสัญญาที่ใช้งานอยู่" }, { status: 400 });
+    if (isPayrollContractor(contract)) {
+      return NextResponse.json({ error: "พนักงานงานเหมาไม่ใช้การลงเวลา ให้ลงยอดที่แท็บงานเหมาแทน" }, { status: 400 });
+    }
     if (kind !== "ot" && !isWorkableDate(workDate, holidays, contract)) {
       return NextResponse.json({ error: "วันที่นี้ไม่ใช่วันทำงานตามสัญญา หรือเป็นวันหยุด จึงลงสาย/ขาด/ลาไม่ได้" }, { status: 400 });
     }

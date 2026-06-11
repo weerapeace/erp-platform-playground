@@ -1,9 +1,9 @@
 /**
- * GET /api/purchasing/receivable
- * รายการ "สินค้าที่รอเข้า" — ทุกบรรทัดของ PO ที่ยังรับไม่ครบ (qty - qty_received > 0)
+ * GET /api/purchasing/receivable            → สินค้าที่รอเข้า (ยังรับไม่ครบ + ยังไม่ปิดยอด)
+ * GET /api/purchasing/receivable?mode=done  → รายการที่ปิดแล้ว (รับครบ / ปิดยอดขาด) ไว้ดู/แก้
  * join skus_v2 (รหัส + รูปปก) + supplier_items (ลีดไทม์ร้านหลัก) เพื่อโชว์การ์ดรับของ
  * คำนวณ "วันคาดการณ์ของเข้า": ① PO.expected_date ถ้ามี → ② order_date + lead_time → ③ null
- * ใช้ในหน้า "รับสินค้าเข้า" แท็บ "สินค้าที่รอเข้า"
+ * ใช้ในหน้า "รับสินค้าเข้า" แท็บ "สินค้าที่รอเข้า" + "รับครบแล้ว"
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -32,29 +32,36 @@ const dayDiff = (from: string, to: string): number => {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
+  const mode = request.nextUrl.searchParams.get("mode") === "done" ? "done" : "pending";
 
-  // 1) ใบสั่งซื้อที่ยังไม่ปิด (ตัด received/cancelled)
-  const { data: pos, error: poErr } = await admin
+  // 1) ใบสั่งซื้อ — pending: ตัด received/cancelled · done: ตัดเฉพาะ cancelled (ใบที่รับครบต้องยังเห็น)
+  let poQuery = admin
     .from("purchase_orders_v2")
     .select("id, po_no, seller_name, currency, status, order_date, expected_date")
-    .not("status", "in", "(received,cancelled)")
     .limit(1000);
+  poQuery = mode === "done" ? poQuery.neq("status", "cancelled") : poQuery.not("status", "in", "(received,cancelled)");
+  const { data: pos, error: poErr } = await poQuery;
   if (poErr) return NextResponse.json({ data: [], error: poErr.message }, { status: 500 });
   const poMap = new Map((pos ?? []).map((p) => [String(p.id), p as Record<string, unknown>]));
   const poIds = [...poMap.keys()];
   if (poIds.length === 0) return NextResponse.json({ data: [], error: null });
 
-  // 2) บรรทัด PO ที่ยังรับไม่ครบ
+  // 2) บรรทัด PO — pending: ยังรับไม่ครบ+ยังไม่ปิดยอด · done: เฉพาะที่ปิดแล้ว (รับครบ/ปิดยอดขาด)
   const lines: Record<string, unknown>[] = [];
   for (let i = 0; i < poIds.length; i += 300) {
     const chunk = poIds.slice(i, i + 300);
     const { data: ls, error: lErr } = await admin
       .from("purchase_order_lines_v2")
-      .select("id, po_id, item_sku_id, item_name, qty, uom, qty_received")
+      .select("id, po_id, item_sku_id, item_name, qty, uom, qty_received, qty_defective, line_status")
       .in("po_id", chunk)
       .limit(5000);
     if (lErr) return NextResponse.json({ data: [], error: lErr.message }, { status: 500 });
     for (const l of (ls ?? []) as Record<string, unknown>[]) {
+      const st = l.line_status as string | null;
+      const closed = st === "received" || st === "short_closed";
+      if (mode === "done") { if (closed) lines.push(l); continue; }
+      // pending: ข้ามที่ปิดแล้ว แม้จะยังมีคงเหลือ
+      if (closed) continue;
       if (Math.max(0, num(l.qty) - num(l.qty_received)) > 0) lines.push(l);
     }
   }
@@ -94,12 +101,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       id: String(l.id),                          // = po_line_id
       po_id: String(l.po_id),
       po_no: (po.po_no as string) ?? "",
+      po_status: (po.status as string) ?? "",
       seller_name: (po.seller_name as string) ?? "—",
       item_sku_id: l.item_sku_id ?? null,
       item_name: (l.item_name as string) ?? "",
       code: sk?.code ?? "",
       image_url: cover ? `/api/r2-image?key=${encodeURIComponent(cover)}` : null,
       uom: (l.uom as string) ?? "",
+      qty: num(l.qty),
+      qty_received: num(l.qty_received),
+      qty_defective: num(l.qty_defective),
+      line_status: (l.line_status as string) ?? "",
       remaining: Math.max(0, num(l.qty) - num(l.qty_received)),
       currency: (po.currency as string) ?? "THB",
       order_date: orderDate,

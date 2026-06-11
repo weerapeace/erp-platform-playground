@@ -7,6 +7,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { money, roundMoney } from "@/lib/payroll-calc";
+import { isPayrollContractor, isPayrollDailyLike } from "@/lib/payroll-attendance-rules";
 
 type Row = Record<string, unknown>;
 const MANUAL_STATUSES = new Set(["approved", "review", "draft"]);
@@ -14,8 +15,8 @@ const isManualStatus = (s: unknown) => MANUAL_STATUSES.has(String(s ?? "approved
 const hasInput = (v: unknown) => v !== undefined && v !== null && v !== "";
 
 // ---- contract helpers (ตรง worker.js) ----
-const isContractor = (c: Row = {}) => c.contract_type === "contractor" || c.employment_type === "contractor";
-const isDailyPaid = (c: Row = {}) => c.contract_type === "daily" || ["daily", "hourly"].includes(String(c.wage_type));
+const isContractor = (c: Row = {}) => isPayrollContractor(c);
+const isDailyPaid = (c: Row = {}) => isPayrollDailyLike(c);
 const isOfficeGroup = (c: Row = {}) => {
   const v = String((c.payroll_group_id ?? c.payroll_group ?? "")).trim().toLowerCase();
   return v === "office";

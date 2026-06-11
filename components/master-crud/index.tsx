@@ -31,6 +31,7 @@ import { buildImportSchemaFromRegistry } from "@/lib/import";
 import { useToast } from "@/components/toast";
 import { resolveDefault, evaluateCondition } from "@/lib/field-helpers";
 import { computeField, formatComputed, type ComputeFormat } from "@/lib/formula";
+import { formatAmount, currencyLabel } from "@/lib/money";
 import { computedTextValue, textComputeDescribe } from "@/lib/computed-text";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
@@ -76,7 +77,7 @@ function registryToFieldDef(
   // map ui_field_type → FieldDef.type
   const fieldType: FieldDef["type"] =
     rf.ui_field_type === "boolean" ? "boolean"
-    : rf.ui_field_type === "number" ? "number"
+    : rf.ui_field_type === "number" || rf.ui_field_type === "currency" ? "number"
     : rf.ui_field_type === "date" ? "date"
     : rf.ui_field_type === "relation" ? "relation"
     : rf.ui_field_type === "image" ? "image"
@@ -91,6 +92,12 @@ function registryToFieldDef(
   const relCfg = rf.relation_config as RelationConfig | undefined;
   const key = rf.column_name ?? rf.field_key;
   const customRender = cellRenderers?.[key];
+
+  // สกุลเงินของฟิลด์ (ทะเบียนกลาง options.currency / options.currency_field) — currency type ไม่ตั้ง = THB
+  const curOpt = rf.options as { currency?: string; currency_field?: string } | null;
+  const currencyCode  = curOpt?.currency || (rf.ui_field_type === "currency" && !curOpt?.currency_field ? "THB" : undefined);
+  const currencyField = curOpt?.currency_field || undefined;
+  const hasCurrency   = !!(currencyCode || currencyField);
 
   // computed: อ่านสูตร/รูปแบบจาก relation_config (เก็บไว้ที่นั่นเพื่อเลี่ยง migrate DB)
   const compCfg = rf.relation_config as { kind?: string; formula?: string; format?: ComputeFormat; decimals?: number; summary?: boolean; text_compute?: string } | undefined;
@@ -115,6 +122,13 @@ function registryToFieldDef(
             ? (v: unknown) => <ImageCell r2Key={v as string | null} size={40} />
           : fieldType === "date"
             ? (v: unknown) => v ? <span className="text-sm tabular-nums text-slate-700">{formatDate(v)}</span> : <span className="text-slate-300">—</span>
+          : hasCurrency && fieldType === "number"
+            // ฟิลด์เงิน: โชว์สกุลถูกต้องตามทะเบียน (ตายตัว หรือตามฟิลด์อื่นในแถว เช่น currency)
+            ? (v: unknown, row?: Record<string, unknown>) => {
+                if (v == null || v === "" || isNaN(Number(v))) return <span className="text-slate-300">—</span>;
+                const cur = currencyCode ?? (currencyField ? row?.[currencyField] : undefined);
+                return <span className="text-sm tabular-nums text-slate-700">{formatAmount(Number(v), cur)}</span>;
+              }
             : undefined);
 
   // Sprint 9: validation_rules → validations array
@@ -141,6 +155,8 @@ function registryToFieldDef(
     sortable:    rf.is_sortable,
     cellRender:  effectiveCellRender,
     relationConfig: relCfg && relCfg.target_table ? relCfg : undefined,
+    currencyCode, currencyField,
+    optionsRaw:  (rf.options as Record<string, unknown>) ?? {},
     groupKey:    rf.group_key,
     order:       rf.display_order,
     validations: Array.isArray(valRules?.rules) ? valRules.rules : undefined,
@@ -306,6 +322,12 @@ export type FieldDef = {
   bulkEditable?: boolean;
   /** config สำหรับ relation field (FK picker) */
   relationConfig?: RelationConfig;
+  /** สกุลเงินตายตัวของฟิลด์ (เช่น "THB"/"RMB") — จาก options.currency ในทะเบียนฟิลด์ */
+  currencyCode?: string;
+  /** สกุลเงินตามฟิลด์อื่นในรายการ (เช่น "currency") — จาก options.currency_field */
+  currencyField?: string;
+  /** options ดิบจากทะเบียน (ไว้ merge ตอน Studio save — ไม่ทับ select choices) */
+  optionsRaw?: Record<string, unknown>;
   /** Studio style presets (ขนาด/หนา/เอียง/ขีดเส้นใต้/สี/ฟอนต์/จัดชิด/ไฮไลต์) */
   uiStyle?:   Record<string, unknown>;
   /** Sprint 7: section group สำหรับ form layout */
@@ -1584,6 +1606,21 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             onChange={(iso) => updateForm({ [f.key]: iso })}
             disabled={disabled}
           />
+        ) : f.type === "number" && (f.currencyCode || f.currencyField) ? (
+          /* ฟิลด์เงิน: ป้ายสกุลกำกับท้ายช่อง (ตายตัว หรือตามฟิลด์อื่นในฟอร์ม เช่น currency) */
+          <div className="relative">
+            <input
+              type="number" step="any" disabled={disabled}
+              value={(v as string | number | undefined) ?? ""}
+              onChange={e => updateForm({ [f.key]: e.target.value })}
+              placeholder={f.placeholder}
+              style={tStyle}
+              className={`${common} pr-14`}
+            />
+            <span className="absolute right-3 bottom-2 text-[11px] font-medium text-slate-400 pointer-events-none">
+              {currencyLabel(f.currencyCode ?? (f.currencyField ? form[f.currencyField] : undefined))}
+            </span>
+          </div>
         ) : (
           <input
             type={f.type === "number" ? "number" : "text"}
@@ -2146,6 +2183,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               editable:    !f.readonly,
               defaultValue: (f.defaultValue as string | null) ?? "",
               uiStyle:     f.uiStyle ?? {},
+              // สกุลเงิน (ค่าดิบจาก options — ไม่เอาค่า default THB ที่เติมตอน render)
+              currency:      (f.optionsRaw?.currency as string) ?? "",
+              currencyField: (f.optionsRaw?.currency_field as string) ?? "",
+              optionsRaw:    f.optionsRaw ?? {},
             }))}
           onClose={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}
           onSaved={() => { setStudioOpen(false); if (typeof window !== "undefined") window.location.reload(); }}

@@ -4,15 +4,24 @@
  * Payroll module — คำนวณงวด (พรีวิว/เทียบ) Phase 3 — อ่านอย่างเดียว
  * เลือกงวด → รันเครื่องคำนวณเต็มจาก raw input → เทียบกับ payroll_lines เดิม (ยังไม่เขียนจริง)
  */
-import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
+import { shouldAutoRunPayrollCalc } from "@/lib/payroll-flow";
 import { PeriodHolidaysPanel } from "@/components/payroll/period-holidays-panel";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
 type Row = { id: string; employee_name: string; gross_new: number; gross_old: number | null; net_new: number; net_old: number | null; diff_net: number | null; status: string; ok: boolean };
 type ColumnDiff = { column: string; count: number };
 type Summary = { total: number; match: number; diff: number; fresh: number; columnDiffs: ColumnDiff[] };
-type ValidationIssue = { level: "error" | "warning"; code: string; title: string; detail: string; count?: number };
+type ValidationIssue = {
+  level: "error" | "warning";
+  code: string;
+  title: string;
+  detail: string;
+  count?: number;
+  fix?: { label: string; href: string };
+};
 type Validation = {
   ready: boolean;
   summary: { errors: number; warnings: number; active_employees: number; active_contracts: number; recurring_items: number };
@@ -61,6 +70,7 @@ const BTN_LABEL = (from: string, to: string): { label: string; cls: string } => 
 
 export default function PayrollCalcRunPage() {
   const { periods, periodId, selectedPeriod: curPeriod, setPeriodId, refreshPeriods } = usePayrollPeriod();
+  const autoRunDoneRef = useRef(false);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,11 +119,13 @@ export default function PayrollCalcRunPage() {
   }
 
   // Phase 2 — คำนวณแบบเบื้องหลัง: สร้าง job → poll สถานะ → แสดงผลเมื่อเสร็จ (ไม่บล็อกหน้าจอ/ไม่ timeout)
-  async function run() {
+  async function run(options?: { keepSaveMsg?: boolean }) {
     if (!periodId) return;
     const v = await loadValidation(periodId);
     if (v && !v.ready) { setErr("งวดยังไม่พร้อมคำนวณ กรุณาแก้รายการ error ในกล่องตรวจความพร้อมก่อน"); return; }
-    setLoading(true); setErr(null); setRows(null); setSummary(null); setSaveMsg(null); setProgress("กำลังส่งงานคำนวณ…");
+    setLoading(true); setErr(null); setRows(null); setSummary(null);
+    if (!options?.keepSaveMsg) setSaveMsg(null);
+    setProgress("กำลังส่งงานคำนวณ…");
     try {
       const enq = await apiFetch("/api/payroll/calc-enqueue", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ period_id: periodId }),
@@ -156,7 +168,7 @@ export default function PayrollCalcRunPage() {
       if (j.error) setErr(j.error);
       else {
         setSaveMsg(`✅ บันทึกสำเร็จ — รอบคำนวณที่ ${j.data.run_no}, ${j.data.line_count} บรรทัด`);
-        await run();   // คำนวณ+เทียบใหม่ (ตอนนี้จะตรงกับที่เพิ่งบันทึก)
+        await run({ keepSaveMsg: true });   // คำนวณ+เทียบใหม่ (ตอนนี้จะตรงกับที่เพิ่งบันทึก)
       }
     } catch { setErr("บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
@@ -164,10 +176,17 @@ export default function PayrollCalcRunPage() {
 
   const shown = rows ? (onlyDiff ? rows.filter((r) => r.status === "ต่าง") : rows) : [];
 
+  useEffect(() => {
+    if (autoRunDoneRef.current || !periodId || typeof window === "undefined") return;
+    if (!shouldAutoRunPayrollCalc(window.location.search)) return;
+    autoRunDoneRef.current = true;
+    void run();
+  }, [periodId]);
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <h1 className="text-xl font-bold text-slate-800">🧮 คำนวณเงินเดือน (พรีวิว/เทียบ)</h1>
-      <p className="text-sm text-slate-500 mb-4">รันเครื่องคำนวณเต็มจากข้อมูลดิบ (เวลา/ลา/OT/ปรับยอด/ค่าประจำ) แล้วเทียบกับยอดเดิม — <b>ยังไม่เขียนข้อมูลจริง</b></p>
+      <h1 className="text-xl font-bold text-slate-800">🧮 คำนวณงวด</h1>
+      <p className="text-sm text-slate-500 mb-4">รันเครื่องคำนวณเต็มจากข้อมูลดิบ (เวลา/ลา/OT/ปรับยอด/ค่าประจำ) แล้วแสดงรายการให้ตรวจ ก่อนกดบันทึกผลคำนวณจริง</p>
 
       <div className="flex flex-wrap items-end gap-3 mb-5">
         <div>
@@ -177,7 +196,7 @@ export default function PayrollCalcRunPage() {
             {periods.map((p) => <option key={p.id} value={p.id}>{p.period_name} ({p.status})</option>)}
           </select>
         </div>
-        <button onClick={run} disabled={loading || !periodId || validationLoading || validation?.ready === false}
+        <button onClick={() => void run()} disabled={loading || !periodId || validationLoading || validation?.ready === false}
           className="h-10 px-5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
           {loading ? "กำลังคำนวณ..." : "▶ คำนวณ + เทียบ"}
         </button>
@@ -216,6 +235,13 @@ export default function PayrollCalcRunPage() {
       {curPeriod && <PeriodHolidaysPanel periodId={periodId} editable={["draft", "review"].includes(curPeriod.status)} onChanged={run} />}
 
       {err && <div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm mb-4">{err}</div>}
+
+      {!rows && !loading && !progress && !err && (
+        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-4 text-sm text-blue-800 mb-4">
+          <div className="font-semibold">ยังไม่ได้คำนวณงวดนี้ในหน้านี้</div>
+          <div className="mt-1 text-blue-700">กด “คำนวณ + เทียบ” เพื่อให้ระบบสร้างรายการพนักงานออกมาให้ตรวจ ก่อนกดบันทึกผลคำนวณ</div>
+        </div>
+      )}
 
       {summary && (
         <>
@@ -261,7 +287,14 @@ export default function PayrollCalcRunPage() {
               </button>
             </div>
           </div>
-          {saveMsg && <div className="rounded-lg bg-emerald-50 text-emerald-800 px-4 py-2 text-sm mb-3">{saveMsg}</div>}
+          {saveMsg && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-emerald-50 text-emerald-800 px-4 py-2 text-sm mb-3">
+              <span>{saveMsg}</span>
+              <Link href={`/payroll/review?period_id=${encodeURIComponent(periodId)}`} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
+                ไปตรวจยอดเงินเดือน
+              </Link>
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-sm text-slate-600 mb-2">
             <input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} /> แสดงเฉพาะที่ต่าง
@@ -331,10 +364,26 @@ function ValidationPanel({ validation, loading }: { validation: Validation | nul
         <div className="mt-3 grid gap-2">
           {validation.issues.slice(0, 8).map((it) => (
             <div key={it.code} className="rounded-lg bg-white/70 border border-white px-3 py-2">
-              <div className={`text-sm font-medium ${it.level === "error" ? "text-red-700" : "text-amber-700"}`}>
-                {it.level === "error" ? "ต้องแก้" : "ควรดู"}: {it.title}{it.count != null ? ` (${it.count})` : ""}
+              <div className="flex flex-wrap items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className={`text-sm font-medium ${it.level === "error" ? "text-red-700" : "text-amber-700"}`}>
+                    {it.level === "error" ? "ต้องแก้" : "ควรดู"}: {it.title}{it.count != null ? ` (${it.count})` : ""}
+                  </div>
+                  <div className="text-xs text-slate-600 mt-0.5">{it.detail}</div>
+                </div>
+                {it.fix && (
+                  <a
+                    href={it.fix.href}
+                    className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                      it.level === "error"
+                        ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                        : "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                    }`}
+                  >
+                    {it.fix.label}
+                  </a>
+                )}
               </div>
-              <div className="text-xs text-slate-600 mt-0.5">{it.detail}</div>
             </div>
           ))}
         </div>

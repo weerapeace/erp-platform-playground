@@ -15,6 +15,7 @@ import { ImageInput } from "@/components/image-input";
 import { SupplierWizard } from "@/components/supplier-wizard";
 import { SupplierPicker } from "@/components/supplier-picker";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
+import { RelationPeekModal } from "@/components/relation-peek";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -42,7 +43,7 @@ const isCNY = (c: string) => c === "RMB" || c === "YUAN" || c === "CNY";
 const noShop = (r: Row) => !r.seller_name || r.seller_name === "—" || r.seller_name === "ไม่ระบุร้าน";
 // ตัด [code] นำหน้าชื่อสินค้าออก (code โชว์เป็น chip ข้างล่างอยู่แล้ว) — ถ้าตัดแล้วว่างให้คงชื่อเดิมไว้
 const stripCode = (name: string) => name?.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
-const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate";
+const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate", CART_KEY = "po_create_cart";
 
 const COLUMNS: ColumnDef<Row>[] = [
   { accessorKey: "image_url", header: "รูป", size: 56, enableSorting: false, meta: { type: "image" } },
@@ -121,7 +122,30 @@ export default function PurchaseOrdersPage() {
     const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "card") setView(v);
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 12) setCols(c);
     const r = Number(localStorage.getItem(RATE_KEY)); if (r > 0) setRate(r);
-  }, []);
+    // กู้คืน draft ตะกร้า (เผลอปิดหน้า/รีเฟรช ของไม่หาย)
+    try {
+      const d = JSON.parse(localStorage.getItem(CART_KEY) ?? "{}") as Record<string, CartLine>;
+      const n = d && typeof d === "object" ? Object.keys(d).length : 0;
+      if (n > 0) { setCart(d); toast.info(`🛒 กู้คืนตะกร้าค้าง ${n} รายการ`); }
+    } catch { /* ignore */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // เซฟ draft ตะกร้าอัตโนมัติทุกครั้งที่เปลี่ยน (สั่งสำเร็จ = รายการถูกเอาออก → draft อัปเดตตาม)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* ignore */ }
+  }, [cart]);
+
+  // ตัดรายการที่ไม่อยู่ในรายการรอสั่งแล้ว (ถูกสั่ง/ยกเลิกโดยคนอื่น) ออกจาก draft — กันของผีค้างในตะกร้า
+  useEffect(() => {
+    if (loading || error) return;
+    const ids = new Set(rows.map((r) => r.id));
+    const dropped = Object.keys(cart).filter((id) => !ids.has(id));
+    if (dropped.length === 0) return;
+    setCart((c) => { const n = { ...c }; dropped.forEach((id) => delete n[id]); return n; });
+    toast.warning(`ตัด ${dropped.length} รายการออกจากตะกร้า (ถูกสั่งซื้อ/ยกเลิกไปแล้ว)`);
+  }, [rows, loading, error, cart, toast]);
+
   const changeView = (v: "table" | "card") => { setView(v); localStorage.setItem(VIEW_KEY, v); };
   const changeCols = (n: number) => { setCols(n); localStorage.setItem(COLS_KEY, String(n)); };
   const changeRate = (n: number) => { setRate(n); if (n > 0) localStorage.setItem(RATE_KEY, String(n)); };
@@ -382,7 +406,8 @@ export default function PurchaseOrdersPage() {
               {/* ขวา: ตะกร้า (ขยายได้) */}
               <aside className="w-full shrink-0 relative" style={{ width: typeof window !== "undefined" && window.innerWidth >= 1024 ? cartWidth : undefined }}>
                 <div onMouseDown={startResize} title="ลากเพื่อขยาย/ย่อ" className="hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 -ml-2 cursor-col-resize hover:bg-blue-200 rounded" />
-                <div className="bg-white border border-slate-200 rounded-lg sticky top-4">
+                {/* top-14 เผื่อพ้นแถบ App tabs (sticky top-0) ของ shell */}
+                <div className="bg-white border border-slate-200 rounded-lg sticky top-14">
                   <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                     <span className="font-semibold text-slate-800">ตะกร้าสั่งซื้อ ({cartRows.length})</span>
                     <label className="flex items-center gap-1 text-[11px] text-slate-400">¥→฿
@@ -855,6 +880,8 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
   const [saving, setSaving] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [syncCount, setSyncCount] = useState(0);
+  const [skuEdit, setSkuEdit] = useState(false);          // popup แก้สินค้า (SKU จริง) — RelationPeek โหมดแก้เร็ว
+  const skuChanged = useRef(false);                       // แก้ SKU แล้ว → ปิดเมื่อไหร่ค่อยรีเฟรชหน้า
 
   // เดา id ร้านจากชื่อเดิม เมื่อรายชื่อร้านโหลดเสร็จ (PR เก็บแค่ชื่อ)
   useEffect(() => {
@@ -919,9 +946,16 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
       </>}>
       <div className="space-y-3">
-        <div>
-          <div className="text-sm font-medium text-slate-800">{stripCode(row.item_name)}</div>
-          <div className="text-xs text-slate-400">{row.code || "—"}</div>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-800">{stripCode(row.item_name)}</div>
+            <div className="text-xs text-slate-400">{row.code || "—"}</div>
+          </div>
+          {row.item_sku_id && (
+            <button type="button" onClick={() => setSkuEdit(true)}
+              title="แก้ข้อมูลสินค้าตัวจริง (มีผลกับทุกใบที่ใช้สินค้านี้)"
+              className="h-7 px-2.5 text-xs font-medium rounded-md border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 shrink-0">✎ แก้ไขสินค้า</button>
+          )}
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย)</label>
@@ -954,6 +988,13 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
         <div><label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ</label>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="(ถ้ามี)" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
       </div>
+
+      {/* popup แก้สินค้า (SKU จริง) — ของกลาง RelationPeek โหมดแก้เร็ว (⚙ เลือกฟิลด์ได้, default ทุกคน) */}
+      {skuEdit && row.item_sku_id && (
+        <RelationPeekModal moduleKey="skus-v2" recordId={row.item_sku_id} quickEdit startInEdit
+          onChanged={() => { skuChanged.current = true; }}
+          onClose={() => { setSkuEdit(false); if (skuChanged.current) void onSaved(); }} />
+      )}
     </ERPModal>
   );
 }

@@ -4,25 +4,38 @@
  * RelationPeekModal — popup ดู/แก้ไขรายละเอียดของ record ที่เชื่อม (ของกลาง)
  * ใช้ตอนกดที่ค่า relation หรือกดรายการในการ์ด "ข้อมูลที่เกี่ยวข้อง (360)"
  * registry-driven: โหลด field + ค่า → โชว์เป็น view; กด "✎ แก้ไข" → แก้ได้ทุก field แล้วบันทึก (PATCH)
+ *
+ * โหมด quickEdit: โชว์เฉพาะ "ชุดฟิลด์แก้เร็ว" ของโมดูล (erp_modules.config.quick_edit_fields)
+ * — ยังไม่ตั้ง = โชว์ทุกฟิลด์เหมือนเดิม · ปุ่ม ⚙ (admin) เลือกฟิลด์ → เป็น default ของทุก user
  */
 import { useEffect, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
-import { useAuth } from "@/components/auth";
+import { useAuth, usePermission } from "@/components/auth";
 import { useBackdropDismiss } from "@/components/modal";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { ImageInput } from "@/components/image-input";
+import { invalidateCache } from "@/lib/client-cache";
+import { formatAmount, currencyLabel } from "@/lib/money";
 
 type RF = {
   field_key: string; column_name: string | null; field_label: string; ui_field_type: string;
   is_visible: boolean; show_in_form: boolean; is_editable: boolean; is_required: boolean;
-  options: { options?: string[] } | null; relation_config: RelationConfig | null; display_order: number;
+  options: { options?: string[]; currency?: string; currency_field?: string } | null;
+  relation_config: RelationConfig | null; display_order: number;
+};
+
+// สกุลเงินของฟิลด์ (ทะเบียนกลาง) — ตายตัว (options.currency) หรือตามฟิลด์อื่นในรายการ (options.currency_field)
+const fieldCurrency = (f: RF, rec: Record<string, unknown> | null): unknown => {
+  if (f.options?.currency) return f.options.currency;
+  if (f.options?.currency_field) return rec?.[f.options.currency_field];
+  return f.ui_field_type === "currency" ? "THB" : null;
 };
 
 const img = (k: unknown) => (k ? `/api/r2-image?key=${encodeURIComponent(String(k))}` : null);
 
 export function RelationPeekModal({
-  moduleKey, recordId, onClose, startInEdit, onChanged, createDefaults, createTitle,
+  moduleKey, recordId, onClose, startInEdit, onChanged, createDefaults, createTitle, quickEdit,
 }: {
   moduleKey: string;
   recordId?: string | null;       // ว่าง/null = โหมดสร้างใหม่ (POST)
@@ -31,9 +44,11 @@ export function RelationPeekModal({
   onChanged?: () => void;         // เรียกหลังบันทึกสำเร็จ → ให้ตัวเรียกรีเฟรชรายการ
   createDefaults?: Record<string, unknown>;  // โหมดสร้าง: ค่าตั้งต้น เช่น { parent_sku_id, is_active:true }
   createTitle?: string;           // โหมดสร้าง: หัวข้อ popup
+  quickEdit?: boolean;            // โหมดแก้เร็ว: กรองตามชุดฟิลด์ของโมดูล + ปุ่ม ⚙ (admin) เลือกฟิลด์
 }) {
   const isCreate = !recordId;
   const { user } = useAuth();
+  const canCfg = usePermission("admin.users");   // ⚙ ตั้งชุดฟิลด์ = ค่ากลางของทุก user → จำกัด admin
   const [fields, setFields] = useState<RF[]>([]);
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -41,6 +56,12 @@ export function RelationPeekModal({
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // quick edit config
+  const [quickFields, setQuickFields] = useState<string[] | null>(null);
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const [cfgSel, setCfgSel] = useState<string[]>([]);
+  const [cfgQ, setCfgQ] = useState("");
+  const [cfgSaving, setCfgSaving] = useState(false);
 
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -49,6 +70,7 @@ export function RelationPeekModal({
     try {
       const reg = await apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json());
       setFields((reg.fields ?? []).filter((f: RF) => (f.is_visible || f.show_in_form) && !["one2many", "many2many"].includes(f.ui_field_type)));
+      setQuickFields(Array.isArray(reg.quick_edit_fields) && reg.quick_edit_fields.length > 0 ? (reg.quick_edit_fields as string[]) : null);
       if (isCreate) {
         setRow({});               // โหมดสร้าง: ไม่มี record เดิม ใช้ object ว่าง (กัน "ไม่พบข้อมูล")
       } else {
@@ -61,10 +83,44 @@ export function RelationPeekModal({
 
   useEffect(() => { void load(); }, [load]);
 
+  // โหมดแก้เร็ว: กรองตามชุดฟิลด์ของโมดูล (ยังไม่ตั้ง = โชว์ทุกฟิลด์)
+  const shownFields = quickEdit && quickFields ? fields.filter((f) => quickFields.includes(f.field_key)) : fields;
+
   // field ที่แก้ไขได้ (เคารพทะเบียน field) — ตัด one2many/many2many/related/computed/id
-  const editableFields = fields.filter(
+  const editableFields = shownFields.filter(
     (f) => f.is_editable && f.show_in_form && !["one2many", "many2many", "related", "computed"].includes(f.ui_field_type) && f.field_key !== "id",
   );
+
+  // ⚙ บันทึกชุดฟิลด์แก้เร็ว → config กลางของโมดูล (default ทุก user) ผ่าน API กลาง (admin + audit)
+  const saveQuickCfg = async (list: string[] | null) => {
+    setCfgSaving(true); setErr(null);
+    try {
+      const res = await apiFetch(`/api/admin/module-settings/${moduleKey}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ module: { quick_edit_fields: list }, actor: user?.name }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { setErr(j.error ?? `บันทึกไม่สำเร็จ (HTTP ${res.status})`); return; }
+      const next = list && list.length > 0 ? list : null;
+      setQuickFields(next);
+      // กำลังแก้ไขค้างอยู่ → เติมค่าฟิลด์ที่เพิ่งเพิ่มเข้าชุดจาก record (กันฟอร์มส่งค่าว่างทับ)
+      if (editing && row) {
+        setForm((p) => {
+          const f = { ...p };
+          fields.filter((fd) => !next || next.includes(fd.field_key)).forEach((fd) => {
+            if (!(fd.field_key in f)) {
+              const v = row[fd.field_key];
+              f[fd.field_key] = v == null ? (fd.ui_field_type === "boolean" ? false : "") : v;
+            }
+          });
+          return f;
+        });
+      }
+      invalidateCache("/api/admin/field-registry-v2");   // ให้จุดอื่นที่ cache ทะเบียนเห็นค่าล่าสุด
+      setCfgOpen(false);
+    } catch (e) { setErr(String((e as Error).message ?? e)); }
+    finally { setCfgSaving(false); }
+  };
 
   const enterEdit = () => {
     if (!row) return;
@@ -136,6 +192,9 @@ export function RelationPeekModal({
     if (f.ui_field_type === "boolean") return row[f.field_key] ? "ใช่" : "ไม่ใช่";
     const v = row[f.field_key];
     if (v == null || v === "") return <span className="text-slate-300">—</span>;
+    // ฟิลด์เงิน → โชว์สกุลถูกต้องตามทะเบียน (฿1,234 / 1,234 RMB)
+    const cur = fieldCurrency(f, row);
+    if (cur != null && typeof v !== "boolean" && !isNaN(Number(v))) return <span className="tabular-nums">{formatAmount(Number(v), cur)}</span>;
     return <span>{typeof v === "number" ? v.toLocaleString() : String(v)}</span>;
   };
 
@@ -167,12 +226,17 @@ export function RelationPeekModal({
       );
     }
     const isNum = fd.ui_field_type === "number" || fd.ui_field_type === "currency";
+    // ฟิลด์เงิน: ป้ายสกุลกำกับท้ายช่อง (currency_field อ่านจากค่าที่กำลังแก้ก่อน แล้วค่อย fallback record เดิม)
+    const cur = isNum ? fieldCurrency(fd, { ...(row ?? {}), ...form }) : null;
     return (
       <div>
         <label className="text-[11px] font-medium text-slate-500">{fd.field_label}{fd.is_required && " *"}</label>
-        <input type={isNum ? "number" : "text"} value={(v as string | number) ?? ""} step={isNum ? "any" : undefined}
-          onChange={(e) => set(fd.field_key, isNum ? (e.target.value === "" ? null : Number(e.target.value)) : e.target.value)}
-          className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        <div className="relative">
+          <input type={isNum ? "number" : "text"} value={(v as string | number) ?? ""} step={isNum ? "any" : undefined}
+            onChange={(e) => set(fd.field_key, isNum ? (e.target.value === "" ? null : Number(e.target.value)) : e.target.value)}
+            className={`mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-md ${cur != null ? "pr-12" : ""}`} />
+          {cur != null && <span className="absolute right-3 top-1/2 -translate-y-1/2 mt-[1px] text-[11px] font-medium text-slate-400 pointer-events-none">{currencyLabel(cur)}</span>}
+        </div>
       </div>
     );
   };
@@ -190,10 +254,15 @@ export function RelationPeekModal({
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">{isCreate ? "➕ " : editing ? "✎ " : "🔗 "}{title}</h3>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {!editing && !loading && row && editableFields.length > 0 && (
+            {quickEdit && canCfg && !cfgOpen && !loading && (
+              <button onClick={() => { setCfgSel(quickFields ?? fields.map((f) => f.field_key)); setCfgQ(""); setCfgOpen(true); }}
+                title="เลือกฟิลด์ที่จะโชว์/แก้ไขในป๊อปนี้ (เป็นค่าเริ่มต้นของทุกคน)"
+                className="h-7 w-7 text-sm border border-slate-200 rounded-md text-slate-500 hover:bg-slate-50">⚙</button>
+            )}
+            {!editing && !cfgOpen && !loading && row && editableFields.length > 0 && (
               <button onClick={enterEdit} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
             )}
-            {!editing && !isCreate && recordId && (
+            {!editing && !cfgOpen && !isCreate && recordId && (
               <a href={`/m/${moduleKey}?open=${encodeURIComponent(recordId)}`}
                 className="h-7 px-2.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 inline-flex items-center">เปิดหน้าเต็ม →</a>
             )}
@@ -204,6 +273,26 @@ export function RelationPeekModal({
         <div className="p-5 overflow-auto flex-1">
           {loading ? (
             <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+          ) : cfgOpen ? (
+            /* ⚙ เลือกชุดฟิลด์แก้เร็ว — เป็น default ของทุก user */
+            <div>
+              <div className="text-xs text-slate-500 mb-2">เลือกฟิลด์ที่จะโชว์/แก้ไขในป๊อปแก้เร็วนี้ — มีผลกับ<b>ทุกคน</b>ที่เปิดป๊อปนี้ · ฟิลด์ใหม่ที่เพิ่มเข้าทะเบียนภายหลังจะโผล่ในรายการนี้อัตโนมัติ</div>
+              <input value={cfgQ} onChange={(e) => setCfgQ(e.target.value)} placeholder="🔎 ค้นหาฟิลด์…" className="w-full h-8 px-2 mb-2 text-xs border border-slate-200 rounded-md" />
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[45vh] overflow-auto">
+                {fields
+                  .filter((f) => { const q = cfgQ.trim().toLowerCase(); return !q || f.field_label.toLowerCase().includes(q) || f.field_key.toLowerCase().includes(q); })
+                  .map((f) => (
+                    <label key={f.field_key} className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
+                      <input type="checkbox" checked={cfgSel.includes(f.field_key)}
+                        onChange={(e) => setCfgSel((p) => e.target.checked ? [...p, f.field_key] : p.filter((k) => k !== f.field_key))}
+                        className="rounded border-slate-300" />
+                      <span className="flex-1 min-w-0 truncate">{f.field_label}</span>
+                      <span className="text-[10px] font-mono text-slate-300">{f.field_key}</span>
+                    </label>
+                  ))}
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1.5">เลือกแล้ว {cfgSel.length} / {fields.length} ฟิลด์</div>
+            </div>
           ) : !row ? (
             <div className="py-10 text-center text-slate-300 text-sm">— ไม่พบข้อมูล —</div>
           ) : editing ? (
@@ -217,7 +306,7 @@ export function RelationPeekModal({
                 </div>
               )}
               <dl className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 min-w-0">
-                {fields.filter((f) => f.ui_field_type !== "image").map((f) => (
+                {shownFields.filter((f) => f.ui_field_type !== "image").map((f) => (
                   <div key={f.field_key} className="min-w-0">
                     <dt className="text-[11px] text-slate-400">{f.field_label}</dt>
                     <dd className="text-sm text-slate-700 truncate">{val(f)}</dd>
@@ -229,7 +318,20 @@ export function RelationPeekModal({
           {err && <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">⚠ {err}</div>}
         </div>
 
-        {editing && (
+        {cfgOpen && (
+          <div className="px-5 py-3 border-t border-slate-100 flex items-center gap-2">
+            <button onClick={() => void saveQuickCfg(null)} disabled={cfgSaving}
+              title="ล้างค่า — กลับไปโชว์ทุกฟิลด์ตามทะเบียน"
+              className="h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50">↺ โชว์ทุกฟิลด์</button>
+            <div className="flex-1" />
+            <button onClick={() => { setCfgOpen(false); setErr(null); }} disabled={cfgSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={() => void saveQuickCfg(cfgSel)} disabled={cfgSaving || cfgSel.length === 0}
+              title={cfgSel.length === 0 ? "เลือกอย่างน้อย 1 ฟิลด์" : ""}
+              className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{cfgSaving ? "กำลังบันทึก..." : "บันทึก (ทุกคน)"}</button>
+          </div>
+        )}
+
+        {editing && !cfgOpen && (
           <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
             <button onClick={() => { setEditing(false); setErr(null); }} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
             <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>

@@ -11,15 +11,19 @@ import { apiFetch } from "@/lib/api";
 import { Drawer, ERPModal } from "@/components/modal";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
+import { buildPayrollCalcRunHref } from "@/lib/payroll-flow";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
+import { AttendanceImportPreview } from "@/components/payroll/attendance-import-preview";
 
 type Row = {
   id: string; employee_id: string; employee_code: string; employee_name: string; work_days: number;
-  contract_type?: string | null; wage_type?: string | null;
+  contract_type?: string | null; employment_type?: string | null; wage_type?: string | null;
+  scanner_employee_code?: string | null; work_schedule_id?: string | null; attendance_scan_exempt?: boolean | null;
+  contract_start_date?: string | null; contract_end_date?: string | null;
   hours_per_day?: number; paid_minutes?: number; base_pay_minutes?: number; deducted_pay_minutes?: number;
   late_baht: number; late_minutes: number; absence_baht: number; absence_days: number; absence_hours: number;
   leave_baht: number; leave_days: number; leave_hours: number; ot_baht: number; ot_hours: number;
-  piecework_baht: number; special_add: number; other_deduct: number;
+  piecework_baht: number; special_add: number; other_deduct: number; mid_month_paid?: number;
   social_security_baht?: number; withholding_tax_baht?: number; system_deduct_baht?: number;
   net_estimate: number; has_manual: boolean;
 };
@@ -66,6 +70,13 @@ type GridRow = {
   employee_id: string; employee_code: string; employee_name: string; contract_type?: string | null; wage_type?: string | null; net_estimate: number; manual_days: number; cells: GridCell[];
 };
 type GridData = { days: GridDay[]; rows: GridRow[]; period?: { default_hours_per_day?: number } };
+type ManualInputPeriodMeta = {
+  id?: string;
+  start_date?: string | null;
+  end_date?: string | null;
+  default_hours_per_day?: number | null;
+  holidays?: { holiday_date?: string | null }[];
+};
 type DetailModal =
   | { type: "recurring"; row: Row; items: RecurringItem[] }
   | { type: "system"; row: Row }
@@ -253,17 +264,19 @@ export default function ManualInputPage() {
   const [grid, setGrid] = useState<GridData | null>(null);
   const [gridLoading, setGridLoading] = useState(false);
   const [gridErr, setGridErr] = useState<string | null>(null);
+  const [periodMeta, setPeriodMeta] = useState<ManualInputPeriodMeta | null>(null);
 
   const load = useCallback(async (pid: string) => {
     if (!pid) return;
     setLoading(true); setErr(null);
     try {
       const j = await apiFetch(`/api/payroll/manual-input?period_id=${encodeURIComponent(pid)}`).then((r) => r.json());
-      if (j.error) { setErr(j.error); setRows([]); }
+      if (j.error) { setErr(j.error); setRows([]); setPeriodMeta(null); }
       else {
         setRows(j.data as Row[]);
         setRecurringItems((j.recurring_items ?? []) as RecurringItem[]);
         setPeriodStatus(j.period_status ?? "");
+        setPeriodMeta((j.period ?? null) as ManualInputPeriodMeta | null);
       }
     } catch { setErr("โหลดไม่ได้"); }
     finally { setLoading(false); }
@@ -360,6 +373,7 @@ export default function ManualInputPage() {
       piecework_baht: 0,
       special_add: 0,
       other_deduct: 0,
+      mid_month_paid: 0,
       social_security_baht: 0,
       withholding_tax_baht: 0,
       system_deduct_baht: 0,
@@ -391,7 +405,7 @@ export default function ManualInputPage() {
         <label className="h-10 flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={onlyManual} onChange={(e) => setOnlyManual(e.target.checked)} /> เฉพาะที่มีรายการ
         </label>
-        <Link href="/payroll/calc-run" className="h-10 px-5 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 inline-flex items-center">▶ ไปคำนวณ + บันทึก</Link>
+        <Link href={buildPayrollCalcRunHref(periodId, { autoRun: true })} className="h-10 px-5 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800 inline-flex items-center">▶ ไปคำนวณงวด</Link>
       </div>
 
       <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
@@ -432,6 +446,13 @@ export default function ManualInputPage() {
           onlyManual={onlyManual}
           editable={editable}
           onCellClick={openGridEditor}
+        />
+      ) : activeTab === "import" ? (
+        <AttendanceImportPreview
+          editable={editable}
+          period={periodMeta}
+          rows={rows}
+          onCommitted={() => { load(periodId); loadAdjustments(periodId); loadGrid(periodId); }}
         />
       ) : activeTab === "piecework" ? (
         <AdjustmentList
@@ -510,6 +531,7 @@ export default function ManualInputPage() {
                 <th className="text-right px-3 py-2">งานเหมา</th>
                 <th className="text-right px-3 py-2">เพิ่มพิเศษ</th>
                 <th className="text-right px-3 py-2">หักอื่น</th>
+                <th className="text-right px-3 py-2">หักกลางเดือน</th>
                 <th className="text-right px-3 py-2">หักตามระบบ</th>
                 <th className="text-right px-3 py-2">สุทธิประมาณ</th>
                 <th className="text-center px-3 py-2">แก้</th>
@@ -520,7 +542,7 @@ export default function ManualInputPage() {
                 <Fragment key={group.key}>
                   {summaryGroupBy !== "none" && (
                     <tr className="border-t border-slate-100 bg-slate-50/80">
-                      <td colSpan={13} className="px-3 py-2 text-xs font-semibold text-slate-500">
+                      <td colSpan={14} className="px-3 py-2 text-xs font-semibold text-slate-500">
                         {group.label} <span className="font-normal text-slate-400">({group.rows.length.toLocaleString("th-TH")} คน)</span>
                       </td>
                     </tr>
@@ -564,6 +586,9 @@ export default function ManualInputPage() {
                       <AdjustmentCell value={r.other_deduct} mode="deduction" editable={editable} onClick={() => openQuickAdjust(r, "deduction")} tooltip={adjustmentTooltip("หักอื่น", deductionItems, "-")} />
                     </td>
                     <td className="px-3 py-2 text-right">
+                      <MidMonthDeductCell value={r.mid_month_paid} />
+                    </td>
+                    <td className="px-3 py-2 text-right">
                       <SystemDeductCell row={r} onClick={() => setDetailModal({ type: "system", row: r })} />
                     </td>
                     <td className="px-3 py-2 text-right">
@@ -580,7 +605,7 @@ export default function ManualInputPage() {
               })}
                 </Fragment>
               ))}
-              {shown.length === 0 && <tr><td colSpan={13} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
+              {shown.length === 0 && <tr><td colSpan={14} className="px-3 py-10 text-center text-slate-400 text-sm">— ไม่มีรายการ —</td></tr>}
             </tbody>
           </table>
           </div>
@@ -1008,6 +1033,20 @@ function RecurringDetailModal({ row, items, onClose, onChanged }: { row: Row; it
   );
 }
 
+function MidMonthDeductCell({ value }: { value?: number | null }) {
+  const amount = Number(value || 0);
+  if (!amount) return <span className="text-slate-300">-</span>;
+  return (
+    <span
+      className="inline-flex h-8 min-w-[96px] items-center justify-end gap-1 rounded-lg border border-red-100 bg-red-50 px-2 text-xs font-medium tabular-nums text-red-700"
+      title={`หักกลางเดือน\nยอดที่จ่ายกลางเดือนไปแล้ว และถูกหักในสุทธิประมาณแล้ว`}
+    >
+      {baht(amount)}
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/70 bg-white/70 text-[10px] cursor-help">?</span>
+    </span>
+  );
+}
+
 function RecurringLookupManagerModal({
   type,
   items,
@@ -1270,6 +1309,7 @@ function netTooltip(row: Row, recurring: RecurringItem[]) {
     `งานเหมา: +${baht(row.piecework_baht)}`,
     `เพิ่มพิเศษ: +${baht(row.special_add)}`,
     `หักอื่น: -${baht(row.other_deduct)}`,
+    `หักกลางเดือน: -${baht(Number(row.mid_month_paid || 0))}`,
     `หักตามระบบ: -${baht(Number(row.system_deduct_baht || 0))}`,
     `  ประกันสังคม: -${baht(Number(row.social_security_baht || 0))}`,
     `  ภาษี: -${baht(Number(row.withholding_tax_baht || 0))}`,

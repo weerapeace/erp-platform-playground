@@ -22,6 +22,7 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
     { href: "/payroll/employees", icon: "🪪", label: "พนักงาน" },
     { href: "/payroll/board", icon: "🗂️", label: "ผังพนักงาน (บอร์ด)" },
     { href: "/payroll/contracts", icon: "📄", label: "สัญญาจ้าง" },
+    { href: "/payroll/resignations", icon: "📤", label: "แจ้งลาออก" },
     { href: "/payroll/warnings", icon: "⚠️", label: "ใบเตือนพนักงาน" },
   ] },
   { group: "คำนวณเงินเดือน", items: [
@@ -32,6 +33,7 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
     { href: "/payroll/calc-run", icon: "▶️", label: "คำนวณงวด (พรีวิว)" },
     { href: "/payroll/payslips", icon: "🧾", label: "สลิปเงินเดือน" },
     { href: "/payroll/payments", icon: "🏦", label: "รอบจ่ายเงิน" },
+    { href: "/payroll/exports", icon: "📤", label: "ส่งออกไฟล์เงินเดือน" },
     { href: "/payroll/attendance", icon: "⏰", label: "เวลาเข้าออก" },
     { href: "/payroll/recurring", icon: "🔁", label: "เงินประจำ" },
   ] },

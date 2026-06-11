@@ -1,5 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { money } from "@/lib/payroll-calc";
+import { buildPayrollIssueFix, type PayrollIssueFix } from "@/lib/payroll-validation-actions";
+import { countEmployeesMissingCurrentContract, payrollWageProblem } from "@/lib/payroll-issue-filters";
 
 type Row = Record<string, unknown>;
 
@@ -9,6 +11,7 @@ export type PayrollValidationIssue = {
   title: string;
   detail: string;
   count?: number;
+  fix?: PayrollIssueFix;
 };
 
 export type PayrollValidationResult = {
@@ -31,14 +34,6 @@ const isBlank = (v: unknown) => v == null || String(v).trim() === "";
 
 function issue(level: PayrollValidationIssue["level"], code: string, title: string, detail: string, count?: number): PayrollValidationIssue {
   return { level, code, title, detail, ...(count != null ? { count } : {}) };
-}
-
-function wageProblem(contract: Row): string | null {
-  const wageType = String(contract.wage_type ?? "monthly");
-  if (wageType === "daily" && money(contract.daily_wage) <= 0) return "ค่าแรงรายวันว่างหรือเป็น 0";
-  if (wageType === "hourly" && money(contract.hourly_wage) <= 0) return "ค่าแรงรายชั่วโมงว่างหรือเป็น 0";
-  if (wageType !== "daily" && wageType !== "hourly" && money(contract.base_salary) <= 0) return "เงินเดือนฐานว่างหรือเป็น 0";
-  return null;
 }
 
 export async function validatePayrollPeriod(periodId: string): Promise<PayrollValidationResult> {
@@ -73,40 +68,41 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
     issues.push(issue("error", "missing_hours_per_day", "ชั่วโมงต่อวันว่าง", "ตั้งค่า default_hours_per_day ให้มากกว่า 0 ก่อนคำนวณ"));
   }
 
-  const [empRes, conRes, recRes, runRes] = await Promise.all([
+  const [empRes, conRes, allConRes, recRes, runRes] = await Promise.all([
     admin.from("employees").select("id, employee_code, first_name, employment_status").eq("employment_status", "active"),
     (() => {
-      let q = admin.from("employee_contracts").select("id, employee_id, contract_no, status, is_current, company_id, wage_type, base_salary, daily_wage, hourly_wage")
+      let q = admin.from("employee_contracts").select("id, employee_id, contract_no, status, is_current, company_id, contract_type, employment_type, wage_type, base_salary, daily_wage, hourly_wage")
         .eq("is_current", true).eq("status", "active");
       if (companyId) q = q.eq("company_id", companyId);
       return q;
     })(),
+    admin.from("employee_contracts").select("id, employee_id, company_id")
+      .eq("is_current", true).eq("status", "active"),
     admin.from("employee_recurring_pay_items").select("id, employee_id, contract_id, item_name, item_type, amount_per_period, calculation_method, quantity_default, rate_default, status, start_date, end_date")
       .eq("status", "active").lte("start_date", endDate || "9999-12-31"),
     admin.from("payroll_runs").select("id", { count: "exact", head: true }).eq("payroll_period_id", periodId),
   ]);
   if (empRes.error) throw new Error(empRes.error.message);
   if (conRes.error) throw new Error(conRes.error.message);
+  if (allConRes.error) throw new Error(allConRes.error.message);
   if (recRes.error) throw new Error(recRes.error.message);
   if (runRes.error) throw new Error(runRes.error.message);
 
   const employees = (empRes.data ?? []) as Row[];
   const contracts = (conRes.data ?? []) as Row[];
+  const allCurrentContracts = (allConRes.data ?? []) as Row[];
   const recurring = ((recRes.data ?? []) as Row[]).filter((r) => !r.end_date || String(r.end_date) >= startDate);
-  const contractByEmployee = new Map(contracts.map((c) => [String(c.employee_id), c]));
 
   if (contracts.length === 0) {
     issues.push(issue("error", "no_active_contracts", "ไม่พบสัญญาที่ใช้คำนวณ", "งวดนี้ไม่มีสัญญา active/current ที่ตรงบริษัทของงวด จึงคำนวณไม่ได้"));
   }
 
-  const employeesWithoutContract = companyId
-    ? employees.filter((e) => !contractByEmployee.has(String(e.id))).length
-    : employees.filter((e) => !contractByEmployee.has(String(e.id))).length;
+  const employeesWithoutContract = countEmployeesMissingCurrentContract(employees, contracts, allCurrentContracts, companyId);
   if (employeesWithoutContract > 0) {
     issues.push(issue("warning", "employees_without_contract", "มีพนักงานไม่มีสัญญาปัจจุบัน", "คนกลุ่มนี้จะไม่ถูกนำไปคำนวณเงินเดือน", employeesWithoutContract));
   }
 
-  const badWages = contracts.filter((c) => wageProblem(c));
+  const badWages = contracts.filter((c) => payrollWageProblem(c));
   if (badWages.length > 0) {
     issues.push(issue("error", "invalid_contract_wage", "มีสัญญาที่ค่าแรงไม่พร้อม", "ตรวจเงินเดือนฐาน/ค่าแรงรายวัน/รายชั่วโมงในสัญญาพนักงาน", badWages.length));
   }
@@ -135,6 +131,10 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
 
   const errors = issues.filter((i) => i.level === "error").length;
   const warnings = issues.filter((i) => i.level === "warning").length;
+  const issuesWithFixes = issues.map((it) => ({
+    ...it,
+    fix: buildPayrollIssueFix(it.code, periodId, it.count),
+  }));
   return {
     period_id: periodId,
     period_name: periodName,
@@ -146,7 +146,7 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
       active_contracts: contracts.length,
       recurring_items: recurring.length,
     },
-    issues,
+    issues: issuesWithFixes,
     ready: errors === 0,
   };
 }

@@ -10,7 +10,7 @@ const MasterCRUDPage = dynamic(
   { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
 );
 
-const REQ_TYPE: Record<string, string> = { profile_edit: "ขอแก้ข้อมูล", medical: "ใบรับรองแพทย์", leave: "ขอลา" };
+const REQ_TYPE: Record<string, string> = { profile_edit: "ขอแก้ข้อมูล", medical: "ใบรับรองแพทย์", leave: "ขอลา", resignation: "แจ้งลาออก" };
 
 const CONFIG: MasterCRUDConfig = {
   apiBase: "/api/payroll/view/", apiPath: "requests", tableId: "payroll-requests",

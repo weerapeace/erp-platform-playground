@@ -44,7 +44,7 @@ export async function runCalcPreview(periodIdInput?: string | null): Promise<Cal
     .eq("payroll_period_id", periodId).order("created_at", { ascending: false });
   const oldBy = new Map<string, Record<string, unknown>>();
   (existing ?? []).forEach((e) => {
-    const r = e as Record<string, unknown>;
+    const r = e as unknown as Record<string, unknown>;
     const id = String(r.employee_id);
     if (!oldBy.has(id)) oldBy.set(id, r);
   });
@@ -75,7 +75,7 @@ export async function runCalcPreview(periodIdInput?: string | null): Promise<Cal
   const editable = ["draft", "review"].includes(String(period.status));
   const allColumnsMatch = diff === 0 && match > 0;
   return {
-    data: rows, period_name: period.period_name, period_status: period.status, period_id: periodId,
+    data: rows, period_name: String(period.period_name), period_status: String(period.status), period_id: periodId,
     editable, all_columns_match: allColumnsMatch, columns_compared: COMPARE_COLS.length,
     summary: { total: rows.length, match, diff, fresh, columnDiffs },
   };

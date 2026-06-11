@@ -186,9 +186,12 @@ export default function PurchasingShopPage() {
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 10) setCols(c);
     const sk = localStorage.getItem(SORT_KEY); if (sk && SORTS.some(s => s.key === sk)) setSortKey(sk);
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
-    // ข้อ 4: กู้ตะกร้าที่ค้างไว้ (กันหายเมื่อรีเฟรช)
-    try { const c2 = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]"); if (Array.isArray(c2) && c2.length) setCart(c2 as Line[]); } catch { /* ignore */ }
-  }, []);
+    // ข้อ 4: กู้ตะกร้าที่ค้างไว้ (กันหายเมื่อรีเฟรช) + แจ้งให้รู้ว่าของเก่ายังอยู่
+    try {
+      const c2 = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]");
+      if (Array.isArray(c2) && c2.length) { setCart(c2 as Line[]); toast.info(`🛒 กู้คืนตะกร้าค้าง ${c2.length} รายการ`); }
+    } catch { /* ignore */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // ข้อ 4: จำตะกร้าทุกครั้งที่เปลี่ยน
   useEffect(() => {
     if (typeof window === "undefined") return;

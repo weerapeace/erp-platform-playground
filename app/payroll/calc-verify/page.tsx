@@ -83,7 +83,7 @@ const CONFIG: MasterCRUDConfig = {
       cellRender: (v) => Number(v) === 0
         ? <span className="text-slate-300">0</span>
         : <span className="font-semibold text-red-600 tabular-nums">{Number(v).toLocaleString("th-TH")}</span> },
-    { key: "match", label: "ผล", type: "boolean", colSize: 90, filterable: true, filterType: "boolean",
+    { key: "match", label: "ผล", type: "boolean", colSize: 90, filterable: true, filterType: "select",
       cellRender: (v) => v === true
         ? <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">✅ ตรง</span>
         : <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">❌ ต่าง</span> },

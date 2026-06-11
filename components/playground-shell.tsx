@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
  */
 export const ShellPresentContext = createContext(false);
 export const useShellPresent = () => useContext(ShellPresentContext);
-import { useAuth, roleLabel, roleColor } from "@/components/auth";
+import { useAuth, roleLabel, roleColor, AccessDenied } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
 import { Logo, BRAND } from "@/components/brand";
@@ -93,6 +93,7 @@ export const navGroups = [
       { href: "/m/purchase-orders-v2", icon: "🧾", labelTH: "ใบสั่งซื้อ v2 (PO) ⭐" },
       { href: "/purchasing/receive", icon: "📥", labelTH: "รับสินค้าเข้า ⭐" },
       { href: "/m/goods-receipts-v2", icon: "📦", labelTH: "ใบรับสินค้า v2 (GR)" },
+      { href: "/purchasing/receive-history", icon: "📜", labelTH: "ประวัติการรับสินค้า" },
       { href: "/inventory/sku-stock", icon: "📊", labelTH: "ยอดคงเหลือ SKU ⭐" },
       { href: "/m/product-groups",   icon: "🧺", labelTH: "Product Groups" },
       { href: "/m/product-variations", icon: "🎨", labelTH: "Product Variations" },
@@ -316,6 +317,7 @@ const readySections = [
   "/m/purchase-orders-v2",
   "/purchasing/receive",
   "/m/goods-receipts-v2",
+  "/purchasing/receive-history",
   "/inventory/sku-stock",
   "/admin/create-table",
   "/admin/schema-sync",
@@ -353,7 +355,7 @@ const readySections = [
 
 export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { can, user, ready } = useAuth();
+  const { can, user, ready, permsReady } = useAuth();
   const router = useRouter();
   // ยังไม่ได้ login → เด้งไปหน้าเข้าสู่ระบบ (ของกลาง — ทุกหน้าในเชลล์)
   useEffect(() => {
@@ -469,6 +471,31 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         items: g.items.filter((it) => !it.permission || can(it.permission as Parameters<typeof can>[0])),
       }))
       .filter((g) => g.items.length > 0);
+  })();
+
+  // ---- App access guard (เฟส 2) — กันเข้าตรง URL เข้า app ที่ไม่มีสิทธิ์ ----
+  // หา "app ของหน้าที่เปิดอยู่" จาก pathname (เมนู → ROUTE_APP_FALLBACK)
+  const currentAppKey: string | null = (() => {
+    if (menuRows && menuRows.length > 0) {
+      const matches = menuRows.filter((r) => r.is_active && r.href && (pathname === r.href || pathname.startsWith(r.href + "/")));
+      if (matches.length > 0) {
+        const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
+        const k = (best.app_keys ?? []).find((x) => appGroups.some((a) => a.key === x));
+        if (k) return k;
+      }
+    }
+    const fb = ROUTE_APP_FALLBACK
+      .filter((f) => pathname === f.prefix || pathname.startsWith(f.prefix + "/"))
+      .sort((a, b) => b.prefix.length - a.prefix.length)[0];
+    return fb?.app ?? null;
+  })();
+  // บล็อกเฉพาะเมื่อ: login แล้ว + สิทธิ์ DB โหลดสำเร็จ (permsReady) + app นี้ล็อกด้วยสิทธิ์ + ไม่มีสิทธิ์
+  // (permsReady = false → ไม่บล็อก กันพลาดตอนใช้ค่าสำรอง · ข้อมูลยังปลอดภัยที่ API guard)
+  const blockedAppLabel: string | null = (() => {
+    if (!user || !ready || !permsReady || !currentAppKey) return null;
+    const ag = appGroups.find((a) => a.key === currentAppKey);
+    if (!ag?.permission_key) return null;
+    return can(ag.permission_key as Parameters<typeof can>[0]) ? null : ag.label;
   })();
 
   // ปิด mobile nav อัตโนมัติเมื่อเปลี่ยนหน้า
@@ -651,31 +678,40 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Content */}
-      <main id="main-content" className="flex-1 overflow-y-auto pt-12 md:pt-0 flex flex-col" tabIndex={-1}>
+      {/* หมายเหตุ: ห้ามใส่ overflow-y-auto ที่ main — root เป็น min-h-screen (เลื่อนที่ body)
+          overflow บน main จะกลายเป็น scrollport ปลอมที่ไม่เคยเลื่อน ทำให้ sticky ทุกตัวข้างในตาย */}
+      <main id="main-content" className="flex-1 pt-12 md:pt-0 flex flex-col" tabIndex={-1}>
         {/* โมดูลใหญ่ (App) tabs — ข้างบนสุด (โชว์เมื่อมีทะเบียนเมนูแล้ว) */}
         {appGroups.length > 0 && menuRows && menuRows.length > 0 && (
           <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-3 flex items-center gap-1 overflow-x-auto">
             {appGroups
               .filter((a) => !a.permission_key || can(a.permission_key as Parameters<typeof can>[0]))
-              .map((a) => (
-                <button key={a.key} onClick={() => {
-                    setActiveApp(a.key);
-                    const href = firstHrefForApp(a.key);   // เด้งเข้าหน้าแรกของหมวดนั้นเลย
-                    if (href && href !== pathname) router.push(href);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors ${
-                    activeApp === a.key
-                      ? "border-blue-600 text-blue-700 font-medium"
-                      : "border-transparent text-slate-500 hover:text-slate-800"
-                  }`}>
-                  <span>{a.icon ?? "📦"}</span><span>{a.label}</span>
-                </button>
-              ))}
+              .map((a) => {
+                const href = firstHrefForApp(a.key);   // หน้าแรกของหมวด — เป็นลิงก์จริง คลิกขวา open new tab ได้
+                const cls = `flex items-center gap-1.5 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors ${
+                  activeApp === a.key
+                    ? "border-blue-600 text-blue-700 font-medium"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`;
+                return href ? (
+                  <Link key={a.key} href={href} onClick={() => setActiveApp(a.key)} className={cls}>
+                    <span>{a.icon ?? "📦"}</span><span>{a.label}</span>
+                  </Link>
+                ) : (
+                  <button key={a.key} onClick={() => setActiveApp(a.key)} className={cls}>
+                    <span>{a.icon ?? "📦"}</span><span>{a.label}</span>
+                  </button>
+                );
+              })}
             <a href="/apps" className="ml-auto px-3 py-2.5 text-xs text-slate-400 hover:text-slate-700 whitespace-nowrap">⊞ ทุก App</a>
           </div>
         )}
         <div className="flex-1">
-          <ShellPresentContext.Provider value={true}>{children}</ShellPresentContext.Provider>
+          <ShellPresentContext.Provider value={true}>
+            {blockedAppLabel
+              ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />
+              : children}
+          </ShellPresentContext.Provider>
         </div>
       </main>
     </div>
