@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { r2DeleteObject, isR2Configured } from "@/lib/r2";
+import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 // ---- DELETE /api/attachments/[id]?actor=.. ----
-// ลบ metadata + ลบไฟล์ใน R2
+// ลบ metadata + ย้ายไฟล์ใน R2 เข้า trash/ (นโยบายกลาง: สำรอง 30 วันก่อนลบจริงด้วย lifecycle rule)
 
 export async function DELETE(
   request: NextRequest,
@@ -19,7 +19,7 @@ export async function DELETE(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // ลบไฟล์ใน R2 — รายงานสถานะกลับ client
+  // ย้ายไฟล์ใน R2 เข้า trash/ — กู้คืนได้ภายใน 30 วัน (ลบจริงอัตโนมัติด้วย R2 lifecycle rule)
   const filePath = (data as { file_path?: string })?.file_path;
   let deletedFromR2 = false;
   let warning: string | null = null;
@@ -30,12 +30,12 @@ export async function DELETE(
     warning = "ลบ DB แล้วแต่ R2 ยังไม่ได้ตั้งค่า — ไฟล์อาจคงค้างบน R2";
   } else {
     try {
-      await r2DeleteObject(filePath);
+      const trashKey = await r2MoveToTrash(filePath);
       deletedFromR2 = true;
-      console.log("[api/attachments/[id]] R2 deleted:", filePath);
+      console.log("[api/attachments/[id]] R2 moved to trash:", filePath, "→", trashKey);
     } catch (err) {
-      console.error("[api/attachments/[id]] R2 delete failed", filePath, err);
-      warning = `ลบ DB สำเร็จแต่ลบจาก R2 ไม่สำเร็จ: ${err instanceof Error ? err.message : "unknown"} (path: ${filePath})`;
+      console.error("[api/attachments/[id]] R2 trash move failed", filePath, err);
+      warning = `ลบ DB สำเร็จแต่ย้ายไฟล์เข้าถังเก็บ R2 ไม่สำเร็จ: ${err instanceof Error ? err.message : "unknown"} (path: ${filePath})`;
     }
   }
 

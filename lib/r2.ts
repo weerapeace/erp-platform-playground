@@ -97,6 +97,24 @@ export async function r2DeleteObject(key: string): Promise<void> {
   await bucket.delete(key);
 }
 
+/**
+ * นโยบายลบไฟล์กลาง (ทุกโมดูล): "ลบ" = ย้ายเข้า trash/<key> เก็บ 30 วันก่อนลบจริง
+ * - ลบจริงอัตโนมัติด้วย R2 lifecycle rule (ตั้งใน Cloudflare dashboard: prefix trash/ → delete after 30 days)
+ * - กู้คืน: copy ไฟล์จาก trash/ กลับที่เดิมใน dashboard ได้ภายใน 30 วัน
+ * คืน key ใหม่ใน trash หรือ null ถ้าไม่พบไฟล์ต้นทาง
+ */
+export async function r2MoveToTrash(key: string): Promise<string | null> {
+  const bucket = await getR2Binding();
+  if (!bucket) throw new Error("R2 binding ไม่พร้อม (R2_IMAGES)");
+  if (key.startsWith("trash/")) return key;   // อยู่ในถังแล้ว
+  const obj = await bucket.get(key);
+  if (!obj) return null;                       // ไม่มีไฟล์ต้นทาง — ไม่มีอะไรให้ย้าย
+  const trashKey = `trash/${key}`;
+  await bucket.put(trashKey, obj.body, { httpMetadata: { contentType: obj.httpMetadata?.contentType ?? "application/octet-stream" } });
+  await bucket.delete(key);
+  return trashKey;
+}
+
 /** ดึง object body จาก R2 (ผ่าน binding) — null ถ้าไม่พบ */
 export async function r2GetObject(key: string): Promise<R2ObjectBodyLike> {
   const bucket = await getR2Binding();

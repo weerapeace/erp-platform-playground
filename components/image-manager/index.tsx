@@ -87,7 +87,7 @@ export function ImageManager({
 
   useEffect(() => { fetchList(); }, [fetchList]);
 
-  const upload = async (files: FileList | File[]) => {
+  const upload = useCallback(async (files: FileList | File[]) => {
     setUploading(true); setError(null);
     try {
       for (const file of Array.from(files)) {
@@ -104,7 +104,20 @@ export function ImageManager({
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "อัปโหลดไม่สำเร็จ");
     } finally { setUploading(false); }
-  };
+  }, [entityType, entityId, actor, fetchList]);
+
+  // วางรูปจาก clipboard (Ctrl+V) — ทำงานเฉพาะตอนเมาส์ชี้อยู่ในกล่องนี้
+  // (กันชนกันเมื่อหน้าเดียวมี ImageManager หลายตัว เช่น รูปใบงาน + รูปประกอบ comment)
+  const [hovering, setHovering] = useState(false);
+  useEffect(() => {
+    if (readonly || !hovering) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (files.length > 0) { e.preventDefault(); void upload(files); }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [readonly, hovering, upload]);
 
   const remove = async (id: string) => {
     try {
@@ -131,7 +144,7 @@ export function ImageManager({
   };
 
   return (
-    <div>
+    <div onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">รูปภาพ & ไฟล์แนบ {items.length > 0 && `(${items.length})`}</p>
       </div>
@@ -191,7 +204,7 @@ export function ImageManager({
             <p className="text-sm text-blue-600">⏳ กำลังอัปโหลด...</p>
           ) : (
             <>
-              <p className="text-sm text-slate-600">{dragging ? "วางไฟล์ที่นี่" : "ลากรูป/ไฟล์มาวาง หรือคลิกเพื่อเลือก"}</p>
+              <p className="text-sm text-slate-600">{dragging ? "วางไฟล์ที่นี่" : "ลากรูป/ไฟล์มาวาง · คลิกเลือก · หรือชี้ที่กล่องนี้แล้วกด Ctrl+V"}</p>
               <p className="text-xs text-slate-400 mt-0.5">รูปภาพ หรือ PDF · ไม่เกิน 10MB</p>
             </>
           )}
