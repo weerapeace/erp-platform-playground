@@ -50,6 +50,8 @@ export type EditorLine = {
   size_values:    Record<string, number>;     // { "40\"": 100 } คีย์ = ชื่อไซส์
 };
 export const SIZE_DIMS: [string, string][] = [["cut_length", "ยาว"], ["cut_width", "กว้าง"], ["pieces", "ชิ้น"], ["qty", "จำนวน"]];
+// คอลัมน์ที่โชว์ในมุมมอง BASIC (ที่เหลือซ่อน: ช่อง/สถานะ/บล็อกตัด/หน้ากว้าง/%เผื่อเสีย/พื้นที่/ทางเลือก/ผันไซส์)
+const BASIC_COLS = new Set(["component", "material_type", "pieces", "cut_width", "cut_length", "calc", "qty", "uom"]);
 
 let _seq = 0;
 const genKey = () => `l${Date.now()}_${_seq++}`;
@@ -260,14 +262,20 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
   const [options, setOptions] = useState<CuttingBlock[]>([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [cCode, setCCode] = useState("");
+  const [cW, setCW] = useState(0);
+  const [cL, setCL] = useState(0);
   const boxRef = useRef<HTMLDivElement>(null);
 
+  // เปิดตัวเลือก → เติมกว้าง/ยาวจากบรรทัดให้ (กดสร้างได้เลย)
+  useEffect(() => { if (open) { setCCode(""); setCW(width); setCL(length); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const createBlock = async () => {
-    const newCode = search.trim();
-    if (!newCode || !(width > 0) || !(length > 0)) return;
+    const code = cCode.trim();
+    if (!code || !(cW > 0) || !(cL > 0)) return;
     setCreating(true);
     try {
-      const res = await apiFetch("/api/bom/cutting-blocks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: newCode, width, length }) });
+      const res = await apiFetch("/api/bom/cutting-blocks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, width: cW, length: cL }) });
       const j = await res.json();
       if (j.data) { onPick(j.data as CuttingBlock); setOpen(false); }
     } finally { setCreating(false); }
@@ -305,19 +313,29 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
               </button>
             ))}
           </div>
-          {/* สร้างบล็อกใหม่จากกว้าง/ยาวที่พิมพ์ */}
-          {search.trim() && !options.some((o) => o.code === search.trim()) && (
-            <div className="border-t border-slate-100 p-2">
-              {width > 0 && length > 0 ? (
-                <button type="button" disabled={creating} onClick={createBlock}
-                  className="w-full text-left text-xs px-2 py-1.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
-                  ＋ สร้างบล็อก &ldquo;{search.trim()}&rdquo; ({width}×{length} ซม.)
-                </button>
-              ) : (
-                <p className="text-[11px] text-slate-400 px-1">พิมพ์ กว้าง/ยาว ในบรรทัดก่อน จึงจะสร้างบล็อกใหม่ได้</p>
-              )}
+          {/* เพิ่มบล็อกใหม่ — จากขนาดในบรรทัด หรือกรอกเอง */}
+          <div className="border-t border-slate-100 p-2 space-y-1.5">
+            <div className="text-[10px] font-medium text-slate-400">เพิ่มบล็อกใหม่</div>
+            <div className="flex items-center gap-1">
+              <input value={cCode} onChange={(e) => setCCode(e.target.value)} placeholder="รหัสบล็อก เช่น A-4-18"
+                className="flex-1 h-8 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input type="number" min={0} step="any" value={cW || ""} onChange={(e) => setCW(Number(e.target.value))} placeholder="กว้าง"
+                className="w-14 h-8 px-1.5 text-xs text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <span className="text-slate-300 text-xs">×</span>
+              <input type="number" min={0} step="any" value={cL || ""} onChange={(e) => setCL(Number(e.target.value))} placeholder="ยาว"
+                className="w-14 h-8 px-1.5 text-xs text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
-          )}
+            <div className="flex items-center gap-1">
+              {width > 0 && length > 0 && (
+                <button type="button" onClick={() => { setCW(width); setCL(length); }} title="ดึงกว้าง/ยาวจากบรรทัด"
+                  className="h-7 px-2 text-[11px] rounded bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap">↧ ใช้ขนาดในบรรทัด ({width}×{length})</button>
+              )}
+              <button type="button" disabled={creating || !cCode.trim() || !(cW > 0) || !(cL > 0)} onClick={createBlock}
+                className="flex-1 h-7 px-2 text-[11px] rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                {creating ? "กำลังสร้าง…" : "＋ สร้างบล็อก"}
+              </button>
+            </div>
+          </div>
         </div>
       </FloatingPanel>
     </div>
@@ -333,6 +351,7 @@ export function BomLineEditor({
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
   const [detail, setDetail] = useState<EditorLine | null>(null);
+  const [view, setView] = useState<"basic" | "pro">("pro");   // มุมมองตาราง: BASIC (ย่อ) / PRO (เต็ม)
   const [editFace, setEditFace] = useState<Set<string>>(new Set());
   const [editUom, setEditUom] = useState<Set<string>>(new Set());
   useEffect(() => {
@@ -601,19 +620,29 @@ export function BomLineEditor({
     } as LineColumn<EditorLine>] : []),
   ];
 
+  const shownColumns = view === "pro" ? columns : columns.filter((c) => BASIC_COLS.has(c.key));
+
   return (
     <>
-      {!readonly && (
-        <div className="flex items-center justify-end gap-1 mb-1">
-          <button type="button" onClick={undo} disabled={!undoStack.length} title="ย้อนกลับ (Ctrl+Z)"
-            className="h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">↶ ย้อน</button>
-          <button type="button" onClick={redo} disabled={!redoStack.length} title="ทำซ้ำ (Ctrl+Shift+Z)"
-            className="h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">↷ ทำซ้ำ</button>
+      <div className="flex items-center justify-between gap-1 mb-1">
+        <div className="flex border border-slate-200 rounded-lg overflow-hidden text-xs">
+          <button type="button" onClick={() => setView("basic")} title="โชว์เฉพาะคอลัมน์หลัก"
+            className={`h-7 px-3 ${view === "basic" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>BASIC</button>
+          <button type="button" onClick={() => setView("pro")} title="โชว์ทุกคอลัมน์"
+            className={`h-7 px-3 border-l border-slate-200 ${view === "pro" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>PRO</button>
         </div>
-      )}
+        {!readonly && (
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={undo} disabled={!undoStack.length} title="ย้อนกลับ (Ctrl+Z)"
+              className="h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">↶ ย้อน</button>
+            <button type="button" onClick={redo} disabled={!redoStack.length} title="ทำซ้ำ (Ctrl+Shift+Z)"
+              className="h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-50">↷ ทำซ้ำ</button>
+          </div>
+        )}
+      </div>
       <LineItemsGrid<EditorLine>
         rows={lines}
-        columns={columns}
+        columns={shownColumns}
         onChange={handleGridChange}
         rowId={(l) => l.key}
         readonly={readonly}

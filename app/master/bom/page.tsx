@@ -43,7 +43,6 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   obsolete: { label: "เลิกใช้",    cls: "bg-amber-50 text-amber-700" },
 };
 const STATUS_OPTIONS = [["draft", "ร่าง"], ["active", "ใช้งาน"], ["obsolete", "เลิกใช้"]] as const;
-const BOMTYPE_OPTIONS = [["normal", "ผลิตปกติ"], ["phantom", "Phantom (สูตรย่อย)"], ["kit", "ชุด (Kit)"]] as const;
 
 // ---- editing form state ----
 type FormState = {
@@ -401,14 +400,7 @@ export default function BomWorkspacePage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2">
-              <label className="block">
-                <span className="text-[11px] text-slate-500">ประเภทสูตร</span>
-                <select value={form.bom_type} onChange={(e) => patchForm({ bom_type: e.target.value })}
-                  className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {BOMTYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </label>
+            <div className="grid grid-cols-2 gap-2">
               <label className="block">
                 <span className="text-[11px] text-slate-500">สถานะ</span>
                 <select value={form.status} onChange={(e) => patchForm({ status: e.target.value })}
@@ -443,8 +435,25 @@ export default function BomWorkspacePage() {
                   </span>
                 ))}
                 {canEdit && (
-                  <input placeholder="+ เพิ่มไซส์ (เช่น 40&quot; / M) แล้ว Enter" className="h-7 px-2 text-xs border border-slate-200 rounded-lg w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  <input placeholder="+ พิมพ์ไซส์เอง (เช่น 40&quot; / M) แล้ว Enter" className="h-7 px-2 text-xs border border-slate-200 rounded-lg w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); const v = (e.target as HTMLInputElement).value.trim(); if (v && !form.sizes.some((s) => s.label === v)) { patchForm({ sizes: [...form.sizes, { label: v, sort: form.sizes.length }] }); (e.target as HTMLInputElement).value = ""; } } }} />
+                )}
+                {canEdit && (
+                  <select value="" title="เลือกชุดไซส์มาตรฐาน — ระบบจะเพิ่มให้ทั้งชุด"
+                    onChange={(e) => {
+                      const v = e.target.value; if (!v) return;
+                      const labels = v.split(",");
+                      const add = labels.filter((l) => !form.sizes.some((s) => s.label === l)).map((l, i) => ({ label: l, sort: form.sizes.length + i }));
+                      if (add.length) patchForm({ sizes: [...form.sizes, ...add] });
+                    }}
+                    className="h-7 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-600 bg-white">
+                    <option value="">＋ ใช้ชุดไซส์มาตรฐาน…</option>
+                    <option value="S,M,L">เสื้อ: S / M / L</option>
+                    <option value="S,M,L,XL,XXL">เสื้อ: S / M / L / XL / XXL</option>
+                    <option value="ฟรีไซส์">ฟรีไซส์</option>
+                    <option value={'38",40",42",44"'}>เข็มขัด: 38&quot; / 40&quot; / 42&quot; / 44&quot;</option>
+                    <option value={'36",38",40",42",44",46"'}>เข็มขัด: 36&quot;–46&quot;</option>
+                  </select>
                 )}
               </div>
               {form.sizes.length > 0 && <p className="text-[11px] text-slate-400 mt-1">ติ๊กช่อง “ผันไซส์” ที่บรรทัดวัตถุดิบ แล้วกรอกค่าต่อไซส์ในตารางด้านล่าง</p>}
