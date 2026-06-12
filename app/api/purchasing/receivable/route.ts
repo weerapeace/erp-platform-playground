@@ -37,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 1) ใบสั่งซื้อ — pending: ตัด received/cancelled · done: ตัดเฉพาะ cancelled (ใบที่รับครบต้องยังเห็น)
   let poQuery = admin
     .from("purchase_orders_v2")
-    .select("id, po_no, seller_name, currency, status, order_date, expected_date")
+    .select("id, po_no, seller_name, currency, status, order_date, expected_date, payment_status, paid_date")
     .limit(1000);
   poQuery = mode === "done" ? poQuery.neq("status", "cancelled") : poQuery.not("status", "in", "(received,cancelled)");
   const { data: pos, error: poErr } = await poQuery;
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const chunk = poIds.slice(i, i + 300);
     const { data: ls, error: lErr } = await admin
       .from("purchase_order_lines_v2")
-      .select("id, po_id, item_sku_id, item_name, qty, uom, qty_received, qty_defective, line_status")
+      .select("id, po_id, pr_id, item_sku_id, item_name, qty, uom, qty_received, qty_defective, line_status")
       .in("po_id", chunk)
       .limit(5000);
     if (lErr) return NextResponse.json({ data: [], error: lErr.message }, { status: 500 });
@@ -84,6 +84,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const s of (si ?? []) as Record<string, unknown>[]) leadMap.set(String(s.item_sku_id), s.lead_time_days == null ? null : Number(s.lead_time_days));
   }
 
+  // 5) ใบสั่งผลิต (MO) ต้นทาง — ผ่าน บรรทัด PO → pr_id → ใบขอซื้อ.source_mo_no + used_for_label
+  const prIds = [...new Set(lines.map((l) => l.pr_id).filter(Boolean) as string[])];
+  const prMap = new Map<string, { mo: string | null; usedFor: string | null }>();
+  for (let i = 0; i < prIds.length; i += 300) {
+    const chunk = prIds.slice(i, i + 300);
+    const { data: pr } = await admin.from("purchase_requests_v2").select("id, source_mo_no, used_for_label").in("id", chunk);
+    for (const p of (pr ?? []) as Record<string, unknown>[]) prMap.set(String(p.id), { mo: (p.source_mo_no as string) ?? null, usedFor: (p.used_for_label as string) ?? null });
+  }
+
+  // 6) จำนวนครั้งที่รับ (นับใบรับ GR ต่อบรรทัด) — โชว์บนการ์ดติดตาม
+  const lineIds = lines.map((l) => String(l.id));
+  const recvCount = new Map<string, number>();
+  for (let i = 0; i < lineIds.length; i += 300) {
+    const chunk = lineIds.slice(i, i + 300);
+    const { data: grl } = await admin.from("goods_receipt_lines_v2").select("po_line_id").in("po_line_id", chunk);
+    for (const g of (grl ?? []) as Record<string, unknown>[]) { const k = String(g.po_line_id); recvCount.set(k, (recvCount.get(k) ?? 0) + 1); }
+  }
+
+  // 7) ร้านที่ตั้งว่า "ส่งก่อนจ่าย" (match ด้วยชื่อ — PO เก็บร้านเป็นชื่อ) → เริ่มนับวันส่งจากวันสั่ง
+  const shipBeforePay = new Set<string>();
+  const { data: sup } = await admin.from("partners_v2").select("name_th, display_name, code, ship_before_pay").eq("ship_before_pay", true).limit(2000);
+  for (const s of (sup ?? []) as Record<string, unknown>[]) {
+    for (const nm of [s.name_th, s.display_name, s.code]) { const v = String(nm ?? "").trim(); if (v) shipBeforePay.add(v); }
+  }
+
   const t = today();
   const rows = lines.map((l) => {
     const po = poMap.get(String(l.po_id))!;
@@ -92,10 +117,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const orderDate = (po.order_date as string) || null;
     const lead = l.item_sku_id ? (leadMap.get(String(l.item_sku_id)) ?? null) : null;
 
-    // วันคาดการณ์: ① PO.expected_date → ② order_date + lead → ③ null
+    // สถานะจ่ายเงิน + ร้านส่งก่อนจ่าย → จุดเริ่มนับวันส่ง
+    const sellerName = (po.seller_name as string) ?? "";
+    const shipBefore = shipBeforePay.has(sellerName);
+    const paymentStatus = (po.payment_status as string) || "unpaid";
+    const paidDate = (po.paid_date as string) || null;
+    const isPaid = paymentStatus === "paid";
+    // เริ่มนับ: ร้านส่งก่อนจ่าย=วันสั่ง · ร้านปกติ=วันจ่าย (ยังไม่จ่าย=ยังไม่เริ่ม)
+    const shipStart = shipBefore ? orderDate : (isPaid ? (paidDate || orderDate) : null);
+
+    // วันคาดการณ์: ① PO.expected_date → ② ship_start + lead → ③ null (รอจ่าย/ไม่มีลีดไทม์)
     let expected: string | null = (po.expected_date as string) || null;
     let expectedSource: "po" | "lead" | null = expected ? "po" : null;
-    if (!expected && orderDate && lead != null) { expected = addDays(orderDate, lead); expectedSource = "lead"; }
+    if (!expected && shipStart && lead != null) { expected = addDays(shipStart, lead); expectedSource = "lead"; }
+    const pr = l.pr_id ? prMap.get(String(l.pr_id)) : null;
 
     return {
       id: String(l.id),                          // = po_line_id
@@ -119,6 +154,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       expected_source: expectedSource,           // 'po' | 'lead' | null
       lead_time_days: lead,
       days_remaining: expected ? dayDiff(t, expected) : null,
+      source_mo_no: pr?.mo ?? null,               // ใบสั่งผลิตต้นทาง (ถ้าขอซื้อมาจาก MO)
+      used_for_label: pr?.usedFor ?? null,        // สินค้าที่ผลิต (ป้ายช่วยจำ)
+      receive_count: recvCount.get(String(l.id)) ?? 0,   // รับมาแล้วกี่ครั้ง (ใบรับ GR)
+      // สถานะจ่ายเงิน + วันส่ง
+      payment_status: paymentStatus,              // 'unpaid' | 'paid'
+      paid_date: paidDate,
+      ship_before_pay: shipBefore,
+      duration_days: shipStart ? dayDiff(shipStart, t) : null,   // ค้างมากี่วัน (ตั้งแต่เริ่มนับ)
     };
   });
 
