@@ -292,6 +292,7 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
               <select value={family} onChange={(e) => setFamily(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">— ไม่ระบุ —</option>{familyOptions.map((f) => <option key={f} value={f}>{FAMILY_LABELS[f] ?? f}</option>)}
               </select>
+              <a href="/admin/attribute-fields" target="_blank" rel="noopener" className="text-[11px] text-blue-600 hover:underline mt-0.5 inline-block">⚙️ เพิ่ม/แก้ฟิลด์ของประเภทนี้ →</a>
             </label>
             <label className="block"><span className="text-[11px] text-slate-500">ขนาด (สรุป)</span>
               <input value={size} onChange={(e) => setSize(e.target.value)} className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" /></label>
