@@ -1,6 +1,12 @@
 "use client";
 
 import React, { useRef, useState } from "react";
+import {
+  compactReportLayout,
+  DEFAULT_REPORT_LAYOUT,
+  normalizeReportLayout,
+  type ReportLayoutSettings,
+} from "@/lib/report-layout";
 
 // ============================================================
 // PrintDocument — เอกสารสำหรับพิมพ์/บันทึก PDF (component กลาง)
@@ -123,7 +129,18 @@ export function PrintDocument({
 // PrintToolbar — แถบปุ่มพิมพ์ (ซ่อนตอนพิมพ์จริงด้วย .no-print)
 // ============================================================
 
-export function PrintToolbar({ onBack }: { onBack?: () => void }) {
+function printReportFrameOrWindow() {
+  const frame = document.querySelector<HTMLIFrameElement>('iframe[data-report-print-frame="true"]');
+  const frameWindow = frame?.contentWindow;
+  if (frameWindow) {
+    frameWindow.focus();
+    frameWindow.print();
+    return;
+  }
+  window.print();
+}
+
+export function PrintToolbar({ onBack, onPrint }: { onBack?: () => void; onPrint?: () => void }) {
   return (
     <div className="no-print sticky top-0 z-10 bg-slate-100 border-b border-slate-200 px-6 py-3 flex items-center gap-3">
       {onBack && (
@@ -132,7 +149,7 @@ export function PrintToolbar({ onBack }: { onBack?: () => void }) {
         </button>
       )}
       <div className="flex-1" />
-      <button onClick={() => window.print()}
+      <button onClick={onPrint ?? printReportFrameOrWindow}
         className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 flex items-center gap-2">
         🖨️ พิมพ์ / บันทึก PDF
       </button>
@@ -145,6 +162,161 @@ export function PrintToolbar({ onBack }: { onBack?: () => void }) {
 // ปรับความสูงตามเนื้อหาจริง (วัด scrollHeight ของ iframe) → ไม่มีช่องว่าง/หน้าว่างเกิน/scroll
 // ใช้แทน <iframe srcDoc=... minHeight=1180> เดิมในทุกหน้าพิมพ์ (PR/PO/SO/QT/Design Sheets ฯลฯ)
 // ============================================================
+
+function NumberControl({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  unit,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  unit: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="grid gap-1 text-xs text-slate-600">
+      <span className="flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <span className="font-mono text-slate-900">{value}{unit}</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full accent-slate-900"
+      />
+    </label>
+  );
+}
+
+function VisibilityToggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 text-sm text-slate-700">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 accent-slate-900"
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+export function ReportLayoutControls({
+  value,
+  onChange,
+  onSaveDefault,
+  onUseDefault,
+  savingDefault = false,
+  defaultMessage,
+}: {
+  value: ReportLayoutSettings;
+  onChange: (next: ReportLayoutSettings) => void;
+  onSaveDefault?: () => void;
+  onUseDefault?: () => void;
+  savingDefault?: boolean;
+  defaultMessage?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const layout = normalizeReportLayout(value);
+  const patch = (next: Partial<ReportLayoutSettings>) => onChange(normalizeReportLayout({ ...layout, ...next }));
+
+  return (
+    <div className="no-print mx-auto mb-4 max-w-[1120px] rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+        <button
+          type="button"
+          onClick={() => setOpen(current => !current)}
+          className={`h-9 rounded-lg border px-4 text-sm font-medium ${open ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+        >
+          จัดหน้า
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(compactReportLayout(layout))}
+          className="h-9 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+        >
+          บีบให้ 1 หน้า
+        </button>
+        <button
+          type="button"
+          onClick={() => patch({ signatureToBottom: true })}
+          className="h-9 rounded-lg border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-700 hover:bg-blue-100"
+        >
+          ลายเซ็นชิดล่าง
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange(DEFAULT_REPORT_LAYOUT)}
+          className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 hover:bg-slate-50"
+        >
+          รีเซ็ต
+        </button>
+        {onUseDefault && (
+          <button
+            type="button"
+            onClick={onUseDefault}
+            className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            ใช้ค่าเริ่มต้น
+          </button>
+        )}
+        {onSaveDefault && (
+          <button
+            type="button"
+            onClick={onSaveDefault}
+            disabled={savingDefault}
+            className="h-9 rounded-lg border border-slate-900 bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {savingDefault ? "กำลังบันทึก..." : "บันทึกเป็นค่าเริ่มต้น"}
+          </button>
+        )}
+        {defaultMessage && <span className="text-xs text-slate-500">{defaultMessage}</span>}
+      </div>
+
+      {open && (
+        <div className="grid gap-4 border-t border-slate-100 px-4 py-4 lg:grid-cols-[1.5fr_1fr]">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <NumberControl label="ขอบบน" value={layout.topMarginMm} min={0} max={30} unit="mm" onChange={(topMarginMm) => patch({ topMarginMm })} />
+            <NumberControl label="ขอบข้าง" value={layout.horizontalMarginMm} min={6} max={25} unit="mm" onChange={(horizontalMarginMm) => patch({ horizontalMarginMm })} />
+            <NumberControl label="ขอบล่าง" value={layout.bottomMarginMm} min={0} max={30} unit="mm" onChange={(bottomMarginMm) => patch({ bottomMarginMm })} />
+            <NumberControl label="ตัวอักษร" value={layout.fontSizePx} min={8} max={14} unit="px" onChange={(fontSizePx) => patch({ fontSizePx })} />
+            <NumberControl label="ความสูงแถว" value={layout.rowHeightMm} min={10} max={36} unit="mm" onChange={(rowHeightMm) => patch({ rowHeightMm })} />
+            <NumberControl label="ช่องลายเซ็น" value={layout.signatureGapMm} min={0} max={45} unit="mm" onChange={(signatureGapMm) => patch({ signatureGapMm })} />
+          </div>
+
+          <div className="grid gap-3 rounded-lg bg-slate-50 p-3">
+            <VisibilityToggle label="รหัสสินค้า" checked={layout.showSku} onChange={(showSku) => patch({ showSku })} />
+            <VisibilityToggle label="รูปสินค้า" checked={layout.showImage} onChange={(showImage) => patch({ showImage })} />
+            <VisibilityToggle label="เบอร์โทร" checked={layout.showPhone} onChange={(showPhone) => patch({ showPhone })} />
+            <VisibilityToggle label="ผู้รับผิดชอบ" checked={layout.showResponsible} onChange={(showResponsible) => patch({ showResponsible })} />
+            <VisibilityToggle label="หมายเหตุ" checked={layout.showNote} onChange={(showNote) => patch({ showNote })} />
+            <VisibilityToggle label="ลายเซ็นชิดล่าง" checked={layout.signatureToBottom} onChange={(signatureToBottom) => patch({ signatureToBottom })} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function PrintFrame({ html, maxWidth = 840 }: { html: string; maxWidth?: number }) {
   const ref = useRef<HTMLIFrameElement>(null);
@@ -159,7 +331,7 @@ export function PrintFrame({ html, maxWidth = 840 }: { html: string; maxWidth?: 
   const onLoad = () => { measure(); setTimeout(measure, 120); setTimeout(measure, 400); };
   return (
     <div className="mx-auto bg-white shadow-lg print-document" style={{ maxWidth }}>
-      <iframe ref={ref} srcDoc={html} onLoad={onLoad} scrolling="no"
+      <iframe ref={ref} srcDoc={html} onLoad={onLoad} scrolling="no" data-report-print-frame="true"
         className="w-full bg-white border-0 block" style={{ height: h }} title="Print preview" />
     </div>
   );

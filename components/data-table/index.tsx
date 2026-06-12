@@ -12,6 +12,13 @@ import { formatDate } from "@/lib/date";
 import { formatAmount } from "@/lib/money";
 import type { TableLayoutSettings, RowColorRule } from "@/app/api/table-layouts/route";
 import {
+  getRowActionStorageKey,
+  loadRowActionSettings,
+  renderStandardRowActionIcon,
+  type StandardRowActionIconKey,
+  type RowActionSetting,
+} from "@/components/data-table/row-actions";
+import {
   useReactTable,
   getCoreRowModel,
   getSortedRowModel,
@@ -224,10 +231,16 @@ export type DataTableView = {
 };
 
 export type RowAction<T> = {
+  id?: string;
   label: string;
   icon?: React.ReactNode;
   onClick: (row: T) => void;
   variant?: "default" | "danger";
+  group?: string;
+  description?: string;
+  defaultVisible?: boolean;
+  defaultPlacement?: "inline" | "menu" | "hidden";
+  iconKey?: StandardRowActionIconKey;
   /** แสดงปุ่มนี้เฉพาะแถวที่เงื่อนไขเป็นจริง (ไม่ระบุ = แสดงทุกแถว) */
   show?: (row: T) => boolean;
 };
@@ -673,11 +686,39 @@ export function DataTable<T extends Record<string, unknown>>({
   const [globalSearch,     setGlobalSearch]     = useState("");
   const [activeView,       setActiveView]       = useState(views[0]?.id ?? "all");
   const [showColumnMgr,    setShowColumnMgr]    = useState(false);
+  const [actionSettings,   setActionSettings]   = useState<Record<string, RowActionSetting>>({});
   const [copiedField,      setCopiedField]      = useState<string | null>(null);  // F1: คัดลอกชื่อ field จริง
   const [exportOpen,       setExportOpen]       = useState(false);
   const [rowMenu,          setRowMenu]          = useState<{ row: T; x: number; y: number } | null>(null);
   const [mounted,          setMounted]          = useState(false);
   useEffect(() => { setMounted(true); }, []);
+
+  const actionStorageKey = getRowActionStorageKey(tableId, exportEntityType, exportFilename);
+  const actionOptions = useMemo(() => rowActions.map((action, index) => {
+    const id = action.id || String(action.label || `action-${index}`);
+    return {
+      ...action,
+      id,
+      defaultIconKey: action.iconKey ?? "more",
+    };
+  }), [rowActions]);
+
+  useEffect(() => {
+    setActionSettings(loadRowActionSettings(actionStorageKey, actionOptions));
+  }, [actionOptions, actionStorageKey]);
+
+  const inlineRowActions = useMemo(
+    () => actionOptions.filter((action) => actionSettings[action.id]?.placement === "inline"),
+    [actionOptions, actionSettings],
+  );
+  const menuRowActions = useMemo(
+    () => actionOptions.filter((action) => (actionSettings[action.id]?.placement ?? "menu") === "menu"),
+    [actionOptions, actionSettings],
+  );
+  const activeRowActions = useMemo(
+    () => actionOptions.filter((action) => (actionSettings[action.id]?.placement ?? "menu") !== "hidden"),
+    [actionOptions, actionSettings],
+  );
 
   // ---- Filter state ----
   const [colFilterValues, setColFilterValues] = useState<Record<string, ColumnFilterValue>>({});
@@ -1084,32 +1125,54 @@ export function DataTable<T extends Record<string, unknown>>({
       });
     };
     const base = injectSummary(withSelectCol);
-    if (rowActions.length === 0) return base;
+    if (activeRowActions.length === 0) return base;
+    const inlineWidth = inlineRowActions.length * 34;
+    const menuWidth = menuRowActions.length > 0 ? 40 : 0;
     return [
       ...base,
       {
         id: "__actions__",
-        size: 48,
-        header: () => null,
+        size: Math.min(320, Math.max(56, inlineWidth + menuWidth + 16)),
+        header: () => <span className="text-xs font-medium text-slate-500">จัดการ</span>,
         cell: ({ row }) => (
-          <div className="flex justify-center">
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                const r = e.currentTarget.getBoundingClientRect();
-                setRowMenu(prev =>
-                  prev && prev.row === row.original ? null : { row: row.original, x: r.right, y: r.bottom }
-                );
-              }}
-              className="h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
-              <IconMoreVertical />
-            </button>
+          <div className="flex items-center justify-end gap-1.5">
+            {inlineRowActions.filter((action) => !action.show || action.show(row.original)).map((action) => (
+              <button
+                key={action.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  action.onClick(row.original);
+                }}
+                className={`h-7 w-7 rounded-md border text-xs font-medium transition-colors inline-flex items-center justify-center ${
+                  action.variant === "danger"
+                    ? "border-red-200 text-red-600 bg-white hover:bg-red-50"
+                    : "border-slate-200 text-slate-700 bg-white hover:bg-slate-50"
+                }`}
+                title={action.description || action.label}
+                aria-label={action.label}
+              >
+                {action.icon ?? renderStandardRowActionIcon(actionSettings[action.id]?.iconKey ?? action.iconKey)}
+              </button>
+            ))}
+            {menuRowActions.some((action) => !action.show || action.show(row.original)) && (
+              <button
+                onClick={e => {
+                  e.stopPropagation();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setRowMenu(prev =>
+                    prev && prev.row === row.original ? null : { row: row.original, x: r.right, y: r.bottom }
+                  );
+                }}
+                className="h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
+                <IconMoreVertical />
+              </button>
+            )}
           </div>
         ),
         enableSorting: false, enableHiding: false,
       },
     ];
-  }, [withSelectCol, rowActions, layoutSettings]);
+  }, [withSelectCol, activeRowActions, inlineRowActions, menuRowActions, layoutSettings]);
 
   // ของกลาง: บังคับ checkbox (__select__) ซ้ายสุด และปุ่ม ⋮ (__actions__) ขวาสุดเสมอ
   // กัน columnOrder ที่ถูกบันทึก/จัดเรียงไว้ (ซึ่งมักไม่รวมคอลัมน์พิเศษ 2 ตัวนี้)
@@ -1120,9 +1183,9 @@ export function DataTable<T extends Record<string, unknown>>({
     return [
       ...(showSelectCol ? ["__select__"] : []),
       ...rest,
-      ...(rowActions.length > 0 ? ["__actions__"] : []),
+      ...(activeRowActions.length > 0 ? ["__actions__"] : []),
     ];
-  }, [columnOrder, showSelectCol, rowActions]);
+  }, [columnOrder, showSelectCol, activeRowActions]);
 
   // ---- TanStack Table instance ----
   const table = useReactTable({
@@ -2082,21 +2145,22 @@ export function DataTable<T extends Record<string, unknown>>({
       })()}
 
       {/* Row Actions menu (portal — หลุดจากกรอบตาราง ไม่โดน overflow ตัด) */}
-      {mounted && rowMenu && rowActions.length > 0 && createPortal(
+      {mounted && rowMenu && menuRowActions.length > 0 && createPortal(
         <>
           <div className="fixed inset-0 z-40" onClick={() => setRowMenu(null)} />
           <div
             className="fixed z-50 min-w-[150px] bg-white border border-slate-200 rounded-lg shadow-lg py-1"
             style={{ top: rowMenu.y + 4, left: Math.max(8, rowMenu.x - 150) }}
           >
-            {rowActions.filter((action) => !action.show || action.show(rowMenu.row)).map((action, i) => (
+            {menuRowActions.filter((action) => !action.show || action.show(rowMenu.row)).map((action) => (
               <button
-                key={i}
+                key={action.id}
                 onClick={() => { action.onClick(rowMenu.row); setRowMenu(null); }}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
                   action.variant === "danger" ? "text-red-600 hover:bg-red-50" : "text-slate-700 hover:bg-slate-50"
                 }`}>
-                {action.icon}{action.label}
+                {action.icon ?? renderStandardRowActionIcon(actionSettings[action.id]?.iconKey ?? action.iconKey)}
+                {action.label}
               </button>
             ))}
           </div>

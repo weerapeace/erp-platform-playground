@@ -49,9 +49,22 @@ describe("payroll register print", () => {
       social_security_employee: 558,
       net_pay: 7000,
     })).toMatchObject({
-      month_end_pay: 7602,
+      month_end_pay: 7000,
       overtime_amount: 0,
       cash_pay: 602,
+      balance: 10602,
+    });
+
+    expect(computePayrollRegisterAmounts({
+      base_salary: 11160,
+      mid_month_paid: 3000,
+      social_security_employee: 558,
+      net_pay: 3976.27,
+    })).toMatchObject({
+      month_end_pay: 3976.27,
+      transfer_net_pay: 3976.27,
+      overtime_amount: 0,
+      cash_pay: 3625.73,
       balance: 10602,
     });
   });

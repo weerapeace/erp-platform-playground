@@ -680,7 +680,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       {/* Content */}
       {/* หมายเหตุ: ห้ามใส่ overflow-y-auto ที่ main — root เป็น min-h-screen (เลื่อนที่ body)
           overflow บน main จะกลายเป็น scrollport ปลอมที่ไม่เคยเลื่อน ทำให้ sticky ทุกตัวข้างในตาย */}
-      <main id="main-content" className="flex-1 pt-12 md:pt-0 flex flex-col" tabIndex={-1}>
+      <main id="main-content" className="flex-1 min-w-0 pt-12 md:pt-0 flex flex-col" tabIndex={-1}>
         {/* โมดูลใหญ่ (App) tabs — ข้างบนสุด (โชว์เมื่อมีทะเบียนเมนูแล้ว) */}
         {appGroups.length > 0 && menuRows && menuRows.length > 0 && (
           <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-3 flex items-center gap-1 overflow-x-auto">

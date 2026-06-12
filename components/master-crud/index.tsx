@@ -1786,7 +1786,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   return (
     <Wrap>
       <div className="w-full px-6 py-6" style={{ "--dt-sticky-top": `${headerH}px` } as React.CSSProperties}>
-        <div ref={headerRef} className="sticky top-0 z-40 bg-white -mx-6 px-6 pt-1 pb-3 mb-3 border-b border-slate-100 flex items-start justify-between gap-4 flex-wrap">
+        <div ref={headerRef} className="sticky top-0 z-40 bg-white pb-3 mb-3 border-b border-slate-100 flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-slate-800">
               {config.icon && <span className="mr-2">{config.icon}</span>}{config.title}

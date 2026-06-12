@@ -14,6 +14,7 @@ import {
   payrollExportIdentityNo,
   payrollExportTotals,
   payrollRegisterExportAmounts,
+  payrollRegisterNetPayBasis,
   pnd3NetPayBasis,
   pnd3SheetRows,
   type PayrollExportRow,
@@ -125,6 +126,48 @@ describe("payroll export rules", () => {
       overtime_amount: 3740,
       cash_pay: 0,
       social_security: 558,
+      balance: 10602,
+    });
+  });
+
+  it("uses actual net pay as month-end pay and keeps cash as the remaining register difference", () => {
+    const amounts = payrollRegisterExportAmounts({
+      ...baseRow,
+      payroll_register_base_salary: 11160,
+      mid_month_paid: 3000,
+      social_security_employee: 558,
+      net_pay: 3976.27,
+    });
+
+    expect(amounts).toEqual({
+      base_salary: 11160,
+      mid_month_paid: 3000,
+      month_end_pay: 3976.27,
+      transfer_net_pay: 3976.27,
+      overtime_amount: 0,
+      cash_pay: 3625.73,
+      social_security: 558,
+      balance: 10602,
+    });
+  });
+
+  it("uses confirmed month-end payment amount as payroll register net pay when available", () => {
+    expect(payrollRegisterNetPayBasis(5677.38, 5677)).toBe(5677);
+    expect(payrollRegisterNetPayBasis(5677.38, 0)).toBe(5677.38);
+
+    const amounts = payrollRegisterExportAmounts({
+      ...baseRow,
+      payroll_register_base_salary: 11160,
+      mid_month_paid: 3000,
+      social_security_employee: 558,
+      net_pay: 5677.38,
+      register_paid_amount: 5677,
+    });
+
+    expect(amounts).toMatchObject({
+      month_end_pay: 5677,
+      transfer_net_pay: 5677,
+      cash_pay: 1925,
       balance: 10602,
     });
   });

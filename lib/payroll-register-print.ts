@@ -40,9 +40,11 @@ export function computePayrollRegisterAmounts(line: Record<string, unknown>): {
   const baseSalary = roundMoney(money(line.base_salary));
   const midMonthPaid = roundMoney(money(line.mid_month_paid));
   const socialSecurity = roundMoney(money(line.social_security_employee));
-  const monthEndPay = roundMoney(baseSalary - midMonthPaid - socialSecurity);
+  const plannedMonthEndPay = roundMoney(baseSalary - midMonthPaid - socialSecurity);
+  const payableMonthEndPay = Math.max(plannedMonthEndPay, 0);
   const transferNetPay = roundMoney(money(line.net_pay));
-  const diff = roundMoney(transferNetPay - monthEndPay);
+  const monthEndPay = roundMoney(Math.min(Math.max(transferNetPay, 0), payableMonthEndPay));
+  const diff = roundMoney(transferNetPay - plannedMonthEndPay);
 
   return {
     base_salary: baseSalary,
@@ -50,7 +52,7 @@ export function computePayrollRegisterAmounts(line: Record<string, unknown>): {
     month_end_pay: monthEndPay,
     transfer_net_pay: transferNetPay,
     overtime_amount: diff > 0 ? diff : 0,
-    cash_pay: diff < 0 ? roundMoney(Math.abs(diff)) : 0,
+    cash_pay: diff < 0 ? roundMoney(payableMonthEndPay - monthEndPay) : 0,
     social_security: socialSecurity,
     balance: roundMoney(baseSalary - socialSecurity),
   };

@@ -16,6 +16,7 @@ import { SupplierWizard } from "@/components/supplier-wizard";
 import { SupplierPicker } from "@/components/supplier-picker";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { RelationPeekModal } from "@/components/relation-peek";
+import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./approval";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -86,6 +87,7 @@ export default function PurchaseOrdersPage() {
   const [cartWidth, setCartWidth] = useState(340);
   const [editRow, setEditRow] = useState<Row | null>(null);
   const [setShopRow, setSetShopRow] = useState<Row | null>(null);   // popup ตั้งร้านให้สินค้าที่ยังไม่มีร้าน
+  const [rejectedOpen, setRejectedOpen] = useState(false);          // ป๊อปแท็บ "รายการไม่อนุมัติ"
   const [buyAllShop, setBuyAllShop] = useState<{ name: string; rows: Row[] } | null>(null);
   const [linkRow, setLinkRow] = useState<Row | null>(null);          // popup ใส่ลิงก์สินค้า
   const [reviewOpen, setReviewOpen] = useState(false);               // ป๊อปทวนรายการก่อนสร้างใบสั่งซื้อ
@@ -348,9 +350,13 @@ export default function PurchaseOrdersPage() {
               <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
               <button onClick={() => changeView("table")} className={`h-9 px-3 border-l border-slate-200 ${view === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▤ ตาราง</button>
             </div>
+            <button onClick={() => setRejectedOpen(true)} className="h-9 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center whitespace-nowrap">🚫 รายการไม่อนุมัติ</button>
             <a href="/m/purchase-orders-v2" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 ดูใบสั่งซื้อ</a>
           </div>
         </div>
+
+        {/* ป๊อปแท็บ "รายการไม่อนุมัติ" + กู้คืน — โหลดใหม่หน้าหลักเมื่อกู้คืน */}
+        <RejectedPanel open={rejectedOpen} onClose={() => setRejectedOpen(false)} onChanged={fetchRows} />
 
         {view === "table" && (
           <DataTable<Row>
@@ -399,6 +405,7 @@ export default function PurchaseOrdersPage() {
                     <div className="ml-auto flex items-center gap-2">
                       <button onClick={() => selectedRows.length > 0 && setBulkShop(selectedRows)} disabled={selectedIds.size === 0}
                         className="h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">📍 ตั้งร้าน / ราคา ({selectedIds.size})</button>
+                      <BulkApproveBar ids={[...selectedIds]} onDone={() => { setSelectedIds(new Set()); void fetchRows(); }} />
                       <button onClick={() => setSelectedIds(new Set())} disabled={selectedIds.size === 0} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-white disabled:opacity-40">ล้างเลือก</button>
                       <button onClick={exitSelect} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-white">ออกจากโหมดเลือก</button>
                     </div>
@@ -444,6 +451,7 @@ export default function PurchaseOrdersPage() {
                                     className={`w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border shadow-sm text-xs hover:bg-blue-50 ${r.purchase_link ? "border-blue-200 text-blue-600" : "border-slate-200 text-slate-400"}`}>🔗</button>
                                   <button onClick={(e) => { e.stopPropagation(); setEditRow(r); }} title="ดูรายละเอียด / แก้ไข"
                                     className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-blue-50 text-slate-600 text-xs">✎</button>
+                                  {!selectMode && <ApproveActions prId={r.id} approved={r.approved} onChanged={fetchRows} compact stop />}
                                 </div>
                                 {r.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={r.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">📦</span>}
                               </div>
@@ -566,6 +574,7 @@ export default function PurchaseOrdersPage() {
       </div>
 
       {setShopRow && <SetShopModal row={setShopRow} suppliers={suppliers} onSupplierAdded={addSupplier}
+        onApprovalChanged={() => { setSetShopRow(null); void fetchRows(); }}
         onClose={() => setSetShopRow(null)}
         onSaved={(updated) => {
           setRows((rs) => rs.map((x) => x.id === updated.id ? updated : x));
@@ -853,9 +862,9 @@ function BuyAllModal({ shop, rows, rate, onClose, onConfirm }: {
 }
 
 // ── popup ตั้งร้านให้สินค้าที่ยังไม่มีร้าน (เลือกผู้จำหน่าย m2o + ราคา + เพิ่มผู้จำหน่าย) ──
-function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
+function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved, onApprovalChanged }: {
   row: Row; suppliers: { id: string; name: string; cn?: boolean }[]; onSupplierAdded: (s: { id: string; name: string; cn?: boolean }) => void;
-  onClose: () => void; onSaved: (updated: Row) => void;
+  onClose: () => void; onSaved: (updated: Row) => void; onApprovalChanged: () => void;
 }) {
   const { user } = useAuth();
   const toast = useToast();
@@ -922,9 +931,12 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก + ใส่ตะกร้า"}</button>
       </>}>
       <div className="space-y-3">
-        <div>
-          <div className="text-sm font-medium text-slate-800">{stripCode(row.item_name)}</div>
-          <div className="text-xs text-slate-400">{row.code || "—"} · ขอซื้อ {row.qty.toLocaleString()} {row.uom}</div>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-800">{stripCode(row.item_name)}</div>
+            <div className="text-xs text-slate-400">{row.code || "—"} · ขอซื้อ {row.qty.toLocaleString()} {row.uom}</div>
+          </div>
+          <div className="shrink-0"><ApproveActions prId={row.id} approved={row.approved} onChanged={onApprovalChanged} /></div>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย) *</label>
@@ -1173,6 +1185,7 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
   return (
     <ERPModal open onClose={onClose} size="md" storageKey="po-card-edit" title="รายละเอียด / แก้ไขรายการ"
       footer={<>
+        <div className="mr-auto"><DeleteButton prId={row.id} onDeleted={() => void onSaved()} /></div>
         <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
         <button onClick={save} disabled={saving} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
       </>}>

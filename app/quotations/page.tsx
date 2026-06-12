@@ -11,6 +11,7 @@ import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
+import { QUOTATION_ROW_ACTIONS } from "@/components/data-table/row-actions";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { QuoteListItem, QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
 import { SOLineEditor, SalesLineCompactTable, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
@@ -402,15 +403,15 @@ export default function QuotationsPage() {
   }, [fetchList, runTransitionRequest]);
 
   const rowActions = useMemo(() => [
-    { label: "ดูรายละเอียด", onClick: (row: QuoteListItem) => openDetail(row.id) },
-    { label: "พิมพ์ใบเสนอราคา", onClick: (row: QuoteListItem) => openPrint(row.id) },
-    { label: "เปิด/พับรายการสินค้า", onClick: (row: QuoteListItem) => toggleExpanded(row) },
-    { label: "แก้ไข", show: (row: QuoteListItem) => row.status === "draft", onClick: (row: QuoteListItem) => openEditFromRow(row) },
-    { label: "ส่งให้ลูกค้า", show: (row: QuoteListItem) => row.status === "draft" && canSend, onClick: (row: QuoteListItem) => transition(row.id, "send") },
-    { label: "ลูกค้าตอบรับ", show: (row: QuoteListItem) => row.status === "sent" && canAccept, onClick: (row: QuoteListItem) => transition(row.id, "accept") },
-    { label: "แปลงเป็น SO", show: (row: QuoteListItem) => ["sent", "accepted"].includes(row.status) && canAccept, onClick: (row: QuoteListItem) => convertToSO(row.id) },
-    { label: "ปฏิเสธ", show: (row: QuoteListItem) => row.status === "sent" && canReject, onClick: (row: QuoteListItem) => rejectFromRow(row) },
-    { label: "ยกเลิก", variant: "danger" as const, show: (row: QuoteListItem) => ["draft", "sent"].includes(row.status) && canCancel, onClick: (row: QuoteListItem) => transition(row.id, "cancel") },
+    { ...QUOTATION_ROW_ACTIONS[0], iconKey: QUOTATION_ROW_ACTIONS[0].defaultIconKey, onClick: (row: QuoteListItem) => openDetail(row.id) },
+    { ...QUOTATION_ROW_ACTIONS[1], iconKey: QUOTATION_ROW_ACTIONS[1].defaultIconKey, onClick: (row: QuoteListItem) => toggleExpanded(row) },
+    { ...QUOTATION_ROW_ACTIONS[2], iconKey: QUOTATION_ROW_ACTIONS[2].defaultIconKey, onClick: (row: QuoteListItem) => openPrint(row.id) },
+    { ...QUOTATION_ROW_ACTIONS[3], iconKey: QUOTATION_ROW_ACTIONS[3].defaultIconKey, show: (row: QuoteListItem) => row.status === "draft", onClick: (row: QuoteListItem) => openEditFromRow(row) },
+    { ...QUOTATION_ROW_ACTIONS[4], iconKey: QUOTATION_ROW_ACTIONS[4].defaultIconKey, show: (row: QuoteListItem) => row.status === "draft" && canSend, onClick: (row: QuoteListItem) => transition(row.id, "send") },
+    { ...QUOTATION_ROW_ACTIONS[5], iconKey: QUOTATION_ROW_ACTIONS[5].defaultIconKey, show: (row: QuoteListItem) => row.status === "sent" && canAccept, onClick: (row: QuoteListItem) => transition(row.id, "accept") },
+    { ...QUOTATION_ROW_ACTIONS[6], iconKey: QUOTATION_ROW_ACTIONS[6].defaultIconKey, show: (row: QuoteListItem) => ["sent", "accepted"].includes(row.status) && canAccept, onClick: (row: QuoteListItem) => convertToSO(row.id) },
+    { ...QUOTATION_ROW_ACTIONS[7], iconKey: QUOTATION_ROW_ACTIONS[7].defaultIconKey, show: (row: QuoteListItem) => row.status === "sent" && canReject, onClick: (row: QuoteListItem) => rejectFromRow(row) },
+    { ...QUOTATION_ROW_ACTIONS[8], iconKey: QUOTATION_ROW_ACTIONS[8].defaultIconKey, variant: "danger" as const, show: (row: QuoteListItem) => ["draft", "sent"].includes(row.status) && canCancel, onClick: (row: QuoteListItem) => transition(row.id, "cancel") },
   ], [canAccept, canCancel, canReject, canSend, openEditFromRow, openPrint, rejectFromRow, toggleExpanded]);
 
   const bulkActions = useMemo(() => [

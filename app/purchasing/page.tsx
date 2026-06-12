@@ -18,6 +18,7 @@ import { useToast } from "@/components/toast";
 import { SkuImagePicker, type PickedSku } from "@/components/sku-image-picker";
 import { ImageGallery, HoverZoomImage, ImageInput } from "@/components/image-input";
 import { TagGroupFilter } from "@/components/tag-filter";
+import { DupOrderBadge, DupOrderList, type OpenOrder } from "./dup-order";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
@@ -65,6 +66,7 @@ export default function PurchasingShopPage() {
 
   // grid
   const [cards, setCards] = useState<Card[]>([]);
+  const [dupMap, setDupMap] = useState<Record<string, OpenOrder[]>>({});       // sku_id → ใบขอซื้อที่ยังค้าง (เตือนสั่งซ้ำ)
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());   // sku_id → คงเหลือในสต๊อก
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -368,6 +370,16 @@ export default function PurchasingShopPage() {
       if (myId === reqIdRef.current) setLoading(false);
     }
   }, [source, q, builtFilters, mapSku, fetchSkusByIds, exclParam, sortParam, tagsSel, hiddenTagIds]);
+
+  // เตือนสั่งซ้ำ — เช็คใบขอซื้อที่ยังค้างของสินค้าที่โชว์อยู่ (batch) → ป้ายบนการ์ด + รายการในป๊อป
+  useEffect(() => {
+    const ids = cards.map(c => c.id).filter(Boolean);
+    if (ids.length === 0) { setDupMap({}); return; }
+    let alive = true;
+    apiFetch("/api/purchasing/sku-open-orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sku_ids: ids }) })
+      .then(r => r.json()).then(j => { if (alive && j.data) setDupMap(j.data as Record<string, OpenOrder[]>); }).catch(() => {});
+    return () => { alive = false; };
+  }, [cards]);
 
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
   // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
@@ -711,6 +723,8 @@ export default function PurchasingShopPage() {
                 {c.sku && cartQtyBySku.has(c.id) && (
                   <span className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-medium shadow-sm">🛒 {cartQtyBySku.get(c.id)}</span>
                 )}
+                {/* เตือนสั่งซ้ำ — มีใบขอซื้อค้างอยู่ (ซ้อนใต้ป้ายตะกร้าถ้ามี) */}
+                {c.sku && <DupOrderBadge orders={dupMap[c.id]} className={`absolute left-2 z-10 ${cartQtyBySku.has(c.id) ? "top-9" : "top-2"}`} />}
                 <button onClick={() => onCardClick(c)}
                   className="w-full text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-md transition-all">
                   <div className="aspect-square bg-slate-50 flex items-center justify-center">
@@ -934,7 +948,7 @@ export default function PurchasingShopPage() {
 
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
-        <ConfirmSku card={confirmSku} rate={cnyRate} stockQty={stockMap.has(confirmSku.id) ? stockMap.get(confirmSku.id)! : null} onClose={() => setConfirmSku(null)}
+        <ConfirmSku card={confirmSku} rate={cnyRate} stockQty={stockMap.has(confirmSku.id) ? stockMap.get(confirmSku.id)! : null} dupOrders={dupMap[confirmSku.id]} onClose={() => setConfirmSku(null)}
           onAdd={(qty, note, usedFor, urgent, useDate) => addSku(confirmSku, qty, note, usedFor, urgent, useDate)}
           onSaveImage={saveSkuImage}
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
@@ -1053,7 +1067,7 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, rate, stockQty, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; stockQty?: number | null; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null, urgent: boolean, useDate: string | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
+function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; stockQty?: number | null; dupOrders?: OpenOrder[]; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null, urgent: boolean, useDate: string | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const [usedFor, setUsedFor] = useState<PickedSku | null>(null);   // 🎯 ใช้กับสินค้า (ปลายทาง)
@@ -1071,7 +1085,9 @@ function ConfirmSku({ card, rate, stockQty, onClose, onAdd, onEdit, onSaveImage 
           <button onClick={() => onAdd(qty, note, usedFor, urgent, useDate || null)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
         </>
       }>
-      <div className="flex gap-3">
+      {/* เตือนสั่งซ้ำ — สินค้านี้มีใบขอซื้อค้างอยู่ (ไม่บล็อก ยังกดเพิ่มได้) */}
+      <DupOrderList orders={dupOrders} />
+      <div className="flex gap-3 mt-3">
         <div className="flex flex-col items-center gap-1 flex-shrink-0">
           {editImg ? (
             <div className="w-24">

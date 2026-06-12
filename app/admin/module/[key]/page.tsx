@@ -11,7 +11,7 @@
  * tableId = `master-<moduleKey>` (คอนเวนชันกลางของ MasterPage/MasterCRUD)
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -19,13 +19,26 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { IconPicker } from "@/components/icon-picker";
 import { TableLayoutPanel } from "@/components/table-layout-panel";
+import {
+  STANDARD_ROW_ACTION_ICONS,
+  getDefaultRowActionSettings,
+  getModuleRowActionMetas,
+  getRowActionStorageKey,
+  loadRowActionSettings,
+  renderStandardRowActionIcon,
+  resetRowActionSettings,
+  saveRowActionSettings,
+  type RowActionSetting,
+  type RowActionPlacement,
+  type StandardRowActionIconKey,
+} from "@/components/data-table/row-actions";
 
 const SchemaSyncClient = dynamic(
   () => import("@/app/admin/schema-sync/schema-sync-client").then((m) => m.SchemaSyncClient),
   { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
 );
 
-type Tab = "general" | "fields" | "views" | "layout";
+type Tab = "general" | "fields" | "views" | "layout" | "actions";
 
 type App = { key: string; label: string; icon: string | null };
 type ModuleGeneral = {
@@ -78,6 +91,7 @@ export default function ModuleSettingsPage() {
               { id: "fields", label: "🗂️ Field Registry" },
               { id: "views",  label: "🔖 Saved Views" },
               { id: "layout", label: "📐 Table Layout" },
+              { id: "actions", label: "⋮ Row Actions" },
             ] as { id: Tab; label: string }[]).map((t) => (
               <button key={t.id} onClick={() => setTab(t.id)}
                 className={`h-10 px-4 text-sm font-medium border-b-2 transition-colors ${
@@ -96,8 +110,150 @@ export default function ModuleSettingsPage() {
         )}
         {tab === "views"  && <SavedViewsPanel tableId={tableId} />}
         {tab === "layout" && <TableLayoutPanel tableId={tableId} moduleKey={moduleKey} />}
+        {tab === "actions" && <RowActionsPanel moduleKey={moduleKey} tableId={tableId} />}
       </div>
     </PlaygroundShell>
+  );
+}
+
+function RowActionsPanel({ moduleKey, tableId }: { moduleKey: string; tableId: string }) {
+  const modulePath = moduleKey === "quotations" ? "/quotations" : `/master/${moduleKey}`;
+  const actions = useMemo(() => getModuleRowActionMetas(moduleKey), [moduleKey]);
+  const storageKey = getRowActionStorageKey(moduleKey === "quotations" ? "quotations" : tableId);
+  const [settings, setSettings] = useState<Record<string, RowActionSetting>>({});
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setSettings(loadRowActionSettings(storageKey, actions));
+    setSaved(false);
+  }, [actions, storageKey]);
+
+  const setPlacement = (actionId: string, placement: RowActionPlacement) => {
+    setSettings((current) => ({
+      ...current,
+      [actionId]: { ...(current[actionId] ?? getDefaultRowActionSettings(actions)[actionId]), placement },
+    }));
+    setSaved(false);
+  };
+
+  const setIcon = (actionId: string, iconKey: StandardRowActionIconKey) => {
+    setSettings((current) => ({
+      ...current,
+      [actionId]: { ...(current[actionId] ?? getDefaultRowActionSettings(actions)[actionId]), iconKey },
+    }));
+    setSaved(false);
+  };
+
+  const save = () => {
+    saveRowActionSettings(storageKey, settings);
+    setSaved(true);
+  };
+
+  const reset = () => {
+    setSettings(resetRowActionSettings(storageKey, actions));
+    setSaved(false);
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-6">
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-800">Row Actions</h3>
+            <p className="text-sm text-slate-500 mt-1">
+              เลือกว่าปุ่มจัดการของแต่ละแถวจะโชว์บนตารางเลย อยู่ในเมนู ⋮ หรือซ่อนไว้ และเลือก icon มาตรฐานของปุ่มได้
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={reset}
+              disabled={actions.length === 0}
+              className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Reset
+            </button>
+            <button
+              onClick={save}
+              disabled={actions.length === 0}
+              className="h-9 px-4 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              บันทึก
+            </button>
+            <Link
+              href={modulePath}
+              className="shrink-0 h-9 px-3 inline-flex items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+            >
+              ไปหน้าตาราง
+            </Link>
+          </div>
+        </div>
+
+        {actions.length === 0 ? (
+          <div className="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">
+            โมดูลนี้ยังไม่ได้ประกาศ Row Actions กลางไว้ จึงยังตั้งค่าจากหน้านี้ไม่ได้
+          </div>
+        ) : (
+          <div className="mt-5 overflow-hidden rounded-lg border border-slate-200">
+            <div className="grid grid-cols-[1.5fr_220px_220px] bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <div>Action</div>
+              <div>แสดงที่ไหน</div>
+              <div>Icon</div>
+            </div>
+            {actions.map((action) => {
+              const current = settings[action.id] ?? getDefaultRowActionSettings(actions)[action.id];
+              return (
+                <div key={action.id} className="grid grid-cols-[1.5fr_220px_220px] items-center gap-3 border-t border-slate-100 px-4 py-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={action.group === "อันตราย" ? "text-red-500" : "text-slate-500"}>
+                        {renderStandardRowActionIcon(current.iconKey)}
+                      </span>
+                      <span className="font-medium text-slate-800">{action.label}</span>
+                      {action.group && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{action.group}</span>}
+                    </div>
+                    {action.description && <p className="mt-1 text-xs text-slate-400">{action.description}</p>}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-100 p-1">
+                    {([
+                      ["inline", "บนแถว"],
+                      ["menu", "เมนู"],
+                      ["hidden", "ซ่อน"],
+                    ] as const).map(([placement, label]) => (
+                      <button
+                        key={placement}
+                        type="button"
+                        onClick={() => setPlacement(action.id, placement)}
+                        className={`h-8 rounded-md text-xs font-medium transition-colors ${
+                          current.placement === placement ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <select
+                    value={current.iconKey}
+                    onChange={(event) => setIcon(action.id, event.target.value as StandardRowActionIconKey)}
+                    className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  >
+                    {STANDARD_ROW_ACTION_ICONS.map((icon) => (
+                      <option key={icon.key} value={icon.key}>{icon.label}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          <span>
+            ตอนนี้การตั้งค่ายังจำเฉพาะเครื่องนี้ก่อน เฟสถัดไปค่อยย้ายไปบันทึกเป็นค่า module กลาง เพื่อให้ทุกคนในทีมเห็นเหมือนกัน
+          </span>
+          {saved && <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700">บันทึกแล้ว</span>}
+        </div>
+      </div>
+    </div>
   );
 }
 

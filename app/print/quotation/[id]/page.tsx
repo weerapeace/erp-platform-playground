@@ -2,9 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PrintToolbar, PrintFrame } from "@/components/report";
+import { PrintToolbar, PrintFrame, ReportLayoutControls } from "@/components/report";
 import { apiFetch } from "@/lib/api";
+import {
+  buildQuotationHtml as buildPrintableQuotationHtml,
+  buildQuoteTemplateData as buildPrintableQuoteTemplateData,
+} from "@/lib/quotation-print";
+import { DEFAULT_REPORT_LAYOUT, reportLayoutFromStoredValue, type ReportLayoutSettings } from "@/lib/report-layout";
 import { buildReportHtml } from "@/lib/template";
+import type { ReportLayoutDefaultResponse } from "@/app/api/admin/report-layout-defaults/route";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
 
@@ -314,6 +320,10 @@ export default function PrintQuotationPage() {
   const [quote, setQuote] = useState<QuotePrintDetail | null>(null);
   const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
   const [origin, setOrigin] = useState("");
+  const [layout, setLayout] = useState<ReportLayoutSettings>(DEFAULT_REPORT_LAYOUT);
+  const [useStandardLayout, setUseStandardLayout] = useState(false);
+  const [savingLayoutDefault, setSavingLayoutDefault] = useState(false);
+  const [layoutDefaultMessage, setLayoutDefaultMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -328,14 +338,21 @@ export default function PrintQuotationPage() {
     Promise.all([
       apiFetch(`/api/quotations/${id}`).then(res => res.json()),
       apiFetch("/api/admin/report-templates?entity_type=qt").then(res => res.json()).catch(() => ({ data: [] })),
+      apiFetch("/api/admin/report-layout-defaults?entity_type=qt").then(res => res.json()).catch(() => ({ data: null })),
     ])
-      .then(async ([quoteJson, templateJson]) => {
+      .then(async ([quoteJson, templateJson, layoutDefaultJson]) => {
         if (quoteJson.error) throw new Error(quoteJson.error);
         const enriched = await enrichQuoteImages(quoteJson.data as QuoteDetail);
         const templates = ((templateJson as ReportTemplatesResponse).data ?? []).filter(item => item.active);
         const published = templates.find(item => item.is_default) ?? templates[0] ?? null;
+        const defaultLayout = (layoutDefaultJson as ReportLayoutDefaultResponse).data?.layout_settings;
         if (alive) setQuote(enriched);
         if (alive) setTemplate(published);
+        if (alive && defaultLayout) {
+          setLayout(reportLayoutFromStoredValue(defaultLayout));
+          setUseStandardLayout(true);
+          setLayoutDefaultMessage("ใช้ค่าเริ่มต้นที่บันทึกไว้");
+        }
       })
       .catch(err => {
         if (alive) setError(err instanceof Error ? err.message : "โหลดเอกสารไม่ได้");
@@ -348,7 +365,7 @@ export default function PrintQuotationPage() {
 
   const html = useMemo(() => {
     if (!quote) return "";
-    if (template) {
+    if (template && !useStandardLayout) {
       return buildReportHtml({
         paper_size: template.paper_size,
         orientation: template.orientation,
@@ -356,10 +373,55 @@ export default function PrintQuotationPage() {
         body_html: template.body_html,
         footer_html: template.footer_html,
         custom_css: template.custom_css,
-      }, buildQuoteTemplateData(quote, origin));
+      }, buildPrintableQuoteTemplateData(quote, origin));
     }
-    return buildQuotationHtml(quote, origin);
-  }, [origin, quote, template]);
+    return buildPrintableQuotationHtml(quote, origin, layout);
+  }, [layout, origin, quote, template, useStandardLayout]);
+
+  const updateLayout = (next: ReportLayoutSettings) => {
+    setLayout(next);
+    setUseStandardLayout(true);
+    setLayoutDefaultMessage(null);
+  };
+
+  const loadDefaultLayout = async () => {
+    setLayoutDefaultMessage("กำลังโหลดค่าเริ่มต้น...");
+    try {
+      const res = await apiFetch("/api/admin/report-layout-defaults?entity_type=qt");
+      const json = await res.json() as ReportLayoutDefaultResponse;
+      if (!res.ok || json.error) throw new Error(json.error ?? "โหลดค่าเริ่มต้นไม่สำเร็จ");
+      if (!json.data) {
+        setLayoutDefaultMessage("ยังไม่มีค่าเริ่มต้นที่บันทึกไว้");
+        return;
+      }
+      setLayout(reportLayoutFromStoredValue(json.data.layout_settings));
+      setUseStandardLayout(true);
+      setLayoutDefaultMessage("ใช้ค่าเริ่มต้นที่บันทึกไว้");
+    } catch (err) {
+      setLayoutDefaultMessage(err instanceof Error ? err.message : "โหลดค่าเริ่มต้นไม่สำเร็จ");
+    }
+  };
+
+  const saveDefaultLayout = async () => {
+    setSavingLayoutDefault(true);
+    setLayoutDefaultMessage(null);
+    try {
+      const res = await apiFetch("/api/admin/report-layout-defaults", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_type: "qt", layout_settings: layout }),
+      });
+      const json = await res.json() as ReportLayoutDefaultResponse;
+      if (!res.ok || json.error) throw new Error(json.error ?? "บันทึกค่าเริ่มต้นไม่สำเร็จ");
+      if (json.data?.layout_settings) setLayout(reportLayoutFromStoredValue(json.data.layout_settings));
+      setUseStandardLayout(true);
+      setLayoutDefaultMessage("บันทึกค่าเริ่มต้นแล้ว");
+    } catch (err) {
+      setLayoutDefaultMessage(err instanceof Error ? err.message : "บันทึกค่าเริ่มต้นไม่สำเร็จ");
+    } finally {
+      setSavingLayoutDefault(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -370,7 +432,17 @@ export default function PrintQuotationPage() {
         ) : error || !quote ? (
           <div className="text-center py-20 text-red-500">⚠ {error ?? "ไม่พบเอกสาร"}</div>
         ) : (
-          <PrintFrame html={html} />
+          <>
+            <ReportLayoutControls
+              value={layout}
+              onChange={updateLayout}
+              onSaveDefault={saveDefaultLayout}
+              onUseDefault={loadDefaultLayout}
+              savingDefault={savingLayoutDefault}
+              defaultMessage={layoutDefaultMessage}
+            />
+            <PrintFrame html={html} />
+          </>
         )}
       </div>
     </div>

@@ -9,7 +9,7 @@
  *
  * - new: สร้างใบเสนอราคาสถานะ draft พร้อมบรรทัดนี้ 1 รายการ
  * - เดิม: ดึงบรรทัดเดิม + ต่อท้ายบรรทัดใหม่ แล้วอัปเดต (รวมหลายสินค้าใน 1 ใบ)
- * - variation เก็บที่ช่อง note ของบรรทัด · sku = รหัสใบงาน (DS-...) ไว้ตามรอย
+ * - variation เก็บที่ช่อง note ของบรรทัด · sku ใช้รหัสสินค้าจริงเท่านั้น
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -44,12 +44,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!Number.isFinite(price) || price < 0) return NextResponse.json({ error: "ราคาต้องเป็นตัวเลขและไม่ติดลบ" }, { status: 400 });
   const qty = body.line?.qty != null && Number(body.line.qty) > 0 ? Number(body.line.qty) : 1;
 
-  // รหัสใบงาน ไว้ตามรอยในบรรทัดเสนอราคา
-  const { data: sheet } = await supabaseAdmin().from("design_sheets").select("code").eq("id", id).maybeSingle();
-  const sheetCode = (sheet?.code as string | undefined) ?? null;
+  // ใบเสนอราคาควรโชว์รหัสสินค้าจริงเท่านั้น ไม่เอารหัสใบงาน DS-... ไปออกเอกสาร
+  const { data: sheet } = await supabaseAdmin()
+    .from("design_sheets")
+    .select("code, parent_sku_code")
+    .eq("id", id)
+    .maybeSingle();
+  const productCode = (sheet?.parent_sku_code as string | undefined)?.trim() || null;
 
   const newLine: QuoteLine = {
-    sku: sheetCode, product_name: name, qty, unit: "ชิ้น", unit_price: price,
+    sku: productCode, product_name: name, qty, unit: "ชิ้น", unit_price: price,
     note: body.line?.variation?.trim() || null,
   };
 

@@ -173,11 +173,46 @@ export function pnd3NetPayBasis(payrollNetPay: unknown, paidAmount: unknown) {
   return round2(money(payrollNetPay));
 }
 
+export function payrollRegisterNetPayBasis(payrollNetPay: unknown, paidAmount: unknown) {
+  const paid = round2(money(paidAmount));
+  if (paid > 0) return paid;
+  return round2(money(payrollNetPay));
+}
+
 async function pnd3ConfirmedPaymentNetByEmployee(admin: ReturnType<typeof supabaseAdmin>, periodId: string) {
   const { data: batchRows, error: batchError } = await admin
     .from("payment_batches")
     .select("id")
     .eq("payroll_period_id", periodId)
+    .in("status", CONFIRMED_PAYMENT_STATUSES);
+  if (batchError) throw new Error(batchError.message);
+
+  const batchIds = ((batchRows ?? []) as Row[]).map((batch) => text(batch.id)).filter(Boolean);
+  if (!batchIds.length) return new Map<string, number>();
+
+  const { data: lineRows, error: lineError } = await admin
+    .from("payment_batch_lines")
+    .select("employee_id, paid_amount, status")
+    .in("payment_batch_id", batchIds)
+    .in("status", CONFIRMED_PAYMENT_STATUSES);
+  if (lineError) throw new Error(lineError.message);
+
+  const byEmployee = new Map<string, number>();
+  ((lineRows ?? []) as Row[]).forEach((line) => {
+    const employeeId = text(line.employee_id);
+    const paidAmount = round2(money(line.paid_amount));
+    if (!employeeId || paidAmount <= 0) return;
+    byEmployee.set(employeeId, round2((byEmployee.get(employeeId) ?? 0) + paidAmount));
+  });
+  return byEmployee;
+}
+
+async function payrollRegisterConfirmedMonthEndPaymentNetByEmployee(admin: ReturnType<typeof supabaseAdmin>, periodId: string) {
+  const { data: batchRows, error: batchError } = await admin
+    .from("payment_batches")
+    .select("id")
+    .eq("payroll_period_id", periodId)
+    .eq("batch_type", "month_end")
     .in("status", CONFIRMED_PAYMENT_STATUSES);
   if (batchError) throw new Error(batchError.message);
 
@@ -269,11 +304,12 @@ export function payrollExportTotals(rows: PayrollExportRow[]) {
 
 export function payrollRegisterExportAmounts(row: Record<string, unknown>) {
   const registerBase = money(row.payroll_register_base_salary) || money(row.base_salary);
+  const registerNetPay = payrollRegisterNetPayBasis(row.net_pay, row.register_paid_amount ?? row.paid_amount);
   return computePayrollRegisterAmounts({
     base_salary: registerBase,
     mid_month_paid: row.mid_month_paid,
     social_security_employee: row.social_security_employee,
-    net_pay: row.net_pay,
+    net_pay: registerNetPay,
   });
 }
 
@@ -490,6 +526,9 @@ export async function getPayrollExportPreview(periodId: string, type: PayrollExp
   const pnd3PaymentNetByEmployee = type === "pnd3"
     ? await pnd3ConfirmedPaymentNetByEmployee(admin, periodId)
     : new Map<string, number>();
+  const payrollRegisterPaymentNetByEmployee = type === "payroll_register"
+    ? await payrollRegisterConfirmedMonthEndPaymentNetByEmployee(admin, periodId)
+    : new Map<string, number>();
 
   const allRows = lines.map((line): PayrollExportRow => {
     const employeeId = text(line.employee_id);
@@ -498,6 +537,7 @@ export async function getPayrollExportPreview(periodId: string, type: PayrollExp
     const pnd3NetBasis = pnd3NetPayBasis(line.net_pay, pnd3PaymentNetByEmployee.get(employeeId));
     const pnd3Amounts = pnd3GrossUpFromNet(pnd3NetBasis, 3);
     const registerBase = money(contract.payroll_register_base_salary) || money(line.base_salary);
+    const registerPaidAmount = payrollRegisterPaymentNetByEmployee.get(employeeId);
     const identityNo = payrollExportIdentityNo({
       identity_no: "",
       national_id: text(employee.national_id),
@@ -506,6 +546,7 @@ export async function getPayrollExportPreview(periodId: string, type: PayrollExp
     const registerAmounts = payrollRegisterExportAmounts({
       ...line,
       payroll_register_base_salary: registerBase,
+      register_paid_amount: registerPaidAmount,
     });
     return {
       id: text(line.id),
