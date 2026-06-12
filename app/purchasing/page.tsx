@@ -137,21 +137,21 @@ export default function PurchasingShopPage() {
       .catch(() => {});
   }, []);
 
-  // โหลดรายชื่อแท็กทั้งหมด (id→ชื่อ) + แท็กที่ตั้ง "ห้ามขอซื้อ" (กฎกลาง) ในครั้งเดียว
-  useEffect(() => {
-    apiFetch(`/api/master-v2/product_families?limit=500`).then(r => r.json())
-      .then(j => {
-        const rows = (j.data ?? []) as Record<string, unknown>[];
-        const names: Record<string, string> = {};
-        const hidden: string[] = [];
-        rows.forEach(t => {
-          names[String(t.id)] = String(t.name ?? t.id);
-          if (t.hide_in_purchasing === true) hidden.push(String(t.id));
-        });
-        setTagNames(names); setHiddenTagIds(hidden);
-      })
-      .catch(() => {});
+  // โหลดรายชื่อแท็กทั้งหมด (id→ชื่อ) + แท็กที่ตั้ง "ห้ามขอซื้อ" (กฎกลาง) — เรียกซ้ำได้หลัง admin แก้ใน ⚙
+  const reloadHiddenTags = useCallback(async () => {
+    try {
+      const j = await apiFetch(`/api/master-v2/product_families?limit=500`).then(r => r.json());
+      const rows = (j.data ?? []) as Record<string, unknown>[];
+      const names: Record<string, string> = {};
+      const hidden: string[] = [];
+      rows.forEach(t => {
+        names[String(t.id)] = String(t.name ?? t.id);
+        if (t.hide_in_purchasing === true) hidden.push(String(t.id));
+      });
+      setTagNames(names); setHiddenTagIds(hidden);
+    } catch { /* ignore */ }
   }, []);
+  useEffect(() => { void reloadHiddenTags(); }, [reloadHiddenTags]);
   // แยกแท็กที่เลือกเป็น 2 กอง ตามโหมดของแต่ละตัวกรอง: ซ่อน (hide) / โชว์เฉพาะ (show)
   // ซ่อน = กฎกลาง (ห้ามขอซื้อ) + ที่ผู้ใช้เลือกโหมดซ่อน ; โชว์เฉพาะ = ที่ผู้ใช้เลือกโหมดโชว์
   const { exclTagIds, inclTagIds } = useMemo(() => {
@@ -634,7 +634,9 @@ export default function PurchasingShopPage() {
               <p className="text-xs text-slate-500 leading-relaxed">เลือกแท็ก (ประเภทสินค้า) เพื่อดูเฉพาะสินค้าในแท็กนั้น</p>
               <TagGroupFilter label="เลือกแท็ก" showNone={false}
                 value={{ tagIds: tagsSel, none: false }}
-                onChange={(v) => setTagsSel(v.tagIds)} />
+                onChange={(v) => setTagsSel(v.tagIds)}
+                manageFlag={{ field: "hide_in_purchasing", onLabel: "🙈 ห้ามขอซื้อ", offLabel: "👁 โชว์", permission: "products.edit" }}
+                onManaged={() => { void reloadHiddenTags(); }} />
               {tagsSel.length > 0 ? (
                 <div className="flex flex-wrap gap-1 pt-1">
                   {tagsSel.map(tid => (
