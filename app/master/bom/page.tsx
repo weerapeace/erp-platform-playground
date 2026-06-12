@@ -7,7 +7,8 @@
  *   DataTable / ERPModal / ConfirmDialog / SkuPicker(/api/admin/picker) / useToast / useAuth
  *   ไม่ query Supabase ตรง — ผ่าน /api/bom (อ่าน auth, เขียน admin, audit)
  */
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import type { SizeTemplate } from "@/app/api/admin/size-templates/route";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -90,6 +91,8 @@ export default function BomWorkspacePage() {
   const [versions, setVersions]   = useState<BomVersionRow[]>([]);
   const [newVerOpen, setNewVerOpen] = useState(false);
   const [copyFromId, setCopyFromId] = useState<string>("");
+  const [sizeTemplates, setSizeTemplates] = useState<SizeTemplate[]>([]);
+  useEffect(() => { apiFetch("/api/admin/size-templates").then((r) => r.json()).then((j) => setSizeTemplates((j.data ?? []) as SizeTemplate[])).catch(() => {}); }, []);
 
   // server mode — โหลดทีละหน้า + ค้นที่ server (กันค้างตอนพิมพ์ search)
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
@@ -441,22 +444,22 @@ export default function BomWorkspacePage() {
                 {canEdit && (
                   <select value="" title="เลือกชุดไซส์มาตรฐาน — ระบบจะเพิ่มให้ทั้งชุด"
                     onChange={(e) => {
-                      const v = e.target.value; if (!v) return;
-                      const labels = v.split(",");
-                      const add = labels.filter((l) => !form.sizes.some((s) => s.label === l)).map((l, i) => ({ label: l, sort: form.sizes.length + i }));
+                      const t = sizeTemplates.find((x) => x.id === e.target.value); if (!t) return;
+                      const add = t.labels.filter((l) => !form.sizes.some((s) => s.label === l)).map((l, i) => ({ label: l, sort: form.sizes.length + i }));
                       if (add.length) patchForm({ sizes: [...form.sizes, ...add] });
                     }}
                     className="h-7 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-600 bg-white">
                     <option value="">＋ ใช้ชุดไซส์มาตรฐาน…</option>
-                    <option value="S,M,L">เสื้อ: S / M / L</option>
-                    <option value="S,M,L,XL,XXL">เสื้อ: S / M / L / XL / XXL</option>
-                    <option value="ฟรีไซส์">ฟรีไซส์</option>
-                    <option value={'38",40",42",44"'}>เข็มขัด: 38&quot; / 40&quot; / 42&quot; / 44&quot;</option>
-                    <option value={'36",38",40",42",44",46"'}>เข็มขัด: 36&quot;–46&quot;</option>
+                    {sizeTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 )}
+                {canEdit && <a href="/admin/size-templates" target="_blank" rel="noopener" className="text-[11px] text-blue-600 hover:underline whitespace-nowrap">⚙️ จัดการชุดไซส์</a>}
               </div>
-              {form.sizes.length > 0 && <p className="text-[11px] text-slate-400 mt-1">ติ๊กช่อง “ผันไซส์” ที่บรรทัดวัตถุดิบ แล้วกรอกค่าต่อไซส์ในตารางด้านล่าง</p>}
+              <p className="text-[11px] text-slate-400 mt-1">
+                {form.sizes.length > 0
+                  ? "ขั้นต่อไป: ที่บรรทัดวัตถุดิบ ติ๊กช่อง “ผันไซส์” เฉพาะตัวที่ค่าต่างกันตามไซส์ (เช่น ความยาว) แล้วกรอกค่าต่อไซส์ในตารางด้านล่าง"
+                  : "ไซส์ = ใช้เมื่อสินค้านี้มีหลายขนาด · เพิ่มไซส์ที่นี่ก่อน แล้วค่อยตั้งค่าต่อไซส์ที่บรรทัดวัตถุดิบ (ถ้าใช้ขนาดเดียว ข้ามได้)"}
+              </p>
             </div>
 
             {/* lines */}
