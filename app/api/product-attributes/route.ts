@@ -47,7 +47,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const valOf = (r: Record<string, unknown>): AttrVal => ({ option_id: (r.option_id as string) ?? null, option_ids: Array.isArray(r.option_ids) ? (r.option_ids as string[]) : [], text_value: (r.text_value as string) ?? null, number_value: r.number_value == null ? null : Number(r.number_value), boolean_value: r.boolean_value == null ? null : !!r.boolean_value });
   const model_values: Record<string, AttrVal> = {};
   const sku_values: Record<string, AttrVal> = {};
-  if (parent) { const { data } = await admin.from("product_model_attribute_values").select("*").eq("product_model_id", (parent as { id: string }).id); for (const r of (data ?? []) as Record<string, unknown>[]) model_values[String(r.definition_id)] = valOf(r); }
+  const productModelId = parent ? await resolveProductModelId(admin, (parent as { id: string }).id, false) : null;
+  if (productModelId) { const { data } = await admin.from("product_model_attribute_values").select("*").eq("product_model_id", productModelId); for (const r of (data ?? []) as Record<string, unknown>[]) model_values[String(r.definition_id)] = valOf(r); }
   { const { data } = await admin.from("product_sku_attribute_values").select("*").eq("product_sku_id", skuRow.id); for (const r of (data ?? []) as Record<string, unknown>[]) sku_values[String(r.definition_id)] = valOf(r); }
 
   // ป้ายชื่อ SKU ปัจจุบันของฟิลด์อ้างวัตถุดิบ (code → "[code] ชื่อ")
@@ -79,6 +80,18 @@ function rowFor(iv: InVal, link: Record<string, string>): Record<string, unknown
   else if (iv.input_type === "boolean") { if (v == null) return null; base.boolean_value = !!v; }
   else { const t = str(v).trim(); if (!t) return null; base.text_value = t; }
   return base;
+}
+
+/** หา product_models.id ของ parent (อ้างผ่าน source_parent_sku_id) · create=true → สร้างให้ถ้ายังไม่มี */
+async function resolveProductModelId(admin: ReturnType<typeof supabaseAdmin>, parentId: string, create: boolean): Promise<string | null> {
+  const { data: pm } = await admin.from("product_models").select("id").eq("source_parent_sku_id", parentId).maybeSingle();
+  if ((pm as { id: string } | null)?.id) return (pm as { id: string }).id;
+  if (!create) return null;
+  const { data: parent } = await admin.from("parent_skus_v2").select("code, product_family").eq("id", parentId).maybeSingle();
+  const code = ((parent as { code?: string } | null)?.code) || `PM-${parentId.slice(0, 8)}`;
+  const { data: created, error } = await admin.from("product_models").insert({ code, product_family: (parent as { product_family?: string } | null)?.product_family ?? null, source_parent_sku_id: parentId }).select("id").single();
+  if (error) return null;
+  return (created as { id: string }).id;
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -114,7 +127,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (rows.length) { const { error } = await admin.from(table).insert(rows); if (error) throw new Error(error.message); }
   };
   try {
-    if (parentId && Array.isArray(body.model)) await saveVals("product_model_attribute_values", { product_model_id: parentId }, body.model);
+    if (parentId && Array.isArray(body.model)) {
+      const productModelId = await resolveProductModelId(admin, parentId, true);
+      if (productModelId) await saveVals("product_model_attribute_values", { product_model_id: productModelId }, body.model);
+    }
     if (Array.isArray(body.sku_vals)) await saveVals("product_sku_attribute_values", { product_sku_id: skuRow.id as string }, body.sku_vals);
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "บันทึก attribute ไม่สำเร็จ" }, { status: 400 }); }
 
