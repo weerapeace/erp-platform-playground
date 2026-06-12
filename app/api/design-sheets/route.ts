@@ -72,7 +72,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const archived = searchParams.get("archived") === "1";   // โชว์ที่เก็บเข้ากรุ
   const limit  = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
-  const SAFE = ["code", "name", "status", "order_date", "deadline", "created_at", "updated_at"];
+  const SAFE = ["code", "name", "status", "order_date", "deadline", "created_at", "updated_at", "sort_order"];
   const sortBy = searchParams.get("sort_by");
   const orderCol = sortBy && SAFE.includes(sortBy) ? sortBy : "updated_at";
   const orderAsc = sortBy ? searchParams.get("sort_dir") === "asc" : false;

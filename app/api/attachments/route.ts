@@ -91,5 +91,6 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ data, error: null });
+  // public_url ระดับบนสุด — ให้ฝั่ง client (เช่น Tiptap แทรกรูป) ใช้ได้ทันทีไม่ต้อง re-fetch
+  return NextResponse.json({ data, public_url: publicUrl, error: null });
 }

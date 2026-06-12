@@ -44,7 +44,7 @@ function buildData(sheet: Sheet, comments: DesignSheetComment[], images: Attachm
     order_date_th: thaiDate(sheet.order_date as string | null),
     deadline_th:   thaiDate(sheet.deadline as string | null),
     note:          sheet.note ?? "",
-    detail_html:   canvasImg || detail ? `${canvasImg}${detail ? esc(detail).replace(/\n/g, "<br/>") : ""}` : "",
+    detail_html:   canvasImg || detail ? `${canvasImg}${detail}` : "",   // detail = HTML จาก RichTextEditor → ใส่ดิบ
     images_html:   imgTags,
     comments: comments.map((c, i) => ({
       idx: i + 1,

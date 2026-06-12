@@ -31,7 +31,8 @@ type Sheet = Record<string, unknown> & { brand?: { name?: string } | Array<{ nam
 function buildData(sheet: Sheet, quotes: DesignSheetQuote[], cover: Attachment | null, origin: string): Record<string, unknown> {
   const brand = (Array.isArray(sheet.brand) ? sheet.brand[0] : sheet.brand) as { name?: string } | null;
   const qRow = (q: DesignSheetQuote) => ({
-    round: q.round, date_th: thaiDate(q.quote_date), price_th: baht(q.price),
+    // ราคาที่พิมพ์ = ราคาที่เสนอจริง (offered_price) ถ้าไม่มีใช้ราคาจากตีราคา
+    round: q.round, date_th: thaiDate(q.quote_date), price_th: baht(q.offered_price ?? q.price),
     status_label: QUOTE_STATUS[q.status]?.label ?? q.status, note: q.note ?? "",
   });
   const latest = quotes.length > 0 ? quotes[quotes.length - 1] : null;

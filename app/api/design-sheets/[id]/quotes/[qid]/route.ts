@@ -19,7 +19,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id, qid } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { quote_date?: string; price?: number | null; status?: string; note?: string | null };
+  let body: { quote_date?: string; price?: number | null; offered_price?: number | null; status?: string; note?: string | null };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -31,6 +31,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: "ราคาต้องเป็นตัวเลขและไม่ติดลบ" }, { status: 400 });
     }
     patch.price = price;
+  }
+  if (body.offered_price !== undefined) {
+    const op = body.offered_price != null ? Number(body.offered_price) : null;
+    if (op != null && (!Number.isFinite(op) || op < 0)) {
+      return NextResponse.json({ error: "ราคาต้องเป็นตัวเลขและไม่ติดลบ" }, { status: 400 });
+    }
+    patch.offered_price = op;
   }
   if (body.status !== undefined) {
     if (!(QUOTE_STATUSES as readonly string[]).includes(body.status ?? "")) {

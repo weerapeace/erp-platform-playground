@@ -15,7 +15,14 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
-import { CanvasSketch, type CanvasSketchControls } from "@/components/canvas-sketch";
+import { WorkflowStatusManager } from "@/components/workflow-status-manager";
+import { SkuWizard } from "./sku-wizard";
+import { ToQuotationModal } from "./to-quotation-modal";
+import { QuotationCartDrawer } from "./quotation-cart-drawer";
+
+const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
+import { RichTextEditor } from "@/components/rich-text";
+import type { Attachment } from "@/app/api/attachments/route";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -156,14 +163,12 @@ export default function DesignSheetsPage() {
   const [archiveTarget, setArchiveTarget] = useState<DesignSheetListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
 
-  // เตือนก่อนปิด เมื่อมีข้อมูลยังไม่บันทึก (กระดาน + ตีราคา)
-  const canvasControlsRef = useRef<CanvasSketchControls | null>(null);
-  const [canvasDirty, setCanvasDirty] = useState(false);
+  // เตือนก่อนปิด เมื่อมีข้อมูลตีราคายังไม่บันทึก
   const [closeConfirm, setCloseConfirm] = useState(false);
   const [closeSaving, setCloseSaving] = useState(false);
 
   // ---- เฟส 3: แท็บในป๊อปอัพ + comment ลูกค้า + รอบเสนอราคา ----
-  const [modalTab, setModalTab] = useState<"info" | "board" | "comments" | "cost" | "quotes">("info");
+  const [modalTab, setModalTab] = useState<"info" | "comments" | "cost" | "quotes">("info");
   const [comments, setComments] = useState<DesignSheetComment[]>([]);
   const [quotes, setQuotes] = useState<DesignSheetQuote[]>([]);
   const [cqLoading, setCqLoading] = useState(false);
@@ -178,25 +183,32 @@ export default function DesignSheetsPage() {
   const [delComment, setDelComment] = useState<DesignSheetComment | null>(null);
   // เพิ่ม/แก้รอบเสนอราคา
   const [newQDate, setNewQDate] = useState("");
-  const [newQPrice, setNewQPrice] = useState("");
+  const [newQPrice, setNewQPrice] = useState("");      // ราคาจากตีราคา (อ้างอิง)
+  const [newQOffered, setNewQOffered] = useState("");  // ราคาที่เสนอ (ใช้อันนี้)
   const [newQStatus, setNewQStatus] = useState("pending");
   const [newQNote, setNewQNote] = useState("");
   const [qSaving, setQSaving] = useState(false);
   const [editQid, setEditQid] = useState<string | null>(null);
-  const [editQ, setEditQ] = useState({ quote_date: "", price: "", note: "" });
+  const [editQ, setEditQ] = useState({ quote_date: "", price: "", offered: "", note: "" });
   const [delQuote, setDelQuote] = useState<DesignSheetQuote | null>(null);
 
   // ---- เฟส 4: ตีราคา ----
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
   const [costLines, setCostLines] = useState<CostRow[]>([]);
   const [costDirty, setCostDirty] = useState(false);
-  const [costView, setCostView] = useState<"card" | "table">("card");   // มุมมองตีราคา: การ์ด/ตาราง
-  const [cardSearch, setCardSearch] = useState("");                       // ค้นหาวัสดุในมุมมองการ์ด
   const [costSaving, setCostSaving] = useState(false);
   const [costExtra, setCostExtra] = useState<CostExtra[]>([]);            // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ)
   const costTotal  = costLines.reduce((s, r) => s + (r.amount || 0), 0);  // ต้นทุนวัสดุดิบรวม
   const extraTotal = costExtra.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const grandTotal = costTotal + extraTotal;                              // ต้นทุนสินค้า (รวมทั้งหมด)
+  // ราคาที่เสนอ (ผ่านแล้ว) ล่าสุด — ใช้เป็นราคาตั้งต้นใน Wizard สร้าง SKU
+  const offeredPrice = useMemo<number | null>(() => {
+    const val = (q: DesignSheetQuote) => (q.offered_price ?? q.price);
+    const passed = quotes.filter((q) => q.status === "passed" && val(q) != null);
+    const pool = passed.length > 0 ? passed : quotes.filter((q) => val(q) != null);
+    if (pool.length === 0) return null;
+    return val(pool.reduce((a, b) => (b.round > a.round ? b : a))) ?? null;
+  }, [quotes]);
   // ต้นทุนวัสดุแยกตามชนิด (สำหรับการ์ดสรุป)
   const costByGroup = useMemo(() => {
     const m = new Map<string, number>();
@@ -361,28 +373,25 @@ export default function DesignSheetsPage() {
     setPendImgs((list) => { list.forEach((p) => URL.revokeObjectURL(p.url)); return []; });
   }, []);
 
-  // ---- เตือนก่อนปิด (มีข้อมูลยังไม่บันทึก: กระดาน หรือ ตีราคา) ----
-  const hasUnsavedClose = () => (canvasControlsRef.current?.isDirty() ?? false) || costDirty;
+  // ---- เตือนก่อนปิด (มีข้อมูลตีราคายังไม่บันทึก) ----
   const doClose = useCallback(() => {
-    setForm(null); clearPend(); setCloseConfirm(false); setCanvasDirty(false);
+    setForm(null); clearPend(); setCloseConfirm(false);
   }, [clearPend]);
   const requestClose = () => {
     if (saving) return;
-    if (hasUnsavedClose()) setCloseConfirm(true);
+    if (costDirty) setCloseConfirm(true);
     else doClose();
   };
-  // "บันทึกแล้วปิด" — บันทึกกระดาน + ตีราคา ที่ค้าง แล้วปิด
+  // "บันทึกแล้วปิด" — บันทึกตีราคาที่ค้าง แล้วปิด
   const saveAndClose = async () => {
     setCloseSaving(true);
     try {
-      if (canvasControlsRef.current?.isDirty()) await canvasControlsRef.current.save();
       if (costDirty) await saveCost();
       doClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setCloseSaving(false); }
   };
-  // "ออกโดยไม่บันทึก" — ทิ้งกระดานที่ค้าง (กัน auto-save ตอน unmount) แล้วปิด
-  const discardAndClose = () => { canvasControlsRef.current?.discard(); doClose(); };
+  const discardAndClose = () => doClose();
 
   // Ctrl+V วางรูป — ทำงานเฉพาะตอนเปิดฟอร์มสร้างใหม่ (ยังไม่มี id)
   useEffect(() => {
@@ -458,8 +467,9 @@ export default function DesignSheetsPage() {
     if (!(total > 0)) { toast.error("ยังไม่มียอดตีราคา — ใส่บรรทัดวัสดุ/ค่าใช้จ่ายก่อน"); return; }
     if (costDirty && !(await saveCost())) return;
     try {
+      // price = ราคาจากตีราคา (อ้างอิง), offered_price = ตั้งต้นเท่ายอดตีราคา (แก้ทีหลังได้)
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: todayStr(), price: total, status: "pending", note: "จากตีราคา" }) });
+        body: JSON.stringify({ quote_date: todayStr(), price: total, offered_price: total, status: "pending", note: "จากตีราคา" }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       await loadCq(form.id);
       setModalTab("quotes");
@@ -467,12 +477,6 @@ export default function DesignSheetsPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "ส่งยอดไม่สำเร็จ"); }
   };
 
-  // กด "ลงตะกร้า" จากการ์ดวัสดุ → เพิ่มเป็นบรรทัดตีราคา
-  const addCostFromItem = (it: PriceItem) => {
-    setCostLines((prev) => [...prev, rowFromItem(it, prev.length)]);
-    setCostDirty(true);
-    toast.success(`เพิ่ม "${it.name}" ลงตีราคาแล้ว`);
-  };
 
   useEffect(() => {
     if (form?.id) void loadCq(form.id);
@@ -520,10 +524,12 @@ export default function DesignSheetsPage() {
     if (!form?.id || qSaving) return;
     setQSaving(true);
     try {
+      // ถ้าไม่กรอกราคาที่เสนอ ใช้ราคาจากตีราคาแทน
+      const offered = newQOffered !== "" ? Number(newQOffered) : (newQPrice !== "" ? Number(newQPrice) : null);
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: newQDate || todayStr(), price: newQPrice === "" ? null : Number(newQPrice), status: newQStatus, note: newQNote || null }) });
+        body: JSON.stringify({ quote_date: newQDate || todayStr(), price: newQPrice === "" ? null : Number(newQPrice), offered_price: offered, status: newQStatus, note: newQNote || null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      setNewQPrice(""); setNewQNote(""); setNewQStatus("pending"); setNewQDate(todayStr());
+      setNewQPrice(""); setNewQOffered(""); setNewQNote(""); setNewQStatus("pending"); setNewQDate(todayStr());
       await loadCq(form.id); toast.success(`เพิ่มรอบเสนอราคา ครั้งที่ ${j.round} แล้ว`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มรอบเสนอราคาไม่สำเร็จ"); }
     finally { setQSaving(false); }
@@ -540,12 +546,12 @@ export default function DesignSheetsPage() {
     } catch (e) { setQuotes(prev); toast.error(e instanceof Error ? e.message : "เปลี่ยนสถานะไม่สำเร็จ"); }
   };
 
-  const startEditQuote = (q: DesignSheetQuote) => { setEditQid(q.id); setEditQ({ quote_date: q.quote_date ?? "", price: q.price != null ? String(q.price) : "", note: q.note ?? "" }); };
+  const startEditQuote = (q: DesignSheetQuote) => { setEditQid(q.id); setEditQ({ quote_date: q.quote_date ?? "", price: q.price != null ? String(q.price) : "", offered: q.offered_price != null ? String(q.offered_price) : "", note: q.note ?? "" }); };
   const saveEditQuote = async () => {
     if (!form?.id || !editQid) return;
     try {
       const res = await apiFetch(`/api/design-sheets/${form.id}/quotes/${editQid}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quote_date: editQ.quote_date || null, price: editQ.price === "" ? null : Number(editQ.price), note: editQ.note || null }) });
+        body: JSON.stringify({ quote_date: editQ.quote_date || null, price: editQ.price === "" ? null : Number(editQ.price), offered_price: editQ.offered === "" ? null : Number(editQ.offered), note: editQ.note || null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setEditQid(null); await loadCq(form.id); toast.success("แก้รอบเสนอราคาแล้ว");
     } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
@@ -568,9 +574,24 @@ export default function DesignSheetsPage() {
   const [canvasLoading, setCanvasLoading] = useState(false);
   const [canvasErr, setCanvasErr] = useState<string | null>(null);
 
-  // สถานะจากระบบ Workflow กลาง (แก้เองได้ที่ /admin/workflows) — โหลดไม่ได้ = ใช้ชุดสำรองในโค้ด
+  // สถานะจากระบบ Workflow กลาง (แก้เองได้ที่ /admin/workflows หรือปุ่ม "จัดการสถานะงาน") — โหลดไม่ได้ = ใช้ชุดสำรองในโค้ด
   const [wfMeta, setWfMeta] = useState<StatusMeta>(() => buildStatusMeta(null));
+  const [statusMgr, setStatusMgr] = useState(false);   // ป๊อปอัปจัดการสถานะงาน
+  const [skuWizard, setSkuWizard] = useState(false);   // Wizard สร้าง SKU
+  const [toQuote, setToQuote] = useState(false);       // ส่งไปใบเสนอราคา (ระบบขาย)
+  const [cartId, setCartId] = useState<string | null>(null);   // ตะกร้าใบเสนอราคาปัจจุบัน
+  const [cartLabel, setCartLabel] = useState<string | null>(null);
+  const [cartRefresh, setCartRefresh] = useState(0);
+  useEffect(() => { try { setCartId(localStorage.getItem(QUOTE_CART_KEY)); } catch { /* ignore */ } }, []);
+  const setCart = useCallback((qid: string) => { setCartId(qid); try { localStorage.setItem(QUOTE_CART_KEY, qid); } catch { /* ignore */ } }, []);
+  const clearCart = useCallback(() => { setCartId(null); try { localStorage.removeItem(QUOTE_CART_KEY); } catch { /* ignore */ } }, []);
+  const bumpCart = useCallback(() => setCartRefresh((n) => n + 1), []);
   const statusOf = (key: string) => wfMeta.map[key] ?? { label: key, cls: UNKNOWN_STATUS_CLS };
+
+  const reloadStatuses = useCallback(() => {
+    apiFetch("/api/design-sheets/statuses").then((r) => r.json())
+      .then((j) => { if (!j.error) setWfMeta(buildStatusMeta(j.data as WfStatusRow[])); }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -585,7 +606,7 @@ export default function DesignSheetsPage() {
     if (view !== "canvas") return;
     let alive = true;
     setCanvasLoading(true); setCanvasErr(null);
-    const params = new URLSearchParams({ limit: "500", sort_by: "deadline", sort_dir: "asc" });
+    const params = new URLSearchParams({ limit: "500", sort_by: "sort_order", sort_dir: "asc" });
     if (brandFilter) params.set("brand_id", brandFilter);
     apiFetch(`/api/design-sheets?${params}`).then((r) => r.json()).then((j) => {
       if (!alive) return;
@@ -625,6 +646,18 @@ export default function DesignSheetsPage() {
     }
   };
 
+  // ลากสลับ/เรียงลำดับการ์ด → จำลำดับถาวร (sort_order)
+  const reorderCards = async (orderedIds: string[]) => {
+    const byId = new Map(canvasItems.map((it) => [it.id, it]));
+    const next = orderedIds.map((id) => byId.get(id)).filter(Boolean) as DesignSheetListItem[];
+    for (const it of canvasItems) if (!orderedIds.includes(it.id)) next.push(it);
+    setCanvasItems(next);
+    try {
+      const res = await apiFetch("/api/design-sheets/reorder", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: next.map((x) => x.id) }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกลำดับไม่สำเร็จ"); }
+  };
+
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
     if (p.search) params.set("search", p.search);
@@ -639,6 +672,33 @@ export default function DesignSheetsPage() {
   }, [statusFilter, brandFilter, showArchived]);
 
   const patch = (p: Partial<FormState>) => setForm((f) => (f ? { ...f, ...p } : f));
+
+  // อัปโหลดรูปในรายละเอียดงาน (Tiptap) → R2 ผ่านระบบแนบไฟล์กลาง (entity=design_sheet_detail)
+  const uploadDetailImage = async (file: File): Promise<string> => {
+    if (!form?.id) throw new Error("ต้องบันทึกใบงานก่อน");
+    const fd = new FormData();
+    fd.append("file", file); fd.append("entity_type", "design_sheet_detail"); fd.append("entity_id", form.id);
+    const an = user?.name ?? user?.email; if (an) fd.append("actor", an);
+    const res = await apiFetch("/api/attachments", { method: "POST", body: fd });
+    const j = await res.json(); if (j.error) throw new Error(j.error);
+    const url = j.public_url ?? j.data?.public_url;
+    if (!url) throw new Error("อัปโหลดรูปไม่สำเร็จ");
+    return url as string;
+  };
+  // ลบรูปในรายละเอียดที่ถูกเอาออกจากเนื้อหา → ลบจาก R2 (ย้าย trash) กันไฟล์ขยะ
+  const reconcileDetailImages = async (sheetId: string, html: string) => {
+    try {
+      const res = await apiFetch(`/api/attachments?entity_type=design_sheet_detail&entity_id=${encodeURIComponent(sheetId)}`);
+      const j = await res.json();
+      const atts = (j.data ?? []) as Attachment[];
+      const actor = encodeURIComponent(user?.name ?? user?.email ?? "");
+      for (const a of atts) {
+        if (a.public_url && !html.includes(a.public_url)) {
+          await apiFetch(`/api/attachments/${a.id}?actor=${actor}`, { method: "DELETE" });
+        }
+      }
+    } catch { /* ไม่ critical */ }
+  };
 
   const openCreate = () => { setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostExtra(DEFAULT_COST_EXTRA); };
 
@@ -677,6 +737,7 @@ export default function DesignSheetsPage() {
         : await apiFetch("/api/design-sheets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       if (form.id) {
+        await reconcileDetailImages(form.id, form.detail);   // ลบรูปในรายละเอียดที่ถูกเอาออก (→ R2 trash)
         toast.success("บันทึกแล้ว");
         setForm(null);
       } else {
@@ -839,8 +900,6 @@ export default function DesignSheetsPage() {
             <p className="text-sm text-slate-500 mt-0.5">งานออกแบบสินค้าใหม่ ตั้งแต่รับโจทย์จนตั้งเป็นสินค้าจริง — คลิกแถวเพื่อเปิดดู/แก้</p>
           </div>
           <div className="flex items-center gap-2">
-            <a href="/master/design-sheets/canvas-demo" title="เดโม่กระดานรายละเอียดงาน — ลองเล่นก่อนตัดสินใจ"
-              className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🧪 ทดลอง Canvas</a>
             {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบงานออกแบบ</button>}
           </div>
         </div>
@@ -871,6 +930,12 @@ export default function DesignSheetsPage() {
               <input type="checkbox" checked={showArchived} onChange={(e) => { setShowArchived(e.target.checked); refresh(); }} className="rounded border-slate-300" />
               แสดงที่เก็บเข้ากรุ
             </label>
+          )}
+          {view === "canvas" && canEdit && (
+            <button onClick={() => setStatusMgr(true)} title="เพิ่ม/แก้ชื่อ/เปลี่ยนสี/เรียงลำดับสถานะงาน"
+              className="h-8 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50 ml-auto">
+              ⚙️ จัดการสถานะงาน
+            </button>
           )}
         </div>
 
@@ -905,6 +970,7 @@ export default function DesignSheetsPage() {
             getZoneId={(it) => (knownStatus.has(it.status) ? it.status : OLD_STATUS_ZONE)}
             canDrag={canEdit}
             onMove={canEdit ? moveStatus : undefined}
+            onReorder={canEdit ? reorderCards : undefined}
             onCardClick={openEdit}
             cardWidth={184}
             emptyText="ยังไม่มีงานในสถานะนี้ — ลากการ์ดมาวางได้"
@@ -954,6 +1020,10 @@ export default function DesignSheetsPage() {
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบเสนอราคา</a>
               <a href={`/print/design-sheet-cost/${form.id}`} target="_blank" rel="noreferrer"
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบตีราคา</a>
+              {canCreate && (
+                <button onClick={() => setSkuWizard(true)} title="สร้าง Parent SKU + SKU ลูก จากใบงานนี้"
+                  className="h-9 px-3 inline-flex items-center text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">🪄 สร้าง SKU</button>
+              )}
             </div>
           )}
           <button onClick={requestClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
@@ -966,7 +1036,7 @@ export default function DesignSheetsPage() {
             {/* แท็บ (โผล่เมื่อบันทึกแล้ว) */}
             {form.id && (
               <div className="flex items-center gap-1 border-b border-slate-200 pb-2">
-                {([["info", "📋 ข้อมูลงาน"], ["board", "🖌 กระดาน"], ["comments", `💬 Comment ลูกค้า (${comments.length})`], ["cost", `🧮 ตีราคา (${costLines.length})`], ["quotes", `💰 เสนอราคา (${quotes.length})`]] as const).map(([k, l]) => (
+                {([["info", "📋 ข้อมูลงาน"], ["comments", `💬 Comment ลูกค้า (${comments.length})`], ["cost", `🧮 ตีราคา (${costLines.length})`], ["quotes", `💰 เสนอราคา (${quotes.length})`]] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setModalTab(k)}
                     className={`h-8 px-3 text-sm rounded-lg ${modalTab === k ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{l}</button>
                 ))}
@@ -1053,11 +1123,14 @@ export default function DesignSheetsPage() {
               </label>
             </div>
 
-            <label className="block">
+            <div className="block">
               <span className="text-[11px] text-slate-500">รายละเอียดงาน</span>
-              <textarea rows={3} value={form.detail} onChange={(e) => patch({ detail: e.target.value })} disabled={!canEdit}
-                className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-            </label>
+              <div className="mt-0.5">
+                <RichTextEditor value={form.detail} onChange={(html) => patch({ detail: html })} editable={canEdit}
+                  onUploadImage={form.id ? uploadDetailImage : undefined} minHeight={150} />
+                {!form.id && <p className="text-[10px] text-slate-400 mt-0.5">บันทึกใบงานก่อน แล้วจะวางรูปในรายละเอียดได้</p>}
+              </div>
+            </div>
 
             <label className="block">
               <span className="text-[11px] text-slate-500">Note</span>
@@ -1103,12 +1176,6 @@ export default function DesignSheetsPage() {
               )}
             </div>
             </div>}
-
-            {/* แท็บกระดานวาด (ของกลาง CanvasSketch — Excalidraw) */}
-            {modalTab === "board" && form.id && (
-              <CanvasSketch entityType="design_sheet" entityId={form.id} editable={canEdit} height="56vh"
-                onDirtyChange={setCanvasDirty} controlsRef={canvasControlsRef} />
-            )}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}
             {modalTab === "comments" && form.id && <div className="space-y-2">
@@ -1163,13 +1230,7 @@ export default function DesignSheetsPage() {
 
             {/* แท็บตีราคา (เฟส 4) — สูตรเดียวกับ BOM, วัสดุจาก master /master/design-price-items */}
             {modalTab === "cost" && form.id && <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
-                  <button onClick={() => setCostView("card")}
-                    className={`h-7 px-3 text-sm rounded-md ${costView === "card" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>📇 เลือกจากการ์ด</button>
-                  <button onClick={() => setCostView("table")}
-                    className={`h-7 px-3 text-sm rounded-md ${costView === "table" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>📋 ตาราง ({costLines.length})</button>
-                </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
               </div>
               {priceItems.length === 0 && (
@@ -1178,40 +1239,6 @@ export default function DesignSheetsPage() {
                 </div>
               )}
 
-              {/* มุมมองการ์ด: กดลงตะกร้า → เพิ่มบรรทัดในตาราง */}
-              {costView === "card" && (
-                <div className="space-y-2">
-                  <input value={cardSearch} onChange={(e) => setCardSearch(e.target.value)} placeholder="ค้นหาวัสดุ..."
-                    className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[42vh] overflow-y-auto pr-1">
-                    {priceItems
-                      .filter((p) => { const q = cardSearch.trim().toLowerCase(); return !q || p.name.toLowerCase().includes(q) || (p.group_name ?? "").toLowerCase().includes(q); })
-                      .map((p) => {
-                        const inCart = costLines.filter((l) => l.item_id === p.id).length;
-                        return (
-                          <div key={p.id} className="border border-slate-200 rounded-lg p-2 flex flex-col gap-1 hover:border-blue-300">
-                            <div className="text-sm font-medium text-slate-700 leading-snug line-clamp-2">{p.name}</div>
-                            <div className="flex items-center justify-between text-[11px] text-slate-400">
-                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{p.group_name ?? "ไม่ระบุชนิด"}</span>
-                              <span className="tabular-nums">{p.price_per_unit != null ? `${fmtBaht(p.price_per_unit)}/${p.uom ?? p.uom_default ?? ""}` : "—"}</span>
-                            </div>
-                            {canEdit && (
-                              <button onClick={() => addCostFromItem(p)}
-                                className="mt-0.5 h-7 text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100">
-                                ＋ ลงตะกร้า{inCart > 0 ? ` (มี ${inCart})` : ""}</button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    {priceItems.length > 0 && priceItems.filter((p) => { const q = cardSearch.trim().toLowerCase(); return !q || p.name.toLowerCase().includes(q) || (p.group_name ?? "").toLowerCase().includes(q); }).length === 0 && (
-                      <div className="col-span-full py-6 text-center text-sm text-slate-300">ไม่พบวัสดุที่ค้นหา</div>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-slate-400">กดลงตะกร้าแล้วไปกรอกขนาดที่มุมมอง &quot;📋 ตาราง&quot;</p>
-                </div>
-              )}
-
-              {costView === "table" && (
               <LineItemsGrid<CostRow>
                 rows={costLines}
                 columns={costCols}
@@ -1227,9 +1254,9 @@ export default function DesignSheetsPage() {
                   unit_price: null, amount: null, note: null, sort_order: costLines.length + 1,
                 })}
                 addLabel="＋ เพิ่มบรรทัดตีราคา"
-                emptyText="ยังไม่มีบรรทัดตีราคา — เลือกจากการ์ด หรือกดเพิ่มบรรทัดแล้วเลือกวัสดุ"
+                emptyText="ยังไม่มีบรรทัดตีราคา — กดเพิ่มบรรทัดแล้วเลือกวัสดุ"
               />
-              )}
+
 
               {/* ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ) — เพิ่ม/ลบ/ตั้งชื่อเองได้ */}
               <div className="border border-slate-200 rounded-lg p-2.5 space-y-1.5">
@@ -1296,10 +1323,19 @@ export default function DesignSheetsPage() {
             {/* แท็บรอบเสนอราคา (เฟส 3) */}
             {modalTab === "quotes" && form.id && <div className="space-y-2">
               {canEdit && (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs text-slate-400">บันทึกรอบเสนอราคาภายใน — หรือส่งสินค้าไปออกใบเสนอราคาจริงในระบบขาย</div>
+                  <button onClick={() => setToQuote(true)}
+                    className="h-8 px-3 text-sm border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">🧾 ส่งไปใบเสนอราคา</button>
+                </div>
+              )}
+              {canEdit && (
                 <div className="flex flex-wrap gap-1.5 items-center p-2 bg-slate-50 border border-slate-200 rounded-lg">
                   <input type="date" value={newQDate} onChange={(e) => setNewQDate(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-36" />
-                  <input type="number" min={0} step="any" value={newQPrice} onChange={(e) => setNewQPrice(e.target.value)} placeholder="ราคา (บาท)"
+                  <input type="number" min={0} step="any" value={newQPrice} onChange={(e) => setNewQPrice(e.target.value)} placeholder="ราคาจากตีราคา" title="ราคาอ้างอิงจากการตีราคา"
                     className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg w-32" />
+                  <input type="number" min={0} step="any" value={newQOffered} onChange={(e) => setNewQOffered(e.target.value)} placeholder="ราคาที่เสนอ" title="ราคาที่เสนอลูกค้าจริง (ใช้อันนี้) — เว้นว่าง = ใช้ราคาจากตีราคา"
+                    className="h-8 px-2 text-sm text-right border border-blue-300 bg-blue-50/40 rounded-lg w-32 font-medium" />
                   <select value={newQStatus} onChange={(e) => setNewQStatus(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg">
                     {QUOTE_STATUS_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
@@ -1314,7 +1350,8 @@ export default function DesignSheetsPage() {
                     <tr className="bg-slate-50 text-xs text-slate-500">
                       <th className="border border-slate-200 px-2 py-1.5 w-14">ครั้งที่</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-32">วันที่เสนอ</th>
-                      <th className="border border-slate-200 px-2 py-1.5 w-32 text-right">ราคา (บาท)</th>
+                      <th className="border border-slate-200 px-2 py-1.5 w-28 text-right text-slate-400">ราคาจากตีราคา</th>
+                      <th className="border border-slate-200 px-2 py-1.5 w-28 text-right bg-blue-50 text-blue-600">ราคาที่เสนอ</th>
                       <th className="border border-slate-200 px-2 py-1.5 w-28">สถานะ</th>
                       <th className="border border-slate-200 px-2 py-1.5 text-left">หมายเหตุ</th>
                       {canEdit && <th className="border border-slate-200 px-2 py-1.5 w-20"></th>}
@@ -1331,9 +1368,14 @@ export default function DesignSheetsPage() {
                             {editing ? <input type="date" value={editQ.quote_date} onChange={(e) => setEditQ({ ...editQ, quote_date: e.target.value })} className="h-7 px-1 text-sm border border-slate-200 rounded" />
                               : <span className="text-slate-600">{formatDate(q.quote_date)}</span>}
                           </td>
-                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums">
+                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums text-slate-400">
                             {editing ? <input type="number" min={0} step="any" value={editQ.price} onChange={(e) => setEditQ({ ...editQ, price: e.target.value })} className="h-7 px-1 w-24 text-sm text-right border border-slate-200 rounded" />
                               : (q.price != null ? Number(q.price).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : "—")}
+                          </td>
+                          <td className="border border-slate-200 px-2 py-1 text-right tabular-nums font-semibold text-blue-700 bg-blue-50/40">
+                            {editing ? <input type="number" min={0} step="any" value={editQ.offered} onChange={(e) => setEditQ({ ...editQ, offered: e.target.value })} placeholder="ใช้ราคาตีราคา" className="h-7 px-1 w-24 text-sm text-right border border-blue-300 rounded" />
+                              : (q.offered_price != null ? Number(q.offered_price).toLocaleString("th-TH", { minimumFractionDigits: 2 })
+                                : (q.price != null ? <span className="text-slate-400 font-normal">{Number(q.price).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span> : "—"))}
                           </td>
                           <td className="border border-slate-200 px-2 py-1 text-center">
                             {canEdit ? (
@@ -1376,6 +1418,28 @@ export default function DesignSheetsPage() {
         title="ลบรอบเสนอราคา" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
         message={`ลบรอบเสนอราคา ครั้งที่ ${delQuote?.round ?? ""} หรือไม่?`} />
 
+      {/* จัดการสถานะงาน (โซนบนกระดาน) — เปิดจากปุ่มบนหน้า Canvas */}
+      <WorkflowStatusManager open={statusMgr} onClose={() => setStatusMgr(false)}
+        entityType="design_sheet" actor={user?.email ?? null} onChanged={reloadStatuses} />
+
+      {/* Wizard สร้าง Parent SKU + SKU ลูก จากใบงาน */}
+      {form?.id && (
+        <SkuWizard open={skuWizard} onClose={() => setSkuWizard(false)}
+          sheetId={form.id} sheetName={form.name} brandId={form.brand_id || null}
+          parentCodeDefault={form.parent_sku_code || ""} defaultPrice={offeredPrice}
+          onDone={() => { patch({ status: "sku_created" }); refresh(); }} />
+      )}
+
+      {/* ส่งสินค้าไปใบเสนอราคา (ระบบขาย) — หย่อนเข้าตะกร้า หรือเริ่มใบใหม่ */}
+      {form?.id && (
+        <ToQuotationModal open={toQuote} onClose={() => setToQuote(false)}
+          sheetId={form.id} sheetName={form.name} defaultPrice={offeredPrice}
+          cartId={cartId} cartLabel={cartLabel} onCartSet={setCart} onAdded={bumpCart} />
+      )}
+
+      {/* ตะกร้าใบเสนอราคา (drawer ขอบขวา) — โผล่เมื่อมีรายการในตะกร้า */}
+      <QuotationCartDrawer cartId={cartId} refreshKey={cartRefresh} onClear={clearCart} onLabel={setCartLabel} />
+
       {/* เตือนก่อนปิด เมื่อมีข้อมูลยังไม่บันทึก (กระดาน/ตีราคา) — 3 ทางเลือก */}
       <ERPModal open={closeConfirm} onClose={() => !closeSaving && setCloseConfirm(false)} size="sm" title="ยังไม่ได้บันทึก"
         footer={<>
@@ -1384,7 +1448,7 @@ export default function DesignSheetsPage() {
           <button onClick={() => void saveAndClose()} disabled={closeSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{closeSaving ? "กำลังบันทึก..." : "บันทึกแล้วปิด"}</button>
         </>}>
         <p className="text-sm text-slate-600">
-          มีข้อมูลที่ยังไม่ได้บันทึก{canvasControlsRef.current?.isDirty() ? " (กระดาน)" : ""}{costDirty ? " (ตีราคา)" : ""} —
+          มีข้อมูลตีราคาที่ยังไม่ได้บันทึก —
           ต้องการบันทึกก่อนปิดหรือไม่?
         </p>
       </ERPModal>
