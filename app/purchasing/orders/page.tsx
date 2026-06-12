@@ -458,8 +458,8 @@ export default function PurchaseOrdersPage() {
                               <div className="p-2.5">
                                 <div className="text-sm font-medium text-slate-800 line-clamp-2 leading-snug" title={r.item_name}>{stripCode(r.item_name)}</div>
                                 {r.code && <div className="text-[11px] font-mono text-slate-500 bg-slate-50 inline-block px-1.5 py-0.5 rounded mt-0.5 max-w-full truncate">{r.code}</div>}
-                                <div className="text-xs text-slate-500 mt-1">ขอซื้อ <b className="text-slate-700">{r.qty.toLocaleString()}</b> {r.uom}</div>
-                                <div className="text-sm font-semibold text-blue-600 mt-0.5">{money(r.line_total, r.currency)}{isCNY(r.currency) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(r.line_total * rate).toLocaleString()}</span>}</div>
+                                <div className="text-lg font-bold text-orange-600 mt-1 leading-tight">ขอซื้อ {r.qty.toLocaleString()} <span className="text-sm font-medium">{r.uom}</span></div>
+                                <div className="text-xs font-medium text-slate-800 mt-0.5">{money(r.line_total, r.currency)}{isCNY(r.currency) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(r.line_total * rate).toLocaleString()}</span>}</div>
                                 <div className="text-[11px] text-slate-400">@ {money(r.price_est, r.currency)} · {r.order_date ? formatDate(r.order_date) : "—"}</div>
                                 {(r.moq != null || r.lead_time_days != null) && (
                                   <div className="text-[11px] text-slate-500 mt-0.5">

@@ -50,7 +50,7 @@ type PendItem = {
   uom: string; qty: number; qty_received: number; qty_defective: number; line_status: string;
   remaining: number; currency: string;
   order_date: string | null; expected_date: string | null;
-  expected_source: "po" | "lead" | null; lead_time_days: number | null;
+  expected_source: "po" | "lead" | "china" | null; lead_time_days: number | null;
   days_remaining: number | null;
   source_mo_no: string | null; used_for_label: string | null;   // ใบสั่งผลิตต้นทาง
   receive_count: number;                                          // รับมาแล้วกี่ครั้ง (ใบรับ GR)
@@ -617,6 +617,7 @@ export default function ReceiveGoodsPage() {
                                       <div key={k} className="flex items-center gap-1 flex-wrap">
                                         <span>🚚 คาดเข้า: {it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}</span>
                                         {it.expected_source === "lead" && <span title="ประเมินจากลีดไทม์ร้าน (แก้ได้)" className="text-[10px] text-indigo-500">~ลีดไทม์</span>}
+                                        {it.expected_source === "china" && <span title="ค่าเริ่มต้นร้านจีน +14 วัน (แก้ได้)" className="text-[10px] text-orange-500">~จีน 14 วัน</span>}
                                         <button onClick={(e) => { e.stopPropagation(); setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" }); }}
                                           title="แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO)" className="text-slate-400 hover:text-blue-600 text-xs">✎</button>
                                       </div>
@@ -707,7 +708,7 @@ export default function ReceiveGoodsPage() {
                             ) : (
                               <>
                             <td className="px-3 py-2 whitespace-nowrap">
-                              <div className="text-xs text-slate-500">{it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}{it.expected_source === "lead" && <span className="text-[10px] text-indigo-500 ml-1">~ลีดไทม์</span>}</div>
+                              <div className="text-xs text-slate-500">{it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}{it.expected_source === "lead" && <span className="text-[10px] text-indigo-500 ml-1">~ลีดไทม์</span>}{it.expected_source === "china" && <span className="text-[10px] text-orange-500 ml-1">~จีน 14 วัน</span>}</div>
                               <div className="flex items-center gap-1">
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
                                 <button onClick={() => setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" })}

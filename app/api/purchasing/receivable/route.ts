@@ -14,6 +14,8 @@ export const revalidate = 0;
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const today = () => new Date().toISOString().slice(0, 10);
+const CHINA_DEFAULT_LEAD = 14;   // ร้านจีน (สกุล RMB/หยวน) ที่ไม่มีลีดไทม์ → ใช้ค่านี้
+const isCNYCur = (c: unknown) => { const s = String(c ?? "").toUpperCase(); return s === "RMB" || s === "YUAN" || s === "CNY"; };
 // บวกวันจากวันที่ฐาน (YYYY-MM-DD) → คืน YYYY-MM-DD
 const addDays = (date: string, days: number): string => {
   const d = new Date(date + "T00:00:00Z");
@@ -125,11 +127,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const isPaid = paymentStatus === "paid";
     // เริ่มนับ: ร้านส่งก่อนจ่าย=วันสั่ง · ร้านปกติ=วันจ่าย (ยังไม่จ่าย=ยังไม่เริ่ม)
     const shipStart = shipBefore ? orderDate : (isPaid ? (paidDate || orderDate) : null);
+    // ลีดไทม์ที่ใช้: ลีดไทม์ร้าน (ถ้ามี) → ไม่มี + ร้านจีน = 14 วัน → ไม่มี + ไม่ใช่จีน = null
+    const isChina = isCNYCur(po.currency);
+    const effLead = lead != null ? lead : (isChina ? CHINA_DEFAULT_LEAD : null);
+    const leadFromChina = lead == null && isChina;
 
-    // วันคาดการณ์: ① PO.expected_date → ② ship_start + lead → ③ null (รอจ่าย/ไม่มีลีดไทม์)
+    // วันคาดการณ์: ① PO.expected_date → ② ship_start + ลีดไทม์ → ③ null (รอจ่าย/ไม่มีลีดไทม์)
     let expected: string | null = (po.expected_date as string) || null;
-    let expectedSource: "po" | "lead" | null = expected ? "po" : null;
-    if (!expected && shipStart && lead != null) { expected = addDays(shipStart, lead); expectedSource = "lead"; }
+    let expectedSource: "po" | "lead" | "china" | null = expected ? "po" : null;
+    if (!expected && shipStart && effLead != null) { expected = addDays(shipStart, effLead); expectedSource = leadFromChina ? "china" : "lead"; }
     const pr = l.pr_id ? prMap.get(String(l.pr_id)) : null;
 
     return {
