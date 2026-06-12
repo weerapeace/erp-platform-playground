@@ -71,7 +71,7 @@ type InVal = { definition_id: string; input_type: string; value: unknown };
 type SaveBody = { sku?: string; family?: string | null; size_summary?: string; work_instruction_notes?: string; legacy?: Record<string, string>; model?: InVal[]; sku_vals?: InVal[] };
 
 function rowFor(iv: InVal, link: Record<string, string>): Record<string, unknown> | null {
-  const base = { ...link, definition_id: iv.definition_id, option_id: null as string | null, option_ids: null as string[] | null, text_value: null as string | null, number_value: null as number | null, boolean_value: null as boolean | null };
+  const base = { ...link, definition_id: iv.definition_id, option_id: null as string | null, option_ids: [] as string[], text_value: null as string | null, number_value: null as number | null, boolean_value: null as boolean | null };
   const v = iv.value;
   if (iv.input_type === "many2one") { if (!v) return null; base.option_id = String(v); }
   else if (iv.input_type === "multiselect") { const arr = (Array.isArray(v) ? v : []).map(String).filter(Boolean); if (!arr.length) return null; base.option_ids = arr; }
