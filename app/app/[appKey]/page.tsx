@@ -49,11 +49,16 @@ export default function StandaloneApp() {
   );
 
   const cur = items[active];
-  const moduleKey = cur ? cur.href.replace(/^\/m\//, "").split("?")[0] : null;
+  // เมนูที่เป็นตารางข้อมูล (/m/<entity>) → MasterPage · เมนูหน้า custom อื่น → โหลดหน้าจริงผ่าน iframe
+  const isMasterItem = !!cur && cur.href.startsWith("/m/");
+  const moduleKey = isMasterItem ? cur!.href.replace(/^\/m\//, "").split("?")[0] : null;
+
+  // กว้าง: มือถือ = คอลัมน์แคบ (max-w-md) · iPad/จอกว้าง (md+) = เต็มเฟรม
+  const frame = "w-full max-w-md md:max-w-none mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm";
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-sm">
+      <div className={frame}>
         <header className="sticky top-0 z-20 bg-gradient-to-r from-blue-700 to-indigo-600 text-white px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-lg">{app?.icon ?? "🧩"} {app?.label ?? appKey}</div>
           <div className="text-xs opacity-90">{user.name}</div>
@@ -64,13 +69,17 @@ export default function StandaloneApp() {
             <ShellPresentContext.Provider value={true}>
               <MasterPage key={moduleKey} apiPath={moduleKey} moduleKey={moduleKey} title={cur!.label} icon={cur!.icon ?? "🧩"} />
             </ShellPresentContext.Provider>
+          ) : cur ? (
+            // หน้า custom (ไม่ใช่ตาราง เช่น App Launcher/Dashboard) → แสดงหน้าจริง
+            <iframe key={cur.href} src={cur.href} title={cur.label}
+              className="w-full border-0" style={{ height: "calc(100vh - 124px)" }} />
           ) : (
             <div className="p-10 text-center text-slate-300 text-sm">— ยังไม่มีเมนูใน App นี้ —</div>
           )}
         </main>
 
         {items.length > 0 && (
-          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-slate-200 grid z-20"
+          <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md md:max-w-3xl bg-white border-t border-slate-200 grid z-20"
             style={{ gridTemplateColumns: `repeat(${Math.min(items.length, 5)}, minmax(0,1fr))` }}>
             {items.slice(0, 5).map((it, i) => (
               <button key={it.href} onClick={() => setActive(i)}

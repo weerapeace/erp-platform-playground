@@ -53,6 +53,7 @@ export type PaymentExportRow = {
 
 export type PaymentBatchType = "month_end" | "mid_month" | "special";
 export type PaymentCompareStatus = "same" | "changed" | "new" | "missing_this_month";
+export type PaymentLineGroup = "regular" | "other";
 
 const PAYMENT_BATCH_TYPES: PaymentBatchType[] = ["month_end", "mid_month", "special"];
 const LEGACY_PAYMENT_METHOD_BATCH_TYPE: Record<string, PaymentBatchType> = {
@@ -68,6 +69,16 @@ export function normalizePaymentBatchType(value: unknown): PaymentBatchType {
   const raw = String(value ?? "").trim();
   if ((PAYMENT_BATCH_TYPES as string[]).includes(raw)) return raw as PaymentBatchType;
   return LEGACY_PAYMENT_METHOD_BATCH_TYPE[raw] ?? "month_end";
+}
+
+export function paymentLineGroup(row: { contract_type?: unknown; wage_type?: unknown; source?: unknown }): PaymentLineGroup {
+  const contractType = String(row.contract_type ?? "").trim().toLowerCase();
+  const wageType = String(row.wage_type ?? "").trim().toLowerCase();
+  const source = String(row.source ?? "").trim().toLowerCase();
+  if (source && !["payroll_payslip", "payroll_mid_month", "settings", "manual_default"].includes(source)) return "other";
+  if (["regular_external", "daily", "contractor", "hourly", "piecework"].includes(contractType)) return "other";
+  if (["daily", "hourly", "piece_rate", "piecework"].includes(wageType)) return "other";
+  return "regular";
 }
 
 export function buildPaymentLineFromPayslip(slip: PaymentPayslipInput): PaymentLineDraft {

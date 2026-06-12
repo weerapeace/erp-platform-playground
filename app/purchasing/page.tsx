@@ -65,6 +65,7 @@ export default function PurchasingShopPage() {
 
   // grid
   const [cards, setCards] = useState<Card[]>([]);
+  const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());   // sku_id → คงเหลือในสต๊อก
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);   // ข้อ 2: error state
@@ -126,6 +127,13 @@ export default function PurchasingShopPage() {
   useEffect(() => {
     apiFetch("/api/purchasing/favorites").then(r => r.json())
       .then(j => { if (Array.isArray(j.ids)) setFavorites(new Set(j.ids as string[])); })
+      .catch(() => {});
+  }, []);
+
+  // โหลดยอดคงเหลือในสต๊อก (sku_id → qty) — ไว้โชว์ในป๊อปเพิ่มลงใบขอซื้อ
+  useEffect(() => {
+    apiFetch("/api/inventory/sku-stock?limit=2000").then(r => r.json())
+      .then(j => { const m = new Map<string, number>(); for (const r of (j.data ?? [])) m.set(String(r.sku_id), Number(r.qty_on_hand) || 0); setStockMap(m); })
       .catch(() => {});
   }, []);
 
@@ -924,7 +932,7 @@ export default function PurchasingShopPage() {
 
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
-        <ConfirmSku card={confirmSku} rate={cnyRate} onClose={() => setConfirmSku(null)}
+        <ConfirmSku card={confirmSku} rate={cnyRate} stockQty={stockMap.has(confirmSku.id) ? stockMap.get(confirmSku.id)! : null} onClose={() => setConfirmSku(null)}
           onAdd={(qty, note, usedFor, urgent, useDate) => addSku(confirmSku, qty, note, usedFor, urgent, useDate)}
           onSaveImage={saveSkuImage}
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
@@ -1043,7 +1051,7 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null, urgent: boolean, useDate: string | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
+function ConfirmSku({ card, rate, stockQty, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; stockQty?: number | null; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null, urgent: boolean, useDate: string | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
   const [usedFor, setUsedFor] = useState<PickedSku | null>(null);   // 🎯 ใช้กับสินค้า (ปลายทาง)
@@ -1083,6 +1091,11 @@ function ConfirmSku({ card, rate, onClose, onAdd, onEdit, onSaveImage }: { card:
           <div className="text-xs text-slate-500 mt-0.5">🏪 {s.seller}</div>
           <div className="text-sm font-semibold text-blue-600 mt-1">{s.price.toLocaleString()} {curLabel(s.currency)} / {s.uom}</div>
           {s.currency === "YUAN" && rate > 0 && <div className="text-xs text-slate-400">≈ ฿{Math.round(s.price * rate).toLocaleString()} / {s.uom}</div>}
+          {stockQty != null && (
+            <div className={`text-xs mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${stockQty > 0 ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-slate-50 text-slate-400 border-slate-200"}`}>
+              📦 คงเหลือในสต๊อก: <b className="tabular-nums">{stockQty.toLocaleString()}</b> {s.uom}
+            </div>
+          )}
         </div>
       </div>
       <div className="mt-4 space-y-3">

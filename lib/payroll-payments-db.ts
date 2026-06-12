@@ -110,16 +110,20 @@ async function periodNameMap(periodIds: string[]): Promise<Record<string, string
 
 async function employeeAndBankMaps(employeeIds: string[]) {
   const admin = supabaseAdmin();
-  const [emps, banks] = await Promise.all([
+  const [emps, banks, contracts] = await Promise.all([
     employeeIds.length
       ? admin.from("employees").select("id, employee_code, first_name, last_name, nickname, national_id, passport_no").in("id", employeeIds)
       : Promise.resolve({ data: [], error: null }),
     employeeIds.length
       ? admin.from("employee_bank_accounts").select("employee_id, bank_name, account_no, account_name, is_primary").in("employee_id", employeeIds).order("is_primary", { ascending: false })
       : Promise.resolve({ data: [], error: null }),
+    employeeIds.length
+      ? admin.from("employee_contracts").select("employee_id, contract_type, wage_type, is_current, status").in("employee_id", employeeIds).eq("is_current", true).eq("status", "active")
+      : Promise.resolve({ data: [], error: null }),
   ]);
   if (emps.error) throw new Error(emps.error.message);
   if (banks.error) throw new Error(banks.error.message);
+  if (contracts.error) throw new Error(contracts.error.message);
   const empById: Record<string, Row> = {};
   ((emps.data ?? []) as Row[]).forEach((emp) => { empById[text(emp.id)] = emp; });
   const bankByEmp: Record<string, Row> = {};
@@ -127,7 +131,12 @@ async function employeeAndBankMaps(employeeIds: string[]) {
     const employeeId = text(bank.employee_id);
     if (employeeId && !bankByEmp[employeeId]) bankByEmp[employeeId] = bank;
   });
-  return { empById, bankByEmp };
+  const contractByEmp: Record<string, Row> = {};
+  ((contracts.data ?? []) as Row[]).forEach((contract) => {
+    const employeeId = text(contract.employee_id);
+    if (employeeId && !contractByEmp[employeeId]) contractByEmp[employeeId] = contract;
+  });
+  return { empById, bankByEmp, contractByEmp };
 }
 
 async function previousPaymentLineMap(periodId: string, batchType: PaymentBatchType, beforeDate?: string | null): Promise<Map<string, Row>> {
@@ -280,17 +289,21 @@ export async function getPaymentBatchDetail(batchId: string): Promise<PaymentBat
     const employeeId = text(line.employee_id);
     const emp = maps.empById[employeeId] ?? {};
     const bank = maps.bankByEmp[employeeId] ?? {};
+    const contract = maps.contractByEmp[employeeId] ?? {};
     const slip = slipByEmp[employeeId] ?? {};
     const note = parsePaymentLineNote(line.note);
     return {
       ...line,
       employee_code: text(emp.employee_code),
       employee_name: employeeName(emp),
+      contract_type: text(contract.contract_type),
+      wage_type: text(contract.wage_type),
       bank_name: text(bank.bank_name),
       bank_account_name: text(bank.account_name) || employeeName(emp),
       bank_account_no: text(bank.account_no),
       payslip_no: text(slip.payslip_no),
       payslip_id: text(slip.id || note.payslip_id),
+      source: text(note.source),
       net_before_rounding: note.net_before_rounding ?? null,
       rounding_adjustment: note.rounding_adjustment ?? null,
       line_note: note.line_note ?? null,
@@ -331,6 +344,7 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
       const employeeId = text(slip.employee_id);
       const emp = maps.empById[employeeId] ?? {};
       const bank = maps.bankByEmp[employeeId] ?? {};
+      const contract = maps.contractByEmp[employeeId] ?? {};
       const line = buildPaymentLineFromPayslip({
         id: text(slip.id),
         payroll_period_id: text(slip.payroll_period_id),
@@ -349,6 +363,8 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
         selected: true,
         employee_code: text(emp.employee_code),
         employee_name: employeeName(emp),
+        contract_type: text(contract.contract_type),
+        wage_type: text(contract.wage_type),
         identity_no: identityNo(emp),
         bank_name: text(bank.bank_name),
         bank_account_name: text(bank.account_name) || employeeName(emp),
@@ -382,13 +398,14 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
   const previousEmpIds = [...previousByEmp.keys()];
   const [activeEmployees, activeContracts] = await Promise.all([
     admin.from("employees").select("id, employee_code, first_name, last_name, nickname, employment_status").eq("employment_status", "active"),
-    admin.from("employee_contracts").select("employee_id, is_current, status, contract_type").eq("is_current", true).eq("status", "active"),
+    admin.from("employee_contracts").select("employee_id, is_current, status, contract_type, wage_type").eq("is_current", true).eq("status", "active"),
   ]);
   if (activeEmployees.error) throw new Error(activeEmployees.error.message);
   if (activeContracts.error) throw new Error(activeContracts.error.message);
   const activeEmpRows = (activeEmployees.data ?? []) as Row[];
   const activeEmpIds = new Set(activeEmpRows.map((emp) => text(emp.id)));
-  const contractByEmp = new Set(((activeContracts.data ?? []) as Row[]).map((contract) => text(contract.employee_id)));
+  const activeContractByEmp = new Map(((activeContracts.data ?? []) as Row[]).map((contract) => [text(contract.employee_id), contract]));
+  const contractByEmp = new Set(activeContractByEmp.keys());
   const allMapEmpIds = [...new Set([...settingEmpIds, ...previousEmpIds, ...activeEmpRows.map((emp) => text(emp.id)).filter(Boolean)])];
   const maps = await employeeAndBankMaps(allMapEmpIds);
 
@@ -397,6 +414,7 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
     if (!activeEmpIds.has(employeeId) || !contractByEmp.has(employeeId)) return [];
     const emp = maps.empById[employeeId] ?? {};
     const bank = maps.bankByEmp[employeeId] ?? {};
+    const contract = activeContractByEmp.get(employeeId) ?? {};
     const previous = previousByEmp.get(employeeId);
     const line = buildMidMonthPaymentLine({
       payroll_period_id: periodId,
@@ -409,6 +427,8 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
       selected: true,
       employee_code: text(emp.employee_code),
       employee_name: employeeName(emp),
+      contract_type: text(contract.contract_type),
+      wage_type: text(contract.wage_type),
       identity_no: identityNo(emp),
       bank_name: text(bank.bank_name),
       bank_account_name: text(bank.account_name) || employeeName(emp),
@@ -423,6 +443,7 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
     if (currentEmpIds.has(employeeId) || !activeEmpIds.has(employeeId) || !contractByEmp.has(employeeId)) return [];
     const emp = maps.empById[employeeId] ?? {};
     const bank = maps.bankByEmp[employeeId] ?? {};
+    const contract = activeContractByEmp.get(employeeId) ?? {};
     return [{
       payroll_period_id: periodId,
       employee_id: employeeId,
@@ -435,6 +456,8 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
       selected: false,
       employee_code: text(emp.employee_code),
       employee_name: employeeName(emp),
+      contract_type: text(contract.contract_type),
+      wage_type: text(contract.wage_type),
       identity_no: identityNo(emp),
       bank_name: text(bank.bank_name),
       bank_account_name: text(bank.account_name) || employeeName(emp),
@@ -449,11 +472,14 @@ export async function previewPaymentBatch(periodId: string, rawBatchType?: strin
     const employeeId = text(emp.id);
     if (!employeeId || previewEmpIds.has(employeeId) || !contractByEmp.has(employeeId)) return [];
     const bank = maps.bankByEmp[employeeId] ?? {};
+    const contract = activeContractByEmp.get(employeeId) ?? {};
     const previous = previousByEmp.get(employeeId);
     return [{
       employee_id: employeeId,
       employee_code: text(emp.employee_code),
       employee_name: employeeName(emp),
+      contract_type: text(contract.contract_type),
+      wage_type: text(contract.wage_type),
       identity_no: identityNo(emp),
       bank_name: text(bank.bank_name),
       bank_account_name: text(bank.account_name) || employeeName(emp),

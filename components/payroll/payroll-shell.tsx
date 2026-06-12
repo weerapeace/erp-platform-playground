@@ -24,6 +24,7 @@ const NAV: { group: string; items: { href: string; icon: string; label: string }
     { href: "/payroll/contracts", icon: "📄", label: "สัญญาจ้าง" },
     { href: "/payroll/resignations", icon: "📤", label: "แจ้งลาออก" },
     { href: "/payroll/warnings", icon: "⚠️", label: "ใบเตือนพนักงาน" },
+    { href: "/payroll/line-members", icon: "LINE", label: "LINE พนักงาน" },
   ] },
   { group: "คำนวณเงินเดือน", items: [
     { href: "/payroll/periods", icon: "🗓️", label: "งวดเงินเดือน" },

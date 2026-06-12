@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 import { apiFetch } from "@/lib/api";
+import { paymentLineGroup, type PaymentLineGroup } from "@/lib/payroll-payments";
 
 type Batch = {
   id: string;
@@ -30,6 +31,8 @@ type BatchLine = {
   bank_name: string;
   bank_account_name?: string;
   bank_account_no: string;
+  contract_type?: string | null;
+  wage_type?: string | null;
   payslip_no?: string;
   base_salary?: number | null;
   mid_month_paid?: number | null;
@@ -56,6 +59,7 @@ type BatchLine = {
 
 type Detail = { batch: Batch; lines: BatchLine[] };
 type Preview = { batch_type: string; existing_count?: number; lines: BatchLine[]; candidates?: BatchLine[]; totals: { line_count: number; paid_amount: number } };
+type PaymentReportColumn = "employee" | "bank" | "account_name" | "account_no" | "amount" | "status";
 
 const BATCH_TYPE: Record<string, string> = { month_end: "สิ้นเดือน", mid_month: "กลางเดือน", special: "พิเศษ", bank: "โอนธนาคาร", cash: "เงินสด" };
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -98,6 +102,19 @@ const compareAmounts = (currentAmount: unknown, previousAmount: unknown): Pick<B
   return { previous_paid_amount: previous, delta_amount: delta, compare_status: Math.abs(delta) < 0.005 ? "same" : "changed" };
 };
 const defaultPaidAmount = (line: BatchLine): number => Number(line.default_paid_amount ?? 0) || 0;
+const paymentLineAmount = (line: BatchLine): number => Number(line.paid_amount) || 0;
+const paymentTabLabel: Record<PaymentLineGroup, string> = {
+  regular: "พนักงานประจำ",
+  other: "ประจำนอกระบบ / รายวัน / ช่างเหมา",
+};
+const paymentReportColumns: Array<{ key: PaymentReportColumn; label: string }> = [
+  { key: "employee", label: "พนักงาน" },
+  { key: "bank", label: "ธนาคาร" },
+  { key: "account_name", label: "ชื่อบัญชี" },
+  { key: "account_no", label: "เลขที่บัญชี" },
+  { key: "amount", label: "ยอดจ่าย" },
+  { key: "status", label: "สถานะ" },
+];
 
 export default function PayrollPaymentsPage() {
   const { periods, periodId, selectedPeriod, setPeriodId, refreshPeriods } = usePayrollPeriod();
@@ -109,6 +126,18 @@ export default function PayrollPaymentsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [paymentTab, setPaymentTab] = useState<PaymentLineGroup>("regular");
+  const [hideZeroPaymentLines, setHideZeroPaymentLines] = useState(true);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [paymentReportVisibleColumns, setPaymentReportVisibleColumns] = useState<Record<PaymentReportColumn, boolean>>({
+    employee: true,
+    bank: true,
+    account_name: true,
+    account_no: true,
+    amount: true,
+    status: true,
+  });
+  const [copiedAccountNos, setCopiedAccountNos] = useState<Set<string>>(() => new Set());
 
   const [createOpen, setCreateOpen] = useState(false);
   const [batchType, setBatchType] = useState<"month_end" | "mid_month" | "special">("month_end");
@@ -187,6 +216,7 @@ export default function PayrollPaymentsPage() {
   useEffect(() => { if (periodId) void loadBatches(periodId); }, [periodId, loadBatches]);
   useEffect(() => { if (selectedBatchId) void loadDetail(selectedBatchId); }, [selectedBatchId, loadDetail]);
   useEffect(() => { void loadPreview(); }, [loadPreview]);
+  useEffect(() => { setCopiedAccountNos(new Set()); }, [detail?.batch.id]);
 
   const summary = useMemo(() => {
     const total = batches.reduce((sum, batch) => sum + (Number(batch.paid_amount) || 0), 0);
@@ -369,6 +399,44 @@ export default function PayrollPaymentsPage() {
   const detailCalcDiff = Math.round((detailTotal - latestCalcNet) * 100) / 100;
   const detailCalcDiffClass = Math.abs(detailCalcDiff) < 0.005 ? "text-emerald-700" : detailCalcDiff > 0 ? "text-amber-700" : "text-red-700";
   const periodStatus = String((selectedPeriod as Record<string, unknown> | null)?.status ?? "");
+  const detailLinesForReport = useMemo(() => {
+    const rows = detail?.lines ?? [];
+    const payableRows = hideZeroPaymentLines ? rows.filter((line) => Math.abs(paymentLineAmount(line)) > 0.004) : rows;
+    return {
+      regular: payableRows.filter((line) => paymentLineGroup(line) === "regular"),
+      other: payableRows.filter((line) => paymentLineGroup(line) === "other"),
+    };
+  }, [detail?.lines, hideZeroPaymentLines]);
+  const activePaymentLines = detailLinesForReport[paymentTab];
+  const paymentTabCounts = {
+    regular: detailLinesForReport.regular.length,
+    other: detailLinesForReport.other.length,
+  };
+  const paymentTabTotals = {
+    regular: detailLinesForReport.regular.reduce((sum, line) => sum + paymentLineAmount(line), 0),
+    other: detailLinesForReport.other.reduce((sum, line) => sum + paymentLineAmount(line), 0),
+  };
+  const visiblePaymentReportColumns = paymentReportColumns.filter((column) => paymentReportVisibleColumns[column.key]);
+
+  async function copyAccountNo(accountNo: string) {
+    const value = accountNo.trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedAccountNos((current) => new Set(current).add(value));
+      setMsg("คัดลอกเลขบัญชีแล้ว");
+    } catch {
+      setErr("คัดลอกเลขบัญชีไม่สำเร็จ");
+    }
+  }
+
+  function togglePaymentReportColumn(column: PaymentReportColumn, checked: boolean) {
+    setPaymentReportVisibleColumns((current) => {
+      const next = { ...current, [column]: checked };
+      if (!Object.values(next).some(Boolean)) return current;
+      return next;
+    });
+  }
 
   return (
     <div className="mx-auto max-w-7xl p-6">
@@ -449,6 +517,7 @@ export default function PayrollPaymentsPage() {
               <div className="flex flex-wrap items-center gap-2">
                 {badge(detail.batch.status)}
                 <a href={`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/export`} className="h-9 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Export CSV</a>
+                <button type="button" onClick={() => setReportOpen(true)} className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">ปรับ Report</button>
                 {detail.batch.status === "draft" && <button onClick={() => batchAction("approve")} disabled={busy === "approve"} className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40">อนุมัติ</button>}
                 {detail.batch.status === "approved" && <button onClick={() => batchAction("mark-paid")} disabled={busy === "mark-paid"} className="h-9 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">{detail.batch.batch_type === "month_end" ? "�������� + �Դ�Ǵ" : "��������"}</button>}
                 {detail.batch.status !== "paid" && detail.batch.status !== "cancelled" && <button onClick={() => batchAction("cancel")} disabled={busy === "cancel"} className="h-9 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40">ยกเลิก</button>}
@@ -468,10 +537,69 @@ export default function PayrollPaymentsPage() {
                 ยอดจ่ายรอบนี้ยังไม่เท่ากับยอดสุทธิจากรอบคำนวณล่าสุด ใช้จุดนี้เช็คก่อน Export CSV หรือบันทึกจ่ายแล้ว
               </div>
             )}
-            <PaymentLinesTable lines={detail.lines} />
+            <div className="border-b border-slate-100 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                  {(["regular", "other"] as PaymentLineGroup[]).map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setPaymentTab(tab)}
+                      className={`rounded-md px-3 py-2 text-xs font-semibold transition ${paymentTab === tab ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
+                    >
+                      {paymentTabLabel[tab]} ({paymentTabCounts[tab].toLocaleString("th-TH")}) · {baht(paymentTabTotals[tab])}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600">
+                    <input type="checkbox" checked={hideZeroPaymentLines} onChange={(event) => setHideZeroPaymentLines(event.target.checked)} />
+                    ซ่อนยอด 0
+                  </label>
+                  <button type="button" onClick={() => setCopiedAccountNos(new Set())} className="h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                    Reset คัดลอกแล้ว
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                แสดงเฉพาะรายการของ tab ที่เลือก · Export CSV เดิมยังผ่าน API กลางและมี audit log
+              </div>
+            </div>
+            <PaymentLinesTable
+              lines={activePaymentLines}
+              columns={visiblePaymentReportColumns}
+              copiedAccountNos={copiedAccountNos}
+              onCopyAccount={copyAccountNo}
+            />
           </>
         )}
       </section>
+
+      <ERPModal
+        open={reportOpen}
+        onClose={() => setReportOpen(false)}
+        size="md"
+        title="ปรับ Report รอบจ่าย"
+        description="เลือก column ที่ต้องการแสดงในตารางรอบจ่าย หน้านี้เป็นการตั้งค่าหน้าจอ ไม่เปลี่ยนข้อมูลจริง"
+        footer={
+          <div className="flex w-full justify-end">
+            <button onClick={() => setReportOpen(false)} className="h-9 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800">เสร็จ</button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {paymentReportColumns.map((column) => (
+            <label key={column.key} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <span className="font-medium text-slate-700">{column.label}</span>
+              <input
+                type="checkbox"
+                checked={paymentReportVisibleColumns[column.key]}
+                onChange={(event) => togglePaymentReportColumn(column.key, event.target.checked)}
+              />
+            </label>
+          ))}
+        </div>
+      </ERPModal>
 
       <ERPModal
         open={createOpen}
@@ -645,7 +773,97 @@ function SummaryBox({ label, value, strong = false }: { label: string; value: st
   );
 }
 
-function PaymentLinesTable({ lines }: { lines: BatchLine[] }) {
+function PaymentLinesTable({
+  lines,
+  columns,
+  copiedAccountNos,
+  onCopyAccount,
+}: {
+  lines: BatchLine[];
+  columns: Array<{ key: PaymentReportColumn; label: string }>;
+  copiedAccountNos: Set<string>;
+  onCopyAccount: (accountNo: string) => void;
+}) {
+  const colSpan = Math.max(columns.length, 1);
+  const headerAlign = (column: PaymentReportColumn) => {
+    if (column === "amount") return "text-right";
+    if (column === "status") return "text-center";
+    return "text-left";
+  };
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[980px] text-sm">
+        <thead className="bg-slate-50 text-xs text-slate-500">
+          <tr>
+            {columns.map((column) => (
+              <th key={column.key} className={`px-3 py-2 ${headerAlign(column.key)}`}>
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((line) => (
+            <tr key={line.id ?? line.employee_id} className="border-t border-slate-100 hover:bg-slate-50">
+              {columns.map((column) => {
+                if (column.key === "employee") {
+                  return (
+                    <td key={column.key} className="px-3 py-2">
+                      <div className="font-medium text-slate-800">{line.employee_name || "-"}</div>
+                      <div className="font-mono text-xs text-slate-400">{line.employee_code || "-"}</div>
+                    </td>
+                  );
+                }
+
+                if (column.key === "bank") {
+                  return <td key={column.key} className="px-3 py-2">{line.bank_name || "-"}</td>;
+                }
+
+                if (column.key === "account_name") {
+                  return <td key={column.key} className="px-3 py-2">{line.bank_account_name || line.employee_name || "-"}</td>;
+                }
+
+                if (column.key === "account_no") {
+                  const accountNo = line.bank_account_no || "";
+                  const copied = accountNo ? copiedAccountNos.has(accountNo) : false;
+
+                  return (
+                    <td key={column.key} className="px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-slate-600">{accountNo || "-"}</span>
+                        {accountNo && (
+                          <button
+                            type="button"
+                            onClick={() => onCopyAccount(accountNo)}
+                            className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold transition ${
+                              copied
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {copied ? "คัดลอกแล้ว" : "Copy"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  );
+                }
+
+                if (column.key === "amount") {
+                  return <td key={column.key} className="px-3 py-2 text-right font-semibold tabular-nums">{baht(line.paid_amount)}</td>;
+                }
+
+                return <td key={column.key} className="px-3 py-2 text-center">{badge(line.status ?? "draft")}</td>;
+              })}
+            </tr>
+          ))}
+          {!lines.length && <tr><td colSpan={colSpan} className="px-3 py-10 text-center text-sm text-slate-400">ไม่มีรายการใน tab นี้</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[980px] text-sm">

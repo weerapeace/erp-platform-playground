@@ -43,7 +43,10 @@ const isCNY = (c: string) => c === "RMB" || c === "YUAN" || c === "CNY";
 const noShop = (r: Row) => !r.seller_name || r.seller_name === "—" || r.seller_name === "ไม่ระบุร้าน";
 // ตัด [code] นำหน้าชื่อสินค้าออก (code โชว์เป็น chip ข้างล่างอยู่แล้ว) — ถ้าตัดแล้วว่างให้คงชื่อเดิมไว้
 const stripCode = (name: string) => name?.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
-const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate", CART_KEY = "po_create_cart";
+const VIEW_KEY = "po_create_view", COLS_KEY = "po_create_cols", RATE_KEY = "po_create_rate", CART_KEY = "po_create_cart", SORT_KEY = "po_create_sort";
+type SortKey = "date" | "name" | "qty" | "price";
+type CreatedPO = { id: string; po_no: string; seller_name: string; currency: string; grand_total: number; line_count: number };
+type ShareItem = { name: string; code: string; qty: number; uom: string };
 
 const COLUMNS: ColumnDef<Row>[] = [
   { accessorKey: "image_url", header: "รูป", size: 56, enableSorting: false, meta: { type: "image" } },
@@ -92,6 +95,12 @@ export default function PurchaseOrdersPage() {
   const [shopQ, setShopQ] = useState("");
   const [prodQ, setProdQ] = useState("");
   const [cartQ, setCartQ] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("date");
+  const [selectMode, setSelectMode] = useState(false);                 // โหมดเลือกหลายชิ้น (ตั้งร้าน/ราคา Mass)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkShop, setBulkShop] = useState<Row[] | null>(null);        // popup ตั้งร้าน/ราคา หลายชิ้น
+  const [createdPOs, setCreatedPOs] = useState<CreatedPO[] | null>(null);   // การ์ดใบสั่งซื้อหลังสร้างสำเร็จ (พิมพ์/แชร์ไลน์)
+  const shareItemsRef = useRef<Record<string, ShareItem[]>>({});            // seller_name → รายการ (ไว้ทำข้อความแชร์)
   const addSupplier = (s: { id: string; name: string; cn?: boolean }) => setSuppliers((arr) => arr.some((x) => x.id === s.id) ? arr : [...arr, s].sort((a, b) => a.name.localeCompare(b.name, "th")));
 
   // โหลดรายชื่อผู้จำหน่าย (m2o สำหรับแก้ร้าน — เลือกได้จากลิสต์เท่านั้น)
@@ -122,6 +131,7 @@ export default function PurchaseOrdersPage() {
     const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "card") setView(v);
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 12) setCols(c);
     const r = Number(localStorage.getItem(RATE_KEY)); if (r > 0) setRate(r);
+    const sk = localStorage.getItem(SORT_KEY); if (sk === "date" || sk === "name" || sk === "qty" || sk === "price") setSortKey(sk);
     // กู้คืน draft ตะกร้า (เผลอปิดหน้า/รีเฟรช ของไม่หาย)
     try {
       const d = JSON.parse(localStorage.getItem(CART_KEY) ?? "{}") as Record<string, CartLine>;
@@ -149,6 +159,20 @@ export default function PurchaseOrdersPage() {
   const changeView = (v: "table" | "card") => { setView(v); localStorage.setItem(VIEW_KEY, v); };
   const changeCols = (n: number) => { setCols(n); localStorage.setItem(COLS_KEY, String(n)); };
   const changeRate = (n: number) => { setRate(n); if (n > 0) localStorage.setItem(RATE_KEY, String(n)); };
+  const changeSort = (s: SortKey) => { setSortKey(s); localStorage.setItem(SORT_KEY, s); };
+  // เลือกหลายชิ้น (Mass)
+  const toggleSelect = (id: string) => setSelectedIds((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()); };
+  const selectedRows = useMemo(() => rows.filter((r) => selectedIds.has(r.id)), [rows, selectedIds]);
+  // เรียงรายการในแต่ละ section (วันที่สั่งใหม่ก่อน / ชื่อ / จำนวนมากก่อน / ราคารวมมากก่อน)
+  const sortList = useCallback((list: Row[]) => {
+    const arr = [...list];
+    if (sortKey === "name") arr.sort((a, b) => a.item_name.localeCompare(b.item_name, "th"));
+    else if (sortKey === "qty") arr.sort((a, b) => b.qty - a.qty);
+    else if (sortKey === "price") arr.sort((a, b) => b.line_total - a.line_total);
+    else arr.sort((a, b) => String(b.order_date ?? "").localeCompare(String(a.order_date ?? "")));   // date
+    return arr;
+  }, [sortKey]);
 
   const fetchRows = useCallback(async () => {
     setLoading(true); setError(null);
@@ -161,15 +185,21 @@ export default function PurchaseOrdersPage() {
   }, []);
   useEffect(() => { void fetchRows(); }, [fetchRows]);
 
-  // ── submit PO (ใช้ร่วม: ตาราง/ตะกร้า/ซื้อทั้งร้าน) ──
-  const submitPO = useCallback(async (body: Record<string, unknown>, orderedIds: string[]) => {
+  // ── submit PO (ใช้ร่วม: ตาราง/ตะกร้า/ซื้อทั้งร้าน) — shareRows: รายการที่สั่ง (ไว้ทำข้อความแชร์ตามร้าน) ──
+  const submitPO = useCallback(async (body: Record<string, unknown>, orderedIds: string[], shareRows?: { seller_name: string; qty: number; item_name: string; code: string; uom: string }[]) => {
     setBusy(true);
     try {
       const res = await apiFetch("/api/purchasing/create-po", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, actor: user?.name }) });
       const j = await res.json();
       if (j.error) throw new Error(j.error);
-      toast.success(`สร้างใบสั่งซื้อ ${(j.created ?? []).length} ใบแล้ว`);
+      const created = (j.created ?? []) as CreatedPO[];
+      // จัดรายการตามร้าน ไว้ทำข้อความแชร์ในการ์ด
+      const byShop: Record<string, ShareItem[]> = {};
+      for (const r of (shareRows ?? [])) { (byShop[r.seller_name] ??= []).push({ name: stripCode(r.item_name), code: r.code, qty: r.qty, uom: r.uom }); }
+      shareItemsRef.current = byShop;
+      toast.success(`สร้างใบสั่งซื้อ ${created.length} ใบแล้ว`);
       setCart((c) => { const n = { ...c }; orderedIds.forEach((id) => delete n[id]); return n; });
+      if (created.length > 0) setCreatedPOs(created);
       await fetchRows();
     } catch (e) { toast.error("สร้างใบสั่งซื้อไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setBusy(false); }
@@ -182,7 +212,7 @@ export default function PurchaseOrdersPage() {
     const shops = [...new Set(valid.map((r) => r.seller_name))];
     const unapproved = valid.filter((r) => !r.approved).length;
     if (!confirm(`สร้างใบสั่งซื้อจาก ${valid.length} รายการ → ${shops.length} ร้าน (1 ใบ/ร้าน)?${unapproved ? `\n(มี ${unapproved} รายการยังไม่อนุมัติ → บันทึกอนุมัติให้อัตโนมัติ)` : ""}`)) return;
-    await submitPO({ pr_ids: valid.map((r) => r.id) }, valid.map((r) => r.id));
+    await submitPO({ pr_ids: valid.map((r) => r.id) }, valid.map((r) => r.id), valid.map((r) => ({ seller_name: r.seller_name, qty: r.qty, item_name: r.item_name, code: r.code, uom: r.uom })));
   }, [submitPO, toast]);
 
   const bulkActions: BulkAction<Row>[] = [{ label: busy ? "กำลังสร้าง…" : "🧾 สร้างใบสั่งซื้อ (ตามร้าน)", onClick: (r) => void createPOByRows(r) }];
@@ -212,7 +242,8 @@ export default function PurchaseOrdersPage() {
   const confirmCreatePO = useCallback(async () => {
     if (cartRows.length === 0) return;
     const items = cartRows.map((r) => ({ pr_id: r.id, qty: cart[r.id]?.qty ?? r.qty, keep_remainder: cart[r.id]?.partial ?? false }));
-    await submitPO({ items, order_date: orderDate }, cartRows.map((r) => r.id));
+    await submitPO({ items, order_date: orderDate }, cartRows.map((r) => r.id),
+      cartRows.map((r) => ({ seller_name: r.seller_name, qty: cart[r.id]?.qty ?? r.qty, item_name: r.item_name, code: r.code, uom: r.uom })));
     setReviewOpen(false);
   }, [cartRows, cart, orderDate, submitPO]);
 
@@ -240,12 +271,26 @@ export default function PurchaseOrdersPage() {
     w.document.write(html); w.document.close();
   }, [cart, orderDate, toast]);
 
+  // ร้านไหนเป็นจีน: ป้าย Taobao / สกุล RMB / ตั้งค่า cn ในผู้จำหน่าย
+  const cnSupplierNames = useMemo(() => new Set(suppliers.filter((s) => s.cn).map((s) => s.name)), [suppliers]);
+  const isChineseShop = useCallback((name: string, currency: string) =>
+    taobaoShops.has(name) || cnSupplierNames.has(name) || isCNY(currency), [taobaoShops, cnSupplierNames]);
+
   // ── ข้อมูล view การ์ด ──
   const shops = useMemo(() => {
     const m = new Map<string, { name: string; count: number; total: number; currency: string }>();
     for (const r of rows) { const s = m.get(r.seller_name) ?? { name: r.seller_name, count: 0, total: 0, currency: r.currency }; s.count += 1; s.total += r.line_total; m.set(r.seller_name, s); }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, "th"));
   }, [rows]);
+  // แยกร้านไทย/จีน สำหรับลิสต์ซ้าย
+  const shopsByOrigin = useMemo(() => {
+    const q = shopQ.trim().toLowerCase();
+    const filtered = shops.filter((s) => !q || s.name.toLowerCase().includes(q));
+    return {
+      th: filtered.filter((s) => !isChineseShop(s.name, s.currency)),
+      cn: filtered.filter((s) => isChineseShop(s.name, s.currency)),
+    };
+  }, [shops, shopQ, isChineseShop]);
   const shopNames = useMemo(() => (activeShop ? [activeShop] : shops.map((s) => s.name)), [activeShop, shops]);
   const rowsOfShop = useCallback((name: string) => rows.filter((r) => r.seller_name === name), [rows]);
 
@@ -283,9 +328,21 @@ export default function PurchaseOrdersPage() {
           </div>
           <div className="flex items-center gap-2">
             {view === "card" && (
-              <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
-                <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
-              </label>
+              <>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">เรียงตาม
+                  <select value={sortKey} onChange={(e) => changeSort(e.target.value as SortKey)} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                    <option value="date">วันที่สั่ง</option>
+                    <option value="name">ชื่อสินค้า</option>
+                    <option value="qty">จำนวน</option>
+                    <option value="price">ราคารวม</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">การ์ด/แถว
+                  <select value={cols} onChange={(e) => changeCols(Number(e.target.value))} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">{[4, 6, 8, 10, 12].map((n) => <option key={n} value={n}>{n}</option>)}</select>
+                </label>
+                <button onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+                  className={`h-9 px-3 text-sm font-medium rounded-lg border ${selectMode ? "bg-blue-600 text-white border-blue-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>☑️ เลือกหลายชิ้น</button>
+              </>
             )}
             <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
               <button onClick={() => changeView("card")} className={`h-9 px-3 ${view === "card" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ การ์ด</button>
@@ -319,11 +376,16 @@ export default function PurchaseOrdersPage() {
                 <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                   <button onClick={() => { setMainTab("shop"); setActiveShop(null); }} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "shop" && !activeShop ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({rows.length})</button>
                   <button onClick={() => setMainTab("mo")} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "mo" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🏭 จากใบสั่งงาน ({moCount})</button>
-                  {shops.filter((s) => !shopQ.trim() || s.name.toLowerCase().includes(shopQ.trim().toLowerCase())).map((s) => (
-                    <button key={s.name} onClick={() => { setMainTab("shop"); setActiveShop(s.name); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${mainTab === "shop" && activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                      <div className={`text-sm ${mainTab === "shop" && activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
-                      <div className="text-[11px] text-slate-400">{s.count} รายการ · {money(s.total, s.currency)}</div>
-                    </button>
+                  {([["🇹🇭 ร้านไทย", shopsByOrigin.th], ["🇨🇳 ร้านจีน", shopsByOrigin.cn]] as const).map(([label, list]) => list.length === 0 ? null : (
+                    <div key={label}>
+                      <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 bg-slate-50 border-b border-slate-100 uppercase tracking-wide">{label} ({list.length})</div>
+                      {list.map((s) => (
+                        <button key={s.name} onClick={() => { setMainTab("shop"); setActiveShop(s.name); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${mainTab === "shop" && activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                          <div className={`text-sm ${mainTab === "shop" && activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
+                          <div className="text-[11px] text-slate-400">{s.count} รายการ · {money(s.total, s.currency)}</div>
+                        </button>
+                      ))}
+                    </div>
                   ))}
                 </div>
               </aside>
@@ -331,6 +393,17 @@ export default function PurchaseOrdersPage() {
               {/* กลาง: การ์ด แบ่ง section ตามร้าน */}
               <main className="flex-1 min-w-0 space-y-4">
                 <input value={prodQ} onChange={(e) => setProdQ(e.target.value)} placeholder="🔎 ค้นหาสินค้า (ชื่อ / รหัส)…" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                {selectMode && (
+                  <div className="sticky top-14 z-10 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-blue-800">เลือก {selectedIds.size} รายการ</span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <button onClick={() => selectedRows.length > 0 && setBulkShop(selectedRows)} disabled={selectedIds.size === 0}
+                        className="h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">📍 ตั้งร้าน / ราคา ({selectedIds.size})</button>
+                      <button onClick={() => setSelectedIds(new Set())} disabled={selectedIds.size === 0} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-white disabled:opacity-40">ล้างเลือก</button>
+                      <button onClick={exitSelect} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-white">ออกจากโหมดเลือก</button>
+                    </div>
+                  </div>
+                )}
                 {mainTab === "mo" && moGroups.length === 0 && (
                   <div className="text-center text-slate-300 py-16 border border-dashed border-slate-200 rounded-lg">
                     ยังไม่มีรายการขอซื้อที่มาจากใบสั่งงาน<br />
@@ -342,7 +415,7 @@ export default function PurchaseOrdersPage() {
                   : shopNames.map((name) => ({ key: name, title: `🏪 ${name}`, sub: "", items: rowsOfShop(name), shopName: name as string | null }))
                 ).map((sec) => {
                   const pq = prodQ.trim().toLowerCase();
-                  const list = sec.items.filter((r) => !pq || r.item_name.toLowerCase().includes(pq) || r.code.toLowerCase().includes(pq));
+                  const list = sortList(sec.items.filter((r) => !pq || r.item_name.toLowerCase().includes(pq) || r.code.toLowerCase().includes(pq)));
                   if (list.length === 0) return null;
                   const sectionNoShop = sec.shopName ? noShop(list[0]) : true;
                   return (
@@ -355,11 +428,15 @@ export default function PurchaseOrdersPage() {
                         {list.map((r) => {
                           const on = inCart(r.id);
                           const blocked = noShop(r);
+                          const picked = selectedIds.has(r.id);
                           return (
-                            <div key={r.id} onClick={() => (blocked ? setSetShopRow(r) : toggleCart(r))}
-                              className={`bg-white border rounded-xl overflow-hidden cursor-pointer transition-all ${on ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}>
+                            <div key={r.id} onClick={() => (selectMode ? toggleSelect(r.id) : blocked ? setSetShopRow(r) : toggleCart(r))}
+                              className={`bg-white border rounded-xl overflow-hidden cursor-pointer transition-all ${selectMode && picked ? "border-blue-500 ring-2 ring-blue-300" : on ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-blue-300 hover:shadow-sm"}`}>
                               <div className="aspect-square bg-slate-50 flex items-center justify-center relative">
-                                {!r.approved && <span className="absolute top-1.5 left-1.5 z-10 text-[10px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">ยังไม่อนุมัติ</span>}
+                                {selectMode && (
+                                  <span className={`absolute top-1.5 left-1.5 z-20 w-6 h-6 rounded-md flex items-center justify-center text-sm font-bold shadow-sm ${picked ? "bg-blue-600 text-white" : "bg-white/90 border border-slate-300 text-transparent"}`}>✓</span>
+                                )}
+                                {!selectMode && !r.approved && <span className="absolute top-1.5 left-1.5 z-10 text-[10px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">ยังไม่อนุมัติ</span>}
                                 <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1">
                                   {isTaobaoRow(r) && <span title="Taobao" className="w-6 h-6 flex items-center justify-center rounded-full bg-orange-500 text-white text-[12px] font-bold shadow-sm leading-none">淘</span>}
                                   <button onClick={(e) => { e.stopPropagation(); onLinkClick(r); }}
@@ -496,9 +573,17 @@ export default function PurchaseOrdersPage() {
           setSetShopRow(null);
         }} />}
       {editRow && <CardEditModal row={editRow} suppliers={suppliers} onSupplierAdded={addSupplier} onClose={() => setEditRow(null)} onSaved={async () => { setEditRow(null); await fetchRows(); }} />}
+      {bulkShop && <BulkSetShopModal rows={bulkShop} suppliers={suppliers} onSupplierAdded={addSupplier}
+        onClose={() => setBulkShop(null)}
+        onSaved={async () => { setBulkShop(null); exitSelect(); await fetchRows(); }} />}
       {buyAllShop && <BuyAllModal shop={buyAllShop.name} rows={buyAllShop.rows} rate={rate}
         onClose={() => setBuyAllShop(null)}
-        onConfirm={async (items) => { await submitPO({ items, order_date: orderDate }, items.map((i) => i.pr_id)); setBuyAllShop(null); }} />}
+        onConfirm={async (items) => {
+          const byId = new Map(buyAllShop.rows.map((r) => [r.id, r]));
+          const share = items.map((i) => { const r = byId.get(i.pr_id); return { seller_name: r?.seller_name ?? buyAllShop.name, qty: i.qty, item_name: r?.item_name ?? "", code: r?.code ?? "", uom: r?.uom ?? "" }; });
+          await submitPO({ items, order_date: orderDate }, items.map((i) => i.pr_id), share); setBuyAllShop(null);
+        }} />}
+      {createdPOs && <PoSuccessModal pos={createdPOs} shareItems={shareItemsRef.current} rate={rate} actor={user?.name ?? ""} onClose={() => setCreatedPOs(null)} />}
       {linkRow && <LinkModal row={linkRow} onClose={() => setLinkRow(null)}
         onSaved={(url) => { const sid = linkRow.item_sku_id; setRows((rs) => rs.map((x) => x.item_sku_id === sid ? { ...x, purchase_link: url } : x)); setLinkRow(null); }} />}
 
@@ -862,6 +947,152 @@ function SetShopModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: {
         )}
       </div>
       {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setSellerId(p.id); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
+    </ERPModal>
+  );
+}
+
+// ── popup ตั้งร้าน/ราคา หลายชิ้นพร้อมกัน (Mass) — เลือกร้าน 1 ร้าน + ราคา → ใส่ให้ทุกชิ้นที่เลือก ──
+function BulkSetShopModal({ rows, suppliers, onSupplierAdded, onClose, onSaved }: {
+  rows: Row[]; suppliers: { id: string; name: string; cn?: boolean }[]; onSupplierAdded: (s: { id: string; name: string; cn?: boolean }) => void;
+  onClose: () => void; onSaved: () => void | Promise<void>;
+}) {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [seller, setSeller] = useState("");
+  const [sellerId, setSellerId] = useState("");
+  const [price, setPrice] = useState("");      // เว้นว่าง = ไม่แก้ราคา (คงราคาเดิมของแต่ละชิ้น)
+  const [cur, setCur] = useState("THB");
+  const [setPriceOn, setSetPriceOn] = useState(false);   // ติ๊กถ้าต้องการตั้งราคาเดียวให้ทุกชิ้น
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const pickTaobao = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/purchasing/taobao-shop", { method: "POST" }).then((r) => r.json());
+      if (j.error || !j.data?.id) { toast.error("ตั้งร้าน Taobao ไม่สำเร็จ: " + (j.error ?? "")); return; }
+      onSupplierAdded(j.data); setSeller(j.data.name); setSellerId(j.data.id); setCur("RMB");
+    } catch (e) { toast.error(String((e as Error).message ?? e)); }
+  }, [onSupplierAdded, toast]);
+
+  const save = async () => {
+    if (!seller) { toast.error("เลือกร้านก่อน"); return; }
+    setSaving(true);
+    const priceN = setPriceOn ? (Number(price) || 0) : null;
+    let ok = 0, fail = 0;
+    try {
+      for (const r of rows) {
+        try {
+          const body: Record<string, unknown> = { seller_name: seller, currency: cur, actor: user?.name };
+          if (priceN != null) body.price_est = priceN;     // ตั้งราคาเดียว · ไม่ติ๊ก = คงราคาเดิม
+          const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${r.id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+          });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.error) { fail++; continue; }
+          // เก็บร้าน+ราคาเข้ารายการสินค้า (best-effort)
+          if (r.item_sku_id && sellerId) {
+            await apiFetch(`/api/purchasing/sku-suppliers`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sku_id: r.item_sku_id, partner_id: sellerId, price: priceN ?? r.price_est ?? null, currency: cur, default_if_none: true }),
+            }).catch(() => {});
+          }
+          ok++;
+        } catch { fail++; }
+      }
+      if (ok > 0) toast.success(`ตั้งร้านให้ ${ok} รายการแล้ว${fail ? ` (พลาด ${fail})` : ""}`);
+      else toast.error("ตั้งร้านไม่สำเร็จทั้งหมด");
+      await onSaved();
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} size="md" storageKey="po-bulk-shop" title={`📍 ตั้งร้าน/ราคา ${rows.length} รายการ`}
+      description="เลือกร้าน 1 ร้าน → ระบบตั้งให้ทุกชิ้นที่เลือก (ติ๊กถ้าจะตั้งราคาเดียวกันด้วย)"
+      footer={<>
+        <button onClick={onClose} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+        <button onClick={() => void save()} disabled={saving || !seller} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : `ตั้งร้านให้ ${rows.length} รายการ`}</button>
+      </>}>
+      <div className="space-y-3">
+        <div className="max-h-28 overflow-auto text-xs text-slate-500 border border-slate-100 rounded-lg p-2 space-y-0.5">
+          {rows.map((r) => <div key={r.id} className="truncate">• {stripCode(r.item_name)} <span className="text-slate-300">({r.code || "—"})</span></div>)}
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">ร้าน (ผู้จำหน่าย) *</label>
+          <SupplierPicker value={sellerId} suppliers={suppliers} onChange={(id, name) => { setSellerId(id); setSeller(name); }} onAddNew={() => setWizardOpen(true)} />
+          <button type="button" onClick={() => void pickTaobao()} className="mt-1.5 h-7 px-2.5 text-xs font-medium rounded-md border border-orange-200 text-orange-700 bg-orange-50 hover:bg-orange-100">🛒 ตั้งเป็นร้าน Taobao</button>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={setPriceOn} onChange={(e) => setSetPriceOn(e.target.checked)} className="rounded border-slate-300" />
+          ตั้งราคาเดียวกันให้ทุกชิ้น
+        </label>
+        {setPriceOn && (
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">ราคา/หน่วย ({curLabel(cur)})</label>
+            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" placeholder="0" />
+          </div>
+        )}
+        {!setPriceOn && <p className="text-[11px] text-slate-400">ไม่ติ๊ก = คงราคาเดิมของแต่ละชิ้น เปลี่ยนแค่ร้าน</p>}
+      </div>
+      {wizardOpen && <SupplierWizard onClose={() => setWizardOpen(false)} onCreated={(p) => { onSupplierAdded(p); setSeller(p.name); setSellerId(p.id); setWizardOpen(false); toast.success(`เพิ่มผู้จำหน่าย "${p.name}" แล้ว`); }} />}
+    </ERPModal>
+  );
+}
+
+// ── popup "สร้างใบสั่งซื้อสำเร็จ" — การ์ดต่อใบ (พิมพ์ / แชร์ไลน์ / คัดลอกข้อความ ส่ง supplier) ──
+function PoSuccessModal({ pos, shareItems, rate, onClose }: {
+  pos: CreatedPO[]; shareItems: Record<string, ShareItem[]>; rate: number; actor: string; onClose: () => void;
+}) {
+  const toast = useToast();
+  // ข้อความสรุปใบ (ไว้แชร์ไลน์/คัดลอก ส่งร้าน)
+  const buildText = (p: CreatedPO) => {
+    const items = shareItems[p.seller_name] ?? [];
+    const lines = items.map((it, i) => `${i + 1}. ${it.name}${it.code ? ` (${it.code})` : ""} x ${it.qty.toLocaleString()} ${it.uom}`.trim());
+    const total = `${money(p.grand_total, p.currency)}`;
+    return [`🧾 ใบสั่งซื้อ ${p.po_no}`, `🏪 ${p.seller_name}`, items.length ? "รายการ:" : "", ...lines, `รวม ${total}`].filter(Boolean).join("\n");
+  };
+  const shareLine = (p: CreatedPO) => window.open(`https://line.me/R/share?text=${encodeURIComponent(buildText(p))}`, "_blank", "noopener");
+  const copyText = async (p: CreatedPO) => { try { await navigator.clipboard.writeText(buildText(p)); toast.success("คัดลอกข้อความแล้ว — วางส่งร้านได้เลย"); } catch { toast.error("คัดลอกไม่สำเร็จ"); } };
+  const printPo = (p: CreatedPO) => window.open(`/print/purchase-order/${p.id}`, "_blank", "noopener");
+
+  return (
+    <ERPModal open onClose={onClose} size="lg" storageKey="po-success"
+      title={`✅ สร้างใบสั่งซื้อสำเร็จ ${pos.length} ใบ`}
+      description="พิมพ์ส่งร้าน หรือกดแชร์ไลน์ / คัดลอกข้อความส่งให้ supplier ได้เลย"
+      footer={<button onClick={onClose} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">เสร็จ</button>}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {pos.map((p) => {
+          const items = shareItems[p.seller_name] ?? [];
+          return (
+            <div key={p.id} className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2.5">
+                <div className="font-mono text-sm font-semibold">{p.po_no}</div>
+                <div className="text-xs opacity-90 truncate">🏪 {p.seller_name}</div>
+              </div>
+              <div className="p-3">
+                {items.length > 0 ? (
+                  <div className="space-y-1 max-h-40 overflow-auto">
+                    {items.map((it, i) => (
+                      <div key={i} className="flex justify-between gap-2 text-xs">
+                        <span className="text-slate-700 truncate">{i + 1}. {it.name} {it.code && <span className="text-slate-400">({it.code})</span>}</span>
+                        <span className="text-slate-600 tabular-nums shrink-0">{it.qty.toLocaleString()} {it.uom}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="text-xs text-slate-400">{p.line_count} รายการ</div>}
+                <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between text-sm">
+                  <span className="text-slate-500">ยอดรวม</span>
+                  <span className="font-bold text-blue-600">{money(p.grand_total, p.currency)}{isCNY(p.currency) && rate > 0 && <span className="text-[11px] font-normal text-slate-400"> ≈ ฿{Math.round(p.grand_total * rate).toLocaleString()}</span>}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-1.5">
+                  <button onClick={() => printPo(p)} className="h-8 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">🖨️ พิมพ์</button>
+                  <button onClick={() => shareLine(p)} className="h-8 text-xs font-medium rounded-md bg-green-600 text-white hover:bg-green-700">💬 แชร์ไลน์</button>
+                  <button onClick={() => void copyText(p)} className="h-8 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">📋 คัดลอก</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </ERPModal>
   );
 }

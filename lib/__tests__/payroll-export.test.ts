@@ -1,11 +1,12 @@
 ﻿import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
-import { DEFAULT_PND3_RANDOM_SPREAD_PERCENT, PND3_RANDOM_ALLOCATION_NOTE, applyPnd3AllocationToPreviewRows, distributePnd3Allocation, equalizePnd3Allocation, filterPnd3OutputRows, initializePnd3Allocation, randomizePnd3Allocation, randomizePnd3AllocationSelection } from "@/lib/payroll-pnd3-allocation";
+import { DEFAULT_PND3_RANDOM_SPREAD_PERCENT, PND3_RANDOM_ALLOCATION_NOTE, applyPnd3AllocationToPreviewRows, defaultPnd3ShownSelectionIds, distributePnd3Allocation, equalizePnd3Allocation, filterPnd3OutputRows, initializePnd3Allocation, pnd3SelectedSourcePoolNetAmount, pnd3SourceSelectionIds, randomizePnd3Allocation, randomizePnd3AllocationSelection } from "@/lib/payroll-pnd3-allocation";
 import { pnd3GrossUpFromNet } from "@/lib/payroll-pnd3-recurring-db";
 import {
   DEFAULT_PND3_INCOME_TYPE,
   PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT,
   applyPnd3ExportRowOverrides,
+  buildPnd3WorkbookBuffer,
   buildPayrollRegisterWorkbookBuffer,
   buildPayrollRegisterRecurringExportRow,
   cleanPnd3IncomeType,
@@ -13,6 +14,7 @@ import {
   payrollExportIdentityNo,
   payrollExportTotals,
   payrollRegisterExportAmounts,
+  pnd3NetPayBasis,
   pnd3SheetRows,
   type PayrollExportRow,
 } from "@/lib/payroll-export";
@@ -215,6 +217,13 @@ describe("payroll export rules", () => {
     expect(pnd3GrossUpFromNet(17000, 3)).toEqual({ gross_pay: 17525.77, withholding_tax: 525.77, net_pay: 17000 });
   });
 
+  it("uses actual payment amount as the PND3 net basis before gross-up", () => {
+    const netBasis = pnd3NetPayBasis(17000, 8755.57);
+    expect(netBasis).toBe(8755.57);
+    expect(pnd3GrossUpFromNet(netBasis, 3)).toEqual({ gross_pay: 9026.36, withholding_tax: 270.79, net_pay: 8755.57 });
+    expect(pnd3NetPayBasis(17000, 0)).toBe(17000);
+  });
+
   it("hides zero-net PND3 rows", () => {
     const rows = [
       { ...baseRow, include_pnd3_export: true, net_pay: 0, gross_pay: 0 },
@@ -222,6 +231,15 @@ describe("payroll export rules", () => {
     ];
 
     expect(filterPayrollExportRows(rows, "pnd3").map((row) => row.employee_code)).toEqual(["ISG-002"]);
+  });
+
+  it("keeps payable non-employee PND3 rows even without a contract export flag", () => {
+    const rows = [
+      { ...baseRow, source: "employee" as const, selection_id: "emp-base", employee_code: "ISG-001", include_pnd3_export: false, net_pay: 17000 },
+      { ...baseRow, source: "pnd3_recurring" as const, selection_id: "pnd3:rec-1", employee_code: "", employee_name: "ผู้รับ ภ.ง.ด.3", include_pnd3_export: false, net_pay: 5000 },
+    ];
+
+    expect(filterPayrollExportRows(rows, "pnd3").map((row) => row.selection_id)).toEqual(["pnd3:rec-1"]);
   });
 
   it("spreads foreign daily PND3 allocation after fixed recipients", () => {
@@ -233,6 +251,17 @@ describe("payroll export rules", () => {
 
     expect(result.rows.map((row) => row.allocated_net_amount)).toEqual([400, 300, 300]);
     expect(result.totals).toEqual({ pool_net_amount: 1000, allocated_net_amount: 1000, remaining_net_amount: 0, fixed_net_amount: 400, random_net_amount: 0 });
+  });
+
+  it("uses only selected foreign daily sources as the PND3 allocation pool", () => {
+    const sourceRows = [
+      { selection_id: "src-1", employee_id: "emp-1", employee_code: "ISG-001", employee_name: "A", nationality: "MM", contract_type: "daily", wage_type: "daily", net_pay: 8750 },
+      { selection_id: "src-2", employee_id: "emp-2", employee_code: "ISG-002", employee_name: "B", nationality: "MM", contract_type: "daily", wage_type: "daily", net_pay: 8750 },
+      { selection_id: "src-3", employee_id: "emp-3", employee_code: "ISG-003", employee_name: "C", nationality: "MM", contract_type: "daily", wage_type: "daily", net_pay: 5000 },
+    ];
+
+    expect(pnd3SourceSelectionIds(sourceRows)).toEqual(["src-1", "src-2", "src-3"]);
+    expect(pnd3SelectedSourcePoolNetAmount(sourceRows, ["src-1", "src-3"])).toBe(13750);
   });
 
   it("keeps fixed allocation visible when fixed total is over the pool", () => {
@@ -286,15 +315,28 @@ describe("payroll export rules", () => {
     expect(second.totals.remaining_net_amount).toBe(0);
   });
 
-  it("auto-selects flexible recipients when randomizing a fresh PND3 allocation", () => {
+  it("does not auto-select every PND3 recipient when randomizing an unchecked allocation", () => {
     const sequence = [0.25, 0.75];
     const result = randomizePnd3Allocation(1000, [
       { selection_id: "emp-1", target_source: "employee", target_label: "A", base_net_amount: 0, is_selected: false, is_fixed: false, fixed_net_amount: 0 },
       { selection_id: "emp-2", target_source: "employee", target_label: "B", base_net_amount: 0, is_selected: false, is_fixed: false, fixed_net_amount: 0 },
     ], () => sequence.shift() ?? 0.5);
 
-    expect(result.rows.map((row) => row.is_selected)).toEqual([true, true]);
-    expect(result.rows.map((row) => row.allocated_net_amount)).toEqual([250, 750]);
+    expect(result.rows.map((row) => row.is_selected)).toEqual([false, false]);
+    expect(result.rows.map((row) => row.allocated_net_amount)).toEqual([0, 0]);
+    expect(result.totals.remaining_net_amount).toBe(1000);
+  });
+
+  it("keeps randomized PND3 baht amounts as whole numbers when the pool has no satang", () => {
+    const sequence = [0.21, 0.52, 0.89];
+    const result = randomizePnd3Allocation(136628, [
+      { selection_id: "emp-1", target_source: "employee", target_label: "A", base_net_amount: 0, is_selected: true, is_fixed: false, fixed_net_amount: 0 },
+      { selection_id: "emp-2", target_source: "employee", target_label: "B", base_net_amount: 0, is_selected: true, is_fixed: false, fixed_net_amount: 0 },
+      { selection_id: "emp-3", target_source: "employee", target_label: "C", base_net_amount: 0, is_selected: true, is_fixed: false, fixed_net_amount: 0 },
+    ], () => sequence.shift() ?? 0.5, 30);
+
+    expect(result.rows.map((row) => row.allocated_net_amount % 1)).toEqual([0, 0, 0]);
+    expect(result.totals.allocated_net_amount).toBe(136628);
     expect(result.totals.remaining_net_amount).toBe(0);
   });
 
@@ -312,7 +354,7 @@ describe("payroll export rules", () => {
     expect(result.totals.remaining_net_amount).toBe(1000);
   });
 
-  it("keeps PND3 recipients unchecked by default even when they already have a base amount", () => {
+  it("keeps PND3 allocation recipients unchecked by default even when preview has base amounts", () => {
     const sequence = [0.2, 0.8];
     const result = initializePnd3Allocation(1000, [
       { selection_id: "emp-1", target_source: "employee", target_label: "A", base_net_amount: 16983.65, is_selected: false, is_fixed: false, fixed_net_amount: 0 },
@@ -429,14 +471,25 @@ describe("payroll export rules", () => {
     expect(applied[0]).toMatchObject({ net_pay: 2914.82, gross_pay: 3004.97, withholding_tax: 90.15, pnd3_allocation_net: 2914.82 });
   });
 
-  it("hides regular employee PND3 rows unless they have an allocated amount", () => {
+  it("keeps PND3 employee preview rows with base amounts even when allocation is unchecked", () => {
     const rows = filterPnd3OutputRows([
       { ...baseRow, selection_id: "emp-base", source: "employee", include_pnd3_export: true, net_pay: 13900, gross_pay: 14329.9, withholding_tax: 429.9, pnd3_allocation_net: 0 },
       { ...baseRow, selection_id: "emp-allocated", source: "employee", include_pnd3_export: true, net_pay: 2914.82, gross_pay: 3004.97, withholding_tax: 90.15, pnd3_allocation_net: 2914.82 },
       { ...baseRow, selection_id: "rec-1", source: "pnd3_recurring", include_pnd3_export: true, net_pay: 5000, gross_pay: 5154.64, withholding_tax: 154.64 },
     ]);
 
-    expect(rows.map((row) => row.selection_id)).toEqual(["emp-allocated", "rec-1"]);
+    expect(rows.map((row) => row.selection_id)).toEqual(["emp-base", "emp-allocated", "rec-1"]);
+  });
+
+  it("defaults the PND3 preview selection to payable rows only", () => {
+    const ids = defaultPnd3ShownSelectionIds([
+      { ...baseRow, selection_id: "emp-base", source: "employee", include_pnd3_export: true, wage_type: "monthly", nationality: "TH", net_pay: 13900, gross_pay: 14329.9, withholding_tax: 429.9, pnd3_allocation_net: 0 },
+      { ...baseRow, selection_id: "mm-daily", source: "employee", include_pnd3_export: true, wage_type: "daily", nationality: "MM", net_pay: 1000, gross_pay: 1030.93, withholding_tax: 30.93, pnd3_allocation_net: 1000 },
+      { ...baseRow, selection_id: "emp-allocated", source: "employee", include_pnd3_export: true, wage_type: "monthly", nationality: "TH", net_pay: 2914.82, gross_pay: 3004.97, withholding_tax: 90.15, pnd3_allocation_net: 2914.82 },
+      { ...baseRow, selection_id: "rec-1", source: "pnd3_recurring", include_pnd3_export: true, net_pay: 5000, gross_pay: 5154.64, withholding_tax: 154.64 },
+    ]);
+
+    expect(ids).toEqual(["emp-base", "emp-allocated", "rec-1"]);
   });
 
   it("can split one PND3 recipient into another dated row with its own net amount", () => {
@@ -503,6 +556,54 @@ describe("payroll export rules", () => {
     const sheetRows = pnd3SheetRows(rows, "2026-05-31");
     expect(sheetRows[2][3]).toBe("3 9999 88888 77 6");
     expect(sheetRows[2][4]).toBe("ที่อยู่เฉพาะงวด ภงด.3");
+  });
+
+  it("builds a formatted PND3 workbook like the payroll register export", () => {
+    const rows = [
+      {
+        ...baseRow,
+        include_pnd3_export: true,
+        national_id: "3189800023261",
+        identity_no: "",
+        gross_pay: 17508.919,
+        withholding_tax: 525.27,
+        net_pay: 16983.65,
+      },
+      {
+        ...baseRow,
+        id: "line-2",
+        selection_id: "emp-2",
+        employee_id: "emp-2",
+        employee_code: "ISG-002",
+        employee_name: "No ID",
+        include_pnd3_export: true,
+        national_id: "",
+        identity_no: "",
+        passport_no: "",
+        gross_pay: 1000,
+        withholding_tax: 30,
+        net_pay: 970,
+      },
+    ];
+
+    const buffer = buildPnd3WorkbookBuffer(rows, "2026-06-30");
+    const workbook = XLSX.read(buffer, { type: "buffer", cellFormula: true, cellNF: true, cellStyles: true });
+    const worksheet = workbook.Sheets.PND3;
+
+    expect(worksheet["!ref"]).toBe("A1:I5");
+    expect(worksheet["!merges"]).toContainEqual({ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } });
+    expect(worksheet["!cols"]?.map((col) => col.wch)).toEqual([10.5, 11.5, 26.5, 19.5, 36.5, 16.5, 11.5, 10.5, 10.5]);
+    expect(worksheet.A1.v).toBe("ภ.ง.ด.3");
+    expect(worksheet.A2.v).toBe("ลำดับ");
+    expect(worksheet.D3.v).toBe("3 1898 00023 26 1");
+    expect(worksheet.D4.v).toBe("-");
+    expect(worksheet.C5.v).toBe("รวม");
+    expect(worksheet.G3.z).toBe(PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT);
+    expect(worksheet.G5.f).toBe("SUM(G3:G4)");
+    expect(worksheet.H5.f).toBe("SUM(H3:H4)");
+    expect(worksheet.I5.f).toBe("SUM(I3:I4)");
+    expect(buffer.toString("utf8")).toContain('name val="Angsana New"');
+    expect(buffer.toString("utf8")).toContain('left style="thin"');
   });
 });
 

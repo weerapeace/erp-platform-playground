@@ -6,6 +6,7 @@ import {
   csvEscape,
   normalizePaymentBatchType,
   parsePaymentLineNote,
+  paymentLineGroup,
   paymentExportCsv,
 } from "@/lib/payroll-payments";
 
@@ -15,6 +16,13 @@ describe("payroll payments", () => {
     expect(normalizePaymentBatchType("cash")).toBe("month_end");
     expect(normalizePaymentBatchType("mid_month")).toBe("mid_month");
     expect(normalizePaymentBatchType("unknown")).toBe("month_end");
+  });
+
+  it("groups payment lines by current contract type for the payment report tabs", () => {
+    expect(paymentLineGroup({ contract_type: "permanent", wage_type: "monthly", source: "payroll_payslip" })).toBe("regular");
+    expect(paymentLineGroup({ contract_type: "regular_external", wage_type: "monthly" })).toBe("other");
+    expect(paymentLineGroup({ contract_type: "permanent", wage_type: "daily" })).toBe("other");
+    expect(paymentLineGroup({ contract_type: "contractor", wage_type: "piece_rate" })).toBe("other");
   });
 
   it("builds a payment line from a payslip using rounded net pay", () => {

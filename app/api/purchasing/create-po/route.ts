@@ -92,7 +92,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ตั้งค่ารูปแบบได้ที่หน้า /admin/numbering (ไม่ต้องแก้โค้ด)
   const now = new Date();
   const actor = body.actor ?? user.email ?? "system";
-  const created: Array<{ po_no: string; seller_name: string; currency: string; grand_total: number; line_count: number }> = [];
+  const created: Array<{ id: string; po_no: string; seller_name: string; currency: string; grand_total: number; line_count: number }> = [];
 
   for (const [key, items] of groups) {
     const [seller, currency] = key.split("|||");
@@ -169,7 +169,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       metadata:   { po_no: poNo, seller, currency, grand_total: grandTotal, line_count: items.length },
     });
 
-    created.push({ po_no: poNo, seller_name: seller, currency, grand_total: grandTotal, line_count: items.length });
+    created.push({ id: po.id, po_no: poNo, seller_name: seller, currency, grand_total: grandTotal, line_count: items.length });
   }
 
   return NextResponse.json({ ok: true, created, error: null });

@@ -45,6 +45,10 @@ export type Pnd3AllocationPreview = {
 export type Pnd3AllocationPreviewRow = {
   selection_id: string;
   source?: string;
+  include_pnd3_export?: boolean;
+  nationality?: string | null;
+  contract_type?: string | null;
+  wage_type?: string | null;
   gross_pay: number;
   withholding_tax: number;
   net_pay: number;
@@ -58,6 +62,18 @@ const cents = (value: number) => Math.round(round2(value) * 100);
 const fromCents = (value: number) => round2(value / 100);
 export const PND3_RANDOM_ALLOCATION_NOTE = "__pnd3_random_allocation__";
 export const DEFAULT_PND3_RANDOM_SPREAD_PERCENT = 30;
+
+export function pnd3SourceSelectionIds(sourceRows: Pnd3AllocationSourceRow[]) {
+  return sourceRows.map((row) => row.selection_id).filter(Boolean);
+}
+
+export function pnd3SelectedSourcePoolNetAmount(sourceRows: Pnd3AllocationSourceRow[], selectedIds: Iterable<string>) {
+  const selected = new Set(selectedIds);
+  return round2(sourceRows.reduce((sum, row) => {
+    if (!selected.has(row.selection_id)) return sum;
+    return sum + Math.max(money(row.net_pay), 0);
+  }, 0));
+}
 
 export function normalizePnd3RandomSpreadPercent(value: unknown) {
   return Math.min(100, Math.max(0, money(value) || 0));
@@ -89,7 +105,9 @@ export function applyPnd3AllocationToPreviewRows<T extends Pnd3AllocationPreview
     const extraNet = allocations.get(row.selection_id) ?? 0;
     const previousExtraNet = Math.max(money(row.pnd3_allocation_net), 0);
     const isEmployeeBaseRow = row.source === "employee" && row.pnd3_is_extra !== true;
-    const baseNet = isEmployeeBaseRow ? 0 : round2(Math.max(money(row.net_pay) - previousExtraNet, 0));
+    const baseNet = isEmployeeBaseRow && extraNet > 0
+      ? 0
+      : round2(Math.max(money(row.net_pay) - (isEmployeeBaseRow ? 0 : previousExtraNet), 0));
     const nextNet = round2(baseNet + extraNet);
     const amounts = pnd3GrossUpFromNet(nextNet, 3);
     return {
@@ -106,11 +124,18 @@ export function applyPnd3AllocationToPreviewRows<T extends Pnd3AllocationPreview
 export function filterPnd3OutputRows<T extends Pnd3AllocationPreviewRow>(rows: T[]): T[] {
   return rows.filter((row) => {
     if (Math.max(money(row.net_pay), 0) <= 0) return false;
+    const nationality = String(row.nationality ?? "").trim().toUpperCase();
+    const wageType = String(row.wage_type ?? "").trim().toLowerCase();
+    if (row.source === "employee" && nationality.startsWith("MM") && wageType === "daily") return false;
     if (row.source === "employee" && row.pnd3_is_extra !== true) {
-      return Math.max(money(row.pnd3_allocation_net), 0) > 0;
+      return Math.max(money(row.net_pay), 0) > 0 || Math.max(money(row.pnd3_allocation_net), 0) > 0;
     }
     return true;
   });
+}
+
+export function defaultPnd3ShownSelectionIds<T extends Pnd3AllocationPreviewRow>(rows: T[]): string[] {
+  return filterPnd3OutputRows(rows).map((row) => row.selection_id);
 }
 
 export function distributePnd3Allocation(poolNetAmount: number, targets: Pnd3AllocationInputTarget[]) {
@@ -163,8 +188,7 @@ export function randomizePnd3Allocation(
   const pool = round2(Math.max(money(poolNetAmount), 0));
   const spread = normalizePnd3RandomSpreadPercent(spreadPercent) / 100;
   const selectedFixed = targets.filter((target) => target.is_selected && target.is_fixed);
-  const hasSelectedFlexible = targets.some((target) => target.is_selected && !target.is_fixed);
-  const selectedFlexible = targets.filter((target) => !target.is_fixed && (hasSelectedFlexible ? target.is_selected : true));
+  const selectedFlexible = targets.filter((target) => target.is_selected && !target.is_fixed);
   const fixedTotal = round2(selectedFixed.reduce((sum, target) => sum + Math.max(money(target.fixed_net_amount), 0), 0));
   const remainingCents = Math.max(cents(pool - fixedTotal), 0);
 
@@ -172,34 +196,36 @@ export function randomizePnd3Allocation(
     return distributePnd3Allocation(pool, targets);
   }
 
+  const allocationUnitCents = remainingCents % 100 === 0 ? 100 : 1;
+  const remainingUnits = Math.floor(remainingCents / allocationUnitCents);
   const weights = selectedFlexible.map((target) => {
     const raw = Math.min(1, Math.max(0, random()));
     const centered = (raw * 2) - 1;
     return {
       selection_id: target.selection_id,
       weight: Math.max(1 + (centered * spread), 0),
-    cents: 0,
-    fraction: 0,
+      units: 0,
+      fraction: 0,
     };
   });
   const totalWeight = weights.reduce((sum, row) => sum + row.weight, 0) || 1;
   let allocated = 0;
   weights.forEach((row) => {
-    const exact = (remainingCents * row.weight) / totalWeight;
-    row.cents = Math.floor(exact);
-    row.fraction = exact - row.cents;
-    allocated += row.cents;
+    const exact = (remainingUnits * row.weight) / totalWeight;
+    row.units = Math.floor(exact);
+    row.fraction = exact - row.units;
+    allocated += row.units;
   });
-  let remainder = remainingCents - allocated;
+  let remainder = remainingUnits - allocated;
   weights
     .sort((a, b) => b.fraction - a.fraction)
     .forEach((row) => {
       if (remainder <= 0) return;
-      row.cents += 1;
+      row.units += 1;
       remainder -= 1;
     });
 
-  const randomized = new Map(weights.map((row) => [row.selection_id, fromCents(row.cents)]));
+  const randomized = new Map(weights.map((row) => [row.selection_id, fromCents(row.units * allocationUnitCents)]));
   const nextTargets = targets.map((target) => {
     const amount = randomized.get(target.selection_id);
     if (amount === undefined) return target;

@@ -9,6 +9,7 @@
 
 import dynamic from "next/dynamic";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { SkuWizard } from "./sku-wizard";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
@@ -56,6 +57,13 @@ const CONFIG: MasterCRUDConfig = {
         ? <span className="text-sm tabular-nums text-slate-600">¥{Number(n).toLocaleString("zh-CN", { minimumFractionDigits: 2 })}</span>
         : <span className="text-xs text-slate-300">—</span>;
     },
+  },
+  // แทนฟอร์มเพิ่มมาตรฐานด้วย Wizard (เพิ่มเดี่ยว/เป็นชุด + ตัวช่วยรหัส) — กันส่งผิด/มั่ว/พลาด
+  customCreate: {
+    label: "＋ เพิ่ม SKU",
+    render: ({ open, onClose, onCreated }) => (
+      <SkuWizard open={open} onClose={onClose} onCreated={onCreated} />
+    ),
   },
 };
 

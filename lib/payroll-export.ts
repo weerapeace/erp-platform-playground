@@ -29,6 +29,8 @@ const PAYROLL_REGISTER_HEADERS = [
   "ยอดคงเหลือ",
 ] as const;
 const PAYROLL_REGISTER_COLUMN_WIDTHS = [4.3, 26.9, 19.9, 14.9, 13, 13, 10.9, 13, 13, 12.9];
+const PND3_HEADERS = ["ลำดับ", "วันที่", "ชื่อบริษัท/บุคคล", "เลข 13 หลัก", "ที่อยู่", "ค่าจ้าง/บริการ", "จำนวนเงิน", "ภาษี", "ยอดสุทธิ"] as const;
+const PND3_COLUMN_WIDTHS = [10.85546875, 11.85546875, 26.85546875, 19.85546875, 36.85546875, 16.85546875, 11.85546875, 10.85546875, 10.85546875];
 const THAI_MONTHS = [
   "มกราคม",
   "กุมภาพันธ์",
@@ -158,10 +160,45 @@ const LINE_COLS = [
 const text = (value: unknown) => String(value ?? "").trim();
 const boolDefault = (value: unknown, fallback: boolean) => value === null || value === undefined ? fallback : value === true;
 const round2 = (value: number) => Math.round(value * 100) / 100;
+const CONFIRMED_PAYMENT_STATUSES = ["approved", "paid"] as const;
 export function cleanPnd3IncomeType(value: unknown) {
   const raw = text(value);
   if (!raw || MOJIBAKE_PATTERN.test(raw)) return DEFAULT_PND3_INCOME_TYPE;
   return raw;
+}
+
+export function pnd3NetPayBasis(payrollNetPay: unknown, paidAmount: unknown) {
+  const paid = round2(money(paidAmount));
+  if (paid > 0) return paid;
+  return round2(money(payrollNetPay));
+}
+
+async function pnd3ConfirmedPaymentNetByEmployee(admin: ReturnType<typeof supabaseAdmin>, periodId: string) {
+  const { data: batchRows, error: batchError } = await admin
+    .from("payment_batches")
+    .select("id")
+    .eq("payroll_period_id", periodId)
+    .in("status", CONFIRMED_PAYMENT_STATUSES);
+  if (batchError) throw new Error(batchError.message);
+
+  const batchIds = ((batchRows ?? []) as Row[]).map((batch) => text(batch.id)).filter(Boolean);
+  if (!batchIds.length) return new Map<string, number>();
+
+  const { data: lineRows, error: lineError } = await admin
+    .from("payment_batch_lines")
+    .select("employee_id, paid_amount, status")
+    .in("payment_batch_id", batchIds)
+    .in("status", CONFIRMED_PAYMENT_STATUSES);
+  if (lineError) throw new Error(lineError.message);
+
+  const byEmployee = new Map<string, number>();
+  ((lineRows ?? []) as Row[]).forEach((line) => {
+    const employeeId = text(line.employee_id);
+    const paidAmount = round2(money(line.paid_amount));
+    if (!employeeId || paidAmount <= 0) return;
+    byEmployee.set(employeeId, round2((byEmployee.get(employeeId) ?? 0) + paidAmount));
+  });
+  return byEmployee;
 }
 const buddhistDate = (value: string) => {
   if (!value) return "";
@@ -195,7 +232,11 @@ function paymentDateFor(period: Row) {
 }
 
 function exportFlag(row: PayrollExportRow, type: PayrollExportType) {
-  if (type === "pnd3") return row.include_pnd3_export === true && row.net_pay > 0;
+  if (type === "pnd3") {
+    if (row.net_pay <= 0) return false;
+    if (row.source !== "employee" || row.pnd3_is_extra === true) return true;
+    return row.include_pnd3_export === true;
+  }
   return row.include_payroll_register_export !== false;
 }
 
@@ -446,11 +487,16 @@ export async function getPayrollExportPreview(periodId: string, type: PayrollExp
   const contracts = new Map<string, Row>();
   employeeRows.forEach((row) => employees.set(text(row.id), row));
   contractRows.forEach((row) => contracts.set(text(row.id), row));
+  const pnd3PaymentNetByEmployee = type === "pnd3"
+    ? await pnd3ConfirmedPaymentNetByEmployee(admin, periodId)
+    : new Map<string, number>();
 
   const allRows = lines.map((line): PayrollExportRow => {
-    const employee = employees.get(text(line.employee_id)) ?? {};
+    const employeeId = text(line.employee_id);
+    const employee = employees.get(employeeId) ?? {};
     const contract = contracts.get(text(line.contract_id)) ?? {};
-    const pnd3Amounts = pnd3GrossUpFromNet(line.net_pay, 3);
+    const pnd3NetBasis = pnd3NetPayBasis(line.net_pay, pnd3PaymentNetByEmployee.get(employeeId));
+    const pnd3Amounts = pnd3GrossUpFromNet(pnd3NetBasis, 3);
     const registerBase = money(contract.payroll_register_base_salary) || money(line.base_salary);
     const identityNo = payrollExportIdentityNo({
       identity_no: "",
@@ -463,10 +509,10 @@ export async function getPayrollExportPreview(periodId: string, type: PayrollExp
     });
     return {
       id: text(line.id),
-      selection_id: text(line.employee_id),
+      selection_id: employeeId,
       source: "employee",
-      source_id: text(line.employee_id),
-      employee_id: text(line.employee_id),
+      source_id: employeeId,
+      employee_id: employeeId,
       employee_code: text(employee.employee_code),
       employee_name: employeeOfficialName(employee),
       nickname: text(employee.nickname),
@@ -616,6 +662,10 @@ function payrollRegisterMoney(value: unknown) {
   return round2(money(value));
 }
 
+function pnd3IdentityNo(row: PayrollExportRow) {
+  return formatThaiNationalId(text(row.national_id)) || formatThaiNationalId(text(row.identity_no)) || text(row.national_id) || text(row.identity_no) || text(row.passport_no) || "-";
+}
+
 export function buildPayrollRegisterWorkbookBuffer(rows: PayrollExportRow[], paymentDate: string, periodName: string) {
   const firstDataRow = 4;
   const lastDataRow = firstDataRow + rows.length - 1;
@@ -680,28 +730,246 @@ export function buildPayrollRegisterWorkbookBuffer(rows: PayrollExportRow[], pay
 export function pnd3SheetRows(rows: PayrollExportRow[], paymentDate: string) {
   return [
     ["ภ.ง.ด.3", "", "", "", "", "", "", "", ""],
-    ["ลำดับ", "วันที่", "ชื่อบริษัท/บุคคล", "เลข 13 หลัก", "ที่อยู่", "ค่าจ้าง/บริการ", "จำนวนเงิน", "ภาษี", "ยอดสุทธิ"],
+    [...PND3_HEADERS],
     ...rows.map((row, index) => [
       index + 1,
       buddhistDate(row.pnd3_payment_date || paymentDate),
       row.employee_name,
-      row.national_id,
+      pnd3IdentityNo(row),
       row.address,
       cleanPnd3IncomeType(row.income_type),
-      row.gross_pay,
-      row.withholding_tax,
-      row.net_pay,
+      payrollRegisterMoney(row.gross_pay),
+      payrollRegisterMoney(row.withholding_tax),
+      payrollRegisterMoney(row.net_pay),
     ]),
+    ["", "", "รวม", "", "", "", 0, 0, 0],
   ];
 }
 
-function autosizeSheet(ws: XLSX.WorkSheet, rows: unknown[][]) {
-  ws["!cols"] = rows[0].map((_, colIndex) => ({
-    wch: Math.min(
-      36,
-      Math.max(10, ...rows.map((row) => String(row[colIndex] ?? "").length + 2)),
-    ),
-  }));
+function xmlEscape(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function pnd3StringCell(ref: string, value: unknown, styleId: number) {
+  const textValue = String(value ?? "");
+  if (!textValue) return `<c r="${ref}" s="${styleId}"/>`;
+  return `<c r="${ref}" s="${styleId}" t="inlineStr"><is><t>${xmlEscape(textValue)}</t></is></c>`;
+}
+
+function pnd3NumberCell(ref: string, value: unknown, styleId: number) {
+  return `<c r="${ref}" s="${styleId}"><v>${payrollRegisterMoney(value)}</v></c>`;
+}
+
+function pnd3FormulaCell(ref: string, formula: string, value: unknown, styleId: number) {
+  return `<c r="${ref}" s="${styleId}"><f>${xmlEscape(formula)}</f><v>${payrollRegisterMoney(value)}</v></c>`;
+}
+
+function buildPnd3WorksheetXml(rows: PayrollExportRow[], paymentDate: string) {
+  const firstDataRow = 3;
+  const lastDataRow = firstDataRow + rows.length - 1;
+  const totalRowNumber = lastDataRow + 1;
+  const totals = payrollExportTotals(rows);
+  const rowXml: string[] = [];
+  const titleCells = Array.from({ length: PND3_HEADERS.length }, (_, index) => {
+    const ref = XLSX.utils.encode_cell({ r: 0, c: index });
+    return pnd3StringCell(ref, index === 0 ? "ภ.ง.ด.3" : "", 1);
+  }).join("");
+  rowXml.push(`<row r="1" ht="20.6" customHeight="1">${titleCells}</row>`);
+
+  rowXml.push(
+    `<row r="2" ht="20.6" customHeight="1">${PND3_HEADERS.map((header, index) =>
+      pnd3StringCell(XLSX.utils.encode_cell({ r: 1, c: index }), header, 2),
+    ).join("")}</row>`,
+  );
+
+  rows.forEach((row, index) => {
+    const rowNumber = firstDataRow + index;
+    const values = [
+      pnd3NumberCell(`A${rowNumber}`, index + 1, 4),
+      pnd3StringCell(`B${rowNumber}`, buddhistDate(row.pnd3_payment_date || paymentDate), 4),
+      pnd3StringCell(`C${rowNumber}`, row.employee_name, 3),
+      pnd3StringCell(`D${rowNumber}`, pnd3IdentityNo(row), 3),
+      pnd3StringCell(`E${rowNumber}`, row.address, 3),
+      pnd3StringCell(`F${rowNumber}`, cleanPnd3IncomeType(row.income_type), 4),
+      pnd3NumberCell(`G${rowNumber}`, row.gross_pay, 5),
+      pnd3NumberCell(`H${rowNumber}`, row.withholding_tax, 5),
+      pnd3NumberCell(`I${rowNumber}`, row.net_pay, 5),
+    ];
+    rowXml.push(`<row r="${rowNumber}" ht="20.6" customHeight="1">${values.join("")}</row>`);
+  });
+
+  const totalRow = [
+    pnd3StringCell(`A${totalRowNumber}`, "", 6),
+    pnd3StringCell(`B${totalRowNumber}`, "", 6),
+    pnd3StringCell(`C${totalRowNumber}`, "รวม", 6),
+    pnd3StringCell(`D${totalRowNumber}`, "", 6),
+    pnd3StringCell(`E${totalRowNumber}`, "", 6),
+    pnd3StringCell(`F${totalRowNumber}`, "", 6),
+    pnd3FormulaCell(`G${totalRowNumber}`, `SUM(G${firstDataRow}:G${lastDataRow})`, totals.gross_pay, 7),
+    pnd3FormulaCell(`H${totalRowNumber}`, `SUM(H${firstDataRow}:H${lastDataRow})`, totals.withholding_tax, 7),
+    pnd3FormulaCell(`I${totalRowNumber}`, `SUM(I${firstDataRow}:I${lastDataRow})`, totals.net_pay, 7),
+  ];
+  rowXml.push(`<row r="${totalRowNumber}" ht="20.6" customHeight="1">${totalRow.join("")}</row>`);
+
+  const columns = PND3_COLUMN_WIDTHS.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<dimension ref="A1:I${totalRowNumber}"/>
+<sheetViews><sheetView workbookViewId="0"/></sheetViews>
+<sheetFormatPr defaultRowHeight="20.6"/>
+<cols>${columns}</cols>
+<sheetData>${rowXml.join("")}</sheetData>
+<mergeCells count="1"><mergeCell ref="A1:I1"/></mergeCells>
+</worksheet>`;
+}
+
+function pnd3StylesXml() {
+  const numberFormat = xmlEscape(PAYROLL_REGISTER_EXCEL_NUMBER_FORMAT);
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="${numberFormat}"/></numFmts>
+<fonts count="3">
+<font><sz val="12"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>
+<font><b/><sz val="14"/><color theme="1"/><name val="Angsana New"/><family val="1"/></font>
+<font><sz val="14"/><color theme="1"/><name val="Angsana New"/><family val="1"/></font>
+</fonts>
+<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color indexed="64"/></left><right style="thin"><color indexed="64"/></right><top style="thin"><color indexed="64"/></top><bottom style="thin"><color indexed="64"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="8">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="164" fontId="2" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="164" fontId="1" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="right" vertical="center"/></xf>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+<dxfs count="0"/><tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleMedium9"/>
+</styleSheet>`;
+}
+
+function crc32(buffer: Buffer) {
+  let crc = -1;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ -1) >>> 0;
+}
+
+function uint16(value: number) {
+  const buffer = Buffer.alloc(2);
+  buffer.writeUInt16LE(value, 0);
+  return buffer;
+}
+
+function uint32(value: number) {
+  const buffer = Buffer.alloc(4);
+  buffer.writeUInt32LE(value >>> 0, 0);
+  return buffer;
+}
+
+function buildStoredZip(files: Array<{ name: string; content: string }>) {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBuffer = Buffer.from(file.name, "utf8");
+    const dataBuffer = Buffer.from(file.content, "utf8");
+    const crc = crc32(dataBuffer);
+    const localHeader = Buffer.concat([
+      uint32(0x04034b50),
+      uint16(20),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint32(crc),
+      uint32(dataBuffer.length),
+      uint32(dataBuffer.length),
+      uint16(nameBuffer.length),
+      uint16(0),
+      nameBuffer,
+    ]);
+    localParts.push(localHeader, dataBuffer);
+
+    const centralHeader = Buffer.concat([
+      uint32(0x02014b50),
+      uint16(20),
+      uint16(20),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint32(crc),
+      uint32(dataBuffer.length),
+      uint32(dataBuffer.length),
+      uint16(nameBuffer.length),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint16(0),
+      uint32(0),
+      uint32(offset),
+      nameBuffer,
+    ]);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + dataBuffer.length;
+  });
+
+  const centralDirectory = Buffer.concat(centralParts);
+  const endRecord = Buffer.concat([
+    uint32(0x06054b50),
+    uint16(0),
+    uint16(0),
+    uint16(files.length),
+    uint16(files.length),
+    uint32(centralDirectory.length),
+    uint32(offset),
+    uint16(0),
+  ]);
+  return Buffer.concat([...localParts, centralDirectory, endRecord]);
+}
+
+export function buildPnd3WorkbookBuffer(rows: PayrollExportRow[], paymentDate: string) {
+  return buildStoredZip([
+    {
+      name: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`,
+    },
+    {
+      name: "docProps/core.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>PND3</dc:title><dc:subject>PND3</dc:subject><dc:creator>ERP Payroll</dc:creator><cp:lastModifiedBy>ERP Payroll</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:modified></cp:coreProperties>`,
+    },
+    {
+      name: "docProps/app.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>ERP Payroll</Application><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Worksheets</vt:lpstr></vt:variant><vt:variant><vt:i4>1</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="1" baseType="lpstr"><vt:lpstr>PND3</vt:lpstr></vt:vector></TitlesOfParts></Properties>`,
+    },
+    {
+      name: "xl/workbook.xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="PND3" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    },
+    { name: "xl/styles.xml", content: pnd3StylesXml() },
+    { name: "xl/worksheets/sheet1.xml", content: buildPnd3WorksheetXml(rows, paymentDate) },
+  ]);
 }
 
 export async function buildPayrollExportWorkbook(periodId: string, type: PayrollExportType, paymentDate: string, employeeIds: string[] = []) {
@@ -714,14 +982,7 @@ export async function buildPayrollExportWorkbook(periodId: string, type: Payroll
     return { buffer, preview, rows, totals: payrollExportTotals(rows) };
   }
 
-  const sheetRows = pnd3SheetRows(rows, paymentDate || preview.period.payment_date);
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(sheetRows);
-  ws["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }];
-  autosizeSheet(ws, sheetRows);
-  XLSX.utils.book_append_sheet(wb, ws, "PND3");
-
-  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+  const buffer = buildPnd3WorkbookBuffer(rows, paymentDate || preview.period.payment_date);
   return { buffer, preview, rows, totals: payrollExportTotals(rows) };
 }
 

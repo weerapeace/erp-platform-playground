@@ -17,6 +17,7 @@ import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { FamilyNavTabs } from "@/components/family-nav-tabs";
 import { IconPicker } from "@/components/icon-picker";
 import { SearchableSelect } from "@/components/searchable-select";
+import { SkuPrefixManager } from "@/components/sku-prefix-manager";
 
 type Rec = { id: string; code: string; name: string; image: string | null };
 type Tag = { id: string; label: string; group_id: string | null };
@@ -69,6 +70,7 @@ export default function TagsManagerPage() {
   useEffect(() => { loadTags(); }, [loadTags]);
   // โหลดกลุ่มแท็ก (จัด palette + filter ตามกลุ่ม)
   const [groupMgr, setGroupMgr] = useState(false);
+  const [prefixMgr, setPrefixMgr] = useState(false);   // จัดการรหัสนำหน้า SKU ต่อแท็ก
   const loadGroups = useCallback(() => {
     apiFetch(`/api/master-v2/product_family_groups?limit=500`).then((r) => r.json())
       .then((j) => setGroups(((j.data ?? []) as Record<string, unknown>[]).map((g) => ({
@@ -367,6 +369,7 @@ export default function TagsManagerPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <FamilyNavTabs active="tags" />
       {groupMgr && <GroupManager groups={groups} onClose={() => setGroupMgr(false)} onChanged={loadGroups} />}
+      {prefixMgr && <SkuPrefixManager onClose={() => setPrefixMgr(false)} />}
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -374,6 +377,7 @@ export default function TagsManagerPage() {
           <p className="text-sm text-slate-500 mt-0.5">ใส่แท็ก (Product Family) ให้สินค้าหลายตัวพร้อมกัน — กดหรือลากเพื่อเลือก</p>
         </div>
         <div className="flex items-center gap-2">
+        <button onClick={() => setPrefixMgr(true)} className="text-xs px-2.5 h-9 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">🔢 รหัสนำหน้า SKU</button>
         <span className="text-xs text-slate-500">จัดแท็กให้:</span>
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
           {(Object.keys(ENTITIES) as EntityKey[]).map((k) => (

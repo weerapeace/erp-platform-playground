@@ -454,6 +454,15 @@ export type MasterCRUDConfig = {
     onClick: (selected: Record<string, unknown>[]) => Promise<void> | void;
     variant?: "default" | "danger";
   }>;
+  /**
+   * แทนที่ฟอร์ม "เพิ่ม" มาตรฐานด้วย UI เอง (เช่น SKU Wizard) — ของกลาง
+   * ปุ่ม "+ เพิ่ม" จะเรียก node นี้แทน drawer ปกติ · เรียก onCreated เมื่อสร้างเสร็จ (refresh ตารางให้เอง)
+   * label = ข้อความบนปุ่ม (ไม่ใส่ = "+ เพิ่ม{title}")
+   */
+  customCreate?: {
+    label?: string;
+    render: (args: { open: boolean; onClose: () => void; onCreated: () => void }) => React.ReactNode;
+  };
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -807,7 +816,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [fieldCreatorOpen, setFieldCreatorOpen] = useState(false);
   const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);   // นำเข้าข้อมูล (ของกลาง)
+  const [customCreateOpen, setCustomCreateOpen] = useState(false);   // UI สร้างเอง (เช่น SKU Wizard)
   const [toolsOpen, setToolsOpen] = useState(false);     // เมนู "ปรับแต่ง" (ยุบปุ่ม admin)
+  // หัวหน้า (title + ปุ่ม เพิ่ม/นำเข้า/ปรับแต่ง) ติดหนึบขอบบน → วัดความสูงส่งให้ toolbar ตารางเรียงใต้
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerH, setHeaderH] = useState(0);
+  useEffect(() => {
+    const el = headerRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setHeaderH(el.offsetHeight));
+    ro.observe(el); setHeaderH(el.offsetHeight);
+    return () => ro.disconnect();
+  }, [canView]);
 
   // ตัวกรองจากลิงก์ (?flt=<json>) — เปิดหน้าแบบกรองไว้ล่วงหน้า เช่นจากปุ่ม "จัดการกลุ่ม"
   // ต่างจาก baseFilter ตรงที่ "ล้างได้" (ผู้ใช้กดล้างเพื่อดู/เพิ่มสมาชิกนอกกลุ่มได้)
@@ -1766,8 +1785,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
 
   return (
     <Wrap>
-      <div className="w-full px-6 py-6">
-        <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+      <div className="w-full px-6 py-6" style={{ "--dt-sticky-top": `${headerH}px` } as React.CSSProperties}>
+        <div ref={headerRef} className="sticky top-0 z-40 bg-white -mx-6 px-6 pt-1 pb-3 mb-3 border-b border-slate-100 flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-slate-800">
               {config.icon && <span className="mr-2">{config.icon}</span>}{config.title}
@@ -1808,13 +1827,20 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               </button>
             )}
             {canCreate && (
-              <button onClick={openCreate}
+              <button onClick={() => config.customCreate ? setCustomCreateOpen(true) : openCreate()}
                 className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">
-                ＋ เพิ่ม{config.title}
+                {config.customCreate?.label ?? `＋ เพิ่ม${config.title}`}
               </button>
             )}
           </div>
         </div>
+
+        {/* UI สร้างเอง (เช่น SKU Wizard) — แทนฟอร์มมาตรฐาน */}
+        {config.customCreate?.render({
+          open: customCreateOpen,
+          onClose: () => setCustomCreateOpen(false),
+          onCreated: () => { setCustomCreateOpen(false); void refreshData(); },
+        })}
 
         {/* นำเข้าข้อมูล (ของกลาง) — schema สร้างจากทะเบียน field, commit ผ่าน endpoint กลาง */}
         {importOpen && config.moduleKey && registryFields && (

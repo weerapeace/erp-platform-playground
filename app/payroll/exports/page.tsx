@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
-import { DEFAULT_PND3_RANDOM_SPREAD_PERCENT, applyPnd3AllocationToPreviewRows, distributePnd3Allocation, equalizePnd3Allocation, filterPnd3OutputRows, pnd3GrossUpFromNet, randomizePnd3Allocation, randomizePnd3AllocationSelection, type Pnd3AllocationPreview, type Pnd3AllocationTarget } from "@/lib/payroll-pnd3-allocation";
+import { DEFAULT_PND3_RANDOM_SPREAD_PERCENT, applyPnd3AllocationToPreviewRows, defaultPnd3ShownSelectionIds, distributePnd3Allocation, equalizePnd3Allocation, filterPnd3OutputRows, pnd3GrossUpFromNet, pnd3SelectedSourcePoolNetAmount, pnd3SourceSelectionIds, randomizePnd3Allocation, randomizePnd3AllocationSelection, type Pnd3AllocationPreview, type Pnd3AllocationTarget } from "@/lib/payroll-pnd3-allocation";
 
 type ExportType = "payroll_register" | "pnd3";
 type RowSource = "employee" | "pnd3_recurring" | "payroll_register_recurring";
@@ -151,6 +151,7 @@ export default function PayrollExportsPage() {
   const [type, setType] = useState<ExportType>("pnd3");
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionTouched, setSelectionTouched] = useState(false);
   const [paymentDate, setPaymentDate] = useState(today());
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
@@ -160,6 +161,7 @@ export default function PayrollExportsPage() {
   const [pnd3Draft, setPnd3Draft] = useState<Pnd3Draft>(BLANK_PND3);
   const [registerDraft, setRegisterDraft] = useState<RegisterRecurringDraft>(BLANK_REGISTER_RECURRING);
   const [allocation, setAllocation] = useState<Pnd3AllocationPreview | null>(null);
+  const [selectedPnd3SourceIds, setSelectedPnd3SourceIds] = useState<Set<string>>(() => new Set());
   const [randomSpreadPercent, setRandomSpreadPercent] = useState(DEFAULT_PND3_RANDOM_SPREAD_PERCENT);
   const [editingPnd3Row, setEditingPnd3Row] = useState<ExportRow | null>(null);
   const [pnd3RowDraft, setPnd3RowDraft] = useState<Pnd3RowEditDraft>({ payment_date: today(), net_pay: "", national_id: "", address: "" });
@@ -167,6 +169,7 @@ export default function PayrollExportsPage() {
   const loadPreview = useCallback(async () => {
     if (!periodId) return;
     setLoading(true);
+    setSelectionTouched(false);
     setErr(null);
     setMsg(null);
     try {
@@ -174,14 +177,17 @@ export default function PayrollExportsPage() {
       const json = await apiFetch(`/api/payroll/exports?${qs.toString()}`).then((res) => res.json());
       if (json.error) throw new Error(json.error);
       const data = json.data as ExportPreview;
+      const nextAllocation = data.pnd3_allocation ?? null;
       setPreview(data);
-      setAllocation(data.pnd3_allocation ?? null);
+      setAllocation(nextAllocation);
+      setSelectedPnd3SourceIds(new Set(nextAllocation ? pnd3SourceSelectionIds(nextAllocation.source_rows) : []));
       setPaymentDate(data.period.payment_date || today());
-      const outputRows = type === "pnd3" ? filterPnd3OutputRows(data.rows) : data.rows;
-      setSelectedIds(new Set(outputRows.map((row) => row.selection_id)));
+      const defaultIds = type === "pnd3" ? defaultPnd3ShownSelectionIds(data.rows) : data.rows.map((row) => row.selection_id);
+      setSelectedIds(new Set(defaultIds));
     } catch (e) {
       setPreview(null);
       setAllocation(null);
+      setSelectedPnd3SourceIds(new Set());
       setSelectedIds(new Set());
       setErr(e instanceof Error ? e.message : "โหลดรายการ export ไม่สำเร็จ");
     } finally {
@@ -221,6 +227,16 @@ export default function PayrollExportsPage() {
   }, [outputRows, q]);
 
   const selectedRows = useMemo(() => outputRows.filter((row) => selectedIds.has(row.selection_id)), [outputRows, selectedIds]);
+
+  useEffect(() => {
+    if (type !== "pnd3" || loading || selectionTouched) return;
+    const defaultIds = defaultPnd3ShownSelectionIds(outputRows);
+    if (!defaultIds.length) return;
+    setSelectedIds((current) => {
+      if (current.size === defaultIds.length && defaultIds.every((id) => current.has(id))) return current;
+      return new Set(defaultIds);
+    });
+  }, [loading, outputRows, selectionTouched, type]);
   const selectedTotals = useMemo(() => ({
     count: selectedRows.length,
     gross: selectedRows.reduce((sum, row) => sum + (Number(row.gross_pay) || 0), 0),
@@ -241,6 +257,7 @@ export default function PayrollExportsPage() {
   const employeeCount = outputRows.filter((row) => row.source === "employee").length;
 
   function toggleRow(selectionId: string, checked: boolean) {
+    setSelectionTouched(true);
     setSelectedIds((current) => {
       const next = new Set(current);
       if (checked) next.add(selectionId);
@@ -250,6 +267,7 @@ export default function PayrollExportsPage() {
   }
 
   function toggleShown(checked: boolean) {
+    setSelectionTouched(true);
     setSelectedIds((current) => {
       const next = new Set(current);
       shownRows.forEach((row) => {
@@ -382,13 +400,21 @@ export default function PayrollExportsPage() {
     }
   }
 
+  function allocationPoolAmount(current: Pnd3AllocationPreview, sourceIds = selectedPnd3SourceIds) {
+    return pnd3SelectedSourcePoolNetAmount(current.source_rows, sourceIds);
+  }
+
+  function replaceAllocation(current: Pnd3AllocationPreview, rows: Pnd3AllocationTarget[], totals: Pnd3AllocationPreview["totals"]) {
+    rememberAllocatedPnd3Targets(rows);
+    return { ...current, targets: rows, totals };
+  }
+
   function updateAllocationTargets(updater: (targets: Pnd3AllocationTarget[]) => Pnd3AllocationTarget[]) {
     setAllocation((current) => {
       if (!current) return current;
       const nextTargets = updater(current.targets);
-      const distributed = distributePnd3Allocation(current.totals.pool_net_amount, nextTargets);
-      rememberAllocatedPnd3Targets(distributed.rows);
-      return { ...current, targets: distributed.rows, totals: distributed.totals };
+      const distributed = distributePnd3Allocation(allocationPoolAmount(current), nextTargets);
+      return replaceAllocation(current, distributed.rows, distributed.totals);
     });
   }
 
@@ -401,11 +427,11 @@ export default function PayrollExportsPage() {
         random_net_amount: target.is_fixed ? 0 : 0,
         note: target.is_fixed ? target.note : null,
       }));
+      const poolAmount = allocationPoolAmount(current);
       const next = checked
-        ? randomizePnd3Allocation(current.totals.pool_net_amount, nextTargets, Math.random, randomSpreadPercent)
-        : distributePnd3Allocation(current.totals.pool_net_amount, nextTargets);
-      rememberAllocatedPnd3Targets(next.rows);
-      return { ...current, targets: next.rows, totals: next.totals };
+        ? randomizePnd3Allocation(poolAmount, nextTargets, Math.random, randomSpreadPercent)
+        : distributePnd3Allocation(poolAmount, nextTargets);
+      return replaceAllocation(current, next.rows, next.totals);
     });
   }
 
@@ -416,18 +442,16 @@ export default function PayrollExportsPage() {
   function randomizeAllocationTargets() {
     setAllocation((current) => {
       if (!current) return current;
-      const randomized = randomizePnd3Allocation(current.totals.pool_net_amount, current.targets, Math.random, randomSpreadPercent);
-      rememberAllocatedPnd3Targets(randomized.rows);
-      return { ...current, targets: randomized.rows, totals: randomized.totals };
+      const randomized = randomizePnd3Allocation(allocationPoolAmount(current), current.targets, Math.random, randomSpreadPercent);
+      return replaceAllocation(current, randomized.rows, randomized.totals);
     });
   }
 
   function toggleAllocationTargetSelection(selectionId: string, checked: boolean) {
     setAllocation((current) => {
       if (!current) return current;
-      const randomized = randomizePnd3AllocationSelection(current.totals.pool_net_amount, current.targets, selectionId, checked, Math.random, randomSpreadPercent);
-      rememberAllocatedPnd3Targets(randomized.rows);
-      return { ...current, targets: randomized.rows, totals: randomized.totals };
+      const randomized = randomizePnd3AllocationSelection(allocationPoolAmount(current), current.targets, selectionId, checked, Math.random, randomSpreadPercent);
+      return replaceAllocation(current, randomized.rows, randomized.totals);
     });
   }
 
@@ -436,19 +460,39 @@ export default function PayrollExportsPage() {
     setRandomSpreadPercent(nextValue);
     setAllocation((current) => {
       if (!current) return current;
-      const randomized = randomizePnd3Allocation(current.totals.pool_net_amount, current.targets, Math.random, nextValue);
-      rememberAllocatedPnd3Targets(randomized.rows);
-      return { ...current, targets: randomized.rows, totals: randomized.totals };
+      const randomized = randomizePnd3Allocation(allocationPoolAmount(current), current.targets, Math.random, nextValue);
+      return replaceAllocation(current, randomized.rows, randomized.totals);
     });
   }
 
   function equalizeAllocationTargets() {
     setAllocation((current) => {
       if (!current) return current;
-      const equalized = equalizePnd3Allocation(current.totals.pool_net_amount, current.targets);
-      rememberAllocatedPnd3Targets(equalized.rows);
-      return { ...current, targets: equalized.rows, totals: equalized.totals };
+      const equalized = equalizePnd3Allocation(allocationPoolAmount(current), current.targets);
+      return replaceAllocation(current, equalized.rows, equalized.totals);
     });
+  }
+
+  function toggleAllocationSourceSelection(selectionId: string, checked: boolean) {
+    if (!allocation) return;
+    const nextSourceIds = new Set(selectedPnd3SourceIds);
+    if (checked) nextSourceIds.add(selectionId);
+    else nextSourceIds.delete(selectionId);
+    const poolAmount = allocationPoolAmount(allocation, nextSourceIds);
+    const randomized = randomizePnd3Allocation(poolAmount, allocation.targets, Math.random, randomSpreadPercent);
+    setSelectedPnd3SourceIds(nextSourceIds);
+    setAllocation(replaceAllocation(allocation, randomized.rows, randomized.totals));
+  }
+
+  function toggleAllAllocationSources(checked: boolean) {
+    if (!allocation) return;
+    const nextSourceIds = checked ? new Set(pnd3SourceSelectionIds(allocation.source_rows)) : new Set<string>();
+    const poolAmount = allocationPoolAmount(allocation, nextSourceIds);
+    const next = checked
+      ? randomizePnd3Allocation(poolAmount, allocation.targets, Math.random, randomSpreadPercent)
+      : distributePnd3Allocation(poolAmount, allocation.targets);
+    setSelectedPnd3SourceIds(nextSourceIds);
+    setAllocation(replaceAllocation(allocation, next.rows, next.totals));
   }
 
   function repricePnd3Row(row: ExportRow, netPay: number): ExportRow {
@@ -761,8 +805,11 @@ export default function PayrollExportsPage() {
           allocation={allocation}
           busy={busy === "pnd3-allocation-save"}
           randomSpreadPercent={randomSpreadPercent}
+          selectedSourceIds={selectedPnd3SourceIds}
           onSelectAll={() => selectAllocationTargets(true)}
           onClearSelection={() => selectAllocationTargets(false)}
+          onToggleSourceSelection={toggleAllocationSourceSelection}
+          onToggleAllSources={toggleAllAllocationSources}
           onClearFixed={clearAllocationFixed}
           onRandomize={randomizeAllocationTargets}
           onEqualize={equalizeAllocationTargets}
@@ -927,16 +974,19 @@ function PayrollRegisterRecurringPanel({ draft, setDraft, busy, onCreate, recurr
   );
 }
 
-function Pnd3AllocationPanel({ allocation, busy, randomSpreadPercent, onSelectAll, onClearSelection, onClearFixed, onRandomize, onEqualize, onChangeRandomSpread, onToggleTargetSelection, onCreateExternal, onSave, onChangeTarget }: {
+function Pnd3AllocationPanel({ allocation, busy, randomSpreadPercent, selectedSourceIds, onSelectAll, onClearSelection, onClearFixed, onRandomize, onEqualize, onChangeRandomSpread, onToggleSourceSelection, onToggleAllSources, onToggleTargetSelection, onCreateExternal, onSave, onChangeTarget }: {
   allocation: Pnd3AllocationPreview;
   busy: boolean;
   randomSpreadPercent: number;
+  selectedSourceIds: Set<string>;
   onSelectAll: () => void;
   onClearSelection: () => void;
   onClearFixed: () => void;
   onRandomize: () => void;
   onEqualize: () => void;
   onChangeRandomSpread: (value: number) => void;
+  onToggleSourceSelection: (selectionId: string, checked: boolean) => void;
+  onToggleAllSources: (checked: boolean) => void;
   onToggleTargetSelection: (selectionId: string, checked: boolean) => void;
   onCreateExternal: (draft: Pnd3Draft, onDone: () => void) => void;
   onSave: () => void;
@@ -957,6 +1007,8 @@ function Pnd3AllocationPanel({ allocation, busy, randomSpreadPercent, onSelectAl
   const remainingClass = allocation.totals.remaining_net_amount === 0
     ? "text-emerald-700"
     : allocation.totals.remaining_net_amount < 0 ? "text-red-700" : "text-amber-700";
+  const allSourcesSelected = allocation.source_rows.length > 0 && allocation.source_rows.every((row) => selectedSourceIds.has(row.selection_id));
+  const selectedSourceCount = allocation.source_rows.filter((row) => selectedSourceIds.has(row.selection_id)).length;
   return (
     <section className="mb-4 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -1021,14 +1073,50 @@ function Pnd3AllocationPanel({ allocation, busy, randomSpreadPercent, onSelectAl
 
       <div className="grid gap-3 xl:grid-cols-[340px_1fr]">
         <div className="rounded-lg border border-amber-100 bg-white p-3">
-          <div className="mb-2 text-sm font-bold text-slate-900">ต้นทางรายวันต่างชาติ ({allocation.source_rows.length.toLocaleString("th-TH")} คน)</div>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-900">
+              <input
+                type="checkbox"
+                checked={allSourcesSelected}
+                onChange={(e) => onToggleAllSources(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300"
+              />
+              ต้นทางรายวันต่างชาติ
+            </label>
+            <div className="text-xs font-semibold text-slate-500">
+              เลือก {selectedSourceCount.toLocaleString("th-TH")} / {allocation.source_rows.length.toLocaleString("th-TH")} คน
+            </div>
+          </div>
           <div className="max-h-64 space-y-2 overflow-auto pr-1">
             {allocation.source_rows.map((row) => (
-              <div key={row.selection_id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs">
-                <div className="font-semibold text-slate-800">{row.employee_code || "-"} · {row.employee_name}</div>
-                <div className="text-slate-500">{row.nationality || "-"} · {row.wage_type || row.contract_type || "-"}</div>
-                <div className="mt-1 font-bold text-amber-700">{baht(row.net_pay)}</div>
-              </div>
+              <label
+                key={row.selection_id}
+                className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-xs transition ${
+                  selectedSourceIds.has(row.selection_id)
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-slate-100 bg-slate-50 opacity-70"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedSourceIds.has(row.selection_id)}
+                  onChange={(e) => onToggleSourceSelection(row.selection_id, e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold text-slate-800">{row.employee_code || "-"} · {row.employee_name}</span>
+                  <span className="block text-slate-500">{row.nationality || "-"} · {row.wage_type || row.contract_type || "-"}</span>
+                  <span className="mt-1 block font-bold text-amber-700">ยอดจ่าย/สุทธิ {baht(row.net_pay)}</span>
+                  {(() => {
+                    const amounts = pnd3GrossUpFromNet(row.net_pay, 3);
+                    return (
+                      <span className="mt-0.5 block text-[11px] font-medium text-slate-500">
+                        จำนวนเงิน {baht(amounts.gross_pay)} · ภาษี {baht(amounts.withholding_tax)}
+                      </span>
+                    );
+                  })()}
+                </span>
+              </label>
             ))}
             {allocation.source_rows.length === 0 && (
               <div className="rounded-lg bg-slate-50 px-3 py-8 text-center text-sm text-slate-400">ไม่พบพนักงานรายวันต่างชาติในงวดนี้</div>
@@ -1138,7 +1226,7 @@ function Pnd3PreviewTable({ rows, selectedIds, allShownSelected, paymentDate, lo
         </div>
       </div>
       <div className="border-b border-sky-100 bg-sky-50 px-4 py-2 text-xs font-medium text-sky-800">
-        สูตร ภ.ง.ด.3: ตารางนี้เป็น preview อ่านก่อนโหลดไฟล์ · กด “แก้ไข” เพื่อแก้วันที่/ยอดสุทธิ/เลขภาษี/ที่อยู่เฉพาะแถว · กด “คัดลอก” เมื่อต้องลงคนเดิมหลายวัน
+        สูตร ภ.ง.ด.3: ยอดสุทธิ = ยอดจ่ายจริง, จำนวนเงิน = ยอดสุทธิ / 0.97, ภาษี = จำนวนเงิน - ยอดสุทธิ · ตารางนี้เป็น preview อ่านก่อนโหลดไฟล์
       </div>
       <div className="max-h-[66vh] overflow-auto">
         <table className="min-w-[1500px] border-collapse text-left text-sm">

@@ -1370,8 +1370,10 @@ export function DataTable<T extends Record<string, unknown>>({
         </div>
       )}
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200 flex-wrap">
+      {/* Toolbar — ติดหนึบขอบบน (sticky) ให้ปุ่ม Filter/Columns/Export เห็นตลอด
+          top = ความสูงของหัวหน้า (ส่งผ่าน --dt-sticky-top) เพื่อเรียงใต้แถบหัวหน้า ไม่ทับกัน */}
+      <div className="sticky z-30 flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-200 flex-wrap"
+        style={{ top: "var(--dt-sticky-top, 0px)" }}>
         <div className="relative flex-1 min-w-[200px] max-w-xs">
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconSearch /></span>
           <input type="text" placeholder={searchPlaceholder} value={globalSearch}

@@ -161,6 +161,11 @@ const APPS: AppEntry[] = [
     href: "/admin/form-builder", category: "Admin",
     color: "from-slate-600 to-slate-700", status: "live",
   },
+  {
+    key: "line-members", icon: "LINE", name: "LINE พนักงาน", subtitle: "Employee Portal Binding",
+    href: "/payroll/line-members", category: "Admin",
+    color: "from-emerald-500 to-green-600", status: "live",
+  },
 
   // ============= Coming Soon (เร็ว ๆ นี้) =============
   {
