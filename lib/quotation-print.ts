@@ -181,6 +181,12 @@ export function buildQuotationHtml(
   const visibleColumnCount = 6 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
   const summaryLabelColspan = 1 + (layout.showSku ? 1 : 0) + (layout.showImage ? 1 : 0);
   const signatureMarginTop = layout.signatureToBottom ? "auto" : `${layout.signatureGapMm}mm`;
+  const authorizedSignatureImage = layout.showAuthorizedSignature && layout.authorizedSignatureUrl
+    ? `<img class="signature-image" src="${escapeHtml(layout.authorizedSignatureUrl)}" alt="authorized signature" style="width: ${layout.authorizedSignatureWidthMm}mm; transform: translate(calc(-50% + ${layout.authorizedSignatureOffsetXMm}mm), ${layout.authorizedSignatureOffsetYMm}mm);">`
+    : "";
+  const companyStampImage = layout.showCompanyStamp && layout.companyStampUrl
+    ? `<img class="stamp-image" src="${escapeHtml(layout.companyStampUrl)}" alt="company stamp" style="width: ${layout.companyStampWidthMm}mm; transform: translate(calc(-50% + ${layout.companyStampOffsetXMm}mm), ${layout.companyStampOffsetYMm}mm);">`
+    : "";
 
   return `<!doctype html>
 <html lang="th">
@@ -218,7 +224,10 @@ export function buildQuotationHtml(
     .totals tr:last-child td { border-bottom: 0; font-weight: 700; }
     .amount-text { text-align: center; font-weight: 700; padding: 3mm 0 1mm; }
     .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 28mm; margin-top: ${signatureMarginTop}; padding: ${layout.signatureGapMm}mm 18mm 0; }
-    .signature { text-align: center; }
+    .signature { text-align: center; position: relative; min-height: 24mm; }
+    .signature-assets { position: absolute; left: 50%; bottom: 7mm; width: 0; height: 0; pointer-events: none; }
+    .signature-image, .stamp-image { position: absolute; bottom: 0; left: 0; max-height: 24mm; object-fit: contain; }
+    .stamp-image { opacity: 0.9; }
     .sig-line { border-top: 1px solid #000; padding-top: 2mm; font-weight: 700; }
     .sig-date { font-size: 10px; margin-top: 1mm; }
     @media print {
@@ -300,7 +309,8 @@ export function buildQuotationHtml(
       <div class="signature">
         <div class="sig-line">ลูกค้าอนุมัติ</div>
       </div>
-      <div class="signature">
+      <div class="signature authorized-signature">
+        ${(authorizedSignatureImage || companyStampImage) ? `<div class="signature-assets">${authorizedSignatureImage}${companyStampImage}</div>` : ""}
         <div class="sig-line">ลายเซ็นผู้มีอำนาจ</div>
         <div class="sig-date">${escapeHtml(thaiDate(quote.quote_date))}</div>
       </div>

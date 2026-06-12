@@ -110,4 +110,27 @@ describe("quotation print", () => {
     expect(html).not.toContain("photo-cell");
     expect(html).not.toContain("center code");
   });
+
+  it("prints authorized signature and company stamp assets when enabled", () => {
+    const html = buildQuotationHtml(quote, "", {
+      showAuthorizedSignature: true,
+      authorizedSignatureUrl: "/uploads/signature.png",
+      authorizedSignatureWidthMm: 38,
+      authorizedSignatureOffsetXMm: -2,
+      authorizedSignatureOffsetYMm: -4,
+      showCompanyStamp: true,
+      companyStampUrl: "https://assets.example.com/stamp.png?x=<tag>",
+      companyStampWidthMm: 30,
+      companyStampOffsetXMm: 22,
+      companyStampOffsetYMm: -8,
+    });
+
+    expect(html).toContain("signature-image");
+    expect(html).toContain('src="/uploads/signature.png"');
+    expect(html).toContain("width: 38mm");
+    expect(html).toContain("stamp-image");
+    expect(html).toContain("https://assets.example.com/stamp.png?x=&lt;tag&gt;");
+    expect(html).toContain("width: 30mm");
+    expect(html).toContain("translate(calc(-50% + 22mm), -8mm)");
+  });
 });

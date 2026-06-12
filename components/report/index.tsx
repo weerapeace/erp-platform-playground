@@ -221,6 +221,71 @@ function VisibilityToggle({
   );
 }
 
+function ImageAssetControl({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+
+  const onFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    setError(null);
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("เลือกได้เฉพาะไฟล์รูปภาพ");
+      return;
+    }
+    if (file.size > 700 * 1024) {
+      setError("รูปใหญ่เกินไป กรุณาใช้ไฟล์ไม่เกิน 700KB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onChange(String(reader.result ?? ""));
+    reader.onerror = () => setError("อ่านไฟล์รูปไม่สำเร็จ");
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3">
+      <div className="text-sm font-medium text-slate-800">{label}</div>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="วาง URL รูป หรือเลือกไฟล์จากเครื่อง"
+        className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 outline-none focus:border-slate-400"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-700 hover:bg-slate-100">
+          เลือกรูป
+          <input type="file" accept="image/*" onChange={onFileChange} className="hidden" />
+        </label>
+        {value && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="h-8 rounded-lg border border-red-100 bg-red-50 px-3 text-xs font-medium text-red-600 hover:bg-red-100"
+          >
+            ล้างรูป
+          </button>
+        )}
+      </div>
+      {value && (
+        <div className="flex items-center gap-3 rounded-lg bg-slate-50 p-2">
+          <img src={value} alt={label} className="h-12 max-w-[120px] object-contain" />
+          <span className="text-xs text-slate-500">ตัวอย่างรูปที่จะวางบนเอกสาร</span>
+        </div>
+      )}
+      {error && <div className="text-xs text-red-600">{error}</div>}
+    </div>
+  );
+}
+
 export function ReportLayoutControls({
   value,
   onChange,
@@ -237,6 +302,7 @@ export function ReportLayoutControls({
   defaultMessage?: string | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [signatureOpen, setSignatureOpen] = useState(false);
   const layout = normalizeReportLayout(value);
   const patch = (next: Partial<ReportLayoutSettings>) => onChange(normalizeReportLayout({ ...layout, ...next }));
 
@@ -249,6 +315,13 @@ export function ReportLayoutControls({
           className={`h-9 rounded-lg border px-4 text-sm font-medium ${open ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
         >
           จัดหน้า
+        </button>
+        <button
+          type="button"
+          onClick={() => setSignatureOpen(current => !current)}
+          className={`h-9 rounded-lg border px-4 text-sm font-medium ${signatureOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+        >
+          ลายเซ็น / ตรา
         </button>
         <button
           type="button"
@@ -311,6 +384,42 @@ export function ReportLayoutControls({
             <VisibilityToggle label="ผู้รับผิดชอบ" checked={layout.showResponsible} onChange={(showResponsible) => patch({ showResponsible })} />
             <VisibilityToggle label="หมายเหตุ" checked={layout.showNote} onChange={(showNote) => patch({ showNote })} />
             <VisibilityToggle label="ลายเซ็นชิดล่าง" checked={layout.signatureToBottom} onChange={(signatureToBottom) => patch({ signatureToBottom })} />
+          </div>
+        </div>
+      )}
+
+      {signatureOpen && (
+        <div className="grid gap-4 border-t border-slate-100 px-4 py-4 lg:grid-cols-2">
+          <div className="grid gap-3 rounded-lg bg-slate-50 p-3">
+            <VisibilityToggle
+              label="ใส่ลายเซ็นผู้มีอำนาจ"
+              checked={layout.showAuthorizedSignature}
+              onChange={(showAuthorizedSignature) => patch({ showAuthorizedSignature })}
+            />
+            <ImageAssetControl
+              label="รูปลายเซ็น"
+              value={layout.authorizedSignatureUrl}
+              onChange={(authorizedSignatureUrl) => patch({ authorizedSignatureUrl })}
+            />
+            <NumberControl label="ขนาดลายเซ็น" value={layout.authorizedSignatureWidthMm} min={10} max={70} unit="mm" onChange={(authorizedSignatureWidthMm) => patch({ authorizedSignatureWidthMm })} />
+            <NumberControl label="เลื่อนซ้าย/ขวา" value={layout.authorizedSignatureOffsetXMm} min={-60} max={60} unit="mm" onChange={(authorizedSignatureOffsetXMm) => patch({ authorizedSignatureOffsetXMm })} />
+            <NumberControl label="เลื่อนขึ้น/ลง" value={layout.authorizedSignatureOffsetYMm} min={-40} max={40} unit="mm" onChange={(authorizedSignatureOffsetYMm) => patch({ authorizedSignatureOffsetYMm })} />
+          </div>
+
+          <div className="grid gap-3 rounded-lg bg-slate-50 p-3">
+            <VisibilityToggle
+              label="ใส่ตราประทับบริษัท"
+              checked={layout.showCompanyStamp}
+              onChange={(showCompanyStamp) => patch({ showCompanyStamp })}
+            />
+            <ImageAssetControl
+              label="รูปตราประทับ"
+              value={layout.companyStampUrl}
+              onChange={(companyStampUrl) => patch({ companyStampUrl })}
+            />
+            <NumberControl label="ขนาดตรา" value={layout.companyStampWidthMm} min={10} max={60} unit="mm" onChange={(companyStampWidthMm) => patch({ companyStampWidthMm })} />
+            <NumberControl label="เลื่อนซ้าย/ขวา" value={layout.companyStampOffsetXMm} min={-60} max={60} unit="mm" onChange={(companyStampOffsetXMm) => patch({ companyStampOffsetXMm })} />
+            <NumberControl label="เลื่อนขึ้น/ลง" value={layout.companyStampOffsetYMm} min={-40} max={40} unit="mm" onChange={(companyStampOffsetYMm) => patch({ companyStampOffsetYMm })} />
           </div>
         </div>
       )}

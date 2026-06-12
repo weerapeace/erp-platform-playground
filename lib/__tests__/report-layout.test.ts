@@ -66,4 +66,30 @@ describe("report layout settings", () => {
       showImage: false,
     });
   });
+
+  it("normalizes signature and stamp assets before saving or printing", () => {
+    const layout = normalizeReportLayout({
+      showAuthorizedSignature: true,
+      authorizedSignatureUrl: "javascript:alert(1)",
+      authorizedSignatureWidthMm: 999,
+      authorizedSignatureOffsetXMm: -999,
+      authorizedSignatureOffsetYMm: 999,
+      showCompanyStamp: true,
+      companyStampUrl: "data:image/png;base64,abc123",
+      companyStampWidthMm: 1,
+      companyStampOffsetXMm: 999,
+      companyStampOffsetYMm: -999,
+    });
+
+    expect(layout.showAuthorizedSignature).toBe(true);
+    expect(layout.authorizedSignatureUrl).toBe("");
+    expect(layout.authorizedSignatureWidthMm).toBe(70);
+    expect(layout.authorizedSignatureOffsetXMm).toBe(-60);
+    expect(layout.authorizedSignatureOffsetYMm).toBe(40);
+    expect(layout.showCompanyStamp).toBe(true);
+    expect(layout.companyStampUrl).toBe("data:image/png;base64,abc123");
+    expect(layout.companyStampWidthMm).toBe(10);
+    expect(layout.companyStampOffsetXMm).toBe(60);
+    expect(layout.companyStampOffsetYMm).toBe(-40);
+  });
 });
