@@ -1964,6 +1964,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
                   </div>
                 );
               })()}
+              {/* ปุ่มรายแถวเพิ่มเติม (เช่น คัดลอก) — โชว์ตอนดูรายการที่บันทึกแล้ว */}
+              {editingId && (config.extraRowActions ?? [])
+                .filter((a) => !a.show || a.show({ ...form, id: editingId }))
+                .map((a, i) => (
+                  <button key={i} onClick={async () => { await a.onClick({ ...form, id: editingId }); await refreshData(); }}
+                    className={`h-9 px-3 text-sm border rounded-lg inline-flex items-center gap-1 ${a.variant === "danger" ? "border-rose-300 text-rose-600 hover:bg-rose-50" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}>
+                    {a.icon ? `${a.icon} ` : ""}{a.label}
+                  </button>
+                ))}
               <button onClick={() => setModalOpen(false)}
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">ปิด</button>
               {canEdit && (
