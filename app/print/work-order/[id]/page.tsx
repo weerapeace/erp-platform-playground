@@ -157,6 +157,29 @@ const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .note-box { margin-top: 2mm; min-height: 10mm; }
 .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 36mm; margin-top: 18mm; padding: 0 18mm; page-break-inside: avoid; break-inside: avoid; }
 .signature { text-align: center; border-top: 1px solid #111; padding-top: 2mm; font-weight: 700; }
+@media print {
+  .doc { padding: 8mm 9mm !important; font-size: 9.2px; }
+  .doc-header { margin-bottom: 1.5mm; }
+  .company-name { font-size: 13px; }
+  .doc-title { font-size: 20px; margin: 1.5mm 0 2.5mm; }
+  .wo-hero { grid-template-columns: 20mm 1.7fr 26mm 35mm; gap: 2mm; padding: 2mm; margin-bottom: 2mm; }
+  .wo-photo { width: 20mm; height: 18mm; }
+  .product-name { font-size: 12px; }
+  .product-code, .product-size { margin-top: 0.5mm; }
+  .qty-big { font-size: 22px; }
+  .section-title { font-size: 10px; margin: 1.5mm 0 1mm; }
+  .summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: 0.75mm 1mm; }
+  .summary-table { margin-bottom: 1.5mm; }
+  .product-detail { margin-top: 2mm; gap: 2mm; grid-template-columns: 22mm 1fr; padding-top: 2mm; }
+  .detail-photo { width: 22mm; height: 17mm; }
+  .detail-title { font-size: 10px; margin-bottom: 0.5mm; }
+  .detail-sub { margin-bottom: 0.5mm; }
+  .detail-table td { padding: 0.35mm 0; line-height: 1.25; }
+  .detail-label { width: 24mm; }
+  .note-box { margin-top: 0.8mm; min-height: 0; }
+  .signatures { margin-top: 7mm; padding: 0 22mm; gap: 28mm; }
+  .signature { padding-top: 1mm; }
+}
 `,
 };
 
