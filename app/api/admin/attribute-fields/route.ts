@@ -16,15 +16,17 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // ชนิดฟิลด์ (UI) → (input_type, external_table)
-type FieldType = "text" | "number" | "boolean" | "select" | "multiselect" | "sku";
-function typeToDb(t: FieldType): { input_type: string; external_table: string | null } {
+type FieldType = "text" | "number" | "boolean" | "select" | "multiselect" | "sku" | "lookup";
+function typeToDb(t: FieldType, externalTable?: string | null): { input_type: string; external_table: string | null } {
   if (t === "select") return { input_type: "many2one", external_table: null };
   if (t === "multiselect") return { input_type: "multiselect", external_table: null };
   if (t === "sku") return { input_type: "text", external_table: "skus_v2" };
+  if (t === "lookup") return { input_type: "text", external_table: externalTable || null };
   return { input_type: t, external_table: null };
 }
 export function dbToType(input_type: string, external_table: string | null): FieldType {
   if (external_table === "skus_v2") return "sku";
+  if (external_table) return "lookup";
   if (input_type === "many2one") return "select";
   if (input_type === "multiselect") return "multiselect";
   if (input_type === "number") return "number";
@@ -60,6 +62,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const definitions = defRows.map((d) => ({
     id: String(d.id), product_family: (d.product_family as string) ?? null, key: String(d.key ?? ""), label: String(d.label ?? ""),
     scope: String(d.scope ?? "model"), type: dbToType(String(d.input_type ?? "text"), (d.external_table as string) ?? null),
+    external_table: (d.external_table as string) ?? null,
     required: !!d.required, display_order: Number(d.display_order) || 0, help_text: (d.help_text as string) ?? "",
     relation_filter: (d.relation_filter as Record<string, unknown>) ?? null, options: optByDef.get(String(d.id)) ?? [],
   }));
@@ -68,10 +71,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: famRows } = await admin.from("product_attribute_definitions").select("product_family").eq("is_active", true).not("product_family", "is", null);
   const families = [...new Set((famRows ?? []).map((f: Record<string, unknown>) => String(f.product_family)).filter(Boolean))].sort();
 
-  return NextResponse.json({ families, definitions, error: null });
+  // ตารางหลักที่ใช้เป็น "เลือกจากตารางหลัก" (lookup) ได้
+  const { data: mods } = await admin.from("erp_modules").select("table_name, label").order("label", { ascending: true });
+  const lookupTables = (mods ?? []).map((m: Record<string, unknown>) => ({ table_name: String(m.table_name), label: String(m.label ?? m.table_name) })).filter((m) => m.table_name);
+
+  return NextResponse.json({ families, definitions, lookupTables, error: null });
 }
 
-type Body = { id?: string; product_family?: string; label?: string; scope?: string; type?: FieldType; required?: boolean; relation_filter?: unknown; help_text?: string; key?: string };
+type Body = { id?: string; product_family?: string; label?: string; scope?: string; type?: FieldType; external_table?: string; required?: boolean; relation_filter?: unknown; help_text?: string; key?: string };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -80,7 +87,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const family = (b.product_family ?? "").trim(); const label = (b.label ?? "").trim();
   if (!family || !label) return NextResponse.json({ error: "ต้องระบุประเภทและชื่อฟิลด์" }, { status: 400 });
   const scope = b.scope === "sku" ? "sku" : "model";
-  const { input_type, external_table } = typeToDb((b.type ?? "text") as FieldType);
+  const { input_type, external_table } = typeToDb((b.type ?? "text") as FieldType, b.external_table);
   const admin = supabaseAdmin();
   // display_order ถัดไป (ต่อ family+scope)
   const { data: maxRow } = await admin.from("product_attribute_definitions").select("display_order").eq("product_family", family).eq("scope", scope).order("display_order", { ascending: false }).limit(1).maybeSingle();
@@ -104,7 +111,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const patch: Record<string, unknown> = {};
   if (typeof b.label === "string") patch.label = b.label.trim();
   if (typeof b.scope === "string") patch.scope = b.scope === "sku" ? "sku" : "model";
-  if (b.type) { const m = typeToDb(b.type); patch.input_type = m.input_type; patch.external_table = m.external_table; }
+  if (b.type) { const m = typeToDb(b.type, b.external_table); patch.input_type = m.input_type; patch.external_table = m.external_table; }
   if (typeof b.required === "boolean") patch.required = b.required;
   if (b.relation_filter !== undefined) patch.relation_filter = b.relation_filter ?? null;
   if (typeof b.help_text === "string") patch.help_text = b.help_text || null;

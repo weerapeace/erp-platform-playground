@@ -97,6 +97,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
     if (section === "notes") return <textarea autoFocus value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} rows={2} className="w-full px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />;
     if (section === "legacy") return <input autoFocus value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} className={cls} />;
     const def = editData?.definitions.find((x) => x.id === key);
+    if (def && isLookup(def)) return <LookupSelect table={def.external_table as string} value={String(editVal ?? "")} onChange={(val) => setEditVal(val)} />;
     if (def && isSkuRef(def)) return <ComponentPicker sku={String(editVal ?? "")} name={editName} placeholder="— เลือกวัตถุดิบ —" allowedTags={def.relation_filter?.tags} onPick={(c) => { setEditVal(c.code); setEditName(c.name); }} />;
     if (def?.input_type === "many2one") return <select autoFocus value={String(editVal ?? "")} onChange={(e) => setEditVal(e.target.value)} className={cls}><option value="">— ไม่ระบุ —</option>{def.options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>;
     if (def?.input_type === "multiselect") { const arr = (editVal as string[]) ?? []; return <div className="flex flex-wrap gap-1">{def.options.map((o) => { const on = arr.includes(o.id); return <button type="button" key={o.id} onClick={() => setEditVal(on ? arr.filter((x) => x !== o.id) : [...arr, o.id])} className={`text-[11px] px-1.5 py-0.5 rounded-full border ${on ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600"}`}>{o.label}</button>; })}</div>; }
@@ -205,6 +206,20 @@ type EditData = {
   legacy: Record<string, string>; sku_labels: Record<string, string>; error?: string;
 };
 const isSkuRef = (d: AttrDef) => d.external_table === "skus_v2";
+const isLookup = (d: AttrDef) => !!d.external_table && d.external_table !== "skus_v2";
+
+// dropdown ดึงตัวเลือกสดจากตารางหลัก (เช่น belt_tails) — เก็บค่าเป็นชื่อรายการ
+function LookupSelect({ table, value, onChange }: { table: string; value: string; onChange: (v: string) => void }) {
+  const [opts, setOpts] = useState<{ id: string; label: string }[]>([]);
+  useEffect(() => { apiFetch(`/api/admin/picker?table=${encodeURIComponent(table)}&label=name&limit=300`).then((r) => r.json()).then((j) => setOpts((j.data ?? []) as { id: string; label: string }[])).catch(() => {}); }, [table]);
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">— ไม่ระบุ —</option>
+      {opts.map((o) => <option key={o.id} value={o.label}>{o.label}</option>)}
+      {value && !opts.some((o) => o.label === value) && <option value={value}>{value}</option>}
+    </select>
+  );
+}
 const LEGACY_LABELS: Record<string, string> = { materials: "วัตถุดิบ", lining: "ซับใน", zipper: "ซิป", strap: "สาย/สายสะพาย", thread: "ด้าย", spares: "อะไหล่", logo: "โลโก้/พิมพ์" };
 // ป้ายประเภทสินค้า (ค่าใน DB → ชื่อไทย) + ประเภทที่ใช้ "ช่องกระเป๋า" (legacy) เป็นชุดฟิลด์
 const FAMILY_LABELS: Record<string, string> = { belt: "เข็มขัด", bag: "กระเป๋า", "กระเป๋า": "กระเป๋า" };
@@ -256,6 +271,7 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
   const renderInput = (def: AttrDef, scope: string) => {
     const k = `${scope}:${def.id}`; const v = vals[k];
     const cls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
+    if (isLookup(def)) return <LookupSelect table={def.external_table as string} value={String(v ?? "")} onChange={(val) => setV(k, val)} />;
     if (isSkuRef(def)) return <ComponentPicker sku={String(v ?? "")} name={skuNames[k] ?? ""} placeholder="— เลือกวัตถุดิบ —" allowedTags={def.relation_filter?.tags}
       onPick={(c) => { setV(k, c.code); setSkuNames((s) => ({ ...s, [k]: c.name })); }} />;
     if (def.input_type === "many2one") return <select value={String(v ?? "")} onChange={(e) => setV(k, e.target.value)} className={cls}><option value="">— ไม่ระบุ —</option>{def.options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>;

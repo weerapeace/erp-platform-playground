@@ -12,11 +12,12 @@ import { useToast } from "@/components/toast";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 
-type FieldType = "text" | "number" | "boolean" | "select" | "multiselect" | "sku";
+type FieldType = "text" | "number" | "boolean" | "select" | "multiselect" | "sku" | "lookup";
 type Opt = { id: string; label: string; value: string; display_order: number };
-type Def = { id: string; product_family: string | null; key: string; label: string; scope: string; type: FieldType; required: boolean; display_order: number; help_text: string; relation_filter: { tags?: string[] } | null; options: Opt[] };
+type LookupTable = { table_name: string; label: string };
+type Def = { id: string; product_family: string | null; key: string; label: string; scope: string; type: FieldType; external_table: string | null; required: boolean; display_order: number; help_text: string; relation_filter: { tags?: string[] } | null; options: Opt[] };
 
-const TYPE_LABEL: Record<FieldType, string> = { text: "ข้อความ", number: "ตัวเลข", boolean: "ใช่/ไม่ใช่", select: "ตัวเลือก (เลือก 1)", multiselect: "เลือกหลายอัน", sku: "เลือกวัตถุดิบ (SKU)" };
+const TYPE_LABEL: Record<FieldType, string> = { text: "ข้อความ", number: "ตัวเลข", boolean: "ใช่/ไม่ใช่", select: "ตัวเลือก (เลือก 1)", multiselect: "เลือกหลายอัน", sku: "เลือกวัตถุดิบ (SKU)", lookup: "เลือกจากตารางหลัก" };
 const SCOPES: [string, string][] = [["model", "สเปกร่วม (ใช้ทุกสี)"], ["sku", "รายสี (เฉพาะรุ่นสีนี้)"]];
 
 export default function AttributeFieldsPage() {
@@ -28,6 +29,7 @@ export default function AttributeFieldsPage() {
   const [family, setFamily] = useState<string>("");
   const [defs, setDefs] = useState<Def[]>([]);
   const [tags, setTags] = useState<string[]>([]);
+  const [lookupTables, setLookupTables] = useState<LookupTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Partial<Def> | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
@@ -39,6 +41,7 @@ export default function AttributeFieldsPage() {
       const j = await res.json();
       setFamilies((j.families ?? []) as string[]);
       setDefs((j.definitions ?? []) as Def[]);
+      setLookupTables((j.lookupTables ?? []) as LookupTable[]);
       if (!fam && (j.families ?? []).length) setFamily((j.families as string[])[0]);
     } catch { /* ignore */ } finally { setLoading(false); }
   }, []);
@@ -56,7 +59,8 @@ export default function AttributeFieldsPage() {
   const saveDef = async (d: Partial<Def>) => {
     if (!d.label?.trim()) { toast.error("ใส่ชื่อฟิลด์ก่อน"); return; }
     try {
-      const body = { id: d.id, product_family: family, label: d.label, scope: d.scope ?? "model", type: d.type ?? "text", required: !!d.required, help_text: d.help_text ?? "", relation_filter: d.type === "sku" ? { tags: d.relation_filter?.tags ?? [] } : null };
+      if (d.type === "lookup" && !d.external_table) { toast.error("เลือกตารางหลักก่อน"); return; }
+      const body = { id: d.id, product_family: family, label: d.label, scope: d.scope ?? "model", type: d.type ?? "text", external_table: d.external_table ?? undefined, required: !!d.required, help_text: d.help_text ?? "", relation_filter: d.type === "sku" ? { tags: d.relation_filter?.tags ?? [] } : null };
       const res = await apiFetch("/api/admin/attribute-fields", { method: d.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกฟิลด์แล้ว"); setEditing(null); await load(family);
@@ -127,6 +131,7 @@ export default function AttributeFieldsPage() {
                                 <div className="text-[11px] text-slate-400 mt-0.5">
                                   {TYPE_LABEL[d.type]}
                                   {(d.type === "select" || d.type === "multiselect") && <span> · {d.options.length} ตัวเลือก</span>}
+                                  {d.type === "lookup" && d.external_table ? <span> · จาก {lookupTables.find((t) => t.table_name === d.external_table)?.label ?? d.external_table}</span> : null}
                                   {d.type === "sku" && d.relation_filter?.tags?.length ? <span> · เฉพาะแท็ก: {d.relation_filter.tags.join(", ")}</span> : null}
                                 </div>
                               </div>
@@ -146,16 +151,17 @@ export default function AttributeFieldsPage() {
             )}
       </div>
 
-      {editing && <FieldEditor key={editing.id ?? "new"} initial={editing} tags={tags} onClose={() => setEditing(null)} onSave={saveDef} onReload={() => load(family)} canEdit={canEdit} />}
+      {editing && <FieldEditor key={editing.id ?? "new"} initial={editing} tags={tags} lookupTables={lookupTables} onClose={() => setEditing(null)} onSave={saveDef} onReload={() => load(family)} canEdit={canEdit} />}
     </PlaygroundShell>
   );
 }
 
 // ===== ตัวแก้ฟิลด์ (modal) =====
-function FieldEditor({ initial, tags, onClose, onSave, onReload, canEdit }: { initial: Partial<Def>; tags: string[]; onClose: () => void; onSave: (d: Partial<Def>) => void; onReload: () => void; canEdit: boolean }) {
+function FieldEditor({ initial, tags, lookupTables, onClose, onSave, onReload, canEdit }: { initial: Partial<Def>; tags: string[]; lookupTables: LookupTable[]; onClose: () => void; onSave: (d: Partial<Def>) => void; onReload: () => void; canEdit: boolean }) {
   const toast = useToast();
   const [label, setLabel] = useState(initial.label ?? "");
   const [type, setType] = useState<FieldType>(initial.type ?? "text");
+  const [externalTable, setExternalTable] = useState(initial.external_table ?? "");
   const [required, setRequired] = useState(!!initial.required);
   const [help, setHelp] = useState(initial.help_text ?? "");
   const [filterTags, setFilterTags] = useState<string[]>(initial.relation_filter?.tags ?? []);
@@ -181,7 +187,7 @@ function FieldEditor({ initial, tags, onClose, onSave, onReload, canEdit }: { in
     <ERPModal open onClose={onClose} size="md" title={isNew ? "＋ เพิ่มฟิลด์" : `✎ แก้ฟิลด์: ${initial.label}`}
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
-        {canEdit && <button onClick={() => onSave({ ...initial, label, type, required, help_text: help, relation_filter: { tags: filterTags } })} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">{isNew ? "สร้างฟิลด์" : "บันทึก"}</button>}
+        {canEdit && <button onClick={() => onSave({ ...initial, label, type, external_table: type === "lookup" ? externalTable : null, required, help_text: help, relation_filter: { tags: filterTags } })} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">{isNew ? "สร้างฟิลด์" : "บันทึก"}</button>}
       </>}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-2">
@@ -193,6 +199,18 @@ function FieldEditor({ initial, tags, onClose, onSave, onReload, canEdit }: { in
             </select></label>
           <label className="flex items-center gap-2 text-sm text-slate-600 mt-5"><input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} className="rounded border-slate-300" /> บังคับกรอก</label>
         </div>
+
+        {/* เลือกตารางหลัก (lookup) */}
+        {type === "lookup" && (
+          <label className="block">
+            <span className="text-[11px] text-slate-500">ดึงตัวเลือกจากตารางหลัก</span>
+            <select value={externalTable} onChange={(e) => setExternalTable(e.target.value)} className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+              <option value="">— เลือกตาราง —</option>
+              {lookupTables.map((t) => <option key={t.table_name} value={t.table_name}>{t.label}</option>)}
+            </select>
+            <span className="text-[10px] text-slate-400 mt-0.5 block">ตัวเลือกดึงสดจากตารางนี้ (จัดการรายการ/รูปที่หน้าตารางหลัก ไม่ต้องพิมพ์ซ้ำ)</span>
+          </label>
+        )}
 
         {/* ตัวเลือก (many2one/multiselect) */}
         {usesOptions && (
