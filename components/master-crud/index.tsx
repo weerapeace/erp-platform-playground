@@ -463,6 +463,16 @@ export type MasterCRUDConfig = {
     label?: string;
     render: (args: { open: boolean; onClose: () => void; onCreated: () => void }) => React.ReactNode;
   };
+  /**
+   * ปุ่มรายแถวเพิ่มเติม (เช่น "คัดลอก") — ของกลาง · refresh ตารางให้อัตโนมัติหลัง onClick
+   */
+  extraRowActions?: Array<{
+    label: string;
+    icon?: string;
+    variant?: "default" | "danger";
+    onClick: (row: Record<string, unknown>) => Promise<void> | void;
+    show?: (row: Record<string, unknown>) => boolean;
+  }>;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -1257,13 +1267,21 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ---- Row actions ----
   const rowActions: RowAction<Row>[] = useMemo(() => {
     const acts: RowAction<Row>[] = [{ label: "ดู / แก้", icon: "✎", onClick: openEdit }];
+    // ปุ่มรายแถวเพิ่มเติมจาก config (เช่น คัดลอก) — wrap ให้ refresh อัตโนมัติ
+    for (const a of (config.extraRowActions ?? [])) {
+      acts.push({
+        label: a.label, icon: a.icon, variant: a.variant,
+        show: a.show as ((r: Row) => boolean) | undefined,
+        onClick: async (r: Row) => { await a.onClick(r); await refreshData(); },
+      });
+    }
     if (canEdit) {
       acts.push({ label: "กู้คืน", icon: "↩", onClick: restore, show: (r: Row) => !r[activeField] });
       acts.push({ label: "ลบ", icon: "🗑", onClick: openDelete, variant: "danger" });
     }
     return acts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canEdit, activeField]);
+  }, [canEdit, activeField, config.extraRowActions]);
 
   // ---- Bulk archive ----
   const bulkActions: BulkAction<Row>[] = useMemo(() => {

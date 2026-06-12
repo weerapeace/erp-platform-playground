@@ -8,7 +8,10 @@
  */
 
 import dynamic from "next/dynamic";
+import { useMemo } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { useToast } from "@/components/toast";
+import { apiFetch } from "@/lib/api";
 import { SkuWizard } from "./sku-wizard";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
@@ -75,5 +78,21 @@ function fmtPrice(v: unknown) {
 }
 
 export default function SkusV2Page() {
-  return <MasterCRUDPage config={CONFIG} />;
+  const toast = useToast();
+  // เพิ่มปุ่ม "คัดลอก" รายแถว — ก๊อปทุกฟิลด์ไปเป็น SKU ใหม่ + (copy) ท้ายชื่อ + รหัสใหม่
+  const config = useMemo<MasterCRUDConfig>(() => ({
+    ...CONFIG,
+    extraRowActions: [{
+      label: "คัดลอก", icon: "⧉",
+      onClick: async (row) => {
+        try {
+          const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id }) });
+          const j = await res.json().catch(() => ({}));
+          if (!res.ok || j.error) throw new Error(j.error ?? "คัดลอกไม่สำเร็จ");
+          toast.success(`คัดลอกเป็น ${j.code} แล้ว — แก้ไขรายละเอียดได้`);
+        } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
+      },
+    }],
+  }), [toast]);
+  return <MasterCRUDPage config={config} />;
 }
