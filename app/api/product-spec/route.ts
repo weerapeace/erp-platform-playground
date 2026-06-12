@@ -54,9 +54,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const legacy: SpecField[] = [];
   if (parent) LEGACY.forEach((f, i) => { const v = str((parent as Record<string, unknown>)[f.col]); if (v && v !== "-") legacy.push({ key: f.col, label: f.label, value: v, order: i }); });
 
+  // product_model_id ที่ถูกต้อง = product_models ที่อ้าง parent นี้ (source_parent_sku_id) ไม่ใช่ parent.id
+  let productModelId: string | null = null;
+  if (parent) { const { data: pm } = await admin.from("product_models").select("id").eq("source_parent_sku_id", (parent as { id: string }).id).maybeSingle(); productModelId = (pm as { id: string } | null)?.id ?? null; }
+
   // attribute values (ทั้ง model + sku) → join definitions + options
   const [{ data: mVals }, { data: sVals }] = await Promise.all([
-    parent ? admin.from("product_model_attribute_values").select("definition_id, option_id, option_ids, text_value, number_value, boolean_value").eq("product_model_id", (parent as { id: string }).id) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    productModelId ? admin.from("product_model_attribute_values").select("definition_id, option_id, option_ids, text_value, number_value, boolean_value").eq("product_model_id", productModelId) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     admin.from("product_sku_attribute_values").select("definition_id, option_id, option_ids, text_value, number_value, boolean_value").eq("product_sku_id", skuRow.id),
   ]);
   type Val = Record<string, unknown> & { _scope: "model" | "sku" };
