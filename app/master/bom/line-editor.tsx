@@ -102,14 +102,14 @@ function calcLine(l: EditorLine, g: GroupInfo | undefined): number | null {
 const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
 
 // dropdown ลอยผ่าน portal — ไม่โดนตาราง scroll บัง + เด้งขึ้นบนเมื่อพื้นที่ล่างไม่พอ
-function FloatingPanel({ anchorRef, open, children }: { anchorRef: RefObject<HTMLDivElement | null>; open: boolean; children: ReactNode }) {
+function FloatingPanel({ anchorRef, open, children, minWidth = 340 }: { anchorRef: RefObject<HTMLDivElement | null>; open: boolean; children: ReactNode; minWidth?: number }) {
   const [style, setStyle] = useState<CSSProperties | null>(null);
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) { setStyle(null); return; }
     const r = anchorRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - r.bottom;
     const openUp = spaceBelow < 300 && r.top > spaceBelow;
-    const width = Math.min(Math.max(r.width, 340), window.innerWidth - 16);
+    const width = Math.min(Math.max(r.width, minWidth), window.innerWidth - 16);
     setStyle({
       position: "fixed",
       left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)),
@@ -117,7 +117,7 @@ function FloatingPanel({ anchorRef, open, children }: { anchorRef: RefObject<HTM
       zIndex: 60,
       ...(openUp ? { bottom: window.innerHeight - r.top + 4 } : { top: r.bottom + 4 }),
     });
-  }, [open, anchorRef]);
+  }, [open, anchorRef, minWidth]);
   if (!open || !style) return null;
   return createPortal(<div style={style} onMouseDown={(e) => e.stopPropagation()}>{children}</div>, document.body);
 }
@@ -194,18 +194,19 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
   const [loading, setLoading] = useState(false);
   const [showAll, setShowAll] = useState(false);   // ข้ามตัวกรองกลุ่ม
   const [recent, setRecent] = useState<BomComponent[]>([]);
+  const [fullOpen, setFullOpen] = useState(false);   // popup ค้นหาแบบเต็ม
   const boxRef = useRef<HTMLDivElement>(null);
   const filtered = !!(allowedGroupCodes && allowedGroupCodes.length > 0 && !showAll);
   useEffect(() => { if (open) setRecent(loadRecentMat()); }, [open]);
-  const pick = (c: BomComponent) => { pushRecentMat(c); onPick(c); setOpen(false); };
+  const pick = (c: BomComponent) => { pushRecentMat(c); onPick(c); setOpen(false); setFullOpen(false); };
   const load = useCallback(async (q: string, grps: string[] | undefined, tagList: string[] | undefined) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ limit: "50" });
       if (q) params.set("search", q);
       if (grps && grps.length) params.set("groups", grps.join(","));
       if (tagList && tagList.length) params.set("tags", tagList.join(","));
-      const res = await apiFetch(`/api/bom/components${params.toString() ? `?${params}` : ""}`);
+      const res = await apiFetch(`/api/bom/components?${params}`);
       const json = await res.json(); setOptions((json.data ?? []) as BomComponent[]);
     } finally { setLoading(false); }
   }, []);
@@ -217,7 +218,7 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
         className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1.5 overflow-hidden">
         {sku ? <><Thumb k={imageKey ?? null} /><span className="truncate"><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span></> : <span className="text-slate-400">{placeholder}</span>}
       </button>
-      <FloatingPanel anchorRef={boxRef} open={open}>
+      <FloatingPanel anchorRef={boxRef} open={open} minWidth={520}>
         <div className="bg-white border border-slate-200 rounded-lg shadow-xl">
           <div className="p-2 border-b border-slate-100">
             <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ..." className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -237,7 +238,7 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
                 <button key={`r-${c.id}`} type="button" onClick={() => pick(c)} className="w-full px-3 py-1.5 text-left hover:bg-amber-50 flex items-center gap-2">
                   <Thumb k={c.image_key} size={26} />
                   <code className="text-xs text-slate-500 shrink-0">{c.code}</code>
-                  <span className="text-sm text-slate-700 truncate flex-1">{c.name}</span>
+                  <span className="text-sm text-slate-700 line-clamp-2 leading-tight flex-1">{c.name}</span>
                   {c.material_type && <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 shrink-0">{c.material_type}</span>}
                 </button>
               ))}
@@ -250,14 +251,70 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
                 className="w-full px-3 py-1.5 text-left hover:bg-blue-50 flex items-center gap-2">
                 <Thumb k={c.image_key} size={26} />
                 <code className="text-xs text-slate-500 shrink-0">{c.code}</code>
-                <span className="text-sm text-slate-700 truncate flex-1">{c.name}</span>
+                <span className="text-sm text-slate-700 line-clamp-2 leading-tight flex-1">{c.name}</span>
                 {c.material_type && <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 shrink-0">{c.material_type}</span>}
               </button>
             ))}
           </div>
+          <div className="border-t border-slate-100 p-1.5">
+            <button type="button" onClick={() => { setFullOpen(true); setOpen(false); }}
+              className="w-full h-8 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100">🔍 ค้นหาแบบเต็ม (ดูทั้งหมด + รูปใหญ่)</button>
+          </div>
         </div>
       </FloatingPanel>
+      <MaterialSearchModal open={fullOpen} onClose={() => setFullOpen(false)} onPick={pick} allowedGroupCodes={filtered ? allowedGroupCodes : undefined} allowedTags={allowedTags} />
     </div>
+  );
+}
+
+// ============================================================
+// MaterialSearchModal — ค้นหาวัตถุดิบแบบเต็ม (popup ใหญ่ + โหลดเพิ่ม)
+// ============================================================
+function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowedTags }: { open: boolean; onClose: () => void; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[] }) {
+  const PAGE = 40;
+  const [search, setSearch] = useState("");
+  const [items, setItems] = useState<BomComponent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const load = useCallback(async (q: string, off: number, append: boolean) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: String(PAGE), offset: String(off) });
+      if (q) params.set("search", q);
+      if (allowedGroupCodes && allowedGroupCodes.length) params.set("groups", allowedGroupCodes.join(","));
+      if (allowedTags && allowedTags.length) params.set("tags", allowedTags.join(","));
+      const res = await apiFetch(`/api/bom/components?${params}`); const j = await res.json();
+      const data = (j.data ?? []) as BomComponent[];
+      setItems((prev) => append ? [...prev, ...data] : data);
+      setHasMore(data.length === PAGE);
+      setOffset(off + data.length);
+    } finally { setLoading(false); }
+  }, [allowedGroupCodes, allowedTags]);
+  useEffect(() => { if (!open) return; const t = setTimeout(() => { void load(search, 0, false); }, search ? 300 : 0); return () => clearTimeout(t); }, [open, search, load]);
+
+  return (
+    <ERPModal open={open} onClose={onClose} size="lg" title="🔍 ค้นหาวัตถุดิบ"
+      footer={<button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>}>
+      <div className="space-y-2">
+        <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อวัตถุดิบ…"
+          className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        <div className="grid grid-cols-2 gap-2 max-h-[55vh] overflow-y-auto pr-1">
+          {items.map((c) => (
+            <button key={c.id} type="button" onClick={() => onPick(c)} className="flex items-center gap-2 p-2 border border-slate-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 text-left">
+              <Thumb k={c.image_key} size={44} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1"><code className="text-[10px] text-slate-400">{c.code}</code>{c.material_type && <span className="text-[9px] px-1 rounded bg-slate-100 text-slate-500">{c.material_type}</span>}</div>
+                <div className="text-sm text-slate-700 line-clamp-2 leading-tight">{c.name}</div>
+              </div>
+            </button>
+          ))}
+          {!loading && items.length === 0 && <div className="col-span-2 text-center py-10 text-slate-300 text-sm">ไม่พบวัตถุดิบ</div>}
+        </div>
+        {loading && <div className="text-center text-xs text-slate-400 py-1">กำลังค้นหา…</div>}
+        {hasMore && !loading && <button type="button" onClick={() => load(search, offset, true)} className="w-full h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">โหลดเพิ่ม</button>}
+      </div>
+    </ERPModal>
   );
 }
 

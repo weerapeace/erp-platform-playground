@@ -31,6 +31,8 @@ type UomEmbed = { name: string | null } | null;
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const sp = new URL(request.url).searchParams;
   const search = (sp.get("search") ?? "").trim();
+  const limit = Math.min(200, Math.max(1, parseInt(sp.get("limit") ?? "30", 10)));
+  const offset = Math.max(0, parseInt(sp.get("offset") ?? "0", 10));
   const groups = (sp.get("groups") ?? "").split(",").map((s) => s.trim()).filter(Boolean);   // กรองตามกลุ่มวัตถุดิบ (code)
   const tags = (sp.get("tags") ?? "").split(",").map((s) => s.trim()).filter(Boolean);        // กรองตามแท็ก (product_families ชื่อ)
   const supabase = supabaseFromRequest(request);
@@ -59,7 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
     .eq("is_active", true)
     .order("code", { ascending: true })
-    .limit(30);
+    .range(offset, offset + limit - 1);
   if (groupIds) q = q.in("material_group_id", groupIds);
   if (tagSkuIds) q = q.in("id", tagSkuIds);
   if (search) {
