@@ -32,6 +32,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sp = new URL(request.url).searchParams;
   const search = (sp.get("search") ?? "").trim();
   const groups = (sp.get("groups") ?? "").split(",").map((s) => s.trim()).filter(Boolean);   // กรองตามกลุ่มวัตถุดิบ (code)
+  const tags = (sp.get("tags") ?? "").split(",").map((s) => s.trim()).filter(Boolean);        // กรองตามแท็ก (product_families ชื่อ)
   const supabase = supabaseFromRequest(request);
 
   // แปลง group code → id (สำหรับกรอง material_group_id)
@@ -42,6 +43,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (groupIds.length === 0) return NextResponse.json({ data: [], error: null });   // กลุ่มไม่พบ → ว่าง
   }
 
+  // กรองตามแท็ก: ชื่อแท็ก → family id → sku id (ผ่าน junction)
+  let tagSkuIds: string[] | null = null;
+  if (tags.length) {
+    const { data: fams } = await supabase.from("product_families").select("id").in("name", tags);
+    const famIds = (fams ?? []).map((x: Record<string, unknown>) => String(x.id));
+    if (famIds.length === 0) return NextResponse.json({ data: [], error: null });
+    const { data: links } = await supabase.from("skus_v2_product_family_m2m").select("src_id").in("tgt_id", famIds).limit(2000);
+    tagSkuIds = [...new Set((links ?? []).map((x: Record<string, unknown>) => String(x.src_id)))];
+    if (tagSkuIds.length === 0) return NextResponse.json({ data: [], error: null });
+  }
+
   let q = supabase
     .from("skus_v2")
     .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
@@ -49,6 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .order("code", { ascending: true })
     .limit(30);
   if (groupIds) q = q.in("material_group_id", groupIds);
+  if (tagSkuIds) q = q.in("id", tagSkuIds);
   if (search) {
     const t = `%${search}%`;
     q = q.or(`code.ilike.${t},name_th.ilike.${t}`);

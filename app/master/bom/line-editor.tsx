@@ -180,7 +180,7 @@ export function SkuPicker({
 // ============================================================
 // ComponentPicker — เลือกวัตถุดิบ (คืนกลุ่ม+หน้ากว้าง+loss) ผ่าน /api/bom/components
 // ============================================================
-export function ComponentPicker({ sku, name, imageKey, placeholder = "— เลือกวัตถุดิบ —", onPick, allowedGroupCodes }: { sku: string; name: string; imageKey?: string | null; placeholder?: string; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[] }) {
+export function ComponentPicker({ sku, name, imageKey, placeholder = "— เลือกวัตถุดิบ —", onPick, allowedGroupCodes, allowedTags }: { sku: string; name: string; imageKey?: string | null; placeholder?: string; onPick: (c: BomComponent) => void; allowedGroupCodes?: string[]; allowedTags?: string[] }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [options, setOptions] = useState<BomComponent[]>([]);
@@ -188,17 +188,18 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
   const [showAll, setShowAll] = useState(false);   // ข้ามตัวกรองกลุ่ม
   const boxRef = useRef<HTMLDivElement>(null);
   const filtered = !!(allowedGroupCodes && allowedGroupCodes.length > 0 && !showAll);
-  const load = useCallback(async (q: string, grps: string[] | undefined) => {
+  const load = useCallback(async (q: string, grps: string[] | undefined, tagList: string[] | undefined) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (q) params.set("search", q);
       if (grps && grps.length) params.set("groups", grps.join(","));
+      if (tagList && tagList.length) params.set("tags", tagList.join(","));
       const res = await apiFetch(`/api/bom/components${params.toString() ? `?${params}` : ""}`);
       const json = await res.json(); setOptions((json.data ?? []) as BomComponent[]);
     } finally { setLoading(false); }
   }, []);
-  useEffect(() => { if (!open) return; const t = setTimeout(() => load(search, filtered ? allowedGroupCodes : undefined), 250); return () => clearTimeout(t); }, [open, search, load, filtered, allowedGroupCodes]);
+  useEffect(() => { if (!open) return; const t = setTimeout(() => load(search, filtered ? allowedGroupCodes : undefined, allowedTags), 250); return () => clearTimeout(t); }, [open, search, load, filtered, allowedGroupCodes, allowedTags]);
   useEffect(() => { const f = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener("mousedown", f); return () => document.removeEventListener("mousedown", f); }, []);
   return (
     <div ref={boxRef} className="relative">
