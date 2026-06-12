@@ -17,6 +17,7 @@ import { SkuPrefixManager } from "@/components/sku-prefix-manager";
 type PickerOpt = { id: string; label: string; secondary?: string };
 type TagOpt = { id: string; name: string; code_prefix: string; group_name: string | null };
 type Suggest = { prefix: string; this_latest: string | null; this_suggested: string | null; group_latest: string | null; group_name: string | null; error?: string };
+type TagCode = { prefix: string; latest_code: string; suggested: string; count: number };
 
 // คอลัมน์จากทะเบียน field (ไม่ hardcode)
 type ColDef = { key: string; label: string; type: "text" | "number" | "boolean" | "relation"; rel?: { table: string; label: string; secondary?: string } };
@@ -140,6 +141,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
   // ---------- โหมดเดี่ยว ----------
   const [sTag, setSTag] = useState<string | null>(null);
   const [sug, setSug] = useState<Suggest | null>(null);
+  const [tagCodes, setTagCodes] = useState<TagCode[]>([]);   // ทุกตระกูลรหัสที่ใช้กับแท็กนี้ (tooltip)
   const [single, setSingle] = useState<Row>(blankRow());
   const setSV = (k: string, v: unknown, lbl?: string) => setSingle((s) => ({ values: { ...s.values, [k]: v }, labels: lbl !== undefined ? { ...s.labels, [k]: lbl } : s.labels }));
   const loadSuggest = useCallback((tagId: string) => {
@@ -147,6 +149,9 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
       setSug(j as Suggest);
       if (j.this_suggested) setSingle((s) => (s.values.code ? s : { ...s, values: { ...s.values, code: j.this_suggested } }));
     }).catch(() => {});
+    // ดึงทุกตระกูลรหัสจริงที่ผูกแท็กนี้ (สำหรับ tooltip)
+    setTagCodes([]);
+    apiFetch(`/api/skus/tag-codes?family_tag_id=${tagId}`).then((r) => r.json()).then((j) => setTagCodes((j.prefixes ?? []) as TagCode[])).catch(() => {});
   }, []);
 
   // ---------- โหมดชุด ----------
@@ -160,7 +165,7 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
     return l.map((x, i) => i === 0 ? x : ({ values: { ...x.values, [k]: v }, labels: { ...x.labels, [k]: lbl } }));
   });
 
-  const reset = () => { setSingle(blankRow()); setSug(null); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); };
+  const reset = () => { setSingle(blankRow()); setSug(null); setTagCodes([]); setSTag(null); setLines([blankRow(), blankRow(), blankRow()]); setBTag(null); };
   const close = () => { if (saving) return; reset(); onClose(); };
 
   const submit = async (rows: Row[], tagId: string | null) => {
@@ -228,11 +233,32 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
           <div>
             <span className="text-xs text-slate-500">ประเภท (Tag) — ใช้เสนอรหัสให้</span>
             <div className="mt-0.5 flex gap-1.5">
-              <select value={sTag ?? ""} onChange={(e) => { const v = e.target.value || null; setSTag(v); if (v) loadSuggest(v); else setSug(null); }}
+              <select value={sTag ?? ""} onChange={(e) => { const v = e.target.value || null; setSTag(v); if (v) loadSuggest(v); else { setSug(null); setTagCodes([]); } }}
                 className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
                 <option value="">— เลือกประเภท —</option>
                 {tags.map((t) => <option key={t.id} value={t.id}>{t.group_name ? `${t.group_name} · ` : ""}{t.name} {t.code_prefix ? `(${t.code_prefix})` : "— ยังไม่ตั้งรหัส"}</option>)}
               </select>
+              {/* ℹ️ tooltip: ทุกตระกูลรหัสที่ SKU ในแท็กนี้ใช้จริง (hover ดู ไม่ใช่ปุ่มเลือก) */}
+              {tagCodes.length > 0 && (
+                <div className="relative group flex items-center">
+                  <span className="h-9 px-2 inline-flex items-center text-sm border border-blue-200 bg-blue-50 text-blue-600 rounded-lg cursor-help whitespace-nowrap">ℹ️ รหัสที่ใช้ ({tagCodes.length})</span>
+                  <div className="invisible group-hover:visible absolute right-0 top-full z-30 mt-1 w-72 max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-xl p-2 text-xs">
+                    <div className="text-slate-400 mb-1">ตระกูลรหัสที่ใช้กับประเภทนี้ (พิมพ์รหัสเอง)</div>
+                    <table className="w-full">
+                      <tbody>
+                        {tagCodes.map((c) => (
+                          <tr key={c.prefix} className="border-t border-slate-50">
+                            <td className="py-0.5 pr-2 font-mono text-slate-700">{c.prefix}</td>
+                            <td className="py-0.5 pr-2 text-slate-500 whitespace-nowrap">ล่าสุด {c.latest_code}</td>
+                            <td className="py-0.5 pr-2 text-emerald-600 whitespace-nowrap">→ {c.suggested}</td>
+                            <td className="py-0.5 text-right text-slate-300">{c.count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
               <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
                 className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ จัดการรหัสนำหน้า</button>
             </div>
@@ -282,6 +308,8 @@ export function SkuWizard({ open, onClose, onCreated }: { open: boolean; onClose
                 <option value="">— ไม่ระบุ —</option>
                 {tags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select></label>
+            <button type="button" onClick={() => setPrefixMgr(true)} title="ตั้ง/แก้รหัสนำหน้าของแต่ละประเภท"
+              className="h-8 px-3 text-sm border border-slate-200 rounded text-slate-600 hover:bg-white whitespace-nowrap">⚙️ จัดการรหัสนำหน้า</button>
             {/* ตัวเลือกคอลัมน์ (จากทะเบียน field) */}
             <div className="relative">
               <button onClick={() => setColMenu((o) => !o)} className="h-8 px-3 text-sm border border-slate-200 rounded bg-white text-slate-600 hover:bg-slate-50">🧩 เลือกคอลัมน์ ({shownCols.length})</button>

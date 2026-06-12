@@ -351,7 +351,7 @@ export function BomLineEditor({
   const [groups, setGroups] = useState<MaterialGroup[]>([]);
   const [uoms, setUoms] = useState<{ id: string; name: string }[]>([]);
   const [detail, setDetail] = useState<EditorLine | null>(null);
-  const [view, setView] = useState<"basic" | "pro">("pro");   // มุมมองตาราง: BASIC (ย่อ) / PRO (เต็ม)
+  const [view, setView] = useState<"basic" | "pro">("basic");   // มุมมองตาราง: BASIC (ย่อ, ค่าเริ่มต้น) / PRO (เต็ม)
   const [editFace, setEditFace] = useState<Set<string>>(new Set());
   const [editUom, setEditUom] = useState<Set<string>>(new Set());
   useEffect(() => {
