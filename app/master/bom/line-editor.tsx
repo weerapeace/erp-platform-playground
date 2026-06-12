@@ -366,6 +366,23 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
   );
 }
 
+// ตัวช่วย "สูตร" ค่าต่อไซส์ — ใส่ค่าฐาน + เพิ่มต่อไซส์ → เติมให้ทุกไซส์
+function SizeFormula({ onApply }: { onApply: (base: number, step: number) => void }) {
+  const [base, setBase] = useState("");
+  const [step, setStep] = useState("");
+  const apply = () => { if (base.trim() === "") return; onApply(Number(base) || 0, Number(step) || 0); };
+  return (
+    <div className="flex items-center gap-0.5">
+      <input type="number" step="any" value={base} onChange={(e) => setBase(e.target.value)} title="ค่าที่ไซส์เล็กสุด" placeholder="ฐาน"
+        className="w-12 h-7 px-1 text-right border border-slate-200 rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+      <span className="text-slate-300 text-[10px]">+</span>
+      <input type="number" step="any" value={step} onChange={(e) => setStep(e.target.value)} title="เพิ่ม/ลด ต่อ 1 ไซส์" placeholder="/ไซส์"
+        className="w-12 h-7 px-1 text-right border border-slate-200 rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+      <button type="button" onClick={apply} title="เติมค่าให้ทุกไซส์ตามสูตร" className="h-7 px-1.5 text-[11px] bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100">เติม</button>
+    </div>
+  );
+}
+
 // ============================================================
 // BomLineEditor
 // ============================================================
@@ -688,6 +705,7 @@ export function BomLineEditor({
             <thead><tr className="text-slate-400 border-b border-slate-100">
               <th className="text-left px-3 py-1.5 font-medium">วัตถุดิบ</th>
               <th className="text-center px-2 py-1.5 font-medium">ค่าที่ผัน</th>
+              {!readonly && <th className="text-center px-2 py-1.5 font-medium whitespace-nowrap">สูตร (ฐาน + เพิ่ม/ไซส์)</th>}
               {sizes.map((s) => <th key={s} className="text-right px-2 py-1.5 font-medium">{s}</th>)}
             </tr></thead>
             <tbody>
@@ -695,6 +713,7 @@ export function BomLineEditor({
                 <tr key={l.key} className="border-b border-slate-50 last:border-0">
                   <td className="px-3 py-1 text-slate-700"><code className="text-[10px] text-slate-400">{l.component_sku}</code> {l.component_name}</td>
                   <td className="px-2 py-1 text-center text-slate-500">{SIZE_DIMS.find((d) => d[0] === l.size_dim)?.[1] ?? l.size_dim}</td>
+                  {!readonly && <td className="px-2 py-1"><SizeFormula onApply={(base, step) => onChange(lines.map((x) => x.key === l.key ? { ...x, size_values: Object.fromEntries(sizes.map((sz, i) => [sz, r4(base + i * step)])) } : x))} /></td>}
                   {sizes.map((s) => (
                     <td key={s} className="px-2 py-1">
                       <input type="number" step="any" disabled={readonly} value={l.size_values?.[s] ?? ""}
@@ -706,7 +725,7 @@ export function BomLineEditor({
               ))}
             </tbody>
           </table>
-          <p className="text-[10px] text-slate-400 px-3 py-1.5">ค่าที่กรอกจะแทนค่าตามช่องที่เลือก (ยาว/กว้าง/ชิ้น/จำนวน) เมื่อเลือกไซส์นั้นตอนสั่งผลิต</p>
+          <p className="text-[10px] text-slate-400 px-3 py-1.5">ค่าที่กรอกจะแทนค่าตามช่องที่เลือก (ยาว/กว้าง/ชิ้น/จำนวน) เมื่อเลือกไซส์นั้นตอนสั่งผลิต · <b>สูตร:</b> ใส่ค่าฐาน (ไซส์เล็กสุด) + เพิ่ม/ลดต่อไซส์ แล้วกด “เติม” ระบบจะเติมทุกไซส์ให้ (แก้รายตัวต่อได้)</p>
         </div>
       )}
 
