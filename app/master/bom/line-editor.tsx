@@ -128,6 +128,13 @@ function Thumb({ k, size = 22 }: { k: string | null; size?: number }) {
   return <img src={thumbUrl(k)} alt="" loading="lazy" className="rounded object-cover bg-slate-50 shrink-0" style={{ width: size, height: size }} />;
 }
 
+// recently used (วัตถุดิบที่เลือกล่าสุด) — เหมือน ProductPicker ของกลาง
+const RECENT_MAT_KEY = "erp-recent-materials";
+function loadRecentMat(): BomComponent[] { try { return JSON.parse(localStorage.getItem(RECENT_MAT_KEY) ?? "[]") as BomComponent[]; } catch { return []; } }
+function pushRecentMat(c: BomComponent) {
+  try { const list = loadRecentMat().filter((x) => x.id !== c.id); localStorage.setItem(RECENT_MAT_KEY, JSON.stringify([c, ...list].slice(0, 8))); } catch { /* ignore */ }
+}
+
 // ============================================================
 // SkuPicker — เลือก SKU ทั่วไป (หัวสูตร product) ผ่าน /api/admin/picker
 // ============================================================
@@ -186,8 +193,11 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
   const [options, setOptions] = useState<BomComponent[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAll, setShowAll] = useState(false);   // ข้ามตัวกรองกลุ่ม
+  const [recent, setRecent] = useState<BomComponent[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
   const filtered = !!(allowedGroupCodes && allowedGroupCodes.length > 0 && !showAll);
+  useEffect(() => { if (open) setRecent(loadRecentMat()); }, [open]);
+  const pick = (c: BomComponent) => { pushRecentMat(c); onPick(c); setOpen(false); };
   const load = useCallback(async (q: string, grps: string[] | undefined, tagList: string[] | undefined) => {
     setLoading(true);
     try {
@@ -220,10 +230,23 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
             )}
           </div>
           <div className="max-h-72 overflow-auto py-1">
+            {/* ใช้ล่าสุด (เมื่อยังไม่พิมพ์ค้นหา) */}
+            {!search.trim() && recent.length > 0 && <>
+              <div className="px-3 pt-1 pb-0.5 text-[10px] font-medium text-slate-400">⭐ ใช้ล่าสุด</div>
+              {recent.map((c) => (
+                <button key={`r-${c.id}`} type="button" onClick={() => pick(c)} className="w-full px-3 py-1.5 text-left hover:bg-amber-50 flex items-center gap-2">
+                  <Thumb k={c.image_key} size={26} />
+                  <code className="text-xs text-slate-500 shrink-0">{c.code}</code>
+                  <span className="text-sm text-slate-700 truncate flex-1">{c.name}</span>
+                  {c.material_type && <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 shrink-0">{c.material_type}</span>}
+                </button>
+              ))}
+              <div className="border-t border-slate-100 my-1" />
+            </>}
             {loading && <div className="px-3 py-2 text-xs text-slate-400">กำลังค้นหา...</div>}
             {!loading && options.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ไม่พบวัตถุดิบ</div>}
             {options.map((c) => (
-              <button key={c.id} type="button" onClick={() => { onPick(c); setOpen(false); }}
+              <button key={c.id} type="button" onClick={() => pick(c)}
                 className="w-full px-3 py-1.5 text-left hover:bg-blue-50 flex items-center gap-2">
                 <Thumb k={c.image_key} size={26} />
                 <code className="text-xs text-slate-500 shrink-0">{c.code}</code>
