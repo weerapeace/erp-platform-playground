@@ -1,0 +1,91 @@
+"use client";
+
+/**
+ * ตารางงานเหมารายชิ้นในหน้า BOM (ตารางที่ 2)
+ * - เลือกชื่องานจากทะเบียนกลาง (piecework_jobs) → เติมราคาตั้งต้นให้
+ * - แก้ราคา/จำนวน(ตัวคูณต่อใบสั่ง)/หมายเหตุ/☑งานละเอียด ต่อสูตรได้
+ * controlled: value + onChange (พ่อแม่เก็บใน form แล้วบันทึกพร้อม BOM)
+ */
+import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "@/lib/api";
+import type { PieceworkJob } from "@/app/api/admin/piecework-jobs/route";
+
+export type PieceLine = {
+  id?: string; job_id: string | null; job_name: string; rate: number;
+  note: string; is_detail: boolean; qty_per: number;
+};
+
+export function emptyPiece(): PieceLine {
+  return { job_id: null, job_name: "", rate: 0, note: "", is_detail: false, qty_per: 1 };
+}
+
+export function PieceworkLines({ value, onChange, readonly }: {
+  value: PieceLine[]; onChange: (lines: PieceLine[]) => void; readonly?: boolean;
+}) {
+  const [jobs, setJobs] = useState<PieceworkJob[]>([]);
+  useEffect(() => {
+    let cancel = false;
+    void (async () => {
+      try { const res = await apiFetch("/api/admin/piecework-jobs"); const j = await res.json(); if (!cancel) setJobs((j.data ?? []) as PieceworkJob[]); }
+      catch { /* ignore */ }
+    })();
+    return () => { cancel = true; };
+  }, []);
+  const jobById = useMemo(() => new Map(jobs.map((j) => [j.id, j])), [jobs]);
+
+  const patch = (i: number, p: Partial<PieceLine>) => onChange(value.map((l, idx) => idx === i ? { ...l, ...p } : l));
+  const pickJob = (i: number, jobId: string) => {
+    const j = jobById.get(jobId);
+    if (!j) { patch(i, { job_id: null, job_name: "" }); return; }
+    patch(i, { job_id: j.id, job_name: j.name, rate: j.default_rate, is_detail: j.is_detail });
+  };
+  const add = () => onChange([...value, emptyPiece()]);
+  const remove = (i: number) => onChange(value.filter((_, idx) => idx !== i));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">🧵 งานเหมารายชิ้น</h3>
+          <p className="text-[11px] text-slate-400">งานที่จ้างเหมาเป็นชิ้น (เย็บ/ติดอะไหล่ ฯลฯ) — จำนวน = ตัวคูณต่อ 1 ใบสั่ง</p>
+        </div>
+        <a href="/admin/piecework-jobs" target="_blank" rel="noreferrer" className="text-[11px] text-indigo-600 hover:underline shrink-0">＋ จัดการชื่องาน</a>
+      </div>
+
+      {value.length === 0 ? (
+        <div className="text-center py-5 border border-dashed border-slate-200 rounded-lg text-[12px] text-slate-300">ยังไม่มีงานเหมาในสูตรนี้</div>
+      ) : (
+        <div className="border border-slate-100 rounded-lg overflow-hidden">
+          <div className="grid grid-cols-[1fr_5rem_4.5rem_3rem_1fr_2rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500">
+            <span>ชื่องาน</span><span className="text-right">ราคา/ชิ้น</span><span className="text-center">จำนวน×</span><span className="text-center">ละเอียด</span><span>หมายเหตุ</span><span></span>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {value.map((l, i) => (
+              <div key={l.id ?? i} className="grid grid-cols-[1fr_5rem_4.5rem_3rem_1fr_2rem] gap-2 px-3 py-2 items-center">
+                <select value={l.job_id ?? ""} disabled={readonly} onChange={(e) => pickJob(i, e.target.value)}
+                  className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 bg-white">
+                  <option value="">{l.job_name || "— เลือกงาน —"}</option>
+                  {jobs.map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
+                </select>
+                <input type="number" inputMode="decimal" value={l.rate || ""} disabled={readonly} placeholder="0"
+                  onChange={(e) => patch(i, { rate: Number(e.target.value) || 0 })}
+                  className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                <input type="number" inputMode="numeric" value={l.qty_per || ""} disabled={readonly} placeholder="1"
+                  onChange={(e) => patch(i, { qty_per: Number(e.target.value) || 0 })}
+                  className="h-8 px-2 text-sm text-center border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                <label className="flex justify-center"><input type="checkbox" checked={l.is_detail} disabled={readonly} onChange={(e) => patch(i, { is_detail: e.target.checked })} className="w-4 h-4 accent-indigo-600" /></label>
+                <input value={l.note} disabled={readonly} placeholder="—" onChange={(e) => patch(i, { note: e.target.value })}
+                  className="h-8 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                {!readonly ? <button onClick={() => remove(i)} className="h-8 w-7 flex items-center justify-center text-slate-300 hover:text-rose-600 rounded-lg hover:bg-rose-50">🗑</button> : <span />}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!readonly && (
+        <button onClick={add} className="h-8 px-3 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50">＋ เพิ่มงานเหมา</button>
+      )}
+    </div>
+  );
+}
