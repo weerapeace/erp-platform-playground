@@ -275,8 +275,8 @@ function ImageMarkupEditorModal({ sourceUrl, fileName, entityType, entityId, act
       else if (meta && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
       else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) { e.preventDefault(); deleteSelected(); }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);   // capture phase — กัน modal กิน event ก่อน
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [undo, redo, deleteSelected, selectedId, textEdit]);
 
   const pointFromEvent = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -288,17 +288,15 @@ function ImageMarkupEditorModal({ sourceUrl, fileName, entityType, entityId, act
   const startDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (loading || saving || textEdit) return;
     const p = pointFromEvent(e);
-    e.currentTarget.setPointerCapture(e.pointerId);
 
+    // ข้อความ: เปิดช่องพิมพ์ตรงจุดที่คลิก — ห้าม setPointerCapture (จะแย่ง focus ทำช่องพิมพ์ blur ทันที)
+    if (tool === "text") { setSelectedId(null); setError(null); setTextEdit({ at: p, value: "" }); return; }
+
+    e.currentTarget.setPointerCapture(e.pointerId);
     if (tool === "select") {
       const id = hitTest(objects, p);
       setSelectedId(id);
       if (id) dragRef.current = { id, last: p, snapshot: objectsRef.current, moved: false };
-      return;
-    }
-    if (tool === "text") {
-      setSelectedId(null);
-      setTextEdit({ at: p, value: "" });   // เปิดช่องพิมพ์ตรงจุดที่คลิก
       return;
     }
     drawingRef.current = true; setError(null); setSelectedId(null);
