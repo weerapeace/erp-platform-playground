@@ -23,7 +23,7 @@ export type WorkOrder = {
   dispatch_date: string | null; due_date: string | null; status: string; note: string | null;
   created_at: string; updated_at: string; is_active: boolean;
   // เสริมจาก board API
-  image_url?: string | null; brand?: string | null; brand_color?: string | null;
+  image_url?: string | null; brand?: string | null; brand_color?: string | null; mo_id?: string | null;
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };

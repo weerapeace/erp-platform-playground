@@ -145,7 +145,8 @@ export default function WorkBoardPage() {
   const [clCutRows, setClCutRows] = useState<CutRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
-  const [clTab, setClTab] = useState<"prep" | "cut" | "piece" | "purch" | "issue" | "hist">("prep");
+  const [clTab, setClTab] = useState<"recv" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist">("prep");
+  const [clWO, setClWO] = useState<WorkOrder | null>(null);   // เปิดเช็กลิสต์จากใบจ่ายงาน → มีแท็บ "รับงานคืน"
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clPurch, setClPurch] = useState<PurchaseStatusRow[] | null>(null);   // ของที่ซื้อ/ETA
@@ -315,8 +316,10 @@ export default function WorkBoardPage() {
     if (!it || it.type !== "card") return;
     if (!movedRef.current) {
       // คลิก (ไม่ลาก) = เปิดรายละเอียด
-      if (it.kind === "wo") { const wo = board.workOrders.find((x) => x.id === it.id); if (wo) { setDetailWO(wo); setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); } }
-      else { const mo = board.pending.find((x) => x.id === it.id); if (mo) setChecklistMO(mo); }
+      if (it.kind === "wo") {
+        const wo = board.workOrders.find((x) => x.id === it.id);
+        if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }
+      } else { const mo = board.pending.find((x) => x.id === it.id); if (mo) { setClWO(null); setChecklistMO(mo); } }
       return;
     }
     const w = screenToWorld(e.clientX, e.clientY);
@@ -352,6 +355,18 @@ export default function WorkBoardPage() {
     setBrands((bs) => bs.map((b) => b.id === id ? { ...b, color } : b));
     try { await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, color }) }); await load(); }
     catch { toast.error("บันทึกสีไม่สำเร็จ"); }
+  };
+
+  // เปิดป๊อปอัปเช็กลิสต์จากใบจ่ายงาน (มีแท็บ "รับงานคืน" เป็นแท็บแรก) — ถ้าไม่รู้ MO id ใช้ป๊อปอัปเดิม
+  const openWO = (wo: WorkOrder) => {
+    if (!wo.mo_id) { setDetailWO(wo); return; }
+    setClWO(wo); setClTab("recv");
+    setChecklistMO({
+      id: wo.mo_id, mo_no: wo.mo_no, product_sku: wo.product_sku, product_name: wo.product_name,
+      qty: wo.qty || 0, dispatched: 0, remaining: 0, due_date: wo.due_date, status: wo.status,
+      image_url: wo.image_url ?? null, brand: wo.brand ?? null, brand_color: wo.brand_color ?? null,
+      prep_done: false, cut_done: false, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: false,
+    });
   };
 
   const submitDispatch = async () => {
@@ -395,10 +410,28 @@ export default function WorkBoardPage() {
       toast.success("ยกเลิกใบจ่ายงานแล้ว"); setDetailWO(null); await load();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
+  // รับงานคืน/ยกเลิก จากแท็บ "รับงานคืน" ในป๊อปอัปเช็กลิสต์ (clWO)
+  const submitReceiveTab = async () => {
+    if (!clWO) return;
+    const total = (clWO.received_qty || 0) + recvQty;
+    setRecvSaving(true);
+    try {
+      const res = await apiFetch(`/api/mo/work-orders/${clWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ received_qty: total }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("บันทึกรับงานคืนแล้ว"); closeChecklist();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setRecvSaving(false); }
+  };
+  const cancelWOTab = async () => {
+    if (!clWO) return;
+    try { const res = await apiFetch(`/api/mo/work-orders/${clWO.id}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ยกเลิกใบจ่ายงานแล้ว"); closeChecklist();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
+  };
 
   // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
   useEffect(() => {
-    setDelArmed(false); setClTab("prep");
+    setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setIssType(""); setIssSev("medium"); setIssQty("");
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); return; }
     let cancel = false; setClLoading(true);
@@ -520,7 +553,7 @@ export default function WorkBoardPage() {
     try { const res = await apiFetch(`/api/mo/issues?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setClIssues((rs) => (rs ?? []).filter((x) => x.id !== id)); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast]);
-  const closeChecklist = useCallback(() => { setChecklistMO(null); setDelArmed(false); void load(); }, [load]);
+  const closeChecklist = useCallback(() => { setChecklistMO(null); setClWO(null); setDelArmed(false); void load(); }, [load]);
   const deleteMO = useCallback(async (mo: PendingMO) => {
     try {
       const res = await apiFetch(`/api/mo/${mo.id}`, { method: "DELETE" });
@@ -788,9 +821,9 @@ export default function WorkBoardPage() {
       </ERPModal>
 
       {/* เช็กลิสต์วัตถุดิบ เตรียม/ตัด (Phase 2 — จาก BOM) */}
-      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="lg" title={`📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
+      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="lg" title={clWO ? `🔄 ใบจ่ายงาน · ${clWO.wo_no}` : `📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
         footer={<>
-          {checklistMO && canEdit && (delArmed
+          {checklistMO && !clWO && canEdit && (delArmed
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
             : <button onClick={() => setDelArmed(true)} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 mr-auto">🗑 ลบงาน</button>)}
           {checklistMO && <a href={`/print/work-order/${checklistMO.id}`} target="_blank" rel="noreferrer" className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์ใบสั่งงาน</a>}
@@ -820,6 +853,7 @@ export default function WorkBoardPage() {
                 return (
                   <div className="space-y-2">
                     <div className="flex flex-wrap gap-1 text-[12px]">
+                      {clWO && tabBtn("recv", "🔄 รับงานคืน")}
                       {tabBtn("prep", `📋 เตรียม ${prepDone}/${prepTotal}`)}
                       {tabBtn("cut", `✂️ ตัด ${cutDone}/${cutTotal}`)}
                       {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
@@ -827,7 +861,27 @@ export default function WorkBoardPage() {
                       {tabBtn("issue", `⚠️ ปัญหา${issN ? ` ${issN}` : ""}`)}
                       {tabBtn("hist", "🕑 ประวัติ")}
                     </div>
-                    {(clTab === "prep" || clTab === "cut" || clTab === "piece") && clLoading ? (
+                    {clTab === "recv" && clWO ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-[6rem_1fr] gap-y-1.5 text-xs">
+                          <span className="text-slate-400">แผนก/ผู้รับ</span><span className="text-slate-700">{clWO.department_name ?? "—"} · {clWO.assignee_name ?? "—"}</span>
+                          <span className="text-slate-400">จ่าย</span><span className="text-slate-700">{fmt(clWO.qty)} ชิ้น</span>
+                          <span className="text-slate-400">รับคืนแล้ว</span><span className="text-slate-700">{fmt(clWO.received_qty)} · เหลือ {fmt(Math.max(0, (clWO.qty || 0) - (clWO.received_qty || 0)))}</span>
+                          <span className="text-slate-400">กำหนดเสร็จ</span><span className="text-slate-700">{clWO.due_date ?? "—"}</span>
+                          <span className="text-slate-400">สถานะ</span><span><span className={`text-[11px] px-2 py-0.5 rounded border ${(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).cls}`}>{(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).label}</span></span>
+                        </div>
+                        <label className="block"><span className="text-[11px] text-slate-500">รับคืนรอบนี้ (ชิ้น)</span>
+                          <input type="number" min={0} step="any" value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))} disabled={!canEdit}
+                            className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50" /></label>
+                        {canEdit && (
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => void cancelWOTab()} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">ยกเลิกใบจ่ายงาน</button>
+                            <button onClick={() => void submitReceiveTab()} disabled={recvSaving || recvQty <= 0} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 ml-auto">{recvSaving ? "กำลังบันทึก…" : "✓ รับงานคืน"}</button>
+                          </div>
+                        )}
+                        <p className="text-[11px] text-slate-400">แท็บอื่นด้านบนดูข้อมูลใบสั่งผลิตเดียวกัน (เตรียม/ตัด/งานเหมา/ของซื้อ/ปัญหา/ประวัติ)</p>
+                      </div>
+                    ) : (clTab === "prep" || clTab === "cut" || clTab === "piece") && clLoading ? (
                       <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
                     ) : clTab === "prep" ? (
                       clRows.length === 0 ? (
@@ -947,12 +1001,12 @@ export default function WorkBoardPage() {
                     ) : (
                       <HistTab rows={clHist} />
                     )}
-                    <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ · ครบทั้ง 2 หน้า → การ์ดไฟเขียว"
+                    {clTab !== "recv" && <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ · ครบทั้ง 2 หน้า → การ์ดไฟเขียว"
                       : clTab === "cut" ? "ติ๊ก ✓ ตัดครบรายบล็อก — ตัดครบทุกบล็อกของวัตถุดิบใด ระบบติ๊กเตรียมครบให้อัตโนมัติ"
                       : clTab === "piece" ? "ติ๊กเลือกงานเหมาที่จะจ่ายในใบนี้ · จำนวนรวม = จำนวนต่อใบ × จำนวนที่สั่ง"
                       : clTab === "purch" ? "สถานะและวันของจะถึง ดึงจากใบขอซื้อ/ใบสั่งซื้อที่ผูกกับงานนี้"
                       : clTab === "issue" ? "ลงปัญหาที่เจอ (เชื่อมระบบ QC) — ใช้ติดตามของเสีย/แก้ไข"
-                      : "ใบจ่ายงานทั้งหมดของงานนี้ (รวมที่ยกเลิกแล้ว)"}</p>
+                      : "ใบจ่ายงานทั้งหมดของงานนี้ (รวมที่ยกเลิกแล้ว)"}</p>}
                   </div>
                 );
               })()}

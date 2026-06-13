@@ -65,9 +65,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const allSkus = [...workOrders.map((w) => w.product_sku as string), ...(mos ?? []).map((m: Record<string, unknown>) => m.product_sku as string)];
   const info = await skuInfoMap(admin, allSkus.filter(Boolean) as string[]);
 
+  // map mo_no → manufacturing_orders.id (สำหรับเปิดป๊อปอัปเช็กลิสต์จากใบจ่ายงาน)
+  const moIdByNo = new Map<string, string>();
+  for (const m of (mos ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));
+  const missingMoNos = [...new Set(workOrders.map((w) => String(w.mo_no)).filter(Boolean))].filter((n) => !moIdByNo.has(n));
+  if (missingMoNos.length > 0) {
+    const { data: extra } = await admin.from("manufacturing_orders").select("id, mo_no").in("mo_no", missingMoNos);
+    for (const m of (extra ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));
+  }
+
   const enrichedWO = workOrders.map((w) => {
     const inf = info.get(String(w.product_sku)) ?? { image_url: null, brand: null, brand_color: null };
-    return { ...w, ...inf };
+    return { ...w, ...inf, mo_id: moIdByNo.get(String(w.mo_no)) ?? null };
   });
 
   const pending = (mos ?? []).map((m: Record<string, unknown>) => {
