@@ -459,12 +459,30 @@ export function StudioPanel({
     const { active, over } = e;
     if (!over) return;
     const activeKey = String(active.id), overId = String(over.id);
+    const secTabKey = (s: SectionDef) => ((s.tab ?? "").trim() ? `tab_${(s.tab ?? "").trim()}` : s.key);
+    // ลากหัวแท็บไปวางทับอีกแท็บ → สลับลำดับแท็บ (ย้าย section ทั้งชุดของแท็บนั้นไปตำแหน่งปลายทาง)
+    if (activeKey.startsWith("tabsort:")) {
+      if (!overId.startsWith("tabsort:")) return;
+      const fromTk = activeKey.slice(8), toTk = overId.slice(8);
+      if (fromTk === toTk) return;
+      setSections((p) => {
+        const order: string[] = [];
+        for (const s of p) { const tk = secTabKey(s); if (!order.includes(tk)) order.push(tk); }
+        const from = order.indexOf(fromTk), to = order.indexOf(toTk);
+        if (from < 0 || to < 0) return p;
+        const newOrder = arrayMove(order, from, to);
+        const byTab = new Map<string, SectionDef[]>();
+        for (const s of p) { const tk = secTabKey(s); const l = byTab.get(tk) ?? []; l.push(s); byTab.set(tk, l); }
+        return newOrder.flatMap((tk) => byTab.get(tk) ?? []);
+      });
+      setDirty(true);
+      return;
+    }
     // ลากออกไปคลังซ้าย → เอาออกจากฟอร์ม
     if (overId === "palette") { setItems((p) => p.map((i) => i.key === activeKey ? { ...i, showInForm: false } : i)); setDirty(true); return; }
-    // ลากไปจ่อชื่อแท็บ → ย้ายเข้ากล่องแรกของแท็บนั้น
-    if (overId.startsWith("tab:")) {
-      const tk = overId.slice(4);
-      const secTabKey = (s: SectionDef) => ((s.tab ?? "").trim() ? `tab_${(s.tab ?? "").trim()}` : s.key);
+    // ลาก field ไปจ่อหัวแท็บ → ย้ายเข้ากล่องแรกของแท็บนั้น
+    if (overId.startsWith("tabsort:")) {
+      const tk = overId.slice(8);
       const target = sections.find((s) => secTabKey(s) === tk);
       if (target) { setItems((p) => p.map((i) => i.key === activeKey ? { ...i, groupKey: target.key } : i)); setDirty(true); }
       return;
@@ -1173,33 +1191,30 @@ function GridDrop({ id, children }: { id: string; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return <div ref={setNodeRef} className={`p-3 grid grid-cols-12 gap-3 min-h-[3rem] ${isOver?"bg-orange-50 ring-1 ring-orange-200":""}`}>{children}</div>;
 }
-// หัวแท็บ — drop zone (id tab:<key>) ลาก field มาจ่อ = ย้ายเข้าแท็บนั้น
-function CanvasTab({ t, active, editable, editApi, onClick, first, last }: {
+// หัวแท็บ — เป็นทั้ง drop zone (ลาก field มาจ่อ = ย้ายเข้าแท็บ) และ sortable (จับไอคอนลากสลับลำดับแท็บ)
+function CanvasTab({ t, active, editable, editApi, onClick }: {
   t: { key: string; label: string; icon: string; entries: [SectionDef, StudioField[]][] };
-  active: boolean; editable?: boolean; editApi?: EditApi; onClick: ()=>void; first?: boolean; last?: boolean;
+  active: boolean; editable?: boolean; editApi?: EditApi; onClick: ()=>void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `tab:${t.key}` });
+  const { setNodeRef, setActivatorNodeRef, listeners, attributes, transform, transition, isDragging, isOver } =
+    useSortable({ id: `tabsort:${t.key}` });
   const named = t.key.startsWith("tab_");
+  const canDrag = editable && editApi;
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 };
   return (
-    <div ref={setNodeRef} onClick={onClick}
-      className={`flex items-center gap-1 px-2 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${active?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"} ${isOver?"bg-orange-100 ring-1 ring-orange-300 rounded-t":""}`}>
-      {/* ◀▶ เรียง/สลับแท็บ */}
-      {editable && editApi && (
-        <button type="button" title="เลื่อนแท็บไปทางซ้าย" disabled={first}
-          onClick={(e)=>{ e.stopPropagation(); editApi.moveTab(t.key, -1); }}
-          className="text-slate-300 hover:text-orange-600 disabled:opacity-0 text-xs leading-none">◀</button>
-      )}
-      {iconNode(t.icon)}
-      {editable && editApi
+    <div ref={setNodeRef} style={style} onClick={onClick}
+      className={`flex items-center gap-1 px-2 py-2 text-sm whitespace-nowrap border-b-2 cursor-pointer ${active?"border-orange-500 text-orange-600 font-medium":"border-transparent text-slate-500 hover:text-slate-700"} ${isOver && !isDragging?"bg-orange-100 ring-1 ring-orange-300 rounded-t":""}`}>
+      {/* ไอคอน = จุดจับลากสลับแท็บ (กดค้างแล้วลาก) */}
+      {canDrag
+        ? <span ref={setActivatorNodeRef} {...listeners} {...attributes} onClick={(e)=>e.stopPropagation()}
+            title="กดค้างที่ไอคอนแล้วลากเพื่อสลับลำดับแท็บ"
+            className="cursor-grab active:cursor-grabbing touch-none select-none px-0.5 -ml-0.5 hover:text-orange-600">{iconNode(t.icon)}</span>
+        : iconNode(t.icon)}
+      {canDrag
         ? <input value={t.label} onClick={(e)=>e.stopPropagation()}
-            onChange={(e)=> named ? editApi.renameTab(t.label, e.target.value) : editApi.renameSection(t.entries[0][0].key, e.target.value)}
+            onChange={(e)=> named ? editApi!.renameTab(t.label, e.target.value) : editApi!.renameSection(t.entries[0][0].key, e.target.value)}
             className="bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-300 focus:bg-white rounded px-1 w-24 focus:outline-none" />
         : <span>{t.label}</span>}
-      {editable && editApi && (
-        <button type="button" title="เลื่อนแท็บไปทางขวา" disabled={last}
-          onClick={(e)=>{ e.stopPropagation(); editApi.moveTab(t.key, 1); }}
-          className="text-slate-300 hover:text-orange-600 disabled:opacity-0 text-xs leading-none">▶</button>
-      )}
     </div>
   );
 }
@@ -1264,9 +1279,11 @@ function FormPreview({ groups, row, moduleLabel, editable, selectedKey, onSelect
       )}
       {(tabs.length > 1 || (editable && editApi)) && (
         <div className="flex items-center gap-1 border-b border-slate-200 overflow-x-auto">
-          {tabs.map((t, i)=>(
-            <CanvasTab key={t.key} t={t} active={i===curIdx} editable={editable} editApi={editApi} onClick={()=>setActive(i)} first={i===0} last={i===tabs.length-1} />
-          ))}
+          <SortableContext items={tabs.map((t)=>`tabsort:${t.key}`)} strategy={rectSortingStrategy}>
+            {tabs.map((t, i)=>(
+              <CanvasTab key={t.key} t={t} active={i===curIdx} editable={editable} editApi={editApi} onClick={()=>setActive(i)} />
+            ))}
+          </SortableContext>
           {editable && editApi && (
             <button type="button" onClick={()=>editApi.addTab()} title="เพิ่มแท็บใหม่"
               className="px-2.5 py-2 text-sm text-orange-500 hover:text-orange-700 whitespace-nowrap">＋ แท็บ</button>
