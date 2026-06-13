@@ -33,7 +33,13 @@ type RelConfig = {
 type Opt = { id: string; label: string; group_id?: string | null; sort_order?: number };
 type Grp = { id: string; name: string; parent_group_id: string | null; single_select: boolean; sort_order: number };
 
-async function fetchOptions(moduleKey: string, labelField: string): Promise<Opt[]> {
+async function fetchOptions(moduleKey: string, labelField: string, targetTable?: string, useGroups?: boolean): Promise<Opt[]> {
+  // product_families (มีระบบกลุ่ม) → master-v2 (ได้ group_id) · ตารางอื่น → picker กลาง (ตารางใดก็ได้)
+  if (!useGroups && targetTable) {
+    const r = await apiFetch(`/api/admin/picker?table=${encodeURIComponent(targetTable)}&label=${encodeURIComponent(labelField)}&limit=500`);
+    const j = await r.json();
+    return ((j.data ?? []) as { id: string; label: string }[]).map((o) => ({ id: String(o.id), label: String(o.label ?? o.id), group_id: null }));
+  }
   const r = await apiFetch(`/api/master-v2/${moduleKey}?limit=500`);
   const j = await r.json();
   return (j.data ?? j.rows ?? []).map((row: Record<string, unknown>) => ({
@@ -148,9 +154,10 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
 }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const labelField = config.target_label_field ?? "name";
-  const allowCreate = config.allow_create !== false;
   const isCreate = !recordId;
   const usesGroups = moduleKey === "product_families";   // แท็กที่มีระบบกลุ่ม
+  const allowCreate = usesGroups && config.allow_create !== false;   // สร้าง/จัดการ เฉพาะแท็ก product_families
+  const pickTitle = usesGroups ? "เลือกแท็ก (Product Family)" : "เลือกข้อมูล";
 
   const [opts, setOpts] = useState<Opt[]>([]);
   const [groups, setGroups] = useState<Grp[]>([]);
@@ -165,7 +172,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
   const linkedRef = useRef<string[]>(linked);
   linkedRef.current = linked;
 
-  const reloadOpts = useCallback(() => { fetchOptions(moduleKey, labelField).then(setOpts).catch(() => {}); }, [moduleKey, labelField]);
+  const reloadOpts = useCallback(() => { fetchOptions(moduleKey, labelField, config.target_table, usesGroups).then(setOpts).catch(() => {}); }, [moduleKey, labelField, config.target_table, usesGroups]);
   useEffect(() => { reloadOpts(); }, [reloadOpts]);
   useEffect(() => { if (usesGroups) fetchGroups().then(setGroups).catch(() => {}); }, [usesGroups]);
 
@@ -259,9 +266,11 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
       {editable && !loading && (
         <div className="flex gap-1.5">
           <button type="button" onClick={() => { setPickerOpen(true); setQ(""); }}
-            className="h-8 px-3 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">＋ เลือก/แก้ไขแท็ก</button>
-          <button type="button" onClick={() => setMgrOpen(true)} title="จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ)"
-            className="h-8 px-2.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️</button>
+            className="h-8 px-3 text-sm rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">＋ {usesGroups ? "เลือก/แก้ไขแท็ก" : "เลือก"}</button>
+          {usesGroups && (
+            <button type="button" onClick={() => setMgrOpen(true)} title="จัดการแท็ก (เพิ่ม/แก้ชื่อ/ลบ)"
+              className="h-8 px-2.5 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️</button>
+          )}
         </div>
       )}
 
@@ -270,7 +279,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4" onClick={() => setPickerOpen(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-[480px] max-w-[94vw] max-h-[82vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <h3 className="font-semibold text-slate-800">เลือกแท็ก (Product Family)</h3>
+              <h3 className="font-semibold text-slate-800">{pickTitle}</h3>
               <button type="button" onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
             </div>
             <div className="px-3 pt-3">
@@ -310,7 +319,7 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
                   <div className="p-1">{ungrouped.map((o) => tagRow(o))}</div>
                 </div>
               )}
-              {filteredOpts.length === 0 && !ql && <div className="text-xs text-slate-300 py-4 text-center">— ยังไม่มีแท็ก —</div>}
+              {filteredOpts.length === 0 && !ql && <div className="text-xs text-slate-300 py-4 text-center">{usesGroups ? "— ยังไม่มีแท็ก —" : "— ไม่มีข้อมูลให้เลือก —"}</div>}
               {allowCreate && ql && !exact && (
                 <button type="button" onClick={createNew} disabled={busy}
                   className="flex items-center gap-2 w-full px-2 py-2 text-sm text-left rounded text-blue-600 hover:bg-blue-50 border border-dashed border-blue-200">
@@ -319,7 +328,9 @@ export function RelationMany2Many({ config, recordId, editable, value, onChange 
               )}
             </div>
             <div className="flex items-center justify-between px-3 py-3 border-t border-slate-100">
-              <button type="button" onClick={() => setMgrOpen(true)} className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️ จัดการแท็ก</button>
+              {usesGroups
+                ? <button type="button" onClick={() => setMgrOpen(true)} className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50">🗂️ จัดการแท็ก</button>
+                : <span />}
               <button type="button" onClick={() => setPickerOpen(false)} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">เสร็จ ({linked.length})</button>
             </div>
           </div>

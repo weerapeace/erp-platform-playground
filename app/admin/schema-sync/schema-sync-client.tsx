@@ -20,6 +20,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useBackdropDismiss } from "@/components/modal";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { SearchableSelect } from "@/components/searchable-select";
+import { TableColumnSelect } from "@/components/table-column-select";
 import { IconPicker } from "@/components/icon-picker";
 import { apiFetch } from "@/lib/api";
 import { invalidateCache } from "@/lib/client-cache";
@@ -137,7 +138,10 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
     setTypeChange({ field: f, newType });
     setTcStats(null); setTcAck(false); setTcApplying(false);
     setTcOptions(((f.options as { options?: string[] })?.options ?? []).join("\n"));
-    setTcTargetTable(""); setTcTargetLabel("name");
+    // prefill ตารางปลายทางจาก relation เดิม (เช่นแปลง relation → many2many)
+    const rc = (f.relation_config ?? {}) as Record<string, string>;
+    setTcTargetTable(rc.target_table ?? "");
+    setTcTargetLabel(rc.target_label_field || "name");
     apiFetch(`/api/admin/schema/field-stats?module=${encodeURIComponent(moduleKey)}&field=${encodeURIComponent(f.column_name ?? f.field_key)}`)
       .then((r) => r.json()).then((j) => { if (!j.error) setTcStats({ total: j.total, filled: j.filled }); }).catch(() => {});
   };
@@ -145,6 +149,21 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
   const applyTypeChange = async () => {
     if (!typeChange) return;
     const { field, newType } = typeChange;
+    // many2many = ไม่ใช่ patch ธรรมดา → สร้าง junction + ย้ายค่า + ซ่อนคอลัมน์เดิม (endpoint กลาง)
+    if (newType === "many2many") {
+      if (!tcTargetTable) { flash("เลือกตารางปลายทางก่อน"); return; }
+      setTcApplying(true);
+      try {
+        const res = await apiFetch("/api/admin/schema/convert-to-m2m", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ module_key: moduleKey, column: field.column_name ?? field.field_key, target_table: tcTargetTable, target_label_field: tcTargetLabel || "name", label: field.field_label }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) { flash("แปลงไม่สำเร็จ: " + (j.error ?? res.status)); return; }
+        setTypeChange(null); flash(`✓ แปลงเป็น many2many แล้ว (ย้าย ${j.migrated ?? 0} ค่า · ซ่อนคอลัมน์เดิม)`); load();
+      } finally { setTcApplying(false); }
+      return;
+    }
     const patch: Record<string, unknown> = { ui_field_type: newType };
     if (newType === "select") {
       const opts = tcOptions.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
@@ -165,9 +184,9 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
     try { await updateField(field.id, patch); setTypeChange(null); flash("✓ เปลี่ยนประเภทแล้ว"); }
     finally { setTcApplying(false); }
   };
-  const tcCanApply = !!typeChange && tcAck && !tcApplying
+  const tcCanApply = !!typeChange && (tcAck || typeChange.newType === "many2many") && !tcApplying
     && (typeChange.newType !== "select" || tcOptions.split(/[\n,]/).some((s) => s.trim()))
-    && (typeChange.newType !== "relation" || !!tcTargetTable);
+    && ((typeChange.newType !== "relation" && typeChange.newType !== "many2many") || !!tcTargetTable);
 
   // Sprint 11
   const [selected,    setSelected]    = useState<Set<string>>(new Set());
@@ -814,15 +833,17 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                 </div>
               </div>
               <div className="px-5 py-4 space-y-3 text-sm">
-                {/* ผลกระทบ + จำนวนข้อมูล */}
-                <div className="p-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800">
-                  {tcStats === null
-                    ? "กำลังตรวจจำนวนข้อมูล…"
-                    : <>field นี้มีข้อมูลอยู่ <b>{tcStats.filled.toLocaleString()}</b> แถว (จากทั้งหมด {tcStats.total.toLocaleString()})</>}
-                  <div className="mt-1 text-amber-700">
-                    เปลี่ยนประเภทไม่ลบข้อมูลใน Supabase — แต่ถ้าข้อมูลเดิมไม่เข้ากับประเภทใหม่ อาจแสดงเพี้ยน/ว่าง
+                {/* ผลกระทบ + จำนวนข้อมูล (ไม่โชว์สำหรับ m2m — ไม่ใช่การเปลี่ยนชนิดคอลัมน์) */}
+                {typeChange.newType !== "many2many" && (
+                  <div className="p-2.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800">
+                    {tcStats === null
+                      ? "กำลังตรวจจำนวนข้อมูล…"
+                      : <>field นี้มีข้อมูลอยู่ <b>{tcStats.filled.toLocaleString()}</b> แถว (จากทั้งหมด {tcStats.total.toLocaleString()})</>}
+                    <div className="mt-1 text-amber-700">
+                      เปลี่ยนประเภทไม่ลบข้อมูลใน Supabase — แต่ถ้าข้อมูลเดิมไม่เข้ากับประเภทใหม่ อาจแสดงเพี้ยน/ว่าง
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* select → ตัวเลือก */}
                 {typeChange.newType === "select" && (
@@ -833,29 +854,37 @@ export function SchemaSyncClient({ initialModule, lockModule, embedded }: {
                   </div>
                 )}
 
-                {/* relation → ตารางปลายทาง + field ชื่อ */}
-                {typeChange.newType === "relation" && (
+                {/* relation / many2many → ตารางปลายทาง + field ชื่อ */}
+                {(typeChange.newType === "relation" || typeChange.newType === "many2many") && (
                   <div className="space-y-2">
+                    {typeChange.newType === "many2many" && (
+                      <div className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800 space-y-0.5">
+                        <div className="font-medium">แปลงเป็น many2many (เลือกได้หลายค่า) — ระบบจะ:</div>
+                        <div>① สร้างตารางเชื่อม (junction) ให้</div>
+                        <div>② ย้ายค่าเดิมจากคอลัมน์นี้เข้า field ใหม่อัตโนมัติ</div>
+                        <div>③ ซ่อนคอลัมน์เดิม (ไม่ลบ — กู้คืนได้)</div>
+                      </div>
+                    )}
                     <div>
                       <div className="text-xs text-slate-600 mb-1">ตารางปลายทาง</div>
                       <SearchableSelect value={tcTargetTable} onChange={setTcTargetTable} placeholder="— เลือก —"
                         options={modules.filter((m) => m.table).map((m) => ({ value: String(m.table), label: m.label, sub: String(m.table) }))} />
-
                     </div>
                     <div>
                       <div className="text-xs text-slate-600 mb-1">field ที่ใช้แสดงชื่อ</div>
-                      <input value={tcTargetLabel} onChange={(e) => setTcTargetLabel(e.target.value)} placeholder="name"
-                        className="w-full h-9 px-2 text-sm border border-slate-300 rounded-md" />
+                      <TableColumnSelect table={tcTargetTable} value={tcTargetLabel} onChange={setTcTargetLabel} />
                     </div>
-                    <div className="text-[11px] text-slate-400">หมายเหตุ: ตั้งค่าเพื่อแสดง/เลือกค่า (ไม่บังคับสร้าง FK) — ถ้าต้องการ relation เต็มควรสร้าง field ใหม่</div>
+                    {typeChange.newType === "relation" && <div className="text-[11px] text-slate-400">หมายเหตุ: ตั้งค่าเพื่อแสดง/เลือกค่า (ไม่บังคับสร้าง FK) — ถ้าต้องการ relation เต็มควรสร้าง field ใหม่</div>}
                   </div>
                 )}
 
-                {/* ยืนยันชั้นที่ 2 */}
-                <label className="flex items-start gap-2 text-xs text-slate-600">
-                  <input type="checkbox" checked={tcAck} onChange={(e) => setTcAck(e.target.checked)} className="mt-0.5" />
-                  เข้าใจว่าข้อมูลเดิมอาจแสดงไม่ตรงกับประเภทใหม่
-                </label>
+                {/* ยืนยันชั้นที่ 2 (ไม่ต้องสำหรับ m2m — ไม่ลบ/ไม่เปลี่ยนคอลัมน์เดิม) */}
+                {typeChange.newType !== "many2many" && (
+                  <label className="flex items-start gap-2 text-xs text-slate-600">
+                    <input type="checkbox" checked={tcAck} onChange={(e) => setTcAck(e.target.checked)} className="mt-0.5" />
+                    เข้าใจว่าข้อมูลเดิมอาจแสดงไม่ตรงกับประเภทใหม่
+                  </label>
+                )}
               </div>
               <div className="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
                 <button onClick={() => setTypeChange(null)} disabled={tcApplying}
@@ -1082,7 +1111,9 @@ function SortableFieldRow({
           onChange={(e) => { if (e.target.value !== field.ui_field_type) onChangeType?.(e.target.value); }}
           className="text-xs px-1.5 py-1 border border-slate-200 rounded bg-white"
         >
-          {UI_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+          {/* many2many = ตัวเลือกพิเศษ เฉพาะฟิลด์ relation (แปลงเป็นเลือกหลายค่า) */}
+          {[...UI_TYPE_OPTIONS, ...(field.ui_field_type === "relation" || field.ui_field_type === "many2many" ? ["many2many"] : [])]
+            .map((t) => <option key={t} value={t}>{t === "many2many" ? "many2many (หลายค่า)" : t}</option>)}
         </select>
       </td>
       <td className="px-3 py-1.5">

@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { invalidateCache } from "@/lib/client-cache";
 import { SearchableSelect } from "@/components/searchable-select";
+import { TableColumnSelect } from "@/components/table-column-select";
 import { useBackdropDismiss } from "@/components/modal";
 import { validateFormula } from "@/lib/formula";
 import { useRoleOptions } from "@/lib/use-roles";
@@ -376,8 +377,7 @@ export function FieldCreatorModal({
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-600">ใช้ field ไหนเป็นชื่อแสดง</label>
-                <input value={targetLabelField} onChange={e => setTargetLabelField(e.target.value)} placeholder="name"
-                  className="mt-1 w-full h-9 px-3 text-sm font-mono border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500" />
+                <div className="mt-1"><TableColumnSelect table={targetTable} value={targetLabelField} onChange={setTargetLabelField} /></div>
               </div>
               {uiType === "many2many" && (
                 <p className="text-[11px] text-emerald-700">จะสร้างตารางเชื่อม (junction) ให้อัตโนมัติ + เลือกได้หลายค่า</p>
