@@ -112,6 +112,7 @@ export default function WorkBoardPage() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
   const [loading, setLoading] = useState(true);
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
+  const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // ผลรวมค่าแรงต่อแผนก
 
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Inter>(null);
@@ -165,7 +166,7 @@ export default function WorkBoardPage() {
     } catch { /* ignore */ } finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ } })(); }, []);
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } catch { /* ignore */ } })(); }, []);
   useEffect(() => { try {
     const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r));
     const s = localStorage.getItem(ZONESIZE_KEY); if (s) setZoneSize(JSON.parse(s));
@@ -633,7 +634,7 @@ export default function WorkBoardPage() {
                     <div className="flex items-center gap-1.5 shrink-0">
                       {z.kind === "dept" && z.dept && (() => {
                         const staff = craftsmen.filter((c) => c.department_id === z.dept!.id);
-                        const total = staff.reduce((s, c) => s + (c.base_salary ?? 0), 0);
+                        const total = deptWages[z.dept!.id] ?? 0;
                         return <>
                           <StaffAvatars staff={staff} />
                           {total > 0 && <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 rounded-full px-1.5 py-0.5" title="ค่าแรงรวม (เงินเดือนพนักงานในแผนก)">💰 {fmt(total)}</span>}
