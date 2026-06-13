@@ -38,6 +38,7 @@ export type Permission =
   | "po.view" | "po.create" | "po.edit" | "po.confirm" | "po.receive" | "po.complete" | "po.cancel"
   | "attachments.view" | "attachments.upload" | "attachments.delete"
   | "accounting.view" | "accounting.manage" | "accounting.post"
+  | "work_board.dispatch"
   | "admin.users" | "admin.audit_log"
   // สิทธิ์ระดับ "เข้าถึง App" (เฟส 2) — ผูกกับ erp_app_groups.permission_key (home เปิดให้ทุกคน)
   | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory" | "app.production"
@@ -75,6 +76,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "po.view", "po.create", "po.edit", "po.confirm", "po.receive", "po.complete", "po.cancel",
     "attachments.view", "attachments.upload", "attachments.delete",
     "accounting.view", "accounting.manage", "accounting.post",
+    "work_board.dispatch",
     "admin.users", "admin.audit_log",
   ],
   manager: [
@@ -90,6 +92,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "units.view", "units.create", "taxes.view", "taxes.create",
     "attachments.view", "attachments.upload", "attachments.delete",
     "accounting.view", "accounting.manage", "accounting.post",
+    "work_board.dispatch",
     "admin.audit_log",
   ],
   staff: [

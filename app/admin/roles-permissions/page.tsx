@@ -24,6 +24,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   customers:   "🧑‍💼 Customers",
   employees:   "👥 Employees",
   master:      "🗃 Master Data",
+  production:  "🏭 การผลิต",
   attachments: "🖼 Attachments",
   core:        "⚙ Core",
   admin:       "🔐 Admin",

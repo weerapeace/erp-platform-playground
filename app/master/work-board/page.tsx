@@ -97,6 +97,8 @@ type Zone = { key: string; label: string; kind: "pending" | "dept"; dept?: Dept;
 export default function WorkBoardPage() {
   const canView = usePermission("products.view");
   const canEdit = usePermission("products.edit");
+  // สิทธิ์ "จ่ายงานเข้าแผนก" แยกต่างหาก — ตั้งค่ารายตำแหน่งได้ที่ /admin/roles-permissions
+  const canDispatch = usePermission("work_board.dispatch");
   const { user } = useAuth(); void user;
   const toast = useToast();
 
@@ -272,7 +274,8 @@ export default function WorkBoardPage() {
     interRef.current = { type: "resize", key: z.key, sx: e.clientX, sy: e.clientY, ow: zoneWof(z.key), oh: zoneH(z) };
   };
   const onCardDown = (e: RPE, kind: "mo" | "wo", id: string) => {
-    if (tool === "pan" || !canEdit) return;
+    // กดเพื่อเปิดรายละเอียด/เช็กลิสต์ได้เสมอ (อยู่หน้านี้ = ดูได้); การลากเพื่อจ่าย/ย้ายงานค่อยเช็คสิทธิ์ตอนวาง
+    if (tool === "pan") return;
     e.stopPropagation();
     const cid = `${kind}:${id}`; const p = posOfCard(cid);
     boardRef.current?.setPointerCapture(e.pointerId); movedRef.current = false; setDragId(cid);
@@ -307,6 +310,7 @@ export default function WorkBoardPage() {
       if (target && target.kind === "dept" && target.dept) {
         const mo = board.pending.find((m) => m.id === it.id);
         setCardPos((cp) => { const n = { ...cp }; delete n[it.cid]; return n; });
+        if (!canDispatch) { toast.error("คุณไม่มีสิทธิ์จ่ายงาน — ให้ผู้ดูแลเปิดสิทธิ์ที่หน้าจัดการสิทธิ์ (การผลิต › จ่ายงานเข้าแผนก)"); return; }
         if (mo) {
           if (mo.ready) openDispatch(mo, target.dept);
           else setWarnDispatch({ mo, dept: target.dept });   // ยังไม่พร้อม → เตือนก่อน (แต่จ่ายต่อได้)
@@ -316,6 +320,7 @@ export default function WorkBoardPage() {
     } else {
       const wo = board.workOrders.find((x) => x.id === it.id); if (!wo) return;
       if (target && target.kind === "dept" && target.dept && wo.department_id !== target.dept.id) {
+        if (!canEdit) { toast.error("คุณไม่มีสิทธิ์ย้ายงานข้ามแผนก"); await load(); return; }
         const d = target.dept;
         setBoard((b) => ({ ...b, workOrders: b.workOrders.map((x) => x.id === it.id ? { ...x, department_id: d.id, department_name: d.name } : x) }));
         try { const res = await apiFetch(`/api/mo/work-orders/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: d.id, department_name: d.name, stage: stageOfDept(d.name) }) });
