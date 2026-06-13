@@ -129,7 +129,7 @@ export function PrintDocument({
 // PrintToolbar — แถบปุ่มพิมพ์ (ซ่อนตอนพิมพ์จริงด้วย .no-print)
 // ============================================================
 
-function printReportFrameOrWindow() {
+export function printReportFrameOrWindow() {
   const frame = document.querySelector<HTMLIFrameElement>('iframe[data-report-print-frame="true"]');
   const frameWindow = frame?.contentWindow;
   if (frameWindow) {

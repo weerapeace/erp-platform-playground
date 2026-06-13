@@ -14,6 +14,7 @@ import type { TableLayoutSettings, RowColorRule } from "@/app/api/table-layouts/
 import {
   getRowActionStorageKey,
   loadRowActionSettings,
+  normalizeRowActionTableKey,
   renderStandardRowActionIcon,
   type StandardRowActionIconKey,
   type RowActionSetting,
@@ -704,8 +705,23 @@ export function DataTable<T extends Record<string, unknown>>({
   }), [rowActions]);
 
   useEffect(() => {
-    setActionSettings(loadRowActionSettings(actionStorageKey, actionOptions));
-  }, [actionOptions, actionStorageKey]);
+    let alive = true;
+    const localSettings = loadRowActionSettings(actionStorageKey, actionOptions);
+    setActionSettings(localSettings);
+
+    const tableKey = normalizeRowActionTableKey(tableId || exportEntityType || exportFilename);
+    if (!tableKey || actionOptions.length === 0) return () => { alive = false; };
+
+    apiFetch(`/api/row-action-settings?key=${encodeURIComponent(tableKey)}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((json) => {
+        if (!alive || !json?.settings) return;
+        setActionSettings({ ...localSettings, ...(json.settings as Record<string, RowActionSetting>) });
+      })
+      .catch(() => {});
+
+    return () => { alive = false; };
+  }, [actionOptions, actionStorageKey, tableId, exportEntityType, exportFilename]);
 
   const inlineRowActions = useMemo(
     () => actionOptions.filter((action) => actionSettings[action.id]?.placement === "inline"),

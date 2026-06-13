@@ -17,7 +17,9 @@ describe("report print template", () => {
     );
 
     expect(html).toContain("@media print");
-    expect(html).toContain("min-height: auto");
+    expect(html).toContain("min-height: 0");
     expect(html).toContain("break-inside: avoid");
+    expect(html).toContain("page-break-after: auto");
+    expect(html).toContain(".doc::after");
   });
 });

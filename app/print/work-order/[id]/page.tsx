@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { PrintFrame } from "@/components/report";
+import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
@@ -506,7 +506,7 @@ export default function PrintWorkOrderPage() {
             เปิด PDF (พิมพ์/บันทึก)
           </button>
         ) : (
-          <button onClick={() => window.print()} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
+          <button onClick={printReportFrameOrWindow} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
             พิมพ์ / บันทึก PDF
           </button>
         )}

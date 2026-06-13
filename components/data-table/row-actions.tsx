@@ -30,6 +30,12 @@ export type RowActionMeta = {
   defaultIconKey?: StandardRowActionIconKey;
 };
 
+export const GENERIC_MASTER_ROW_ACTIONS: RowActionMeta[] = [
+  { id: "open-edit", group: "เปิดดู", label: "ดู / แก้ไข", description: "เปิดฟอร์มดูรายละเอียดหรือแก้ไขรายการ", defaultPlacement: "inline", defaultIconKey: "edit" },
+  { id: "restore", group: "จัดการ", label: "กู้คืน", description: "กู้คืนรายการที่ถูกปิด/ลบชั่วคราว", defaultPlacement: "menu", defaultIconKey: "convert" },
+  { id: "delete", group: "อันตราย", label: "ลบ", description: "ลบหรือปิดรายการนี้ตามกฎของโมดูล", defaultPlacement: "menu", defaultIconKey: "ban" },
+];
+
 export const STANDARD_ROW_ACTION_ICONS: { key: StandardRowActionIconKey; label: string }[] = [
   { key: "eye", label: "ดูรายละเอียด" },
   { key: "printer", label: "พิมพ์" },
@@ -57,7 +63,13 @@ export const QUOTATION_ROW_ACTIONS: RowActionMeta[] = [
 
 export function getModuleRowActionMetas(moduleKey: string): RowActionMeta[] {
   if (moduleKey === "quotations") return QUOTATION_ROW_ACTIONS;
-  return [];
+  return GENERIC_MASTER_ROW_ACTIONS;
+}
+
+export function normalizeRowActionTableKey(tableId?: string) {
+  const raw = (tableId || "").trim();
+  if (!raw) return "";
+  return raw.startsWith("master-") ? raw.slice("master-".length) : raw;
 }
 
 export function getRowActionStorageKey(tableId?: string, exportEntityType?: string, exportFilename?: string) {

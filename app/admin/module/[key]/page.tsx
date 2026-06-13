@@ -23,11 +23,7 @@ import {
   STANDARD_ROW_ACTION_ICONS,
   getDefaultRowActionSettings,
   getModuleRowActionMetas,
-  getRowActionStorageKey,
-  loadRowActionSettings,
   renderStandardRowActionIcon,
-  resetRowActionSettings,
-  saveRowActionSettings,
   type RowActionSetting,
   type RowActionPlacement,
   type StandardRowActionIconKey,
@@ -110,23 +106,40 @@ export default function ModuleSettingsPage() {
         )}
         {tab === "views"  && <SavedViewsPanel tableId={tableId} />}
         {tab === "layout" && <TableLayoutPanel tableId={tableId} moduleKey={moduleKey} />}
-        {tab === "actions" && <RowActionsPanel moduleKey={moduleKey} tableId={tableId} />}
+        {tab === "actions" && <RowActionsPanel moduleKey={moduleKey} />}
       </div>
     </PlaygroundShell>
   );
 }
 
-function RowActionsPanel({ moduleKey, tableId }: { moduleKey: string; tableId: string }) {
+function RowActionsPanel({ moduleKey }: { moduleKey: string }) {
   const modulePath = moduleKey === "quotations" ? "/quotations" : `/master/${moduleKey}`;
   const actions = useMemo(() => getModuleRowActionMetas(moduleKey), [moduleKey]);
-  const storageKey = getRowActionStorageKey(moduleKey === "quotations" ? "quotations" : tableId);
   const [settings, setSettings] = useState<Record<string, RowActionSetting>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setSettings(loadRowActionSettings(storageKey, actions));
+    let alive = true;
+    const defaults = getDefaultRowActionSettings(actions);
+    setLoading(true);
+    setError(null);
     setSaved(false);
-  }, [actions, storageKey]);
+    apiFetch(`/api/row-action-settings?key=${encodeURIComponent(moduleKey)}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!alive) return;
+        setSettings({ ...defaults, ...((j.settings ?? {}) as Record<string, RowActionSetting>) });
+      })
+      .catch(() => {
+        if (!alive) return;
+        setSettings(defaults);
+        setError("โหลดค่ากลางไม่สำเร็จ จะแสดงค่าเริ่มต้นให้ก่อน");
+      })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [actions, moduleKey]);
 
   const setPlacement = (actionId: string, placement: RowActionPlacement) => {
     setSettings((current) => ({
@@ -144,13 +157,28 @@ function RowActionsPanel({ moduleKey, tableId }: { moduleKey: string; tableId: s
     setSaved(false);
   };
 
-  const save = () => {
-    saveRowActionSettings(storageKey, settings);
-    setSaved(true);
+  const save = async () => {
+    setSaved(false);
+    setError(null);
+    try {
+      const j = await apiFetch("/api/row-action-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: moduleKey, settings }),
+      }).then((r) => r.json());
+      if (j.error) {
+        setError(String(j.error));
+        return;
+      }
+      setSettings({ ...getDefaultRowActionSettings(actions), ...((j.settings ?? settings) as Record<string, RowActionSetting>) });
+      setSaved(true);
+    } catch {
+      setError("บันทึกค่ากลางไม่สำเร็จ กรุณาลองใหม่");
+    }
   };
 
   const reset = () => {
-    setSettings(resetRowActionSettings(storageKey, actions));
+    setSettings(getDefaultRowActionSettings(actions));
     setSaved(false);
   };
 
@@ -167,14 +195,14 @@ function RowActionsPanel({ moduleKey, tableId }: { moduleKey: string; tableId: s
           <div className="flex items-center gap-2">
             <button
               onClick={reset}
-              disabled={actions.length === 0}
+              disabled={actions.length === 0 || loading}
               className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
             >
               Reset
             </button>
             <button
               onClick={save}
-              disabled={actions.length === 0}
+              disabled={actions.length === 0 || loading}
               className="h-9 px-4 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
             >
               บันทึก
@@ -188,7 +216,11 @@ function RowActionsPanel({ moduleKey, tableId }: { moduleKey: string; tableId: s
           </div>
         </div>
 
-        {actions.length === 0 ? (
+        {loading ? (
+          <div className="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">
+            กำลังโหลดค่ากลาง...
+          </div>
+        ) : actions.length === 0 ? (
           <div className="mt-5 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-400">
             โมดูลนี้ยังไม่ได้ประกาศ Row Actions กลางไว้ จึงยังตั้งค่าจากหน้านี้ไม่ได้
           </div>
@@ -246,12 +278,13 @@ function RowActionsPanel({ moduleKey, tableId }: { moduleKey: string; tableId: s
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <span>
-            ตอนนี้การตั้งค่ายังจำเฉพาะเครื่องนี้ก่อน เฟสถัดไปค่อยย้ายไปบันทึกเป็นค่า module กลาง เพื่อให้ทุกคนในทีมเห็นเหมือนกัน
+            การตั้งค่านี้บันทึกเป็นค่ากลางของโมดูลแล้ว ทุกคนในทีมจะเห็นตำแหน่งปุ่ม Row Actions เหมือนกัน ไม่ได้ผูกกับเครื่องนี้เครื่องเดียว
           </span>
           {saved && <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700">บันทึกแล้ว</span>}
         </div>
+        {error && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
       </div>
     </div>
   );
@@ -502,4 +535,3 @@ function GeneralPanel({ moduleKey, onLabelChange }: { moduleKey: string; onLabel
     </div>
   );
 }
-

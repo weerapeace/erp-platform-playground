@@ -94,17 +94,22 @@ export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknow
 
   const css = `
     *,*::before,*::after { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", "Sarabun", sans-serif; color: #0f172a; background: white; }
-    .doc { width: ${pageW}; min-height: ${pageH}; padding: 20mm 16mm; margin: 0 auto; background: white; overflow: visible; }
+    html, body { width: ${pageW}; min-height: 0; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", "Sarabun", sans-serif; color: #0f172a; background: white; overflow-x: hidden; }
+    .doc { width: ${pageW}; min-height: ${pageH}; padding: 20mm 16mm; margin: 0 auto; background: white; overflow: visible; break-after: auto; page-break-after: auto; }
     .doc table { page-break-inside: auto; }
     .doc tr { page-break-inside: avoid; break-inside: avoid; }
     .doc thead { display: table-header-group; }
     .doc tfoot { display: table-footer-group; }
-    .doc footer, .totals, .amount-text, .signatures { page-break-inside: avoid; break-inside: avoid; }
+    .doc header, .doc footer, .totals, .amount-text, .signatures { page-break-inside: avoid; break-inside: avoid; break-before: auto; break-after: auto; page-break-before: auto; page-break-after: auto; }
+    .doc footer:empty { display: none; }
+    .doc img, .doc svg, .doc canvas { max-width: 100%; page-break-inside: avoid; break-inside: avoid; }
     @media print {
-      html, body { width: ${pageW}; min-height: auto; background: white; }
+      html, body { width: ${pageW}; height: auto !important; min-height: 0 !important; background: white; overflow: visible !important; }
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-      .doc { width: ${pageW}; min-height: auto; margin: 0; padding: 14mm 12mm; box-shadow: none; overflow: visible; }
+      .doc { width: ${pageW}; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 14mm 12mm; box-shadow: none; overflow: visible; break-after: auto !important; page-break-after: auto !important; }
+      .doc::after { content: none !important; display: none !important; }
+      .doc > header, .doc > main, .doc > footer { break-before: auto !important; break-after: auto !important; page-break-before: auto !important; page-break-after: auto !important; }
+      .doc > footer:empty { display: none !important; }
     }
     @page { size: ${tpl.paper_size} ${tpl.orientation}; margin: 0; }
     ${tpl.custom_css}
