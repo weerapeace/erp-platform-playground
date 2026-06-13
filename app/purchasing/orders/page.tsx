@@ -17,6 +17,7 @@ import { SupplierPicker } from "@/components/supplier-picker";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
 import { RelationPeekModal } from "@/components/relation-peek";
 import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./approval";
+import { PieceworkFromPoModal, type PieceFromPoInit } from "../piecework-from-po-modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -86,6 +87,7 @@ export default function PurchaseOrdersPage() {
   const [rate, setRate] = useState(5.2);
   const [cartWidth, setCartWidth] = useState(340);
   const [editRow, setEditRow] = useState<Row | null>(null);
+  const [pieceInit, setPieceInit] = useState<PieceFromPoInit>(null);   // ทำรายการเป็นงานเหมา
   const [setShopRow, setSetShopRow] = useState<Row | null>(null);   // popup ตั้งร้านให้สินค้าที่ยังไม่มีร้าน
   const [rejectedOpen, setRejectedOpen] = useState(false);          // ป๊อปแท็บ "รายการไม่อนุมัติ"
   const [buyAllShop, setBuyAllShop] = useState<{ name: string; rows: Row[] } | null>(null);
@@ -364,7 +366,10 @@ export default function PurchaseOrdersPage() {
             emptyMessage="ไม่มีรายการรอสั่งซื้อ" searchPlaceholder="ค้นหา ร้าน / สินค้า / รหัส..."
             searchableKeys={["seller_name", "item_name", "code", "requester"]} tableId="purchase-orders-create" exportFilename="รอสั่งซื้อ"
             selectable bulkActions={bulkActions}
-            rowActions={[{ label: "ดู / แก้ไข", icon: "✎", onClick: (r: Row) => setEditRow(r) } as RowAction<Row>]}
+            rowActions={[
+              { label: "ดู / แก้ไข", icon: "✎", onClick: (r: Row) => setEditRow(r) } as RowAction<Row>,
+              { label: "ทำเป็นงานเหมา", icon: "🧵", onClick: (r: Row) => setPieceInit({ job_name: r.item_name ?? "", rate: Number(r.price_est) || 0 }) } as RowAction<Row>,
+            ]}
             views={[{ id: "all", label: "ทั้งหมด" }, { id: "approved", label: "อนุมัติแล้ว", filter: (r) => (r as Row).approved }, { id: "pending", label: "ยังไม่อนุมัติ", filter: (r) => !(r as Row).approved }]}
           />
         )}
@@ -582,6 +587,7 @@ export default function PurchaseOrdersPage() {
           setSetShopRow(null);
         }} />}
       {editRow && <CardEditModal row={editRow} suppliers={suppliers} onSupplierAdded={addSupplier} onClose={() => setEditRow(null)} onSaved={async () => { setEditRow(null); await fetchRows(); }} />}
+      <PieceworkFromPoModal init={pieceInit} onClose={() => setPieceInit(null)} />
       {bulkShop && <BulkSetShopModal rows={bulkShop} suppliers={suppliers} onSupplierAdded={addSupplier}
         onClose={() => setBulkShop(null)}
         onSaved={async () => { setBulkShop(null); exitSelect(); await fetchRows(); }} />}
