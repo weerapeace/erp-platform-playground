@@ -791,6 +791,7 @@ export default function WorkBoardPage() {
           {checklistMO && canEdit && (delArmed
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
             : <button onClick={() => setDelArmed(true)} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 mr-auto">🗑 ลบงาน</button>)}
+          {checklistMO && <a href={`/print/work-order/${checklistMO.id}`} target="_blank" rel="noreferrer" className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์ใบสั่งงาน</a>}
           <button onClick={closeChecklist} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>
         </>}>
         {checklistMO && (() => {

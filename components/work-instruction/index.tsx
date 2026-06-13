@@ -132,17 +132,24 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
         <button type="button" onClick={() => setOpen((o) => !o)} className="flex-1 flex items-center gap-2 text-sm font-semibold text-slate-700 text-left">
           <span>📋 รายละเอียดสั่งงาน</span><span className="text-slate-400 text-xs">{open ? "▾" : "▸"}</span>
         </button>
-        {editable && <button type="button" onClick={() => setEditOpen(true)} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ แก้ไขทั้งหมด</button>}
+        {editable && <button type="button" onClick={() => setEditOpen(true)} title="ลงรายละเอียดสินค้า" className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ แก้ไขละเอียดสินค้า</button>}
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-slate-100">
           {loading ? <div className="text-xs text-slate-400 py-3 text-center">กำลังโหลด…</div>
-          : empty || !spec ? <div className="text-xs text-slate-300 py-3 text-center">ยังไม่มีรายละเอียดสั่งงาน{editable ? " — กด ✎ แก้ไขทั้งหมด เพื่อเพิ่ม" : ""}</div>
+          : empty || !spec ? <div className="text-xs text-slate-300 py-3 text-center">ยังไม่มีรายละเอียดสั่งงาน{editable ? " — กด ✎ แก้ไขละเอียดสินค้า เพื่อเพิ่ม" : ""}</div>
           : (
             <div className="space-y-2.5">
               {spec.parent && (
                 <div className="flex gap-2 items-center">
-                  {spec.parent.image_url && /* eslint-disable-next-line @next/next/no-img-element */ <img src={spec.parent.image_url} alt="" className="w-12 h-12 rounded-md object-cover border border-slate-100" />}
+                  {spec.parent.image_url && (
+                    <span className="relative group/zoom shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={spec.parent.image_url} alt="" className="w-12 h-12 rounded-md object-cover border border-slate-100 cursor-zoom-in" />
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={spec.parent.image_url} alt="" className="hidden group-hover/zoom:block absolute z-50 left-0 top-14 w-56 h-56 object-contain rounded-lg border border-slate-200 bg-white shadow-xl p-1.5" />
+                    </span>
+                  )}
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-slate-800 truncate">{spec.parent.name ?? spec.parent.code}</div>
                     {spec.parent.size_summary && <div className="text-[11px] text-slate-400">ขนาด: {spec.parent.size_summary}</div>}
@@ -162,7 +169,9 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
                   {spec.bom_materials.map((g) => (
                     <div key={g.slot} className="flex gap-2 text-xs py-0.5">
                       <span className="text-slate-400 w-28 shrink-0">{g.label}</span>
-                      <span className="text-slate-700 flex-1">{g.items.map((it) => it.count > 1 ? `${it.name} (${it.count} บล็อก)` : it.name).join(", ")}</span>
+                      <div className="flex-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
+                        {g.items.map((it, i) => <span key={i} className="text-slate-700 truncate" title={it.name}>• {it.count > 1 ? `${it.name} (${it.count} บล็อก)` : it.name}</span>)}
+                      </div>
                     </div>
                   ))}
                 </div>
