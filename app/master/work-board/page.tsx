@@ -14,6 +14,9 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
+import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
+import type { MoIssue } from "@/app/api/mo/issues/route";
+import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -140,8 +143,12 @@ export default function WorkBoardPage() {
   const [clCutRows, setClCutRows] = useState<CutRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
-  const [clTab, setClTab] = useState<"prep" | "cut" | "piece">("prep");   // แท็บเช็กลิสต์: เตรียม/ตัด/งานเหมา
+  const [clTab, setClTab] = useState<"prep" | "cut" | "piece" | "purch" | "issue" | "hist">("prep");
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
+  const [clPurch, setClPurch] = useState<PurchaseStatusRow[] | null>(null);   // ของที่ซื้อ/ETA
+  const [clIssues, setClIssues] = useState<MoIssue[] | null>(null);           // ปัญหา QC
+  const [clHist, setClHist] = useState<DispatchHistRow[] | null>(null);       // ประวัติการจ่าย
+  const [issType, setIssType] = useState(""); const [issSev, setIssSev] = useState("medium"); const [issQty, setIssQty] = useState("");
   // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
   const [deptMgrOpen, setDeptMgrOpen] = useState(false);
   const [deptList, setDeptList] = useState<DeptFull[]>([]);
@@ -383,6 +390,7 @@ export default function WorkBoardPage() {
   // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
   useEffect(() => {
     setDelArmed(false); setClTab("prep");
+    setClPurch(null); setClIssues(null); setClHist(null); setIssType(""); setIssSev("medium"); setIssQty("");
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); return; }
     let cancel = false; setClLoading(true);
     void (async () => {
@@ -424,6 +432,11 @@ export default function WorkBoardPage() {
         if (!cancel) setClPieceRows((pj?.data ?? []) as MoPieceRow[]);
       } catch { if (!cancel) setClPieceRows([]); }
     })();
+    // เฟส 4: ของที่ซื้อ / ปัญหา / ประวัติ (โหลดแยก)
+    const moNo = checklistMO.mo_no;
+    void (async () => { try { const r = await apiFetch(`/api/mo/purchase-status?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClPurch((j?.data ?? []) as PurchaseStatusRow[]); } catch { if (!cancel) setClPurch([]); } })();
+    void (async () => { try { const r = await apiFetch(`/api/mo/issues?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClIssues((j?.data ?? []) as MoIssue[]); } catch { if (!cancel) setClIssues([]); } })();
+    void (async () => { try { const r = await apiFetch(`/api/mo/dispatch-history?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClHist((j?.data ?? []) as DispatchHistRow[]); } catch { if (!cancel) setClHist([]); } })();
     return () => { cancel = true; };
   }, [checklistMO]);
 
@@ -476,6 +489,22 @@ export default function WorkBoardPage() {
       }
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
   }, [canEdit, checklistMO, clPieceRows, toast]);
+  // ลงปัญหา (QC) ผูกกับใบสั่งผลิตนี้
+  const addIssue = useCallback(async () => {
+    if (!canEdit || !checklistMO) return;
+    const dtype = issType.trim(); if (!dtype) { toast.error("กรุณาระบุปัญหาที่เจอ"); return; }
+    try {
+      const res = await apiFetch(`/api/mo/issues`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mo_no: checklistMO.mo_no, defect_type: dtype, severity: issSev, qty: issQty || null }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setClIssues((rs) => [{ id: String(j.id), defect_no: j.defect_no ?? null, defect_type: dtype, severity: issSev, qty: issQty ? Number(issQty) : null, cause: null, created_at: new Date().toISOString() }, ...(rs ?? [])]);
+      setIssType(""); setIssQty(""); toast.success("ลงปัญหาแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  }, [canEdit, checklistMO, issType, issSev, issQty, toast]);
+  const delIssue = useCallback(async (id: string) => {
+    try { const res = await apiFetch(`/api/mo/issues?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setClIssues((rs) => (rs ?? []).filter((x) => x.id !== id)); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+  }, [toast]);
   const closeChecklist = useCallback(() => { setChecklistMO(null); setDelArmed(false); void load(); }, [load]);
   const deleteMO = useCallback(async (mo: PendingMO) => {
     try {
@@ -751,26 +780,35 @@ export default function WorkBoardPage() {
                 <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
-              {clLoading ? <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
-                : clRows.length === 0 ? (
-                    <div className="text-center py-6">
-                      <p className="text-slate-400 text-sm mb-3">ใบนี้ยังไม่มีรายการวัตถุดิบจาก BOM — ติ๊กรวมทั้งใบ</p>
-                      <div className="grid grid-cols-2 gap-2 max-w-[280px] mx-auto">
-                        <StepChip label="เตรียม" done={curMo.prep_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "prep_done")} />
-                        <StepChip label="ตัด" done={curMo.cut_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "cut_done")} />
-                      </div>
+              {/* แท็บรวม 6 หน้า — ใช้ได้ทั้งมี/ไม่มี BOM */}
+              {(() => {
+                const tabBtn = (id: typeof clTab, label: string) => (
+                  <button type="button" onClick={() => setClTab(id)}
+                    className={`h-8 px-3 rounded-lg border ${clTab === id ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
+                );
+                const issN = clIssues?.length ?? 0;
+                return (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-1 text-[12px]">
+                      {tabBtn("prep", `📋 เตรียม ${prepDone}/${prepTotal}`)}
+                      {tabBtn("cut", `✂️ ตัด ${cutDone}/${cutTotal}`)}
+                      {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
+                      {tabBtn("purch", "📦 ของซื้อ")}
+                      {tabBtn("issue", `⚠️ ปัญหา${issN ? ` ${issN}` : ""}`)}
+                      {tabBtn("hist", "🕑 ประวัติ")}
                     </div>
-                  )
-                  : (
-                    <div className="space-y-2">
-                      {/* 2 หน้า: เตรียม / ตัด (เหมือนใบสั่งผลิตจริง) */}
-                      <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm w-fit">
-                        <button type="button" onClick={() => setClTab("prep")} className={`h-8 px-4 ${clTab === "prep" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 หน้าเตรียม {prepDone}/{prepTotal}</button>
-                        <button type="button" onClick={() => setClTab("cut")} className={`h-8 px-4 border-l border-slate-200 ${clTab === "cut" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>✂️ หน้าตัด {cutDone}/{cutTotal}</button>
-                        <button type="button" onClick={() => setClTab("piece")} className={`h-8 px-4 border-l border-slate-200 ${clTab === "piece" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🧵 งานเหมา {clPieceRows.filter((r) => r.selected_id).length}/{clPieceRows.length}</button>
-                      </div>
-                      {clTab === "prep" ? (
-                        /* หน้าเตรียม — สรุปต่อวัตถุดิบ */
+                    {(clTab === "prep" || clTab === "cut" || clTab === "piece") && clLoading ? (
+                      <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
+                    ) : clTab === "prep" ? (
+                      clRows.length === 0 ? (
+                        <div className="text-center py-6">
+                          <p className="text-slate-400 text-sm mb-3">ใบนี้ไม่มีรายการวัตถุดิบจาก BOM — ติ๊กรวมทั้งใบ</p>
+                          <div className="grid grid-cols-2 gap-2 max-w-[280px] mx-auto">
+                            <StepChip label="เตรียม" done={curMo.prep_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "prep_done")} />
+                            <StepChip label="ตัด" done={curMo.cut_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "cut_done")} />
+                          </div>
+                        </div>
+                      ) : (
                         <div className="border border-slate-100 rounded-lg overflow-hidden">
                           <div className="grid grid-cols-[1fr_4rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>วัตถุดิบ</span><span className="text-center">เตรียม</span></div>
                           <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
@@ -782,60 +820,69 @@ export default function WorkBoardPage() {
                             ))}
                           </div>
                         </div>
-                      ) : clTab === "cut" ? (
-                        clCutRows.length === 0 ? (
-                          <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ไม่มีงานตัด</div>
-                        ) : (
-                          /* หน้าตัด — รายละเอียดรายบล็อก (ติ๊กตัดครบรายบล็อกได้เลย) */
-                          <div className="border border-slate-100 rounded-lg overflow-hidden">
-                            <div className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>บล็อก / วัตถุดิบ</span><span className="text-center">ตัด</span></div>
-                            <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-                              {clCutRows.map((r) => (
-                                <div key={r.id} className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-2 items-center">
-                                  <div className="min-w-0">
-                                    <p className="text-sm text-slate-800 truncate">
-                                      {r.cut_block_code ? <span className="font-mono text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mr-1.5">{r.cut_block_code}</span> : null}
-                                      {r.component_name ?? r.component_sku}
-                                    </p>
-                                    <p className="text-[10px] text-slate-400">
-                                      {r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)} · ` : ""}
-                                      {r.pieces != null ? `${fmt(r.pieces)} ชิ้น · ` : ""}
-                                      รวม {fmt(r.required_qty)} {r.uom ?? ""}
-                                    </p>
-                                  </div>
-                                  <div className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )
+                      )
+                    ) : clTab === "cut" ? (
+                      clCutRows.length === 0 ? (
+                        <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ไม่มีงานตัด</div>
                       ) : (
-                        /* หน้างานเหมา — ติ๊กเลือกงานเหมาที่จะจ่าย (จำนวน = ตัวคูณ × จำนวนสั่ง) */
-                        clPieceRows.length === 0 ? (
-                          <div className="text-center py-8 text-slate-300 text-sm">สินค้านี้ยังไม่มีงานเหมาใน BOM<br /><span className="text-[11px]">เพิ่มได้ที่หน้า BOM › ตารางงานเหมารายชิ้น</span></div>
-                        ) : (
-                          <div className="border border-slate-100 rounded-lg overflow-hidden">
-                            <div className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span></div>
-                            <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-                              {clPieceRows.map((r) => (
-                                <label key={r.key} className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-2 items-center cursor-pointer hover:bg-slate-50/60">
-                                  <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" /></span>
-                                  <div className="min-w-0">
-                                    <p className="text-sm text-slate-800 truncate">{r.job_name} {r.is_detail && <span className="text-[10px] text-amber-600">★ละเอียด</span>}{!r.in_bom && <span className="text-[10px] text-slate-400">(เพิ่มเอง)</span>}</p>
-                                    <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น` : ""}</p>
-                                  </div>
-                                  <span className="text-right text-sm font-semibold text-slate-700">{fmt(r.total_qty)}</span>
-                                </label>
-                              ))}
-                            </div>
+                        <div className="border border-slate-100 rounded-lg overflow-hidden">
+                          <div className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>บล็อก / วัตถุดิบ</span><span className="text-center">ตัด</span></div>
+                          <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+                            {clCutRows.map((r) => (
+                              <div key={r.id} className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-2 items-center">
+                                <div className="min-w-0">
+                                  <p className="text-sm text-slate-800 truncate">
+                                    {r.cut_block_code ? <span className="font-mono text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mr-1.5">{r.cut_block_code}</span> : null}
+                                    {r.component_name ?? r.component_sku}
+                                  </p>
+                                  <p className="text-[10px] text-slate-400">
+                                    {r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)} · ` : ""}
+                                    {r.pieces != null ? `${fmt(r.pieces)} ชิ้น · ` : ""}
+                                    รวม {fmt(r.required_qty)} {r.uom ?? ""}
+                                  </p>
+                                </div>
+                                <div className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></div>
+                              </div>
+                            ))}
                           </div>
-                        )
-                      )}
-                      <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ · ครบทั้ง 2 หน้า → การ์ดไฟเขียว"
-                        : clTab === "cut" ? "ติ๊ก ✓ ตัดครบรายบล็อก — ตัดครบทุกบล็อกของวัตถุดิบใด ระบบติ๊กเตรียมครบให้อัตโนมัติ"
-                        : "ติ๊กเลือกงานเหมาที่จะจ่ายในใบนี้ · จำนวนรวม = จำนวนต่อใบ × จำนวนที่สั่ง"}</p>
-                    </div>
-                  )}
+                        </div>
+                      )
+                    ) : clTab === "piece" ? (
+                      clPieceRows.length === 0 ? (
+                        <div className="text-center py-8 text-slate-300 text-sm">สินค้านี้ยังไม่มีงานเหมาใน BOM<br /><span className="text-[11px]">เพิ่มได้ที่หน้า BOM › ตารางงานเหมารายชิ้น</span></div>
+                      ) : (
+                        <div className="border border-slate-100 rounded-lg overflow-hidden">
+                          <div className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span></div>
+                          <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+                            {clPieceRows.map((r) => (
+                              <label key={r.key} className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-2 items-center cursor-pointer hover:bg-slate-50/60">
+                                <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" /></span>
+                                <div className="min-w-0">
+                                  <p className="text-sm text-slate-800 truncate">{r.job_name} {r.is_detail && <span className="text-[10px] text-amber-600">★ละเอียด</span>}{!r.in_bom && <span className="text-[10px] text-slate-400">(เพิ่มเอง)</span>}</p>
+                                  <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น` : ""}</p>
+                                </div>
+                                <span className="text-right text-sm font-semibold text-slate-700">{fmt(r.total_qty)}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    ) : clTab === "purch" ? (
+                      <PurchTab rows={clPurch} />
+                    ) : clTab === "issue" ? (
+                      <IssueTab issues={clIssues} canEdit={canEdit} issType={issType} setIssType={setIssType} issSev={issSev} setIssSev={setIssSev} issQty={issQty} setIssQty={setIssQty} onAdd={addIssue} onDel={delIssue} />
+                    ) : (
+                      <HistTab rows={clHist} />
+                    )}
+                    <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ · ครบทั้ง 2 หน้า → การ์ดไฟเขียว"
+                      : clTab === "cut" ? "ติ๊ก ✓ ตัดครบรายบล็อก — ตัดครบทุกบล็อกของวัตถุดิบใด ระบบติ๊กเตรียมครบให้อัตโนมัติ"
+                      : clTab === "piece" ? "ติ๊กเลือกงานเหมาที่จะจ่ายในใบนี้ · จำนวนรวม = จำนวนต่อใบ × จำนวนที่สั่ง"
+                      : clTab === "purch" ? "สถานะและวันของจะถึง ดึงจากใบขอซื้อ/ใบสั่งซื้อที่ผูกกับงานนี้"
+                      : clTab === "issue" ? "ลงปัญหาที่เจอ (เชื่อมระบบ QC) — ใช้ติดตามของเสีย/แก้ไข"
+                      : "ใบจ่ายงานทั้งหมดของงานนี้ (รวมที่ยกเลิกแล้ว)"}</p>
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}
@@ -933,6 +980,109 @@ function CheckBtn({ done, disabled, onClick }: { done: boolean; disabled?: boole
       className={`h-7 w-7 rounded-md border flex items-center justify-center text-sm transition-colors ${done ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-slate-300 border-slate-300 hover:border-emerald-400"} ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}>
       {done ? "✓" : ""}
     </button>
+  );
+}
+
+// ---- เฟส 4: ของที่ซื้อ / ETA ----
+const _dt = (s: string | null) => { if (!s) return "—"; try { return new Date(s).toLocaleDateString("th-TH", { day: "2-digit", month: "short" }); } catch { return s; } };
+const PO_BADGE: Record<string, { t: string; c: string }> = {
+  draft: { t: "ร่าง", c: "bg-slate-100 text-slate-600" }, confirmed: { t: "สั่งแล้ว", c: "bg-blue-50 text-blue-700" },
+  partially_received: { t: "รับบางส่วน", c: "bg-amber-50 text-amber-700" }, received: { t: "รับครบ", c: "bg-emerald-50 text-emerald-700" }, closed: { t: "ปิดแล้ว", c: "bg-slate-100 text-slate-500" },
+};
+function PurchTab({ rows }: { rows: PurchaseStatusRow[] | null }) {
+  if (rows === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>;
+  if (rows.length === 0) return <div className="text-center py-8 text-slate-300 text-sm">ยังไม่มีรายการสั่งซื้อสำหรับงานนี้</div>;
+  return (
+    <div className="border border-slate-100 rounded-lg overflow-hidden">
+      <div className="grid grid-cols-[1fr_5rem_3.5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>ของที่ซื้อ</span><span className="text-center">สถานะ</span><span className="text-right">ของถึง</span></div>
+      <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+        {rows.map((r) => {
+          const po = r.po_status ? (PO_BADGE[r.po_status] ?? { t: r.po_status, c: "bg-slate-100 text-slate-600" }) : null;
+          return (
+            <div key={r.id} className="grid grid-cols-[1fr_5rem_3.5rem] gap-2 px-3 py-2 items-center">
+              <div className="min-w-0">
+                <p className="text-sm text-slate-800 truncate">{r.is_urgent && <span className="text-rose-500">⚡</span>} {r.item_name}</p>
+                <p className="text-[10px] text-slate-400">{r.po_no ? `PO ${r.po_no}${r.seller_name ? ` · ${r.seller_name}` : ""}` : "ยังไม่ออกใบสั่งซื้อ"}</p>
+              </div>
+              <span className="flex justify-center">
+                {po ? <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${po.c}`}>{po.t}</span>
+                  : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">รอสั่งซื้อ</span>}
+              </span>
+              <span className="text-right text-[11px] text-slate-600">{_dt(r.expected_date ?? r.needed_date)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---- เฟส 4: ปัญหา QC (ลง/ดู/ลบ) ----
+const SEV_OPT: [string, string][] = [["low", "เล็กน้อย"], ["medium", "ปานกลาง"], ["high", "รุนแรง"]];
+const SEV_BADGE: Record<string, string> = { low: "bg-slate-100 text-slate-600", medium: "bg-amber-50 text-amber-700", high: "bg-rose-50 text-rose-700" };
+function IssueTab({ issues, canEdit, issType, setIssType, issSev, setIssSev, issQty, setIssQty, onAdd, onDel }: {
+  issues: MoIssue[] | null; canEdit: boolean; issType: string; setIssType: (v: string) => void; issSev: string; setIssSev: (v: string) => void; issQty: string; setIssQty: (v: string) => void; onAdd: () => void; onDel: (id: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {canEdit && (
+        <div className="flex gap-1.5 items-center">
+          <input value={issType} onChange={(e) => setIssType(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onAdd(); }}
+            placeholder="ปัญหาที่เจอ เช่น เย็บเบี้ยว" className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-rose-400" />
+          <select value={issSev} onChange={(e) => setIssSev(e.target.value)} className="h-8 px-1.5 text-xs border border-slate-200 rounded-lg bg-white">
+            {SEV_OPT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <input value={issQty} onChange={(e) => setIssQty(e.target.value)} type="number" inputMode="numeric" placeholder="จำนวน" className="w-16 h-8 px-2 text-sm text-center border border-slate-200 rounded-lg" />
+          <button onClick={onAdd} className="h-8 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">＋</button>
+        </div>
+      )}
+      {issues === null ? <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
+        : issues.length === 0 ? <div className="text-center py-6 text-slate-300 text-sm">ยังไม่มีปัญหาในงานนี้</div>
+          : (
+            <div className="border border-slate-100 rounded-lg overflow-hidden">
+              <div className="divide-y divide-slate-50 max-h-[40vh] overflow-y-auto">
+                {issues.map((i) => (
+                  <div key={i.id} className="flex items-center gap-2 px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-slate-800 truncate">{i.defect_type}</p>
+                      <p className="text-[10px] text-slate-400">{i.qty != null ? `${fmt(i.qty)} ชิ้น · ` : ""}{_dt(i.created_at)}{i.cause ? ` · ${i.cause}` : ""}</p>
+                    </div>
+                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${SEV_BADGE[i.severity ?? "medium"] ?? SEV_BADGE.medium}`}>{(SEV_OPT.find(([v]) => v === i.severity)?.[1]) ?? i.severity}</span>
+                    {canEdit && <button onClick={() => onDel(i.id)} className="shrink-0 text-slate-300 hover:text-rose-600 text-xs">🗑</button>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+    </div>
+  );
+}
+
+// ---- เฟส 4: ประวัติการจ่ายงาน ----
+const HIST_BADGE: Record<string, { t: string; c: string }> = {
+  dispatched: { t: "จ่ายแล้ว", c: "bg-blue-50 text-blue-700" }, in_progress: { t: "กำลังทำ", c: "bg-indigo-50 text-indigo-700" },
+  partial_return: { t: "คืนบางส่วน", c: "bg-amber-50 text-amber-700" }, done: { t: "เสร็จ", c: "bg-emerald-50 text-emerald-700" },
+};
+function HistTab({ rows }: { rows: DispatchHistRow[] | null }) {
+  if (rows === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>;
+  if (rows.length === 0) return <div className="text-center py-8 text-slate-300 text-sm">ยังไม่เคยจ่ายงานนี้</div>;
+  return (
+    <div className="border border-slate-100 rounded-lg overflow-hidden">
+      <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+        {rows.map((r) => {
+          const b = HIST_BADGE[r.status] ?? { t: r.status, c: "bg-slate-100 text-slate-600" };
+          return (
+            <div key={r.id} className={`flex items-center gap-2 px-3 py-2 ${r.is_active ? "" : "opacity-50"}`}>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm text-slate-800 truncate">{r.assignee_name ?? r.department_name ?? "—"}{!r.is_active && <span className="text-[10px] text-rose-500"> · ยกเลิก</span>}</p>
+                <p className="text-[10px] text-slate-400">{r.wo_no} · {_dt(r.dispatch_date)} · จ่าย {fmt(r.qty)}{r.received_qty ? ` · คืน ${fmt(r.received_qty)}` : ""}</p>
+              </div>
+              <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${b.c}`}>{b.t}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
