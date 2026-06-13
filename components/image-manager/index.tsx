@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { Attachment, AttachmentsResponse } from "@/app/api/attachments/route";
+import { ImageMarkupButton } from "@/components/image-markup-editor";
 import { apiFetch } from "@/lib/api";
 
 // ============================================================
@@ -174,6 +175,17 @@ export function ImageManager({
               )}
               {!readonly && (
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+                  {isImage(a.content_type) && (
+                    <ImageMarkupButton
+                      sourceUrl={a.public_url}
+                      fileName={a.file_name}
+                      entityType={entityType}
+                      entityId={entityId}
+                      actor={actor}
+                      onSaved={fetchList}
+                      triggerClassName="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50 text-blue-600"
+                    />
+                  )}
                   {!a.is_primary && (
                     <button onClick={() => setPrimary(a.id)} title="ตั้งเป็นรูปหลัก"
                       className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50">⭐</button>
