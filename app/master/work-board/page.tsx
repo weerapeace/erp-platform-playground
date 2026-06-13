@@ -134,6 +134,7 @@ export default function WorkBoardPage() {
   const [clRows, setClRows] = useState<MatRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
+  const [clTab, setClTab] = useState<"prep" | "cut">("prep");   // แท็บเช็กลิสต์: เตรียม/ตัด
   // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
   const [deptMgrOpen, setDeptMgrOpen] = useState(false);
   const [deptList, setDeptList] = useState<DeptFull[]>([]);
@@ -371,7 +372,7 @@ export default function WorkBoardPage() {
 
   // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
   useEffect(() => {
-    setDelArmed(false);
+    setDelArmed(false); setClTab("prep");
     if (!checklistMO) { setClRows([]); return; }
     let cancel = false; setClLoading(true);
     void (async () => {
@@ -689,10 +690,6 @@ export default function WorkBoardPage() {
                 <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
-              <div className="flex gap-4 text-[11px] text-slate-500">
-                <span>เตรียม <b className="text-slate-700">{prepDone}/{prepTotal}</b></span>
-                <span>ตัด <b className="text-slate-700">{cutDone}/{cutTotal}</b></span>
-              </div>
               {clLoading ? <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
                 : clRows.length === 0 ? (
                     <div className="text-center py-6">
@@ -703,26 +700,35 @@ export default function WorkBoardPage() {
                       </div>
                     </div>
                   )
-                  : (
-                    <div className="border border-slate-100 rounded-lg overflow-hidden">
-                      <div className="grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500">
-                        <span>วัตถุดิบ</span><span className="text-center">เตรียม</span><span className="text-center">ตัด</span>
-                      </div>
-                      <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-                        {clRows.map((r) => (
-                          <div key={r.id} className="grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 px-3 py-2 items-center">
-                            <div className="min-w-0">
-                              <p className="text-sm text-slate-800 truncate">{r.component_name ?? r.component_sku}</p>
-                              <p className="text-[10px] text-slate-400">ต้องใช้ {fmt(r.required_qty)} {r.uom ?? ""}</p>
+                  : (() => {
+                    const cutRows = clRows.filter((r) => r.needs_cut);
+                    const rows = clTab === "prep" ? clRows : cutRows;
+                    return (
+                      <div className="space-y-2">
+                        {/* 2 หน้า: เตรียม / ตัด (เหมือนใบสั่งผลิตจริง) */}
+                        <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm w-fit">
+                          <button type="button" onClick={() => setClTab("prep")} className={`h-8 px-4 ${clTab === "prep" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 หน้าเตรียม {prepDone}/{prepTotal}</button>
+                          <button type="button" onClick={() => setClTab("cut")} className={`h-8 px-4 border-l border-slate-200 ${clTab === "cut" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>✂️ หน้าตัด {cutDone}/{cutTotal}</button>
+                        </div>
+                        {clTab === "cut" && cutRows.length === 0 ? <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ไม่มีงานตัด</div> : (
+                          <div className="border border-slate-100 rounded-lg overflow-hidden">
+                            <div className="grid grid-cols-[1fr_4rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>วัตถุดิบ</span><span className="text-center">{clTab === "prep" ? "เตรียม" : "ตัด"}</span></div>
+                            <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+                              {rows.map((r) => (
+                                <div key={r.id} className="grid grid-cols-[1fr_4rem] gap-2 px-3 py-2 items-center">
+                                  <div className="min-w-0"><p className="text-sm text-slate-800 truncate">{r.component_name ?? r.component_sku}</p><p className="text-[10px] text-slate-400">ต้องใช้ {fmt(r.required_qty)} {r.uom ?? ""}</p></div>
+                                  {clTab === "prep"
+                                    ? <div className="flex justify-center"><CheckBtn done={r.is_ready} disabled={!canEdit} onClick={() => toggleMat(r.id, "is_ready")} /></div>
+                                    : <div className="flex justify-center" title="ติ๊กตัดที่หน้าใบสั่งผลิต (แท็บบล็อก)"><span className={`text-base ${r.cut_done ? "text-emerald-600" : "text-slate-300"}`}>{r.cut_done ? "✓" : "○"}</span></div>}
+                                </div>
+                              ))}
                             </div>
-                            <div className="flex justify-center"><CheckBtn done={r.is_ready} disabled={!canEdit} onClick={() => toggleMat(r.id, "is_ready")} /></div>
-                            <div className="flex justify-center" title="ติ๊กตัดที่หน้าใบสั่งผลิต (แท็บบล็อก)">{r.needs_cut ? <span className={`text-base ${r.cut_done ? "text-emerald-600" : "text-slate-300"}`}>{r.cut_done ? "✓" : "○"}</span> : <span className="text-[11px] text-slate-300">—</span>}</div>
                           </div>
-                        ))}
+                        )}
+                        <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ" : "ช่องตัดติ๊กรายบล็อกที่หน้าใบสั่งผลิต (แท็บบล็อก) — ที่นี่ดูสถานะ"} · ครบทั้ง 2 หน้า → การ์ด<b className="text-emerald-600">ไฟเขียว</b></p>
                       </div>
-                    </div>
-                  )}
-              <p className="text-[11px] text-slate-400">ช่อง <b>เตรียม</b> ติ๊กได้ที่นี่ · ช่อง <b>ตัด</b> ติ๊กรายบล็อกที่หน้าใบสั่งผลิต (แท็บบล็อก) · ครบทั้งหมด → การ์ด<b className="text-emerald-600">ไฟเขียว</b></p>
+                    );
+                  })()}
             </div>
           );
         })()}
@@ -829,7 +835,7 @@ function PendingBody({ mo }: { mo: PendingMO }) {
   const border = mo.brand_color || prodColor(mo.product_sku);
   const showName = mo.product_name && mo.product_name !== mo.product_sku;
   return (
-    <div className="bg-white rounded-lg p-2 hover:shadow-lg transition select-none cursor-pointer" style={{ border: `2px solid ${ready ? "#10b981" : border}`, boxShadow: `0 2px 10px ${border}55` }} title="กดเพื่อเปิดเช็กลิสต์ เตรียม/ตัด">
+    <div className="bg-white rounded-lg p-2 transition select-none cursor-pointer hover:-translate-y-0.5" style={{ border: `2px solid ${ready ? "#10b981" : border}`, boxShadow: `5px 5px 0 0 ${border}` }} title="กดเพื่อเปิดเช็กลิสต์ เตรียม/ตัด">
       <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5">
         {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-2xl">📦</span>}
         <span className={`absolute top-1 right-1 h-3 w-3 rounded-full ring-2 ring-white ${ready ? "bg-emerald-500" : "bg-rose-500"}`} title={ready ? "พร้อมจ่าย (เตรียม+ตัด ครบ)" : "ยังไม่พร้อม — เตรียม/ตัด ยังไม่ครบ"} />
