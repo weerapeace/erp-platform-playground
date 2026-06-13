@@ -263,6 +263,23 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
 
   const defsOf = (scope: string) => (data?.definitions ?? []).filter((d) => d.scope === scope && d.product_family === family).sort((a, b) => a.display_order - b.display_order);
   const setV = (k: string, v: unknown) => setVals((s) => ({ ...s, [k]: v }));
+  // เลือกฟิลด์ lookup ที่เป็น "เทมเพลต" → ดึงค่าสำเร็จเติมฟิลด์อื่น (เช่น รูปแบบเข็มขัด → เจาะรู/ห่วง/ปลายหาง/ไซส์)
+  const cascadeFrom = async (def: AttrDef, val: string) => {
+    if (!val || !def.external_table) return;
+    try {
+      const res = await apiFetch(`/api/bom/lookup-cascade?table=${encodeURIComponent(def.external_table)}&value=${encodeURIComponent(val)}`);
+      const j = await res.json();
+      const fields = (j.fields ?? {}) as Record<string, string>;
+      const keys = Object.keys(fields);
+      if (!keys.length) return;
+      setVals((prev) => {
+        const next = { ...prev };
+        for (const fk of keys) { const d = (data?.definitions ?? []).find((x) => x.key === fk); if (d) next[`${d.scope}:${d.id}`] = fields[fk]; }
+        return next;
+      });
+      toast.success("ดึงค่าจากรูปแบบให้แล้ว");
+    } catch { /* ignore */ }
+  };
   // ประเภทนี้มี "ชุดฟิลด์" เฉพาะไหม (เช่น belt) → ถ้ามี ซ่อนช่องกระเป๋า · ถ้าไม่มี (กระเป๋า/ไม่ระบุ) ใช้ช่องกระเป๋า
   const hasFieldSet = defsOf("model").length > 0 || defsOf("sku").length > 0;
   // ตัวเลือกประเภท: รวม "กระเป๋า" (built-in) + ประเภทที่มีชุดฟิลด์ + ประเภทที่บันทึกไว้ปัจจุบัน
@@ -271,7 +288,7 @@ function WorkInstructionEditor({ sku, onClose, onSaved }: { sku: string; onClose
   const renderInput = (def: AttrDef, scope: string) => {
     const k = `${scope}:${def.id}`; const v = vals[k];
     const cls = "w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
-    if (isLookup(def)) return <LookupSelect table={def.external_table as string} value={String(v ?? "")} onChange={(val) => setV(k, val)} />;
+    if (isLookup(def)) return <LookupSelect table={def.external_table as string} value={String(v ?? "")} onChange={(val) => { setV(k, val); void cascadeFrom(def, val); }} />;
     if (isSkuRef(def)) return <ComponentPicker sku={String(v ?? "")} name={skuNames[k] ?? ""} placeholder="— เลือกวัตถุดิบ —" allowedTags={def.relation_filter?.tags}
       onPick={(c) => { setV(k, c.code); setSkuNames((s) => ({ ...s, [k]: c.name })); }} />;
     if (def.input_type === "many2one") return <select value={String(v ?? "")} onChange={(e) => setV(k, e.target.value)} className={cls}><option value="">— ไม่ระบุ —</option>{def.options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}</select>;
