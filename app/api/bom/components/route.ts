@@ -56,23 +56,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (tagSkuIds.length === 0) return NextResponse.json({ data: [], error: null });
   }
 
+  // แตกคำค้นเป็น token (ตัดด้วยช่องว่าง/อักขระคั่น เช่น - _ # / . ,) + ตัดอักขระที่ทำให้ filter พัง
+  const tokens = search
+    ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6)
+    : [];
+
   let q = supabase
     .from("skus_v2")
     .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
-    .eq("is_active", true)
-    .order("code", { ascending: true })
-    .range(offset, offset + limit - 1);
+    .eq("is_active", true);
   if (groupIds) q = q.in("material_group_id", groupIds);
   if (tagSkuIds) q = q.in("id", tagSkuIds);
-  if (search) {
-    const t = `%${search}%`;
-    q = q.or(`code.ilike.${t},name_th.ilike.${t}`);
+  if (tokens.length) {
+    // match "คำใดคำหนึ่ง" (ดึงผู้สมัครกว้างๆ) แล้วค่อยจัดอันดับใน JS
+    const orParts = tokens.flatMap((t) => [`code.ilike.%${t}%`, `name_th.ilike.%${t}%`]);
+    q = q.or(orParts.join(",")).limit(300);
+  } else {
+    q = q.order("code", { ascending: true }).range(offset, offset + limit - 1);
   }
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
   const rows = (data ?? []) as Array<Record<string, unknown>>;
-  const out: BomComponent[] = rows.map((r) => {
+  let out: BomComponent[] = rows.map((r) => {
     const g = (Array.isArray(r.grp) ? r.grp[0] : r.grp) as GroupEmbed;
     const u = (Array.isArray(r.uom) ? r.uom[0] : r.uom) as UomEmbed;
     return {
@@ -88,6 +94,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       image_key:         (r.cover_image_r2_key as string) ?? null,
     };
   });
+
+  // จัดอันดับ "ตัวที่เหมือนที่สุด" ขึ้นก่อน (เหมือนค้นหน้าขอซื้อ)
+  if (tokens.length) {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ก-๙]/gi, "");
+    const S = norm(search);
+    const nTokens = tokens.map(norm).filter(Boolean);
+    const scoreOf = (c: BomComponent): number => {
+      const code = norm(c.code), name = norm(c.name);
+      if (S && code === S) return 1_000_000;                    // ตรงเป๊ะ
+      if (S && code.startsWith(S)) return 900_000 - code.length;
+      if (S && code.includes(S)) return 800_000 - code.length;
+      let s = 0;
+      nTokens.forEach((t, i) => {
+        if (code.startsWith(t)) s += 200 - i * 5;
+        else if (code.includes(t)) s += 120 - i * 5;
+        else if (name.includes(t)) s += 40;
+      });
+      return s;
+    };
+    out = out
+      .map((c) => ({ c, s: scoreOf(c) }))
+      .sort((a, b) => b.s - a.s || a.c.code.localeCompare(b.c.code, "th"))
+      .slice(offset, offset + limit)
+      .map((x) => x.c);
+  }
   return NextResponse.json({ data: out, error: null });
 }
 
