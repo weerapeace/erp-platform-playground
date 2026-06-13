@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { PrHistoryButton } from "@/components/pr-history";
+import { RejectedPanel } from "./orders/approval";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
@@ -69,6 +70,7 @@ export default function PurchasingShopPage() {
   const [cards, setCards] = useState<Card[]>([]);
   const [dupMap, setDupMap] = useState<Record<string, OpenOrder[]>>({});       // sku_id → ใบขอซื้อที่ยังค้าง (เตือนสั่งซ้ำ)
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());   // sku_id → คงเหลือในสต๊อก
+  const [rejectedOpen, setRejectedOpen] = useState(false);                     // ป๊อปรายการไม่อนุมัติ
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);   // ข้อ 2: error state
@@ -684,6 +686,7 @@ export default function PurchasingShopPage() {
               </label>
             )}
             <PrHistoryButton />
+            <button onClick={() => setRejectedOpen(true)} className="h-10 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1 flex-shrink-0">🚫 รายการไม่อนุมัติ</button>
             {source === "sku" && (
               <button onClick={() => setSkuForm({ mode: "create" })}
                 className="h-9 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
@@ -1054,6 +1057,8 @@ export default function PurchasingShopPage() {
           onSaved={() => { setCreateSku(false); void loadGroupVars(sel.id); }}
         />
       )}
+
+      <RejectedPanel open={rejectedOpen} onClose={() => setRejectedOpen(false)} onChanged={() => {}} />
 
     </PlaygroundShell>
   );

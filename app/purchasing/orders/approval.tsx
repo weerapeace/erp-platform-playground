@@ -11,6 +11,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 const money = (v: number, c: string) => `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${curLabel(c)}`;
@@ -134,7 +135,7 @@ export function BulkApproveBar({ ids, onDone }: { ids: string[]; onDone: () => v
 }
 
 type Rej = {
-  id: string; seller_name: string; item_name: string; code: string; qty: number; uom: string;
+  id: string; item_sku_id: string | null; seller_name: string; item_name: string; code: string; qty: number; uom: string;
   price_est: number; line_total: number; currency: string; requester: string;
   reject_reason: string; rejected_by: string; rejected_at: string | null; image_url: string | null;
 };
@@ -146,6 +147,8 @@ export function RejectedPanel({ open, onClose, onChanged }: { open: boolean; onC
   const [rows, setRows] = useState<Rej[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editRow, setEditRow] = useState<Rej | null>(null);
+  const [delRow, setDelRow] = useState<Rej | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -163,9 +166,18 @@ export function RejectedPanel({ open, onClose, onChanged }: { open: boolean; onC
     } catch (e) { toast.error(e instanceof Error ? e.message : "กู้คืนไม่สำเร็จ"); } finally { setBusyId(null); }
   };
 
+  const doDelete = async (id: string) => {
+    setBusyId(id);
+    try {
+      await callApi("/api/purchasing/pr-delete", { pr_ids: [id], actor: user?.name });
+      toast.success("ลบแล้ว (กู้คืนได้ภายหลัง)");
+      setRows((rs) => rs.filter((x) => x.id !== id)); setDelRow(null); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); } finally { setBusyId(null); }
+  };
+
   return (
     <ERPModal open={open} onClose={onClose} size="xl" title={`🚫 รายการไม่อนุมัติ (${rows.length})`}
-      description="รายการที่ถูกไม่อนุมัติ — กดกู้คืนเพื่อส่งกลับไปรออนุมัติใหม่">
+      description="รายการที่ถูกไม่อนุมัติ — แก้ไขแล้วส่งใหม่ / กู้คืน / ลบ">
       {loading ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div>
         : rows.length === 0 ? <div className="py-12 text-center text-sm text-slate-400">— ไม่มีรายการที่ไม่อนุมัติ —</div>
         : <div className="space-y-2">
@@ -179,12 +191,75 @@ export function RejectedPanel({ open, onClose, onChanged }: { open: boolean; onC
                   <div className="text-[11px] text-slate-400">{r.code || "—"} · 🏪 {r.seller_name} · {r.qty.toLocaleString()} {r.uom} · {money(r.line_total, r.currency)}</div>
                   <div className="text-[11px] text-rose-600 mt-0.5">เหตุผล: {r.reject_reason || "—"}{r.rejected_by ? ` · โดย ${r.rejected_by}` : ""}</div>
                 </div>
-                <button onClick={() => void restore(r.id)} disabled={busyId === r.id}
-                  className="h-8 px-3 text-xs rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap shrink-0">
-                  {busyId === r.id ? "..." : "↩ กู้คืน"}</button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button onClick={() => setEditRow(r)} disabled={busyId === r.id}
+                    className="h-8 px-2.5 text-xs rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50 disabled:opacity-50 whitespace-nowrap">✎ แก้ไข</button>
+                  <button onClick={() => void restore(r.id)} disabled={busyId === r.id}
+                    className="h-8 px-2.5 text-xs rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap">
+                    {busyId === r.id ? "..." : "↩ กู้คืน"}</button>
+                  <button onClick={() => setDelRow(r)} disabled={busyId === r.id}
+                    className="h-8 px-2.5 text-xs rounded-lg border border-rose-300 text-rose-600 hover:bg-rose-50 disabled:opacity-50 whitespace-nowrap">🗑 ลบ</button>
+                </div>
               </div>
             ))}
           </div>}
+
+      {/* แก้ไข → เปลี่ยนสินค้า/จำนวน แล้วส่งขอซื้อใหม่ */}
+      {editRow && <RejectedEditModal row={editRow} onClose={() => setEditRow(null)}
+        onSaved={() => { setEditRow(null); setRows((rs) => rs.filter((x) => x.id !== editRow.id)); onChanged(); }} />}
+
+      {/* ยืนยันลบ */}
+      <ConfirmDialog open={!!delRow} onClose={() => setDelRow(null)} onConfirm={() => delRow && void doDelete(delRow.id)}
+        title="ลบรายการขอซื้อ" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
+        message="ลบรายการนี้ออก? (ลบแบบซ่อน — กู้คืนได้ภายหลัง)" />
+    </ERPModal>
+  );
+}
+
+// ---- ป๊อปแก้ไขรายการไม่อนุมัติ: เปลี่ยน SKU + จำนวน → บันทึก + กู้คืน (ส่งขอซื้อใหม่) ----
+function RejectedEditModal({ row, onClose, onSaved }: { row: Rej; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const { user } = useAuth();
+  const [sku, setSku] = useState<SkuPickerValue | null>(row.item_sku_id ? { id: row.item_sku_id, code: row.code, name: row.item_name, uom_name: row.uom } : null);
+  const [qty, setQty] = useState(String(row.qty));
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const q = Number(qty);
+    if (!(q > 0)) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    setSaving(true);
+    try {
+      // แก้ค่า PR (สินค้า/ชื่อ/หน่วย/จำนวน) — เปลี่ยน SKU = อัปเดต item_sku_id + ชื่อ + หน่วย
+      const patch: Record<string, unknown> = { qty: q, actor: user?.name };
+      if (sku && sku.id !== row.item_sku_id) { patch.item_sku_id = sku.id; patch.item_name = sku.name; if (sku.uom_name) patch.uom = sku.uom_name; }
+      const res = await apiFetch(`/api/master-v2/purchase-requests-v2/${row.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+      });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error ?? "บันทึกไม่สำเร็จ");
+      // ส่งใหม่ = กู้คืนกลับไปรออนุมัติ
+      await callApi("/api/purchasing/pr-restore", { pr_ids: [row.id], actor: user?.name });
+      toast.success("แก้ไขแล้ว — ส่งขอซื้อใหม่ (กลับไปรออนุมัติ)");
+      onSaved();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); } finally { setSaving(false); }
+  };
+
+  return (
+    <ERPModal open onClose={() => !saving && onClose()} size="sm" title="✎ แก้ไข + ส่งขอซื้อใหม่"
+      footer={<>
+        <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+        <button onClick={() => void save()} disabled={saving} className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "บันทึก + ส่งใหม่"}</button>
+      </>}>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">สินค้า</label>
+          <SkuPicker value={sku} onChange={setSku} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน{sku?.uom_name ? ` (${sku.uom_name})` : ""}</label>
+          <input type="number" step="any" min={0} value={qty} onChange={(e) => setQty(e.target.value)} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+        </div>
+        <p className="text-[11px] text-slate-400">บันทึกแล้วระบบส่งรายการกลับไป &quot;รออนุมัติ&quot; ใหม่อัตโนมัติ</p>
+      </div>
     </ERPModal>
   );
 }

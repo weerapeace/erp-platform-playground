@@ -35,6 +35,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const key = sk?.cover ?? p.image_key ?? null;
     return {
       id: String(p.id),
+      item_sku_id: p.item_sku_id ?? null,
       seller_name: p.seller_name ?? "—",
       item_name: p.item_name ?? "",
       code: sk?.code ?? "",
