@@ -20,6 +20,7 @@ export default function MenuManagerPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [q, setQ] = useState("");   // ค้นหาเมนู (ชื่อ/ลิงก์/หมวด)
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 2000); };
 
@@ -108,16 +109,24 @@ export default function MenuManagerPage() {
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   };
 
-  // group by section
+  // group by section (กรองด้วยคำค้นก่อน — ชื่อ/ลิงก์/หมวด)
   const groups = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const visible = s
+      ? rows.filter((r) =>
+          r.label.toLowerCase().includes(s) ||
+          (r.href ?? "").toLowerCase().includes(s) ||
+          (r.section ?? "").toLowerCase().includes(s))
+      : rows;
     const m = new Map<string, { order: number; items: MenuRow[] }>();
-    for (const r of rows) {
+    for (const r of visible) {
       const g = m.get(r.section) ?? { order: r.section_order, items: [] };
       g.items.push(r); m.set(r.section, g);
     }
     return [...m.entries()].sort((a, b) => a[1].order - b[1].order)
       .map(([section, g]) => ({ section, items: g.items.sort((a, b) => a.sort_order - b.sort_order) }));
-  }, [rows]);
+  }, [rows, q]);
+  const matchCount = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
 
   const move = (item: MenuRow, dir: -1 | 1) => {
     const sameSection = rows.filter((r) => r.section === item.section).sort((a, b) => a.sort_order - b.sort_order);
@@ -166,6 +175,23 @@ export default function MenuManagerPage() {
           <p className="text-[11px] text-slate-400 mt-2">ติ๊กชิป App ใต้แต่ละเมนูเพื่อกำหนดว่าเมนูนั้นอยู่ App ใหญ่ไหนบ้าง (อยู่ได้หลาย App)</p>
         </div>
 
+        {/* ค้นหาเมนู */}
+        {!loading && rows.length > 0 && (
+          <div className="mb-4 flex items-center gap-2">
+            <div className="relative flex-1">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">🔍</span>
+              <input value={q} onChange={(e) => setQ(e.target.value)}
+                placeholder="ค้นหาเมนู — ชื่อ / ลิงก์ / หมวด…"
+                className="w-full h-9 pl-9 pr-9 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-blue-400" />
+              {q && (
+                <button onClick={() => setQ("")} title="ล้างคำค้น"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-600">✕</button>
+              )}
+            </div>
+            {q && <span className="text-xs text-slate-500 whitespace-nowrap">พบ {matchCount} เมนู</span>}
+          </div>
+        )}
+
         {loading ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div> : rows.length === 0 ? (
           <div className="py-16 text-center text-slate-400 text-sm">
             ยังไม่มีเมนูในทะเบียน — ตอนนี้ระบบใช้ &quot;เมนูเริ่มต้น&quot; อยู่<br />
@@ -173,6 +199,9 @@ export default function MenuManagerPage() {
           </div>
         ) : (
           <div className="space-y-5">
+            {q && groups.length === 0 && (
+              <div className="py-10 text-center text-slate-400 text-sm">ไม่พบเมนูที่ตรงกับ “{q}”</div>
+            )}
             {groups.map((g) => (
               <div key={g.section} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
                 <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-sm font-semibold text-slate-700">{g.section}</div>
