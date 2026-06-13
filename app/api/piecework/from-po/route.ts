@@ -16,7 +16,7 @@ export const revalidate = 0;
 
 const num = (v: unknown, d = 0) => { const n = Number(v); return isFinite(n) ? n : d; };
 
-type Body = { job_name?: string; rate?: unknown; is_detail?: boolean; note?: string; product_sku?: string };
+type Body = { job_name?: string; rate?: unknown; is_detail?: boolean; note?: string; product_sku?: string; qty_per?: unknown };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "production.piecework"); if (denied) return denied;
@@ -59,8 +59,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       else {
         const { data: maxSeq } = await admin.from("bom_piecework_lines").select("sequence").eq("bom_code", bomCode).order("sequence", { ascending: false }).limit(1).maybeSingle();
         const seq = (num((maxSeq as { sequence?: number } | null)?.sequence) || 0) + 1;
+        const qtyPer = num(b.qty_per, 1) || 1;
         const { error: bErr } = await admin.from("bom_piecework_lines").insert({
-          bom_code: bomCode, job_id: jobId, job_name: name, rate, is_detail: !!b.is_detail, note: (b.note ?? "").trim() || null, qty_per: 1, sequence: seq, is_active: true,
+          bom_code: bomCode, job_id: jobId, job_name: name, rate, is_detail: !!b.is_detail, note: (b.note ?? "").trim() || null, qty_per: qtyPer, sequence: seq, is_active: true,
         });
         if (bErr) return NextResponse.json({ error: bErr.message }, { status: 400 });
         attached = true;

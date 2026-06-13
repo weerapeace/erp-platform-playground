@@ -17,6 +17,7 @@ import type { MoPieceRow } from "@/app/api/mo/piecework/route";
 import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
+import { AddPieceworkModal } from "./add-piecework-modal";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -149,6 +150,7 @@ export default function WorkBoardPage() {
   const [clIssues, setClIssues] = useState<MoIssue[] | null>(null);           // ปัญหา QC
   const [clHist, setClHist] = useState<DispatchHistRow[] | null>(null);       // ประวัติการจ่าย
   const [issType, setIssType] = useState(""); const [issSev, setIssSev] = useState("medium"); const [issQty, setIssQty] = useState("");
+  const [addPieceOpen, setAddPieceOpen] = useState(false);   // popup เพิ่มงานเหมาเข้า BOM
   // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
   const [deptMgrOpen, setDeptMgrOpen] = useState(false);
   const [deptList, setDeptList] = useState<DeptFull[]>([]);
@@ -472,6 +474,11 @@ export default function WorkBoardPage() {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     }
   }, [canEdit, clCutRows, toast]);
+  // โหลดงานเหมาของใบนี้ใหม่ (หลังเพิ่มจาก popup)
+  const reloadPiece = useCallback(async () => {
+    if (!checklistMO) return;
+    try { const pr = await apiFetch(`/api/mo/piecework?mo_id=${encodeURIComponent(checklistMO.id)}`); const pj = await pr.json(); setClPieceRows((pj?.data ?? []) as MoPieceRow[]); } catch { /* ignore */ }
+  }, [checklistMO]);
   // เลือก/ยกเลิก งานเหมารายชิ้นที่จะจ่าย (จากงานเหมาใน BOM ของสินค้า)
   const togglePiece = useCallback(async (key: string) => {
     if (!canEdit || !checklistMO) return;
@@ -762,7 +769,7 @@ export default function WorkBoardPage() {
       </ERPModal>
 
       {/* เช็กลิสต์วัตถุดิบ เตรียม/ตัด (Phase 2 — จาก BOM) */}
-      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="md" title={`📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
+      <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="lg" title={`📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
         footer={<>
           {checklistMO && canEdit && (delArmed
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
@@ -787,6 +794,9 @@ export default function WorkBoardPage() {
                     className={`h-8 px-3 rounded-lg border ${clTab === id ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
                 );
                 const issN = clIssues?.length ?? 0;
+                // map สถานะซื้อ ตามชื่อวัตถุดิบ (โชว์ในหน้าเตรียม)
+                const norm = (s: string | null) => (s ?? "").trim().toLowerCase();
+                const purchByName = new Map((clPurch ?? []).map((p) => [norm(p.item_name), p]));
                 return (
                   <div className="space-y-2">
                     <div className="flex flex-wrap gap-1 text-[12px]">
@@ -809,50 +819,69 @@ export default function WorkBoardPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="border border-slate-100 rounded-lg overflow-hidden">
-                          <div className="grid grid-cols-[1fr_4rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>วัตถุดิบ</span><span className="text-center">เตรียม</span></div>
-                          <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-                            {clRows.map((r) => (
-                              <div key={r.id} className="grid grid-cols-[1fr_4rem] gap-2 px-3 py-2 items-center">
-                                <div className="min-w-0"><p className="text-sm text-slate-800 truncate">{r.component_name ?? r.component_sku}</p><p className="text-[10px] text-slate-400">ต้องใช้ {fmt(r.required_qty)} {r.uom ?? ""}</p></div>
-                                <div className="flex justify-center"><CheckBtn done={r.is_ready} disabled={!canEdit} onClick={() => toggleMat(r.id, "is_ready")} /></div>
-                              </div>
-                            ))}
+                        <div className="border border-slate-200 rounded-lg overflow-hidden">
+                          <div className="grid grid-cols-[1fr_4.5rem_5rem_2.75rem] gap-1.5 px-3 py-1.5 bg-slate-100 text-[11px] font-semibold text-slate-600"><span>วัตถุดิบ</span><span className="text-right">ต้องใช้</span><span className="text-center">สถานะซื้อ</span><span className="text-center">เตรียม</span></div>
+                          <div className="max-h-[46vh] overflow-y-auto">
+                            {clRows.map((r, idx) => {
+                              const p = purchByName.get(norm(r.component_name));
+                              const pb = p ? (p.po_status ? (PO_BADGE[p.po_status] ?? { t: p.po_status, c: "bg-slate-100 text-slate-600" }) : { t: "รอสั่ง", c: "bg-amber-50 text-amber-700" }) : null;
+                              return (
+                                <div key={r.id} className={`grid grid-cols-[1fr_4.5rem_5rem_2.75rem] gap-1.5 px-3 py-2 items-center border-t border-slate-100 ${r.is_ready ? "bg-emerald-50/50" : idx % 2 ? "bg-slate-50/40" : "bg-white"}`}>
+                                  <p className="text-sm text-slate-800 truncate min-w-0">{r.component_name ?? r.component_sku}</p>
+                                  <span className="text-right text-[13px] font-semibold text-slate-700">{fmt(r.required_qty)}<span className="text-[10px] font-normal text-slate-400"> {r.uom ?? ""}</span></span>
+                                  <span className="flex flex-col items-center leading-tight">
+                                    {pb ? <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${pb.c}`}>{pb.t}</span> : <span className="text-[11px] text-slate-300">—</span>}
+                                    {p?.expected_date && <span className="text-[9px] text-slate-400 mt-0.5">{_dt(p.expected_date)}</span>}
+                                  </span>
+                                  <span className="flex justify-center"><CheckBtn done={r.is_ready} disabled={!canEdit} onClick={() => toggleMat(r.id, "is_ready")} /></span>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )
                     ) : clTab === "cut" ? (
                       clCutRows.length === 0 ? (
                         <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ไม่มีงานตัด</div>
-                      ) : (
-                        <div className="border border-slate-100 rounded-lg overflow-hidden">
-                          <div className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>บล็อก / วัตถุดิบ</span><span className="text-center">ตัด</span></div>
-                          <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-                            {clCutRows.map((r) => (
-                              <div key={r.id} className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-2 items-center">
-                                <div className="min-w-0">
-                                  <p className="text-sm text-slate-800 truncate">
-                                    {r.cut_block_code ? <span className="font-mono text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mr-1.5">{r.cut_block_code}</span> : null}
-                                    {r.component_name ?? r.component_sku}
-                                  </p>
-                                  <p className="text-[10px] text-slate-400">
-                                    {r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)} · ` : ""}
-                                    {r.pieces != null ? `${fmt(r.pieces)} ชิ้น · ` : ""}
-                                    รวม {fmt(r.required_qty)} {r.uom ?? ""}
-                                  </p>
+                      ) : (() => {
+                        const totalPieces = clCutRows.reduce((s, r) => s + (r.pieces ?? 0), 0);
+                        return (
+                          <div className="border border-slate-200 rounded-lg overflow-hidden">
+                            <div className="grid grid-cols-[3.2rem_1fr_4.5rem_2.4rem_3.6rem_2.6rem] gap-1.5 px-2.5 py-1.5 bg-slate-100 text-[11px] font-semibold text-slate-600">
+                              <span>บล็อก</span><span>วัตถุดิบ</span><span className="text-center">ขนาด</span><span className="text-center">ชิ้น</span><span className="text-right">รวม</span><span className="text-center">ตัด</span>
+                            </div>
+                            <div className="max-h-[44vh] overflow-y-auto">
+                              {clCutRows.map((r, idx) => (
+                                <div key={r.id} className={`grid grid-cols-[3.2rem_1fr_4.5rem_2.4rem_3.6rem_2.6rem] gap-1.5 px-2.5 py-2 items-center border-t border-slate-100 ${r.cut_done ? "bg-emerald-50/60" : idx % 2 ? "bg-slate-50/40" : "bg-white"}`}>
+                                  <span className="font-mono text-[10px] bg-indigo-50 text-indigo-700 px-1 py-0.5 rounded text-center truncate" title={r.cut_block_code ?? ""}>{r.cut_block_code ?? "—"}</span>
+                                  <span className="text-[13px] text-slate-800 truncate min-w-0" title={r.component_name ?? ""}>{r.component_name ?? r.component_sku}</span>
+                                  <span className="text-center text-[11px] text-slate-500">{r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)}` : "—"}</span>
+                                  <span className="text-center text-[12px] text-slate-600">{r.pieces != null ? fmt(r.pieces) : "—"}</span>
+                                  <span className="text-right text-[12px] font-medium text-slate-700">{fmt(r.required_qty)}<span className="text-[9px] font-normal text-slate-400"> {r.uom ?? ""}</span></span>
+                                  <span className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></span>
                                 </div>
-                                <div className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
+                            <div className="flex justify-between px-3 py-1.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500">
+                              <span>ทั้งหมด <b className="text-slate-700">{clCutRows.length}</b> บล็อก · รวม <b className="text-slate-700">{fmt(totalPieces)}</b> ชิ้น</span>
+                              <span>ตัดแล้ว <b className="text-emerald-600">{cutDone}/{cutTotal}</b></span>
+                            </div>
                           </div>
-                        </div>
-                      )
+                        );
+                      })()
                     ) : clTab === "piece" ? (
                       clPieceRows.length === 0 ? (
-                        <div className="text-center py-8 text-slate-300 text-sm">สินค้านี้ยังไม่มีงานเหมาใน BOM<br /><span className="text-[11px]">เพิ่มได้ที่หน้า BOM › ตารางงานเหมารายชิ้น</span></div>
+                        <div className="text-center py-8">
+                          <p className="text-slate-300 text-sm mb-3">สินค้านี้ยังไม่มีงานเหมาใน BOM</p>
+                          {canEdit && <button onClick={() => setAddPieceOpen(true)} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">➕ เพิ่มงานเหมาเข้า BOM</button>}
+                        </div>
                       ) : (
                         <div className="border border-slate-100 rounded-lg overflow-hidden">
-                          <div className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span></div>
+                          <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50">
+                            <span className="text-[11px] font-medium text-slate-500">เลือกงานเหมาที่จะจ่าย</span>
+                            {canEdit && <button onClick={() => setAddPieceOpen(true)} className="text-[11px] text-blue-600 hover:underline">➕ เพิ่มงานเข้า BOM</button>}
+                          </div>
+                          <div className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span></div>
                           <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
                             {clPieceRows.map((r) => (
                               <label key={r.key} className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-2 items-center cursor-pointer hover:bg-slate-50/60">
@@ -887,6 +916,10 @@ export default function WorkBoardPage() {
           );
         })()}
       </ERPModal>
+
+      {/* popup เพิ่มงานเหมาเข้า BOM (จากแท็บงานเหมา) */}
+      <AddPieceworkModal open={addPieceOpen} productSku={checklistMO?.product_sku ?? null} productName={checklistMO?.product_name ?? null}
+        onClose={() => setAddPieceOpen(false)} onAdded={() => void reloadPiece()} />
 
       {/* ⚙️ ตั้งค่าแผนก — จบในที่เดียว (สร้าง/แก้/ลบ/ซ่อน/หมายเหตุ/เรียงลำดับ) */}
       <ERPModal open={deptMgrOpen} onClose={closeDeptMgr} size="md" title="⚙️ ตั้งค่าแผนก"
@@ -1114,26 +1147,31 @@ function PendingBody({ mo }: { mo: PendingMO }) {
   );
 }
 
-// ---- เนื้อการ์ดใบจ่ายงาน (ในแผนก) ----
+// ---- เนื้อการ์ดใบจ่ายงาน (ในแผนก) — ดีไซน์เดียวกับการ์ดรอจ่าย ----
 function WOBody({ w }: { w: WorkOrder }) {
   const urg = urgencyByDate(w.due_date, w.status === "done");
   const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched;
   const border = w.brand_color || prodColor(w.product_sku);
+  const showName = w.product_name && w.product_name !== w.product_sku;
   return (
-    <div className="bg-white rounded-lg p-2 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${border}` }}>
+    <div className="bg-white rounded-lg p-2 transition select-none cursor-pointer hover:-translate-y-0.5" style={{ border: `2px solid ${border}`, boxShadow: `5px 5px 0 0 ${border}` }} title="กดเพื่อดูรายละเอียด/รับงานคืน">
       <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5">
         {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-2xl">📦</span>}
         <span className={`absolute top-1 right-1 h-3 w-3 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
         <span className={`absolute top-1 left-1 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium border ${st.cls}`}>{st.label}</span>
       </div>
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <span className="text-[10px] text-slate-500 truncate">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
+      <div className="flex items-center justify-between gap-1 mb-1">
+        <span className="text-[9px] text-slate-500 truncate max-w-[58%]">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
         <span className="font-mono text-[9px] text-slate-400 truncate">{w.wo_no}</span>
       </div>
-      <p className="text-xs font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.3em]">{w.product_name ?? w.product_sku}</p>
+      <div className="text-center">
+        <div className="text-sm font-bold text-slate-800 leading-tight truncate">{w.product_sku}</div>
+        {showName && <div className="text-[10px] text-slate-400 line-clamp-1 leading-tight">{w.product_name}</div>}
+        <div className="text-[10px] text-slate-500 mt-0.5">📅 {dueDateText(w.due_date)}</div>
+      </div>
       <div className="flex items-center justify-between gap-1 mt-1.5 pt-1.5 border-t border-slate-100 text-[10px]">
         <span className="tabular-nums text-slate-600">{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
-        <span className={urg === "red" ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(w.due_date)}</span>
+        <span className={daysLeftClass(w.due_date)}>⏱ {daysLeftText(w.due_date)}</span>
       </div>
     </div>
   );
