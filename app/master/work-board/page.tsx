@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
+import type { MoPieceRow } from "@/app/api/mo/piecework/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -139,7 +140,8 @@ export default function WorkBoardPage() {
   const [clCutRows, setClCutRows] = useState<CutRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
-  const [clTab, setClTab] = useState<"prep" | "cut">("prep");   // แท็บเช็กลิสต์: เตรียม/ตัด
+  const [clTab, setClTab] = useState<"prep" | "cut" | "piece">("prep");   // แท็บเช็กลิสต์: เตรียม/ตัด/งานเหมา
+  const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
   // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
   const [deptMgrOpen, setDeptMgrOpen] = useState(false);
   const [deptList, setDeptList] = useState<DeptFull[]>([]);
@@ -381,7 +383,7 @@ export default function WorkBoardPage() {
   // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
   useEffect(() => {
     setDelArmed(false); setClTab("prep");
-    if (!checklistMO) { setClRows([]); setClCutRows([]); return; }
+    if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); return; }
     let cancel = false; setClLoading(true);
     void (async () => {
       try {
@@ -413,6 +415,14 @@ export default function WorkBoardPage() {
         if (!cancel) { setClRows(rows); setClCutRows(cutRows); }
       } catch { if (!cancel) { setClRows([]); setClCutRows([]); } }
       finally { if (!cancel) setClLoading(false); }
+    })();
+    // งานเหมารายชิ้นของใบนี้ (โหลดแยก ไม่บล็อกเช็กลิสต์หลัก)
+    void (async () => {
+      try {
+        const pr = await apiFetch(`/api/mo/piecework?mo_id=${encodeURIComponent(checklistMO.id)}`);
+        const pj = await pr.json();
+        if (!cancel) setClPieceRows((pj?.data ?? []) as MoPieceRow[]);
+      } catch { if (!cancel) setClPieceRows([]); }
     })();
     return () => { cancel = true; };
   }, [checklistMO]);
@@ -449,6 +459,23 @@ export default function WorkBoardPage() {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     }
   }, [canEdit, clCutRows, toast]);
+  // เลือก/ยกเลิก งานเหมารายชิ้นที่จะจ่าย (จากงานเหมาใน BOM ของสินค้า)
+  const togglePiece = useCallback(async (key: string) => {
+    if (!canEdit || !checklistMO) return;
+    const cur = clPieceRows.find((r) => r.key === key); if (!cur) return;
+    try {
+      if (cur.selected_id) {
+        const res = await apiFetch(`/api/mo/piecework?id=${encodeURIComponent(cur.selected_id)}`, { method: "DELETE" });
+        const j = await res.json(); if (j.error) throw new Error(j.error);
+        setClPieceRows((rs) => rs.filter((r) => r.in_bom || r.key !== key).map((r) => r.key === key ? { ...r, selected_id: null } : r));
+      } else {
+        const res = await apiFetch(`/api/mo/piecework`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mo_id: checklistMO.id, job_id: cur.job_id, job_name: cur.job_name, rate: cur.rate, qty_per: cur.qty_per, is_detail: cur.is_detail, note: cur.note }) });
+        const j = await res.json(); if (j.error) throw new Error(j.error);
+        setClPieceRows((rs) => rs.map((r) => r.key === key ? { ...r, selected_id: String(j.id), total_qty: Number(j.total_qty) || r.total_qty } : r));
+      }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  }, [canEdit, checklistMO, clPieceRows, toast]);
   const closeChecklist = useCallback(() => { setChecklistMO(null); setDelArmed(false); void load(); }, [load]);
   const deleteMO = useCallback(async (mo: PendingMO) => {
     try {
@@ -740,6 +767,7 @@ export default function WorkBoardPage() {
                       <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm w-fit">
                         <button type="button" onClick={() => setClTab("prep")} className={`h-8 px-4 ${clTab === "prep" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 หน้าเตรียม {prepDone}/{prepTotal}</button>
                         <button type="button" onClick={() => setClTab("cut")} className={`h-8 px-4 border-l border-slate-200 ${clTab === "cut" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>✂️ หน้าตัด {cutDone}/{cutTotal}</button>
+                        <button type="button" onClick={() => setClTab("piece")} className={`h-8 px-4 border-l border-slate-200 ${clTab === "piece" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🧵 งานเหมา {clPieceRows.filter((r) => r.selected_id).length}/{clPieceRows.length}</button>
                       </div>
                       {clTab === "prep" ? (
                         /* หน้าเตรียม — สรุปต่อวัตถุดิบ */
@@ -754,33 +782,58 @@ export default function WorkBoardPage() {
                             ))}
                           </div>
                         </div>
-                      ) : clCutRows.length === 0 ? (
-                        <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ไม่มีงานตัด</div>
-                      ) : (
-                        /* หน้าตัด — รายละเอียดรายบล็อก (ติ๊กตัดครบรายบล็อกได้เลย) */
-                        <div className="border border-slate-100 rounded-lg overflow-hidden">
-                          <div className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>บล็อก / วัตถุดิบ</span><span className="text-center">ตัด</span></div>
-                          <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-                            {clCutRows.map((r) => (
-                              <div key={r.id} className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-2 items-center">
-                                <div className="min-w-0">
-                                  <p className="text-sm text-slate-800 truncate">
-                                    {r.cut_block_code ? <span className="font-mono text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mr-1.5">{r.cut_block_code}</span> : null}
-                                    {r.component_name ?? r.component_sku}
-                                  </p>
-                                  <p className="text-[10px] text-slate-400">
-                                    {r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)} · ` : ""}
-                                    {r.pieces != null ? `${fmt(r.pieces)} ชิ้น · ` : ""}
-                                    รวม {fmt(r.required_qty)} {r.uom ?? ""}
-                                  </p>
+                      ) : clTab === "cut" ? (
+                        clCutRows.length === 0 ? (
+                          <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ไม่มีงานตัด</div>
+                        ) : (
+                          /* หน้าตัด — รายละเอียดรายบล็อก (ติ๊กตัดครบรายบล็อกได้เลย) */
+                          <div className="border border-slate-100 rounded-lg overflow-hidden">
+                            <div className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>บล็อก / วัตถุดิบ</span><span className="text-center">ตัด</span></div>
+                            <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+                              {clCutRows.map((r) => (
+                                <div key={r.id} className="grid grid-cols-[1fr_3rem] gap-2 px-3 py-2 items-center">
+                                  <div className="min-w-0">
+                                    <p className="text-sm text-slate-800 truncate">
+                                      {r.cut_block_code ? <span className="font-mono text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded mr-1.5">{r.cut_block_code}</span> : null}
+                                      {r.component_name ?? r.component_sku}
+                                    </p>
+                                    <p className="text-[10px] text-slate-400">
+                                      {r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)} · ` : ""}
+                                      {r.pieces != null ? `${fmt(r.pieces)} ชิ้น · ` : ""}
+                                      รวม {fmt(r.required_qty)} {r.uom ?? ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></div>
                                 </div>
-                                <div className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        )
+                      ) : (
+                        /* หน้างานเหมา — ติ๊กเลือกงานเหมาที่จะจ่าย (จำนวน = ตัวคูณ × จำนวนสั่ง) */
+                        clPieceRows.length === 0 ? (
+                          <div className="text-center py-8 text-slate-300 text-sm">สินค้านี้ยังไม่มีงานเหมาใน BOM<br /><span className="text-[11px]">เพิ่มได้ที่หน้า BOM › ตารางงานเหมารายชิ้น</span></div>
+                        ) : (
+                          <div className="border border-slate-100 rounded-lg overflow-hidden">
+                            <div className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span></div>
+                            <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
+                              {clPieceRows.map((r) => (
+                                <label key={r.key} className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-2 items-center cursor-pointer hover:bg-slate-50/60">
+                                  <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" /></span>
+                                  <div className="min-w-0">
+                                    <p className="text-sm text-slate-800 truncate">{r.job_name} {r.is_detail && <span className="text-[10px] text-amber-600">★ละเอียด</span>}{!r.in_bom && <span className="text-[10px] text-slate-400">(เพิ่มเอง)</span>}</p>
+                                    <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น` : ""}</p>
+                                  </div>
+                                  <span className="text-right text-sm font-semibold text-slate-700">{fmt(r.total_qty)}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )
                       )}
-                      <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ" : "ติ๊ก ✓ ตัดครบรายบล็อก — ตัดครบทุกบล็อกของวัตถุดิบใด ระบบติ๊กเตรียมครบให้อัตโนมัติ"} · ครบทั้ง 2 หน้า → การ์ด<b className="text-emerald-600">ไฟเขียว</b></p>
+                      <p className="text-[11px] text-slate-400">{clTab === "prep" ? "ติ๊ก ✓ เมื่อเตรียมวัตถุดิบชิ้นนั้นครบ · ครบทั้ง 2 หน้า → การ์ดไฟเขียว"
+                        : clTab === "cut" ? "ติ๊ก ✓ ตัดครบรายบล็อก — ตัดครบทุกบล็อกของวัตถุดิบใด ระบบติ๊กเตรียมครบให้อัตโนมัติ"
+                        : "ติ๊กเลือกงานเหมาที่จะจ่ายในใบนี้ · จำนวนรวม = จำนวนต่อใบ × จำนวนที่สั่ง"}</p>
                     </div>
                   )}
             </div>
