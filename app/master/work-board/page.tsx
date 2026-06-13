@@ -369,7 +369,12 @@ export default function WorkBoardPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
     finally { setDispSaving(false); }
   };
-  const deptCraftsmen = useMemo(() => dispDept ? craftsmen.filter((c) => c.department_id === dispDept.id) : [], [dispDept, craftsmen]);
+  // ช่างในแผนก — ยกเว้นแผนก "ช่างเหมา" (ชื่อมีคำว่า เหมา) ให้เลือกพนักงานได้ทุกคน
+  const dispIsHire = useMemo(() => !!dispDept && /เหมา/.test(dispDept.name), [dispDept]);
+  const deptCraftsmen = useMemo(() => {
+    if (!dispDept) return [];
+    return dispIsHire ? craftsmen : craftsmen.filter((c) => c.department_id === dispDept.id);
+  }, [dispDept, dispIsHire, craftsmen]);
 
   // รับงานคืน (จากการ์ดบนบอร์ด) — รองรับรับคืนบางส่วน
   const submitReceive = async () => {
@@ -624,8 +629,18 @@ export default function WorkBoardPage() {
                 <div key={z.key} className="absolute rounded-2xl border-2 border-dashed bg-white/40" style={{ left: p.x, top: p.y, width: zw, height: zoneH(z), borderColor: `${z.accent}88` }}>
                   <div onPointerDown={(e) => onZoneDown(e, z.key)} title="ลากเพื่อย้ายตำแหน่งแผนก"
                     className="flex items-center justify-between px-3 rounded-t-2xl cursor-move select-none" style={{ height: HEADER_H, background: `${z.accent}1f`, borderBottom: `2px solid ${z.accent}55` }}>
-                    <div className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ background: z.accent }} /><span className="text-base font-bold text-slate-700 truncate">{z.label}</span></div>
-                    <span className="text-xs font-medium text-slate-500 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
+                    <div className="flex items-center gap-2 min-w-0"><span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: z.accent }} /><span className="text-base font-bold text-slate-700 truncate">{z.label}</span></div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {z.kind === "dept" && z.dept && (() => {
+                        const staff = craftsmen.filter((c) => c.department_id === z.dept!.id);
+                        const total = staff.reduce((s, c) => s + (c.base_salary ?? 0), 0);
+                        return <>
+                          <StaffAvatars staff={staff} />
+                          {total > 0 && <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 rounded-full px-1.5 py-0.5" title="ค่าแรงรวม (เงินเดือนพนักงานในแผนก)">💰 {fmt(total)}</span>}
+                        </>;
+                      })()}
+                      <span className="text-xs font-medium text-slate-500 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
+                    </div>
                   </div>
                   {noteOf(z) && <div className="flex items-center gap-1 px-3 text-[11px] text-amber-700 bg-amber-50/70 border-b border-amber-100 truncate" style={{ height: NOTE_H }} title={noteOf(z) ?? ""}>📝 <span className="truncate">{noteOf(z)}</span></div>}
                   {count === 0 && <div className="flex items-center justify-center text-xs text-slate-300 mt-6">{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
@@ -690,13 +705,14 @@ export default function WorkBoardPage() {
               <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
                 <input type="date" value={dispDue} onChange={(e) => setDispDue(e.target.value)} className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
             </div>
-            <label className="block"><span className="text-[11px] text-slate-500">ช่างในแผนก {dispDept?.name}</span>
+            <label className="block"><span className="text-[11px] text-slate-500">{dispIsHire ? "เลือกช่าง (งานเหมา — เลือกได้ทุกคน)" : `ช่างในแผนก ${dispDept?.name}`}</span>
               <select value={dispCraftsman} onChange={(e) => setDispCraftsman(e.target.value)}
                 className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <option value="">— ทั้งแผนก (ไม่ระบุช่าง) —</option>
                 {deptCraftsmen.map((c) => <option key={c.id} value={c.id}>{c.code ? `[${c.code}] ` : ""}{c.name}</option>)}
               </select>
-              {deptCraftsmen.length === 0 && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
+              {dispIsHire ? <span className="text-[10px] text-indigo-500">งานเหมาเลือกพนักงานได้ทุกคน</span>
+                : deptCraftsmen.length === 0 && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
             </label>
           </div>
         )}
@@ -1013,6 +1029,22 @@ function CheckBtn({ done, disabled, onClick }: { done: boolean; disabled?: boole
       className={`h-7 w-7 rounded-md border flex items-center justify-center text-sm transition-colors ${done ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-slate-300 border-slate-300 hover:border-emerald-400"} ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}>
       {done ? "✓" : ""}
     </button>
+  );
+}
+
+// ---- ไอคอนพนักงานในแผนก (วงกลมรูป/อักษรย่อ) ----
+function StaffAvatars({ staff }: { staff: Assignee[] }) {
+  if (!staff.length) return null;
+  const show = staff.slice(0, 4);
+  return (
+    <div className="flex -space-x-1.5" title={staff.map((s) => s.name).join(", ")}>
+      {show.map((s) => (
+        <span key={s.id} title={s.name} className="h-5 w-5 rounded-full ring-2 ring-white bg-slate-200 overflow-hidden flex items-center justify-center text-[9px] font-medium text-slate-600">
+          {s.photo ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={s.photo} alt="" className="h-full w-full object-cover" /> : (s.name?.trim()?.[0] ?? "?")}
+        </span>
+      ))}
+      {staff.length > 4 && <span className="h-5 w-5 rounded-full ring-2 ring-white bg-slate-100 flex items-center justify-center text-[8px] text-slate-500">+{staff.length - 4}</span>}
+    </div>
   );
 }
 
