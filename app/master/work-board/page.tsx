@@ -270,7 +270,7 @@ export default function WorkBoardPage() {
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [loading]);
+  }, [loading, viewMode]);   // re-attach หลังสลับ บอร์ด/ตาราง (element ใหม่)
   const zoomBtn = (f: number) => { const el = boardRef.current; if (!el) return; const r = el.getBoundingClientRect(); const sx = r.width / 2, sy = r.height / 2;
     setVp((v) => { const ns = clamp(v.scale * f, 0.3, 1.8); return { scale: ns, x: sx - ((sx - v.x) / v.scale) * ns, y: sy - ((sy - v.y) / v.scale) * ns }; }); };
   const resetView = () => setVp({ x: 24, y: 16, scale: 0.85 });
