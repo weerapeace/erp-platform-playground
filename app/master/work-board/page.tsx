@@ -33,7 +33,7 @@ type PendingMO = {
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
-type CutRow = { id: string; component_sku: string | null; component_name: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null; required_qty: number; uom: string | null; cut_done: boolean };
+type CutRow = { id: string; component_sku: string | null; component_name: string | null; material_type: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null; required_qty: number; uom: string | null; cut_done: boolean };
 type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
@@ -147,6 +147,7 @@ export default function WorkBoardPage() {
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
   const [clTab, setClTab] = useState<"prep" | "cut" | "piece" | "purch" | "issue" | "hist">("prep");
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
+  const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clPurch, setClPurch] = useState<PurchaseStatusRow[] | null>(null);   // ของที่ซื้อ/ETA
   const [clIssues, setClIssues] = useState<MoIssue[] | null>(null);           // ปัญหา QC
   const [clHist, setClHist] = useState<DispatchHistRow[] | null>(null);       // ประวัติการจ่าย
@@ -425,6 +426,7 @@ export default function WorkBoardPage() {
         const num = (v: unknown) => (v == null ? null : Number(v));
         const cutRows: CutRow[] = materials.filter(isCut).map((x) => ({
           id: String(x.id), component_sku: (x.component_sku as string) ?? null, component_name: (x.component_name as string) ?? null,
+          material_type: (x.material_type as string) ?? null,
           cut_block_code: (x.cut_block_code as string) ?? null, cut_width: num(x.cut_width), cut_length: num(x.cut_length), pieces: num(x.pieces),
           required_qty: Number(x.required_qty) || 0, uom: (x.uom as string) ?? null, cut_done: !!x.cut_done,
         }));
@@ -862,27 +864,51 @@ export default function WorkBoardPage() {
                       clCutRows.length === 0 ? (
                         <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ไม่มีงานตัด</div>
                       ) : (() => {
-                        const totalPieces = clCutRows.reduce((s, r) => s + (r.pieces ?? 0), 0);
+                        const moQty = checklistMO.qty || 0;
+                        const rowTotal = (r: CutRow) => (r.pieces ?? 0) * moQty;   // ยอดรวมชิ้น = ชิ้น/บล็อก × จำนวนสั่ง
+                        const totalPieces = clCutRows.reduce((s, r) => s + rowTotal(r), 0);
+                        const sorted = [...clCutRows].sort((a, b) => (a.component_name ?? "").localeCompare(b.component_name ?? "", "th") || (a.cut_block_code ?? "").localeCompare(b.cut_block_code ?? ""));
+                        const gkey = (r: CutRow) => clCutGroup === "type" ? (r.material_type ?? "ไม่ระบุประเภท") : clCutGroup === "material" ? (r.component_name ?? r.component_sku ?? "—") : "";
+                        const groups: { key: string; rows: CutRow[] }[] = [];
+                        if (clCutGroup === "none") groups.push({ key: "", rows: sorted });
+                        else { const m = new Map<string, CutRow[]>(); for (const r of sorted) { const k = gkey(r); (m.get(k) ?? m.set(k, []).get(k)!).push(r); } for (const [key, rows] of m) groups.push({ key, rows }); }
+                        const GRID = "grid grid-cols-[3rem_1fr_3.6rem_2.2rem_3.4rem_2.4rem] gap-1";
                         return (
-                          <div className="border border-slate-200 rounded-lg overflow-hidden">
-                            <div className="grid grid-cols-[3.2rem_1fr_4.5rem_2.4rem_3.6rem_2.6rem] gap-1.5 px-2.5 py-1.5 bg-slate-100 text-[11px] font-semibold text-slate-600">
-                              <span>บล็อก</span><span>วัตถุดิบ</span><span className="text-center">ขนาด</span><span className="text-center">ชิ้น</span><span className="text-right">รวม</span><span className="text-center">ตัด</span>
-                            </div>
-                            <div className="max-h-[44vh] overflow-y-auto">
-                              {clCutRows.map((r, idx) => (
-                                <div key={r.id} className={`grid grid-cols-[3.2rem_1fr_4.5rem_2.4rem_3.6rem_2.6rem] gap-1.5 px-2.5 py-2 items-center border-t border-slate-100 ${r.cut_done ? "bg-emerald-50/60" : idx % 2 ? "bg-slate-50/40" : "bg-white"}`}>
-                                  <span className="font-mono text-[10px] bg-indigo-50 text-indigo-700 px-1 py-0.5 rounded text-center truncate" title={r.cut_block_code ?? ""}>{r.cut_block_code ?? "—"}</span>
-                                  <span className="text-[13px] text-slate-800 truncate min-w-0" title={r.component_name ?? ""}>{r.component_name ?? r.component_sku}</span>
-                                  <span className="text-center text-[11px] text-slate-500">{r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)}` : "—"}</span>
-                                  <span className="text-center text-[12px] text-slate-600">{r.pieces != null ? fmt(r.pieces) : "—"}</span>
-                                  <span className="text-right text-[12px] font-medium text-slate-700">{fmt(r.required_qty)}<span className="text-[9px] font-normal text-slate-400"> {r.uom ?? ""}</span></span>
-                                  <span className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></span>
-                                </div>
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[11px]">
+                              <span className="text-slate-400">จัดกลุ่ม:</span>
+                              {([["none", "ไม่จัด"], ["type", "ประเภท"], ["material", "วัตถุดิบ"]] as const).map(([v, l]) => (
+                                <button key={v} type="button" onClick={() => setClCutGroup(v)} className={`px-2 py-0.5 rounded-full border ${clCutGroup === v ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{l}</button>
                               ))}
                             </div>
-                            <div className="flex justify-between px-3 py-1.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500">
-                              <span>ทั้งหมด <b className="text-slate-700">{clCutRows.length}</b> บล็อก · รวม <b className="text-slate-700">{fmt(totalPieces)}</b> ชิ้น</span>
-                              <span>ตัดแล้ว <b className="text-emerald-600">{cutDone}/{cutTotal}</b></span>
+                            <div className="border border-slate-200 rounded-lg overflow-hidden">
+                              <div className={`${GRID} px-2.5 py-1.5 bg-slate-100 text-[10px] font-semibold text-slate-600`}>
+                                <span>บล็อก</span><span>วัตถุดิบ / ประเภท</span><span className="text-center">ก×ย</span><span className="text-center">ชิ้น</span><span className="text-right">ยอดรวม</span><span className="text-center">ตัด</span>
+                              </div>
+                              <div className="max-h-[42vh] overflow-y-auto">
+                                {groups.map((g) => (
+                                  <div key={g.key || "all"}>
+                                    {g.key && <div className="px-2.5 py-1 bg-slate-50 text-[11px] font-medium text-slate-500 border-t border-slate-100">{g.key} <span className="text-slate-400">({g.rows.length})</span></div>}
+                                    {g.rows.map((r, idx) => (
+                                      <div key={r.id} className={`${GRID} px-2.5 py-2 items-center border-t border-slate-100 ${r.cut_done ? "bg-emerald-50/60" : idx % 2 ? "bg-slate-50/30" : "bg-white"}`}>
+                                        <span className="font-mono text-[10px] bg-indigo-50 text-indigo-700 px-1 py-0.5 rounded text-center truncate" title={r.cut_block_code ?? ""}>{r.cut_block_code ?? "—"}</span>
+                                        <span className="min-w-0">
+                                          <span className="block text-[12px] text-slate-800 truncate" title={r.component_name ?? ""}>{r.component_name ?? r.component_sku}</span>
+                                          {r.material_type && <span className="block text-[9px] text-slate-400">{r.material_type}</span>}
+                                        </span>
+                                        <span className="text-center text-[10px] text-slate-500">{r.cut_width != null && r.cut_length != null ? `${fmt(r.cut_width)}×${fmt(r.cut_length)}` : "—"}</span>
+                                        <span className="text-center text-[11px] text-slate-600">{r.pieces != null ? fmt(r.pieces) : "—"}</span>
+                                        <span className="text-right text-[12px] font-semibold text-slate-700">{fmt(rowTotal(r))}</span>
+                                        <span className="flex justify-center"><CheckBtn done={r.cut_done} disabled={!canEdit} onClick={() => toggleCut(r.id)} /></span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="flex justify-between px-3 py-1.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500">
+                                <span>ทั้งหมด <b className="text-slate-700">{clCutRows.length}</b> บล็อก · ยอดรวม <b className="text-slate-700">{fmt(totalPieces)}</b> ชิ้น</span>
+                                <span>ตัดแล้ว <b className="text-emerald-600">{cutDone}/{cutTotal}</b></span>
+                              </div>
                             </div>
                           </div>
                         );

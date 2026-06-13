@@ -71,7 +71,7 @@ export type BomHeader = {
   is_active:      boolean;
 };
 
-export type BomListItem = BomHeader & { line_count: number };
+export type BomListItem = BomHeader & { line_count: number; product_image?: string | null };
 
 // ---- audit helper (best effort — ไม่ให้ล้มงานหลัก) ----
 async function audit(
@@ -129,7 +129,28 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     (cntRows as { bom_code: string; cnt: number }[] | null ?? []).forEach((c) => counts.set(c.bom_code, Number(c.cnt)));
   }
 
-  const data: BomListItem[] = rows.map((r) => ({ ...r, line_count: counts.get(r.bom_code) ?? 0 }));
+  // รูปสินค้า: หาจาก skus_v2 (cover เอง หรือของ parent) แล้ว fallback parent_skus_v2
+  const skuCodes = [...new Set(rows.map((r) => r.product_sku).filter(Boolean))] as string[];
+  const imgMap = new Map<string, string>();
+  if (skuCodes.length > 0) {
+    const { data: sk } = await supabase.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", skuCodes);
+    for (const s of (sk ?? []) as Record<string, unknown>[]) {
+      const own = (s.cover_image_r2_key as string) || "";
+      const par = (Array.isArray(s.parent_skus_v2) ? s.parent_skus_v2[0] : s.parent_skus_v2) as { cover_image_r2_key?: string | null } | null;
+      const key = own || par?.cover_image_r2_key || "";
+      if (key) imgMap.set(String(s.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
+    }
+    const missing = skuCodes.filter((c) => !imgMap.has(c));
+    if (missing.length > 0) {
+      const { data: par } = await supabase.from("parent_skus_v2").select("code, cover_image_r2_key").in("code", missing);
+      for (const p of (par ?? []) as Record<string, unknown>[]) {
+        const key = (p.cover_image_r2_key as string) || "";
+        if (key) imgMap.set(String(p.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
+      }
+    }
+  }
+
+  const data: BomListItem[] = rows.map((r) => ({ ...r, line_count: counts.get(r.bom_code) ?? 0, product_image: r.product_sku ? imgMap.get(r.product_sku) ?? null : null }));
   return NextResponse.json({ data, total: count ?? data.length, error: null });
 }
 

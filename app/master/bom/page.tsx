@@ -25,7 +25,7 @@ import { WorkInstructionPanel } from "@/components/work-instruction";
 type BomListItem = {
   id: string; bom_code: string; product_sku: string | null; product_name: string | null;
   version: string | null; bom_type: string | null; status: string | null;
-  source: string | null; is_active: boolean; line_count: number;
+  source: string | null; is_active: boolean; line_count: number; product_image?: string | null;
 };
 type BomLineRow = {
   id: string; slot_code: string | null; component_sku: string | null; component_name: string | null;
@@ -295,11 +295,19 @@ export default function BomWorkspacePage() {
   const columns: ColumnDef<BomListItem>[] = useMemo(() => [
     { id: "bom_code", accessorKey: "bom_code", header: "รหัสสูตร", size: 150,
       cell: ({ getValue }) => <code className="font-mono text-xs text-slate-700">{getValue() as string}</code> },
-    { id: "product_sku", accessorKey: "product_sku", header: "สินค้า", size: 280,
+    { id: "product_sku", accessorKey: "product_sku", header: "สินค้า", size: 300,
       cell: ({ row }) => (
-        <div>
-          <code className="text-[10px] text-slate-400 font-mono">{row.original.product_sku}</code>
-          <div className="text-sm text-slate-700">{row.original.product_name}</div>
+        <div className="flex items-center gap-2">
+          <span className="relative group/bimg shrink-0">
+            {row.original.product_image
+              ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={row.original.product_image} alt="" className="w-9 h-9 rounded-md object-cover border border-slate-100 bg-slate-50 cursor-zoom-in" />
+              : <span className="w-9 h-9 rounded-md border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-300 text-sm">📦</span>}
+            {row.original.product_image && /* eslint-disable-next-line @next/next/no-img-element */ <img src={row.original.product_image} alt="" className="hidden group-hover/bimg:block absolute z-50 left-0 top-10 w-48 h-48 object-contain rounded-lg border border-slate-200 bg-white shadow-xl p-1.5" />}
+          </span>
+          <div className="min-w-0">
+            <code className="text-[10px] text-slate-400 font-mono">{row.original.product_sku}</code>
+            <div className="text-sm text-slate-700 truncate">{row.original.product_name}</div>
+          </div>
         </div>
       ) },
     { id: "version", accessorKey: "version", header: "เวอร์ชัน", size: 80 },
