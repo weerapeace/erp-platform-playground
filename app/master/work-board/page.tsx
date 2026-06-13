@@ -76,6 +76,20 @@ const daysLeftText = (due: string | null) => {
   if (days === 0) return "วันนี้";
   return `เหลือ ${days} วัน`;
 };
+const daysUntil = (due: string | null): number | null => {
+  if (!due) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.floor((new Date(due + "T00:00:00").getTime() - today.getTime()) / 86400000);
+};
+// สีตามจำนวนวัน: <7 แดง · <15 เหลือง · อื่นๆ เทา
+const daysLeftClass = (due: string | null): string => {
+  const d = daysUntil(due);
+  if (d == null) return "text-slate-400";
+  if (d < 7) return "text-rose-600 font-semibold";
+  if (d < 15) return "text-amber-600 font-semibold";
+  return "text-slate-400";
+};
+const dueDateText = (due: string | null): string => (due ? new Date(due + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "—");
 const stageOfDept = (name: string) => (name.includes("ตัด") || name.includes("เตรียม") ? "cut" : "assemble");
 
 type Zone = { key: string; label: string; kind: "pending" | "dept"; dept?: Dept; accent: string; moCards: PendingMO[]; woCards: WorkOrder[] };
@@ -119,6 +133,7 @@ export default function WorkBoardPage() {
   const [checklistMO, setChecklistMO] = useState<PendingMO | null>(null);
   const [clRows, setClRows] = useState<MatRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
+  const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
   // popup ตั้งค่าแผนก (สร้าง/แก้/ลบ/โชว์-ซ่อน/หมายเหตุ/เรียงลำดับ)
   const [deptMgrOpen, setDeptMgrOpen] = useState(false);
   const [deptList, setDeptList] = useState<DeptFull[]>([]);
@@ -281,7 +296,7 @@ export default function WorkBoardPage() {
     if (!movedRef.current) {
       // คลิก (ไม่ลาก) = เปิดรายละเอียด
       if (it.kind === "wo") { const wo = board.workOrders.find((x) => x.id === it.id); if (wo) { setDetailWO(wo); setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); } }
-      else { const mo = board.pending.find((x) => x.id === it.id); if (mo) setDetailMO(mo); }
+      else { const mo = board.pending.find((x) => x.id === it.id); if (mo) setChecklistMO(mo); }
       return;
     }
     const w = screenToWorld(e.clientX, e.clientY);
@@ -356,6 +371,7 @@ export default function WorkBoardPage() {
 
   // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
   useEffect(() => {
+    setDelArmed(false);
     if (!checklistMO) { setClRows([]); return; }
     let cancel = false; setClLoading(true);
     void (async () => {
@@ -398,7 +414,14 @@ export default function WorkBoardPage() {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     }
   }, [canEdit, clRows, toast]);
-  const closeChecklist = useCallback(() => { setChecklistMO(null); void load(); }, [load]);
+  const closeChecklist = useCallback(() => { setChecklistMO(null); setDelArmed(false); void load(); }, [load]);
+  const deleteMO = useCallback(async (mo: PendingMO) => {
+    try {
+      const res = await apiFetch(`/api/mo/${mo.id}`, { method: "DELETE" });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ลบงานแล้ว"); setChecklistMO(null); setDelArmed(false); await load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+  }, [toast, load]);
 
   // ---- จัดการแผนก (popup ตั้งค่าแผนก) ----
   const loadDepts = useCallback(async () => {
@@ -453,7 +476,7 @@ export default function WorkBoardPage() {
   // ซ่อนใบจ่ายงานสเตจ "ตัด" (ของเดิม) — งานตัดย้ายไปเป็นเช็กลิสต์ในการ์ดรอจ่าย
   const cards = useMemo(() => {
     const arr: { cid: string; kind: "mo" | "wo"; node: React.ReactNode }[] = [];
-    for (const m of board.pending) arr.push({ cid: `mo:${m.id}`, kind: "mo", node: <PendingBody mo={m} canEdit={canEdit} onToggle={togglePrep} onOpenChecklist={() => setChecklistMO(m)} /> });
+    for (const m of board.pending) arr.push({ cid: `mo:${m.id}`, kind: "mo", node: <PendingBody mo={m} /> });
     for (const w of board.workOrders) if (w.status !== "done" && w.stage !== "cut") arr.push({ cid: `wo:${w.id}`, kind: "wo", node: <WOBody w={w} /> });
     return arr;
   }, [board, canEdit, togglePrep]);
@@ -649,11 +672,17 @@ export default function WorkBoardPage() {
 
       {/* เช็กลิสต์วัตถุดิบ เตรียม/ตัด (Phase 2 — จาก BOM) */}
       <ERPModal open={checklistMO !== null} onClose={closeChecklist} size="md" title={`📋 เช็กลิสต์เตรียม/ตัด · ${checklistMO?.mo_no ?? ""}`}
-        footer={<button onClick={closeChecklist} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>}>
+        footer={<>
+          {checklistMO && canEdit && (delArmed
+            ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
+            : <button onClick={() => setDelArmed(true)} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 mr-auto">🗑 ลบงาน</button>)}
+          <button onClick={closeChecklist} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">เสร็จ</button>
+        </>}>
         {checklistMO && (() => {
+          const curMo = board.pending.find((p) => p.id === checklistMO.id) ?? checklistMO;
           const prepTotal = clRows.length, prepDone = clRows.filter((r) => r.is_ready).length;
           const cutTotal = clRows.filter((r) => r.needs_cut).length, cutDone = clRows.filter((r) => r.needs_cut && r.cut_done).length;
-          const ready = prepTotal > 0 && prepDone >= prepTotal && cutDone >= cutTotal;
+          const ready = clRows.length > 0 ? (prepDone >= prepTotal && cutDone >= cutTotal) : curMo.ready;
           return (
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -665,7 +694,15 @@ export default function WorkBoardPage() {
                 <span>ตัด <b className="text-slate-700">{cutDone}/{cutTotal}</b></span>
               </div>
               {clLoading ? <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
-                : clRows.length === 0 ? <div className="text-center py-8 text-slate-300 text-sm">ใบนี้ยังไม่มีรายการวัตถุดิบจาก BOM<br />ใช้ปุ่มติ๊กรวมบนการ์ดแทนได้</div>
+                : clRows.length === 0 ? (
+                    <div className="text-center py-6">
+                      <p className="text-slate-400 text-sm mb-3">ใบนี้ยังไม่มีรายการวัตถุดิบจาก BOM — ติ๊กรวมทั้งใบ</p>
+                      <div className="grid grid-cols-2 gap-2 max-w-[280px] mx-auto">
+                        <StepChip label="เตรียม" done={curMo.prep_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "prep_done")} />
+                        <StepChip label="ตัด" done={curMo.cut_done} disabled={!canEdit} onClick={() => togglePrep(curMo, "cut_done")} />
+                      </div>
+                    </div>
+                  )
                   : (
                     <div className="border border-slate-100 rounded-lg overflow-hidden">
                       <div className="grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500">
@@ -786,47 +823,29 @@ function CheckBtn({ done, disabled, onClick }: { done: boolean; disabled?: boole
   );
 }
 
-// ---- ชิปความคืบหน้า (เตรียม x/total) — คลิกเปิดเช็กลิสต์ ----
-function ProgressChip({ label, done, total, onClick }: { label: string; done: number; total: number; onClick: () => void }) {
-  const full = total > 0 && done >= total;
-  return (
-    <button type="button" onClick={onClick} title="กดดูเช็กลิสต์วัตถุดิบ"
-      className={`h-6 rounded-md text-[10px] font-medium border flex items-center justify-center gap-1 transition-colors cursor-pointer ${full ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`}>
-      <span className="text-[11px] leading-none">{full ? "✓" : "○"}</span>{label} {done}/{total}
-    </button>
-  );
-}
-
-// ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) — เช็กลิสต์ เตรียม/ตัด + ไฟเขียวเมื่อพร้อม ----
-function PendingBody({ mo, canEdit, onToggle, onOpenChecklist }: { mo: PendingMO; canEdit: boolean; onToggle: (mo: PendingMO, f: "prep_done" | "cut_done") => void; onOpenChecklist: () => void }) {
+// ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) — กดเปิดเช็กลิสต์ · SKU หนา + วันที่ + เงาแบรนด์ ----
+function PendingBody({ mo }: { mo: PendingMO }) {
   const ready = mo.ready;
-  const overdue = urgencyByDate(mo.due_date, false) === "red";
   const border = mo.brand_color || prodColor(mo.product_sku);
+  const showName = mo.product_name && mo.product_name !== mo.product_sku;
   return (
-    <div className="bg-white rounded-lg p-2 shadow-sm hover:shadow transition select-none" style={{ border: `2px solid ${ready ? "#10b981" : border}` }}>
+    <div className="bg-white rounded-lg p-2 hover:shadow-lg transition select-none cursor-pointer" style={{ border: `2px solid ${ready ? "#10b981" : border}`, boxShadow: `0 2px 10px ${border}55` }} title="กดเพื่อเปิดเช็กลิสต์ เตรียม/ตัด">
       <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5">
         {mo.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={mo.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-2xl">📦</span>}
         <span className={`absolute top-1 right-1 h-3 w-3 rounded-full ring-2 ring-white ${ready ? "bg-emerald-500" : "bg-rose-500"}`} title={ready ? "พร้อมจ่าย (เตรียม+ตัด ครบ)" : "ยังไม่พร้อม — เตรียม/ตัด ยังไม่ครบ"} />
       </div>
-      <div className="flex items-center justify-between gap-1 mb-0.5">
+      <div className="flex items-center justify-between gap-1 mb-1">
         {mo.brand ? <span className="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium border truncate max-w-[58%]" style={{ background: `${border}18`, color: border, borderColor: `${border}55` }}>{mo.brand}</span> : <span className="text-[9px] text-slate-400">ใบสั่งผลิต</span>}
         <span className="font-mono text-[9px] text-slate-400 truncate">{mo.mo_no}</span>
       </div>
-      <p className="text-xs font-medium text-slate-800 leading-snug line-clamp-2 min-h-[2.3em]">{mo.product_name ?? mo.product_sku}</p>
-      <div className="grid grid-cols-2 gap-1 mt-1.5" onPointerDown={(e) => e.stopPropagation()}>
-        {mo.has_bom ? <>
-          <ProgressChip label="เตรียม" done={mo.prep_ready} total={mo.prep_total} onClick={onOpenChecklist} />
-          {mo.cut_total > 0
-            ? <ProgressChip label="ตัด" done={mo.cut_ready} total={mo.cut_total} onClick={onOpenChecklist} />
-            : <button type="button" onClick={onOpenChecklist} className="h-6 rounded-md text-[10px] font-medium border border-slate-200 bg-slate-50 text-slate-400 flex items-center justify-center cursor-pointer hover:bg-slate-100" title="กดดูเช็กลิสต์">ไม่มีงานตัด</button>}
-        </> : <>
-          <StepChip label="เตรียม" done={mo.prep_done} disabled={!canEdit} onClick={() => onToggle(mo, "prep_done")} />
-          <StepChip label="ตัด" done={mo.cut_done} disabled={!canEdit} onClick={() => onToggle(mo, "cut_done")} />
-        </>}
+      <div className="text-center">
+        <div className="text-sm font-bold text-slate-800 leading-tight truncate">{mo.product_sku}</div>
+        {showName && <div className="text-[10px] text-slate-400 line-clamp-1 leading-tight">{mo.product_name}</div>}
+        <div className="text-[10px] text-slate-500 mt-0.5">📅 {dueDateText(mo.due_date)}</div>
       </div>
       <div className="flex items-center justify-between gap-1 mt-1.5 pt-1.5 border-t border-slate-100 text-[10px]">
         <span className="text-rose-600 font-semibold">เหลือ {fmt(mo.remaining)}/{fmt(mo.qty)}</span>
-        <span className={overdue ? "text-rose-600 font-semibold" : "text-slate-400"}>⏱ {daysLeftText(mo.due_date)}</span>
+        <span className={daysLeftClass(mo.due_date)}>⏱ {daysLeftText(mo.due_date)}</span>
       </div>
     </div>
   );
