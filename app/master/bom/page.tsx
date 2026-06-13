@@ -17,6 +17,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { BomLineEditor, ComponentPicker, emptyLine, type EditorLine } from "./line-editor";
 import { PieceworkLines, type PieceLine } from "./piecework-lines";
+import { LaborRates, type LaborLine } from "./labor-rates";
 import type { BomComponent } from "@/app/api/bom/components/route";
 import { CopyBomModal } from "./copy-bom-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
@@ -60,10 +61,11 @@ type FormState = {
   lines: EditorLine[];
   sizes: BomSizeRow[];
   piecework: PieceLine[];
+  labor: LaborLine[];
 };
 
 function emptyForm(): FormState {
-  return { id: null, bom_code: "", product_sku: "", product_name: "", product_image: null, version: "v1", bom_type: "normal", status: "active", note: "", lines: [], sizes: [], piecework: [] };
+  return { id: null, bom_code: "", product_sku: "", product_name: "", product_image: null, version: "v1", bom_type: "normal", status: "active", note: "", lines: [], sizes: [], piecework: [], labor: [] };
 }
 
 // ---- versioning helpers ----
@@ -137,10 +139,22 @@ export default function BomWorkspacePage() {
         }));
       } catch { /* ignore */ }
     }
+    // ค่าแรงผลิต (ราคาปัจจุบันต่อช่าง)
+    let labor: LaborLine[] = [];
+    if (d.bom_code) {
+      try {
+        const lr = await apiFetch(`/api/bom/labor-rates?bom_code=${encodeURIComponent(d.bom_code)}`);
+        const lj = await lr.json();
+        labor = ((lj.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+          id: String(r.id), craftsman_id: (r.craftsman_id as string) ?? null, craftsman_name: (r.craftsman_name as string) ?? "",
+          rate: Number(r.rate) || 0, note: (r.note as string) ?? "",
+        }));
+      } catch { /* ignore */ }
+    }
     return {
       id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
       version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: d.note ?? "",
-      lines: mapLines(d.lines), sizes: d.sizes ?? [], piecework,
+      lines: mapLines(d.lines), sizes: d.sizes ?? [], piecework, labor,
     };
   };
 
@@ -195,11 +209,11 @@ export default function BomWorkspacePage() {
     const sku = form.product_sku;
     if (!sku) { setFormErr("ต้องเลือกสินค้าก่อนจึงสร้างเวอร์ชั่นได้"); setNewVerOpen(false); return; }
     const n = versions.length ? Math.max(...versions.map((v) => verNum(v.version))) + 1 : verNum(form.version) + 1;
-    let lines: EditorLine[] = []; let sizes: BomSizeRow[] = []; let piecework: PieceLine[] = [];
-    if (copyId) { try { const f = await loadFormById(copyId); lines = f.lines; sizes = f.sizes; piecework = f.piecework.map((p) => ({ ...p, id: undefined })); } catch { /* ignore */ } }
+    let lines: EditorLine[] = []; let sizes: BomSizeRow[] = []; let piecework: PieceLine[] = []; let labor: LaborLine[] = [];
+    if (copyId) { try { const f = await loadFormById(copyId); lines = f.lines; sizes = f.sizes; piecework = f.piecework.map((p) => ({ ...p, id: undefined })); labor = f.labor.map((x) => ({ ...x, id: undefined })); } catch { /* ignore */ } }
     setForm({
       id: null, product_sku: sku, product_name: form.product_name, product_image: form.product_image, version: `v${n}`, bom_code: verCode(sku, n),
-      bom_type: form.bom_type, status: "active", note: "", lines, sizes, piecework,
+      bom_type: form.bom_type, status: "active", note: "", lines, sizes, piecework, labor,
     });
     setDirty(true); setNewVerOpen(false); setCopyFromId("");
   };
@@ -266,6 +280,7 @@ export default function BomWorkspacePage() {
       // บันทึกงานเหมารายชิ้น (ตารางที่ 2) แทนที่ทั้งชุดของสูตรนี้
       try {
         await apiFetch("/api/bom/piecework", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bom_code: form.bom_code.trim(), lines: form.piecework }) });
+        await apiFetch("/api/bom/labor-rates", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bom_code: form.bom_code.trim(), rates: form.labor }) });
       } catch { /* ไม่ให้พังทั้งการบันทึก BOM */ }
       toast.success(form.id ? "บันทึกสูตรแล้ว" : "สร้างสูตรใหม่แล้ว");
       setDirty(false);
@@ -503,6 +518,11 @@ export default function BomWorkspacePage() {
             {/* ตารางที่ 2: งานเหมารายชิ้น */}
             <div className="pt-3 border-t border-slate-100">
               <PieceworkLines value={form.piecework} onChange={(piecework) => patchForm({ piecework })} readonly={!canEdit} />
+            </div>
+
+            {/* ค่าแรงผลิต */}
+            <div className="pt-3 border-t border-slate-100">
+              <LaborRates value={form.labor} onChange={(labor) => patchForm({ labor })} readonly={!canEdit} bomCode={form.bom_code} />
             </div>
 
             <CopyBomModal open={copyOpen} onClose={() => setCopyOpen(false)}

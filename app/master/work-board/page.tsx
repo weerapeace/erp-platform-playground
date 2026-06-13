@@ -147,6 +147,8 @@ export default function WorkBoardPage() {
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
   const [clTab, setClTab] = useState<"recv" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist">("prep");
   const [clWO, setClWO] = useState<WorkOrder | null>(null);   // เปิดเช็กลิสต์จากใบจ่ายงาน → มีแท็บ "รับงานคืน"
+  const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
+  const [saveLaborBom, setSaveLaborBom] = useState(false);    // บันทึกค่าแรงกลับเข้า BOM
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clPurch, setClPurch] = useState<PurchaseStatusRow[] | null>(null);   // ของที่ซื้อ/ETA
@@ -361,6 +363,7 @@ export default function WorkBoardPage() {
   const openWO = (wo: WorkOrder) => {
     if (!wo.mo_id) { setDetailWO(wo); return; }
     setClWO(wo); setClTab("recv");
+    setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false);
     setChecklistMO({
       id: wo.mo_id, mo_no: wo.mo_no, product_sku: wo.product_sku, product_name: wo.product_name,
       qty: wo.qty || 0, dispatched: 0, remaining: 0, due_date: wo.due_date, status: wo.status,
@@ -411,11 +414,28 @@ export default function WorkBoardPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
   // รับงานคืน/ยกเลิก จากแท็บ "รับงานคืน" ในป๊อปอัปเช็กลิสต์ (clWO)
+  // บันทึกค่าแรงผลิตของใบจ่ายงาน (+ เลือกบันทึกกลับเข้า BOM) — ใช้ร่วมตอนรับงานคืน
+  const persistLabor = async (wo: WorkOrder) => {
+    const labor = recvLabor.trim() === "" ? null : Number(recvLabor) || 0;
+    if (recvLabor.trim() !== "") {
+      await apiFetch(`/api/mo/work-orders/${wo.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labor_cost: labor }) }).catch(() => {});
+      if (saveLaborBom && labor != null) {
+        await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_sku: wo.product_sku, craftsman_id: wo.assignee_type === "craftsman" ? wo.assignee_id : null, craftsman_name: wo.assignee_name, rate: labor }) }).catch(() => {});
+      }
+    }
+  };
+  const saveLabor = async () => {
+    if (!clWO) return;
+    try { await persistLabor(clWO); toast.success(`บันทึกค่าแรงแล้ว${saveLaborBom ? " + เข้า BOM" : ""}`); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
   const submitReceiveTab = async () => {
     if (!clWO) return;
     const total = (clWO.received_qty || 0) + recvQty;
     setRecvSaving(true);
     try {
+      await persistLabor(clWO);
       const res = await apiFetch(`/api/mo/work-orders/${clWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ received_qty: total }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกรับงานคืนแล้ว"); closeChecklist();
@@ -870,13 +890,25 @@ export default function WorkBoardPage() {
                           <span className="text-slate-400">กำหนดเสร็จ</span><span className="text-slate-700">{clWO.due_date ?? "—"}</span>
                           <span className="text-slate-400">สถานะ</span><span><span className={`text-[11px] px-2 py-0.5 rounded border ${(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).cls}`}>{(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).label}</span></span>
                         </div>
-                        <label className="block"><span className="text-[11px] text-slate-500">รับคืนรอบนี้ (ชิ้น)</span>
-                          <input type="number" min={0} step="any" value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))} disabled={!canEdit}
-                            className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50" /></label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block"><span className="text-[11px] text-slate-500">รับคืนรอบนี้ (ชิ้น)</span>
+                            <input type="number" min={0} step="any" value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))} disabled={!canEdit}
+                              className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50" /></label>
+                          <label className="block"><span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต (บาท)</span>
+                            <input type="number" min={0} step="any" value={recvLabor} onChange={(e) => setRecvLabor(e.target.value)} disabled={!canEdit} placeholder="—"
+                              className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" /></label>
+                        </div>
+                        {canEdit && (
+                          <label className="flex items-center gap-2 text-xs text-slate-600">
+                            <input type="checkbox" checked={saveLaborBom} onChange={(e) => setSaveLaborBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
+                            บันทึกค่าแรงนี้กลับเข้า BOM (ราคาของช่าง {clWO.assignee_name ?? "—"})
+                          </label>
+                        )}
                         {canEdit && (
                           <div className="flex items-center gap-2">
                             <button onClick={() => void cancelWOTab()} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">ยกเลิกใบจ่ายงาน</button>
-                            <button onClick={() => void submitReceiveTab()} disabled={recvSaving || recvQty <= 0} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 ml-auto">{recvSaving ? "กำลังบันทึก…" : "✓ รับงานคืน"}</button>
+                            <button onClick={() => void saveLabor()} className="h-9 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 ml-auto">💾 บันทึกค่าแรง</button>
+                            <button onClick={() => void submitReceiveTab()} disabled={recvSaving || recvQty <= 0} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{recvSaving ? "กำลังบันทึก…" : "✓ รับงานคืน"}</button>
                           </div>
                         )}
                         <p className="text-[11px] text-slate-400">แท็บอื่นด้านบนดูข้อมูลใบสั่งผลิตเดียวกัน (เตรียม/ตัด/งานเหมา/ของซื้อ/ปัญหา/ประวัติ)</p>

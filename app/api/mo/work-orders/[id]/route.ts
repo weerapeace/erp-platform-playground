@@ -19,7 +19,7 @@ type PatchBody = {
   status?: string; received_qty?: number; qty?: number;
   assignee_type?: string; assignee_id?: string | null; assignee_name?: string | null;
   department_id?: string | null; department_name?: string | null;
-  stage?: string; due_date?: string | null; note?: string | null;
+  stage?: string; due_date?: string | null; note?: string | null; labor_cost?: number | null;
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -43,6 +43,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.department_name !== undefined) patch.department_name = body.department_name ?? null;
   if (body.due_date !== undefined) patch.due_date = body.due_date || null;
   if (body.note !== undefined)     patch.note = body.note ?? null;
+  if (body.labor_cost !== undefined) patch.labor_cost = body.labor_cost == null ? null : num(body.labor_cost);
 
   // รับงานคืน: ตั้ง received_qty + คำนวณสถานะอัตโนมัติ (รับครบ=done · รับบางส่วน=partial_return)
   if (body.received_qty != null) {
