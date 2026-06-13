@@ -163,11 +163,12 @@ export default function WorkBoardPage() {
   const [newDeptName, setNewDeptName] = useState("");
   const [confirmDelId, setConfirmDelId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // silent=true → refresh เบื้องหลัง ไม่โชว์สปินเนอร์เต็มจอ (ใช้หลังปิดป๊อปอัป/ทำ action เพื่อให้ลื่น)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try { const res = await apiFetch("/api/mo/work-board"); const j = await res.json();
       if (!j.error) setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [] });
-    } catch { /* ignore */ } finally { setLoading(false); }
+    } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } catch { /* ignore */ } })(); }, []);
@@ -341,12 +342,12 @@ export default function WorkBoardPage() {
     } else {
       const wo = board.workOrders.find((x) => x.id === it.id); if (!wo) return;
       if (target && target.kind === "dept" && target.dept && wo.department_id !== target.dept.id) {
-        if (!canEdit) { toast.error("คุณไม่มีสิทธิ์ย้ายงานข้ามแผนก"); await load(); return; }
+        if (!canEdit) { toast.error("คุณไม่มีสิทธิ์ย้ายงานข้ามแผนก"); await load(true); return; }
         const d = target.dept;
         setBoard((b) => ({ ...b, workOrders: b.workOrders.map((x) => x.id === it.id ? { ...x, department_id: d.id, department_name: d.name } : x) }));
         try { const res = await apiFetch(`/api/mo/work-orders/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ department_id: d.id, department_name: d.name, stage: stageOfDept(d.name) }) });
           const j = await res.json(); if (j.error) throw new Error(j.error);
-        } catch (err) { toast.error(err instanceof Error ? err.message : "ย้ายไม่สำเร็จ"); await load(); }
+        } catch (err) { toast.error(err instanceof Error ? err.message : "ย้ายไม่สำเร็จ"); await load(true); }
       }
       // คงตำแหน่งที่วางไว้ (อิสระ)
     }
@@ -355,7 +356,7 @@ export default function WorkBoardPage() {
   const openColor = async () => { setColorOpen(true); try { const r = await apiFetch("/api/brands"); const j = await r.json(); setBrands(j.data ?? []); } catch { /* ignore */ } };
   const saveColor = async (id: string, color: string) => {
     setBrands((bs) => bs.map((b) => b.id === id ? { ...b, color } : b));
-    try { await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, color }) }); await load(); }
+    try { await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, color }) }); await load(true); }
     catch { toast.error("บันทึกสีไม่สำเร็จ"); }
   };
 
@@ -385,7 +386,7 @@ export default function WorkBoardPage() {
           qty: dispQty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}` }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`จ่ายงานเข้า ${dispDept.name} แล้ว: ${j.wo_no ?? ""}`);
-      setDispMO(null); setDispDept(null); await load();
+      setDispMO(null); setDispDept(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
     finally { setDispSaving(false); }
   };
@@ -404,13 +405,13 @@ export default function WorkBoardPage() {
     try {
       const res = await apiFetch(`/api/mo/work-orders/${detailWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ received_qty: total }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("บันทึกรับงานคืนแล้ว"); setDetailWO(null); await load();
+      toast.success("บันทึกรับงานคืนแล้ว"); setDetailWO(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setRecvSaving(false); }
   };
   const cancelWO = async (wo: WorkOrder) => {
     try { const res = await apiFetch(`/api/mo/work-orders/${wo.id}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("ยกเลิกใบจ่ายงานแล้ว"); setDetailWO(null); await load();
+      toast.success("ยกเลิกใบจ่ายงานแล้ว"); setDetailWO(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
   // รับงานคืน/ยกเลิก จากแท็บ "รับงานคืน" ในป๊อปอัปเช็กลิสต์ (clWO)
@@ -573,12 +574,12 @@ export default function WorkBoardPage() {
     try { const res = await apiFetch(`/api/mo/issues?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setClIssues((rs) => (rs ?? []).filter((x) => x.id !== id)); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast]);
-  const closeChecklist = useCallback(() => { setChecklistMO(null); setClWO(null); setDelArmed(false); void load(); }, [load]);
+  const closeChecklist = useCallback(() => { setChecklistMO(null); setClWO(null); setDelArmed(false); void load(true); }, [load]);
   const deleteMO = useCallback(async (mo: PendingMO) => {
     try {
       const res = await apiFetch(`/api/mo/${mo.id}`, { method: "DELETE" });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("ลบงานแล้ว"); setChecklistMO(null); setDelArmed(false); await load();
+      toast.success("ลบงานแล้ว"); setChecklistMO(null); setDelArmed(false); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast, load]);
 
@@ -589,7 +590,7 @@ export default function WorkBoardPage() {
     catch { /* ignore */ } finally { setDeptLoading(false); }
   }, []);
   const openDeptMgr = useCallback(() => { setConfirmDelId(null); setDeptMgrOpen(true); void loadDepts(); }, [loadDepts]);
-  const closeDeptMgr = useCallback(() => { setDeptMgrOpen(false); void load(); }, [load]);
+  const closeDeptMgr = useCallback(() => { setDeptMgrOpen(false); void load(true); }, [load]);
   const patchDept = useCallback(async (id: string, p: Partial<DeptFull>) => {
     setDeptList((ls) => ls.map((d) => d.id === id ? { ...d, ...p } : d));
     try { const res = await apiFetch("/api/mo/departments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...p }) }); const j = await res.json(); if (j.error) throw new Error(j.error); }
