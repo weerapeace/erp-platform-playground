@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
+import { PrHistoryButton } from "@/components/pr-history";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
@@ -682,6 +683,7 @@ export default function PurchasingShopPage() {
                 </select>
               </label>
             )}
+            <PrHistoryButton />
             {source === "sku" && (
               <button onClick={() => setSkuForm({ mode: "create" })}
                 className="h-9 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
