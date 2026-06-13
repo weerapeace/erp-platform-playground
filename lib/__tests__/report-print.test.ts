@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildReportHtml } from "@/lib/template";
+import { buildReportHtml, buildReportImageGridHtml } from "@/lib/template";
 
 describe("report print template", () => {
   it("does not reserve a full blank page height when printing", () => {
@@ -21,5 +21,16 @@ describe("report print template", () => {
     expect(html).toContain("break-inside: avoid");
     expect(html).toContain("page-break-after: auto");
     expect(html).toContain(".doc::after");
+  });
+
+  it("renders report images as a reusable two-column grid", () => {
+    const html = buildReportImageGridHtml([
+      { src: "/a.png", alt: "A" },
+      { src: "/b.png", alt: "B" },
+    ]);
+
+    expect(html).toContain("report-image-grid");
+    expect(html).toContain("--report-image-grid-cols:2");
+    expect(html).toContain("--report-image-grid-max-height:58mm");
   });
 });

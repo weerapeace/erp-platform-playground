@@ -80,6 +80,26 @@ export type ReportTemplate = {
   custom_css:  string;
 };
 
+export type ReportImageGridItem = {
+  src: string;
+  alt?: string;
+};
+
+export function buildReportImageGridHtml(items: ReportImageGridItem[], options: { columns?: 1 | 2; maxHeightMm?: number } = {}): string {
+  const images = items.filter((item) => item.src.trim());
+  if (images.length === 0) return "";
+
+  const columns = options.columns ?? 2;
+  const maxHeightMm = options.maxHeightMm ?? 58;
+  const cells = images.map((item) => `
+    <figure class="report-image-grid__item">
+      <img src="${esc(item.src)}" alt="${esc(item.alt ?? "report image")}" />
+    </figure>
+  `).join("");
+
+  return `<div class="report-image-grid report-image-grid--cols-${columns}" style="--report-image-grid-cols:${columns};--report-image-grid-max-height:${maxHeightMm}mm;">${cells}</div>`;
+}
+
 const PAPER_DIMS: Record<string, { w: string; h: string }> = {
   A4:     { w: "210mm", h: "297mm" },
   A5:     { w: "148mm", h: "210mm" },
@@ -103,6 +123,9 @@ export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknow
     .doc header, .doc footer, .totals, .amount-text, .signatures { page-break-inside: avoid; break-inside: avoid; break-before: auto; break-after: auto; page-break-before: auto; page-break-after: auto; }
     .doc footer:empty { display: none; }
     .doc img, .doc svg, .doc canvas { max-width: 100%; page-break-inside: avoid; break-inside: avoid; }
+    .report-image-grid { display: grid; grid-template-columns: repeat(var(--report-image-grid-cols, 2), minmax(0, 1fr)); gap: 4mm; align-items: start; margin: 2mm 0 3mm; }
+    .report-image-grid__item { margin: 0; min-width: 0; page-break-inside: avoid; break-inside: avoid; }
+    .report-image-grid__item img { display: block; width: 100%; height: auto; max-height: var(--report-image-grid-max-height, 58mm); object-fit: contain; border: 1px solid #e2e8f0; border-radius: 4px; background: #fff; }
     @media print {
       html, body { width: ${pageW}; height: auto !important; min-height: 0 !important; background: white; overflow: visible !important; }
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -110,6 +133,7 @@ export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknow
       .doc::after { content: none !important; display: none !important; }
       .doc > header, .doc > main, .doc > footer { break-before: auto !important; break-after: auto !important; page-break-before: auto !important; page-break-after: auto !important; }
       .doc > footer:empty { display: none !important; }
+      .report-image-grid { gap: 3mm; margin: 1.5mm 0 2.5mm; }
     }
     @page { size: ${tpl.paper_size} ${tpl.orientation}; margin: 0; }
     ${tpl.custom_css}

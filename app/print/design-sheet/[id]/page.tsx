@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
 import { apiFetch } from "@/lib/api";
-import { buildReportHtml } from "@/lib/template";
+import { buildReportHtml, buildReportImageGridHtml } from "@/lib/template";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
@@ -32,10 +32,15 @@ function buildData(sheet: Sheet, comments: DesignSheetComment[], images: Attachm
   const canvasImg = canvasUrl
     ? `<img src="${esc(absUrl(canvasUrl, origin))}" style="max-width:100%;max-height:320px;object-fit:contain;border:1px solid #e2e8f0;border-radius:6px;display:block;margin-bottom:6px;" />`
     : "";
-  const imgTags = images
-    .filter((a) => (a.content_type ?? "").startsWith("image/"))
-    .map((a) => `<img src="${esc(absUrl(a.public_url, origin))}" style="height:110px;max-width:160px;object-fit:contain;border:1px solid #e2e8f0;border-radius:4px;margin:0 4px 4px 0;" />`)
-    .join("");
+  const imgTags = buildReportImageGridHtml(
+    images
+      .filter((a) => (a.content_type ?? "").startsWith("image/"))
+      .map((a) => ({
+        src: absUrl(a.public_url, origin),
+        alt: String(a.file_name ?? sheet.name ?? "design image"),
+      })),
+    { columns: 2, maxHeightMm: 58 },
+  );
   return {
     code:          sheet.code ?? "",
     name:          sheet.name ?? "",
