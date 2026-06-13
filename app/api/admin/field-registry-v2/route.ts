@@ -69,6 +69,8 @@ export type FieldRegistryV2Response = {
   section_tag_rules?: Record<string, string[]>;
   /** ชุดฟิลด์ "แก้เร็ว" ของโมดูล (RelationPeek quick edit) — null = ยังไม่ตั้ง โชว์ทุกฟิลด์ */
   quick_edit_fields?: string[] | null;
+  /** ฟิลด์แสดงชื่อหลักของโมดูล (ปัก 🎯) — ใช้ทำป้ายระบุแถว/ชื่อเรื่อง (ของกลาง) */
+  primary_field?: string | null;
   error:      string | null;
 };
 
@@ -86,7 +88,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
 
   const { data: mod } = await supabase
     .from("erp_modules")
-    .select("id, config")
+    .select("id, config, primary_field")
     .eq("module_key", moduleKey)
     .maybeSingle();
 
@@ -122,6 +124,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<FieldRegis
     layout,
     section_tag_rules: sectionTagRules,
     quick_edit_fields: quickEditFields,
+    primary_field: (mod.primary_field as string | null) ?? null,
     error: null,
   }, { headers: { "Cache-Control": "private, max-age=300" } });
 }

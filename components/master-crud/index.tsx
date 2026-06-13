@@ -508,6 +508,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ไม่งั้นใช้ config.fields ที่ส่งมา (static legacy)
   const [registryFields, setRegistryFields] = useState<FormField[] | null>(null);
   const [registryLayout, setRegistryLayout] = useState<FormLayout>(null);  // กลุ่ม B
+  const [primaryField, setPrimaryField] = useState<string | null>(null);   // ฟิลด์แสดงชื่อหลัก (ปัก 🎯) — ของกลาง
   const [registryLoading, setRegistryLoading] = useState(!!config.moduleKey);
   // กฎ section โชว์เฉพาะแท็ก (whitelist): sectionKey → tagId[]
   const [sectionTagRules, setSectionTagRules] = useState<Record<string, string[]>>({});
@@ -519,7 +520,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     cachedJson<FieldRegistryV2Response>(`/api/admin/field-registry-v2?module=${encodeURIComponent(config.moduleKey)}`)
       .then((res) => {
         if (res.error) console.error("Field Registry load error:", res.error);
-        else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); }
+        else { setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); setPrimaryField(res.primary_field ?? null); }
       })
       .catch((e) => console.error("Field Registry load failed:", e))
       .finally(() => setRegistryLoading(false));
@@ -534,7 +535,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const r = await apiFetch(url);
       const res = (await r.json()) as FieldRegistryV2Response;
       if (!res.error) {
-        setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {});
+        setRegistryFields(res.fields); setRegistryLayout(res.layout ?? null); setSectionTagRules(res.section_tag_rules ?? {}); setPrimaryField(res.primary_field ?? null);
         primeCache(url, res);   // อัปเดต cache ให้ตรงกับของใหม่
       }
     } finally {
@@ -1843,7 +1844,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   };
 
   // F11: header ของ detail view
-  const detailTitle = (form["name_th"] ?? form["name"] ?? form["sku_name"] ?? form[config.uniqueKey ?? ""] ?? form["code"] ?? config.title) as string;
+  // ของกลาง: ป้ายชื่อแถว/เรื่อง — ฟิลด์ปัก 🎯 ก่อน → ชื่อ → ชื่อจริง+สกุล → รหัส (ไม่โชว์ UUID)
+  const pickRowLabel = (rec: Record<string, unknown>): string => {
+    const val = (k?: string | null) => { if (!k) return ""; const v = rec[k]; return v != null && v !== "" ? String(v) : ""; };
+    const first = (...ks: (string | null | undefined)[]) => { for (const k of ks) { const s = val(k); if (s) return s; } return ""; };
+    const byPrimary = val(primaryField); if (byPrimary) return byPrimary;
+    const name = first("name_th", "name", "full_name", "sku_name"); if (name) return name;
+    const fn = first("first_name", "first_name_th"), ln = first("last_name", "last_name_th");
+    if (fn || ln) return `${fn} ${ln}`.trim();
+    return first(config.uniqueKey, "code", "employee_code", "sku");   // "" = ไม่มีชื่อ/รหัส (ผู้เรียกเติม fallback เอง)
+  };
+  const detailTitle = (pickRowLabel(form) || config.title) as string;
   const detailCode  = (form["code"] ?? form["sku"] ?? "") as string;
   const coverKey    = (form["cover_image_r2_key"] as string) || null;
   // หัว detail แบบ compact (บรรทัดเดียว: code + สถานะ) — ไม่เอา hero box ใหญ่
@@ -1990,9 +2001,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           enableCards={true}
           cardConfig={{
             image:    "cover_image_r2_key",
-            primary:  effectiveSearchKeys[0] ?? "name_th",
+            primary:  primaryField ?? effectiveSearchKeys[0] ?? "name_th",
             subtitle: "code",
           }}
+          // ของกลาง: ป้ายระบุแถวใน bulk edit ใช้ฟิลด์ปัก 🎯 → ชื่อ → รหัส (ไม่โชว์ UUID)
+          bulkRowLabel={(r) => { const rec = r as Record<string, unknown>; return pickRowLabel(rec) || String(rec.id ?? ""); }}
           filterFieldOptions={config.moduleKey ? filterFieldOptions : undefined}
           onSetFilterable={config.moduleKey && canEdit ? handleSetFilterable : undefined}
         />
