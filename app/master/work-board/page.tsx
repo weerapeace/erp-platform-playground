@@ -111,6 +111,7 @@ export default function WorkBoardPage() {
 
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<"board" | "table">("board");   // สลับ บอร์ด/ตาราง
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // ผลรวมค่าแรงต่อแผนก
 
@@ -660,12 +661,17 @@ export default function WorkBoardPage() {
           <p className="text-sm text-slate-500 mt-0.5">ติ๊ก <b>เตรียม/ตัด</b> บนการ์ด → ครบทั้งคู่ <b className="text-emerald-600">ไฟเขียว</b> = พร้อมจ่าย → ลากไปวางที่แผนกช่างเพื่อจ่ายงาน</p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
+            <button onClick={() => setViewMode("board")} className={`h-9 px-3 font-medium ${viewMode === "board" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 บอร์ด</button>
+            <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
+          </div>
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
         </div>
       </div>
 
-      {/* Toolbar */}
+      {/* Toolbar — เฉพาะมุมมองบอร์ด */}
+      {viewMode === "board" && (
       <div className="z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit mb-2">
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
         <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
@@ -682,8 +688,12 @@ export default function WorkBoardPage() {
         <ToolBtn onClick={openDeptMgr} title="ตั้งค่าแผนก (เพิ่ม/แก้/ลบ/ซ่อน/หมายเหตุ)">⚙️</ToolBtn>
         <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
       </div>
+      )}
 
-      {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div> : (
+      {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div>
+        : viewMode === "table" ? (
+        <BoardTable pending={board.pending} workOrders={board.workOrders} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
+      ) : (
         <div ref={boardRef} onPointerDown={onBoardDown} onPointerMove={onMove} onPointerUp={onUp}
           className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isMax ? "flex-1" : "h-[calc(100vh-230px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : "cursor-default"}`}
           style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
@@ -1333,6 +1343,78 @@ function WOBody({ w }: { w: WorkOrder }) {
         <span className={`text-[10px] ${daysLeftClass(w.due_date)}`}>⏱ {daysLeftText(w.due_date)}</span>
       </div>
       <div className="text-center font-mono text-[8px] text-slate-300 mt-1">{w.wo_no}</div>
+    </div>
+  );
+}
+
+// ---- รูปย่อในตาราง ----
+function BoardImg({ url }: { url: string | null | undefined }) {
+  if (!url) return <span className="w-9 h-9 shrink-0 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300">📦</span>;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt="" className="w-9 h-9 shrink-0 rounded object-contain bg-slate-50 border border-slate-100" />;
+}
+
+// ---- มุมมองตาราง (สลับจากบอร์ด) — รอจ่าย + จ่ายแล้ว ----
+function BoardTable({ pending, workOrders, onOpenMO, onOpenWO }: {
+  pending: PendingMO[]; workOrders: WorkOrder[]; onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void;
+}) {
+  const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
+  const th = "px-2 py-2 font-medium text-[11px] text-slate-500";
+  return (
+    <div className="space-y-5 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
+      <div>
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">📥 รอจ่าย <span className="text-slate-400">({pending.length})</span></h3>
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50"><tr>
+              <th className={`text-left ${th}`}>สินค้า</th><th className={`text-left ${th}`}>ใบสั่งผลิต</th>
+              <th className={`text-right ${th}`}>จำนวน</th><th className={`text-right ${th}`}>จ่ายแล้ว</th><th className={`text-right ${th}`}>เหลือ</th>
+              <th className={`text-left ${th}`}>กำหนดเสร็จ</th><th className={`text-center ${th}`}>พร้อม</th>
+            </tr></thead>
+            <tbody className="divide-y divide-slate-50">
+              {pending.length === 0 ? <tr><td colSpan={7} className="text-center py-8 text-slate-300">ไม่มีงานรอจ่าย</td></tr>
+                : pending.map((m) => (
+                  <tr key={m.id} onClick={() => onOpenMO(m)} className="hover:bg-blue-50/40 cursor-pointer">
+                    <td className="px-3 py-2"><div className="flex items-center gap-2"><BoardImg url={m.image_url} /><div className="min-w-0"><div className="font-semibold text-slate-800 truncate">{m.product_sku}</div>{m.product_name && m.product_name !== m.product_sku && <div className="text-[11px] text-slate-400 truncate">{m.product_name}</div>}</div></div></td>
+                    <td className="px-2 py-2 font-mono text-[11px] text-slate-500">{m.mo_no}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{fmt(m.qty)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmt(m.dispatched)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-semibold text-rose-600">{fmt(m.remaining)}</td>
+                    <td className="px-2 py-2 text-[12px] whitespace-nowrap">📅 {dueDateText(m.due_date)} <span className={daysLeftClass(m.due_date)}>· {daysLeftText(m.due_date)}</span></td>
+                    <td className="px-2 py-2 text-center">{m.ready ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-slate-700 mb-2">🛠 จ่ายแล้ว — กำลังผลิต <span className="text-slate-400">({wos.length})</span></h3>
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50"><tr>
+              <th className={`text-left ${th}`}>สินค้า</th><th className={`text-left ${th}`}>ใบจ่ายงาน</th><th className={`text-left ${th}`}>แผนก/ช่าง</th>
+              <th className={`text-right ${th}`}>จำนวน</th><th className={`text-right ${th}`}>รับคืน</th>
+              <th className={`text-left ${th}`}>กำหนดเสร็จ</th><th className={`text-center ${th}`}>สถานะ</th>
+            </tr></thead>
+            <tbody className="divide-y divide-slate-50">
+              {wos.length === 0 ? <tr><td colSpan={7} className="text-center py-8 text-slate-300">ยังไม่มีงานที่จ่าย</td></tr>
+                : wos.map((w) => { const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched; return (
+                  <tr key={w.id} onClick={() => onOpenWO(w)} className="hover:bg-blue-50/40 cursor-pointer">
+                    <td className="px-3 py-2"><div className="flex items-center gap-2"><BoardImg url={w.image_url} /><div className="min-w-0"><div className="font-semibold text-slate-800 truncate">{w.product_sku}</div>{w.product_name && w.product_name !== w.product_sku && <div className="text-[11px] text-slate-400 truncate">{w.product_name}</div>}</div></div></td>
+                    <td className="px-2 py-2 font-mono text-[11px] text-slate-500">{w.wo_no}</td>
+                    <td className="px-2 py-2 text-[12px] text-slate-600">{w.department_name ?? "—"}{w.assignee_name ? ` · ${w.assignee_name}` : ""}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{fmt(w.qty)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmt(w.received_qty)}</td>
+                    <td className="px-2 py-2 text-[12px] whitespace-nowrap">📅 {dueDateText(w.due_date)} <span className={daysLeftClass(w.due_date)}>· {daysLeftText(w.due_date)}</span></td>
+                    <td className="px-2 py-2 text-center"><span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span></td>
+                  </tr>
+                );})}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
