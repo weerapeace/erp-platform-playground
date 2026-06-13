@@ -81,6 +81,7 @@ export function LineItemsGrid<T>({
   const [groupBy, setGroupBy] = useState<string>("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [widths, setWidths]   = useState<Record<string, number>>({});
+  const gridRef = useRef<HTMLDivElement>(null);
 
   // โหลด/จำความกว้างคอลัมน์ (localStorage)
   useEffect(() => {
@@ -138,6 +139,22 @@ export function LineItemsGrid<T>({
     const move = (ev: MouseEvent) => setWidths((w) => ({ ...w, [key]: Math.max(50, startW + ev.clientX - startX) }));
     const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
     document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+  };
+
+  // ดับเบิลคลิกขอบคอลัมน์ → ขยายให้พอดีกับเนื้อหากว้างสุด (เหมือน Excel) · ความกว้างเป็นของกลาง (จำผ่าน storageKey)
+  const autoFit = (key: string) => {
+    const root = gridRef.current; if (!root) return;
+    const col = columns.find((c) => c.key === key);
+    const minW = Math.max(col?.minWidth ?? 60, 60);
+    let max = 0;
+    root.querySelectorAll<HTMLElement>(`[data-col="${key}"]`).forEach((cell) => {
+      const span = cell.querySelector<HTMLElement>(":scope > span");
+      const w = span ? span.scrollWidth : cell.scrollWidth;
+      if (w > max) max = w;
+    });
+    const head = root.querySelector<HTMLElement>(`[data-colhead="${key}"]`);
+    if (head && head.scrollWidth > max) max = head.scrollWidth;
+    if (max > 0) setWidths((w) => ({ ...w, [key]: Math.min(600, Math.max(minW, Math.ceil(max) + 28)) }));
   };
 
   const toggleCollapse = (g: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(g)) n.delete(g); else n.add(g); return n; });
@@ -230,7 +247,7 @@ export function LineItemsGrid<T>({
       ) : (
         <div className={`${stickyHeader ? "overflow-auto" : "overflow-x-auto"} border border-slate-200 rounded-lg`}
           style={stickyHeader && maxHeight ? { maxHeight } : undefined}>
-          <div style={{ minWidth }}>
+          <div ref={gridRef} style={{ minWidth }}>
             {/* header */}
             <div style={{ gridTemplateColumns: template }}
               className={`grid bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 ${stickyHeader ? "sticky top-0 z-20" : ""}`}>
@@ -239,11 +256,12 @@ export function LineItemsGrid<T>({
                 <div key={c.key} className="relative border-r border-slate-100 last:border-r-0">
                   <button type="button" disabled={!c.sortable} onClick={() => c.sortable && toggleSort(c.key)}
                     className={`w-full px-2 ${dense ? "py-1" : "py-2"} flex items-center gap-1 ${c.align === "right" ? "justify-end" : c.align === "center" ? "justify-center" : ""} ${c.sortable ? "hover:text-slate-800 cursor-pointer" : "cursor-default"}`}>
-                    <span className="truncate">{c.header}</span>
+                    <span className="truncate" data-colhead={c.key}>{c.header}</span>
                     {sort?.key === c.key && <span className="text-blue-600">{sort.dir === "asc" ? "▲" : "▼"}</span>}
                   </button>
-                  {/* resize handle */}
-                  <span onMouseDown={(e) => startResize(c.key, e)} title="ลากเพื่อปรับขนาด"
+                  {/* resize handle — ลากปรับ / ดับเบิลคลิกขยายพอดี */}
+                  <span onMouseDown={(e) => startResize(c.key, e)} onDoubleClick={() => autoFit(c.key)}
+                    title="ลากเพื่อปรับขนาด · ดับเบิลคลิกเพื่อขยายพอดี — ความกว้างจะใช้กับทุก SKU"
                     className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-blue-300/60" />
                 </div>
               ))}
@@ -320,7 +338,7 @@ function GridRow<T>({
           className="h-9 flex items-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="ลากเพื่อเรียงลำดับ">⠿</button>
       )}
       {columns.map((c) => (
-        <div key={c.key} className={`px-1.5 min-w-0 ${dense ? "py-1" : ""} ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>
+        <div key={c.key} data-col={c.key} className={`px-1.5 min-w-0 ${dense ? "py-1" : ""} ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>
           {c.render
             ? c.render(row, onUpdate, readonly)
             : <span className={`block truncate ${dense ? "text-xs" : "text-sm"} text-slate-700`} title={String(colValue(c, row) ?? "")}>{String(colValue(c, row) ?? "")}</span>}
