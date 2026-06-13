@@ -1214,25 +1214,29 @@ function WOBody({ w }: { w: WorkOrder }) {
   const border = w.brand_color || prodColor(w.product_sku);
   const showName = w.product_name && w.product_name !== w.product_sku;
   return (
-    <div className="bg-white rounded-lg p-2 transition select-none cursor-pointer hover:-translate-y-0.5" style={{ border: `2px solid ${border}`, boxShadow: `5px 5px 0 0 ${border}` }} title="กดเพื่อดูรายละเอียด/รับงานคืน">
-      <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5">
+    <div className="relative bg-white rounded-lg p-2 transition select-none cursor-pointer hover:-translate-y-0.5" style={{ border: `2px solid ${border}`, boxShadow: `5px 5px 0 0 ${border}` }} title="กดเพื่อดูรายละเอียด/รับงานคืน">
+      {/* ช่างที่จ่าย — badge มุมซ้ายบน */}
+      {w.assignee_name && (
+        <span className="absolute -top-2.5 left-2 z-20 inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white shadow-sm truncate max-w-[85%]" style={{ border: `2px solid ${border}`, color: border }} title={w.assignee_name}>
+          {w.assignee_type === "department" ? "🏢" : "👤"} {w.assignee_name}
+        </span>
+      )}
+      <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5 mt-1.5">
         {w.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={w.image_url} alt="" draggable={false} className="w-full h-full object-contain pointer-events-none" /> : <span className="text-slate-300 text-2xl">📦</span>}
         <span className={`absolute top-1 right-1 h-3 w-3 rounded-full ring-2 ring-white ${URG_DOT[urg]}`} />
         <span className={`absolute top-1 left-1 inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium border ${st.cls}`}>{st.label}</span>
-      </div>
-      <div className="flex items-center justify-between gap-1 mb-1">
-        <span className="text-[9px] text-slate-500 truncate max-w-[58%]">{w.assignee_type === "department" ? "🏢 " : "👤 "}{w.assignee_name}</span>
-        <span className="font-mono text-[9px] text-slate-400 truncate">{w.wo_no}</span>
       </div>
       <div className="text-center">
         <div className="text-sm font-bold text-slate-800 leading-tight truncate">{w.product_sku}</div>
         {showName && <div className="text-[10px] text-slate-400 line-clamp-1 leading-tight">{w.product_name}</div>}
         <div className="text-[10px] text-slate-500 mt-0.5">📅 {dueDateText(w.due_date)}</div>
       </div>
-      <div className="flex items-center justify-between gap-1 mt-1.5 pt-1.5 border-t border-slate-100 text-[10px]">
-        <span className="tabular-nums text-slate-600">{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
-        <span className={daysLeftClass(w.due_date)}>⏱ {daysLeftText(w.due_date)}</span>
+      {/* จำนวน — แถบล่างตัวหนาเด่น */}
+      <div className="flex items-center justify-between gap-1 mt-2">
+        <span className="px-2.5 py-1 rounded-lg text-sm font-bold text-white shadow-sm tabular-nums" style={{ background: border }}>{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
+        <span className={`text-[10px] ${daysLeftClass(w.due_date)}`}>⏱ {daysLeftText(w.due_date)}</span>
       </div>
+      <div className="text-center font-mono text-[8px] text-slate-300 mt-1">{w.wo_no}</div>
     </div>
   );
 }
