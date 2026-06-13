@@ -165,6 +165,7 @@ function registryToFieldDef(
     defaultExpression: rf.default_expression,
     inlineEditable:    rf.is_inline_editable,
     bulkEditable:      rf.is_bulk_editable,
+    sensitive:         rf.is_sensitive,
     // Sprint 13
     conditionRules:    rf.condition_rules ?? null,
     // Studio style presets
@@ -320,6 +321,8 @@ export type FieldDef = {
   sortable?: boolean;
   /** เปิด bulk edit สำหรับ field นี้ */
   bulkEditable?: boolean;
+  /** ฟิลด์ข้อมูลลับ (ไม่ให้ bulk edit อัตโนมัติ) */
+  sensitive?: boolean;
   /** config สำหรับ relation field (FK picker) */
   relationConfig?: RelationConfig;
   /** สกุลเงินตายตัวของฟิลด์ (เช่น "THB"/"RMB") — จาก options.currency ในทะเบียนฟิลด์ */
@@ -677,7 +680,47 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const [editingId,   setEditingId]   = useState<string | null>(null);
   // แถวที่แสดงในตาราง (ตามลำดับ) — ใช้ปุ่มเลื่อนรายการก่อนหน้า/ถัดไปในป๊อปอัป
   const navRowsRef = useRef<Row[]>([]);
-  const onVisibleRowsChange = useCallback((rows: Row[]) => { navRowsRef.current = rows; }, []);
+
+  // ---- ค่า many2many ในตาราง (ของกลาง): โหลดลิงก์ junction ของแถวที่โชว์ → แสดงเป็นป้ายในคอลัมน์ ----
+  const m2mFields = useMemo(() => effectiveFields.filter((f) => f.type === "many2many" && (f.relationConfig as Record<string, unknown> | undefined)?.junction_table), [effectiveFields]);
+  const [m2mMap, setM2mMap] = useState<Record<string, Record<string, string[]>>>({});   // rowId → fieldKey → [labels]
+  const m2mLabelRef = useRef<Record<string, Record<string, string>>>({});                 // fieldKey → tgtId → label
+  const m2mSigRef = useRef("");
+  const loadM2mForRows = useCallback(async (rows: Row[]) => {
+    if (m2mFields.length === 0 || rows.length === 0) return;
+    const ids = rows.map((r) => String(r.id));
+    const sig = m2mFields.map((f) => f.key).join(",") + "|" + ids.join(",");
+    if (sig === m2mSigRef.current) return;   // แถว/ฟิลด์เดิม → ไม่โหลดซ้ำ
+    m2mSigRef.current = sig;
+    const next: Record<string, Record<string, string[]>> = {};
+    for (const f of m2mFields) {
+      const rc = (f.relationConfig ?? {}) as Record<string, string>;
+      const junction = rc.junction_table; if (!junction) continue;
+      // โหลด label ของตารางปลายทาง (ครั้งเดียวต่อฟิลด์)
+      if (!m2mLabelRef.current[f.key]) {
+        const labels: Record<string, string> = {};
+        try {
+          const mk = rc.target_module_key ?? rc.target_table ?? "";
+          const lf = rc.target_label_field || "name";
+          const url = mk === "product_families"
+            ? `/api/master-v2/product_families?limit=1000`
+            : `/api/admin/picker?table=${encodeURIComponent(rc.target_table ?? "")}&label=${encodeURIComponent(lf)}&limit=1000`;
+          const j = await apiFetch(url).then((r) => r.json());
+          for (const o of ((j.data ?? j.rows ?? []) as Record<string, unknown>[])) labels[String(o.id)] = String(o.label ?? o[lf] ?? o.name ?? o.id);
+        } catch { /* ignore */ }
+        m2mLabelRef.current[f.key] = labels;
+      }
+      const labels = m2mLabelRef.current[f.key];
+      try {
+        const j = await apiFetch(`/api/admin/schema/m2m-links?junction=${junction}&src_ids=${ids.join(",")}`).then((r) => r.json());
+        const map = (j.map ?? {}) as Record<string, string[]>;
+        for (const id of ids) (next[id] ??= {})[f.key] = (map[id] ?? []).map((t) => labels[t] ?? t.slice(0, 6));
+      } catch { /* ignore */ }
+    }
+    setM2mMap(next);
+  }, [m2mFields]);
+
+  const onVisibleRowsChange = useCallback((rows: Row[]) => { navRowsRef.current = rows; void loadM2mForRows(rows); }, [loadM2mForRows]);
   const [form,        setForm]        = useState<Record<string, unknown>>({});
   // ref ที่ชี้ค่า form ล่าสุดเสมอ — ใช้ใน save() เพื่อกัน stale closure (โดยเฉพาะ m2m sync)
   const formRef = useRef<Record<string, unknown>>({});
@@ -1179,17 +1222,17 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   const columns: ColumnDef<Row>[] = useMemo(() => {
     // default ทุกตาราง = โชว์ทุกคอลัมน์ (owner ต้องการเห็นครบ) — หน้าไหนอยากจำกัดให้ตั้ง defaultShowAllColumns:false
     const showAll = config.defaultShowAllColumns !== false;
-    // one2many/many2many = ลิสต์ความสัมพันธ์ → ไม่เหมาะเป็นคอลัมน์ตาราง (ดูเต็มในหน้า detail)
+    // one2many = ลิสต์ลูกหนัก → ไม่เหมาะเป็นคอลัมน์ (ดูเต็มในหน้า detail) · many2many = โชว์เป็นป้าย (โหลดผ่าน m2mMap)
     const tableFields = effectiveFields
-      .filter(f => f.type !== "one2many" && f.type !== "many2many")
+      .filter(f => f.type !== "one2many")
       // กัน column id ซ้ำ: ถ้ามีคอลัมน์ "สถานะ" (activeField) เติมท้ายอยู่แล้ว → ไม่เอา field activeField จาก registry มาเป็นคอลัมน์ซ้ำ
       .filter(f => config.hideActiveStatus ? true : f.key !== activeField)
       .filter(f => showAll ? true : f.colSize !== undefined);
     const cols: ColumnDef<Row>[] = tableFields.map(f => ({
       id: f.key, accessorKey: f.key, header: f.label, size: f.colSize ?? f.width ?? 150,
-      enableSorting: f.sortable !== false,
+      enableSorting: f.type === "many2many" ? false : f.sortable !== false,
       meta: {
-        filterable: f.filterable ?? false,
+        filterable: f.type === "many2many" ? false : (f.filterable ?? false),
         filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "boolean" ? "boolean" : f.type === "select" ? "select" : "text"),
         ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: o })) } : {}),
         // computed + ตั้ง "แสดงผลรวมท้ายตาราง" → sum สูตรทุกแถวในหน้านี้
@@ -1199,7 +1242,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               f.computeFormat, f.computeDecimals) }
           : f.type === "number" && f.summarize ? { summary: "sum" as const } : {}),
       },
-      cell: f.cellRender
+      cell: f.type === "many2many"
+        ? ({ row }) => {
+            const vals = m2mMap[String((row.original as Record<string, unknown>).id)]?.[f.key] ?? [];
+            if (vals.length === 0) return <span className="text-slate-300">—</span>;
+            return <div className="flex flex-wrap gap-1">{vals.map((v, i) => (
+              <span key={i} className="px-1.5 py-0.5 rounded-full text-[11px] bg-blue-50 text-blue-700 border border-blue-100">{v}</span>
+            ))}</div>;
+          }
+        : f.cellRender
         ? ({ getValue, row }) => f.cellRender!(getValue(), row.original as Record<string, unknown>)
         : ({ getValue }) => {
             const v = getValue();
@@ -1225,7 +1276,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     }
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveFields, activeField, config.hideActiveStatus]);
+  }, [effectiveFields, activeField, config.hideActiveStatus, m2mMap]);
 
   // F30: ตัวเลือก field สำหรับปุ่ม "เลือก field กรอง"
   // จำกัดเฉพาะ field ที่เป็น column ในตาราง (colSize) — เพราะการ์ดกรองสร้างจาก column ที่โชว์
@@ -1279,7 +1330,14 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       acts.push({ label: "กู้คืน", icon: "↩", onClick: restore, show: (r: Row) => !r[activeField] });
       acts.push({ label: "ลบ", icon: "🗑", onClick: openDelete, variant: "danger" });
     }
-    return acts;
+    const extraCount = config.extraRowActions?.length ?? 0;
+    return acts.map((action, index) => {
+      if (action.id) return action;
+      if (index === 0) return { ...action, id: "open-edit", iconKey: "edit", defaultPlacement: "inline" };
+      if (canEdit && index === extraCount + 1) return { ...action, id: "restore", iconKey: "convert", defaultPlacement: "menu" };
+      if (canEdit && index === extraCount + 2) return { ...action, id: "delete", iconKey: "ban", defaultPlacement: "menu" };
+      return action;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEdit, activeField, config.extraRowActions]);
 
@@ -1438,12 +1496,18 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, [editingId, onInlineEdit, effectiveFields]);
 
   // ---- Bulk edit fields ----
-  // Bulk edit (ของกลาง): ตั้งค่ารายฟิลด์ใน Studio (toggle) — เก็บใน registry (is_bulk_editable)
-  // ไม่ derive/hardcode รายชื่อ field ในโค้ด → admin คุมเองว่าจะให้แก้ field ไหนแบบ bulk
+  // Bulk edit (ของกลาง): ปรับรายฟิลด์ได้ใน Studio (toggle is_bulk_editable)
+  // ถ้าโมดูลยังไม่เปิดฟิลด์ไหนเลย → ใช้ค่าเริ่มต้นอัตโนมัติ = ฟิลด์ที่แก้ได้ + ไม่ลับ + ไม่ใช่รหัส (uniqueKey)
+  // → ทุกตารางมี bulk edit ทันที แต่ admin ยังคุมรายฟิลด์ทีหลังได้ (พอ tick ฟิลด์ใดฟิลด์หนึ่ง = ใช้เฉพาะที่ tick)
   const bulkEditFields: BulkEditField[] = useMemo(() => {
     if (!canEdit) return [];
+    const simple = (f: typeof effectiveFields[number]) => ["text", "number", "boolean", "select", "relation"].includes(f.type) && (f.type !== "relation" || !!f.relationConfig);
+    const anyFlagged = effectiveFields.some((f) => f.bulkEditable === true);
+    const uniq = config.uniqueKey ?? "code";
     return effectiveFields
-      .filter((f) => f.bulkEditable === true && ["text", "number", "boolean", "select", "relation"].includes(f.type) && (f.type !== "relation" || !!f.relationConfig))
+      .filter((f) => simple(f) && (anyFlagged
+        ? f.bulkEditable === true
+        : (!f.readonly && !f.sensitive && f.key !== uniq)))
       .map((f) => ({
         key: f.key,
         label: f.label,
@@ -1451,7 +1515,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         options: f.type === "select" && f.options ? f.options.map((o) => ({ value: o, label: o })) : undefined,
         relationConfig: f.type === "relation" ? f.relationConfig : undefined,
       }));
-  }, [canEdit, effectiveFields]);
+  }, [canEdit, effectiveFields, config.uniqueKey]);
 
   const onBulkEdit = useCallback(async (
     edits: { row: Row; changes: Record<string, unknown> }[]
