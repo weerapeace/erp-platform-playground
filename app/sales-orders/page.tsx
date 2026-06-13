@@ -14,6 +14,33 @@ import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
 import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
+import { format as formatMoney } from "@/lib/money";
+import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
+
+const randId = () => String(Math.random()).slice(2);
+
+/** รวมรายการสินค้า: SKU เดียวกัน → บวกจำนวน, ใช้ราคาแรกที่ไม่ใช่ 0, รวมหมายเหตุที่มา */
+function mergeLines(base: EditorLine[], incoming: EditorLine[]): EditorLine[] {
+  const out: EditorLine[] = base.filter(l => l.product_name.trim()).map(l => ({ ...l }));
+  const idxBySku = new Map<string, number>();
+  out.forEach((l, i) => { const k = l.sku?.trim(); if (k) idxBySku.set(k, i); });
+  for (const inc of incoming) {
+    const k = inc.sku?.trim();
+    if (k && idxBySku.has(k)) {
+      const t = out[idxBySku.get(k)!];
+      t.qty = Number(t.qty) + Number(inc.qty);
+      if (!t.unit_price && inc.unit_price) t.unit_price = inc.unit_price;
+      const refs = new Set(
+        [...(t.note ? t.note.split(" · ") : []), ...(inc.note ? inc.note.split(" · ") : [])].filter(Boolean),
+      );
+      t.note = [...refs].join(" · ");
+    } else {
+      out.push({ ...inc });
+      if (k) idxBySku.set(k, out.length - 1);
+    }
+  }
+  return out.length ? out : [emptyLine()];
+}
 
 // ---- helpers ----
 
@@ -40,6 +67,8 @@ type FormState = {
   header_discount_value: number;
   shipping_fee: number;
   note: string;
+  payment_terms: string;
+  customer_po_no: string;
   lines: EditorLine[];
 };
 
@@ -48,7 +77,7 @@ const EMPTY: FormState = {
   order_date: new Date().toISOString().slice(0, 10), expected_ship_date: "",
   vat_rate: 7, vat_included: false, wht_rate: 0,
   header_discount_type: "percent", header_discount_value: 0, shipping_fee: 0,
-  note: "", lines: [emptyLine()],
+  note: "", payment_terms: "", customer_po_no: "", lines: [emptyLine()],
 };
 
 const formSnapshot = (form: FormState) => JSON.stringify({
@@ -81,6 +110,14 @@ export default function SalesOrdersPage() {
   const [formErr,   setFormErr]   = useState<string | null>(null);
   const [saving,    setSaving]    = useState(false);
 
+  // ดึงจากเอกสารต้นทาง
+  const [pickerMode,   setPickerMode]   = useState<"quotation" | "mo" | null>(null);
+  const [pulledQuotes, setPulledQuotes] = useState<{ id: string; label: string }[]>([]);
+  const [pulling,      setPulling]      = useState(false);
+
+  // คลังหลัก (default ตอนสร้าง)
+  const [defaultWarehouse, setDefaultWarehouse] = useState<WarehousePickerValue | null>(null);
+
   // detail drawer
   const [detail,        setDetail]        = useState<SODetail | null>(null);
   const [detailOpen,    setDetailOpen]    = useState(false);
@@ -107,6 +144,19 @@ export default function SalesOrdersPage() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
+
+  // โหลดคลังหลัก (WH-MAIN) ไว้เป็นค่าเริ่มต้นตอนสร้าง SO
+  useEffect(() => {
+    if (!canView) return;
+    apiFetch("/api/master/warehouses?limit=50")
+      .then(r => r.json())
+      .then(j => {
+        const list = (j.data ?? []) as WarehousePickerValue[];
+        const main = list.find(w => w.code === "WH-MAIN") ?? null;
+        if (main) setDefaultWarehouse(main);
+      })
+      .catch(() => {});
+  }, [canView]);
 
   // ---- Open detail ----
   const openDetail = async (id: string) => {
@@ -141,6 +191,8 @@ export default function SalesOrdersPage() {
       header_discount_type: so.header_discount_type, header_discount_value: so.header_discount_value,
       shipping_fee: so.shipping_fee,
       note: so.note ?? "",
+      payment_terms: (so as unknown as { payment_terms?: string }).payment_terms ?? "",
+      customer_po_no: (so as unknown as { customer_po_no?: string }).customer_po_no ?? "",
       lines: so.lines.map(l => ({
         tempId: l.id ?? String(Math.random()),
         product_id: l.product_id ?? null, sku: l.sku ?? null, product_name: l.product_name,
@@ -152,12 +204,87 @@ export default function SalesOrdersPage() {
     };
     setForm(nextForm);
     setFormBaseline(formSnapshot(nextForm));
+    setPulledQuotes([]);
     setFormErr(null); setDetailOpen(false); setModalOpen(true);
   };
 
   const openCreate = () => {
-    const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", lines: [emptyLine()] };
-    setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setFormErr(null); setModalOpen(true);
+    const nextForm = { ...EMPTY, sale_person_name: user?.name ?? "", warehouse: defaultWarehouse, lines: [emptyLine()] };
+    setEditingId(null); setForm(nextForm); setFormBaseline(formSnapshot(nextForm)); setPulledQuotes([]); setFormErr(null); setModalOpen(true);
+  };
+
+  // ---- ดึงจากเอกสารต้นทาง ----
+  const handlePicked = async (rows: SourceDocRow[]) => {
+    if (pickerMode === "mo") {
+      const incoming: EditorLine[] = rows.map(r => ({
+        tempId: randId(), product_id: null,
+        sku: (r.product_sku as string) ?? null,
+        product_name: (r.product_name as string) || (r.product_sku as string) || "สินค้า",
+        image_url: null, image_key: null,
+        qty: Number(r.qty) || 1, unit: "ชิ้น", unit_price: 0,
+        discount_type: "percent", discount_value: 0, tax_code: null,
+        note: `จาก ${r.mo_no ?? "ใบสั่งผลิต"}`,
+      }));
+      setForm(f => ({ ...f, lines: mergeLines(f.lines, incoming) }));
+      flash(`ดึง ${rows.length} ใบสั่งผลิตแล้ว (ราคา = 0 กรุณากรอกราคาขาย)`);
+      return;
+    }
+
+    // quotation — บังคับลูกค้าเดียวกัน
+    const custSet = new Set([form.customer?.id, ...rows.map(r => r.customer_id as string)].filter(Boolean));
+    if (custSet.size > 1) {
+      flash("ใบเสนอราคาที่เลือกเป็นคนละลูกค้า — เลือกได้เฉพาะลูกค้าเดียวกัน");
+      return;
+    }
+    setPulling(true);
+    try {
+      const details = await Promise.all(rows.map(r =>
+        apiFetch(`/api/quotations/${r.id}`).then(res => res.json()).then(j => {
+          if (j.error) throw new Error(j.error);
+          return j.data as Record<string, unknown>;
+        }),
+      ));
+      const first = details[0];
+      const incoming: EditorLine[] = details.flatMap(d => {
+        const qn = (d.quote_number as string) ?? "ใบเสนอราคา";
+        return ((d.lines as Record<string, unknown>[]) ?? []).map(l => ({
+          tempId: randId(),
+          product_id: (l.product_id as string) ?? null,
+          sku: (l.sku as string) ?? null,
+          product_name: (l.product_name as string) || "",
+          image_url: null, image_key: null,
+          qty: Number(l.qty) || 0,
+          unit: (l.unit as string) || "ชิ้น",
+          unit_price: Number(l.unit_price) || 0,
+          discount_type: ((l.discount_type as string) === "amount" ? "amount" : "percent") as "percent" | "amount",
+          discount_value: Number(l.discount_value) || 0,
+          tax_code: (l.tax_code as string) ?? null,
+          note: `จาก ${qn}`,
+        }));
+      });
+      setForm(f => ({
+        ...f,
+        customer: f.customer ?? (first.customer_id ? {
+          id: first.customer_id as string, code: (first.customer_code as string) ?? null, name: (first.customer_name as string) ?? "",
+        } as CustomerPickerValue : null),
+        sale_person_name: f.sale_person_name || ((first.sale_person_name as string) ?? ""),
+        vat_rate: first.vat_rate != null ? Number(first.vat_rate) : f.vat_rate,
+        vat_included: first.vat_included != null ? Boolean(first.vat_included) : f.vat_included,
+        wht_rate: first.wht_rate != null ? Number(first.wht_rate) : f.wht_rate,
+        header_discount_type: ((first.header_discount_type as string) === "amount" ? "amount" : "percent"),
+        header_discount_value: first.header_discount_value != null ? Number(first.header_discount_value) : f.header_discount_value,
+        shipping_fee: first.shipping_fee != null ? Number(first.shipping_fee) : f.shipping_fee,
+        lines: mergeLines(f.lines, incoming),
+      }));
+      setPulledQuotes(prev => {
+        const seen = new Set(prev.map(p => p.id));
+        const add = rows.filter(r => !seen.has(r.id)).map(r => ({ id: r.id, label: (r.quote_number as string) ?? "ใบเสนอราคา" }));
+        return [...prev, ...add];
+      });
+      flash(`ดึง ${rows.length} ใบเสนอราคาแล้ว`);
+    } catch (err) {
+      flash(err instanceof Error ? err.message : "ดึงข้อมูลไม่สำเร็จ");
+    } finally { setPulling(false); }
   };
 
   // ---- Save ----
@@ -179,6 +306,8 @@ export default function SalesOrdersPage() {
         header_discount_value: form.header_discount_value,
         shipping_fee: form.shipping_fee,
         note: form.note || null,
+        payment_terms: form.payment_terms || null,
+        customer_po_no: form.customer_po_no || null,
       };
       const lines = form.lines.map(l => ({
         product_id: l.product_id, sku: l.sku, product_name: l.product_name,
@@ -186,15 +315,21 @@ export default function SalesOrdersPage() {
         discount_type: l.discount_type, discount_value: l.discount_value,
         tax_code: l.tax_code, note: l.note,
       }));
-      const url = editingId ? `/api/sales-orders/${editingId}` : "/api/sales-orders";
+      const usingSources = !editingId && pulledQuotes.length > 0;
+      const url = editingId
+        ? `/api/sales-orders/${editingId}`
+        : usingSources ? "/api/sales-orders/from-sources" : "/api/sales-orders";
       const method = editingId ? "PATCH" : "POST";
+      const payload = usingSources
+        ? { header, lines, quote_ids: pulledQuotes.map(q => q.id), actor: user?.name }
+        : { header, lines, actor: user?.name };
       const res = await apiFetch(url, {
         method, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ header, lines, actor: user?.name }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      flash(editingId ? "บันทึกแล้ว" : "สร้าง SO ใหม่");
+      flash(editingId ? "บันทึกแล้ว" : usingSources ? `สร้าง SO + ปิดใบเสนอราคา ${pulledQuotes.length} ใบแล้ว` : "สร้าง SO ใหม่");
       setModalOpen(false);
       await fetchList();
     } catch (err) { setFormErr(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
@@ -255,6 +390,20 @@ export default function SalesOrdersPage() {
     {
       id: "line_count", accessorKey: "line_count", header: "รายการ", size: 80,
       cell: ({ getValue }) => <span className="text-xs text-slate-500">{getValue() as number}</span>,
+    },
+    {
+      id: "actions", header: "", size: 120, enableSorting: false,
+      cell: ({ row }) => (
+        <a
+          href={`/print/sales-order/${row.original.id}`}
+          target="_blank" rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          title="พิมพ์ใบเสร็จรับเงิน/ใบกำกับภาษี"
+          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+        >
+          🧾 ใบกำกับภาษี
+        </a>
+      ),
     },
   ], []);
 
@@ -342,7 +491,7 @@ export default function SalesOrdersPage() {
             {detail.so_number && (
               <a href={`/print/sales-order/${detail.id}`} target="_blank" rel="noopener noreferrer"
                 className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center">
-                🖨 พิมพ์
+                🧾 ใบเสร็จ/ใบกำกับภาษี
               </a>
             )}
             {detail.status === "draft" && (
@@ -410,7 +559,7 @@ export default function SalesOrdersPage() {
               discount_type: l.discount_type ?? "percent",
               discount_value: l.discount_value ?? 0,
               tax_code: l.tax_code ?? null,
-            }))} onChange={() => {}} readonly />
+            }))} onChange={() => {}} readonly layout="table" />
 
             {/* Totals */}
             <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-4 grid grid-cols-2 gap-x-6">
@@ -447,117 +596,180 @@ export default function SalesOrdersPage() {
       {/* Create / Edit modal */}
       <ERPModal open={modalOpen} onClose={() => !saving && setModalOpen(false)} size="xl"
         hasUnsavedChanges={formDirty && !saving}
-        title={editingId ? "แก้ SO" : "สร้าง SO ใหม่"}
+        title={editingId ? "แก้ไข SO" : "สร้าง SO ใหม่"}
+        description="กรอกข้อมูลลูกค้า เลือกสินค้า แล้วระบบจะคำนวณภาษีและยอดรวมให้อัตโนมัติ"
         footer={
           <>
+            <div className="mr-auto flex items-baseline gap-2">
+              <span className="text-xs text-slate-500">ยอดรวมทั้งสิ้น</span>
+              <span className="font-mono text-lg font-semibold tabular-nums text-blue-700">
+                {formatMoney(previewTotals.grand_total)}
+              </span>
+            </div>
             <button onClick={() => setModalOpen(false)} disabled={saving}
-              className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
             <button onClick={save} disabled={saving}
-              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {saving ? "..." : "บันทึก"}
+              className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "กำลังบันทึก..." : editingId ? "บันทึกการแก้ไข" : "สร้าง SO"}
             </button>
           </>
         }>
-        <div className="space-y-4">
+        <div className="space-y-3">
           {formErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <span className="text-xs font-medium text-slate-600">ลูกค้า *</span>
-              <div className="mt-0.5">
-                <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
-              </div>
-              {form.customer && (
-                <RecordPeekLink
-                  moduleKey="partners-v2"
-                  recordId={form.customer.id}
-                  label={form.customer.code ? `${form.customer.code} - ${form.customer.name}` : form.customer.name}
-                />
+          {/* ลัด: ดึงจากเอกสารต้นทาง (เฉพาะตอนสร้างใหม่) */}
+          {!editingId && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-blue-200 bg-blue-50/40 px-3 py-2">
+              <span className="text-xs font-medium text-slate-500">เริ่มจากเอกสารเดิม:</span>
+              <button type="button" disabled={pulling} onClick={() => setPickerMode("quotation")}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+                📋 ดึงจากใบเสนอราคา
+              </button>
+              <button type="button" disabled={pulling} onClick={() => setPickerMode("mo")}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
+                🏭 ดึงจากใบสั่งผลิต
+              </button>
+              {pulling && <span className="text-xs text-slate-400">กำลังดึง...</span>}
+              {pulledQuotes.length > 0 && (
+                <div className="flex w-full flex-wrap items-center gap-1.5 border-t border-blue-100 pt-2">
+                  <span className="text-[11px] text-slate-500">จะปิดเป็น &quot;ผ่าน&quot; เมื่อบันทึก:</span>
+                  {pulledQuotes.map(q => (
+                    <span key={q.id} className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                      ✓ {q.label}
+                    </span>
+                  ))}
+                  <button type="button" onClick={() => setPulledQuotes([])}
+                    className="ml-1 text-[11px] text-slate-400 underline hover:text-slate-600">ยกเลิกการผูก</button>
+                </div>
               )}
             </div>
-            <div>
-              <span className="text-xs font-medium text-slate-600">คลังต้นทาง <span className="text-amber-600">(สำหรับ inventory)</span></span>
-              <div className="mt-0.5">
-                <WarehousePicker value={form.warehouse} onChange={(v) => setForm({ ...form, warehouse: v })} />
+          )}
+
+          {/* 1) ข้อมูลเอกสาร */}
+          <SectionCard step={1} title="ข้อมูลเอกสาร" subtitle="ลูกค้าและรายละเอียดการสั่งซื้อ">
+            <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <FieldLabel required>ลูกค้า</FieldLabel>
+                <div className="mt-0.5">
+                  <CustomerPicker value={form.customer} onChange={(v) => setForm({ ...form, customer: v })} />
+                </div>
+                {form.customer && (
+                  <RecordPeekLink
+                    moduleKey="partners-v2"
+                    recordId={form.customer.id}
+                    label={form.customer.code ? `${form.customer.code} - ${form.customer.name}` : form.customer.name}
+                  />
+                )}
+              </div>
+              <div>
+                <FieldLabel hint="ไม่บังคับ">เซลส์ผู้ดูแล</FieldLabel>
+                <div className="mt-0.5">
+                  <EmployeePicker
+                    value={form.sale_person_name ? { id: "", code: null, name: form.sale_person_name } as EmployeePickerValue : null}
+                    onChange={(v: EmployeePickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
+                  />
+                </div>
+              </div>
+              <div>
+                <FieldLabel hint="ใช้ตัดสต๊อก">คลังต้นทาง</FieldLabel>
+                <div className="mt-0.5">
+                  <WarehousePicker value={form.warehouse} onChange={(v) => setForm({ ...form, warehouse: v })} />
+                </div>
+              </div>
+              <div>
+                <FieldLabel>วันที่สั่ง</FieldLabel>
+                <div className="mt-0.5">
+                  <DateInput value={form.order_date} onChange={(iso) => setForm({ ...form, order_date: iso })} />
+                </div>
+              </div>
+              <div>
+                <FieldLabel hint="ไม่บังคับ">วันที่ส่งคาด</FieldLabel>
+                <div className="mt-0.5">
+                  <DateInput value={form.expected_ship_date} onChange={(iso) => setForm({ ...form, expected_ship_date: iso })} />
+                </div>
+              </div>
+              <div>
+                <FieldLabel hint="ไม่บังคับ">เลขที่ใบสั่งซื้อลูกค้า (PO No)</FieldLabel>
+                <input value={form.customer_po_no} onChange={e => setForm({ ...form, customer_po_no: e.target.value })}
+                  placeholder="เลข PO ของลูกค้า (ถ้ามี)"
+                  className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
+              </div>
+              <div>
+                <FieldLabel hint="ไม่บังคับ">กำหนดชำระเงิน</FieldLabel>
+                <input value={form.payment_terms} onChange={e => setForm({ ...form, payment_terms: e.target.value })}
+                  placeholder="เช่น เงินสด, เครดิต 30 วัน"
+                  className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
               </div>
             </div>
-            <div>
-              <span className="text-xs font-medium text-slate-600">เซลส์ <span className="text-slate-400">(พนักงาน — ไม่บังคับ)</span></span>
-              <div className="mt-0.5">
-                <EmployeePicker
-                  value={form.sale_person_name ? { id: "", code: null, name: form.sale_person_name } as EmployeePickerValue : null}
-                  onChange={(v: EmployeePickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
-                />
+          </SectionCard>
+
+          {/* 2) รายการสินค้า (ของกลาง — โหมดตาราง) */}
+          <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="table" />
+
+          {/* 3) ภาษีและส่วนลด */}
+          <SectionCard step={3} title="ภาษีและส่วนลด" subtitle="ตั้งค่า VAT, หัก ณ ที่จ่าย, ค่าจัดส่ง และส่วนลดท้ายบิล">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-2 md:grid-cols-3">
+              <div>
+                <FieldLabel>ฐานราคา VAT</FieldLabel>
+                <div className="mt-0.5 inline-flex h-9 w-full rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs">
+                  {[
+                    { v: false, label: "ราคายังไม่รวม" },
+                    { v: true, label: "ราคารวม VAT" },
+                  ].map((opt) => (
+                    <button key={String(opt.v)} type="button"
+                      onClick={() => setForm({ ...form, vat_included: opt.v })}
+                      className={`flex-1 rounded-md font-medium transition ${
+                        form.vat_included === opt.v ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                      }`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-              {user?.name && (
-                <p className="mt-1 text-[11px] text-slate-400">
-                  ค่าเริ่มต้นคือ user ที่ login: {user.name}
-                </p>
-              )}
-            </div>
-            <div>
-              <span className="text-xs font-medium text-slate-600">วันที่สั่ง</span>
-              <div className="mt-0.5">
-                <DateInput value={form.order_date} onChange={(iso) => setForm({ ...form, order_date: iso })} />
+              <NumField label="VAT" suffix="%" value={form.vat_rate}
+                onChange={(n) => setForm({ ...form, vat_rate: n })} />
+              <NumField label="หัก ณ ที่จ่าย (WHT)" suffix="%" value={form.wht_rate}
+                onChange={(n) => setForm({ ...form, wht_rate: n })} />
+              <NumField label="ค่าจัดส่ง" prefix="฿" value={form.shipping_fee}
+                onChange={(n) => setForm({ ...form, shipping_fee: n })} />
+              <div className="col-span-2 md:col-span-1">
+                <FieldLabel>ส่วนลดท้ายบิล</FieldLabel>
+                <div className="mt-0.5 flex items-center rounded-lg border border-slate-200 bg-white focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-100">
+                  <input type="number" value={form.header_discount_value}
+                    onChange={e => setForm({ ...form, header_discount_value: parseFloat(e.target.value) || 0 })}
+                    className="h-9 w-full bg-transparent px-3 text-right text-sm tabular-nums outline-none" />
+                  <select value={form.header_discount_type}
+                    onChange={e => setForm({ ...form, header_discount_type: e.target.value as "percent" | "amount" })}
+                    className="h-9 shrink-0 border-l border-slate-200 bg-slate-50 px-2 text-sm outline-none rounded-r-lg">
+                    <option value="percent">%</option><option value="amount">฿</option>
+                  </select>
+                </div>
               </div>
+              <label className="col-span-2 block md:col-span-3">
+                <FieldLabel hint="ไม่บังคับ">หมายเหตุ</FieldLabel>
+                <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
+                  placeholder="เงื่อนไขการชำระเงิน, ที่อยู่จัดส่ง ฯลฯ"
+                  className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
+              </label>
             </div>
-            <div>
-              <span className="text-xs font-medium text-slate-600">วันที่ส่งคาด</span>
-              <div className="mt-0.5">
-                <DateInput value={form.expected_ship_date} onChange={(iso) => setForm({ ...form, expected_ship_date: iso })} />
-              </div>
-            </div>
+          </SectionCard>
+
+          {/* 4) สรุปยอด (ของกลาง) — ล็อกค้างล่างสุดของ popup */}
+          <div className="sticky bottom-0 z-10 -mx-1 bg-white/95 pt-2 backdrop-blur supports-[backdrop-filter]:bg-white/80">
+            <SalesTotalsPreview result={previewTotals} />
           </div>
-
-          <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} />
-
-          <div className="grid grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg">
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">VAT %</span>
-              <input type="number" value={form.vat_rate} onChange={e => setForm({ ...form, vat_rate: parseFloat(e.target.value) || 0 })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">รวม VAT</span>
-              <div className="h-8 mt-0.5 flex items-center">
-                <input type="checkbox" checked={form.vat_included} onChange={e => setForm({ ...form, vat_included: e.target.checked })}
-                  className="rounded border-slate-300" />
-                <span className="ml-2 text-xs">{form.vat_included ? "Included" : "Excluded"}</span>
-              </div>
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">WHT %</span>
-              <input type="number" value={form.wht_rate} onChange={e => setForm({ ...form, wht_rate: parseFloat(e.target.value) || 0 })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-slate-600">ค่าจัดส่ง</span>
-              <input type="number" value={form.shipping_fee} onChange={e => setForm({ ...form, shipping_fee: parseFloat(e.target.value) || 0 })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-            <div className="block col-span-2">
-              <span className="text-xs font-medium text-slate-600">ส่วนลดท้ายบิล</span>
-              <div className="flex gap-1 mt-0.5">
-                <input type="number" value={form.header_discount_value}
-                  onChange={e => setForm({ ...form, header_discount_value: parseFloat(e.target.value) || 0 })}
-                  className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded" />
-                <select value={form.header_discount_type}
-                  onChange={e => setForm({ ...form, header_discount_type: e.target.value as "percent" | "amount" })}
-                  className="w-16 h-8 px-1 text-xs border border-slate-200 rounded bg-white">
-                  <option value="percent">%</option><option value="amount">฿</option>
-                </select>
-              </div>
-            </div>
-            <label className="block col-span-2">
-              <span className="text-xs font-medium text-slate-600">หมายเหตุ</span>
-              <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
-                className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded" />
-            </label>
-          </div>
-
-          <SalesTotalsPreview result={previewTotals} />
         </div>
       </ERPModal>
+
+      {/* ตัวเลือกเอกสารต้นทาง (ของกลาง) */}
+      {pickerMode && (
+        <SourceDocPickerModal
+          open={pickerMode !== null}
+          mode={pickerMode}
+          onClose={() => setPickerMode(null)}
+          onConfirm={handlePicked}
+        />
+      )}
 
       {/* Cancel confirm */}
       <ERPModal open={cancelTarget !== null} onClose={() => setCancelTarget(null)} size="md"
@@ -604,5 +816,50 @@ function Row({ label, value, bold, primary, emerald }: { label: string; value: s
       <span className={`text-xs ${primary ? "text-blue-700" : emerald ? "text-emerald-700" : "text-slate-600"}`}>{label}</span>
       <span className={`tabular-nums font-mono text-xs ${primary ? "text-lg text-blue-700" : emerald ? "text-emerald-700" : "text-slate-800"}`}>{value}</span>
     </div>
+  );
+}
+
+// ---- form section helpers (สไตล์การ์ดมาตรฐานเดียวกันทุกหมวด) ----
+function SectionCard({ step, title, subtitle, children }: {
+  step: number; title: string; subtitle?: string; children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-1.5">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-semibold text-blue-700">
+          {step}
+        </span>
+        <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+        {subtitle && <span className="text-[11px] text-slate-400">· {subtitle}</span>}
+      </div>
+      <div className="p-3">{children}</div>
+    </section>
+  );
+}
+
+function FieldLabel({ children, required, hint }: { children: React.ReactNode; required?: boolean; hint?: string }) {
+  return (
+    <span className="text-xs font-medium text-slate-600">
+      {children}
+      {required && <span className="ml-0.5 text-red-500">*</span>}
+      {hint && <span className="ml-1 font-normal text-slate-400">({hint})</span>}
+    </span>
+  );
+}
+
+function NumField({ label, value, onChange, prefix, suffix }: {
+  label: string; value: number; onChange: (n: number) => void; prefix?: string; suffix?: string;
+}) {
+  return (
+    <label className="block">
+      <FieldLabel>{label}</FieldLabel>
+      <div className="mt-0.5 flex items-center rounded-lg border border-slate-200 bg-white focus-within:border-blue-400 focus-within:ring-1 focus-within:ring-blue-100">
+        {prefix && <span className="pl-3 text-sm text-slate-400">{prefix}</span>}
+        <input type="number" value={value}
+          onChange={e => onChange(parseFloat(e.target.value) || 0)}
+          className="h-9 w-full bg-transparent px-3 text-right text-sm tabular-nums outline-none" />
+        {suffix && <span className="pr-3 text-sm text-slate-400">{suffix}</span>}
+      </div>
+    </label>
   );
 }

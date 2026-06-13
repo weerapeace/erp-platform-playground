@@ -82,10 +82,13 @@ export function SOLineEditor({
   lines,
   onChange,
   readonly,
+  layout = "card",
 }: {
   lines: EditorLine[];
   onChange: (lines: EditorLine[]) => void;
   readonly?: boolean;
+  /** "card" (default) = การ์ดต่อรายการ · "table" = ตารางแก้ไขในแถว */
+  layout?: "card" | "table";
 }) {
   const update = (i: number, patch: Partial<EditorLine>) => {
     onChange(lines.map((l, idx) => idx === i ? { ...l, ...patch } : l));
@@ -100,6 +103,126 @@ export function SOLineEditor({
       : l.discount_value;
     return Math.max(0, sub - disc);
   };
+
+  const applyPick = (i: number, p: SkuPickerValue | null, current: EditorLine) => {
+    if (!p) {
+      update(i, { product_id: null, sku: null, product_name: "", image_url: null, image_key: null });
+      return;
+    }
+    update(i, {
+      product_id: p.id, sku: p.code, product_name: p.name,
+      image_url: p.image_url ?? null, image_key: p.image_key ?? null,
+      unit_price: p.list_price ?? current.unit_price ?? 0,
+      unit: p.uom_name ?? current.unit,
+    });
+  };
+
+  const pickerValueOf = (l: EditorLine): SkuPickerValue | null =>
+    l.product_name
+      ? ({ id: l.product_id ?? "", code: l.sku ?? "", name: l.product_name,
+           list_price: l.unit_price, uom_name: l.unit,
+           image_url: lineImageUrl(l), image_key: l.image_key ?? null } satisfies SkuPickerValue)
+      : null;
+
+  // ===== โหมดตาราง (แก้ไขในแถว) =====
+  if (layout === "table") {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-1.5">
+          <h3 className="text-sm font-semibold text-slate-800">
+            รายการสินค้า <span className="text-xs font-normal text-slate-400">({lines.length})</span>
+          </h3>
+          {!readonly && (
+            <button type="button" onClick={add}
+              className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">
+              + เพิ่มรายการ
+            </button>
+          )}
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px] border-collapse text-sm">
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+              <tr className="border-b border-slate-200">
+                <th className="w-8 px-2 py-2 text-center font-semibold">#</th>
+                <th className="min-w-[240px] px-2 py-2 text-left font-semibold">สินค้า</th>
+                <th className="w-20 px-2 py-2 text-right font-semibold">จำนวน</th>
+                <th className="w-28 px-2 py-2 text-left font-semibold">หน่วย</th>
+                <th className="w-28 px-2 py-2 text-right font-semibold">ราคา/หน่วย</th>
+                <th className="w-36 px-2 py-2 text-left font-semibold">ส่วนลด</th>
+                <th className="w-28 px-2 py-2 text-right font-semibold">รวมก่อนภาษี</th>
+                {!readonly && <th className="w-9 px-1 py-2"></th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {lines.map((l, i) => (
+                <tr key={l.tempId} className="align-top">
+                  <td className="px-2 py-2 text-center font-mono text-xs text-slate-400">{i + 1}</td>
+                  <td className="px-2 py-2">
+                    <div className="flex items-start gap-2">
+                      <div className="pt-0.5"><ImageThumbnail url={lineImageUrl(l)} size={36} alt={l.product_name || "สินค้า"} /></div>
+                      <div className="min-w-0 flex-1">
+                        <SkuPicker value={pickerValueOf(l)} onChange={(p) => applyPick(i, p, l)} disabled={readonly} placeholder="เลือก SKU / ชื่อสินค้า..." />
+                        {l.sku && (
+                          <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                            <code className="rounded bg-orange-50 px-1.5 py-0.5 font-mono text-orange-700">{l.sku}</code>
+                            <span className="truncate">{l.product_name}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2">
+                    <input type="number" value={l.qty} disabled={readonly}
+                      onChange={(e) => update(i, { qty: parseFloat(e.target.value) || 0 })}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
+                  </td>
+                  <td className="px-2 py-2">
+                    <UnitPicker
+                      value={l.unit ? ({ id: "", code: null, name: l.unit, symbol: l.unit } satisfies UnitPickerValue) : null}
+                      onChange={(u: UnitPickerValue | null) => update(i, { unit: u?.name ?? "ชิ้น" })}
+                      disabled={readonly} />
+                  </td>
+                  <td className="px-2 py-2">
+                    <input type="number" value={l.unit_price} disabled={readonly}
+                      onChange={(e) => update(i, { unit_price: parseFloat(e.target.value) || 0 })}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
+                  </td>
+                  <td className="px-2 py-2">
+                    <div className="flex gap-1">
+                      <input type="number" value={l.discount_value} disabled={readonly}
+                        onChange={(e) => update(i, { discount_value: parseFloat(e.target.value) || 0 })}
+                        className="h-9 w-16 rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
+                      <select value={l.discount_type} disabled={readonly}
+                        onChange={(e) => update(i, { discount_type: e.target.value as "percent" | "amount" })}
+                        className="h-9 w-14 rounded-lg border border-slate-200 bg-white px-1 text-sm disabled:bg-slate-50">
+                        <option value="percent">%</option>
+                        <option value="amount">฿</option>
+                      </select>
+                    </div>
+                  </td>
+                  <td className="px-2 py-2 text-right font-mono text-sm font-semibold tabular-nums text-slate-900">
+                    {formatMoney(money(lineTotal(l)))}
+                  </td>
+                  {!readonly && (
+                    <td className="px-1 py-2 text-center">
+                      <button type="button" onClick={() => remove(i)} aria-label="ลบรายการ"
+                        className="h-8 w-8 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500">x</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+              {lines.length === 0 && (
+                <tr><td colSpan={readonly ? 7 : 8} className="px-4 py-8 text-center text-sm text-slate-400">
+                  {readonly ? "ไม่มีรายการสินค้า" : 'กด "+ เพิ่มรายการ" เพื่อเริ่มเลือกสินค้า'}
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">

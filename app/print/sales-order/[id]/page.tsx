@@ -5,7 +5,17 @@ import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
+import { thaiBahtText } from "@/lib/quotation-print";
 import type { SODetail } from "@/app/api/sales-orders/route";
+
+type SODetailExt = SODetail & {
+  subtotal?:         number;
+  customer_address?: string;
+  customer_phone?:   string;
+  customer_tax_id?:  string;
+  payment_terms?:    string;
+  customer_po_no?:   string;
+};
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -19,23 +29,33 @@ const baht = (n: number | null | undefined) =>
 const thaiDate = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" }) : "—";
 
-function buildSoData(so: SODetail): Record<string, unknown> {
+function buildSoData(so: SODetailExt): Record<string, unknown> {
+  const isoDate = (iso: string | null | undefined) => (iso ? String(iso).slice(0, 10) : "—");
   return {
     so_number:        so.so_number ?? "(ยังไม่ออกเลข)",
     status_label:     STATUS_LABELS[so.status] ?? so.status,
     customer_name:    so.customer_name ?? "—",
     customer_code:    so.customer_code ?? "",
+    customer_address: so.customer_address ?? "",
+    customer_phone:   so.customer_phone ?? "",
+    customer_tax_id:  so.customer_tax_id ?? "",
     sale_person_name: so.sale_person_name ?? "—",
     order_date_th:    thaiDate(so.order_date),
+    order_date_iso:   isoDate(so.order_date),
     ship_date_th:     thaiDate(so.expected_ship_date),
     note:             so.note ?? "",
+    payment_terms:    so.payment_terms ?? "",
+    customer_po_no:   so.customer_po_no ?? "",
+    vat_rate:         so.vat_rate,
     vat_rate_label:   so.vat_included ? `${so.vat_rate}% รวมแล้ว` : `${so.vat_rate}%`,
+    subtotal:         baht(so.subtotal ?? so.taxable),
     taxable:          baht(so.taxable),
     total_vat:        baht(so.total_vat),
     total_wht:        baht(so.total_wht),
     has_wht:          so.total_wht > 0 ? "1" : "",
     grand_total:      baht(so.grand_total),
     amount_due:       baht(so.amount_due),
+    amount_in_words:  thaiBahtText(so.grand_total),
     lines: so.lines.map((l, i) => ({
       idx:             i + 1,
       sku:             l.sku ?? "",
