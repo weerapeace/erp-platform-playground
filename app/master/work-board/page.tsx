@@ -203,10 +203,18 @@ export default function WorkBoardPage() {
   const countOf = (z: Zone) => (z.kind === "pending" ? z.moCards.length : z.woCards.length);
   // หมายเหตุที่จะโชว์ใต้หัวแผนก (ถ้าเปิด "โชว์หมายเหตุ")
   const noteOf = useCallback((z: Zone) => (z.kind === "dept" && z.dept?.show_note && z.dept?.note ? z.dept.note : null), []);
-  // ความกว้าง: "รอจ่าย" เป็นกล่องใหญ่ (หลายคอลัมน์) · แผนกอื่นกว้างมาตรฐาน
-  const defWof = useCallback((key: string) => (key === "pending" ? PENDING_W : ZONE_W), []);
+  const zoneByKey = useMemo(() => new Map(zones.map((z) => [z.key, z] as const)), [zones]);
+  // ความกว้าง: "รอจ่าย" กล่องใหญ่ · แผนก = พอดีจำนวนการ์ด (สูงสุด 4 ใบต่อแถว)
+  const defWof = useCallback((key: string) => {
+    const z = zoneByKey.get(key);
+    if (z?.kind !== "dept") return PENDING_W;
+    const cols = Math.min(4, Math.max(1, z.woCards.length));
+    return cols * CARD_W + (cols - 1) * GAP_C + 2 * PAD;
+  }, [zoneByKey]);
   const zoneWof = useCallback((key: string) => zoneSize[key]?.w ?? defWof(key), [zoneSize, defWof]);
   const colsOf = useCallback((key: string) => Math.max(1, Math.floor((zoneWof(key) - PAD) / (CARD_W + GAP_C))), [zoneWof]);
+  // คอลัมน์จริงที่ใช้วางการ์ด — แผนก = min(4, จำนวนการ์ด) · รอจ่าย = ตามความกว้าง
+  const gridCols = useCallback((z: Zone) => z.kind === "pending" ? colsOf(z.key) : Math.min(4, Math.max(1, z.woCards.length)), [colsOf]);
   // ตำแหน่งเริ่มต้นของโซน — เรียงซ้าย→ขวาแบบสะสมความกว้าง (กล่องรอจ่ายใหญ่อยู่ซ้ายสุด)
   const defaultLayout = useMemo(() => {
     const m: Record<string, Pos> = {}; let x = 0;
@@ -215,29 +223,30 @@ export default function WorkBoardPage() {
   }, [zones, zoneWof]);
   const posOfZone = useCallback((key: string): Pos => zonePos[key] ?? defaultLayout[key] ?? { x: 0, y: 0 }, [zonePos, defaultLayout]);
   const zoneH = useCallback((z: Zone) => {
-    const rows = z.kind === "pending" ? Math.ceil(Math.max(1, countOf(z)) / colsOf(z.key)) : Math.max(1, countOf(z));
+    const rows = Math.ceil(Math.max(1, countOf(z)) / gridCols(z));
     const auto = HEADER_H + (noteOf(z) ? NOTE_H : 0) + rows * CARD_SLOT + PAD;
     return Math.max(auto, zoneSize[z.key]?.h ?? 0);
-  }, [zoneSize, colsOf, noteOf]);
+  }, [zoneSize, gridCols, noteOf]);
 
   // ตำแหน่ง "จัดเรียงสวย" อัตโนมัติ — รอจ่าย=กริดหลายคอลัมน์ · แผนก=คอลัมน์เดียว
   const autoPos = useMemo(() => {
     const map: Record<string, Pos> = {};
     for (const z of zones) {
-      const p = posOfZone(z.key); const zw = zoneWof(z.key);
+      const p = posOfZone(z.key); const cols = gridCols(z); const noteY = noteOf(z) ? NOTE_H : 0;
       if (z.kind === "pending") {
-        const cols = colsOf(z.key);
         z.moCards.forEach((m, i) => {
           const col = i % cols, row = Math.floor(i / cols);
           map[`mo:${m.id}`] = { x: p.x + PAD + col * (CARD_W + GAP_C), y: p.y + HEADER_H + 10 + row * CARD_SLOT };
         });
       } else {
-        const noteY = noteOf(z) ? NOTE_H : 0;
-        z.woCards.forEach((w, i) => { map[`wo:${w.id}`] = { x: p.x + (zw - CARD_W) / 2, y: p.y + HEADER_H + 10 + noteY + i * CARD_SLOT }; });
+        z.woCards.forEach((w, i) => {
+          const col = i % cols, row = Math.floor(i / cols);
+          map[`wo:${w.id}`] = { x: p.x + PAD + col * (CARD_W + GAP_C), y: p.y + HEADER_H + 10 + noteY + row * CARD_SLOT };
+        });
       }
     }
     return map;
-  }, [zones, posOfZone, zoneWof, colsOf, noteOf]);
+  }, [zones, posOfZone, gridCols, noteOf]);
   const posOfCard = useCallback((cid: string): Pos => cardPos[cid] ?? autoPos[cid] ?? { x: 0, y: 0 }, [cardPos, autoPos]);
 
   const screenToWorld = (cx: number, cy: number): Pos => {
