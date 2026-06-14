@@ -68,9 +68,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (groupIds) q = q.in("material_group_id", groupIds);
   if (tagSkuIds) q = q.in("id", tagSkuIds);
   if (tokens.length) {
-    // match "คำใดคำหนึ่ง" (ดึงผู้สมัครกว้างๆ) แล้วค่อยจัดอันดับใน JS
-    const orParts = tokens.flatMap((t) => [`code.ilike.%${t}%`, `name_th.ilike.%${t}%`]);
-    q = q.or(orParts.join(",")).limit(300);
+    // ทุก token ต้องเจอ (AND) — แต่ละ token จะอยู่ใน code หรือชื่อก็ได้
+    // (เดิมเป็น OR: token กว้างๆ เช่น "06" ดึงสินค้าเป็นพัน ทำให้ตัวที่ตรงเป๊ะหลุดออกจากชุดผู้สมัคร 300 ตัว)
+    // supabase-js: เรียก .or() หลายครั้ง = AND กันระหว่างกลุ่ม
+    for (const t of tokens) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`);
+    q = q.limit(300);
   } else {
     q = q.order("code", { ascending: true }).range(offset, offset + limit - 1);
   }
