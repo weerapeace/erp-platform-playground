@@ -72,10 +72,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ดึง definitions + options ที่เกี่ยวข้อง
   const defIds = [...new Set(allVals.map((v) => v.definition_id).filter(Boolean) as string[])];
   const optIds = [...new Set(allVals.flatMap((v) => [v.option_id as string, ...((Array.isArray(v.option_ids) ? v.option_ids : []) as string[])]).filter(Boolean))];
+  // ดึง definitions + options พร้อมกัน (เดิมทำทีละตัว)
+  const [defRes, optRes] = await Promise.all([
+    defIds.length ? admin.from("product_attribute_definitions").select("id, label, display_order, external_table").in("id", defIds) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    optIds.length ? admin.from("product_attribute_options").select("id, label").in("id", optIds) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+  ]);
   const defMap = new Map<string, { label: string; order: number; external: string | null }>();
-  if (defIds.length) { const { data } = await admin.from("product_attribute_definitions").select("id, label, display_order, external_table").in("id", defIds); for (const d of (data ?? []) as Record<string, unknown>[]) defMap.set(String(d.id), { label: str(d.label), order: Number(d.display_order) || 0, external: (d.external_table as string) ?? null }); }
+  for (const d of (defRes.data ?? []) as Record<string, unknown>[]) defMap.set(String(d.id), { label: str(d.label), order: Number(d.display_order) || 0, external: (d.external_table as string) ?? null });
   const optMap = new Map<string, string>();
-  if (optIds.length) { const { data } = await admin.from("product_attribute_options").select("id, label").in("id", optIds); for (const o of (data ?? []) as Record<string, unknown>[]) optMap.set(String(o.id), str(o.label)); }
+  for (const o of (optRes.data ?? []) as Record<string, unknown>[]) optMap.set(String(o.id), str(o.label));
 
   const resolve = (v: Record<string, unknown>): string => {
     if (v.option_id && optMap.has(String(v.option_id))) return optMap.get(String(v.option_id))!;

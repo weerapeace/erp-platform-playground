@@ -19,17 +19,25 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const { data: header, error } = await supabase.from("manufacturing_orders").select("*").eq("id", id).single();
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 404 });
   const moNo = (header as { mo_no: string }).mo_no;
-  const { data: materials } = await supabase.from("mo_materials").select("*").eq("mo_no", moNo).eq("is_active", true)
-    .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
-  const { data: summary } = await supabase.from("mo_material_summary").select("*").eq("mo_no", moNo).eq("is_active", true)
-    .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true });
+  const productSku = (header as { product_sku: string | null }).product_sku;
 
-  // สถานะ "ขอซื้อแล้ว" — รวมจำนวนจากใบขอซื้อ (PR v2) ที่ผูกใบสั่งผลิตนี้ จับคู่ด้วยรหัสวัตถุดิบในชื่อ "[CODE] ..."
+  // ยิงพร้อมกัน (ขนาน) — เดิมทำทีละตัว (sequential) ทำให้เปิดป๊อปอัปช้า
+  const [matRes, sumRes, prRes, skRes] = await Promise.all([
+    supabase.from("mo_materials").select("*").eq("mo_no", moNo).eq("is_active", true)
+      .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
+    supabase.from("mo_material_summary").select("*").eq("mo_no", moNo).eq("is_active", true)
+      .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
+    supabaseAdmin().from("purchase_requests_v2").select("item_name, qty, status")
+      .eq("source_mo_no", moNo).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),
+    productSku
+      ? supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const materials = matRes.data; const summary = sumRes.data;
+
+  // สถานะ "ขอซื้อแล้ว" — รวมจำนวนจากใบขอซื้อ (PR v2) ที่ผูกใบสั่งผลิตนี้
   const requested: Record<string, number> = {};
-  const { data: prRows } = await supabaseAdmin()
-    .from("purchase_requests_v2").select("item_name, qty, status")
-    .eq("source_mo_no", moNo).eq("is_active", true).not("status", "in", "(rejected,cancelled)");
-  for (const p of (prRows ?? []) as { item_name: string | null; qty: number | null }[]) {
+  for (const p of (prRes.data ?? []) as { item_name: string | null; qty: number | null }[]) {
     const m = /^\[([^\]]+)\]/.exec(p.item_name ?? "");
     const code = m ? m[1] : (p.item_name ?? "");
     if (!code) continue;
@@ -37,14 +45,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   }
 
   // รูปสินค้า — ใช้รูป SKU รุ่นนั้นก่อน (fallback รูป parent)
-  const productSku = (header as { product_sku: string | null }).product_sku;
   let product_image: string | null = null;
-  if (productSku) {
-    const { data: sk } = await supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).maybeSingle();
-    const own = (sk as { cover_image_r2_key?: string | null } | null)?.cover_image_r2_key;
-    const parRel = sk ? (sk as Record<string, unknown>).parent_skus_v2 : null;
+  const sk = skRes.data as { cover_image_r2_key?: string | null; parent_skus_v2?: unknown } | null;
+  if (sk) {
+    const parRel = sk.parent_skus_v2;
     const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;
-    const key = own || par?.cover_image_r2_key || "";
+    const key = sk.cover_image_r2_key || par?.cover_image_r2_key || "";
     if (key) product_image = `/api/r2-image?key=${encodeURIComponent(key)}`;
   }
 

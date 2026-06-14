@@ -171,7 +171,11 @@ export default function MoWorkspacePage() {
   const openEdit = async (row: MoListItem) => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setVersions([]); setWoList([]);
     try {
-      const res = await apiFetch(`/api/mo/${row.id}`); const j = await res.json();
+      // โหลดใบสั่งผลิต + เวอร์ชั่น BOM พร้อมกัน (เดิมทำทีละตัว ทำให้เปิดช้า)
+      const [j, vj] = await Promise.all([
+        apiFetch(`/api/mo/${row.id}`).then((r) => r.json()),
+        row.product_sku ? apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(row.product_sku)}`).then((r) => r.json()) : Promise.resolve({ data: [] }),
+      ]);
       if (j.error) throw new Error(j.error);
       const d = j.data;
       const moQty = Number(d.qty) || 0;
@@ -203,11 +207,9 @@ export default function MoWorkspacePage() {
         status: d.status ?? "draft", note: d.note ?? "", materials: mats, summary: summ,
         requested: (d.requested ?? {}) as Record<string, number>,
       });
-      if (d.product_sku) {
-        const vr = await apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(d.product_sku)}`); const vj = await vr.json();
-        const vers = (vj.data ?? []) as Version[]; setVersions(vers);
-        const cur = vers.find((v) => v.bom_code === d.bom_code); if (cur) patch({ bom_id: cur.id });
-      }
+      // เวอร์ชั่น BOM (โหลดขนานมาแล้วด้านบน)
+      const vers = (vj.data ?? []) as Version[]; setVersions(vers);
+      const cur = vers.find((v) => v.bom_code === d.bom_code); if (cur) patch({ bom_id: cur.id });
       if (d.mo_no) void loadWorkOrders(d.mo_no);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดไม่ได้"); }
     finally { setLoadingForm(false); }
