@@ -57,7 +57,7 @@ export default function CampaignsPage() {
   useEffect(() => { (async () => { setLoading(true); await load(); try { setBrands(await listBrands()); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
 
   const update = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
-  const openCreate = () => { setForm(EMPTY); setDirty(false); setFormErr(null); setModalOpen(true); };
+  const openCreate = () => { setForm({ ...EMPTY, start_date: new Date().toISOString().slice(0, 10) }); setDirty(false); setFormErr(null); setModalOpen(true); };
 
   const save = async () => {
     if (!form.name.trim()) { setFormErr("กรุณากรอกชื่อแคมเปญ"); return; }

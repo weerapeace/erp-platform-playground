@@ -213,7 +213,10 @@ export async function deleteCampaign(id: string): Promise<void> {
 // ---- Brands (ของกลาง /api/brands) ----
 export async function listBrands(): Promise<BrandOption[]> {
   const j = await jsonOrThrow(await apiFetch("/api/brands"));
-  return ((j.data as { id: string; name: string; color: string | null }[]) ?? []).map((b) => ({ id: b.id, name: b.name, color: b.color }));
+  // กรองเฉพาะแบรนด์ของเรา (ไม่ใช่ "งานลูกค้า") — ใช้ทุกฟอร์มที่เลือกแบรนด์ใน Creative
+  return ((j.data as { id: string; name: string; color: string | null; is_customer_job?: boolean }[]) ?? [])
+    .filter((b) => !b.is_customer_job)
+    .map((b) => ({ id: b.id, name: b.name, color: b.color }));
 }
 
 // ============================================================
