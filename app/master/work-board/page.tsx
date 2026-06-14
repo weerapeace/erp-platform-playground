@@ -21,6 +21,7 @@ import { AddPieceworkModal } from "./add-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
 import { PurchaseNeeds } from "./purchase-needs";
+import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -1419,66 +1420,59 @@ function BoardImg({ url }: { url: string | null | undefined }) {
 }
 
 // ---- มุมมองตาราง (สลับจากบอร์ด) — รอจ่าย + จ่ายแล้ว ----
+const ProdCell = ({ url, sku, name }: { url: string | null | undefined; sku: string | null; name: string | null }) => (
+  <div className="flex items-center gap-2">
+    <BoardImg url={url} />
+    <div className="min-w-0"><div className="font-semibold text-slate-800 truncate">{sku}</div>{name && name !== sku && <div className="text-[11px] text-slate-400 truncate">{name}</div>}</div>
+  </div>
+);
+const DueCell = ({ d }: { d: string | null }) => (
+  <span className="text-[12px] whitespace-nowrap">📅 {dueDateText(d)} <span className={daysLeftClass(d)}>· {daysLeftText(d)}</span></span>
+);
+
 function BoardTable({ pending, workOrders, onOpenMO, onOpenWO }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void;
 }) {
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
-  const th = "px-2 py-2 font-medium text-[11px] text-slate-500";
+
+  const pendCols: MiniColumn<PendingMO>[] = [
+    { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (m) => <ProdCell url={m.image_url} sku={m.product_sku} name={m.product_name} /> },
+    { key: "mo", header: "ใบสั่งผลิต", width: "9rem", sortValue: (m) => m.mo_no, sortLabel: "เลขใบสั่งผลิต", cell: (m) => <span className="font-mono text-[11px] text-slate-500">{m.mo_no}</span> },
+    { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (m) => m.qty, sortLabel: "จำนวน", cell: (m) => <span className="tabular-nums">{fmt(m.qty)}</span> },
+    { key: "disp", header: "จ่ายแล้ว", width: "5rem", align: "right", cell: (m) => <span className="tabular-nums text-slate-500">{fmt(m.dispatched)}</span> },
+    { key: "rem", header: "เหลือ", width: "4.5rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "เหลือ", cell: (m) => <span className="tabular-nums font-semibold text-rose-600">{fmt(m.remaining)}</span> },
+    { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (m) => m.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (m) => <DueCell d={m.due_date} /> },
+    { key: "ready", header: "พร้อม", width: "6.5rem", align: "center", sortValue: (m) => (m.ready ? 0 : 1), sortLabel: "ความพร้อม", cell: (m) => m.ready ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span> },
+  ];
+
+  const woCols: MiniColumn<WorkOrder>[] = [
+    { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (w) => w.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (w) => <ProdCell url={w.image_url} sku={w.product_sku} name={w.product_name} /> },
+    { key: "wo", header: "ใบจ่ายงาน", width: "9rem", sortValue: (w) => w.wo_no, sortLabel: "เลขใบจ่ายงาน", cell: (w) => <span className="font-mono text-[11px] text-slate-500">{w.wo_no}</span> },
+    { key: "dept", header: "แผนก/ช่าง", width: "minmax(8rem,1fr)", sortValue: (w) => w.department_name ?? "", sortLabel: "แผนก", cell: (w) => <span className="text-[12px] text-slate-600">{w.department_name ?? "—"}{w.assignee_name ? ` · ${w.assignee_name}` : ""}</span> },
+    { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (w) => w.qty, sortLabel: "จำนวน", cell: (w) => <span className="tabular-nums">{fmt(w.qty)}</span> },
+    { key: "recv", header: "รับคืน", width: "5rem", align: "right", cell: (w) => <span className="tabular-nums text-slate-500">{fmt(w.received_qty)}</span> },
+    { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (w) => w.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (w) => <DueCell d={w.due_date} /> },
+    { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (w) => (WO_STATUS[w.status]?.label ?? w.status), sortLabel: "สถานะ", cell: (w) => { const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched; return <span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span>; } },
+  ];
+
   return (
     <div className="space-y-5 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
-      <div>
-        <h3 className="text-sm font-semibold text-slate-700 mb-2">📥 รอจ่าย <span className="text-slate-400">({pending.length})</span></h3>
-        <div className="border border-slate-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50"><tr>
-              <th className={`text-left ${th}`}>สินค้า</th><th className={`text-left ${th}`}>ใบสั่งผลิต</th>
-              <th className={`text-right ${th}`}>จำนวน</th><th className={`text-right ${th}`}>จ่ายแล้ว</th><th className={`text-right ${th}`}>เหลือ</th>
-              <th className={`text-left ${th}`}>กำหนดเสร็จ</th><th className={`text-center ${th}`}>พร้อม</th>
-            </tr></thead>
-            <tbody className="divide-y divide-slate-50">
-              {pending.length === 0 ? <tr><td colSpan={7} className="text-center py-8 text-slate-300">ไม่มีงานรอจ่าย</td></tr>
-                : pending.map((m) => (
-                  <tr key={m.id} onClick={() => onOpenMO(m)} className="hover:bg-blue-50/40 cursor-pointer">
-                    <td className="px-3 py-2"><div className="flex items-center gap-2"><BoardImg url={m.image_url} /><div className="min-w-0"><div className="font-semibold text-slate-800 truncate">{m.product_sku}</div>{m.product_name && m.product_name !== m.product_sku && <div className="text-[11px] text-slate-400 truncate">{m.product_name}</div>}</div></div></td>
-                    <td className="px-2 py-2 font-mono text-[11px] text-slate-500">{m.mo_no}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{fmt(m.qty)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmt(m.dispatched)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums font-semibold text-rose-600">{fmt(m.remaining)}</td>
-                    <td className="px-2 py-2 text-[12px] whitespace-nowrap">📅 {dueDateText(m.due_date)} <span className={daysLeftClass(m.due_date)}>· {daysLeftText(m.due_date)}</span></td>
-                    <td className="px-2 py-2 text-center">{m.ready ? <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span> : <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div>
-        <h3 className="text-sm font-semibold text-slate-700 mb-2">🛠 จ่ายแล้ว — กำลังผลิต <span className="text-slate-400">({wos.length})</span></h3>
-        <div className="border border-slate-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50"><tr>
-              <th className={`text-left ${th}`}>สินค้า</th><th className={`text-left ${th}`}>ใบจ่ายงาน</th><th className={`text-left ${th}`}>แผนก/ช่าง</th>
-              <th className={`text-right ${th}`}>จำนวน</th><th className={`text-right ${th}`}>รับคืน</th>
-              <th className={`text-left ${th}`}>กำหนดเสร็จ</th><th className={`text-center ${th}`}>สถานะ</th>
-            </tr></thead>
-            <tbody className="divide-y divide-slate-50">
-              {wos.length === 0 ? <tr><td colSpan={7} className="text-center py-8 text-slate-300">ยังไม่มีงานที่จ่าย</td></tr>
-                : wos.map((w) => { const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched; return (
-                  <tr key={w.id} onClick={() => onOpenWO(w)} className="hover:bg-blue-50/40 cursor-pointer">
-                    <td className="px-3 py-2"><div className="flex items-center gap-2"><BoardImg url={w.image_url} /><div className="min-w-0"><div className="font-semibold text-slate-800 truncate">{w.product_sku}</div>{w.product_name && w.product_name !== w.product_sku && <div className="text-[11px] text-slate-400 truncate">{w.product_name}</div>}</div></div></td>
-                    <td className="px-2 py-2 font-mono text-[11px] text-slate-500">{w.wo_no}</td>
-                    <td className="px-2 py-2 text-[12px] text-slate-600">{w.department_name ?? "—"}{w.assignee_name ? ` · ${w.assignee_name}` : ""}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">{fmt(w.qty)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmt(w.received_qty)}</td>
-                    <td className="px-2 py-2 text-[12px] whitespace-nowrap">📅 {dueDateText(w.due_date)} <span className={daysLeftClass(w.due_date)}>· {daysLeftText(w.due_date)}</span></td>
-                    <td className="px-2 py-2 text-center"><span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span></td>
-                  </tr>
-                );})}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <MiniTable
+        rows={pending} rowKey={(m) => m.id} columns={pendCols} onRowClick={onOpenMO}
+        title="📥 รอจ่าย" countUnit="ใบ"
+        searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
+        searchPlaceholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
+        groupBy={(m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")} groupLabel="จัดกลุ่มตามความพร้อม" defaultGrouped={false}
+        emptyText="ไม่มีงานรอจ่าย"
+      />
+      <MiniTable
+        rows={wos} rowKey={(w) => w.id} columns={woCols} onRowClick={onOpenWO}
+        title="🛠 จ่ายแล้ว — กำลังผลิต" countUnit="ใบ"
+        searchText={(w) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`}
+        searchPlaceholder="ค้นหา สินค้า / ใบจ่ายงาน / แผนก"
+        groupBy={(w) => (WO_STATUS[w.status]?.label ?? w.status)} groupLabel="จัดกลุ่มตามสถานะ" defaultGrouped={false}
+        emptyText="ยังไม่มีงานที่จ่าย"
+      />
     </div>
   );
 }

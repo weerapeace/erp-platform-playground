@@ -54,6 +54,9 @@ export type MiniTableProps<T> = {
   selected?: Set<string>;
   onSelectedChange?: (next: Set<string>) => void;
 
+  // คลิกแถว (เช่น เปิดรายละเอียด)
+  onRowClick?: (row: T) => void;
+
   // ส่วนหัว
   title?: ReactNode;
   actions?: ReactNode;                  // มุมขวาบน เช่น ปุ่มสร้าง
@@ -76,7 +79,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder = "ค้นหา…",
     groupBy, groupLabel = "จัดกลุ่ม", defaultGrouped = true,
-    selectable, selected, onSelectedChange,
+    selectable, selected, onSelectedChange, onRowClick,
     title, actions, countUnit = "รายการ",
     emptyText = "ไม่มีข้อมูล", noMatchText,
     dense, maxHeightClass = "", className = "", footnote,
@@ -144,9 +147,11 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const k = rowKey(r);
     const on = sel.has(k);
     return (
-      <div key={k} className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : idx % 2 ? "bg-slate-50/30" : "bg-white"}`} style={{ gridTemplateColumns: tmpl }}>
+      <div key={k} onClick={onRowClick ? () => onRowClick(r) : undefined}
+        className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
+        style={{ gridTemplateColumns: tmpl }}>
         {selectable && (
-          <span className="flex justify-center">
+          <span className="flex justify-center" onClick={(e) => e.stopPropagation()}>
             <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className="w-4 h-4 accent-rose-600" />
           </span>
         )}
