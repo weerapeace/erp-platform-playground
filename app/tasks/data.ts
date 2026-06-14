@@ -180,13 +180,30 @@ export async function deleteAttachment(taskId: string, attId: string): Promise<v
 }
 
 // ---- Campaigns ----
-export async function listCampaigns(): Promise<Campaign[]> {
-  const j = await jsonOrThrow(await apiFetch("/api/creative-campaigns"));
+export type CampaignDetail = {
+  campaign: Campaign & { is_active: boolean };
+  tasks: CreativeTask[];
+  summary: Record<string, number>;
+  task_count: number;
+};
+
+export async function listCampaigns(includeInactive = false): Promise<Campaign[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-campaigns${includeInactive ? "?include_inactive=1" : ""}`));
   return (j.data as Campaign[]) ?? [];
 }
-export async function createCampaign(body: { name: string; brand_id?: string | null; objective?: string | null; start_date?: string | null; end_date?: string | null }): Promise<{ id: string }> {
+export async function getCampaign(id: string): Promise<CampaignDetail> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-campaigns/${id}`));
+  return j.data as CampaignDetail;
+}
+export async function createCampaign(body: { name: string; brand_id?: string | null; objective?: string | null; start_date?: string | null; end_date?: string | null; owner_id?: string | null; note?: string | null }): Promise<{ id: string }> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-campaigns", { method: "POST", body: JSON.stringify(body) }));
   return { id: j.id as string };
+}
+export async function updateCampaign(id: string, patch: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-campaigns/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+}
+export async function deleteCampaign(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-campaigns/${id}`, { method: "DELETE" }));
 }
 
 // ---- Brands (ของกลาง /api/brands) ----
