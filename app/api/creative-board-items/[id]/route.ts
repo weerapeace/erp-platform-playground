@@ -10,6 +10,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { flattenItem } from "../../creative-boards/[boardId]/items/route";
+import { r2DeleteObject } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,8 +42,20 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
+  // อ่านก่อนลบ — เผื่อเป็นรูปจะได้ลบไฟล์ใน R2 ด้วย
+  const { data: item } = await admin.from("erp_creative_board_items").select("item_type, r2_key").eq("id", id).maybeSingle();
   const { error } = await admin.from("erp_creative_board_items").delete().eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
-  await writeAudit(admin, { action: "board:delete_item", entityType: "creative_board_item", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: {} });
+
+  // ลบไฟล์รูปใน R2 (เฉพาะเมื่อไม่มี item อื่นใช้ key เดียวกัน) — best-effort ไม่ให้พังการลบหลัก
+  const r2Key = (item?.r2_key as string | null) ?? null;
+  if (item?.item_type === "image" && r2Key) {
+    try {
+      const { count } = await admin.from("erp_creative_board_items").select("id", { count: "exact", head: true }).eq("r2_key", r2Key);
+      if ((count ?? 0) === 0) await r2DeleteObject(r2Key);
+    } catch { /* ไฟล์ R2 ลบไม่ได้ก็ไม่เป็นไร — row ลบแล้ว */ }
+  }
+
+  await writeAudit(admin, { action: "board:delete_item", entityType: "creative_board_item", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { item_type: item?.item_type } });
   return NextResponse.json({ success: true, error: null });
 }
