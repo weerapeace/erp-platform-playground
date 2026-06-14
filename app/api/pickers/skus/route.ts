@@ -7,6 +7,8 @@ type SkuPickerRow = {
   code: string | null;
   parent_sku_id: string | null;
   name_th: string | null;
+  color: string | null;
+  color_th: string | null;
   list_price: number | null;
   cover_image_r2_key: string | null;
   sale_ok: boolean | null;
@@ -54,6 +56,8 @@ export async function GET(request: NextRequest) {
       code,
       parent_sku_id,
       name_th,
+      color,
+      color_th,
       list_price,
       cover_image_r2_key,
       sale_ok,
@@ -90,6 +94,7 @@ export async function GET(request: NextRequest) {
       code,
       name: row.name_th ?? code,
       uom_name: uom?.name ?? null,
+      color: row.color_th ?? row.color ?? null,
       list_price: row.list_price,
       image_key: imageKey,
       sale_ok: row.sale_ok,

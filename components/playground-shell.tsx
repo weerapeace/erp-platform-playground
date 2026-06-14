@@ -42,6 +42,7 @@ export const navGroups = [
     items: [
       { href: "/master/parent-skus", icon: "🧬", labelTH: "Parent SKUs" },
       { href: "/master/skus",        icon: "🏷️", labelTH: "SKUs" },
+      { href: "/master/brands",      icon: "🎨", labelTH: "แบรนด์ & ช่างเหมา" },
       { href: "/master/partners",    icon: "🤝", labelTH: "Partners (ลูกค้า/ซัพ)" },
       { href: "/master/customers",   icon: "🧑‍💼", labelTH: "ลูกค้า (Customers)" },
       { href: "/master/suppliers",   icon: "🏢", labelTH: "ผู้ขาย (Suppliers)" },
@@ -144,6 +145,7 @@ export const navGroups = [
     label: "🏭 Production (Phase 7,8)",
     items: [
       { href: "/master/manufacturing-orders", icon: "🏭", labelTH: "Manufacturing Orders" },
+      { href: "/master/work-submissions",      icon: "📤", labelTH: "ตารางส่งงาน" },
       { href: "/master/production-jobs",       icon: "🧰", labelTH: "Production Jobs" },
       { href: "/master/work-centers",          icon: "🏗️", labelTH: "Work Centers" },
       { href: "/master/routings",              icon: "🔀", labelTH: "Routings" },
@@ -280,6 +282,7 @@ const readySections = [
   "/apps",
   "/master/parent-skus",
   "/master/skus",
+  "/master/brands",
   "/master/partners",
   "/master/customers",
   "/master/suppliers",
@@ -305,6 +308,7 @@ const readySections = [
   "/master/goods-receipts",
   "/master/deliveries",
   "/master/manufacturing-orders",
+  "/master/work-submissions",
   "/master/production-jobs",
   "/master/work-centers",
   "/master/routings",
@@ -373,6 +377,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // embed mode — เปิดหน้าในกรอบแอปเดี่ยว (?embed=1) → ซ่อน sidebar/แถบ App ของ shell (กันเมนูซ้อน)
+  const [embed, setEmbed] = useState(false);
+  useEffect(() => {
+    try { setEmbed(new URLSearchParams(window.location.search).get("embed") === "1"); } catch { /* ignore */ }
+  }, []);
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
   const [modules, setModules] = useState<{ key: string; label: string }[]>([]);
@@ -536,6 +545,19 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   // ระหว่างเด้งไป /login (ยังไม่ login) — ไม่ต้องโชว์เชลล์
   if (ready && !user) {
     return <div className="min-h-screen flex items-center justify-center text-slate-400 text-sm">กำลังไปหน้าเข้าสู่ระบบ…</div>;
+  }
+
+  // embed mode (เปิดในกรอบแอปเดี่ยว) — โชว์แค่เนื้อหา ไม่มี sidebar/แถบ App (เมนูมาจากเชลล์แอปเดี่ยวแทน)
+  if (embed) {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <ShellPresentContext.Provider value={true}>
+          {blockedAppLabel
+            ? <AccessDenied message={`คุณไม่มีสิทธิ์เข้าถึงแอป "${blockedAppLabel}" — ติดต่อผู้ดูแลระบบหากต้องการสิทธิ์`} />
+            : children}
+        </ShellPresentContext.Provider>
+      </div>
+    );
   }
 
   return (
