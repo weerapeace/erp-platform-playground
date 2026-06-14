@@ -4,7 +4,7 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
-import { nextTaskNo } from "@/lib/creative-tasks-server";
+import { nextTaskNo, setSubtaskAssignees } from "@/lib/creative-tasks-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -15,9 +15,10 @@ export type RecurringRule = {
   start_date: string; end_date: string | null; next_run: string | null; last_run: string | null;
   created_by: string | null;
 };
+export type TemplateStepDef = { title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[] };
 export type Template = {
   id: string; task_type: string | null; default_priority: string; brand_id: string | null;
-  platforms: string[] | null; steps: { title: string; required_before_next?: boolean }[] | null;
+  platforms: string[] | null; steps: TemplateStepDef[] | null;
 };
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -50,9 +51,16 @@ async function createTaskFromRule(admin: Admin, rule: RecurringRule, tpl: Templa
     created_by: rule.created_by ?? null,
   }).select("id").single();
   if (error || !data) return null;
-  const steps = Array.isArray(tpl?.steps) ? tpl!.steps! : [];
+  const steps = (Array.isArray(tpl?.steps) ? tpl!.steps! : []).filter((s) => s?.title);
   if (steps.length) {
-    await admin.from("erp_creative_subtasks").insert(steps.filter((s) => s?.title).map((s, i) => ({ task_id: data.id, title: s.title, required_before_next: !!s.required_before_next, sort_order: i })));
+    const { data: subs } = await admin.from("erp_creative_subtasks")
+      .insert(steps.map((s, i) => ({ task_id: data.id, title: s.title, description: s.description ?? null, assignee_id: s.assignee_ids?.[0] ?? null, required_before_next: !!s.required_before_next, sort_order: i })))
+      .select("id");
+    const subIds = (subs ?? []) as { id: string }[];
+    for (let i = 0; i < subIds.length; i++) {
+      const ids = steps[i]?.assignee_ids;
+      if (Array.isArray(ids) && ids.length) await setSubtaskAssignees(admin, subIds[i].id, ids);
+    }
   }
   await writeAudit(admin, { action: "recurring:generate", entityType: "creative_task", entityId: data.id, actorId: rule.created_by ?? null, actorName: null, metadata: { rule: rule.id, due: dueDate } });
   return data.id;

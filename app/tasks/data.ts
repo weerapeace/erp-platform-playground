@@ -45,9 +45,12 @@ export type CreativeTask = {
   created_at: string; updated_at: string;
 };
 
+export type SubtaskAssignee = { id: string; label: string };
 export type CreativeSubtask = {
-  id: string; task_id: string; title: string;
-  assignee_id: string | null; assignee_label?: string | null;
+  id: string; task_id: string; title: string; description: string | null;
+  assignee_id: string | null;
+  assignees: SubtaskAssignee[];
+  attachments?: CreativeAttachment[];
   status: SubtaskStatus; due_date: string | null;
   required_before_next: boolean; sort_order: number;
 };
@@ -126,7 +129,7 @@ export async function getTask(id: string): Promise<TaskDetail> {
   return j.data as TaskDetail;
 }
 
-export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; assignee_id?: string | null; required_before_next?: boolean }[] };
+export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean }[] };
 
 export async function createTask(body: CreateTaskBody): Promise<{ id: string; task_no: string }> {
   const res = await apiFetch("/api/creative-tasks", { method: "POST", body: JSON.stringify(body) });
@@ -153,7 +156,7 @@ export async function deleteTask(id: string): Promise<void> {
 }
 
 // ---- Subtasks ----
-export async function addSubtask(taskId: string, body: { title: string; assignee_id?: string | null; due_date?: string | null }): Promise<CreativeSubtask> {
+export async function addSubtask(taskId: string, body: { title: string; description?: string | null; assignee_ids?: string[]; due_date?: string | null; required_before_next?: boolean }): Promise<CreativeSubtask> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`, { method: "POST", body: JSON.stringify(body) }));
   return j.data as CreativeSubtask;
 }
@@ -172,7 +175,7 @@ export async function addComment(taskId: string, body: string, mentions: string[
 }
 
 // ---- Attachments ----
-export async function addAttachment(taskId: string, body: { kind?: string; label?: string; url?: string }): Promise<CreativeAttachment> {
+export async function addAttachment(taskId: string, body: { kind?: string; label?: string; url?: string; subtask_id?: string }): Promise<CreativeAttachment> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/attachments`, { method: "POST", body: JSON.stringify(body) }));
   return j.data as CreativeAttachment;
 }
@@ -278,7 +281,7 @@ export async function deleteHashtag(id: string): Promise<void> {
 // ============================================================
 // Templates + Recurring
 // ============================================================
-export type TemplateStep = { title: string; required_before_next?: boolean };
+export type TemplateStep = { title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[] };
 export type TaskTemplate = {
   id: string; name: string; task_type: string | null; default_priority: string;
   brand_id: string | null; brand_label?: string | null; description: string | null;

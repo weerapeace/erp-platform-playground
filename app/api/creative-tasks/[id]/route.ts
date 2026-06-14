@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenTask } from "../route";
 import { canTransition, STATUS_PROGRESS, type CreativeStatus, type ApprovalStatus } from "@/lib/creative-tasks";
-import { notify, employeeLabelMap, employeeAuthId } from "@/lib/creative-tasks-server";
+import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -49,14 +49,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     admin.from("erp_creative_attachments").select("*").eq("task_id", id).order("created_at", { ascending: true }),
   ]);
 
-  const empMap = await employeeLabelMap(admin, [
-    row.assignee_id as string, row.reviewer_id as string, row.approver_id as string,
-    ...((subtasks ?? []) as Record<string, unknown>[]).map((s) => s.assignee_id as string),
-  ]);
+  const subRows = (subtasks ?? []) as Record<string, unknown>[];
+  const empMap = await employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string]);
+  const aMap = await subtaskAssigneesMap(admin, subRows.map((s) => String(s.id)));
   const task = flattenTask(row, empMap);
-  const subs = ((subtasks ?? []) as Record<string, unknown>[]).map((s) => ({ ...s, assignee_label: s.assignee_id ? empMap.get(String(s.assignee_id)) ?? null : null }));
 
-  return NextResponse.json({ data: { ...task, subtasks: subs, comments: comments ?? [], attachments: attachments ?? [] }, error: null });
+  // แยกไฟล์แนบ: ระดับงาน (subtask_id null) vs ระดับ subtask
+  const allAtt = (attachments ?? []) as Record<string, unknown>[];
+  const taskAtt = allAtt.filter((a) => !a.subtask_id);
+  const subAtt = new Map<string, Record<string, unknown>[]>();
+  for (const a of allAtt) { if (a.subtask_id) { const k = String(a.subtask_id); const arr = subAtt.get(k) ?? []; arr.push(a); subAtt.set(k, arr); } }
+
+  const subs = subRows.map((s) => ({ ...s, assignees: aMap.get(String(s.id)) ?? [], attachments: subAtt.get(String(s.id)) ?? [] }));
+
+  return NextResponse.json({ data: { ...task, subtasks: subs, comments: comments ?? [], attachments: taskAtt }, error: null });
 }
 
 // ---- PATCH ----

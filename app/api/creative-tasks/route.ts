@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { STATUS_PROGRESS, type CreativeStatus } from "@/lib/creative-tasks";
-import { nextTaskNo, notify, employeeLabelMap, employeeAuthId } from "@/lib/creative-tasks-server";
+import { nextTaskNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -112,7 +112,7 @@ type CreateBody = {
   start_date?: string | null; due_date?: string | null;
   asset_status?: string | null; platforms?: string[] | null;
   drive_folder_url?: string | null;
-  subtasks?: { title: string; assignee_id?: string | null; required_before_next?: boolean }[];
+  subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean }[];
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -147,12 +147,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (error || !row) return NextResponse.json({ error: friendlyDbError(error?.message ?? "insert failed") }, { status: 400 });
 
-  // งานย่อยเริ่มต้น (ถ้าส่งมาจาก template)
+  // งานย่อยเริ่มต้น (ถ้าส่งมาจาก template) — รองรับ description + ผู้รับผิดชอบหลายคน
   if (Array.isArray(body.subtasks) && body.subtasks.length > 0) {
-    const subs = body.subtasks
-      .filter((s) => s?.title?.trim())
-      .map((s, i) => ({ task_id: row!.id, title: s.title.trim(), assignee_id: s.assignee_id || null, required_before_next: !!s.required_before_next, sort_order: i }));
-    if (subs.length) await admin.from("erp_creative_subtasks").insert(subs);
+    const steps = body.subtasks.filter((s) => s?.title?.trim());
+    if (steps.length) {
+      const { data: subs } = await admin.from("erp_creative_subtasks")
+        .insert(steps.map((s, i) => ({ task_id: row!.id, title: s.title.trim(), description: s.description ?? null, assignee_id: s.assignee_ids?.[0] || s.assignee_id || null, required_before_next: !!s.required_before_next, sort_order: i })))
+        .select("id");
+      const subIds = (subs ?? []) as { id: string }[];
+      for (let i = 0; i < subIds.length; i++) {
+        const ids = steps[i]?.assignee_ids;
+        if (Array.isArray(ids) && ids.length) await setSubtaskAssignees(admin, subIds[i].id, ids);
+      }
+    }
   }
 
   await writeAudit(admin, {

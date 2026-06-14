@@ -9,9 +9,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
+import { employeeLabelMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+type StepRow = { title?: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[] };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -21,9 +24,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (search) q = q.ilike("name", `%${search}%`);
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
-  const items = ((data ?? []) as Record<string, unknown>[]).map((r) => {
+  const rows = (data ?? []) as Record<string, unknown>[];
+  // resolve ชื่อผู้รับผิดชอบของทุกขั้นตอน (m2m ใน jsonb)
+  const allIds = rows.flatMap((r) => (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).flatMap((s) => s.assignee_ids ?? []));
+  const empMap = await employeeLabelMap(admin, allIds);
+  const items = rows.map((r) => {
     const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
-    const out: Record<string, unknown> = { ...r, brand_label: b?.name ?? null, brand_color: b?.color ?? null }; delete out.brand; return out;
+    const steps = (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).map((s) => ({ ...s, assignee_labels: (s.assignee_ids ?? []).map((id) => empMap.get(String(id)) ?? "") }));
+    const out: Record<string, unknown> = { ...r, steps, brand_label: b?.name ?? null, brand_color: b?.color ?? null }; delete out.brand; return out;
   });
   return NextResponse.json({ data: items, error: null });
 }

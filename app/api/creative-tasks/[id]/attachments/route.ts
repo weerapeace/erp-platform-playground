@@ -38,7 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const admin = supabaseAdmin();
   const { data: row, error } = await admin.from("erp_creative_attachments").insert({
-    task_id: id, kind, label: (body.label as string)?.trim() || null,
+    task_id: id, subtask_id: (body.subtask_id as string) || null, kind, label: (body.label as string)?.trim() || null,
     url: url || null, r2_key: r2Key || null,
     file_name: (body.file_name as string) || null, content_type: (body.content_type as string) || null,
     size_bytes: typeof body.size_bytes === "number" ? body.size_bytes : null, uploaded_by: user?.id ?? null,

@@ -86,6 +86,28 @@ export function employeeLabel(e: Partial<EmpRow> | null | undefined): string {
   return e.employee_code ?? "";
 }
 
+/** ตั้งผู้รับผิดชอบ subtask (m2m) แบบแทนที่ทั้งชุด */
+export async function setSubtaskAssignees(admin: Admin, subtaskId: string, employeeIds: (string | null | undefined)[]): Promise<void> {
+  await admin.from("erp_creative_subtask_assignees").delete().eq("subtask_id", subtaskId);
+  const clean = [...new Set(employeeIds.filter(Boolean).map(String))];
+  if (clean.length) await admin.from("erp_creative_subtask_assignees").insert(clean.map((employee_id) => ({ subtask_id: subtaskId, employee_id })));
+}
+
+/** ผู้รับผิดชอบของหลาย subtask → Map<subtask_id, {id,label}[]> */
+export async function subtaskAssigneesMap(admin: Admin, subtaskIds: string[]): Promise<Map<string, { id: string; label: string }[]>> {
+  const map = new Map<string, { id: string; label: string }[]>();
+  if (subtaskIds.length === 0) return map;
+  const { data } = await admin.from("erp_creative_subtask_assignees").select("subtask_id, employee_id").in("subtask_id", subtaskIds);
+  const rows = (data ?? []) as { subtask_id: string; employee_id: string }[];
+  const empMap = await employeeLabelMap(admin, rows.map((r) => r.employee_id));
+  for (const r of rows) {
+    const arr = map.get(r.subtask_id) ?? [];
+    arr.push({ id: r.employee_id, label: empMap.get(String(r.employee_id)) ?? "" });
+    map.set(r.subtask_id, arr);
+  }
+  return map;
+}
+
 /** ดึงชื่อพนักงานหลายคนพร้อมกัน → Map<id, label> (เฉพาะ id ที่ส่งมา) */
 export async function employeeLabelMap(admin: Admin, ids: (string | null | undefined)[]): Promise<Map<string, string>> {
   const uniq = [...new Set(ids.filter(Boolean).map(String))];

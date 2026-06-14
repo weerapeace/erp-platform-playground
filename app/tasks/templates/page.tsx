@@ -17,7 +17,7 @@ import {
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
   listRecurring, createRecurring, deleteRecurring, runRecurringNow,
   listCampaigns, listBrands,
-  type TaskTemplate, type TemplateStep, type RecurringRule, type Campaign, type BrandOption,
+  type TaskTemplate, type RecurringRule, type Campaign, type BrandOption,
 } from "../data";
 import { useCreativeOptions, taskTypeLabel } from "../use-options";
 
@@ -66,6 +66,30 @@ export default function TemplatesPage() {
 // Templates tab
 // ============================================================
 const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[] };
+type EditStep = { title: string; description: string; required_before_next: boolean; assignees: { id: string; label: string }[] };
+
+// ตัวแก้ 1 ขั้นตอน — ชื่อ + รายละเอียด + ผู้รับผิดชอบหลายคน
+function StepEditor({ step, index, onChange, onRemove }: { step: EditStep; index: number; onChange: (p: Partial<EditStep>) => void; onRemove: () => void }) {
+  const [adding, setAdding] = useState<EmployeePickerValue | null>(null);
+  const ids = step.assignees.map((a) => a.id);
+  return (
+    <div className="border border-slate-200 rounded-lg p-2.5 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-slate-400 w-5">{index + 1}.</span>
+        <ERPInput value={step.title} onChange={(e) => onChange({ title: e.target.value })} placeholder="ชื่อขั้นตอน" />
+        <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap"><input type="checkbox" checked={step.required_before_next} onChange={(e) => onChange({ required_before_next: e.target.checked })} />ต้องเสร็จก่อน</label>
+        <button onClick={onRemove} className="text-slate-400 hover:text-red-500">✕</button>
+      </div>
+      <ERPInput value={step.description} onChange={(e) => onChange({ description: e.target.value })} placeholder="รายละเอียดขั้นตอน (ไม่บังคับ)" />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-slate-400">ผู้รับผิดชอบ:</span>
+        {step.assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => onChange({ assignees: step.assignees.filter((x) => x.id !== a.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+        <div className="w-44"><EmployeePicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onChange({ assignees: [...step.assignees, { id: v.id, label: v.name }] }); setAdding(null); }} disableCreate /></div>
+      </div>
+    </div>
+  );
+}
+
 function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
   const { taskTypes, platforms } = useCreativeOptions();
   const [items, setItems] = useState<TaskTemplate[]>([]);
@@ -74,7 +98,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_TPL);
-  const [steps, setSteps] = useState<TemplateStep[]>([]);
+  const [steps, setSteps] = useState<EditStep[]>([]);
   const [saving, setSaving] = useState(false);
   const [delId, setDelId] = useState<TaskTemplate | null>(null);
 
@@ -82,13 +106,13 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   useEffect(() => { (async () => { setLoading(true); await load(); try { setBrands(await listBrands()); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
 
   const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setOpen(true); };
-  const openEdit = (t: TaskTemplate) => { setEditId(t.id); setForm({ name: t.name, task_type: t.task_type ?? "photo_shoot", default_priority: t.default_priority, brand_id: t.brand_id ?? "", description: t.description ?? "", platforms: t.platforms ?? [] }); setSteps(Array.isArray(t.steps) ? t.steps : []); setOpen(true); };
+  const openEdit = (t: TaskTemplate) => { setEditId(t.id); setForm({ name: t.name, task_type: t.task_type ?? "photo_shoot", default_priority: t.default_priority, brand_id: t.brand_id ?? "", description: t.description ?? "", platforms: t.platforms ?? [] }); setSteps((Array.isArray(t.steps) ? t.steps : []).map((s) => ({ title: s.title ?? "", description: s.description ?? "", required_before_next: !!s.required_before_next, assignees: (s.assignee_ids ?? []).map((id, k) => ({ id, label: s.assignee_labels?.[k] || id })) }))); setOpen(true); };
   const togglePlat = (v: string) => setForm((f) => ({ ...f, platforms: f.platforms.includes(v) ? f.platforms.filter((x) => x !== v) : [...f.platforms, v] }));
 
   const save = async () => {
     if (!form.name.trim()) { pushToast("error", "กรุณาใส่ชื่อเทมเพลต"); return; }
     setSaving(true);
-    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()) };
+    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description.trim() || null, required_before_next: s.required_before_next, assignee_ids: s.assignees.map((a) => a.id) })) };
     try { if (editId) await updateTemplate(editId, body); else await createTemplate(body); setOpen(false); pushToast("success", "บันทึกเทมเพลตแล้ว"); await load(); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
@@ -135,14 +159,9 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
           <p className="text-sm font-medium text-slate-700 mb-2">ขั้นตอน (subtask)</p>
           <div className="space-y-2">
             {steps.map((s, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <span className="text-xs text-slate-400 w-5">{i + 1}.</span>
-                <ERPInput value={s.title} onChange={(e) => setSteps((ss) => ss.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} placeholder="ชื่อขั้นตอน" />
-                <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap"><input type="checkbox" checked={!!s.required_before_next} onChange={(e) => setSteps((ss) => ss.map((x, j) => j === i ? { ...x, required_before_next: e.target.checked } : x))} />ต้องเสร็จก่อน</label>
-                <button onClick={() => setSteps((ss) => ss.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500">✕</button>
-              </div>
+              <StepEditor key={i} step={s} index={i} onChange={(patch) => setSteps((ss) => ss.map((x, j) => j === i ? { ...x, ...patch } : x))} onRemove={() => setSteps((ss) => ss.filter((_, j) => j !== i))} />
             ))}
-            <button onClick={() => setSteps((ss) => [...ss, { title: "", required_before_next: false }])} className="text-sm text-violet-700 hover:underline">＋ เพิ่มขั้นตอน</button>
+            <button onClick={() => setSteps((ss) => [...ss, { title: "", description: "", required_before_next: false, assignees: [] }])} className="text-sm text-violet-700 hover:underline">＋ เพิ่มขั้นตอน</button>
           </div>
         </div>
       </ERPModal>
