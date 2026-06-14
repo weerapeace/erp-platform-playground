@@ -162,6 +162,8 @@ export default function DesignSheetsPage() {
   const [formErr, setFormErr] = useState<string | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<DesignSheetListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [hardDelTarget, setHardDelTarget] = useState<{ id: string; code: string; name: string } | null>(null);
+  const [hardDeleting, setHardDeleting] = useState(false);
 
   // เตือนก่อนปิด เมื่อมีข้อมูลตีราคายังไม่บันทึก
   const [closeConfirm, setCloseConfirm] = useState(false);
@@ -776,6 +778,17 @@ export default function DesignSheetsPage() {
     finally { setArchiving(false); }
   };
 
+  const doHardDelete = async () => {
+    if (!hardDelTarget) return; setHardDeleting(true);
+    try {
+      const res = await apiFetch(`/api/design-sheets/${hardDelTarget.id}?hard=1`, { method: "DELETE" });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ลบใบงานถาวรแล้ว (รูปย้ายเข้าถังขยะ R2 สำรอง 30 วัน)");
+      setHardDelTarget(null); setForm(null); refresh();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setHardDeleting(false); }
+  };
+
   const doRestore = async (row: DesignSheetListItem) => {
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_active: true }) });
@@ -1023,6 +1036,11 @@ export default function DesignSheetsPage() {
               {canCreate && (
                 <button onClick={() => setSkuWizard(true)} title="สร้าง Parent SKU + SKU ลูก จากใบงานนี้"
                   className="h-9 px-3 inline-flex items-center text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">🪄 สร้าง SKU</button>
+              )}
+              {canEdit && (
+                <button onClick={() => { if (form?.id) setHardDelTarget({ id: form.id, code: form.code ?? "", name: form.name ?? "" }); }}
+                  title="ลบใบงานถาวร + ย้ายรูปเข้าถังขยะ R2"
+                  className="h-9 px-3 inline-flex items-center text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">🗑 ลบถาวร</button>
               )}
             </div>
           )}
@@ -1620,6 +1638,11 @@ export default function DesignSheetsPage() {
         title="เก็บเข้ากรุ" variant="danger" loading={archiving}
         confirmText="เก็บเข้ากรุ" cancelText="ยกเลิก"
         message={`ต้องการเก็บใบงาน ${archiveTarget?.code ?? ""} (${archiveTarget?.name ?? ""}) เข้ากรุหรือไม่? ข้อมูลยังอยู่ กู้คืนได้ภายหลัง`} />
+
+      <ConfirmDialog open={hardDelTarget !== null} onClose={() => setHardDelTarget(null)} onConfirm={doHardDelete}
+        title="ลบใบงานถาวร" variant="danger" loading={hardDeleting}
+        confirmText="ลบถาวร" cancelText="ยกเลิก"
+        message={`ต้องการลบใบงาน ${hardDelTarget?.code ?? ""} (${hardDelTarget?.name ?? ""}) ถาวรหรือไม่?\n\nระบบจะลบใบงาน + comment + ตีราคา + เสนอราคา และย้ายรูปทั้งหมดเข้าถังขยะ R2 (สำรอง 30 วัน) — ต่างจาก "เก็บเข้ากรุ" ที่ยังกู้คืนได้`} />
     </>
   );
 }

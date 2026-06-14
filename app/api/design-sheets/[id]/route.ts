@@ -3,15 +3,17 @@
  *
  * GET    /api/design-sheets/[id] → รายละเอียดใบงาน
  * PATCH  /api/design-sheets/[id] → แก้ไข (whitelist field) + กู้คืนจากกรุ (is_active)
- * DELETE /api/design-sheets/[id] → เก็บเข้ากรุ (archive — ไม่ลบจริง)
+ * DELETE /api/design-sheets/[id]        → เก็บเข้ากรุ (archive — ไม่ลบจริง)
+ * DELETE /api/design-sheets/[id]?hard=1 → ลบถาวร + ย้ายรูปใน R2 เข้า trash/ (สำรอง 30 วัน) + ลบลูก (cascade)
  *
- * ของกลาง: guardApi (products.view/products.edit) + writeAudit → audit_logs
+ * ของกลาง: guardApi (products.view/products.edit) + writeAudit → audit_logs + r2MoveToTrash
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { isValidDsStatus } from "../route";
 
@@ -98,9 +100,52 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
+  const hard = new URL(request.url).searchParams.get("hard") === "1";
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-
   const admin = supabaseAdmin();
+
+  // ---- ลบถาวร: ย้ายรูปใน R2 เข้า trash/ + ลบใบงาน (ลูก comments/cost_lines/quotes ลบตาม cascade) ----
+  if (hard) {
+    const { data: sheet } = await admin.from("design_sheets").select("code").eq("id", id).single();
+
+    // รวบรวมรูปทั้งหมดของใบงานนี้จากตารางแนบไฟล์กลาง:
+    //  - design_sheet / design_sheet_detail (entity_id = ใบงาน)
+    //  - design_sheet_comment (entity_id = id ของแต่ละ comment — ต้องอ่านก่อน comment ถูก cascade ลบ)
+    const { data: coms } = await admin.from("design_sheet_comments").select("id").eq("sheet_id", id);
+    const commentIds = (coms ?? []).map((c) => (c as { id: string }).id);
+
+    type Att = { id: string; file_path: string | null };
+    const attRows: Att[] = [];
+    const { data: sheetAtts } = await admin.from("erp_playground_attachments")
+      .select("id, file_path").in("entity_type", ["design_sheet", "design_sheet_detail"]).eq("entity_id", id);
+    attRows.push(...((sheetAtts ?? []) as Att[]));
+    if (commentIds.length > 0) {
+      const { data: comAtts } = await admin.from("erp_playground_attachments")
+        .select("id, file_path").eq("entity_type", "design_sheet_comment").in("entity_id", commentIds);
+      attRows.push(...((comAtts ?? []) as Att[]));
+    }
+
+    if (attRows.length > 0 && await isR2Configured()) {
+      for (const a of attRows) {
+        if (!a.file_path) continue;
+        try { await r2MoveToTrash(a.file_path); }
+        catch (e) { console.error("[design-sheet] R2 trash move failed:", a.file_path, e); }
+      }
+    }
+    if (attRows.length > 0) await admin.from("erp_playground_attachments").delete().in("id", attRows.map((a) => a.id));
+
+    const { error } = await admin.from("design_sheets").delete().eq("id", id);
+    if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+
+    await writeAudit(admin, {
+      action: "delete", entityType: "design_sheet", entityId: id,
+      actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { code: sheet?.code, deleted_images: attRows.length, hard: true },
+    });
+    return NextResponse.json({ id, error: null });
+  }
+
+  // ---- ค่าเริ่มต้น: เก็บเข้ากรุ (archive — ไม่ลบจริง) ----
   const { data: row, error } = await admin.from("design_sheets").update({ is_active: false, updated_at: new Date().toISOString() })
     .eq("id", id).select("id, code").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
