@@ -76,6 +76,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     x: typeof body.x === "number" ? body.x : 80, y: typeof body.y === "number" ? body.y : 80,
     width: typeof body.width === "number" ? body.width : 240, height: typeof body.height === "number" ? body.height : 140,
     color: (body.color as string) || null, z_index: z, created_by: user?.id ?? null,
+    data: body.data && typeof body.data === "object" ? body.data : {},
   }).select(SELECT).single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "board:add_item", entityType: "creative_board", entityId: boardId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { item_type: itemType } });

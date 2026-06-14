@@ -11,6 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { userLabelMap } from "@/lib/creative-tasks-server";
+import { r2DeleteObject } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -79,6 +80,18 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_creative_projects").update({ is_active: false, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+
+  // เก็บกวาดไฟล์รูปใน R2 ของทุกกระดานในโปรเจกต์ (best-effort)
+  try {
+    const { data: boards } = await admin.from("erp_creative_boards").select("id").eq("project_id", id);
+    const boardIds = (boards ?? []).map((b) => b.id as string);
+    if (boardIds.length) {
+      const { data: imgs } = await admin.from("erp_creative_board_items").select("r2_key").in("board_id", boardIds).eq("item_type", "image").not("r2_key", "is", null);
+      const keys = [...new Set((imgs ?? []).map((r) => r.r2_key as string).filter(Boolean))];
+      for (const k of keys) { try { await r2DeleteObject(k); } catch { /* best-effort */ } }
+    }
+  } catch { /* ไม่ให้พังการลบโปรเจกต์ */ }
+
   await writeAudit(admin, { action: "delete", entityType: "creative_project", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: {} });
   return NextResponse.json({ success: true, error: null });
 }
