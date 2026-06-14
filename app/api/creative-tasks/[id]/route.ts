@@ -98,7 +98,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // ส่งตรวจ → แจ้งผู้ตรวจ
     if (to === "need_review") notifyTarget = { empId: (current.reviewer_id as string) ?? null, eventType: "task_need_review", title: `งานรอตรวจ: ${current.title}` };
   } else if (action === "approve" || action === "reject" || action === "revise") {
-    // อนุมัติ / ไม่ผ่าน / ตีกลับแก้
+    // อนุมัติ / ไม่ผ่าน / ตีกลับแก้ — ต้องมีสิทธิ์ tasks.approve (หัวหน้า) แยกจากการแก้งานทั่วไป
+    const denyApprove = await guardApi(request, "tasks.approve"); if (denyApprove) return denyApprove;
     const map: Record<string, { approval: ApprovalStatus; status: CreativeStatus; ev: string; label: string }> = {
       approve: { approval: "approved", status: "approved", ev: "task_approved", label: "อนุมัติงาน" },
       reject:  { approval: "rejected", status: "revision", ev: "task_rejected", label: "ตีกลับ (ไม่ผ่าน)" },
