@@ -368,6 +368,7 @@ export type SkuPickerValue = {
   code: string;
   name: string;
   uom_name?: string | null;
+  color?: string | null;
   list_price?: number | null;
   image_url?: string | null;
   image_key?: string | null;
@@ -395,6 +396,7 @@ function mapSkuRow(row: Record<string, unknown>): SkuPickerValue {
     code,
     name: String(row.name ?? row.name_th ?? row.sku_name ?? code),
     uom_name: row.uom_name != null ? String(row.uom_name) : row.uom_label != null ? String(row.uom_label) : null,
+    color: row.color != null ? String(row.color) : row.color_th != null ? String(row.color_th) : null,
     list_price: row.list_price == null ? null : Number(row.list_price),
     image_key: imageKey == null ? null : String(imageKey),
     image_url: skuImageUrl(imageKey),
@@ -662,11 +664,11 @@ export function SupplierPicker({ value, onChange, placeholder = "เลือก
 // ---- EmployeePicker / others — ใช้ Master Picker Factory (Supabase) ----
 // re-export จาก ./master ที่ใช้ factory pattern
 export {
-  CustomerPicker, EmployeePicker, WarehousePicker,
+  CustomerPicker, EmployeePicker, UserPicker, WarehousePicker,
   DepartmentPicker, UnitPicker, TaxPicker,
 } from "./master";
 export { RecordPeekLink } from "./record-peek-link";
 export type {
-  CustomerPickerValue, EmployeePickerValue, WarehousePickerValue,
+  CustomerPickerValue, EmployeePickerValue, UserPickerValue, WarehousePickerValue,
   DepartmentPickerValue, UnitPickerValue, TaxPickerValue, MasterValue,
 } from "./master";

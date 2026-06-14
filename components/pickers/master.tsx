@@ -297,6 +297,20 @@ export const EmployeePicker = createMasterPicker<EmployeePickerValue>({
   ),
 });
 
+// UserPicker — เลือก "user จริง" (user_profiles คนที่ login ได้) — ของกลางสำหรับมอบหมายงาน
+export type UserPickerValue = MasterValue & { email?: string | null; role?: string | null };
+export const UserPicker = createMasterPicker<UserPickerValue>({
+  apiPath:    "creative-users",
+  listEndpoint: "/api/creative-users",
+  storageKey: "erp-recent-users",
+  label:      "ผู้ใช้",
+  emptyLabel: "ไม่พบผู้ใช้ (คนที่ login ได้)",
+  searchPlaceholder: "ค้นหา ชื่อ / อีเมล...",
+  createPermission: "employees.view",
+  allowCreate: false,
+  secondaryRender: v => v.email ? <span>{v.email}{v.role ? <span> · {v.role}</span> : null}</span> : null,
+});
+
 export type WarehousePickerValue = MasterValue & {
   branch?: string | null; manager_name?: string | null;
 };

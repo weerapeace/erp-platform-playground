@@ -3,7 +3,7 @@
 // ============================================================
 // Creative Task Manager — ต่อข้อมูลจริง (Phase B)
 // ของกลาง: StandaloneShell, DataTable, ERPModal, ConfirmDialog, ERPForm*,
-//          EmployeePicker, ProductPicker, ActivityFeed
+//          UserPicker, ProductPicker, ActivityFeed
 // ข้อมูลจาก /api/creative-tasks (ดู app/tasks/data.ts)
 // ============================================================
 
@@ -13,8 +13,8 @@ import { useAuth } from "@/components/auth";
 import { DataTable } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { EmployeePicker, ProductPicker } from "@/components/pickers";
-import type { EmployeePickerValue, ProductPickerValue } from "@/components/pickers";
+import { UserPicker, ProductPicker } from "@/components/pickers";
+import type { UserPickerValue, ProductPickerValue } from "@/components/pickers";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
@@ -104,7 +104,7 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
 type FormState = {
   title: string; description: string; task_type: string;
   brand_id: string; campaign_id: string;
-  assignee: EmployeePickerValue | null; reviewer: EmployeePickerValue | null;
+  assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
   priority: CreativePriority; due_date: string;
   product: ProductPickerValue | null; platforms: string[]; drive_folder_url: string;
 };
@@ -329,8 +329,8 @@ export default function TasksPage() {
           <ERPFormField label="ความสำคัญ"><ERPSelect value={form.priority} options={PRIORITY_OPTIONS} onChange={(e) => updateForm({ priority: e.target.value as CreativePriority })} /></ERPFormField>
           <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => updateForm({ brand_id: e.target.value })} /></ERPFormField>
           <ERPFormField label="แคมเปญ"><ERPSelect value={form.campaign_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => updateForm({ campaign_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label="ผู้รับผิดชอบ"><EmployeePicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></ERPFormField>
-          <ERPFormField label="ผู้ตรวจ/อนุมัติ"><EmployeePicker value={form.reviewer} onChange={(v) => updateForm({ reviewer: v })} disableCreate /></ERPFormField>
+          <ERPFormField label="ผู้รับผิดชอบ"><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></ERPFormField>
+          <ERPFormField label="ผู้ตรวจ/อนุมัติ"><UserPicker value={form.reviewer} onChange={(v) => updateForm({ reviewer: v })} disableCreate /></ERPFormField>
           <ERPFormField label="กำหนดส่ง"><ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} /></ERPFormField>
           <ERPFormField label="โฟลเดอร์ Drive (ลิงก์)"><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>
           <ERPFormField label="สินค้า/SKU (ถ้ามี)" span={2}><ProductPicker value={form.product} onChange={(v) => updateForm({ product: v })} disableCreate /></ERPFormField>
@@ -626,13 +626,13 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
 function SubtaskCard({ sub, taskId, reload, pushToast }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: (type: Toast["type"], m: string) => void }) {
   const [open, setOpen] = useState(false);
   const [desc, setDesc] = useState(sub.description ?? "");
-  const [adding, setAdding] = useState<EmployeePickerValue | null>(null);
+  const [adding, setAdding] = useState<UserPickerValue | null>(null);
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const ids = sub.assignees.map((a) => a.id);
 
   const patch = async (p: Record<string, unknown>) => { try { await updateSubtask(taskId, sub.id, p); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
-  const addAssignee = async (v: EmployeePickerValue | null) => { if (!v || ids.includes(v.id)) return; setAdding(null); await patch({ assignee_ids: [...ids, v.id] }); };
+  const addAssignee = async (v: UserPickerValue | null) => { if (!v || ids.includes(v.id)) return; setAdding(null); await patch({ assignee_ids: [...ids, v.id] }); };
   const del = async () => { if (!window.confirm(`ลบงานย่อย "${sub.title}" ?`)) return; try { await deleteSubtask(taskId, sub.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -655,7 +655,7 @@ function SubtaskCard({ sub, taskId, reload, pushToast }: { sub: CreativeSubtask;
               {sub.assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => patch({ assignee_ids: ids.filter((x) => x !== a.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}
               {sub.assignees.length === 0 && <span className="text-xs text-slate-400">ยังไม่มี</span>}
             </div>
-            <EmployeePicker value={adding} onChange={addAssignee} disableCreate />
+            <UserPicker value={adding} onChange={addAssignee} disableCreate />
           </div>
           <div>
             <p className="text-[11px] text-slate-400 mb-1">ไฟล์/ลิงก์ส่งงาน</p>

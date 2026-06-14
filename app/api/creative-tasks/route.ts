@@ -71,22 +71,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
 
-  // mine=1 → เฉพาะงานที่ฉันรับผิดชอบ (แปลง auth user → employee id ผ่าน email)
-  let myEmpId: string | null = null;
+  // mine=1 → เฉพาะงานที่ฉันรับผิดชอบ (assignee = user จริงที่ login อยู่)
+  let myUserId: string | null = null;
   if (mine) {
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-    if (user?.email) {
-      const { data: emp } = await admin.from("employees").select("id").ilike("email", user.email).maybeSingle();
-      myEmpId = (emp?.id as string | null) ?? null;
-    }
-    if (!myEmpId) return NextResponse.json({ data: [], total: 0, error: null }); // ไม่มีพนักงานผูกอีเมล = ไม่มีงานของฉัน
+    myUserId = user?.id ?? null;
+    if (!myUserId) return NextResponse.json({ data: [], total: 0, error: null });
   }
 
   let q = admin.from("erp_creative_tasks").select(SELECT, { count: "exact" })
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
   if (!includeInactive) q = q.eq("is_active", true);
-  if (myEmpId) q = q.eq("assignee_id", myEmpId);
+  if (myUserId) q = q.eq("assignee_id", myUserId);
   if (search)   { const t = `%${search}%`; q = q.or(`title.ilike.${t},task_no.ilike.${t},product_name.ilike.${t}`); }
   if (status)   q = q.eq("status", status);
   if (priority) q = q.eq("priority", priority);

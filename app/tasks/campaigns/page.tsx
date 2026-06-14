@@ -2,7 +2,7 @@
 
 // ============================================================
 // Creative Campaigns — แคมเปญที่ครอบงาน creative
-// ของกลาง: StandaloneShell, ERPModal, ConfirmDialog, ERPForm*, EmployeePicker
+// ของกลาง: StandaloneShell, ERPModal, ConfirmDialog, ERPForm*, UserPicker
 // ข้อมูลจาก /api/creative-campaigns (ดู app/tasks/data.ts)
 // ============================================================
 
@@ -10,8 +10,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { EmployeePicker } from "@/components/pickers";
-import type { EmployeePickerValue } from "@/components/pickers";
+import { UserPicker } from "@/components/pickers";
+import type { UserPickerValue } from "@/components/pickers";
 import {
   STATUS_META,
   listCampaigns, createCampaign, getCampaign, updateCampaign, deleteCampaign, listBrands,
@@ -28,7 +28,7 @@ const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
-type FormState = { name: string; brand_id: string; objective: string; owner: EmployeePickerValue | null; start_date: string; end_date: string; note: string };
+type FormState = { name: string; brand_id: string; objective: string; owner: UserPickerValue | null; start_date: string; end_date: string; note: string };
 const EMPTY: FormState = { name: "", brand_id: "", objective: "", owner: null, start_date: "", end_date: "", note: "" };
 
 export default function CampaignsPage() {
@@ -130,7 +130,7 @@ export default function CampaignsPage() {
         <ERPFormSection title="ข้อมูลแคมเปญ" columns={2}>
           <ERPFormField label="ชื่อแคมเปญ" required span={2}><ERPInput value={form.name} onChange={(e) => update({ name: e.target.value })} placeholder="เช่น Shopee 7.7 / เปิดตัว Heart Bag" /></ERPFormField>
           <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => update({ brand_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label="ผู้ดูแลแคมเปญ"><EmployeePicker value={form.owner} onChange={(v) => update({ owner: v })} disableCreate /></ERPFormField>
+          <ERPFormField label="ผู้ดูแลแคมเปญ"><UserPicker value={form.owner} onChange={(v) => update({ owner: v })} disableCreate /></ERPFormField>
           <ERPFormField label="เริ่ม"><ERPInput type="date" value={form.start_date} onChange={(e) => update({ start_date: e.target.value })} /></ERPFormField>
           <ERPFormField label="สิ้นสุด"><ERPInput type="date" value={form.end_date} onChange={(e) => update({ end_date: e.target.value })} /></ERPFormField>
           <ERPFormField label="วัตถุประสงค์" span={2}><ERPTextarea value={form.objective} rows={2} onChange={(e) => update({ objective: e.target.value })} placeholder="เป้าหมายของแคมเปญ" /></ERPFormField>

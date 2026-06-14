@@ -2,7 +2,7 @@
 
 // ============================================================
 // Creative Templates + Recurring — แม่แบบงาน + งานประจำสร้างซ้ำ
-// ของกลาง: StandaloneShell, ERPModal, ConfirmDialog, ERPForm*, EmployeePicker
+// ของกลาง: StandaloneShell, ERPModal, ConfirmDialog, ERPForm*, UserPicker
 // ข้อมูลจาก /api/creative-templates + /api/creative-recurring
 // ============================================================
 
@@ -10,8 +10,8 @@ import { useCallback, useEffect, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { EmployeePicker } from "@/components/pickers";
-import type { EmployeePickerValue } from "@/components/pickers";
+import { UserPicker } from "@/components/pickers";
+import type { UserPickerValue } from "@/components/pickers";
 import {
   PRIORITY_META,
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
@@ -70,7 +70,7 @@ type EditStep = { title: string; description: string; required_before_next: bool
 
 // ตัวแก้ 1 ขั้นตอน — ชื่อ + รายละเอียด + ผู้รับผิดชอบหลายคน
 function StepEditor({ step, index, onChange, onRemove }: { step: EditStep; index: number; onChange: (p: Partial<EditStep>) => void; onRemove: () => void }) {
-  const [adding, setAdding] = useState<EmployeePickerValue | null>(null);
+  const [adding, setAdding] = useState<UserPickerValue | null>(null);
   const ids = step.assignees.map((a) => a.id);
   return (
     <div className="border border-slate-200 rounded-lg p-2.5 space-y-2">
@@ -84,7 +84,7 @@ function StepEditor({ step, index, onChange, onRemove }: { step: EditStep; index
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[11px] text-slate-400">ผู้รับผิดชอบ:</span>
         {step.assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => onChange({ assignees: step.assignees.filter((x) => x.id !== a.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}
-        <div className="w-44"><EmployeePicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onChange({ assignees: [...step.assignees, { id: v.id, label: v.name }] }); setAdding(null); }} disableCreate /></div>
+        <div className="w-44"><UserPicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onChange({ assignees: [...step.assignees, { id: v.id, label: v.name }] }); setAdding(null); }} disableCreate /></div>
       </div>
     </div>
   );
@@ -183,7 +183,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_REC);
-  const [assignee, setAssignee] = useState<EmployeePickerValue | null>(null);
+  const [assignee, setAssignee] = useState<UserPickerValue | null>(null);
   const [saving, setSaving] = useState(false);
   const [delId, setDelId] = useState<RecurringRule | null>(null);
 
@@ -243,7 +243,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
         <ERPFormSection title="กฎงานประจำ" columns={2}>
           <ERPFormField label="ชื่อกฎ/ชื่องาน" required span={2}><ERPInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="เช่น ทำ Content Calendar รายสัปดาห์" /></ERPFormField>
           <ERPFormField label="ใช้เทมเพลต"><ERPSelect value={form.template_id} options={[{ value: "", label: "— ไม่ใช้ —" }, ...templates.map((t) => ({ value: t.id, label: t.name }))]} onChange={(e) => setForm((f) => ({ ...f, template_id: e.target.value }))} /></ERPFormField>
-          <ERPFormField label="ผู้รับผิดชอบ"><EmployeePicker value={assignee} onChange={setAssignee} disableCreate /></ERPFormField>
+          <ERPFormField label="ผู้รับผิดชอบ"><UserPicker value={assignee} onChange={setAssignee} disableCreate /></ERPFormField>
           <ERPFormField label="ความถี่"><ERPSelect value={form.frequency} options={FREQ} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} /></ERPFormField>
           <ERPFormField label="ทุก ๆ (รอบ)"><ERPInput type="number" value={String(form.interval_n)} onChange={(e) => setForm((f) => ({ ...f, interval_n: e.target.value }))} /></ERPFormField>
           <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setForm((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
