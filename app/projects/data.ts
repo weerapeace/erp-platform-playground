@@ -87,3 +87,28 @@ export async function toggleReaction(itemId: string, type: "vote" | "pin" | "lik
   const j = await ok(await apiFetch(`/api/creative-board-items/${itemId}/reactions`, { method: "POST", body: JSON.stringify({ type }) }));
   return (j.active as boolean) ?? false;
 }
+
+// ---- Send to Production ----
+export const PRODUCTION_TASKS: { task_type: string; label: string }[] = [
+  { task_type: "photo_shoot", label: "ถ่ายรูปสินค้า" },
+  { task_type: "photo_edit", label: "แต่งรูป Shopee / Lazada" },
+  { task_type: "product_image", label: "ทำรูปปก / Detail" },
+  { task_type: "banner", label: "ทำ Banner" },
+  { task_type: "video", label: "ทำ Video Content" },
+  { task_type: "caption", label: "เขียน Caption" },
+  { task_type: "product_listing", label: "ลงสินค้า Marketplace" },
+  { task_type: "social_post", label: "โพสต์ Social" },
+];
+export async function sendToProduction(projectId: string, tasks: { task_type: string; title: string }[]): Promise<number> {
+  const j = await ok(await apiFetch(`/api/creative-projects/${projectId}/send-to-production`, { method: "POST", body: JSON.stringify({ tasks }) }));
+  return (j.created as number) ?? 0;
+}
+
+// summary keys
+export const SUMMARY_FIELDS: { key: string; label: string }[] = [
+  { key: "mood", label: "Mood / โทน" },
+  { key: "photo", label: "สไตล์ภาพ" },
+  { key: "video", label: "สไตล์วิดีโอ" },
+  { key: "banner", label: "ข้อความ Banner" },
+  { key: "target", label: "กลุ่มเป้าหมาย" },
+];
