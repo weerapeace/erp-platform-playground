@@ -5,15 +5,16 @@
 import { apiFetch } from "@/lib/api";
 
 export type {
-  CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus,
+  CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus,
 } from "@/lib/creative-tasks";
 export {
   STATUS_META, PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
   TASK_TYPES, PLATFORMS, TRANSITIONS, PRIMARY_ACTIONS, STATUS_PROGRESS,
   ALL_STATUSES, canTransition,
+  CONTENT_STATUS_META, POST_TYPES, HASHTAG_CATEGORIES,
 } from "@/lib/creative-tasks";
 
-import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus } from "@/lib/creative-tasks";
+import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus } from "@/lib/creative-tasks";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -210,4 +211,66 @@ export async function deleteCampaign(id: string): Promise<void> {
 export async function listBrands(): Promise<BrandOption[]> {
   const j = await jsonOrThrow(await apiFetch("/api/brands"));
   return ((j.data as { id: string; name: string; color: string | null }[]) ?? []).map((b) => ({ id: b.id, name: b.name, color: b.color }));
+}
+
+// ============================================================
+// Content / Social
+// ============================================================
+export type ContentCaption = { id?: string; platform: string; caption: string | null; hashtags: string | null; sort_order?: number };
+export type ContentItem = {
+  [key: string]: unknown;
+  id: string; content_no: string | null; title: string;
+  campaign_id: string | null; campaign_label: string | null;
+  brand_id: string | null; brand_label: string | null; brand_color: string | null;
+  sku_id: string | null; sku_code: string | null; sku_name: string | null; product_name: string | null;
+  post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
+  scheduled_at: string | null; published_at: string | null; published_url: string | null;
+  product_links: { platform: string; url: string }[]; note: string | null; updated_at: string;
+};
+export type ContentDetail = ContentItem & { captions: ContentCaption[] };
+export type Hashtag = { id: string; text: string; brand_id: string | null; category: string; platform: string | null; usage_count: number; status: string };
+
+export type ContentListParams = { search?: string; status?: string; campaign_id?: string; brand_id?: string; platform?: string };
+export async function listContent(p: ContentListParams = {}): Promise<ContentItem[]> {
+  const q = new URLSearchParams();
+  if (p.search) q.set("search", p.search);
+  if (p.status) q.set("status", p.status);
+  if (p.campaign_id) q.set("campaign_id", p.campaign_id);
+  if (p.brand_id) q.set("brand_id", p.brand_id);
+  if (p.platform) q.set("platform", p.platform);
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content?${q.toString()}`));
+  return (j.data as ContentItem[]) ?? [];
+}
+export async function getContent(id: string): Promise<ContentDetail> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${id}`));
+  return j.data as ContentDetail;
+}
+export async function createContent(body: Record<string, unknown>): Promise<{ id: string; content_no: string }> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-content", { method: "POST", body: JSON.stringify(body) }));
+  return { id: j.id as string, content_no: j.content_no as string };
+}
+export async function updateContent(id: string, patch: Record<string, unknown>): Promise<ContentDetail> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+  return j.data as ContentDetail;
+}
+export async function deleteContent(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-content/${id}`, { method: "DELETE" }));
+}
+
+// ---- Hashtags ----
+export async function listHashtags(p: { search?: string; brand_id?: string; platform?: string; category?: string } = {}): Promise<Hashtag[]> {
+  const q = new URLSearchParams();
+  if (p.search) q.set("search", p.search);
+  if (p.brand_id) q.set("brand_id", p.brand_id);
+  if (p.platform) q.set("platform", p.platform);
+  if (p.category) q.set("category", p.category);
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-hashtags?${q.toString()}`));
+  return (j.data as Hashtag[]) ?? [];
+}
+export async function createHashtag(body: { text: string; brand_id?: string | null; category?: string; platform?: string | null }): Promise<Hashtag> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-hashtags", { method: "POST", body: JSON.stringify(body) }));
+  return j.data as Hashtag;
+}
+export async function deleteHashtag(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-hashtags?id=${id}`, { method: "DELETE" }));
 }

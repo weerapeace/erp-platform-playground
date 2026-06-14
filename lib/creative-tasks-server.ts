@@ -22,6 +22,22 @@ export async function nextTaskNo(admin: Admin): Promise<string> {
   return `${prefix}${String(Number.isFinite(seq) ? seq : 1).padStart(4, "0")}`;
 }
 
+/** เลขที่คอนเทนต์ CN-YYYYMM-#### (นับตามเดือน) */
+export async function nextContentNo(admin: Admin): Promise<string> {
+  const now = new Date();
+  const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const prefix = `CN-${ym}-`;
+  const { data } = await admin
+    .from("erp_creative_content")
+    .select("content_no")
+    .like("content_no", `${prefix}%`)
+    .order("content_no", { ascending: false })
+    .limit(1);
+  const last = (data?.[0]?.content_no as string | undefined) ?? null;
+  const seq = last ? parseInt(last.slice(prefix.length), 10) + 1 : 1;
+  return `${prefix}${String(Number.isFinite(seq) ? seq : 1).padStart(4, "0")}`;
+}
+
 /** สร้างการแจ้งเตือนในระบบ (ไม่ throw — แจ้งเตือนพังห้ามทำให้ action หลักพัง) */
 export async function notify(
   admin: Admin,

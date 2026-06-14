@@ -125,3 +125,35 @@ export function canTransition(from: string, to: string): boolean {
 }
 
 export const ALL_STATUSES = Object.keys(STATUS_META) as CreativeStatus[];
+
+// ============================================================
+// Content / Social module
+// ============================================================
+export type ContentStatus = "draft" | "ready" | "scheduled" | "published" | "cancelled";
+
+export const CONTENT_STATUS_META: Record<ContentStatus, { label: string; cls: string; dot: string }> = {
+  draft:     { label: "ร่าง",        cls: "bg-slate-50 text-slate-600 border-slate-200",      dot: "bg-slate-400" },
+  ready:     { label: "พร้อมโพสต์",   cls: "bg-sky-50 text-sky-700 border-sky-200",            dot: "bg-sky-500" },
+  scheduled: { label: "ตั้งเวลาแล้ว", cls: "bg-violet-50 text-violet-700 border-violet-200",   dot: "bg-violet-500" },
+  published: { label: "โพสต์แล้ว",    cls: "bg-emerald-50 text-emerald-700 border-emerald-200",dot: "bg-emerald-500" },
+  cancelled: { label: "ยกเลิก",      cls: "bg-slate-100 text-slate-400 border-slate-200",     dot: "bg-slate-300" },
+};
+
+export const POST_TYPES: { value: string; label: string }[] = [
+  { value: "image",  label: "รูปภาพ" },
+  { value: "album",  label: "อัลบั้มรูป" },
+  { value: "video",  label: "วิดีโอ" },
+  { value: "reel",   label: "Reel/Short" },
+  { value: "story",  label: "Story" },
+  { value: "live",   label: "ไลฟ์" },
+];
+
+export const HASHTAG_CATEGORIES: { value: string; label: string }[] = [
+  { value: "brand",    label: "แบรนด์" },
+  { value: "product",  label: "สินค้า" },
+  { value: "campaign", label: "แคมเปญ" },
+  { value: "seasonal", label: "ตามฤดู/เทศกาล" },
+  { value: "platform", label: "แพลตฟอร์ม" },
+  { value: "trend",    label: "เทรนด์" },
+  { value: "general",  label: "ทั่วไป" },
+];
