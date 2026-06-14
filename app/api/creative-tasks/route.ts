@@ -61,6 +61,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const campaign  = (searchParams.get("campaign_id") ?? "").trim();
   const assignee  = (searchParams.get("assignee_id") ?? "").trim();
   const brandId   = (searchParams.get("brand_id") ?? "").trim();
+  const mine      = searchParams.get("mine") === "1";
   const includeInactive = searchParams.get("include_inactive") === "1";
   const limit  = Math.min(1000, Math.max(1, parseInt(searchParams.get("limit") ?? "300", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
@@ -69,10 +70,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const orderAsc = sortBy ? searchParams.get("sort_dir") === "asc" : false;
 
   const admin = supabaseAdmin();
+
+  // mine=1 → เฉพาะงานที่ฉันรับผิดชอบ (แปลง auth user → employee id ผ่าน email)
+  let myEmpId: string | null = null;
+  if (mine) {
+    const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+    if (user?.email) {
+      const { data: emp } = await admin.from("employees").select("id").ilike("email", user.email).maybeSingle();
+      myEmpId = (emp?.id as string | null) ?? null;
+    }
+    if (!myEmpId) return NextResponse.json({ data: [], total: 0, error: null }); // ไม่มีพนักงานผูกอีเมล = ไม่มีงานของฉัน
+  }
+
   let q = admin.from("erp_creative_tasks").select(SELECT, { count: "exact" })
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
   if (!includeInactive) q = q.eq("is_active", true);
+  if (myEmpId) q = q.eq("assignee_id", myEmpId);
   if (search)   { const t = `%${search}%`; q = q.or(`title.ilike.${t},task_no.ilike.${t},product_name.ilike.${t}`); }
   if (status)   q = q.eq("status", status);
   if (priority) q = q.eq("priority", priority);

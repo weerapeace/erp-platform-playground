@@ -1,0 +1,196 @@
+// ============================================================
+// Creative Task Manager — Data Layer (client)
+// เรียก API จริงผ่าน apiFetch (แนบ token). ของกลางค่าคงที่จาก lib/creative-tasks
+// ============================================================
+import { apiFetch } from "@/lib/api";
+
+export type {
+  CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus,
+} from "@/lib/creative-tasks";
+export {
+  STATUS_META, PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
+  TASK_TYPES, PLATFORMS, TRANSITIONS, PRIMARY_ACTIONS, STATUS_PROGRESS,
+  ALL_STATUSES, canTransition,
+} from "@/lib/creative-tasks";
+
+import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus } from "@/lib/creative-tasks";
+
+// ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
+export type CreativeTask = {
+  [key: string]: unknown;
+  id: string;
+  task_no: string | null;
+  title: string;
+  description: string | null;
+  task_type: string | null;
+  brand_id: string | null; brand_label: string | null; brand_color: string | null;
+  campaign_id: string | null; campaign_label: string | null;
+  sku_id: string | null; sku_code: string | null; sku_name: string | null;
+  sku_color: string | null; sku_price: number | null; sku_image_key: string | null;
+  product_name: string | null;
+  priority: CreativePriority;
+  status: CreativeStatus;
+  progress_percent: number;
+  assignee_id: string | null; assignee_label: string | null;
+  reviewer_id: string | null; reviewer_label: string | null;
+  approver_id: string | null; approver_label: string | null;
+  start_date: string | null; due_date: string | null; completed_at: string | null;
+  approval_status: ApprovalStatus;
+  asset_status: AssetStatus;
+  platforms: string[] | null;
+  drive_folder_url: string | null; final_asset_url: string | null; published_url: string | null;
+  blocker_status: string | null; blocker_reason: string | null;
+  is_active: boolean;
+  created_at: string; updated_at: string;
+};
+
+export type CreativeSubtask = {
+  id: string; task_id: string; title: string;
+  assignee_id: string | null; assignee_label?: string | null;
+  status: SubtaskStatus; due_date: string | null;
+  required_before_next: boolean; sort_order: number;
+};
+
+export type CreativeComment = {
+  id: string; task_id: string; author_id: string | null; author_name: string | null;
+  body: string; mentions: string[]; created_at: string;
+};
+
+export type CreativeAttachment = {
+  id: string; task_id: string; kind: string; label: string | null;
+  url: string | null; r2_key: string | null; file_name: string | null;
+  content_type: string | null; size_bytes: number | null; created_at: string;
+};
+
+export type TaskDetail = CreativeTask & {
+  subtasks: CreativeSubtask[];
+  comments: CreativeComment[];
+  attachments: CreativeAttachment[];
+};
+
+export type Campaign = {
+  id: string; name: string; brand_id: string | null; brand_label: string | null; brand_color: string | null;
+  objective: string | null; status: string; start_date: string | null; end_date: string | null;
+  owner_id: string | null; owner_label: string | null; note: string | null;
+};
+
+export type BrandOption = { id: string; name: string; color: string | null };
+
+// ---- helpers ----
+function today(): string { return new Date().toISOString().slice(0, 10); }
+
+export function isOverdue(t: { due_date: string | null; status: string }): boolean {
+  return !!t.due_date && t.due_date < today() && t.status !== "done" && t.status !== "cancelled" && t.status !== "published";
+}
+export function withinThisWeek(t: { due_date: string | null; status: string }): boolean {
+  if (!t.due_date) return false;
+  const diff = (new Date(t.due_date).getTime() - new Date(today()).getTime()) / 86400000;
+  return diff >= 0 && diff <= 7 && t.status !== "done" && t.status !== "cancelled";
+}
+
+async function jsonOrThrow(res: Response): Promise<Record<string, unknown>> {
+  const j = await res.json().catch(() => ({ error: "เครือข่ายผิดพลาด" }));
+  if (!res.ok || j.error) throw new Error((j.error as string) || `HTTP ${res.status}`);
+  return j;
+}
+
+// ---- Tasks ----
+export type TaskListParams = {
+  search?: string; status?: string; priority?: string; task_type?: string;
+  campaign_id?: string; assignee_id?: string; brand_id?: string; mine?: boolean;
+  sort_by?: string; sort_dir?: "asc" | "desc"; include_inactive?: boolean;
+};
+
+export async function listTasks(params: TaskListParams = {}): Promise<CreativeTask[]> {
+  const q = new URLSearchParams();
+  if (params.search) q.set("search", params.search);
+  if (params.status) q.set("status", params.status);
+  if (params.priority) q.set("priority", params.priority);
+  if (params.task_type) q.set("task_type", params.task_type);
+  if (params.campaign_id) q.set("campaign_id", params.campaign_id);
+  if (params.assignee_id) q.set("assignee_id", params.assignee_id);
+  if (params.brand_id) q.set("brand_id", params.brand_id);
+  if (params.mine) q.set("mine", "1");
+  if (params.sort_by) q.set("sort_by", params.sort_by);
+  if (params.sort_dir) q.set("sort_dir", params.sort_dir);
+  if (params.include_inactive) q.set("include_inactive", "1");
+  const res = await apiFetch(`/api/creative-tasks?${q.toString()}`);
+  const j = await jsonOrThrow(res);
+  return (j.data as CreativeTask[]) ?? [];
+}
+
+export async function getTask(id: string): Promise<TaskDetail> {
+  const res = await apiFetch(`/api/creative-tasks/${id}`);
+  const j = await jsonOrThrow(res);
+  return j.data as TaskDetail;
+}
+
+export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; assignee_id?: string | null }[] };
+
+export async function createTask(body: CreateTaskBody): Promise<{ id: string; task_no: string }> {
+  const res = await apiFetch("/api/creative-tasks", { method: "POST", body: JSON.stringify(body) });
+  const j = await jsonOrThrow(res);
+  return { id: j.id as string, task_no: j.task_no as string };
+}
+
+export async function updateTask(id: string, patch: Record<string, unknown>): Promise<CreativeTask> {
+  const res = await apiFetch(`/api/creative-tasks/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  const j = await jsonOrThrow(res);
+  return j.data as CreativeTask;
+}
+
+export async function transitionTask(id: string, to: CreativeStatus, comment?: string): Promise<CreativeTask> {
+  return updateTask(id, { action: "transition", to, comment });
+}
+
+export async function approveTask(id: string, action: "approve" | "reject" | "revise", comment?: string): Promise<CreativeTask> {
+  return updateTask(id, { action, comment });
+}
+
+export async function deleteTask(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-tasks/${id}`, { method: "DELETE" }));
+}
+
+// ---- Subtasks ----
+export async function addSubtask(taskId: string, body: { title: string; assignee_id?: string | null; due_date?: string | null }): Promise<CreativeSubtask> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`, { method: "POST", body: JSON.stringify(body) }));
+  return j.data as CreativeSubtask;
+}
+export async function updateSubtask(taskId: string, subtaskId: string, patch: Record<string, unknown>): Promise<CreativeSubtask> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`, { method: "PATCH", body: JSON.stringify({ subtask_id: subtaskId, ...patch }) }));
+  return j.data as CreativeSubtask;
+}
+export async function deleteSubtask(taskId: string, subtaskId: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks?subtask_id=${subtaskId}`, { method: "DELETE" }));
+}
+
+// ---- Comments ----
+export async function addComment(taskId: string, body: string, mentions: string[] = []): Promise<CreativeComment> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify({ body, mentions }) }));
+  return j.data as CreativeComment;
+}
+
+// ---- Attachments ----
+export async function addAttachment(taskId: string, body: { kind?: string; label?: string; url?: string }): Promise<CreativeAttachment> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/attachments`, { method: "POST", body: JSON.stringify(body) }));
+  return j.data as CreativeAttachment;
+}
+export async function deleteAttachment(taskId: string, attId: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/attachments?attachment_id=${attId}`, { method: "DELETE" }));
+}
+
+// ---- Campaigns ----
+export async function listCampaigns(): Promise<Campaign[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-campaigns"));
+  return (j.data as Campaign[]) ?? [];
+}
+export async function createCampaign(body: { name: string; brand_id?: string | null; objective?: string | null; start_date?: string | null; end_date?: string | null }): Promise<{ id: string }> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-campaigns", { method: "POST", body: JSON.stringify(body) }));
+  return { id: j.id as string };
+}
+
+// ---- Brands (ของกลาง /api/brands) ----
+export async function listBrands(): Promise<BrandOption[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/brands"));
+  return ((j.data as { id: string; name: string; color: string | null }[]) ?? []).map((b) => ({ id: b.id, name: b.name, color: b.color }));
+}
