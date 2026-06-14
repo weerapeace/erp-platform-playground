@@ -16,7 +16,8 @@ export const revalidate = 0;
 export type SpecField = { key: string; label: string; value: string; order: number; sku_code?: string | null };
 export type BomMatGroup = { slot: string; label: string; items: { code: string; name: string; count: number }[] };
 export type ProductSpec = {
-  parent: { code: string | null; name: string | null; family: string | null; size_summary: string | null; work_instruction_notes: string | null; image_url: string | null } | null;
+  parent: { id: string | null; code: string | null; name: string | null; family: string | null; size_summary: string | null; work_instruction_notes: string | null; image_url: string | null } | null;
+  sku_id: string | null;        // id ของ skus_v2 (เผื่อแก้ SKU เองตอนไม่มี parent)
   legacy: SpecField[];          // ช่องเดิมบน Parent (materials/zipper/...)
   model_attrs: SpecField[];     // attribute ระดับ Parent (สเปกร่วม)
   sku_attrs: SpecField[];       // attribute ระดับ SKU (ต่อสี/แบบ)
@@ -136,7 +137,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({
+    sku_id: skuRow.id ? String(skuRow.id) : null,
     parent: parent ? {
+      id: (parent as { id?: string }).id ?? null,
       code: (parent as Record<string, unknown>).code as string ?? null,
       name: ((parent as Record<string, unknown>).sku_name as string) ?? ((parent as Record<string, unknown>).name_th as string) ?? null,
       family: (parent as Record<string, unknown>).product_family as string ?? null,
