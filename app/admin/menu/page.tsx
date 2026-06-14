@@ -8,7 +8,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup } from "@/components/playground-shell";
+import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup as BaseAppGroup } from "@/components/playground-shell";
+
+// ขยาย AppGroup ด้วยฟิลด์แบรนด์แอปเดี่ยว (PWA) — เก็บใน erp_app_groups (icon_url/theme_color)
+type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null };
 
 export default function MenuManagerPage() {
   const allowed = usePermission("admin.users");
@@ -43,6 +46,26 @@ export default function MenuManagerPage() {
 
   // เพิ่ม/แก้ App ใหญ่
   const [naApp, setNaApp] = useState({ key: "", label: "", icon: "📦" });
+  const [editAppId, setEditAppId] = useState<string | null>(null);   // แอปที่กำลังตั้งค่าไอคอน/สี (PWA)
+  const [uploadingApp, setUploadingApp] = useState(false);
+
+  // แก้ฟิลด์ของ App (เช่น icon_url, theme_color) — optimistic + reload
+  const patchApp = async (id: string, p: Partial<AppGroup>) => {
+    setApps((as) => as.map((a) => a.id === id ? { ...a, ...p } : a));
+    const j = await apiFetch("/api/menu/apps", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, patch: p }) }).then((r) => r.json());
+    if (j.error) { setErr(j.error); await load(); }
+  };
+  // อัปโหลดไอคอนแอป (รูปจริง) → R2 → เก็บ r2_key ใน icon_url
+  const uploadAppIcon = async (id: string, file: File) => {
+    setUploadingApp(true); setErr(null);
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("folder", "app-icons");
+      const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
+      if (j.error || !j.r2_key) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
+      await patchApp(id, { icon_url: j.r2_key });
+      flash("อัปโหลดไอคอนแล้ว");
+    } catch (e) { setErr(String(e)); } finally { setUploadingApp(false); }
+  };
   const addApp = async () => {
     if (!naApp.key.trim() || !naApp.label.trim()) { setErr("กรอก key + ชื่อ App"); return; }
     const j = await apiFetch("/api/menu/apps", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -137,6 +160,8 @@ export default function MenuManagerPage() {
     void patch(swap.id!, { sort_order: item.sort_order });
   };
 
+  const editApp = apps.find((a) => a.id === editAppId) ?? null;
+
   if (!allowed) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
   return (
@@ -160,9 +185,13 @@ export default function MenuManagerPage() {
           <div className="text-xs font-semibold text-slate-600 mb-2">โมดูลใหญ่ (App — tabs บนสุด)</div>
           <div className="flex flex-wrap items-center gap-2">
             {apps.map((a) => (
-              <span key={a.id} className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded-full">
-                {a.icon} {a.label} <code className="text-[9px] text-slate-400">{a.key}</code>
-                <button onClick={() => delApp(a.id!, a.label)} className="text-slate-300 hover:text-red-500 ml-0.5">✕</button>
+              <span key={a.id} className={`inline-flex items-center gap-1 px-2 py-1 text-xs border rounded-full ${editAppId === a.id ? "bg-blue-50 border-blue-300" : "bg-slate-50 border-slate-200"}`}>
+                {a.icon_url
+                  ? <img src={`/api/r2-image?key=${encodeURIComponent(a.icon_url)}`} alt="" className="w-4 h-4 rounded object-cover" />
+                  : <span>{a.icon}</span>}
+                {a.label} <code className="text-[9px] text-slate-400">{a.key}</code>
+                <button onClick={() => setEditAppId(editAppId === a.id ? null : a.id!)} title="ตั้งค่าไอคอน/สี (แอปเดี่ยว)" className="text-slate-300 hover:text-blue-600 ml-0.5">✎</button>
+                <button onClick={() => delApp(a.id!, a.label)} className="text-slate-300 hover:text-red-500">✕</button>
               </span>
             ))}
             <span className="inline-flex items-center gap-1">
@@ -172,7 +201,50 @@ export default function MenuManagerPage() {
               <button onClick={addApp} className="h-7 px-2.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">＋ App</button>
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-2">ติ๊กชิป App ใต้แต่ละเมนูเพื่อกำหนดว่าเมนูนั้นอยู่ App ใหญ่ไหนบ้าง (อยู่ได้หลาย App)</p>
+          <p className="text-[11px] text-slate-400 mt-2">ติ๊กชิป App ใต้แต่ละเมนูเพื่อกำหนดว่าเมนูนั้นอยู่ App ใหญ่ไหนบ้าง (อยู่ได้หลาย App) · กด ✎ ที่ชิปเพื่อตั้งไอคอน/สี สำหรับติดตั้งเป็นแอปเดี่ยว</p>
+
+          {/* ตั้งค่าแอปเดี่ยว (PWA): ไอคอนรูปจริง + สีธีม */}
+          {editApp && (
+            <div className="mt-3 border border-blue-200 bg-blue-50/40 rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold text-slate-700">📲 ตั้งค่าแอปเดี่ยว: {editApp.icon} {editApp.label} <code className="text-[10px] text-slate-400">/app/{editApp.key}</code></div>
+                <button onClick={() => setEditAppId(null)} className="text-slate-400 hover:text-slate-700 text-sm">✕</button>
+              </div>
+              <div className="flex flex-wrap items-center gap-4">
+                {/* ไอคอน */}
+                <div className="flex items-center gap-2">
+                  <div className="w-12 h-12 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden text-2xl">
+                    {editApp.icon_url
+                      ? <img src={`/api/r2-image?key=${encodeURIComponent(editApp.icon_url)}`} alt="" className="w-full h-full object-cover" />
+                      : <span>{editApp.icon}</span>}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className={`h-7 px-2.5 leading-7 text-xs font-medium rounded cursor-pointer text-center ${uploadingApp ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
+                      {uploadingApp ? "กำลังอัป…" : "⬆ อัปโหลดไอคอน"}
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={uploadingApp}
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadAppIcon(editApp.id!, f); e.target.value = ""; }} />
+                    </label>
+                    {editApp.icon_url && (
+                      <button onClick={() => void patchApp(editApp.id!, { icon_url: null })} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป (กลับไปใช้ emoji)</button>
+                    )}
+                  </div>
+                </div>
+                {/* สีธีม */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500">สีแอป</span>
+                  <input type="color" value={editApp.theme_color || "#2563eb"} onChange={(e) => void patchApp(editApp.id!, { theme_color: e.target.value })}
+                    className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" title="สีหัวแอป + แถบระบบ" />
+                  <code className="text-[10px] text-slate-400">{editApp.theme_color || "#2563eb"}</code>
+                </div>
+                {/* เปิด/ติดตั้ง */}
+                <a href={`/app/${editApp.key}`} target="_blank" rel="noopener noreferrer"
+                  className="h-8 px-3 leading-8 text-xs font-medium bg-white border border-slate-200 rounded hover:border-blue-300 hover:text-blue-700">
+                  เปิดแอปนี้ ↗ (กดปุ่ม “📲 ติดตั้งแอป” ในหน้านั้นเพื่อลงเครื่อง)
+                </a>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">แนะนำไอคอนสี่เหลี่ยมจัตุรัส ≥ 512×512 px (PNG). ติดตั้งแล้วจะได้ไอคอน/ชื่อนี้บนเครื่อง เปิดมาเห็นแค่เมนูของ {editApp.label}</p>
+            </div>
+          )}
         </div>
 
         {/* ค้นหาเมนู */}

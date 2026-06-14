@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ShellPresentContext } from "@/components/playground-shell";
+import { PwaInstallButton } from "@/components/pwa-install-button";
 
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
@@ -61,7 +62,10 @@ export default function StandaloneApp() {
       <div className={frame}>
         <header className="sticky top-0 z-20 bg-gradient-to-r from-blue-700 to-indigo-600 text-white px-4 py-3 flex items-center justify-between">
           <div className="font-semibold text-lg">{app?.icon ?? "🧩"} {app?.label ?? appKey}</div>
-          <div className="text-xs opacity-90">{user.name}</div>
+          <div className="flex items-center gap-2">
+            <PwaInstallButton />
+            <div className="text-xs opacity-90">{user.name}</div>
+          </div>
         </header>
 
         <main className="flex-1 overflow-y-auto pb-24">
