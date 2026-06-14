@@ -9,14 +9,17 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { PROJECT_STATUS, getProject, updateProject, type ProjectDetail } from "../../data";
+import { BoardCanvas } from "./board-canvas";
 
-const CSTAT = Object.fromEntries(PROJECT_STATUS.map((s) => [s.value, s]));
+type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
 export default function BoardPage() {
   const params = useParams();
   const id = String(params.id);
   const [p, setP] = useState<ProjectDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const pushToast = (type: Toast["type"], message: string) => { const tid = Date.now() + Math.random(); setToasts((q) => [...q, { id: tid, type, message }]); setTimeout(() => setToasts((q) => q.filter((t) => t.id !== tid)), 3500); };
 
   const load = useCallback(async () => { try { setP(await getProject(id)); } catch (e) { setErr((e as Error).message); } }, [id]);
   useEffect(() => { load(); }, [load]);
@@ -76,12 +79,14 @@ export default function BoardPage() {
           </div>
         )}
 
-        {/* กระดาน (ก้อน 3) */}
-        <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center">
-          <div className="text-4xl mb-3">🧠</div>
-          <p className="text-slate-600 font-medium">กระดานระดมไอเดีย (Canvas เต็ม) กำลังต่อในขั้นถัดไป</p>
-          <p className="text-slate-400 text-sm mt-1">โครงสร้างพร้อมแล้ว: โซน Reference/Photo/Video/Banner/Caption/Approve/Done + การ์ดสินค้า ถูกสร้างไว้ในกระดานนี้แล้ว</p>
-        </div>
+        {/* กระดาน Canvas */}
+        {p.board_id
+          ? <BoardCanvas boardId={p.board_id} pushToast={pushToast} />
+          : <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center text-slate-400">ไม่พบกระดานของโปรเจกต์นี้</div>}
+      </div>
+
+      <div className="fixed bottom-6 right-6 z-[80] flex flex-col gap-2">
+        {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}
       </div>
     </StandaloneShell>
   );

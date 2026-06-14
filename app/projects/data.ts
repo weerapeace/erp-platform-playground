@@ -45,3 +45,27 @@ export async function createProject(body: Record<string, unknown>): Promise<{ id
 }
 export async function updateProject(id: string, patch: Record<string, unknown>): Promise<void> { await ok(await apiFetch(`/api/creative-projects/${id}`, { method: "PATCH", body: JSON.stringify(patch) })); }
 export async function deleteProject(id: string): Promise<void> { await ok(await apiFetch(`/api/creative-projects/${id}`, { method: "DELETE" })); }
+
+// ---- Board items ----
+export type BoardItem = {
+  id: string; board_id: string; item_type: string;
+  title: string | null; content: string | null; url: string | null; r2_key: string | null; thumbnail_url: string | null;
+  sku_id: string | null; parent_sku_id: string | null; task_id: string | null; google_slides_url: string | null;
+  x: number; y: number; width: number; height: number; rotation: number; z_index: number;
+  color: string | null; tags: string[] | null; status: string; data: Record<string, unknown>;
+  sku_info?: { code: string | null; name: string | null; color: string | null; price: number | null; image_key: string | null } | null;
+};
+
+export async function listItems(boardId: string): Promise<BoardItem[]> {
+  const j = await ok(await apiFetch(`/api/creative-boards/${boardId}/items`));
+  return (j.data as BoardItem[]) ?? [];
+}
+export async function createItem(boardId: string, body: Record<string, unknown>): Promise<BoardItem> {
+  const j = await ok(await apiFetch(`/api/creative-boards/${boardId}/items`, { method: "POST", body: JSON.stringify(body) }));
+  return j.data as BoardItem;
+}
+export async function updateItem(id: string, patch: Record<string, unknown>): Promise<BoardItem> {
+  const j = await ok(await apiFetch(`/api/creative-board-items/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+  return j.data as BoardItem;
+}
+export async function deleteItem(id: string): Promise<void> { await ok(await apiFetch(`/api/creative-board-items/${id}`, { method: "DELETE" })); }
