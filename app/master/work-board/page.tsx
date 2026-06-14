@@ -20,6 +20,7 @@ import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
+import { PurchaseNeeds } from "./purchase-needs";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -113,7 +114,7 @@ export default function WorkBoardPage() {
 
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<"board" | "table">("board");   // สลับ บอร์ด/ตาราง
+  const [viewMode, setViewMode] = useState<"board" | "table" | "purchase">("board");   // สลับ บอร์ด/ตาราง/ขอซื้อ
   const [pendingCols, setPendingCols] = useState<number | null>(null);     // คอลัมน์โซนรอจ่าย (null=อัตโนมัติ)
   useEffect(() => { try { const v = localStorage.getItem("wb:pendingCols"); if (v) setPendingCols(Number(v) || null); } catch { /* ignore */ } }, []);
   const setPendCols = useCallback((n: number | null) => { setPendingCols(n); try { if (n) localStorage.setItem("wb:pendingCols", String(n)); else localStorage.removeItem("wb:pendingCols"); } catch { /* ignore */ } }, []);
@@ -724,6 +725,7 @@ export default function WorkBoardPage() {
           <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
             <button onClick={() => setViewMode("board")} className={`h-9 px-3 font-medium ${viewMode === "board" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 บอร์ด</button>
             <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
+            <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ</button>
           </div>
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
@@ -759,7 +761,9 @@ export default function WorkBoardPage() {
       )}
 
       {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div>
-        : viewMode === "table" ? (
+        : viewMode === "purchase" ? (
+        <PurchaseNeeds canEdit={canEdit} />
+      ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : (
         <div ref={boardRef} onPointerDown={onBoardDown} onPointerMove={onMove} onPointerUp={onUp}
