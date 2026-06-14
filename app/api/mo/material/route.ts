@@ -13,7 +13,7 @@ import { friendlyDbError } from "../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Body = { id?: string; is_ready?: boolean; cut_done?: boolean };
+type Body = { id?: string; is_ready?: boolean; cut_done?: boolean; on_hand_qty?: number; purchase_override?: number | null };
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -27,6 +27,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const patch: Record<string, unknown> = {};
   if (typeof body.is_ready === "boolean") patch.is_ready = body.is_ready;
   if (typeof body.cut_done === "boolean") { patch.cut_done = body.cut_done; patch.cut_done_at = body.cut_done ? new Date().toISOString() : null; }
+  if (typeof body.on_hand_qty === "number") patch.on_hand_qty = body.on_hand_qty;
+  if (body.purchase_override !== undefined) patch.to_purchase_qty = body.purchase_override;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีสถานะให้อัปเดต" }, { status: 400 });
 
   const admin = supabaseAdmin();

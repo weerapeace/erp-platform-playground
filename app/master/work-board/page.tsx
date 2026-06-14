@@ -19,6 +19,7 @@ import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
+import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -118,6 +119,8 @@ export default function WorkBoardPage() {
 
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Inter>(null);
+  const matSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedSumRef = useRef<Map<string, { on: number; rd: boolean; po: number | null }>>(new Map());
   const movedRef = useRef(false);
   const [vp, setVp] = useState<Viewport>({ x: 24, y: 16, scale: 0.85 });
   const [zonePos, setZonePos] = useState<Record<string, Pos>>({});
@@ -153,6 +156,9 @@ export default function WorkBoardPage() {
   const [saveLaborBom, setSaveLaborBom] = useState(false);    // บันทึกค่าแรงกลับเข้า BOM
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
+  const [clSummary, setClSummary] = useState<MoMatSummary[]>([]);   // ตารางวัตถุดิบกลาง (สรุป)
+  const [clMaterials, setClMaterials] = useState<MoMatPreview[]>([]); // ตารางวัตถุดิบกลาง (รายบล็อก)
+  const [clRequested, setClRequested] = useState<Record<string, number>>({});
   const [clPurch, setClPurch] = useState<PurchaseStatusRow[] | null>(null);   // ของที่ซื้อ/ETA
   const [clIssues, setClIssues] = useState<MoIssue[] | null>(null);           // ปัญหา QC
   const [clHist, setClHist] = useState<DispatchHistRow[] | null>(null);       // ประวัติการจ่าย
@@ -495,8 +501,23 @@ export default function WorkBoardPage() {
           cut_block_code: (x.cut_block_code as string) ?? null, cut_width: num(x.cut_width), cut_length: num(x.cut_length), pieces: num(x.pieces),
           required_qty: Number(x.required_qty) || 0, uom: (x.uom as string) ?? null, cut_done: !!x.cut_done,
         }));
-        if (!cancel) { setClRows(rows); setClCutRows(cutRows); }
-      } catch { if (!cancel) { setClRows([]); setClCutRows([]); } }
+        // ตารางวัตถุดิบกลาง (MoMaterialsTable) — ใช้ข้อมูลดิบชุดเดียวกับหน้าแก้ใบสั่งผลิต
+        const n2 = (v: unknown) => Number(v) || 0;
+        const moSummary: MoMatSummary[] = summary.map((s) => ({
+          key: String(s.id), id: String(s.id), component_sku: (s.component_sku as string) ?? null, component_name: (s.component_name as string) ?? null,
+          material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: n2(s.qty_per),
+          on_hand_qty: n2(s.on_hand_qty), is_ready: !!s.is_ready, purchase_override: s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null,
+        }));
+        const moMaterials: MoMatPreview[] = materials.map((m) => ({
+          key: String(m.id), id: String(m.id), component_sku: (m.component_sku as string) ?? null, component_name: (m.component_name as string) ?? null,
+          material_type: (m.material_type as string) ?? null, qty_per: n2(m.qty_per), uom: (m.uom as string) ?? null,
+          cut_block_code: (m.cut_block_code as string) ?? null, cut_width: num(m.cut_width), cut_length: num(m.cut_length), pieces: num(m.pieces),
+          on_hand_qty: n2(m.on_hand_qty), is_ready: !!m.is_ready, purchase_override: null, cut_done: !!m.cut_done,
+        }));
+        const requested = (j?.data?.requested ?? {}) as Record<string, number>;
+        savedSumRef.current = new Map(moSummary.filter((s) => s.id).map((s) => [s.id as string, { on: s.on_hand_qty, rd: s.is_ready, po: s.purchase_override }]));
+        if (!cancel) { setClRows(rows); setClCutRows(cutRows); setClSummary(moSummary); setClMaterials(moMaterials); setClRequested(requested); }
+      } catch { if (!cancel) { setClRows([]); setClCutRows([]); setClSummary([]); setClMaterials([]); } }
       finally { if (!cancel) setClLoading(false); }
     })();
     // งานเหมารายชิ้นของใบนี้ (โหลดแยก ไม่บล็อกเช็กลิสต์หลัก)
@@ -585,6 +606,37 @@ export default function WorkBoardPage() {
     try { const res = await apiFetch(`/api/mo/issues?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await res.json(); if (j.error) throw new Error(j.error); setClIssues((rs) => (rs ?? []).filter((x) => x.id !== id)); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   }, [toast]);
+  // ตารางวัตถุดิบกลาง — แก้ (จำนวนที่มี/ขอซื้อ/เตรียมครบ) → อัปเดตทันที + บันทึกแบบ debounce (กันยิง API ถี่ตอนพิมพ์)
+  const onMatSummaryChange = useCallback((rows: MoMatSummary[]) => {
+    setClSummary(rows);
+    if (matSaveTimer.current) clearTimeout(matSaveTimer.current);
+    matSaveTimer.current = setTimeout(() => {
+      for (const r of rows) {
+        if (!r.id) continue;
+        const p = savedSumRef.current.get(r.id);
+        const body: Record<string, unknown> = {};
+        if (!p || p.rd !== r.is_ready) body.is_ready = r.is_ready;
+        if (!p || p.on !== r.on_hand_qty) body.on_hand_qty = r.on_hand_qty;
+        if (!p || p.po !== r.purchase_override) body.purchase_override = r.purchase_override;
+        if (Object.keys(body).length === 0) continue;
+        savedSumRef.current.set(r.id, { on: r.on_hand_qty, rd: r.is_ready, po: r.purchase_override });
+        void apiFetch(`/api/mo/material`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.id, ...body }) })
+          .then((res) => res.json()).then((j) => { if (j.error) toast.error(j.error); }).catch(() => toast.error("บันทึกไม่สำเร็จ"));
+      }
+    }, 600);
+  }, [toast]);
+  const onMatToggleCut = useCallback(async (line: MoMatPreview, next: boolean) => {
+    if (!canEdit || !line.id) return;
+    setClMaterials((ms) => ms.map((m) => m.id === line.id ? { ...m, cut_done: next } : m));
+    try {
+      const res = await apiFetch(`/api/mo/material-line`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: line.id, cut_done: next }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      if (line.component_sku != null && typeof j.is_ready === "boolean") setClSummary((ss) => ss.map((s) => s.component_sku === line.component_sku ? { ...s, is_ready: j.is_ready } : s));
+    } catch (e) {
+      setClMaterials((ms) => ms.map((m) => m.id === line.id ? { ...m, cut_done: !next } : m));
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  }, [canEdit, toast]);
   const closeChecklist = useCallback(() => { setChecklistMO(null); setClWO(null); setDelArmed(false); void load(true); }, [load]);
   const deleteMO = useCallback(async (mo: PendingMO) => {
     try {
@@ -903,8 +955,7 @@ export default function WorkBoardPage() {
                   <div className="space-y-2">
                     <div className="flex flex-wrap gap-1 text-[12px]">
                       {clWO && tabBtn("recv", "📤 ส่งงาน")}
-                      {tabBtn("prep", `📋 เตรียม ${prepDone}/${prepTotal}`)}
-                      {tabBtn("cut", `✂️ ตัด ${cutDone}/${cutTotal}`)}
+                      {tabBtn("prep", `📋 วัตถุดิบ · เตรียม ${prepDone}/${prepTotal} · ตัด ${cutDone}/${cutTotal}`)}
                       {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
                       {tabBtn("purch", "📦 ของซื้อ")}
                       {tabBtn("issue", `⚠️ ปัญหา${issN ? ` ${issN}` : ""}`)}
@@ -945,7 +996,7 @@ export default function WorkBoardPage() {
                     ) : (clTab === "prep" || clTab === "cut" || clTab === "piece") && clLoading ? (
                       <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>
                     ) : clTab === "prep" ? (
-                      clRows.length === 0 ? (
+                      clSummary.length === 0 && clMaterials.length === 0 ? (
                         <div className="text-center py-6">
                           <p className="text-slate-400 text-sm mb-3">ใบนี้ไม่มีรายการวัตถุดิบจาก BOM — ติ๊กรวมทั้งใบ</p>
                           <div className="grid grid-cols-2 gap-2 max-w-[280px] mx-auto">
@@ -954,26 +1005,12 @@ export default function WorkBoardPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="border border-slate-200 rounded-lg overflow-hidden">
-                          <div className="grid grid-cols-[1fr_4.5rem_5rem_2.75rem] gap-1.5 px-3 py-1.5 bg-slate-100 text-[11px] font-semibold text-slate-600"><span>วัตถุดิบ</span><span className="text-right">ต้องใช้</span><span className="text-center">สถานะซื้อ</span><span className="text-center">เตรียม</span></div>
-                          <div className="max-h-[46vh] overflow-y-auto">
-                            {clRows.map((r, idx) => {
-                              const p = purchByName.get(norm(r.component_name));
-                              const pb = p ? (p.po_status ? (PO_BADGE[p.po_status] ?? { t: p.po_status, c: "bg-slate-100 text-slate-600" }) : { t: "รอสั่ง", c: "bg-amber-50 text-amber-700" }) : null;
-                              return (
-                                <div key={r.id} className={`grid grid-cols-[1fr_4.5rem_5rem_2.75rem] gap-1.5 px-3 py-2 items-center border-t border-slate-100 ${r.is_ready ? "bg-emerald-50/50" : idx % 2 ? "bg-slate-50/40" : "bg-white"}`}>
-                                  <p className="text-sm text-slate-800 truncate min-w-0">{r.component_name ?? r.component_sku}</p>
-                                  <span className="text-right text-[13px] font-semibold text-slate-700">{fmt(r.required_qty)}<span className="text-[10px] font-normal text-slate-400"> {r.uom ?? ""}</span></span>
-                                  <span className="flex flex-col items-center leading-tight">
-                                    {pb ? <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${pb.c}`}>{pb.t}</span> : <span className="text-[11px] text-slate-300">—</span>}
-                                    {p?.expected_date && <span className="text-[9px] text-slate-400 mt-0.5">{_dt(p.expected_date)}</span>}
-                                  </span>
-                                  <span className="flex justify-center"><CheckBtn done={r.is_ready} disabled={!canEdit} onClick={() => toggleMat(r.id, "is_ready")} /></span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
+                        <MoMaterialsTable
+                          summary={clSummary} materials={clMaterials} qty={checklistMO.qty || 0} requested={clRequested}
+                          editable={canEdit} canEdit={canEdit}
+                          onChangeSummary={(rows) => void onMatSummaryChange(rows)}
+                          onToggleCut={(line, next) => void onMatToggleCut(line, next)}
+                        />
                       )
                     ) : clTab === "cut" ? (
                       clCutRows.length === 0 ? (
