@@ -31,7 +31,29 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_creative_board_items").select(SELECT).eq("board_id", boardId).order("z_index", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
-  return NextResponse.json({ data: ((data ?? []) as Record<string, unknown>[]).map(flattenItem), error: null });
+  const rows = (data ?? []) as Record<string, unknown>[];
+  const ids = rows.map((r) => String(r.id));
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+
+  // รวม reaction + จำนวนคอมเมนต์ ต่อ item
+  const reactBy = new Map<string, { vote: number; pin: number; like: number }>();
+  const mineBy = new Map<string, Set<string>>();
+  const commentBy = new Map<string, number>();
+  if (ids.length) {
+    const [{ data: reacts }, { data: comments }] = await Promise.all([
+      admin.from("erp_creative_board_reactions").select("item_id, user_id, type").in("item_id", ids),
+      admin.from("erp_creative_board_comments").select("item_id").in("item_id", ids),
+    ]);
+    for (const r of (reacts ?? []) as { item_id: string; user_id: string; type: string }[]) {
+      const c = reactBy.get(r.item_id) ?? { vote: 0, pin: 0, like: 0 };
+      if (r.type === "vote" || r.type === "pin" || r.type === "like") c[r.type]++;
+      reactBy.set(r.item_id, c);
+      if (user && r.user_id === user.id) { const s = mineBy.get(r.item_id) ?? new Set<string>(); s.add(r.type); mineBy.set(r.item_id, s); }
+    }
+    for (const c of (comments ?? []) as { item_id: string }[]) commentBy.set(c.item_id, (commentBy.get(c.item_id) ?? 0) + 1);
+  }
+  const items = rows.map((r) => ({ ...flattenItem(r), reactions: reactBy.get(String(r.id)) ?? { vote: 0, pin: 0, like: 0 }, my_reactions: [...(mineBy.get(String(r.id)) ?? [])], comment_count: commentBy.get(String(r.id)) ?? 0 }));
+  return NextResponse.json({ data: items, error: null });
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ boardId: string }> }): Promise<NextResponse> {

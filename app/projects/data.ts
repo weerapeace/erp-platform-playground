@@ -54,7 +54,11 @@ export type BoardItem = {
   x: number; y: number; width: number; height: number; rotation: number; z_index: number;
   color: string | null; tags: string[] | null; status: string; data: Record<string, unknown>;
   sku_info?: { code: string | null; name: string | null; color: string | null; price: number | null; image_key: string | null } | null;
+  reactions?: { vote: number; pin: number; like: number };
+  my_reactions?: string[];
+  comment_count?: number;
 };
+export type BoardComment = { id: string; item_id: string; author_id: string | null; author_name: string | null; body: string; mentions: string[]; created_at: string };
 
 export async function listItems(boardId: string): Promise<BoardItem[]> {
   const j = await ok(await apiFetch(`/api/creative-boards/${boardId}/items`));
@@ -69,3 +73,17 @@ export async function updateItem(id: string, patch: Record<string, unknown>): Pr
   return j.data as BoardItem;
 }
 export async function deleteItem(id: string): Promise<void> { await ok(await apiFetch(`/api/creative-board-items/${id}`, { method: "DELETE" })); }
+
+// ---- comments + reactions ----
+export async function listItemComments(itemId: string): Promise<BoardComment[]> {
+  const j = await ok(await apiFetch(`/api/creative-board-items/${itemId}/comments`));
+  return (j.data as BoardComment[]) ?? [];
+}
+export async function addItemComment(itemId: string, body: string, mentions: string[] = []): Promise<BoardComment> {
+  const j = await ok(await apiFetch(`/api/creative-board-items/${itemId}/comments`, { method: "POST", body: JSON.stringify({ body, mentions }) }));
+  return j.data as BoardComment;
+}
+export async function toggleReaction(itemId: string, type: "vote" | "pin" | "like"): Promise<boolean> {
+  const j = await ok(await apiFetch(`/api/creative-board-items/${itemId}/reactions`, { method: "POST", body: JSON.stringify({ type }) }));
+  return (j.active as boolean) ?? false;
+}
