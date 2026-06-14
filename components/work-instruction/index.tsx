@@ -36,6 +36,9 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
+  const [lightbox, setLightbox] = useState(false);   // คลิกรูป → เด้งรูปใหญ่
+  const [imgErr, setImgErr] = useState(false);        // รูปหาย/โหลดไม่ได้ → โชว์ placeholder
+  useEffect(() => { setImgErr(false); }, [spec?.parent?.image_url]);
   // inline edit (กด ✎ → แก้เฉพาะช่องนั้น)
   const [editData, setEditData] = useState<EditData | null>(null);
   const [editField, setEditField] = useState<{ section: string; key: string } | null>(null);
@@ -127,6 +130,14 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   const missingUniq = [...new Map(missing.map((m) => [m.code, m])).values()];
 
   return (
+    <>
+    {/* เด้งรูปใหญ่ตอนคลิก */}
+    {lightbox && spec?.parent?.image_url && (
+      <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-6 cursor-zoom-out" onClick={() => setLightbox(false)} title="คลิกเพื่อปิด">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={spec.parent.image_url} alt="" className="max-w-[92vw] max-h-[92vh] object-contain rounded-lg shadow-2xl bg-white" />
+      </div>
+    )}
     <div className={`border border-slate-200 rounded-lg bg-white ${className}`}>
       <div className="w-full flex items-center justify-between px-3 py-2 rounded-t-lg hover:bg-slate-50">
         <button type="button" onClick={() => setOpen((o) => !o)} className="flex-1 flex items-center gap-2 text-sm font-semibold text-slate-700 text-left">
@@ -142,13 +153,16 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
             <div className="space-y-2.5">
               {spec.parent && (
                 <div className="flex gap-2 items-center">
-                  {spec.parent.image_url && (
-                    <span className="relative group/zoom shrink-0">
+                  {spec.parent.image_url && !imgErr ? (
+                    <button type="button" onClick={() => setLightbox(true)} className="relative group/zoom shrink-0" title="คลิกเพื่อดูรูปใหญ่">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spec.parent.image_url} alt="" className="w-12 h-12 rounded-md object-cover border border-slate-100 cursor-zoom-in" />
+                      <img src={spec.parent.image_url} alt="" onError={() => setImgErr(true)} className="w-12 h-12 rounded-md object-cover border border-slate-100 cursor-zoom-in" />
+                      {/* รูปลอยตอนเอาเมาส์ชี้ */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spec.parent.image_url} alt="" className="hidden group-hover/zoom:block absolute z-50 left-0 top-14 w-56 h-56 object-contain rounded-lg border border-slate-200 bg-white shadow-xl p-1.5" />
-                    </span>
+                      <img src={spec.parent.image_url} alt="" className="hidden group-hover/zoom:block absolute z-50 left-0 top-14 w-72 h-72 object-contain rounded-xl border border-slate-200 bg-white shadow-2xl p-2 pointer-events-none" />
+                    </button>
+                  ) : (
+                    <span className="w-12 h-12 shrink-0 rounded-md border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-300 text-lg" title={imgErr ? "รูปหาย — ไฟล์ไม่อยู่ในที่เก็บ (ต้องอัปโหลดรูปใหม่)" : ""}>📦</span>
                   )}
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-slate-800 truncate">{spec.parent.name ?? spec.parent.code}</div>
@@ -203,6 +217,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
       )}
       {editOpen && <WorkInstructionEditor sku={sku} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); setEditData(null); loadSpec(); }} />}
     </div>
+    </>
   );
 }
 
