@@ -10,8 +10,8 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup as BaseAppGroup } from "@/components/playground-shell";
 
-// ขยาย AppGroup ด้วยฟิลด์แบรนด์แอปเดี่ยว (PWA) — เก็บใน erp_app_groups (icon_url/theme_color)
-type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null };
+// ขยาย AppGroup ด้วยฟิลด์แอปเดี่ยว (PWA) — เก็บใน erp_app_groups (icon_url/theme_color/default_href)
+type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; default_href?: string | null };
 
 export default function MenuManagerPage() {
   const allowed = usePermission("admin.users");
@@ -161,6 +161,9 @@ export default function MenuManagerPage() {
   };
 
   const editApp = apps.find((a) => a.id === editAppId) ?? null;
+  const editAppMenu = editApp
+    ? rows.filter((r) => r.is_active && (r.app_keys ?? []).includes(editApp.key)).sort((a, b) => a.sort_order - b.sort_order)
+    : [];
 
   if (!allowed) return <PlaygroundShell><AccessDenied /></PlaygroundShell>;
 
@@ -242,7 +245,25 @@ export default function MenuManagerPage() {
                   เปิดแอปนี้ ↗ (กดปุ่ม “📲 ติดตั้งแอป” ในหน้านั้นเพื่อลงเครื่อง)
                 </a>
               </div>
-              <p className="text-[11px] text-slate-400 mt-2">แนะนำไอคอนสี่เหลี่ยมจัตุรัส ≥ 512×512 px (PNG). ติดตั้งแล้วจะได้ไอคอน/ชื่อนี้บนเครื่อง เปิดมาเห็นแค่เมนูของ {editApp.label}</p>
+
+              {/* สิทธิ์เข้าแอป + หน้าเริ่มต้น */}
+              <div className="flex flex-wrap items-center gap-4 mt-3 pt-3 border-t border-blue-100">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 whitespace-nowrap">🔒 สิทธิ์ที่ต้องมีถึงเข้าแอป</span>
+                  <input defaultValue={editApp.permission_key ?? ""} list="perm-list" placeholder="ว่าง = ทุกคนเข้าได้"
+                    onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (editApp.permission_key ?? null)) void patchApp(editApp.id!, { permission_key: v }); }}
+                    className="w-48 h-8 px-2 text-xs border border-slate-200 rounded" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 whitespace-nowrap">🏠 หน้าเริ่มต้น</span>
+                  <select value={editApp.default_href ?? ""} onChange={(e) => void patchApp(editApp.id!, { default_href: e.target.value || null })}
+                    className="w-48 h-8 px-1 text-xs border border-slate-200 rounded bg-white">
+                    <option value="">— เมนูแรกของแอป —</option>
+                    {editAppMenu.map((m) => <option key={m.id} value={m.href}>{m.icon} {m.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">แนะนำไอคอนสี่เหลี่ยมจัตุรัส ≥ 512×512 px (PNG). ติดตั้งแล้วจะได้ไอคอน/ชื่อนี้บนเครื่อง เปิดมาเห็นแค่เมนูของ {editApp.label} · ตั้ง “สิทธิ์” เพื่อล็อกไม่ให้คนไม่เกี่ยวเข้า (พิมพ์ URL ตรงก็เข้าไม่ได้)</p>
             </div>
           )}
         </div>
