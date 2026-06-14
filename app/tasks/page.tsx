@@ -17,6 +17,7 @@ import { EmployeePicker, ProductPicker } from "@/components/pickers";
 import type { EmployeePickerValue, ProductPickerValue } from "@/components/pickers";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
+import { CanvasBoard } from "./canvas-board";
 import {
   STATUS_META, PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
   TASK_TYPES, PLATFORMS, PRIMARY_ACTIONS, canTransition,
@@ -121,7 +122,7 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<CreativeTask[]>([]);
   const [myTasks, setMyTasks] = useState<CreativeTask[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"queue" | "table" | "kanban">("table");
+  const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
@@ -248,6 +249,7 @@ export default function TasksPage() {
           <ViewToggleBtn active={view === "queue"} onClick={() => setView("queue")} icon="🙋" label="คิวงานของฉัน" />
           <ViewToggleBtn active={view === "table"} onClick={() => setView("table")} icon="📋" label="ตาราง" />
           <ViewToggleBtn active={view === "kanban"} onClick={() => setView("kanban")} icon="🟦" label="Kanban" />
+          <ViewToggleBtn active={view === "canvas"} onClick={() => setView("canvas")} icon="🟪" label="Canvas" />
         </div>
 
         {loading ? (
@@ -277,6 +279,13 @@ export default function TasksPage() {
               <div>
                 <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด</p>
                 <KanbanBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
+              </div>
+            )}
+
+            {view === "canvas" && (
+              <div>
+                <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดอิสระ · ปล่อยในโซนสถานะเพื่อเปลี่ยนสถานะ · วาดกล่อง/โน้ต/ลูกศร/วางรูปได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด</p>
+                <CanvasBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
               </div>
             )}
           </>

@@ -11,9 +11,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
 import { apiFetch } from "@/lib/api";
 import {
-  STATUS_META, PRIORITY_META, isOverdue,
-  type Task, type TaskStatus, type TaskPriority,
-} from "./mock-data";
+  STATUS_META, PRIORITY_META, isOverdue, canTransition,
+  type CreativeTask, type CreativeStatus, type CreativePriority,
+} from "./data";
 
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
@@ -37,10 +37,10 @@ type Interaction =
   | { type: "resize"; id: string; sx: number; sy: number; ow: number; oh: number }
   | null;
 
-const COLUMNS: TaskStatus[] = ["new", "in_progress", "review", "done", "cancelled"];
+const COLUMNS: CreativeStatus[] = ["backlog", "ready", "in_progress", "need_review", "revision", "approved", "scheduled", "published", "done", "blocked", "cancelled"];
 const CARD_W = 280, CARD_H = 150;
 const ZONE_W = 340, ZONE_H = 1240, ZONE_GAP = 32, CARD_GAP_Y = 150;
-const BOARD_KEY = "erp-tasks-canvas:v2";
+const BOARD_KEY = "erp-creative-canvas:v3";
 const STICKY_COLORS = ["#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#fed7aa", "#e0e7ff"];
 const TEXT_COLORS = ["#1e293b", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#2563eb", "#7c3aed", "#db2777", "#ffffff"];
 const FILL_COLORS = ["transparent", "#ffffff", "#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#1e293b"];
@@ -53,11 +53,6 @@ const FONTS: { label: string; value: string }[] = [
 ];
 const DEF_STYLE: Style = { fontSize: 16, bold: false, italic: false, underline: false, color: "#1e293b", align: "left", fontFamily: "" };
 
-const ZONE_TONE: Record<TaskStatus, string> = {
-  new: "border-blue-200 bg-blue-50/40", in_progress: "border-indigo-200 bg-indigo-50/40",
-  review: "border-amber-200 bg-amber-50/40", done: "border-emerald-200 bg-emerald-50/40",
-  cancelled: "border-slate-200 bg-slate-50/50",
-};
 const zoneX = (i: number) => i * (ZONE_W + ZONE_GAP);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const clone = (b: Board): Board => JSON.parse(JSON.stringify(b));
@@ -84,8 +79,8 @@ const styleOf = (o: StyledObject): React.CSSProperties => ({
 export function CanvasBoard({
   tasks, onMove, onCardClick, startMaximized,
 }: {
-  tasks: Task[];
-  onMove: (taskId: string, to: TaskStatus) => void;
+  tasks: CreativeTask[];
+  onMove: (taskId: string, to: CreativeStatus) => void;
   onCardClick: (id: string) => void;
   startMaximized?: boolean;
 }) {
@@ -337,7 +332,11 @@ export function CanvasBoard({
       const centerX = posOf(it.id).x + CARD_W / 2;
       const zi = zoneIndexAtWorldX(centerX);
       const task = tasks.find(t => t.id === it.id);
-      if (zi >= 0 && task && task.status !== COLUMNS[zi]) onMove(it.id, COLUMNS[zi]);
+      if (zi >= 0 && task && task.status !== COLUMNS[zi]) {
+        if (canTransition(task.status, COLUMNS[zi])) onMove(it.id, COLUMNS[zi]);
+        // เปลี่ยนสถานะนี้ไม่ได้ตาม workflow → เด้งการ์ดกลับโซนเดิม
+        else setBoard(b => { const pos = { ...b.positions }; delete pos[it.id]; return { ...b, positions: pos }; });
+      }
     } else if ((it.type === "drag" || it.type === "resize") && movedRef.current && dragStartRef.current) {
       pushPast(dragStartRef.current);
     }
@@ -398,7 +397,7 @@ export function CanvasBoard({
             const m = STATUS_META[status];
             const count = tasks.filter(t => t.status === status).length;
             return (
-              <div key={status} className={`absolute rounded-2xl border-2 border-dashed ${ZONE_TONE[status]}`} style={{ left: zoneX(i), top: 0, width: ZONE_W, height: ZONE_H }}>
+              <div key={status} className="absolute rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/40" style={{ left: zoneX(i), top: 0, width: ZONE_W, height: ZONE_H }}>
                 <div className="flex items-center gap-2 px-4 py-3">
                   <span className={`h-2.5 w-2.5 rounded-full ${m.dot}`} />
                   <span className="text-base font-bold text-slate-700">{m.label}</span>
@@ -634,12 +633,10 @@ function IconAlign({ align }: { align: Align }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">{lines.map((d, i) => <path key={i} d={d} />)}</svg>;
 }
 
-function CanvasCard({ task }: { task: Task }) {
-  const pr = PRIORITY_META[task.priority as TaskPriority];
-  const m = STATUS_META[task.status as TaskStatus];
+function CanvasCard({ task }: { task: CreativeTask }) {
+  const pr = PRIORITY_META[task.priority as CreativePriority] ?? PRIORITY_META.normal;
+  const m = STATUS_META[task.status as CreativeStatus] ?? STATUS_META.backlog;
   const overdue = isOverdue(task);
-  const doneSub = task.subtasks.filter(s => s.status === "done").length;
-  const doneChk = task.checklist.filter(c => c.done).length;
   return (
     <div className="bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-300 p-3 cursor-grab active:cursor-grabbing select-none">
       <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -649,14 +646,14 @@ function CanvasCard({ task }: { task: Task }) {
         <span className="font-mono text-[10px] text-slate-400">{task.task_no}</span>
       </div>
       <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2 mb-1.5">{task.title}</p>
-      {task.product_sku && <p className="text-[11px] text-slate-400 line-clamp-1 mb-1">📦 {task.product_sku}</p>}
+      {task.sku_code && <p className="text-[11px] text-slate-400 line-clamp-1 mb-1">📦 {task.sku_code}</p>}
       <div className="flex items-center justify-between gap-2 text-[11px]">
         <span className={`px-1.5 py-0.5 rounded-full border ${pr.cls}`}>{pr.label}</span>
-        <span className="text-slate-500 line-clamp-1">👤 {task.assignee_name}</span>
+        <span className="text-slate-500 line-clamp-1">👤 {task.assignee_label || "—"}</span>
       </div>
-      <div className="flex items-center justify-between gap-2 mt-1.5 text-[11px] text-slate-400">
-        <span>{(task.subtasks.length > 0 || task.checklist.length > 0) ? `☑️ ${doneSub}/${task.subtasks.length} · ✓ ${doneChk}/${task.checklist.length}` : ""}</span>
-        {task.due_date && <span className={overdue ? "text-red-600 font-semibold" : ""}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>}
+      <div className="flex items-center gap-2 mt-1.5">
+        <div className="h-1 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${task.progress_percent}%` }} /></div>
+        {task.due_date && <span className={`text-[11px] ${overdue ? "text-red-600 font-semibold" : "text-slate-400"}`}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>}
       </div>
     </div>
   );
