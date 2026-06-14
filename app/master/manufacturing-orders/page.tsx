@@ -198,7 +198,7 @@ export default function MoWorkspacePage() {
           material_type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null, qty_per: qtyPer, on_hand_qty: onHand, is_ready: !!s.is_ready, purchase_override: override };
       });
       setForm({
-        id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
+        id: d.id, mo_no: d.mo_no ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: (d.product_image as string) ?? null,
         qty: Number(d.qty) || 1, due_date: d.due_date ?? "", bom_code: d.bom_code ?? null, bom_version: d.bom_version ?? null, bom_id: null,
         status: d.status ?? "draft", note: d.note ?? "", materials: mats, summary: summ,
         requested: (d.requested ?? {}) as Record<string, number>,

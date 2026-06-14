@@ -36,7 +36,19 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     requested[code] = (requested[code] ?? 0) + (Number(p.qty) || 0);
   }
 
-  return NextResponse.json({ data: { ...header, materials: materials ?? [], summary: summary ?? [], requested }, error: null });
+  // รูปสินค้า — ใช้รูป SKU รุ่นนั้นก่อน (fallback รูป parent)
+  const productSku = (header as { product_sku: string | null }).product_sku;
+  let product_image: string | null = null;
+  if (productSku) {
+    const { data: sk } = await supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).maybeSingle();
+    const own = (sk as { cover_image_r2_key?: string | null } | null)?.cover_image_r2_key;
+    const parRel = sk ? (sk as Record<string, unknown>).parent_skus_v2 : null;
+    const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;
+    const key = own || par?.cover_image_r2_key || "";
+    if (key) product_image = `/api/r2-image?key=${encodeURIComponent(key)}`;
+  }
+
+  return NextResponse.json({ data: { ...header, materials: materials ?? [], summary: summary ?? [], requested, product_image }, error: null });
 }
 
 type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };

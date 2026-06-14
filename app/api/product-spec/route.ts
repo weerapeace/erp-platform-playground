@@ -107,7 +107,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   sku_attrs.sort((a, b) => a.order - b.order);
 
   const pkey = parent ? (parent as Record<string, unknown>).cover_image_r2_key as string | null : null;
-  const imgKey = pkey ?? skuRow.cover_image_r2_key ?? null;
+  // ใช้รูปของ SKU รุ่นสีนั้นก่อน (ถ้าไม่มี ค่อย fallback รูป Parent)
+  const imgKey = skuRow.cover_image_r2_key ?? pkey ?? null;
 
   // วัตถุดิบจาก BOM เวอร์ชั่นหลัก (is_default) → จัดกลุ่มตามช่อง (slot_code)
   let bom_materials: BomMatGroup[] = []; let bom_version: string | null = null;
