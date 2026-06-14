@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { DataTable } from "@/components/data-table";
-import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { UserPicker, ProductPicker } from "@/components/pickers";
 import type { UserPickerValue, ProductPickerValue } from "@/components/pickers";
@@ -19,9 +19,9 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
 import { useCreativeOptions, taskTypeLabel, platformLabel } from "./use-options";
+import { useCreativeStatuses, statusMeta, transitionsFrom, transitionBetween, isTerminal } from "./use-statuses";
 import {
-  STATUS_META, PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
-  PRIMARY_ACTIONS, canTransition,
+  PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
   isOverdue, withinThisWeek,
   listTasks, getTask, createTask, transitionTask, approveTask, deleteTask,
   addSubtask, updateSubtask, deleteSubtask, addComment, addAttachment, deleteAttachment,
@@ -33,8 +33,8 @@ import {
 // ============================================================
 // Badges
 // ============================================================
-function StatusBadge({ status }: { status: CreativeStatus }) {
-  const m = STATUS_META[status] ?? STATUS_META.backlog;
+function StatusBadge({ status }: { status: string }) {
+  const m = statusMeta(status);
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
 }
 function PriorityBadge({ priority }: { priority: CreativePriority }) {
@@ -70,12 +70,12 @@ const COLUMNS: ColumnDef<CreativeTask>[] = [
 
 const VIEWS = [
   { id: "all", label: "ทั้งหมด" },
-  { id: "active", label: "🔵 กำลังดำเนินการ", filter: (r: Record<string, unknown>) => !["done", "cancelled", "published"].includes(r.status as string) },
+  { id: "active", label: "🔵 กำลังดำเนินการ", filter: (r: Record<string, unknown>) => !isTerminal(r.status as string) },
   { id: "need_review", label: "🟡 รอตรวจ/อนุมัติ", filter: (r: Record<string, unknown>) => r.status === "need_review" },
   { id: "overdue", label: "⚠️ เกินกำหนด", filter: (r: Record<string, unknown>) => isOverdue(r as CreativeTask) },
   { id: "this_week", label: "🗓️ สัปดาห์นี้", filter: (r: Record<string, unknown>) => withinThisWeek(r as CreativeTask) },
   { id: "blocked", label: "🔴 ติดปัญหา", filter: (r: Record<string, unknown>) => r.status === "blocked" },
-  { id: "done", label: "✅ เสร็จ/เผยแพร่", filter: (r: Record<string, unknown>) => ["done", "published"].includes(r.status as string) },
+  { id: "done", label: "✅ เสร็จ/ปิดงาน", filter: (r: Record<string, unknown>) => isTerminal(r.status as string) },
 ];
 
 const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
@@ -119,6 +119,7 @@ const EMPTY_FORM: FormState = {
 export default function TasksPage() {
   const { user } = useAuth();
   const { taskTypes, platforms } = useCreativeOptions();
+  const { statuses } = useCreativeStatuses();
   const [tasks, setTasks] = useState<CreativeTask[]>([]);
   const [myTasks, setMyTasks] = useState<CreativeTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,8 +139,6 @@ export default function TasksPage() {
   // detail drawer
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  // cancel confirm
-  const [cancelTarget, setCancelTarget] = useState<CreativeTask | null>(null);
 
   // toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -190,7 +189,7 @@ export default function TasksPage() {
     if (!form.title.trim()) { setFormErr("กรุณากรอกชื่องาน"); return; }
     setSaving(true); setFormErr(null);
     const tpl = templates.find((t) => t.id === tplId);
-    const subtasks = tpl?.steps?.filter((s) => s.title?.trim()).map((s) => ({ title: s.title, required_before_next: !!s.required_before_next })) ?? [];
+    const subtasks = tpl?.steps?.filter((s) => s.title?.trim()).map((s) => ({ title: s.title, description: s.description ?? null, assignee_ids: s.assignee_ids ?? [], required_before_next: !!s.required_before_next })) ?? [];
     try {
       const { task_no } = await createTask({
         title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
@@ -208,25 +207,19 @@ export default function TasksPage() {
     finally { setSaving(false); }
   };
 
-  // ---- workflow ----
-  const applyMove = useCallback(async (task: CreativeTask, to: CreativeStatus) => {
-    if (!canTransition(task.status, to)) { pushToast("error", `เปลี่ยน "${STATUS_META[task.status].label}" → "${STATUS_META[to].label}" ไม่ได้`); return; }
+  // ---- workflow (เส้นทาง + ชนิด อ่านจาก DB) ----
+  const applyMove = useCallback(async (task: CreativeTask, toKey: string) => {
+    const tr = transitionBetween(task.status, toKey);
+    if (!tr) { pushToast("error", `เปลี่ยน "${statusMeta(task.status).label}" → "${statusMeta(toKey).label}" ไม่ได้`); return; }
     try {
-      if (task.status === "need_review" && to === "approved") await approveTask(task.id, "approve");
-      else if (task.status === "need_review" && to === "revision") await approveTask(task.id, "revise");
-      else if (to === "blocked") { const reason = (typeof window !== "undefined" && window.prompt("ติดปัญหาเรื่องอะไร?")) || ""; await transitionTask(task.id, "blocked", reason); }
-      else await transitionTask(task.id, to);
-      pushToast("success", `→ ${STATUS_META[to].label}`);
+      if (tr.kind === "approve") await approveTask(task.id, "approve", undefined, toKey);
+      else if (tr.kind === "reject" || tr.kind === "revise") { const c = (typeof window !== "undefined" && window.prompt(tr.kind === "reject" ? "เหตุผลที่ไม่ผ่าน:" : "สิ่งที่ต้องแก้:")) || ""; await approveTask(task.id, tr.kind as "reject" | "revise", c, toKey); }
+      else if (tr.kind === "block") { const reason = (typeof window !== "undefined" && window.prompt("ติดปัญหาเรื่องอะไร?")) || ""; await transitionTask(task.id, toKey, reason); }
+      else await transitionTask(task.id, toKey);
+      pushToast("success", `→ ${statusMeta(toKey).label}`);
       await reload();
     } catch (e) { pushToast("error", (e as Error).message); }
   }, [pushToast, reload]);
-
-  const onCancelConfirm = async () => {
-    if (!cancelTarget) return;
-    try { await transitionTask(cancelTarget.id, "cancelled"); pushToast("info", "ยกเลิกงานแล้ว"); await reload(); }
-    catch (e) { pushToast("error", (e as Error).message); }
-    finally { setCancelTarget(null); }
-  };
 
   const onDelete = async (id: string) => { try { await deleteTask(id); pushToast("info", "ลบงานแล้ว"); setDetailId(null); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -290,14 +283,14 @@ export default function TasksPage() {
             {view === "kanban" && (
               <div>
                 <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด</p>
-                <KanbanBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
+                <KanbanBoard tasks={tasks} statuses={statuses} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
               </div>
             )}
 
             {view === "canvas" && (
               <div>
                 <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดอิสระ · ปล่อยในโซนสถานะเพื่อเปลี่ยนสถานะ · วาดกล่อง/โน้ต/ลูกศร/วางรูปได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด</p>
-                <CanvasBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
+                <CanvasBoard tasks={tasks} statuses={statuses} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
               </div>
             )}
           </>
@@ -348,15 +341,9 @@ export default function TasksPage() {
         <TaskDetailDrawer
           taskId={detailId} brands={brands} campaigns={campaigns}
           onClose={() => setDetailId(null)} onChanged={reload}
-          onMove={applyMove} onCancel={(t) => setCancelTarget(t)} onDelete={onDelete} pushToast={pushToast}
+          onMove={applyMove} onDelete={onDelete} pushToast={pushToast}
         />
       )}
-
-      <ConfirmDialog
-        open={!!cancelTarget} onClose={() => setCancelTarget(null)} onConfirm={onCancelConfirm}
-        title="ยกเลิกงาน" message={<span>ต้องการยกเลิก <span className="font-semibold">{cancelTarget?.title}</span> ใช่ไหม?</span>}
-        confirmText="ยกเลิกงาน" variant="danger"
-      />
 
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
     </StandaloneShell>
@@ -375,9 +362,9 @@ function StatChip({ label, value, tone = "slate" }: { label: string; value: numb
 // Queue View — หน้าพนักงาน ปุ่มใหญ่ งานตัวเองเด่น
 // ============================================================
 function QueueView({ tasks, onOpen, onMove, onCreate }: {
-  tasks: CreativeTask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, to: CreativeStatus) => void; onCreate: () => void;
+  tasks: CreativeTask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void;
 }) {
-  const ordered = useMemo(() => [...tasks].filter((t) => !["done", "cancelled", "published"].includes(t.status)).sort((a, b) => {
+  const ordered = useMemo(() => [...tasks].filter((t) => !isTerminal(t.status)).sort((a, b) => {
     const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
     if (pr !== 0) return pr;
     return (a.due_date || "9999").localeCompare(b.due_date || "9999");
@@ -399,7 +386,7 @@ function QueueView({ tasks, onOpen, onMove, onCreate }: {
       <p className="text-sm text-slate-500">งานที่ต้องทำตอนนี้ · เรียงตามความสำคัญ + กำหนดส่ง ({ordered.length})</p>
       {ordered.map((t, i) => {
         const od = isOverdue(t);
-        const actions = PRIMARY_ACTIONS[t.status] ?? [];
+        const actions = transitionsFrom(t.status);
         return (
           <div key={t.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 transition-colors">
             <div className="flex items-start gap-4">
@@ -421,7 +408,7 @@ function QueueView({ tasks, onOpen, onMove, onCreate }: {
             </div>
             <div className="flex items-center gap-2 mt-3 flex-wrap pl-13">
               {actions.map((a) => (
-                <button key={a.to} onClick={() => onMove(t, a.to)} className="h-9 px-4 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700">{a.label}</button>
+                <button key={a.to_key} onClick={() => onMove(t, a.to_key)} className="h-9 px-4 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700">{a.label}</button>
               ))}
               <button onClick={() => onOpen(t.id)} className="h-9 px-4 text-sm font-medium rounded-lg text-slate-600 border border-slate-200 hover:bg-slate-50">📂 เปิดงาน</button>
             </div>
@@ -435,11 +422,11 @@ function QueueView({ tasks, onOpen, onMove, onCreate }: {
 // ============================================================
 // Detail Drawer (โหลดรายละเอียดจริงจาก API)
 // ============================================================
-function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMove, onCancel, onDelete, pushToast }: {
+function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMove, onDelete, pushToast }: {
   taskId: string; brands: BrandOption[]; campaigns: Campaign[];
   onClose: () => void; onChanged: () => Promise<void> | void;
-  onMove: (t: CreativeTask, to: CreativeStatus) => Promise<void>;
-  onCancel: (t: CreativeTask) => void; onDelete: (id: string) => void;
+  onMove: (t: CreativeTask, toKey: string) => Promise<void>;
+  onDelete: (id: string) => void;
   pushToast: (type: Toast["type"], message: string) => void;
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -466,18 +453,11 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
     );
   }
   const t = detail;
-  const isClosed = t.status === "done" || t.status === "cancelled";
-  const isReview = t.status === "need_review";
-  const actions = PRIMARY_ACTIONS[t.status] ?? [];
+  const isClosed = isTerminal(t.status);
+  const actions = transitionsFrom(t.status);
   const doneSub = t.subtasks.filter((s) => s.status === "done").length;
 
-  const handleMove = async (to: CreativeStatus) => { setBusy(true); await onMove(t, to); await refresh(); setBusy(false); };
-  const handleApprove = async (a: "approve" | "reject" | "revise") => {
-    setBusy(true);
-    try { const comment = a === "approve" ? undefined : (window.prompt(a === "reject" ? "เหตุผลที่ไม่ผ่าน:" : "สิ่งที่ต้องแก้:") || ""); await approveTask(t.id, a, comment ?? undefined); pushToast("success", a === "approve" ? "อนุมัติแล้ว" : a === "reject" ? "ตีกลับ (ไม่ผ่าน)" : "ส่งให้แก้ไข"); await refresh(); }
-    catch (e) { pushToast("error", (e as Error).message); }
-    finally { setBusy(false); }
-  };
+  const handleMove = async (toKey: string) => { setBusy(true); await onMove(t, toKey); await refresh(); setBusy(false); };
   const addSub = async () => { if (!newSub.trim()) return; try { await addSubtask(t.id, { title: newSub.trim() }); setNewSub(""); await refresh(); } catch (e) { pushToast("error", (e as Error).message); } };
   const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(t.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(t.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
@@ -600,22 +580,16 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
 
         {/* footer actions */}
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">
-          {isClosed ? (
-            <p className="text-sm text-slate-400 text-center w-full">งานปิดแล้ว ({STATUS_META[t.status].label}) — ดูได้อย่างเดียว</p>
-          ) : isReview ? (
-            <>
-              <button disabled={busy} onClick={() => handleApprove("approve")} className="flex-1 h-9 px-4 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">✓ อนุมัติ</button>
-              <button disabled={busy} onClick={() => handleApprove("revise")} className="h-9 px-4 text-sm font-medium rounded-lg text-orange-700 border border-orange-200 hover:bg-orange-50 disabled:opacity-50">↩ ให้แก้ไข</button>
-              <button disabled={busy} onClick={() => handleApprove("reject")} className="h-9 px-4 text-sm font-medium rounded-lg text-red-600 border border-red-200 hover:bg-red-50 disabled:opacity-50">✗ ไม่ผ่าน</button>
-            </>
-          ) : (
-            <>
-              {actions.map((a, i) => (
-                <button key={a.to} disabled={busy} onClick={() => handleMove(a.to)} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${i === 0 ? "flex-1 bg-violet-600 text-white hover:bg-violet-700" : "text-slate-600 border border-slate-200 hover:bg-slate-50"}`}>{a.label}</button>
-              ))}
-              <button onClick={() => onCancel(t)} className="h-9 px-4 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50">ยกเลิก</button>
-            </>
-          )}
+          {actions.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center w-full">{isClosed ? `งานปิดแล้ว (${statusMeta(t.status).label})` : "ไม่มีการกระทำ"} — ดูได้อย่างเดียว</p>
+          ) : actions.map((a, i) => {
+            const cls = a.kind === "approve" ? "bg-emerald-600 text-white hover:bg-emerald-700"
+              : a.kind === "reject" ? "text-red-600 border border-red-200 hover:bg-red-50"
+              : a.kind === "revise" ? "text-orange-700 border border-orange-200 hover:bg-orange-50"
+              : a.kind === "block" ? "text-red-600 border border-red-200 hover:bg-red-50"
+              : i === 0 ? "flex-1 bg-violet-600 text-white hover:bg-violet-700" : "text-slate-600 border border-slate-200 hover:bg-slate-50";
+            return <button key={a.to_key} disabled={busy} onClick={() => handleMove(a.to_key)} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
+          })}
         </div>
       </div>
     </>

@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
-import { STATUS_PROGRESS, type CreativeStatus } from "@/lib/creative-tasks";
+import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
 import { nextTaskNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
@@ -122,8 +122,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!title) return NextResponse.json({ error: "กรุณาใส่ชื่องาน" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const status = (body.status as CreativeStatus) || "backlog";
-  const progress = typeof body.progress_percent === "number" ? body.progress_percent : (STATUS_PROGRESS[status] ?? 0);
+  const status = (body.status as string) || (await defaultStatusKey(admin));
+  const statusMeta = await getStatusMeta(admin, status);
+  const progress = typeof body.progress_percent === "number" ? body.progress_percent : (statusMeta?.progress_percent ?? 0);
 
   const insertRow = (taskNo: string) => ({
     task_no: taskNo, title, description: body.description?.trim() || null, task_type: body.task_type || null,

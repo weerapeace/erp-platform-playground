@@ -143,12 +143,12 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   return j.data as CreativeTask;
 }
 
-export async function transitionTask(id: string, to: CreativeStatus, comment?: string): Promise<CreativeTask> {
+export async function transitionTask(id: string, to: string, comment?: string): Promise<CreativeTask> {
   return updateTask(id, { action: "transition", to, comment });
 }
 
-export async function approveTask(id: string, action: "approve" | "reject" | "revise", comment?: string): Promise<CreativeTask> {
-  return updateTask(id, { action, comment });
+export async function approveTask(id: string, action: "approve" | "reject" | "revise", comment?: string, to?: string): Promise<CreativeTask> {
+  return updateTask(id, { action, comment, to });
 }
 
 export async function deleteTask(id: string): Promise<void> {

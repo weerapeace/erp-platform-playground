@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenTask } from "../route";
-import { canTransition, STATUS_PROGRESS, type CreativeStatus, type ApprovalStatus } from "@/lib/creative-tasks";
+import { canTransition as canTransitionDB, getStatusMeta } from "@/lib/creative-statuses-server";
 import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
@@ -87,37 +87,39 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let notifyTarget: { empId: string | null; eventType: string; title: string } | null = null;
 
   if (action === "transition") {
-    // เปลี่ยนสถานะตาม workflow กลาง
-    const to = String(body.to ?? "") as CreativeStatus;
-    const from = String(current.status) as CreativeStatus;
-    if (!canTransition(from, to)) {
+    // เปลี่ยนสถานะตาม workflow (อ่านจาก DB)
+    const to = String(body.to ?? "");
+    const from = String(current.status);
+    if (!(await canTransitionDB(admin, from, to))) {
       return NextResponse.json({ error: `เปลี่ยนสถานะจาก "${from}" ไป "${to}" ไม่ได้` }, { status: 400 });
     }
+    const meta = await getStatusMeta(admin, to);
     patch.status = to;
-    patch.progress_percent = STATUS_PROGRESS[to] ?? current.progress_percent;
-    if (to === "need_review") patch.approval_status = "pending" as ApprovalStatus;
-    if (to === "done" || to === "published") patch.completed_at = new Date().toISOString();
-    if (to === "blocked") patch.blocker_status = "blocked";
-    if (from === "blocked" && to !== "blocked") { patch.blocker_status = "none"; patch.blocker_reason = null; }
+    patch.progress_percent = meta ? meta.progress_percent : current.progress_percent;
+    if (meta?.is_approval_gate) patch.approval_status = "pending";
+    if (meta?.is_terminal) patch.completed_at = new Date().toISOString();
     if (typeof body.comment === "string" && body.comment.trim()) patch.blocker_reason = body.comment.trim();
     auditAction = `status:${from}→${to}`;
-    // ส่งตรวจ → แจ้งผู้ตรวจ
-    if (to === "need_review") notifyTarget = { empId: (current.reviewer_id as string) ?? null, eventType: "task_need_review", title: `งานรอตรวจ: ${current.title}` };
+    if (meta?.is_approval_gate) notifyTarget = { empId: (current.reviewer_id as string) ?? null, eventType: "task_need_review", title: `งานรอตรวจ: ${current.title}` };
   } else if (action === "approve" || action === "reject" || action === "revise") {
-    // อนุมัติ / ไม่ผ่าน / ตีกลับแก้ — ต้องมีสิทธิ์ tasks.approve (หัวหน้า) แยกจากการแก้งานทั่วไป
+    // อนุมัติ / ไม่ผ่าน / ตีกลับแก้ — ต้องมีสิทธิ์ tasks.approve. ปลายทาง (to) มาจาก transition
     const denyApprove = await guardApi(request, "tasks.approve"); if (denyApprove) return denyApprove;
-    const map: Record<string, { approval: ApprovalStatus; status: CreativeStatus; ev: string; label: string }> = {
-      approve: { approval: "approved", status: "approved", ev: "task_approved", label: "อนุมัติงาน" },
-      reject:  { approval: "rejected", status: "revision", ev: "task_rejected", label: "ตีกลับ (ไม่ผ่าน)" },
-      revise:  { approval: "revision", status: "revision", ev: "task_revision", label: "ขอให้แก้ไข" },
-    };
-    const m = map[action];
-    patch.approval_status = m.approval;
-    patch.status = m.status;
-    patch.progress_percent = STATUS_PROGRESS[m.status] ?? current.progress_percent;
+    const to = String(body.to ?? "");
+    if (to && !(await canTransitionDB(admin, String(current.status), to))) {
+      return NextResponse.json({ error: "เปลี่ยนสถานะไม่ได้ตาม workflow" }, { status: 400 });
+    }
+    const approvalMap: Record<string, string> = { approve: "approved", reject: "rejected", revise: "revision" };
+    patch.approval_status = approvalMap[action];
+    if (to) {
+      const meta = await getStatusMeta(admin, to);
+      patch.status = to;
+      patch.progress_percent = meta ? meta.progress_percent : current.progress_percent;
+      if (meta?.is_terminal) patch.completed_at = new Date().toISOString();
+    }
     if (action !== "approve" && typeof body.comment === "string") patch.blocker_reason = body.comment.trim() || null;
-    auditAction = m.ev;
-    notifyTarget = { empId: (current.assignee_id as string) ?? null, eventType: m.ev, title: `${m.label}: ${current.title}` };
+    const label = action === "approve" ? "อนุมัติงาน" : action === "reject" ? "ตีกลับ (ไม่ผ่าน)" : "ขอให้แก้ไข";
+    auditAction = `task_${action}`;
+    notifyTarget = { empId: (current.assignee_id as string) ?? null, eventType: `task_${action}`, title: `${label}: ${current.title}` };
   } else {
     // แก้ฟิลด์ทั่วไป — เฉพาะ field ที่อนุญาต
     for (const [k, v] of Object.entries(body)) {

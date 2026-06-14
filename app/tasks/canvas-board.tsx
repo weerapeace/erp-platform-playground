@@ -11,9 +11,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
 import { apiFetch } from "@/lib/api";
 import {
-  STATUS_META, PRIORITY_META, isOverdue, canTransition,
-  type CreativeTask, type CreativeStatus, type CreativePriority,
+  PRIORITY_META, isOverdue,
+  type CreativeTask, type CreativePriority,
 } from "./data";
+import { statusMeta, canTransitionTo, type Status } from "./use-statuses";
 
 type Viewport = { x: number; y: number; scale: number };
 type Pos = { x: number; y: number };
@@ -37,7 +38,6 @@ type Interaction =
   | { type: "resize"; id: string; sx: number; sy: number; ow: number; oh: number }
   | null;
 
-const COLUMNS: CreativeStatus[] = ["backlog", "ready", "in_progress", "need_review", "revision", "approved", "scheduled", "published", "done", "blocked", "cancelled"];
 const CARD_W = 280, CARD_H = 150;
 const ZONE_W = 340, ZONE_H = 1240, ZONE_GAP = 32, CARD_GAP_Y = 150;
 const BOARD_KEY = "erp-creative-canvas:v3";
@@ -56,8 +56,8 @@ const DEF_STYLE: Style = { fontSize: 16, bold: false, italic: false, underline: 
 const zoneX = (i: number) => i * (ZONE_W + ZONE_GAP);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const clone = (b: Board): Board => JSON.parse(JSON.stringify(b));
-function zoneIndexAtWorldX(wx: number): number {
-  for (let i = 0; i < COLUMNS.length; i++) if (wx >= zoneX(i) && wx <= zoneX(i) + ZONE_W) return i;
+function zoneIndexAtWorldX(wx: number, count: number): number {
+  for (let i = 0; i < count; i++) if (wx >= zoneX(i) && wx <= zoneX(i) + ZONE_W) return i;
   return -1;
 }
 // จุดบนขอบสี่เหลี่ยม r ในทิศไปยัง (tx,ty) — ใช้ให้ลูกศรแตะขอบกล่อง ไม่ใช่กลาง
@@ -77,13 +77,15 @@ const styleOf = (o: StyledObject): React.CSSProperties => ({
 });
 
 export function CanvasBoard({
-  tasks, onMove, onCardClick, startMaximized,
+  tasks, statuses, onMove, onCardClick, startMaximized,
 }: {
   tasks: CreativeTask[];
-  onMove: (taskId: string, to: CreativeStatus) => void;
+  statuses: Status[];
+  onMove: (taskId: string, toKey: string) => void;
   onCardClick: (id: string) => void;
   startMaximized?: boolean;
 }) {
+  const columns = useMemo(() => statuses.map((s) => s.key), [statuses]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Interaction>(null);
@@ -225,9 +227,9 @@ export function CanvasBoard({
   // ---- auto layout (การ์ดที่ยังไม่เคยลาก) ----
   const autoPos = useMemo(() => {
     const map: Record<string, Pos> = {};
-    COLUMNS.forEach((status, ci) => tasks.filter(t => t.status === status).forEach((t, ri) => { map[t.id] = { x: zoneX(ci) + 30, y: 90 + ri * CARD_GAP_Y }; }));
+    columns.forEach((status, ci) => tasks.filter(t => t.status === status).forEach((t, ri) => { map[t.id] = { x: zoneX(ci) + 30, y: 90 + ri * CARD_GAP_Y }; }));
     return map;
-  }, [tasks]);
+  }, [tasks, columns]);
   const posOf = (id: string): Pos => board.positions[id] ?? autoPos[id] ?? { x: 40, y: 90 };
 
   // ---- zoom ----
@@ -330,10 +332,10 @@ export function CanvasBoard({
       if (!movedRef.current) return;   // คลิกเดียว = ไม่เปิด (ใช้ดับเบิลคลิกเปิด Drawer)
       if (dragStartRef.current) pushPast(dragStartRef.current);
       const centerX = posOf(it.id).x + CARD_W / 2;
-      const zi = zoneIndexAtWorldX(centerX);
+      const zi = zoneIndexAtWorldX(centerX, columns.length);
       const task = tasks.find(t => t.id === it.id);
-      if (zi >= 0 && task && task.status !== COLUMNS[zi]) {
-        if (canTransition(task.status, COLUMNS[zi])) onMove(it.id, COLUMNS[zi]);
+      if (zi >= 0 && task && task.status !== columns[zi]) {
+        if (canTransitionTo(task.status, columns[zi])) onMove(it.id, columns[zi]);
         // เปลี่ยนสถานะนี้ไม่ได้ตาม workflow → เด้งการ์ดกลับโซนเดิม
         else setBoard(b => { const pos = { ...b.positions }; delete pos[it.id]; return { ...b, positions: pos }; });
       }
@@ -393,8 +395,8 @@ export function CanvasBoard({
         style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
         <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
           {/* Zones */}
-          {COLUMNS.map((status, i) => {
-            const m = STATUS_META[status];
+          {columns.map((status, i) => {
+            const m = statusMeta(status);
             const count = tasks.filter(t => t.status === status).length;
             return (
               <div key={status} className="absolute rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/40" style={{ left: zoneX(i), top: 0, width: ZONE_W, height: ZONE_H }}>
@@ -635,7 +637,7 @@ function IconAlign({ align }: { align: Align }) {
 
 function CanvasCard({ task }: { task: CreativeTask }) {
   const pr = PRIORITY_META[task.priority as CreativePriority] ?? PRIORITY_META.normal;
-  const m = STATUS_META[task.status as CreativeStatus] ?? STATUS_META.backlog;
+  const m = statusMeta(task.status);
   const overdue = isOverdue(task);
   return (
     <div className="bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-300 p-3 cursor-grab active:cursor-grabbing select-none">

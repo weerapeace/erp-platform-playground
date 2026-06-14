@@ -11,10 +11,8 @@ import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   useDraggable, useDroppable, type DragStartEvent, type DragEndEvent,
 } from "@dnd-kit/core";
-import { STATUS_META, PRIORITY_META, isOverdue, type CreativeTask, type CreativeStatus, type CreativePriority } from "./data";
-
-// คอลัมน์หลักของสายงาน (เลื่อนแนวนอนได้) — ตัด cancelled/blocked ออกจากบอร์ดหลัก
-const COLUMNS: CreativeStatus[] = ["backlog", "ready", "in_progress", "need_review", "revision", "approved", "scheduled", "published", "done"];
+import { PRIORITY_META, isOverdue, type CreativeTask, type CreativePriority } from "./data";
+import { statusMeta, type Status } from "./use-statuses";
 
 function CardBody({ task, dragging }: { task: CreativeTask; dragging?: boolean }) {
   const pr = PRIORITY_META[task.priority as CreativePriority];
@@ -48,13 +46,13 @@ function DraggableCard({ task, onClick }: { task: CreativeTask; onClick: () => v
   );
 }
 
-function Column({ status, tasks, onCardClick }: { status: CreativeStatus; tasks: CreativeTask[]; onCardClick: (id: string) => void }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
-  const m = STATUS_META[status];
+function Column({ statusKey, label, tasks, onCardClick }: { statusKey: string; label: string; tasks: CreativeTask[]; onCardClick: (id: string) => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: statusKey });
+  const m = statusMeta(statusKey);
   return (
     <div className="flex flex-col w-64 shrink-0">
       <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200 border-t-4 border-t-violet-300">
-        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${m.dot}`} /><span className="text-sm font-semibold text-slate-700">{m.label}</span></div>
+        <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${m.dot}`} /><span className="text-sm font-semibold text-slate-700">{label}</span></div>
         <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{tasks.length}</span>
       </div>
       <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>
@@ -65,9 +63,10 @@ function Column({ status, tasks, onCardClick }: { status: CreativeStatus; tasks:
   );
 }
 
-export function KanbanBoard({ tasks, onMove, onCardClick }: {
+export function KanbanBoard({ tasks, statuses, onMove, onCardClick }: {
   tasks: CreativeTask[];
-  onMove: (taskId: string, to: CreativeStatus) => void;
+  statuses: Status[];
+  onMove: (taskId: string, toKey: string) => void;
   onCardClick: (id: string) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -77,7 +76,7 @@ export function KanbanBoard({ tasks, onMove, onCardClick }: {
   const onDragStart = (e: DragStartEvent) => setActiveId(String(e.active.id));
   const onDragEnd = (e: DragEndEvent) => {
     setActiveId(null);
-    const overId = e.over?.id as CreativeStatus | undefined;
+    const overId = e.over?.id ? String(e.over.id) : undefined;
     if (!overId) return;
     const task = tasks.find((t) => t.id === String(e.active.id));
     if (task && task.status !== overId) onMove(task.id, overId);
@@ -86,8 +85,8 @@ export function KanbanBoard({ tasks, onMove, onCardClick }: {
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="flex gap-3 overflow-x-auto pb-3">
-        {COLUMNS.map((status) => (
-          <Column key={status} status={status} tasks={tasks.filter((t) => t.status === status)} onCardClick={onCardClick} />
+        {statuses.map((s) => (
+          <Column key={s.key} statusKey={s.key} label={s.label} tasks={tasks.filter((t) => t.status === s.key)} onCardClick={onCardClick} />
         ))}
       </div>
       <DragOverlay dropAnimation={null}>{activeTask ? <div className="w-64"><CardBody task={activeTask} dragging /></div> : null}</DragOverlay>
