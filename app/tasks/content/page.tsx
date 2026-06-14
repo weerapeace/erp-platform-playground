@@ -10,8 +10,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { ProductPicker } from "@/components/pickers";
-import type { ProductPickerValue } from "@/components/pickers";
+import { SkuPicker } from "@/components/pickers";
+import type { SkuPickerValue } from "@/components/pickers";
 import {
   CONTENT_STATUS_META, POST_TYPES,
   listContent, getContent, createContent, updateContent, deleteContent,
@@ -29,7 +29,7 @@ function StatusBadge({ status }: { status: ContentStatus }) {
   return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
 }
 
-const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentStatus, brand_id: "", campaign_id: "", scheduled_at: "", product: null as ProductPickerValue | null, platforms: [] as string[], note: "" };
+const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentStatus, brand_id: "", campaign_id: "", scheduled_at: "", product: null as SkuPickerValue | null, platforms: [] as string[], note: "" };
 
 export default function ContentPage() {
   const { platforms } = useCreativeOptions();
@@ -141,7 +141,7 @@ export default function ContentPage() {
           <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => upd({ brand_id: e.target.value })} /></ERPFormField>
           <ERPFormField label="แคมเปญ"><ERPSelect value={form.campaign_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
           <ERPFormField label="ตั้งเวลาโพสต์"><ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} /></ERPFormField>
-          <ERPFormField label="สินค้า/SKU (ถ้ามี)"><ProductPicker value={form.product} onChange={(v) => upd({ product: v })} disableCreate /></ERPFormField>
+          <ERPFormField label="สินค้า/SKU (ถ้ามี)"><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
           <ERPFormField label="แพลตฟอร์ม" span={2}>
             <div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}</div>
           </ERPFormField>

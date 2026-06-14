@@ -10,8 +10,8 @@ import { useRouter } from "next/navigation";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect } from "@/components/form";
-import { ProductPicker, UserPicker } from "@/components/pickers";
-import type { ProductPickerValue, UserPickerValue } from "@/components/pickers";
+import { SkuPicker, UserPicker } from "@/components/pickers";
+import type { SkuPickerValue, UserPickerValue } from "@/components/pickers";
 import {
   PROJECT_STATUS, listProjects, createProject, listBrands, listCampaigns,
   type Project, type BrandOption, type Campaign,
@@ -32,7 +32,7 @@ export default function ProjectsPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const [name, setName] = useState("");
-  const [product, setProduct] = useState<ProductPickerValue | null>(null);
+  const [product, setProduct] = useState<SkuPickerValue | null>(null);
   const [brandId, setBrandId] = useState("");
   const [campaignId, setCampaignId] = useState("");
   const [pm, setPm] = useState<UserPickerValue | null>(null);
@@ -111,7 +111,7 @@ export default function ProjectsPage() {
         {err && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {err}</div>}
         <ERPFormSection title="ข้อมูลโปรเจกต์" columns={2}>
           <ERPFormField label="ชื่อโปรเจกต์" required span={2}><ERPInput value={name} onChange={(e) => setName(e.target.value)} placeholder="เช่น PD-CLEAR-BAG Launch (7.7)" /></ERPFormField>
-          <ERPFormField label="สินค้า (ดึง SKU ตระกูลเดียวกัน)" span={2}><ProductPicker value={product} onChange={setProduct} disableCreate /></ERPFormField>
+          <ERPFormField label="สินค้า (ดึง SKU ตระกูลเดียวกัน)" span={2}><SkuPicker value={product} onChange={setProduct} /></ERPFormField>
           <ERPFormField label="แบรนด์"><ERPSelect value={brandId} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setBrandId(e.target.value)} /></ERPFormField>
           <ERPFormField label="แคมเปญ"><ERPSelect value={campaignId} options={[{ value: "", label: "— ไม่ระบุ —" }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => setCampaignId(e.target.value)} /></ERPFormField>
           <ERPFormField label="PM / ผู้ดูแล"><UserPicker value={pm} onChange={setPm} disableCreate /></ERPFormField>

@@ -9,8 +9,8 @@
 import { useEffect, useRef, useState, type PointerEvent as RPE } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
-import { ProductPicker, UserPicker } from "@/components/pickers";
-import type { ProductPickerValue, UserPickerValue } from "@/components/pickers";
+import { SkuPicker, UserPicker } from "@/components/pickers";
+import type { SkuPickerValue, UserPickerValue } from "@/components/pickers";
 import { listItems, createItem, updateItem, deleteItem, listItemComments, addItemComment, toggleReaction, type BoardItem, type BoardComment } from "../../data";
 
 type VP = { x: number; y: number; scale: number };
@@ -32,9 +32,10 @@ export function BoardCanvas({ boardId, pushToast }: { boardId: string; pushToast
 
   const [items, setItems] = useState<BoardItem[]>([]);
   const [vp, setVp] = useState<VP>({ x: 40, y: 24, scale: 0.7 });
+  const vpRef = useRef(vp); vpRef.current = vp;
   const [selId, setSelId] = useState<string | null>(null);
   const [skuOpen, setSkuOpen] = useState(false);
-  const [skuPick, setSkuPick] = useState<ProductPickerValue | null>(null);
+  const [skuPick, setSkuPick] = useState<SkuPickerValue | null>(null);
   const [uploading, setUploading] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedOnly, setSelectedOnly] = useState(false);
@@ -66,30 +67,50 @@ export function BoardCanvas({ boardId, pushToast }: { boardId: string; pushToast
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  const worldCenter = () => { const r = boardRef.current?.getBoundingClientRect(); const sx = r ? r.width / 2 : 300, sy = r ? r.height / 2 : 200; return { x: (sx - vp.x) / vp.scale, y: (sy - vp.y) / vp.scale }; };
+  const worldCenter = () => { const r = boardRef.current?.getBoundingClientRect(); const v = vpRef.current; const sx = r ? r.width / 2 : 300, sy = r ? r.height / 2 : 200; return { x: (sx - v.x) / v.scale, y: (sy - v.y) / v.scale }; };
+  const screenToWorld = (cx: number, cy: number) => { const r = boardRef.current!.getBoundingClientRect(); const v = vpRef.current; return { x: (cx - r.left - v.x) / v.scale, y: (cy - r.top - v.y) / v.scale }; };
 
   // ---- add items ----
-  const add = async (body: Record<string, unknown>) => {
-    const c = worldCenter();
+  const addAt = async (body: Record<string, unknown>, at?: { x: number; y: number }) => {
+    const c = at ?? worldCenter();
     try { const it = await createItem(boardId, { x: Math.round(c.x), y: Math.round(c.y), ...body }); setItems((p) => [...p, it]); setSelId(it.id); }
     catch (e) { pushToast("error", (e as Error).message); }
   };
-  const addNote = () => add({ item_type: "note", content: "", width: 200, height: 140, color: NOTE_COLORS[items.length % NOTE_COLORS.length] });
+  const add = (body: Record<string, unknown>) => addAt(body);
+  const addNote = (at?: { x: number; y: number }) => addAt({ item_type: "note", content: "", width: 200, height: 140, color: NOTE_COLORS[items.length % NOTE_COLORS.length] }, at);
   const addSection = () => add({ item_type: "section", title: "โซนใหม่", width: 340, height: 600, color: "slate" });
   const addUrl = (type: "url" | "video_link" | "google_slides") => { const url = window.prompt("วางลิงก์"); if (!url?.trim()) return; const f = type === "google_slides" ? { item_type: "google_slides", google_slides_url: url.trim(), title: "Google Slides" } : { item_type: type, url: url.trim(), title: url.trim() }; add({ ...f, width: 240, height: 120 }); };
   const addImageClick = () => fileRef.current?.click();
-  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return; e.target.value = "";
+  const uploadImage = async (file: File, at?: { x: number; y: number }) => {
     setUploading(true);
     try {
       const fd = new FormData(); fd.append("file", file); fd.append("folder", "brainstorm");
       const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      await add({ item_type: "image", r2_key: j.r2_key, width: 260, height: 200 });
+      await addAt({ item_type: "image", r2_key: j.r2_key, width: 260, height: 200 }, at);
     } catch (err) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (err as Error).message); }
     finally { setUploading(false); }
   };
+  const onFile = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) uploadImage(file); e.target.value = ""; };
   const addSku = async () => { if (!skuPick) return; await add({ item_type: "sku_card", sku_id: skuPick.id, width: 260, height: 180 }); setSkuOpen(false); setSkuPick(null); };
+
+  // ---- Miro-like: paste image (Ctrl+V) + drag-drop + คีย์ลัด ----
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName ?? "")) return;
+      const f = Array.from(e.clipboardData?.items ?? []).find((it) => it.type.startsWith("image/"));
+      const file = f?.getAsFile(); if (!file) return; e.preventDefault(); uploadImage(file);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const typing = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName ?? "");
+      if (e.key === "Escape") setSelId(null);
+      else if ((e.key === "Delete" || e.key === "Backspace") && !typing && selId) { e.preventDefault(); const id = selId; deleteItem(id).then(() => { setItems((p) => p.filter((i) => i.id !== id)); setSelId(null); }).catch((err) => pushToast("error", (err as Error).message)); }
+    };
+    window.addEventListener("paste", onPaste);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("paste", onPaste); window.removeEventListener("keydown", onKey); };
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [selId]);
 
   // ---- patch helpers ----
   const patchLocal = (id: string, p: Partial<BoardItem>) => setItems((items) => items.map((i) => i.id === id ? { ...i, ...p } : i));
@@ -142,6 +163,7 @@ export function BoardCanvas({ boardId, pushToast }: { boardId: string; pushToast
         <TBtn onClick={() => setVp({ x: 40, y: 24, scale: 0.7 })} title="รีเซ็ตมุมมอง">🎯</TBtn>
       </div>
       {uploading && <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 text-white text-sm rounded-lg px-3 py-1.5">กำลังอัปโหลดรูป...</div>}
+      {!sel && <div className="absolute bottom-3 right-3 z-10 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">📋 วางรูป Ctrl+V · ลากรูปมาวางได้ · Del = ลบ · Esc = ยกเลิกเลือก</div>}
       {/* Filter bar */}
       <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 bg-white rounded-lg border border-slate-200 shadow-sm px-2 py-1.5">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 ค้นหา..." className="h-7 w-40 border border-slate-200 rounded-md px-2 text-sm" />
@@ -151,6 +173,8 @@ export function BoardCanvas({ boardId, pushToast }: { boardId: string; pushToast
 
       {/* Canvas */}
       <div ref={boardRef} onPointerDown={onBoardDown} onPointerMove={onBoardMove} onPointerUp={onBoardUp}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f && f.type.startsWith("image/")) uploadImage(f, screenToWorld(e.clientX, e.clientY)); }}
         className="absolute inset-0 cursor-default"
         style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
         <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
@@ -176,7 +200,7 @@ export function BoardCanvas({ boardId, pushToast }: { boardId: string; pushToast
           <button onClick={() => setSkuOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={addSku} disabled={!skuPick} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">เพิ่ม</button>
         </>}>
-        <ProductPicker value={skuPick} onChange={setSkuPick} disableCreate />
+        <SkuPicker value={skuPick} onChange={setSkuPick} />
       </ERPModal>
     </div>
   );

@@ -13,8 +13,8 @@ import { useAuth } from "@/components/auth";
 import { DataTable } from "@/components/data-table";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { UserPicker, ProductPicker } from "@/components/pickers";
-import type { UserPickerValue, ProductPickerValue } from "@/components/pickers";
+import { UserPicker, SkuPicker } from "@/components/pickers";
+import type { UserPickerValue, SkuPickerValue } from "@/components/pickers";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
@@ -106,7 +106,7 @@ type FormState = {
   brand_id: string; campaign_id: string;
   assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
   priority: CreativePriority; due_date: string;
-  product: ProductPickerValue | null; platforms: string[]; drive_folder_url: string;
+  product: SkuPickerValue | null; platforms: string[]; drive_folder_url: string;
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
@@ -332,7 +332,7 @@ export default function TasksPage() {
           <ERPFormField label="ผู้ตรวจ/อนุมัติ"><UserPicker value={form.reviewer} onChange={(v) => updateForm({ reviewer: v })} disableCreate /></ERPFormField>
           <ERPFormField label="กำหนดส่ง"><ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} /></ERPFormField>
           <ERPFormField label="โฟลเดอร์ Drive (ลิงก์)"><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>
-          <ERPFormField label="สินค้า/SKU (ถ้ามี)" span={2}><ProductPicker value={form.product} onChange={(v) => updateForm({ product: v })} disableCreate /></ERPFormField>
+          <ERPFormField label="สินค้า/SKU (ถ้ามี)" span={2}><SkuPicker value={form.product} onChange={(v) => updateForm({ product: v })} /></ERPFormField>
           <ERPFormField label="แพลตฟอร์ม" span={2}>
             <div className="flex flex-wrap gap-1.5">
               {platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
