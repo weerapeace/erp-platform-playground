@@ -18,6 +18,7 @@ import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
+import { WorkInstructionPanel } from "@/components/work-instruction";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -372,7 +373,7 @@ export default function WorkBoardPage() {
 
   // เปิดป๊อปอัปเช็กลิสต์จากใบจ่ายงาน (มีแท็บ "รับงานคืน" เป็นแท็บแรก) — ถ้าไม่รู้ MO id ใช้ป๊อปอัปเดิม
   const openWO = (wo: WorkOrder) => {
-    if (!wo.mo_id) { setDetailWO(wo); return; }
+    if (!wo.mo_id) { setDetailWO(wo); setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false); return; }
     setClWO(wo); setClTab("recv");
     setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false);
     setChecklistMO({
@@ -410,12 +411,12 @@ export default function WorkBoardPage() {
   // รับงานคืน (จากการ์ดบนบอร์ด) — รองรับรับคืนบางส่วน
   const submitReceive = async () => {
     if (!detailWO) return;
-    const total = (detailWO.received_qty || 0) + recvQty;
+    if (recvLabor.trim() === "") { toast.error("กรุณาใส่ค่าแรงก่อนส่งงาน"); return; }
     setRecvSaving(true);
     try {
-      const res = await apiFetch(`/api/mo/work-orders/${detailWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ received_qty: total }) });
+      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: detailWO.id, qty: recvQty, wage: Number(recvLabor) || 0 }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("บันทึกรับงานคืนแล้ว"); setDetailWO(null); await load(true);
+      toast.success("บันทึกส่งงานแล้ว"); setDetailWO(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setRecvSaving(false); }
   };
@@ -443,13 +444,13 @@ export default function WorkBoardPage() {
   };
   const submitReceiveTab = async () => {
     if (!clWO) return;
-    const total = (clWO.received_qty || 0) + recvQty;
+    if (recvLabor.trim() === "") { toast.error("กรุณาใส่ค่าแรงก่อนส่งงาน"); return; }
     setRecvSaving(true);
     try {
-      await persistLabor(clWO);
-      const res = await apiFetch(`/api/mo/work-orders/${clWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ received_qty: total }) });
+      if (saveLaborBom) await persistLabor(clWO);   // บันทึกค่าแรงกลับเข้า BOM (ถ้าติ๊ก)
+      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: clWO.id, qty: recvQty, wage: Number(recvLabor) || 0 }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("บันทึกรับงานคืนแล้ว"); closeChecklist();
+      toast.success("บันทึกส่งงานแล้ว"); closeChecklist();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setRecvSaving(false); }
   };
@@ -666,6 +667,7 @@ export default function WorkBoardPage() {
             <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
           </div>
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
+          <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
         </div>
       </div>
@@ -817,7 +819,7 @@ export default function WorkBoardPage() {
         footer={detailWO && (detailWO.status === "done" ? <button onClick={() => setDetailWO(null)} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg">ปิด</button> : <>
           <button onClick={() => detailWO && cancelWO(detailWO)} disabled={recvSaving} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-50 mr-auto">ยกเลิกใบ</button>
           <button onClick={() => setDetailWO(null)} disabled={recvSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
-          <button onClick={submitReceive} disabled={recvSaving || recvQty <= 0} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{recvSaving ? "กำลังบันทึก..." : "รับงานคืน"}</button>
+          <button onClick={submitReceive} disabled={recvSaving || recvQty <= 0 || recvLabor.trim() === ""} title={recvLabor.trim() === "" ? "ใส่ค่าแรงก่อน" : ""} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{recvSaving ? "กำลังบันทึก..." : "✓ ส่งงาน"}</button>
         </>)}>
         {detailWO && (
           <div className="space-y-2 text-sm">
@@ -826,14 +828,19 @@ export default function WorkBoardPage() {
               <span>ใบสั่งผลิต</span><span className="text-slate-700">{detailWO.mo_no}</span>
               <span>แผนก/ผู้รับ</span><span className="text-slate-700">{detailWO.department_name ?? "—"} · {detailWO.assignee_name ?? "—"}</span>
               <span>จ่าย</span><span className="text-slate-700">{fmt(detailWO.qty)} ชิ้น</span>
-              <span>รับคืนแล้ว</span><span className="text-slate-700">{fmt(detailWO.received_qty)} · เหลือ {fmt(detailWO.qty - detailWO.received_qty)}</span>
+              <span>ส่งแล้ว</span><span className="text-slate-700">{fmt(detailWO.received_qty)} · เหลือ {fmt(detailWO.qty - detailWO.received_qty)}</span>
               <span>กำหนดเสร็จ</span><span className="text-slate-700">{detailWO.due_date ?? "—"}</span>
               <span>สถานะ</span><span><span className={`text-[11px] px-2 py-0.5 rounded border ${(WO_STATUS[detailWO.status] ?? WO_STATUS.dispatched).cls}`}>{(WO_STATUS[detailWO.status] ?? WO_STATUS.dispatched).label}</span></span>
             </div>
             {detailWO.status !== "done" && (
-              <label className="block pt-1"><span className="text-[11px] text-slate-500">รับคืนรอบนี้ (ชิ้น)</span>
-                <input type="number" min={0} step="any" max={detailWO.qty - detailWO.received_qty} value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))}
-                  className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <label className="block"><span className="text-[11px] text-slate-500">ส่งรอบนี้ (ชิ้น)</span>
+                  <input type="number" min={0} step="any" max={detailWO.qty - detailWO.received_qty} value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))}
+                    className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
+                <label className="block"><span className="text-[11px] text-slate-500">💰 ค่าแรง (บาท)</span>
+                  <input type="number" min={0} step="any" value={recvLabor} onChange={(e) => setRecvLabor(e.target.value)} placeholder="—"
+                    className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+              </div>
             )}
           </div>
         )}
@@ -880,6 +887,8 @@ export default function WorkBoardPage() {
                 <p className="text-sm font-medium text-slate-800 truncate">{checklistMO.product_name ?? checklistMO.product_sku}</p>
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
+              {/* รายละเอียดสั่งงาน (เหมือนหน้าแก้ใบสั่งผลิต) — ดูสเปก/วัตถุดิบจาก BOM ได้เลย */}
+              {checklistMO.product_sku && <WorkInstructionPanel sku={checklistMO.product_sku} editable={false} />}
               {/* แท็บรวม 6 หน้า — ใช้ได้ทั้งมี/ไม่มี BOM */}
               {(() => {
                 const tabBtn = (id: typeof clTab, label: string) => (
@@ -893,7 +902,7 @@ export default function WorkBoardPage() {
                 return (
                   <div className="space-y-2">
                     <div className="flex flex-wrap gap-1 text-[12px]">
-                      {clWO && tabBtn("recv", "🔄 รับงานคืน")}
+                      {clWO && tabBtn("recv", "📤 ส่งงาน")}
                       {tabBtn("prep", `📋 เตรียม ${prepDone}/${prepTotal}`)}
                       {tabBtn("cut", `✂️ ตัด ${cutDone}/${cutTotal}`)}
                       {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
@@ -906,12 +915,12 @@ export default function WorkBoardPage() {
                         <div className="grid grid-cols-[6rem_1fr] gap-y-1.5 text-xs">
                           <span className="text-slate-400">แผนก/ผู้รับ</span><span className="text-slate-700">{clWO.department_name ?? "—"} · {clWO.assignee_name ?? "—"}</span>
                           <span className="text-slate-400">จ่าย</span><span className="text-slate-700">{fmt(clWO.qty)} ชิ้น</span>
-                          <span className="text-slate-400">รับคืนแล้ว</span><span className="text-slate-700">{fmt(clWO.received_qty)} · เหลือ {fmt(Math.max(0, (clWO.qty || 0) - (clWO.received_qty || 0)))}</span>
+                          <span className="text-slate-400">ส่งแล้ว</span><span className="text-slate-700">{fmt(clWO.received_qty)} · เหลือ {fmt(Math.max(0, (clWO.qty || 0) - (clWO.received_qty || 0)))}</span>
                           <span className="text-slate-400">กำหนดเสร็จ</span><span className="text-slate-700">{clWO.due_date ?? "—"}</span>
                           <span className="text-slate-400">สถานะ</span><span><span className={`text-[11px] px-2 py-0.5 rounded border ${(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).cls}`}>{(WO_STATUS[clWO.status] ?? WO_STATUS.dispatched).label}</span></span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <label className="block"><span className="text-[11px] text-slate-500">รับคืนรอบนี้ (ชิ้น)</span>
+                          <label className="block"><span className="text-[11px] text-slate-500">ส่งรอบนี้ (ชิ้น)</span>
                             <input type="number" min={0} step="any" value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))} disabled={!canEdit}
                               className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50" /></label>
                           <label className="block"><span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต (บาท)</span>
@@ -928,7 +937,7 @@ export default function WorkBoardPage() {
                           <div className="flex items-center gap-2">
                             <button onClick={() => void cancelWOTab()} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">ยกเลิกใบจ่ายงาน</button>
                             <button onClick={() => void saveLabor()} className="h-9 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 ml-auto">💾 บันทึกค่าแรง</button>
-                            <button onClick={() => void submitReceiveTab()} disabled={recvSaving || recvQty <= 0} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{recvSaving ? "กำลังบันทึก…" : "✓ รับงานคืน"}</button>
+                            <button onClick={() => void submitReceiveTab()} disabled={recvSaving || recvQty <= 0 || recvLabor.trim() === ""} title={recvLabor.trim() === "" ? "ใส่ค่าแรงก่อน" : ""} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{recvSaving ? "กำลังบันทึก…" : "✓ ส่งงาน"}</button>
                           </div>
                         )}
                         <p className="text-[11px] text-slate-400">แท็บอื่นด้านบนดูข้อมูลใบสั่งผลิตเดียวกัน (เตรียม/ตัด/งานเหมา/ของซื้อ/ปัญหา/ประวัติ)</p>
