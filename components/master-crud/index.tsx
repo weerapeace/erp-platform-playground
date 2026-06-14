@@ -1497,11 +1497,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, [editingId, onInlineEdit, effectiveFields]);
 
   // ลบรูปปกในหน้า detail — ล้าง field + ย้ายไฟล์เข้าถังขยะ R2 (backend trash อัตโนมัติเมื่อ cover_image_r2_key ถูกล้าง)
+  const [coverDeleteOpen, setCoverDeleteOpen] = useState(false);
   const deleteCover = useCallback(async () => {
+    setCoverDeleteOpen(false);
     if (!editingId) return;
     const key = (form["cover_image_r2_key"] as string) || null;
     if (!key) return;
-    if (!confirm("ลบรูปนี้?\nไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)")) return;
     try {
       const res = await apiFetch(`${apiBase}${config.apiPath}/${editingId}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -2104,7 +2105,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
           // ปุ่มลบรูป (เฉพาะตอนดู + มีสิทธิ์แก้ + มีรูป) — โผล่ตอน hover
           const coverDeleteBtn = (coverKey && drawerMode === "view" && canEdit) ? (
-            <button type="button" onClick={deleteCover} title="ลบรูป (ย้ายไปถังขยะ R2)"
+            <button type="button" onClick={() => setCoverDeleteOpen(true)} title="ลบรูป (ย้ายไปถังขยะ R2)"
               className="absolute top-2 right-2 z-10 h-8 w-8 flex items-center justify-center rounded-lg bg-white/90 border border-slate-200 text-rose-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50 hover:border-rose-300">🗑</button>
           ) : null;
 
@@ -2229,6 +2230,10 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       <ConfirmDialog open={confirmDiscard} onClose={() => setConfirmDiscard(false)}
         title="ยังไม่บันทึก" message="ออกโดยไม่บันทึกหรือไม่?"
         confirmText="ออก" cancelText="อยู่ต่อ" onConfirm={discard} variant="danger" />
+
+      <ConfirmDialog open={coverDeleteOpen} onClose={() => setCoverDeleteOpen(false)}
+        title="ลบรูป" message="ลบรูปนี้ออกจากรายการ? ไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)"
+        confirmText="ลบรูป" cancelText="ยกเลิก" variant="danger" onConfirm={deleteCover} />
 
       <ConfirmDialog open={archiveTarget !== null} onClose={() => setArchiveTarget(null)}
         title="ปิดบัญชี" message={`ปิดบัญชี "${archiveTarget?.name as string}" ใช่ไหม?`}
