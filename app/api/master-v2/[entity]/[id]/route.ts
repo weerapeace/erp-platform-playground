@@ -14,6 +14,7 @@ import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
+import { r2MoveToTrash } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -91,6 +92,13 @@ async function _PATCH(
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์แก้ไขฟิลด์ที่ส่งมา" }, { status: 403 });
   }
 
+  // ของกลาง: ถ้ารูปปกถูกเปลี่ยน/ลบ → อ่าน key เดิมไว้ก่อน เพื่อย้ายเข้าถังขยะ R2 หลังบันทึกสำเร็จ
+  let oldCoverKey: string | null = null;
+  if ("cover_image_r2_key" in cleanPatch) {
+    const { data: prev } = await admin.from(cfg.table).select("cover_image_r2_key").eq("id", id).maybeSingle();
+    oldCoverKey = (prev?.cover_image_r2_key as string) || null;
+  }
+
   const { data, error } = await admin
     .from(cfg.table)
     .update(cleanPatch)
@@ -99,6 +107,11 @@ async function _PATCH(
     .single();
 
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+
+  // รูปปกเปลี่ยน/ลบ → ย้ายไฟล์เก่าเข้าถังขยะ R2 (ลบจริงด้วย lifecycle rule) ไม่ปล่อยขยะค้าง · ไม่ขวางการบันทึก
+  if (oldCoverKey && oldCoverKey !== cleanPatch.cover_image_r2_key) {
+    try { await r2MoveToTrash(oldCoverKey); } catch { /* best-effort */ }
+  }
 
   // audit (ของกลาง — ลง audit_logs, ไม่ throw)
   await writeAudit(admin, {

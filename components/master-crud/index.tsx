@@ -1496,6 +1496,27 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     return err;
   }, [editingId, onInlineEdit, effectiveFields]);
 
+  // ลบรูปปกในหน้า detail — ล้าง field + ย้ายไฟล์เข้าถังขยะ R2 (backend trash อัตโนมัติเมื่อ cover_image_r2_key ถูกล้าง)
+  const deleteCover = useCallback(async () => {
+    if (!editingId) return;
+    const key = (form["cover_image_r2_key"] as string) || null;
+    if (!key) return;
+    if (!confirm("ลบรูปนี้?\nไฟล์จะถูกย้ายไปถังขยะ แล้วลบถาวรอัตโนมัติภายหลัง (กู้คืนได้ก่อนถูกลบ)")) return;
+    try {
+      const res = await apiFetch(`${apiBase}${config.apiPath}/${editingId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cover_image_r2_key: null, actor: user?.name }),
+      });
+      const json = await res.json();
+      if (json.error) { fail(json.error); return; }
+      setForm((p) => ({ ...p, cover_image_r2_key: null }));
+      void refreshData();
+      flash("ลบรูปแล้ว — ย้ายเข้าถังขยะ");
+    } catch (e) {
+      fail(e instanceof Error ? e.message : "ลบรูปไม่สำเร็จ");
+    }
+  }, [editingId, form, apiBase, config.apiPath, user?.name, refreshData]);
+
   // ---- Bulk edit fields ----
   // Bulk edit (ของกลาง): ปรับรายฟิลด์ได้ใน Studio (toggle is_bulk_editable)
   // ถ้าโมดูลยังไม่เปิดฟิลด์ไหนเลย → ใช้ค่าเริ่มต้นอัตโนมัติ = ฟิลด์ที่แก้ได้ + ไม่ลับ + ไม่ใช่รหัส (uniqueKey)
@@ -2081,6 +2102,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             !f.hideInForm && f.key !== "cover_image_r2_key" && evaluateCondition(f.conditionRules, form) && !tplHidden(f)
           );
           const hasCover = !!effectiveFields.find(f => f.key === "cover_image_r2_key");
+          // ปุ่มลบรูป (เฉพาะตอนดู + มีสิทธิ์แก้ + มีรูป) — โผล่ตอน hover
+          const coverDeleteBtn = (coverKey && drawerMode === "view" && canEdit) ? (
+            <button type="button" onClick={deleteCover} title="ลบรูป (ย้ายไปถังขยะ R2)"
+              className="absolute top-2 right-2 z-10 h-8 w-8 flex items-center justify-center rounded-lg bg-white/90 border border-slate-200 text-rose-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50 hover:border-rose-300">🗑</button>
+          ) : null;
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
           // (โมดูลที่มีรูปปก เช่น Parent SKU/SKU → ใช้เลย์เอาต์ "รูปซ้าย" ด้านล่างเสมอ)
@@ -2091,10 +2117,11 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               <div className="space-y-4">
                 {/* รูปบนสุด เต็มกว้าง (เฉพาะหน้าที่มีรูป) */}
                 {(coverKey || (drawerMode === "edit" && imageField)) && (
-                  <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center" style={{ maxHeight: 260 }}>
+                  <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 flex items-center justify-center" style={{ maxHeight: 260 }}>
                     {coverKey
                       ? <ImageGallery r2Key={coverKey} />
                       : imageField ? renderField(imageField) : null}
+                    {coverDeleteBtn}
                   </div>
                 )}
                 {renderDetailHero(visibleFields)}
@@ -2129,12 +2156,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               {/* ซ้าย: รูป + core */}
               <div className="md:w-72 md:flex-shrink-0 space-y-4">
                 {/* รูปใหญ่ */}
-                <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
+                <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
                   {coverKey
                     ? <ImageGallery r2Key={coverKey} />
                     : drawerMode === "edit"
                       ? renderField(effectiveFields.find(f => f.key === "cover_image_r2_key")!)
                       : <div className="text-slate-300 text-sm">ไม่มีรูป</div>}
+                  {coverDeleteBtn}
                 </div>
 
                 {/* code + status — บอกว่ากำลังดูใบไหน (ข้อมูลหลักย้ายไปเป็นแท็บทางขวา) */}
