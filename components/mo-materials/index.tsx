@@ -106,6 +106,20 @@ export function MoMaterialsTable({
 
   const needCount = sumRows.filter((r) => { const got = r.component_sku ? (requested[r.component_sku] ?? 0) : 0; return r.to_purchase - got > 0.0001; }).length;
 
+  // ติ๊กครบทั้งหมด (เตรียม/ตัด)
+  const cutLines = blockRows.filter((r) => needsCutLine(r));
+  const allCut = cutLines.length > 0 && cutLines.every((r) => r.cut_done);
+  const allReady = summary.length > 0 && summary.every((s) => s.is_ready);
+  const markAllReady = (target: boolean) => {
+    onChangeSummary?.(summary.map((s) => target
+      ? { ...s, is_ready: true, on_hand_qty: Math.round(s.qty_per * (qty || 0) * 10000) / 10000, purchase_override: null }
+      : { ...s, is_ready: false }));
+  };
+  const markAllCut = (target: boolean) => {
+    if (!onToggleCut) return;
+    for (const m of materials) if (needsCutLine(m) && m.cut_done !== target) onToggleCut(m, target);
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
@@ -113,9 +127,17 @@ export function MoMaterialsTable({
           <button type="button" onClick={() => setMatTab("sum")} className={`h-7 px-3 ${matTab === "sum" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>วัตถุดิบที่ต้องใช้</button>
           <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
         </div>
-        {editable && matTab === "sum" && needCount > 0 && canEdit && onCreatePR && (
-          <button type="button" onClick={() => onCreatePR(needCount)} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
-        )}
+        <div className="flex items-center gap-1.5">
+          {matTab === "sum" && editable && canEdit && onChangeSummary && summary.length > 0 && (
+            <button type="button" onClick={() => markAllReady(!allReady)} className="h-7 px-3 text-xs font-medium border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap">{allReady ? "ยกเลิกเตรียมทั้งหมด" : "✓ เตรียมครบทั้งหมด"}</button>
+          )}
+          {matTab === "block" && canEdit && onToggleCut && cutLines.length > 0 && (
+            <button type="button" onClick={() => markAllCut(!allCut)} className="h-7 px-3 text-xs font-medium border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap">{allCut ? "ยกเลิกตัดทั้งหมด" : "✓ ตัดครบทั้งหมด"}</button>
+          )}
+          {editable && matTab === "sum" && needCount > 0 && canEdit && onCreatePR && (
+            <button type="button" onClick={() => onCreatePR(needCount)} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 whitespace-nowrap">🛒 สร้างใบขอซื้อ ({needCount})</button>
+          )}
+        </div>
       </div>
       {materials.length === 0 && summary.length === 0 ? (
         <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">{emptyText ?? "ยังไม่มีวัตถุดิบ"}</div>
