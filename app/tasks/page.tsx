@@ -208,7 +208,12 @@ export default function TasksPage() {
   };
 
   // ---- workflow (เส้นทาง + ชนิด อ่านจาก DB) ----
-  const applyMove = useCallback(async (task: CreativeTask, toKey: string) => {
+  const applyMove = useCallback(async (task: CreativeTask, toKey: string, force?: boolean) => {
+    if (force) {
+      try { await transitionTask(task.id, toKey, undefined, true); pushToast("success", `→ ${statusMeta(toKey).label}`); await reload(); }
+      catch (e) { pushToast("error", (e as Error).message); }
+      return;
+    }
     const tr = transitionBetween(task.status, toKey);
     if (!tr) { pushToast("error", `เปลี่ยน "${statusMeta(task.status).label}" → "${statusMeta(toKey).label}" ไม่ได้`); return; }
     try {
@@ -290,7 +295,7 @@ export default function TasksPage() {
             {view === "canvas" && (
               <div>
                 <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดอิสระ · ปล่อยในโซนสถานะเพื่อเปลี่ยนสถานะ · วาดกล่อง/โน้ต/ลูกศร/วางรูปได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด</p>
-                <CanvasBoard tasks={tasks} statuses={statuses} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
+                <CanvasBoard tasks={tasks} statuses={statuses} startMaximized onAddTask={openCreate} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to, force) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to, force); }} />
               </div>
             )}
           </>
@@ -432,7 +437,6 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
-  const [newSub, setNewSub] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
 
@@ -458,7 +462,6 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
   const doneSub = t.subtasks.filter((s) => s.status === "done").length;
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(t, toKey); await refresh(); setBusy(false); };
-  const addSub = async () => { if (!newSub.trim()) return; try { await addSubtask(t.id, { title: newSub.trim() }); setNewSub(""); await refresh(); } catch (e) { pushToast("error", (e as Error).message); } };
   const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(t.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(t.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -535,10 +538,7 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
             <div className="space-y-2">
               {t.subtasks.map((s) => <SubtaskCard key={s.id} sub={s} taskId={t.id} reload={refresh} pushToast={pushToast} />)}
             </div>
-            <div className="flex gap-2 mt-2">
-              <ERPInput value={newSub} onChange={(e) => setNewSub(e.target.value)} placeholder="เพิ่มงานย่อย..." />
-              <button onClick={addSub} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">＋</button>
-            </div>
+            <AddSubtaskForm onAdd={async (body) => { await addSubtask(t.id, body); await refresh(); }} pushToast={pushToast} />
           </div>
 
           {/* attachments */}
@@ -593,6 +593,41 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
         </div>
       </div>
     </>
+  );
+}
+
+// ฟอร์มเพิ่มงานย่อย (รวยเหมือนเทมเพลต — ชื่อ + รายละเอียด + ผู้รับผิดชอบหลายคน)
+function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: string; description?: string | null; assignee_ids?: string[] }) => Promise<void>; pushToast: (type: Toast["type"], m: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [assignees, setAssignees] = useState<{ id: string; label: string }[]>([]);
+  const [adding, setAdding] = useState<UserPickerValue | null>(null);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!title.trim()) return;
+    setBusy(true);
+    try { await onAdd({ title: title.trim(), description: desc.trim() || null, assignee_ids: assignees.map((a) => a.id) }); setTitle(""); setDesc(""); setAssignees([]); setOpen(false); }
+    catch (e) { pushToast("error", (e as Error).message); }
+    finally { setBusy(false); }
+  };
+  if (!open) return <button onClick={() => setOpen(true)} className="mt-2 text-sm text-violet-700 hover:underline">＋ เพิ่มงานย่อย</button>;
+  return (
+    <div className="mt-2 border border-violet-200 rounded-lg p-3 space-y-2 bg-violet-50/30">
+      <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder="ชื่องานย่อย" />
+      <ERPTextarea value={desc} rows={2} onChange={(e) => setDesc(e.target.value)} placeholder="รายละเอียด (ไม่บังคับ)" />
+      <div>
+        <p className="text-[11px] text-slate-400 mb-1">ผู้รับผิดชอบ (เลือกได้หลายคน)</p>
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => setAssignees((xs) => xs.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+        </div>
+        <UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name }]); setAdding(null); }} disableCreate />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={() => setOpen(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={submit} disabled={busy} className="h-8 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{busy ? "..." : "เพิ่ม"}</button>
+      </div>
+    </div>
   );
 }
 

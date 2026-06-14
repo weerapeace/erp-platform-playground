@@ -143,8 +143,8 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   return j.data as CreativeTask;
 }
 
-export async function transitionTask(id: string, to: string, comment?: string): Promise<CreativeTask> {
-  return updateTask(id, { action: "transition", to, comment });
+export async function transitionTask(id: string, to: string, comment?: string, force?: boolean): Promise<CreativeTask> {
+  return updateTask(id, { action: "transition", to, comment, force });
 }
 
 export async function approveTask(id: string, action: "approve" | "reject" | "revise", comment?: string, to?: string): Promise<CreativeTask> {

@@ -87,13 +87,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let notifyTarget: { empId: string | null; eventType: string; title: string } | null = null;
 
   if (action === "transition") {
-    // เปลี่ยนสถานะตาม workflow (อ่านจาก DB)
+    // เปลี่ยนสถานะตาม workflow (อ่านจาก DB) — force=true ข้ามกฎ (โหมดย้ายอิสระบน Canvas)
     const to = String(body.to ?? "");
     const from = String(current.status);
-    if (!(await canTransitionDB(admin, from, to))) {
+    const force = body.force === true;
+    const meta = await getStatusMeta(admin, to);
+    if (force && !meta) return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 });
+    if (!force && !(await canTransitionDB(admin, from, to))) {
       return NextResponse.json({ error: `เปลี่ยนสถานะจาก "${from}" ไป "${to}" ไม่ได้` }, { status: 400 });
     }
-    const meta = await getStatusMeta(admin, to);
     patch.status = to;
     patch.progress_percent = meta ? meta.progress_percent : current.progress_percent;
     if (meta?.is_approval_gate) patch.approval_status = "pending";

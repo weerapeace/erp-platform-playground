@@ -28,7 +28,7 @@ type BoardObject =
 type ImageObject = Extract<BoardObject, { type: "image" }>;
 type StyledObject = Extract<BoardObject, { type: "box" | "text" }>;   // วัตถุที่จัดรูปแบบตัวอักษรได้
 type Connector = { id: string; from: string; to: string };   // เชื่อมระหว่าง node (การ์ด/กล่อง/text/โน้ต) แบบเกาะวัตถุ
-type Board = { positions: Record<string, Pos>; stickies: Sticky[]; objects: BoardObject[]; connectors: Connector[] };
+type Board = { positions: Record<string, Pos>; stickies: Sticky[]; objects: BoardObject[]; connectors: Connector[]; zoneSizes?: Record<string, { w: number; h: number }> };
 type Rect = { x: number; y: number; w: number; h: number };
 type Tool = "select" | "pan" | "sticky" | "box" | "text" | "connect";
 type Interaction =
@@ -36,6 +36,7 @@ type Interaction =
   | { type: "card"; id: string; sx: number; sy: number; ox: number; oy: number }
   | { type: "drag"; id: string; sx: number; sy: number; ox: number; oy: number }       // sticky/object move
   | { type: "resize"; id: string; sx: number; sy: number; ow: number; oh: number }
+  | { type: "zoneresize"; key: string; sx: number; sy: number; ow: number; oh: number } // ปรับขนาดโซนสถานะ
   | null;
 
 const CARD_W = 280, CARD_H = 150;
@@ -53,13 +54,8 @@ const FONTS: { label: string; value: string }[] = [
 ];
 const DEF_STYLE: Style = { fontSize: 16, bold: false, italic: false, underline: false, color: "#1e293b", align: "left", fontFamily: "" };
 
-const zoneX = (i: number) => i * (ZONE_W + ZONE_GAP);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const clone = (b: Board): Board => JSON.parse(JSON.stringify(b));
-function zoneIndexAtWorldX(wx: number, count: number): number {
-  for (let i = 0; i < count; i++) if (wx >= zoneX(i) && wx <= zoneX(i) + ZONE_W) return i;
-  return -1;
-}
 // จุดบนขอบสี่เหลี่ยม r ในทิศไปยัง (tx,ty) — ใช้ให้ลูกศรแตะขอบกล่อง ไม่ใช่กลาง
 function edgePoint(r: Rect, tx: number, ty: number): Pos {
   const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
@@ -77,15 +73,17 @@ const styleOf = (o: StyledObject): React.CSSProperties => ({
 });
 
 export function CanvasBoard({
-  tasks, statuses, onMove, onCardClick, startMaximized,
+  tasks, statuses, onMove, onCardClick, onAddTask, startMaximized,
 }: {
   tasks: CreativeTask[];
   statuses: Status[];
-  onMove: (taskId: string, toKey: string) => void;
+  onMove: (taskId: string, toKey: string, force?: boolean) => void;
   onCardClick: (id: string) => void;
+  onAddTask?: () => void;
   startMaximized?: boolean;
 }) {
   const columns = useMemo(() => statuses.map((s) => s.key), [statuses]);
+  const [freeMove, setFreeMove] = useState(false);   // ย้ายอิสระ (ข้ามกฎ workflow)
   const wrapRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Interaction>(null);
@@ -109,7 +107,7 @@ export function CanvasBoard({
   useEffect(() => { setPop(null); }, [selId]);
 
   // ---- load/save ----
-  useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) { const b = JSON.parse(r); setBoard({ positions: b.positions ?? {}, stickies: b.stickies ?? [], objects: b.objects ?? [], connectors: b.connectors ?? [] }); } } catch { /* ignore */ } }, []);
+  useEffect(() => { try { const r = localStorage.getItem(BOARD_KEY); if (r) { const b = JSON.parse(r); setBoard({ positions: b.positions ?? {}, stickies: b.stickies ?? [], objects: b.objects ?? [], connectors: b.connectors ?? [], zoneSizes: b.zoneSizes ?? {} }); } } catch { /* ignore */ } }, []);
   useEffect(() => { try { localStorage.setItem(BOARD_KEY, JSON.stringify(board)); } catch { /* ignore */ } }, [board]);
 
   // ---- history ----
@@ -224,12 +222,24 @@ export function CanvasBoard({
     return () => window.removeEventListener("paste", onPaste);
   }, [board, vp]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- layout โซน (รองรับขนาดต่อโซนที่ผู้ใช้ปรับเอง) ----
+  const zoneLayout = useMemo(() => {
+    let x = 0; const out: { key: string; x: number; w: number; h: number }[] = [];
+    for (const key of columns) {
+      const w = board.zoneSizes?.[key]?.w ?? ZONE_W;
+      const h = board.zoneSizes?.[key]?.h ?? ZONE_H;
+      out.push({ key, x, w, h }); x += w + ZONE_GAP;
+    }
+    return out;
+  }, [columns, board.zoneSizes]);
+  const zoneIndexAt = (wx: number): number => zoneLayout.findIndex((z) => wx >= z.x && wx <= z.x + z.w);
+
   // ---- auto layout (การ์ดที่ยังไม่เคยลาก) ----
   const autoPos = useMemo(() => {
     const map: Record<string, Pos> = {};
-    columns.forEach((status, ci) => tasks.filter(t => t.status === status).forEach((t, ri) => { map[t.id] = { x: zoneX(ci) + 30, y: 90 + ri * CARD_GAP_Y }; }));
+    zoneLayout.forEach((z) => tasks.filter(t => t.status === z.key).forEach((t, ri) => { map[t.id] = { x: z.x + 30, y: 90 + ri * CARD_GAP_Y }; }));
     return map;
-  }, [tasks, columns]);
+  }, [tasks, zoneLayout]);
   const posOf = (id: string): Pos => board.positions[id] ?? autoPos[id] ?? { x: 40, y: 90 };
 
   // ---- zoom ----
@@ -308,6 +318,12 @@ export function CanvasBoard({
     const o = board.objects.find(x => x.id === id); if (!o) return;
     interRef.current = { type: "resize", id, sx: e.clientX, sy: e.clientY, ow: o.w, oh: o.h };
   };
+  const startZoneResize = (e: RPE, key: string, w: number, h: number) => {
+    e.stopPropagation(); setDragging(true);
+    boardRef.current?.setPointerCapture(e.pointerId);
+    dragStartRef.current = clone(board);
+    interRef.current = { type: "zoneresize", key, sx: e.clientX, sy: e.clientY, ow: w, oh: h };
+  };
 
   const onBoardPointerMove = (e: RPE) => {
     const it = interRef.current; if (!it) return;
@@ -321,6 +337,9 @@ export function CanvasBoard({
     } else if (it.type === "resize") {
       const nw = Math.max(120, it.ow + dx / vp.scale), nh = Math.max(60, it.oh + dy / vp.scale);
       setBoard(b => ({ ...b, objects: b.objects.map(o => o.id === it.id ? { ...o, w: nw, h: nh } : o) }));
+    } else if (it.type === "zoneresize") {
+      const nw = Math.max(160, it.ow + dx / vp.scale), nh = Math.max(200, it.oh + dy / vp.scale);
+      setBoard(b => ({ ...b, zoneSizes: { ...(b.zoneSizes ?? {}), [it.key]: { w: nw, h: nh } } }));
     }
   };
   const onBoardPointerUp = (e: RPE) => {
@@ -332,14 +351,16 @@ export function CanvasBoard({
       if (!movedRef.current) return;   // คลิกเดียว = ไม่เปิด (ใช้ดับเบิลคลิกเปิด Drawer)
       if (dragStartRef.current) pushPast(dragStartRef.current);
       const centerX = posOf(it.id).x + CARD_W / 2;
-      const zi = zoneIndexAtWorldX(centerX, columns.length);
+      const zi = zoneIndexAt(centerX);
+      const toKey = zi >= 0 ? zoneLayout[zi].key : null;
       const task = tasks.find(t => t.id === it.id);
-      if (zi >= 0 && task && task.status !== columns[zi]) {
-        if (canTransitionTo(task.status, columns[zi])) onMove(it.id, columns[zi]);
+      if (toKey && task && task.status !== toKey) {
+        if (freeMove) onMove(it.id, toKey, true);                       // ย้ายอิสระ (ข้ามกฎ)
+        else if (canTransitionTo(task.status, toKey)) onMove(it.id, toKey);
         // เปลี่ยนสถานะนี้ไม่ได้ตาม workflow → เด้งการ์ดกลับโซนเดิม
         else setBoard(b => { const pos = { ...b.positions }; delete pos[it.id]; return { ...b, positions: pos }; });
       }
-    } else if ((it.type === "drag" || it.type === "resize") && movedRef.current && dragStartRef.current) {
+    } else if ((it.type === "drag" || it.type === "resize" || it.type === "zoneresize") && movedRef.current && dragStartRef.current) {
       pushPast(dragStartRef.current);
     }
     dragStartRef.current = null;
@@ -378,7 +399,12 @@ export function CanvasBoard({
         <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
         <ToolBtn onClick={resetLayout} title="จัดเรียงการ์ดใหม่">↺</ToolBtn>
         <ToolBtn onClick={toggleFs} title={isMax ? "ย่อกลับ (Esc)" : "ขยายเต็มหน้าต่าง"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
+        <Sep />
+        <ToolBtn active={freeMove} onClick={() => setFreeMove(f => !f)} title={freeMove ? "ย้ายอิสระ: เปิด — ลากไปสถานะไหนก็ได้ (ข้าม workflow)" : "ย้ายอิสระ: ปิด — ลากตามเส้นทาง workflow"}>{freeMove ? "🔓" : "🔒"}</ToolBtn>
+        {onAddTask && <button onClick={onAddTask} title="เพิ่มงานใหม่" className="h-8 px-2.5 ml-0.5 flex items-center gap-1 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">＋ งาน</button>}
       </div>
+      {/* ปุ่มออกจากเต็มจอ (ลอยมุมขวาบน) */}
+      {isMax && <button onClick={toggleFs} title="ออกจากเต็มจอ (Esc)" className="absolute top-3 right-3 z-30 h-9 w-9 flex items-center justify-center rounded-lg bg-white border border-slate-200 shadow-md text-slate-500 hover:text-slate-800 hover:bg-slate-50">✕</button>}
       {tool === "connect" ? (
         <div className="absolute top-3 right-3 z-20 text-xs font-medium text-blue-700 bg-blue-50 rounded px-2.5 py-1.5 border border-blue-200">
           ↗ โหมดเชื่อมลูกศร: {connectFrom ? "คลิกวัตถุปลายทาง" : "คลิกวัตถุต้นทาง"} · ชี้ที่เส้นแล้วกด ✕ เพื่อลบ
@@ -395,16 +421,18 @@ export function CanvasBoard({
         style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
         <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
           {/* Zones */}
-          {columns.map((status, i) => {
-            const m = statusMeta(status);
-            const count = tasks.filter(t => t.status === status).length;
+          {zoneLayout.map((z) => {
+            const m = statusMeta(z.key);
+            const count = tasks.filter(t => t.status === z.key).length;
             return (
-              <div key={status} className="absolute rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/40" style={{ left: zoneX(i), top: 0, width: ZONE_W, height: ZONE_H }}>
+              <div key={z.key} className="absolute rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/40 group" style={{ left: z.x, top: 0, width: z.w, height: z.h }}>
                 <div className="flex items-center gap-2 px-4 py-3">
                   <span className={`h-2.5 w-2.5 rounded-full ${m.dot}`} />
                   <span className="text-base font-bold text-slate-700">{m.label}</span>
                   <span className="text-xs font-medium text-slate-400 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
                 </div>
+                {/* ที่จับปรับขนาดโซน (มุมขวาล่าง) */}
+                <div onPointerDown={(e) => startZoneResize(e, z.key, z.w, z.h)} title="ลากปรับขนาดโซน" className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize opacity-0 group-hover:opacity-100" style={{ background: "linear-gradient(135deg, transparent 50%, #cbd5e1 50%)" }} />
               </div>
             );
           })}
