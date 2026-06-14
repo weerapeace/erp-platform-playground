@@ -114,6 +114,9 @@ export default function WorkBoardPage() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"board" | "table">("board");   // สลับ บอร์ด/ตาราง
+  const [pendingCols, setPendingCols] = useState<number | null>(null);     // คอลัมน์โซนรอจ่าย (null=อัตโนมัติ)
+  useEffect(() => { try { const v = localStorage.getItem("wb:pendingCols"); if (v) setPendingCols(Number(v) || null); } catch { /* ignore */ } }, []);
+  const setPendCols = useCallback((n: number | null) => { setPendingCols(n); try { if (n) localStorage.setItem("wb:pendingCols", String(n)); else localStorage.removeItem("wb:pendingCols"); } catch { /* ignore */ } }, []);
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // ผลรวมค่าแรงต่อแผนก
 
@@ -215,14 +218,18 @@ export default function WorkBoardPage() {
   // ความกว้าง: "รอจ่าย" กล่องใหญ่ · แผนก = พอดีจำนวนการ์ด (สูงสุด 4 ใบต่อแถว)
   const defWof = useCallback((key: string) => {
     const z = zoneByKey.get(key);
-    if (z?.kind !== "dept") return PENDING_W;
+    if (z?.kind !== "dept") {
+      // โซนรอจ่าย: ถ้าตั้งจำนวนคอลัมน์ → กว้างพอดี ไม่งั้นใช้ค่ามาตรฐาน
+      if (pendingCols) return pendingCols * CARD_W + (pendingCols - 1) * GAP_C + 2 * PAD;
+      return PENDING_W;
+    }
     const cols = Math.min(4, Math.max(1, z.woCards.length));
     return cols * CARD_W + (cols - 1) * GAP_C + 2 * PAD;
-  }, [zoneByKey]);
+  }, [zoneByKey, pendingCols]);
   const zoneWof = useCallback((key: string) => zoneSize[key]?.w ?? defWof(key), [zoneSize, defWof]);
   const colsOf = useCallback((key: string) => Math.max(1, Math.floor((zoneWof(key) - PAD) / (CARD_W + GAP_C))), [zoneWof]);
   // คอลัมน์จริงที่ใช้วางการ์ด — แผนก = min(4, จำนวนการ์ด) · รอจ่าย = ตามความกว้าง
-  const gridCols = useCallback((z: Zone) => z.kind === "pending" ? colsOf(z.key) : Math.min(4, Math.max(1, z.woCards.length)), [colsOf]);
+  const gridCols = useCallback((z: Zone) => z.kind === "pending" ? (pendingCols ?? colsOf(z.key)) : Math.min(4, Math.max(1, z.woCards.length)), [colsOf, pendingCols]);
   // ตำแหน่งเริ่มต้นของโซน — เรียงซ้าย→ขวาแบบสะสมความกว้าง (กล่องรอจ่ายใหญ่อยู่ซ้ายสุด)
   const defaultLayout = useMemo(() => {
     const m: Record<string, Pos> = {}; let x = 0;
@@ -738,6 +745,13 @@ export default function WorkBoardPage() {
         <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
         <ToolBtn onClick={resetZones} title="รีเซ็ตตำแหน่ง/ขนาดโซน">↺</ToolBtn>
         <ToolBtn onClick={() => void load()} title="โหลดใหม่">⟳</ToolBtn>
+        <Sep />
+        {/* จำนวนคอลัมน์โซนรอจ่าย */}
+        <span className="text-[11px] text-slate-400 pl-1" title="จำนวนคอลัมน์การ์ดในโซนรอจ่าย">รอจ่าย:</span>
+        {([["auto", null], ["1", 1], ["2", 2], ["3", 3], ["4", 4]] as const).map(([lbl, n]) => (
+          <button key={lbl} type="button" onClick={() => setPendCols(n)} title={`โชว์ ${lbl} คอลัมน์`}
+            className={`h-7 px-2 text-xs rounded ${pendingCols === n ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100"}`}>{lbl}</button>
+        ))}
         <Sep />
         <ToolBtn onClick={openDeptMgr} title="ตั้งค่าแผนก (เพิ่ม/แก้/ลบ/ซ่อน/หมายเหตุ)">⚙️</ToolBtn>
         <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>

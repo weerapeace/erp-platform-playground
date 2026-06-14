@@ -143,7 +143,11 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
         <button type="button" onClick={() => setOpen((o) => !o)} className="flex-1 flex items-center gap-2 text-sm font-semibold text-slate-700 text-left">
           <span>📋 รายละเอียดสั่งงาน</span><span className="text-slate-400 text-xs">{open ? "▾" : "▸"}</span>
         </button>
-        {editable && <button type="button" onClick={() => setEditOpen(true)} title="ลงรายละเอียดสินค้า" className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ แก้ไขละเอียดสินค้า</button>}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {sku && <a href={`/master/skus?search=${encodeURIComponent(sku)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="เปิดหน้าแก้ Parent SKU / SKU" className="h-7 px-2 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ SKU</a>}
+          {sku && <a href={`/master/bom?search=${encodeURIComponent(sku)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="เปิดหน้าแก้ BOM (สูตร)" className="h-7 px-2 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ BOM</a>}
+          {editable && <button type="button" onClick={() => setEditOpen(true)} title="ลงรายละเอียดสินค้า" className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ ละเอียด</button>}
+        </div>
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-slate-100">
