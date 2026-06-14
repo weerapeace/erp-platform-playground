@@ -126,7 +126,7 @@ export async function getTask(id: string): Promise<TaskDetail> {
   return j.data as TaskDetail;
 }
 
-export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; assignee_id?: string | null }[] };
+export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; assignee_id?: string | null; required_before_next?: boolean }[] };
 
 export async function createTask(body: CreateTaskBody): Promise<{ id: string; task_no: string }> {
   const res = await apiFetch("/api/creative-tasks", { method: "POST", body: JSON.stringify(body) });
@@ -273,4 +273,54 @@ export async function createHashtag(body: { text: string; brand_id?: string | nu
 }
 export async function deleteHashtag(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-hashtags?id=${id}`, { method: "DELETE" }));
+}
+
+// ============================================================
+// Templates + Recurring
+// ============================================================
+export type TemplateStep = { title: string; required_before_next?: boolean };
+export type TaskTemplate = {
+  id: string; name: string; task_type: string | null; default_priority: string;
+  brand_id: string | null; brand_label?: string | null; description: string | null;
+  platforms: string[] | null; steps: TemplateStep[];
+};
+export type RecurringRule = {
+  id: string; name: string; template_id: string | null; template_label?: string | null;
+  frequency: string; interval_n: number; assignee_id: string | null; assignee_label?: string | null;
+  brand_id: string | null; brand_label?: string | null; campaign_id: string | null;
+  start_date: string; end_date: string | null; next_run: string | null; last_run: string | null; is_active: boolean;
+};
+
+export async function listTemplates(search?: string): Promise<TaskTemplate[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-templates${search ? `?search=${encodeURIComponent(search)}` : ""}`));
+  return (j.data as TaskTemplate[]) ?? [];
+}
+export async function createTemplate(body: Record<string, unknown>): Promise<{ id: string }> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-templates", { method: "POST", body: JSON.stringify(body) }));
+  return { id: j.id as string };
+}
+export async function updateTemplate(id: string, patch: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-templates/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+}
+export async function deleteTemplate(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-templates/${id}`, { method: "DELETE" }));
+}
+
+export async function listRecurring(run = false): Promise<{ data: RecurringRule[]; generated: number }> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-recurring${run ? "?run=1" : ""}`));
+  return { data: (j.data as RecurringRule[]) ?? [], generated: (j.generated as number) ?? 0 };
+}
+export async function createRecurring(body: Record<string, unknown>): Promise<{ id: string }> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-recurring", { method: "POST", body: JSON.stringify(body) }));
+  return { id: j.id as string };
+}
+export async function updateRecurring(id: string, patch: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-recurring/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+}
+export async function deleteRecurring(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-recurring/${id}`, { method: "DELETE" }));
+}
+export async function runRecurringNow(id: string): Promise<number> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-recurring/${id}`, { method: "POST", body: JSON.stringify({ action: "run" }) }));
+  return (j.created as number) ?? 0;
 }

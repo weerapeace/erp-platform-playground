@@ -24,9 +24,9 @@ import {
   isOverdue, withinThisWeek,
   listTasks, getTask, createTask, transitionTask, approveTask, deleteTask,
   addSubtask, updateSubtask, addComment, addAttachment,
-  listCampaigns, listBrands,
+  listCampaigns, listBrands, listTemplates,
   type CreativeTask, type CreativeStatus, type CreativePriority, type TaskDetail,
-  type Campaign, type BrandOption,
+  type Campaign, type BrandOption, type TaskTemplate,
 } from "./data";
 
 // ============================================================
@@ -125,6 +125,8 @@ export default function TasksPage() {
   const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [templates, setTemplates] = useState<TaskTemplate[]>([]);
+  const [tplId, setTplId] = useState("");
 
   // create modal
   const [modalOpen, setModalOpen] = useState(false);
@@ -160,7 +162,7 @@ export default function TasksPage() {
     (async () => {
       setLoading(true);
       await Promise.all([loadAll(), loadMine()]);
-      try { const [b, c] = await Promise.all([listBrands(), listCampaigns()]); setBrands(b); setCampaigns(c); } catch { /* ignore */ }
+      try { const [b, c, tp] = await Promise.all([listBrands(), listCampaigns(), listTemplates()]); setBrands(b); setCampaigns(c); setTemplates(tp); } catch { /* ignore */ }
       setLoading(false);
     })();
   }, [loadAll, loadMine]);
@@ -175,13 +177,20 @@ export default function TasksPage() {
   }), [tasks, myTasks]);
 
   // ---- create ----
-  const openCreate = () => { setForm(EMPTY_FORM); setFormErr(null); setDirty(false); setModalOpen(true); };
+  const openCreate = () => { setForm(EMPTY_FORM); setTplId(""); setFormErr(null); setDirty(false); setModalOpen(true); };
   const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
+  const applyTemplate = (id: string) => {
+    setTplId(id);
+    const t = templates.find((x) => x.id === id);
+    if (t) updateForm({ task_type: t.task_type ?? form.task_type, priority: (t.default_priority as CreativePriority) ?? form.priority, platforms: t.platforms ?? [], brand_id: t.brand_id ?? form.brand_id });
+  };
   const togglePlatform = (v: string) => updateForm({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
 
   const save = async () => {
     if (!form.title.trim()) { setFormErr("กรุณากรอกชื่องาน"); return; }
     setSaving(true); setFormErr(null);
+    const tpl = templates.find((t) => t.id === tplId);
+    const subtasks = tpl?.steps?.filter((s) => s.title?.trim()).map((s) => ({ title: s.title, required_before_next: !!s.required_before_next })) ?? [];
     try {
       const { task_no } = await createTask({
         title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
@@ -190,6 +199,7 @@ export default function TasksPage() {
         priority: form.priority, due_date: form.due_date || null,
         sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null,
         platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
+        subtasks,
       });
       setModalOpen(false); setDirty(false);
       pushToast("success", `สร้างงาน ${task_no} แล้ว`);
@@ -232,6 +242,7 @@ export default function TasksPage() {
           <div className="flex items-center gap-2 shrink-0">
             <a href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 แคมเปญ</a>
             <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 คอนเทนต์</a>
+            <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔁 เทมเพลต</a>
             {user?.role === "admin" && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title="ตั้งค่าสิทธิ์">⚙️</a>}
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ สร้างงาน</button>
           </div>
@@ -303,6 +314,15 @@ export default function TasksPage() {
         </>}
       >
         {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
+        {templates.length > 0 && (
+          <div className="mb-4 flex items-center gap-2 bg-violet-50/60 border border-violet-100 rounded-lg px-3 py-2">
+            <span className="text-sm text-slate-600 shrink-0">🔁 เริ่มจากเทมเพลต:</span>
+            <select value={tplId} onChange={(e) => applyTemplate(e.target.value)} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
+              <option value="">— ไม่ใช้เทมเพลต —</option>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.steps?.length ?? 0} ขั้นตอน)</option>)}
+            </select>
+          </div>
+        )}
         <ERPFormSection title="ข้อมูลงาน" columns={2}>
           <ERPFormField label="ชื่องาน" required span={2}><ERPInput value={form.title} onChange={(e) => updateForm({ title: e.target.value })} placeholder="เช่น ถ่ายรูปกระเป๋า Summer 8 สี" /></ERPFormField>
           <ERPFormField label="ประเภทงาน"><ERPSelect value={form.task_type} options={TASK_TYPES} onChange={(e) => updateForm({ task_type: e.target.value })} /></ERPFormField>
