@@ -18,9 +18,10 @@ import type { EmployeePickerValue, ProductPickerValue } from "@/components/picke
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
+import { useCreativeOptions, taskTypeLabel, platformLabel } from "./use-options";
 import {
   STATUS_META, PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
-  TASK_TYPES, PLATFORMS, PRIMARY_ACTIONS, canTransition,
+  PRIMARY_ACTIONS, canTransition,
   isOverdue, withinThisWeek,
   listTasks, getTask, createTask, transitionTask, approveTask, deleteTask,
   addSubtask, updateSubtask, addComment, addAttachment,
@@ -41,8 +42,6 @@ function PriorityBadge({ priority }: { priority: CreativePriority }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}>{m.label}</span>;
 }
 
-const TASK_TYPE_LABEL = Object.fromEntries(TASK_TYPES.map((t) => [t.value, t.label]));
-const PLATFORM_LABEL = Object.fromEntries(PLATFORMS.map((p) => [p.value, p.label]));
 
 // ============================================================
 // Table columns + views
@@ -55,7 +54,7 @@ const COLUMNS: ColumnDef<CreativeTask>[] = [
       <div className="min-w-0">
         <div className="text-sm font-medium text-slate-800 line-clamp-1">{row.original.title}</div>
         <div className="text-xs text-slate-400 line-clamp-1">
-          {row.original.task_type && <span>{TASK_TYPE_LABEL[row.original.task_type] ?? row.original.task_type}</span>}
+          {row.original.task_type && <span>{taskTypeLabel(row.original.task_type)}</span>}
           {row.original.sku_code && <span> · 📦 {row.original.sku_code}</span>}
         </div>
       </div>
@@ -119,6 +118,7 @@ const EMPTY_FORM: FormState = {
 // ============================================================
 export default function TasksPage() {
   const { user } = useAuth();
+  const { taskTypes, platforms } = useCreativeOptions();
   const [tasks, setTasks] = useState<CreativeTask[]>([]);
   const [myTasks, setMyTasks] = useState<CreativeTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -325,7 +325,7 @@ export default function TasksPage() {
         )}
         <ERPFormSection title="ข้อมูลงาน" columns={2}>
           <ERPFormField label="ชื่องาน" required span={2}><ERPInput value={form.title} onChange={(e) => updateForm({ title: e.target.value })} placeholder="เช่น ถ่ายรูปกระเป๋า Summer 8 สี" /></ERPFormField>
-          <ERPFormField label="ประเภทงาน"><ERPSelect value={form.task_type} options={TASK_TYPES} onChange={(e) => updateForm({ task_type: e.target.value })} /></ERPFormField>
+          <ERPFormField label="ประเภทงาน"><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => updateForm({ task_type: e.target.value })} /></ERPFormField>
           <ERPFormField label="ความสำคัญ"><ERPSelect value={form.priority} options={PRIORITY_OPTIONS} onChange={(e) => updateForm({ priority: e.target.value as CreativePriority })} /></ERPFormField>
           <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => updateForm({ brand_id: e.target.value })} /></ERPFormField>
           <ERPFormField label="แคมเปญ"><ERPSelect value={form.campaign_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => updateForm({ campaign_id: e.target.value })} /></ERPFormField>
@@ -336,7 +336,7 @@ export default function TasksPage() {
           <ERPFormField label="สินค้า/SKU (ถ้ามี)" span={2}><ProductPicker value={form.product} onChange={(v) => updateForm({ product: v })} disableCreate /></ERPFormField>
           <ERPFormField label="แพลตฟอร์ม" span={2}>
             <div className="flex flex-wrap gap-1.5">
-              {PLATFORMS.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
+              {platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
             </div>
           </ERPFormField>
           <ERPFormField label="รายละเอียด" span={2}><ERPTextarea value={form.description} rows={2} onChange={(e) => updateForm({ description: e.target.value })} placeholder="อธิบายงาน/บรีฟเพิ่มเติม" /></ERPFormField>
@@ -408,7 +408,7 @@ function QueueView({ tasks, onOpen, onMove, onCreate }: {
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <PriorityBadge priority={t.priority} />
                   <StatusBadge status={t.status} />
-                  {t.task_type && <span className="text-xs text-slate-400">{TASK_TYPE_LABEL[t.task_type] ?? t.task_type}</span>}
+                  {t.task_type && <span className="text-xs text-slate-400">{taskTypeLabel(t.task_type)}</span>}
                 </div>
                 <p className="text-base font-semibold text-slate-800 leading-snug">{t.title}</p>
                 <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
@@ -518,7 +518,7 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
           </div>
           {/* meta */}
           <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-            <Field label="ประเภทงาน" value={t.task_type ? (TASK_TYPE_LABEL[t.task_type] ?? t.task_type) : null} />
+            <Field label="ประเภทงาน" value={t.task_type ? taskTypeLabel(t.task_type) : null} />
             <Field label="แบรนด์" value={t.brand_label} dot={brandColor} />
             <Field label="ผู้รับผิดชอบ" value={t.assignee_label} />
             <Field label="ผู้ตรวจ/อนุมัติ" value={t.reviewer_label || t.approver_label} />
@@ -538,7 +538,7 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
             </div>
           )}
           {/* platforms */}
-          {t.platforms && t.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{t.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{PLATFORM_LABEL[p] ?? p}</span>)}</div>}
+          {t.platforms && t.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{t.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
           {/* description */}
           {t.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">รายละเอียด</p>{t.description}</div>}
           {/* links */}

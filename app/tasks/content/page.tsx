@@ -13,14 +13,14 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { ProductPicker } from "@/components/pickers";
 import type { ProductPickerValue } from "@/components/pickers";
 import {
-  CONTENT_STATUS_META, POST_TYPES, PLATFORMS,
+  CONTENT_STATUS_META, POST_TYPES,
   listContent, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
   type Campaign, type BrandOption, type Hashtag,
 } from "../data";
+import { useCreativeOptions, platformLabel } from "../use-options";
 
-const PLATFORM_LABEL = Object.fromEntries(PLATFORMS.map((p) => [p.value, p.label]));
 const POST_TYPE_LABEL = Object.fromEntries(POST_TYPES.map((p) => [p.value, p.label]));
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
@@ -32,6 +32,7 @@ function StatusBadge({ status }: { status: ContentStatus }) {
 const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentStatus, brand_id: "", campaign_id: "", scheduled_at: "", product: null as ProductPickerValue | null, platforms: [] as string[], note: "" };
 
 export default function ContentPage() {
+  const { platforms } = useCreativeOptions();
   const [items, setItems] = useState<ContentItem[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -114,7 +115,7 @@ export default function ContentPage() {
                     <span className="font-mono text-[10px] text-slate-400">{c.content_no}</span>
                   </div>
                   <p className="text-base font-semibold text-slate-800 leading-snug line-clamp-2">{c.title}</p>
-                  <div className="flex flex-wrap gap-1 mt-2">{(c.platforms ?? []).map((p) => <span key={p} className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{PLATFORM_LABEL[p] ?? p}</span>)}</div>
+                  <div className="flex flex-wrap gap-1 mt-2">{(c.platforms ?? []).map((p) => <span key={p} className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}</div>
                   <div className="flex items-center gap-2 text-xs text-slate-400 mt-2 flex-wrap">
                     {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
                     {c.post_type && <span>· {POST_TYPE_LABEL[c.post_type] ?? c.post_type}</span>}
@@ -142,7 +143,7 @@ export default function ContentPage() {
           <ERPFormField label="ตั้งเวลาโพสต์"><ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} /></ERPFormField>
           <ERPFormField label="สินค้า/SKU (ถ้ามี)"><ProductPicker value={form.product} onChange={(v) => upd({ product: v })} disableCreate /></ERPFormField>
           <ERPFormField label="แพลตฟอร์ม" span={2}>
-            <div className="flex flex-wrap gap-1.5">{PLATFORMS.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}</div>
+            <div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}</div>
           </ERPFormField>
           <ERPFormField label="โน้ต/บรีฟ" span={2}><ERPTextarea value={form.note} rows={2} onChange={(e) => upd({ note: e.target.value })} /></ERPFormField>
         </ERPFormSection>
@@ -216,6 +217,7 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
   onClose: () => void; onChanged: () => void; onDelete: (c: ContentItem) => void;
   pushToast: (type: Toast["type"], m: string) => void;
 }) {
+  const { platforms } = useCreativeOptions();
   const [d, setD] = useState<ContentDetail | null>(null);
   const [caps, setCaps] = useState<ContentCaption[]>([]);
   const [links, setLinks] = useState<{ platform: string; url: string }[]>([]);
@@ -290,7 +292,7 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
               {links.map((l, i) => (
                 <div key={i} className="flex gap-2">
                   <select value={l.platform} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, platform: e.target.value } : x))} className="h-9 border border-slate-200 rounded-lg px-2 text-sm w-32">
-                    {PLATFORMS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                   </select>
                   <ERPInput value={l.url} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, url: e.target.value } : x))} placeholder="https://..." />
                   <button onClick={() => setLinks((ls) => ls.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
@@ -335,16 +337,16 @@ function CaptionCard({ cap, brandId, onChange, pushToast }: { cap: ContentCaptio
   };
   const copy = async () => {
     const text = `${cap.caption ?? ""}\n\n${cap.hashtags ?? ""}`.trim();
-    try { await navigator.clipboard.writeText(text); pushToast("success", `คัดลอก ${PLATFORM_LABEL[cap.platform] ?? cap.platform} แล้ว`); } catch { pushToast("error", "คัดลอกไม่สำเร็จ"); }
+    try { await navigator.clipboard.writeText(text); pushToast("success", `คัดลอก ${platformLabel(cap.platform)} แล้ว`); } catch { pushToast("error", "คัดลอกไม่สำเร็จ"); }
   };
 
   return (
     <div className="border border-slate-200 rounded-lg p-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-sm font-medium text-slate-700">{PLATFORM_LABEL[cap.platform] ?? cap.platform}</span>
+        <span className="text-sm font-medium text-slate-700">{platformLabel(cap.platform)}</span>
         <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 คัดลอก</button>
       </div>
-      <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={`เขียน caption สำหรับ ${PLATFORM_LABEL[cap.platform] ?? cap.platform}...`} />
+      <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`} />
       <div className="mt-2">
         <ERPInput value={cap.hashtags ?? ""} onChange={(e) => onChange({ hashtags: e.target.value })} placeholder="#hashtag คั่นด้วยเว้นวรรค" />
         <button onClick={() => setShowTags((s) => !s)} className="text-xs text-violet-700 hover:underline mt-1">{showTags ? "ซ่อนคลัง hashtag" : "＋ เลือกจากคลัง hashtag"}</button>

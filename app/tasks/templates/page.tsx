@@ -13,15 +13,15 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { EmployeePicker } from "@/components/pickers";
 import type { EmployeePickerValue } from "@/components/pickers";
 import {
-  TASK_TYPES, PRIORITY_META, PLATFORMS,
+  PRIORITY_META,
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
   listRecurring, createRecurring, deleteRecurring, runRecurringNow,
   listCampaigns, listBrands,
   type TaskTemplate, type TemplateStep, type RecurringRule, type Campaign, type BrandOption,
 } from "../data";
+import { useCreativeOptions, taskTypeLabel } from "../use-options";
 
-const TASK_TYPE_LABEL = Object.fromEntries(TASK_TYPES.map((t) => [t.value, t.label]));
-const FREQ = [{ value: "daily", label: "รายวัน" }, { value: "weekly", label: "รายสัปดาห์" }, { value: "monthly", label: "รายเดือน" }];
+const FREQ =[{ value: "daily", label: "รายวัน" }, { value: "weekly", label: "รายสัปดาห์" }, { value: "monthly", label: "รายเดือน" }];
 const FREQ_LABEL = Object.fromEntries(FREQ.map((f) => [f.value, f.label]));
 const PRIORITY_OPTIONS = Object.entries(PRIORITY_META).map(([v, m]) => ({ value: v, label: m.label }));
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
@@ -67,6 +67,7 @@ export default function TemplatesPage() {
 // ============================================================
 const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[] };
 function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
+  const { taskTypes, platforms } = useCreativeOptions();
   const [items, setItems] = useState<TaskTemplate[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -107,7 +108,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
             {items.map((t) => (
               <div key={t.id} onClick={() => openEdit(t)} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 cursor-pointer">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{t.task_type ? TASK_TYPE_LABEL[t.task_type] ?? t.task_type : "งานทั่วไป"}</span>
+                  <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{t.task_type ? taskTypeLabel(t.task_type) : "งานทั่วไป"}</span>
                   <button onClick={(e) => { e.stopPropagation(); setDelId(t); }} className="text-xs text-slate-300 hover:text-red-500">ลบ</button>
                 </div>
                 <p className="font-semibold text-slate-800">{t.name}</p>
@@ -124,10 +125,10 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
         </>}>
         <ERPFormSection title="ข้อมูลเทมเพลต" columns={2}>
           <ERPFormField label="ชื่อเทมเพลต" required span={2}><ERPInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="เช่น ถ่ายรูปสินค้าใหม่" /></ERPFormField>
-          <ERPFormField label="ประเภทงาน"><ERPSelect value={form.task_type} options={TASK_TYPES} onChange={(e) => setForm((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
+          <ERPFormField label="ประเภทงาน"><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setForm((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
           <ERPFormField label="ความสำคัญเริ่มต้น"><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS} onChange={(e) => setForm((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
           <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setForm((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
-          <ERPFormField label="แพลตฟอร์ม"><div className="flex flex-wrap gap-1.5">{PLATFORMS.map((p) => <button key={p.value} type="button" onClick={() => togglePlat(p.value)} className={`px-2 py-0.5 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>)}</div></ERPFormField>
+          <ERPFormField label="แพลตฟอร์ม"><div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlat(p.value)} className={`px-2 py-0.5 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>)}</div></ERPFormField>
           <ERPFormField label="คำอธิบาย" span={2}><ERPTextarea value={form.description} rows={2} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></ERPFormField>
         </ERPFormSection>
         <div className="mt-4">
