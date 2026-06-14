@@ -39,6 +39,7 @@ export type Permission =
   | "attachments.view" | "attachments.upload" | "attachments.delete"
   | "accounting.view" | "accounting.manage" | "accounting.post"
   | "work_board.dispatch" | "production.piecework"
+  | "qc.view" | "qc.receive" | "qc.move" | "qc.ship" | "qc.defect" | "qc.repair"
   | "admin.users" | "admin.audit_log"
   // สิทธิ์ระดับ "เข้าถึง App" (เฟส 2) — ผูกกับ erp_app_groups.permission_key (home เปิดให้ทุกคน)
   | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory" | "app.production"
@@ -77,6 +78,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "attachments.view", "attachments.upload", "attachments.delete",
     "accounting.view", "accounting.manage", "accounting.post",
     "work_board.dispatch", "production.piecework",
+    "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "admin.users", "admin.audit_log",
   ],
   manager: [
@@ -93,6 +95,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "attachments.view", "attachments.upload", "attachments.delete",
     "accounting.view", "accounting.manage", "accounting.post",
     "work_board.dispatch", "production.piecework",
+    "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "admin.audit_log",
   ],
   staff: [
@@ -108,9 +111,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "qt.view", "qt.create", "qt.edit", "qt.send", "qt.accept", "qt.reject", "qt.cancel",
     "stock.view", "stock.create",
     "po.view", "po.create", "po.edit", "po.receive", "po.cancel",
+    "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "attachments.view", "attachments.upload",
   ],
-  viewer: ["products.view", "pr.view", "suppliers.view", "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
+  viewer: ["products.view", "qc.view", "pr.view", "suppliers.view", "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
     "customers.view", "employees.view", "warehouses.view", "departments.view", "units.view", "taxes.view", "validation.view", "roles.view",
     "comments.view", "notification_rules.view",
     "so.view", "qt.view", "stock.view", "po.view",
