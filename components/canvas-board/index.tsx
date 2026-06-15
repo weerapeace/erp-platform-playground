@@ -13,7 +13,7 @@
 
 import { useState, useEffect, type ReactNode } from "react";
 import {
-  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCorners,
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCorners, useDroppable,
   type DragStartEvent, type DragEndEvent, type DragOverEvent,
 } from "@dnd-kit/core";
 import {
@@ -55,7 +55,7 @@ function SortableCard({ id, disabled, onClick, children }: { id: string; disable
   );
 }
 
-function ZoneBox({ zone, count, children }: { zone: CanvasZone; count: number; children: ReactNode }) {
+function ZoneBox({ zone, count, children, innerRef, isOver }: { zone: CanvasZone; count: number; children: ReactNode; innerRef?: (el: HTMLElement | null) => void; isOver?: boolean }) {
   const accent = zone.color || "#cbd5e1";
   return (
     <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -65,9 +65,16 @@ function ZoneBox({ zone, count, children }: { zone: CanvasZone; count: number; c
         <span className="text-xs font-medium text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{count}</span>
         {zone.hint && <span className="text-[11px] text-slate-300 ml-auto hidden sm:inline">{zone.hint}</span>}
       </div>
-      <div className="flex flex-wrap gap-2 p-3 min-h-[96px] bg-slate-50/50">{children}</div>
+      {/* min-h ให้พื้นที่วางพอแม้โซนว่าง · ไฮไลต์ตอนลากทับ */}
+      <div ref={innerRef} className={`flex flex-wrap gap-2 p-3 min-h-[96px] transition-colors ${isOver ? "bg-blue-50 ring-2 ring-inset ring-blue-300" : "bg-slate-50/50"}`}>{children}</div>
     </section>
   );
+}
+
+// โซนที่เป็น drop target (ใช้เมื่อลากวางได้) — ทำให้โซนว่างก็วางการ์ดได้
+function DroppableZoneBox({ zone, count, children }: { zone: CanvasZone; count: number; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: zone.id });
+  return <ZoneBox zone={zone} count={count} innerRef={setNodeRef} isOver={isOver}>{children}</ZoneBox>;
 }
 
 export function CanvasBoard<T>({
@@ -145,13 +152,15 @@ export function CanvasBoard<T>({
 
   const activeItem = activeId != null ? itemMap.get(activeId) ?? null : null;
 
+  // โซนว่างต้องวางการ์ดได้ → ใช้โซนแบบ droppable เมื่อลากได้ (ต้องอยู่ใน DndContext)
+  const ZoneComp = draggable ? DroppableZoneBox : ZoneBox;
   const board = (
     <div className="space-y-3">
       {zones.map((z) => {
         const ids = containers[z.id] ?? [];
         if (hideEmptyZones && ids.length === 0) return null;
         return (
-          <ZoneBox key={z.id} zone={z} count={ids.length}>
+          <ZoneComp key={z.id} zone={z} count={ids.length}>
             <SortableContext items={ids} strategy={rectSortingStrategy} disabled={!draggable}>
               {ids.map((id) => {
                 const it = itemMap.get(id);
@@ -165,10 +174,10 @@ export function CanvasBoard<T>({
                 );
               })}
               {ids.length === 0 && (
-                <div className="w-full h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">{emptyText}</div>
+                <div className="w-full h-16 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg pointer-events-none">{emptyText}</div>
               )}
             </SortableContext>
-          </ZoneBox>
+          </ZoneComp>
         );
       })}
     </div>
