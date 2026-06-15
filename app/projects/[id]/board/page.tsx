@@ -5,13 +5,15 @@
 // ก้อน 2: top bar (Slides/Drive/สถานะ) + การ์ด SKU + พื้นที่กระดาน (ก้อน 3 = canvas เต็ม)
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
+import { SkuPicker } from "@/components/pickers";
+import type { SkuPickerValue } from "@/components/pickers";
+import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { PROJECT_STATUS, SUMMARY_FIELDS, PRODUCTION_TASKS, getProject, updateProject, listItems, sendToProduction, type ProjectDetail, type BoardItem } from "../../data";
-import { BoardCanvas } from "./board-canvas";
 
 // โหลดของกลาง Excalidraw แบบ dynamic — ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -19,9 +21,28 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
   loading: () => <div className="h-[60vh] flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl">กำลังโหลดกระดาน...</div>,
 });
 
-type BoardTab = "draw" | "cards";
-
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
+
+// ---- สร้าง Excalidraw skeleton สำหรับการ์ด/โซน (x,y นับจาก 0 — ของกลางจะเลื่อนไปกลางจอ) ----
+function sectionSkeleton(name: string): Record<string, unknown>[] {
+  return [
+    { type: "rectangle", x: 0, y: 0, width: 380, height: 300, backgroundColor: "#f1f5f9", strokeColor: "#94a3b8", fillStyle: "solid", roundness: { type: 3 }, strokeWidth: 1 },
+    { type: "text", x: 14, y: 12, text: name || "โซนใหม่", fontSize: 20, strokeColor: "#475569" },
+  ];
+}
+function skuCardSkeleton(s: SkuPickerValue): Record<string, unknown>[] {
+  const lines = [`📦 ${s.code}`, s.name, [s.color, s.list_price != null ? `${Number(s.list_price).toLocaleString()}฿` : null].filter(Boolean).join(" · ")].filter(Boolean).join("\n");
+  return [
+    { type: "rectangle", x: 0, y: 0, width: 250, height: 130, backgroundColor: "#ffffff", strokeColor: "#7c3aed", fillStyle: "solid", roundness: { type: 3 } },
+    { type: "text", x: 14, y: 14, width: 222, text: lines, fontSize: 16, strokeColor: "#1e293b" },
+  ];
+}
+function taskCardSkeleton(title: string): Record<string, unknown>[] {
+  return [
+    { type: "rectangle", x: 0, y: 0, width: 250, height: 110, backgroundColor: "#f5f3ff", strokeColor: "#8b5cf6", fillStyle: "solid", roundness: { type: 3 } },
+    { type: "text", x: 14, y: 14, width: 222, text: `✅ ${title}`, fontSize: 16, strokeColor: "#5b21b6" },
+  ];
+}
 
 export default function BoardPage() {
   const params = useParams();
@@ -31,13 +52,21 @@ export default function BoardPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [prodOpen, setProdOpen] = useState(false);
-  const [tab, setTab] = useState<BoardTab>("draw");
+  const [skuOpen, setSkuOpen] = useState(false);
+  const [skuPick, setSkuPick] = useState<SkuPickerValue | null>(null);
+  const sketchRef = useRef<CanvasSketchControls | null>(null);
   const pushToast = (type: Toast["type"], message: string) => { const tid = Date.now() + Math.random(); setToasts((q) => [...q, { id: tid, type, message }]); setTimeout(() => setToasts((q) => q.filter((t) => t.id !== tid)), 3500); };
 
   const load = useCallback(async () => { try { setP(await getProject(id)); } catch (e) { setErr((e as Error).message); } }, [id]);
   useEffect(() => { load(); }, [load]);
 
   const setStatus = async (status: string) => { try { await updateProject(id, { status }); await load(); } catch (e) { setErr((e as Error).message); } };
+
+  // ---- ปุ่มเพิ่มการ์ด/โซน ลงกระดาน Excalidraw ----
+  const insert = (skeletons: Record<string, unknown>[]) => { if (!sketchRef.current) { pushToast("info", "กระดานยังโหลดไม่เสร็จ ลองอีกครั้ง"); return; } void sketchRef.current.insert(skeletons); };
+  const addSection = () => { const name = window.prompt("ชื่อโซน (Section)", "ไอเดีย"); if (name === null) return; insert(sectionSkeleton(name.trim())); };
+  const addTask = () => { const t = window.prompt("ชื่อการ์ดงาน (Task)"); if (!t?.trim()) return; insert(taskCardSkeleton(t.trim())); };
+  const confirmSku = () => { if (!skuPick) return; insert(skuCardSkeleton(skuPick)); setSkuOpen(false); setSkuPick(null); };
 
   if (err) return <StandaloneShell title="กระดาน" icon="🧠" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
   if (!p) return <StandaloneShell title="กระดาน" icon="🧠" accent="violet"><div className="p-8 text-slate-400">กำลังโหลด...</div></StandaloneShell>;
@@ -93,19 +122,28 @@ export default function BoardPage() {
           </div>
         )}
 
-        {/* กระดาน Canvas — 2 โหมด: วาดอิสระ (Excalidraw ของกลาง) / การ์ดเลือกทิศทาง */}
+        {/* กระดาน Canvas (Excalidraw ของกลาง) + ปุ่มเพิ่มการ์ด/โซน */}
         {p.board_id ? (
           <div>
-            <div className="flex items-center gap-1 mb-3 bg-slate-100 rounded-lg p-1 w-fit">
-              <button onClick={() => setTab("draw")} className={`h-8 px-3 rounded-md text-sm font-medium transition-colors ${tab === "draw" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🖌 กระดานวาด</button>
-              <button onClick={() => setTab("cards")} className={`h-8 px-3 rounded-md text-sm font-medium transition-colors ${tab === "cards" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🎯 เลือกทิศทาง (การ์ด)</button>
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <span className="text-xs text-slate-400 mr-1">เพิ่มลงกระดาน:</span>
+              <button onClick={addSection} className="h-8 px-3 rounded-lg text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50">🗂 Section</button>
+              <button onClick={() => { setSkuPick(null); setSkuOpen(true); }} className="h-8 px-3 rounded-lg text-sm font-medium text-violet-700 border border-violet-200 hover:bg-violet-50">📦 SKU Card</button>
+              <button onClick={addTask} className="h-8 px-3 rounded-lg text-sm font-medium text-violet-700 border border-violet-200 hover:bg-violet-50">✅ Task Card</button>
             </div>
-            {tab === "draw"
-              ? <CanvasSketch entityType="creative_board" entityId={p.board_id} height="calc(100vh - 260px)" />
-              : <BoardCanvas boardId={p.board_id} pushToast={pushToast} />}
+            <CanvasSketch entityType="creative_board" entityId={p.board_id} height="calc(100vh - 280px)" controlsRef={sketchRef} />
           </div>
         ) : <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center text-slate-400">ไม่พบกระดานของโปรเจกต์นี้</div>}
       </div>
+
+      {/* เลือก SKU จริง → แทรกการ์ดลงกระดาน */}
+      <ERPModal open={skuOpen} onClose={() => setSkuOpen(false)} title="เพิ่มการ์ดสินค้า (SKU) ลงกระดาน" size="md"
+        footer={<>
+          <button onClick={() => setSkuOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">ยกเลิก</button>
+          <button onClick={confirmSku} disabled={!skuPick} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">เพิ่มการ์ด</button>
+        </>}>
+        <SkuPicker value={skuPick} onChange={setSkuPick} />
+      </ERPModal>
 
       {summaryOpen && <SummaryModal project={p} onClose={() => setSummaryOpen(false)} onSaved={load} pushToast={pushToast} />}
       {prodOpen && <ProductionModal project={p} onClose={() => setProdOpen(false)} onDone={load} pushToast={pushToast} />}

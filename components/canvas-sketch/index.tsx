@@ -30,8 +30,9 @@ type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
 const AUTOSAVE_MS = 2500;   // หยุดวาดกี่ ms แล้วค่อยบันทึก
 
-/** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด) */
-export type CanvasSketchControls = { isDirty: () => boolean; save: () => Promise<void>; discard: () => void };
+/** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
+ *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
+export type CanvasSketchControls = { isDirty: () => boolean; save: () => Promise<void>; discard: () => void; insert: (skeletons: Record<string, unknown>[]) => Promise<void> };
 
 export function CanvasSketch({
   entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef,
@@ -138,9 +139,26 @@ export function CanvasSketch({
       isDirty: () => dirtyRef.current,
       save: doSave,
       discard: () => { discardRef.current = true; markDirty(false); setSaveState("idle"); },
+      // แทรก element (การ์ด/โซน) ลงกลางจอ แล้วบันทึกอัตโนมัติ
+      insert: async (skeletons) => {
+        const api = apiRef.current;
+        if (!api || !skeletons?.length) return;
+        try {
+          const lib: any = await import("@excalidraw/excalidraw");
+          const st = api.getAppState();
+          const center = lib.viewportCoordsToSceneCoords(
+            { clientX: (st.offsetLeft ?? 0) + (st.width ?? 800) / 2, clientY: (st.offsetTop ?? 0) + (st.height ?? 600) / 2 },
+            st,
+          );
+          const placed = skeletons.map((s) => ({ ...s, x: (Number(s.x) || 0) + center.x, y: (Number(s.y) || 0) + center.y }));
+          const els = lib.convertToExcalidrawElements(placed);
+          api.updateScene({ elements: [...api.getSceneElements(), ...els] });
+          if (editable) queueSave();
+        } catch (e) { console.error("[canvas-sketch] insert failed:", e); }
+      },
     };
     return () => { if (controlsRef) controlsRef.current = null; };
-  }, [controlsRef, doSave]);
+  }, [controlsRef, doSave, queueSave, editable]);
 
   // flush ตอนสลับแท็บ/ปิด modal — ถ้ายังมีแก้ค้าง บันทึกให้เลย (เว้นกรณีผู้ใช้เลือก "ทิ้ง")
   useEffect(() => () => {
