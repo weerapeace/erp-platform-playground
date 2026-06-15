@@ -67,6 +67,18 @@ export function SkuMultiPickerModal({
     });
   };
 
+  // ตัวที่เลือกได้ในหน้านี้ (ไม่นับตัวที่เพิ่มแล้ว) + สถานะ "เลือกครบหน้า"
+  const selectable = results.filter((s) => !excluded.has(s.id));
+  const allOnPagePicked = selectable.length > 0 && selectable.every((s) => picked.has(s.id));
+  const toggleAll = () => {
+    setPicked((prev) => {
+      const next = new Map(prev);
+      if (allOnPagePicked) selectable.forEach((s) => next.delete(s.id));
+      else selectable.forEach((s) => next.set(s.id, s));
+      return next;
+    });
+  };
+
   const confirm = () => {
     if (picked.size === 0) return;
     onConfirm(Array.from(picked.values()));
@@ -90,6 +102,14 @@ export function SkuMultiPickerModal({
         <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
           placeholder="🔍 ค้นหา SKU / ชื่อสินค้า..."
           className="h-10 w-full rounded-lg border border-pink-200 px-3 text-sm outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-100" />
+
+        {selectable.length > 0 && (
+          <label className="flex items-center gap-2 px-1 text-sm text-rose-500 cursor-pointer select-none">
+            <input type="checkbox" checked={allOnPagePicked} onChange={toggleAll}
+              className="rounded border-pink-300 text-pink-500" />
+            เลือกทั้งหมด ({selectable.length} รายการ)
+          </label>
+        )}
 
         <div className="max-h-[55vh] overflow-auto rounded-lg border border-pink-100">
           {loading ? (

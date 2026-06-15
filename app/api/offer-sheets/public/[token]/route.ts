@@ -21,8 +21,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (error || !sheet) return NextResponse.json({ data: null, error: "ไม่พบเอกสาร" }, { status: 404 });
 
   const { data: items } = await db.from("offer_sheet_items")
-    .select("sku_code, name, image_r2_key, uom_name, unit_price, qty, note, sort_order")
+    .select("sku_code, name, image_r2_key, uom_name, color, category, unit_price, qty, note, sort_order")
     .eq("offer_id", sheet.id).order("sort_order", { ascending: true });
 
-  return NextResponse.json({ data: { ...sheet, items: items ?? [] }, error: null });
+  const { data: settings } = await db.from("app_settings").select("offer_columns").eq("id", 1).single();
+
+  return NextResponse.json({ data: { ...sheet, items: items ?? [], columns: settings?.offer_columns ?? null }, error: null });
 }

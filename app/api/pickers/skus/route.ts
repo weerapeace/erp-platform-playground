@@ -14,7 +14,10 @@ type SkuPickerRow = {
   sale_ok: boolean | null;
   is_active: boolean | null;
   uom: { name: string | null } | { name: string | null }[] | null;
-  parent_skus_v2: { cover_image_r2_key: string | null } | { cover_image_r2_key: string | null }[] | null;
+  parent_skus_v2:
+    | { cover_image_r2_key: string | null; product_categories: { name: string | null } | { name: string | null }[] | null }
+    | { cover_image_r2_key: string | null; product_categories: { name: string | null } | { name: string | null }[] | null }[]
+    | null;
 };
 
 type ParentSkuMatchRow = {
@@ -62,7 +65,7 @@ export async function GET(request: NextRequest) {
       cover_image_r2_key,
       sale_ok,
       is_active,
-      parent_skus_v2 ( cover_image_r2_key ),
+      parent_skus_v2 ( cover_image_r2_key, product_categories ( name ) ),
       uom:uoms!uom_id ( name )
     `)
     .eq("is_active", true);
@@ -87,6 +90,7 @@ export async function GET(request: NextRequest) {
   const rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {
     const uom = Array.isArray(row.uom) ? row.uom[0] : row.uom;
     const parent = Array.isArray(row.parent_skus_v2) ? row.parent_skus_v2[0] : row.parent_skus_v2;
+    const cat = parent ? (Array.isArray(parent.product_categories) ? parent.product_categories[0] : parent.product_categories) : null;
     const code = row.code ?? "";
     const imageKey = row.cover_image_r2_key ?? parent?.cover_image_r2_key ?? null;
     return {
@@ -95,6 +99,7 @@ export async function GET(request: NextRequest) {
       name: row.name_th ?? code,
       uom_name: uom?.name ?? null,
       color: row.color_th ?? row.color ?? null,
+      category: cat?.name ?? null,
       list_price: row.list_price,
       image_key: imageKey,
       sale_ok: row.sale_ok,

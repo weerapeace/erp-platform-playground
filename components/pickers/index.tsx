@@ -369,6 +369,7 @@ export type SkuPickerValue = {
   name: string;
   uom_name?: string | null;
   color?: string | null;
+  category?: string | null;
   list_price?: number | null;
   image_url?: string | null;
   image_key?: string | null;

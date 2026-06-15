@@ -26,6 +26,8 @@ export type OfferItem = {
   name:          string | null;
   image_r2_key:  string | null;
   uom_name:      string | null;
+  color:         string | null;
+  category:      string | null;
   unit_price:    number;
   qty:           number;
   note:          string | null;
@@ -67,6 +69,8 @@ export function itemsToRows(offerId: string, items: OfferItem[]): Record<string,
     name:         it.name ?? null,
     image_r2_key: it.image_r2_key ?? null,
     uom_name:     it.uom_name ?? null,
+    color:        it.color ?? null,
+    category:     it.category ?? null,
     unit_price:   Number(it.unit_price || 0),
     qty:          Number(it.qty || 0),
     note:         it.note ?? null,

@@ -10,19 +10,45 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
+import { visibleColumns, type LineColumnConfig } from "@/components/line-item-columns";
+import { OFFER_ITEM_COLUMNS, DEFAULT_OFFER_COLS, offerColAlign, offerGroupValue } from "@/lib/offer-columns";
 
 type Item = {
   sku_code: string | null; name: string | null; image_r2_key: string | null;
-  uom_name: string | null; unit_price: number; qty: number; note: string | null;
+  uom_name: string | null; color: string | null; category: string | null;
+  unit_price: number; qty: number; note: string | null;
 };
 type Offer = {
   offer_no: string | null; title: string; customer_name: string | null;
-  offer_date: string; note: string | null; status: string; items: Item[];
+  offer_date: string; note: string | null; status: string;
+  items: Item[]; columns: LineColumnConfig | null;
 };
 
 const money = (n: number) =>
   Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const imgUrl = (key: string | null) => (key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null);
+
+// เนื้อหาช่องตามคอลัมน์ (อ่านอย่างเดียว)
+const cellOf = (key: string, it: Item) => {
+  switch (key) {
+    case "image":
+      return imgUrl(it.image_r2_key)
+        ? <img src={imgUrl(it.image_r2_key)!} alt="" className="w-12 h-12 rounded-lg object-cover border border-pink-100"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
+        : <div className="w-12 h-12 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200">🖼️</div>;
+    case "product":
+      return (<div><div className="font-medium text-slate-700">{it.name}</div>
+        <div className="font-mono text-xs text-slate-400">{it.sku_code}</div></div>);
+    case "color":      return it.color ?? "—";
+    case "category":   return it.category ?? "—";
+    case "uom":        return it.uom_name ?? "—";
+    case "qty":        return it.qty;
+    case "unit_price": return money(it.unit_price);
+    case "total":      return <span className="font-semibold text-rose-600">{money(Number(it.unit_price || 0) * Number(it.qty || 0))}</span>;
+    case "note":       return <span className="text-xs text-slate-500">{it.note ?? ""}</span>;
+    default: return null;
+  }
+};
 
 export default function PublicOfferPage() {
   return (
@@ -61,6 +87,15 @@ function PublicOfferInner() {
   if (state === "error" || !offer) return <Center>🔍 ไม่พบใบเสนอนี้ (ลิงก์อาจหมดอายุหรือถูกลบ)</Center>;
 
   const grand = offer.items.reduce((s, it) => s + Number(it.unit_price || 0) * Number(it.qty || 0), 0);
+  const cfg = offer.columns ?? DEFAULT_OFFER_COLS;
+  const vis = visibleColumns(OFFER_ITEM_COLUMNS, cfg);
+  const grouped = !!cfg.groupBy;
+  const groups: [string, Item[]][] = grouped
+    ? Array.from(offer.items.reduce((m, it) => {
+        const g = offerGroupValue(it, cfg.groupBy!);
+        m.set(g, [...(m.get(g) ?? []), it]); return m;
+      }, new Map<string, Item[]>()).entries())
+    : [];
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-pink-50 to-rose-50/40 py-8 px-4 print:bg-white print:py-0">
@@ -85,40 +120,37 @@ function PublicOfferInner() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-pink-50 text-rose-500 text-left">
-                <th className="px-3 py-2 font-semibold">สินค้า</th>
-                <th className="px-3 py-2 font-semibold text-center w-16">หน่วย</th>
-                <th className="px-3 py-2 font-semibold text-center w-16">จำนวน</th>
-                <th className="px-3 py-2 font-semibold text-right w-28">ราคา/หน่วย</th>
-                <th className="px-3 py-2 font-semibold text-right w-28">รวม</th>
+                {vis.map((col) => (
+                  <th key={col.key} className={`px-3 py-2 font-semibold ${offerColAlign(col.key)}`}>{col.label}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {offer.items.map((it, i) => (
-                <tr key={i} className="border-t border-pink-50 align-top">
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      {imgUrl(it.image_r2_key)
-                        ? <img src={imgUrl(it.image_r2_key)!} alt="" className="w-12 h-12 rounded-lg object-cover border border-pink-100 flex-shrink-0"
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
-                        : <div className="w-12 h-12 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200 flex-shrink-0">🖼️</div>}
-                      <div className="min-w-0">
-                        <div className="font-medium text-slate-700">{it.name}</div>
-                        <div className="font-mono text-xs text-slate-400">{it.sku_code}</div>
-                        {it.note && <div className="text-xs text-slate-500 mt-0.5">{it.note}</div>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-center text-slate-500">{it.uom_name ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-center text-slate-600">{it.qty}</td>
-                  <td className="px-3 py-2.5 text-right text-slate-600">{money(it.unit_price)}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-rose-600">{money(Number(it.unit_price || 0) * Number(it.qty || 0))}</td>
-                </tr>
-              ))}
+              {grouped
+                ? groups.map(([gName, rows]) => (
+                    <PublicGroup key={gName} name={gName} colSpan={vis.length}>
+                      {rows.map((it, i) => (
+                        <tr key={i} className="border-t border-pink-50 align-top">
+                          {vis.map((col) => (
+                            <td key={col.key} className={`px-3 py-2.5 text-slate-600 ${offerColAlign(col.key)}`}>{cellOf(col.key, it)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </PublicGroup>
+                  ))
+                : offer.items.map((it, i) => (
+                    <tr key={i} className="border-t border-pink-50 align-top">
+                      {vis.map((col) => (
+                        <td key={col.key} className={`px-3 py-2.5 text-slate-600 ${offerColAlign(col.key)}`}>{cellOf(col.key, it)}</td>
+                      ))}
+                    </tr>
+                  ))}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-pink-100">
-                <td colSpan={4} className="px-3 py-3 text-right font-semibold text-slate-500">ยอดรวมทั้งหมด</td>
-                <td className="px-3 py-3 text-right text-lg font-bold text-rose-600">{money(grand)}</td>
+                <td colSpan={vis.length} className="px-3 py-3 text-right text-lg font-bold text-rose-600">
+                  <span className="font-semibold text-slate-500 text-sm mr-3">ยอดรวมทั้งหมด</span>{money(grand)}
+                </td>
               </tr>
             </tfoot>
           </table>
@@ -137,6 +169,17 @@ function PublicOfferInner() {
         </button>
       </div>
     </div>
+  );
+}
+
+function PublicGroup({ name, colSpan, children }: { name: string; colSpan: number; children: React.ReactNode }) {
+  return (
+    <>
+      <tr className="bg-rose-50/70">
+        <td colSpan={colSpan} className="px-3 py-1.5 text-xs font-semibold text-rose-500">📂 {name}</td>
+      </tr>
+      {children}
+    </>
   );
 }
 

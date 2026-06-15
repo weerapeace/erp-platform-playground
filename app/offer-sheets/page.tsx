@@ -19,6 +19,8 @@ import {
   CustomerPicker, type CustomerPickerValue,
 } from "@/components/pickers";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
+import { LineColumnsManager, visibleColumns, type LineColumnConfig } from "@/components/line-item-columns";
+import { OFFER_ITEM_COLUMNS, DEFAULT_OFFER_COLS, offerColAlign, offerGroupValue } from "@/lib/offer-columns";
 import { exportTable } from "@/lib/export";
 import type { OfferItem, OfferListItem } from "@/app/api/offer-sheets/route";
 
@@ -210,6 +212,24 @@ function OfferEditor({ id, canEdit, onBack }: {
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [offerNo, setOfferNo] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [colConfig, setColConfig] = useState<LineColumnConfig>(DEFAULT_OFFER_COLS);
+
+  // โหลดค่าตั้งคอลัมน์ (รวมทั้งโมดูล)
+  useEffect(() => {
+    apiFetch("/api/offer-sheets/settings").then((r) => r.json()).then((j) => {
+      if (j.data) setColConfig({
+        order: j.data.order?.length ? j.data.order : DEFAULT_OFFER_COLS.order,
+        hidden: j.data.hidden ?? [],
+        groupBy: j.data.groupBy ?? null,
+      });
+    }).catch(() => {});
+  }, []);
+
+  // แก้ค่าตั้งคอลัมน์ → บันทึกทันที (มีผลกับทุกคน)
+  const updateCols = (c: LineColumnConfig) => {
+    setColConfig(c);
+    apiFetch("/api/offer-sheets/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) }).catch(() => {});
+  };
 
   // โหลดใบเดิม
   useEffect(() => {
@@ -240,6 +260,7 @@ function OfferEditor({ id, canEdit, onBack }: {
       const fresh = skus.filter((s) => !have.has(s.id)).map((sku, k) => ({
         sku_id: sku.id, sku_code: sku.code, name: sku.name,
         image_r2_key: sku.image_key ?? null, uom_name: sku.uom_name ?? null,
+        color: sku.color ?? null, category: sku.category ?? null,
         unit_price: Number(sku.list_price ?? 0), qty: 1, note: null, sort_order: prev.length + k,
       }));
       return [...prev, ...fresh];
@@ -298,6 +319,73 @@ function OfferEditor({ id, canEdit, onBack }: {
   };
 
   const grandTotal = items.reduce((s, it) => s + Number(it.unit_price || 0) * Number(it.qty || 0), 0);
+
+  // คอลัมน์ที่ต้องแสดง (ตาม config) + การจัดกลุ่ม
+  const vis = visibleColumns(OFFER_ITEM_COLUMNS, colConfig);
+  const grouped = !!colConfig.groupBy;
+  const groups: [string, { it: OfferItem; i: number }[]][] = (() => {
+    if (!grouped) return [];
+    const m = new Map<string, { it: OfferItem; i: number }[]>();
+    items.forEach((it, i) => {
+      const g = offerGroupValue(it, colConfig.groupBy!);
+      const arr = m.get(g) ?? [];
+      arr.push({ it, i });
+      m.set(g, arr);
+    });
+    return Array.from(m.entries());
+  })();
+
+  // เนื้อหาในแต่ละช่องตามคอลัมน์
+  const cellContent = (key: string, it: OfferItem, i: number) => {
+    switch (key) {
+      case "image":
+        return imgUrl(it.image_r2_key)
+          ? <img src={imgUrl(it.image_r2_key)!} alt="" className="w-10 h-10 rounded-lg object-cover border border-pink-100"
+              onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.onerror = null; t.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' rx='8' fill='%23fce7f3'/><text x='20' y='26' font-size='18' text-anchor='middle'>🖼️</text></svg>"; }} />
+          : <div className="w-10 h-10 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200">🖼️</div>;
+      case "product":
+        return (
+          <div className="min-w-0">
+            <div className="font-medium text-slate-700">{it.name}</div>
+            <div className="font-mono text-xs text-slate-400">{it.sku_code}</div>
+          </div>
+        );
+      case "color":    return <span className="text-slate-500">{it.color ?? "—"}</span>;
+      case "category": return <span className="text-slate-500">{it.category ?? "—"}</span>;
+      case "uom":      return <span className="text-slate-500">{it.uom_name ?? "—"}</span>;
+      case "qty":
+        return <input type="number" min={0} value={it.qty} onChange={(e) => patchItem(i, { qty: Number(e.target.value) })}
+          className="w-20 h-9 px-2 rounded-lg border border-pink-200 text-center outline-none focus:border-pink-400" />;
+      case "unit_price":
+        return <input type="number" min={0} step="0.01" value={it.unit_price} onChange={(e) => patchItem(i, { unit_price: Number(e.target.value) })}
+          className="w-28 h-9 px-2 rounded-lg border border-pink-200 text-right outline-none focus:border-pink-400" />;
+      case "total":
+        return <span className="font-semibold text-rose-600">{money(Number(it.unit_price || 0) * Number(it.qty || 0))}</span>;
+      case "note":
+        return <input value={it.note ?? ""} onChange={(e) => patchItem(i, { note: e.target.value })} placeholder="หมายเหตุ"
+          className="w-full max-w-xs h-8 px-2 rounded border border-pink-100 text-xs outline-none focus:border-pink-300" />;
+      default: return null;
+    }
+  };
+
+  // แถวสินค้า 1 แถว (ใช้ทั้งแบบกลุ่ม/ไม่กลุ่ม) — drag เฉพาะตอนไม่จัดกลุ่ม
+  const renderRow = (it: OfferItem, i: number) => (
+    <tr key={i} className={`border-t border-pink-50 ${dragIdx === i ? "opacity-40" : ""}`}
+      onDragOver={(e) => e.preventDefault()} onDrop={() => !grouped && onDrop(i)}>
+      <td className="px-1 py-2 text-center">
+        {!grouped && (
+          <span draggable onDragStart={() => setDragIdx(i)} onDragEnd={() => setDragIdx(null)}
+            className="cursor-grab active:cursor-grabbing text-pink-300 hover:text-pink-500 select-none" title="ลากเพื่อจัดลำดับ">⠿</span>
+        )}
+      </td>
+      {vis.map((col) => (
+        <td key={col.key} className={`px-3 py-2 ${offerColAlign(col.key)}`}>{cellContent(col.key, it, i)}</td>
+      ))}
+      <td className="px-3 py-2 text-center">
+        <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 text-lg" title="ลบแถว">✕</button>
+      </td>
+    </tr>
+  );
 
   const save = async () => {
     setSaving(true);
@@ -377,14 +465,18 @@ function OfferEditor({ id, canEdit, onBack }: {
 
       {/* รายการสินค้า */}
       <div className="bg-white rounded-2xl border border-pink-100 shadow-sm p-5 sm:p-6">
-        <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center justify-between gap-2 mb-4 flex-wrap">
           <h2 className="text-lg font-bold text-rose-600 flex items-center gap-2">🛍️ รายการสินค้า</h2>
-          {canEdit && (
-            <button onClick={() => setPickerOpen(true)}
-              className="h-10 px-5 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white text-sm font-semibold shadow shadow-pink-200 hover:from-pink-600 hover:to-rose-600">
-              + เพิ่มสินค้า
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <LineColumnsManager defs={OFFER_ITEM_COLUMNS} config={colConfig} onChange={updateCols}
+              groupableKeys={["category", "color"]} canEdit={canEdit} />
+            {canEdit && (
+              <button onClick={() => setPickerOpen(true)}
+                className="h-10 px-5 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white text-sm font-semibold shadow shadow-pink-200 hover:from-pink-600 hover:to-rose-600">
+                + เพิ่มสินค้า
+              </button>
+            )}
+          </div>
         </div>
 
         <SkuMultiPickerModal
@@ -405,56 +497,26 @@ function OfferEditor({ id, canEdit, onBack }: {
               <thead>
                 <tr className="bg-pink-50 text-rose-500 text-left">
                   <th className="px-1 py-2 w-6"></th>
-                  <th className="px-3 py-2 font-semibold">สินค้า</th>
-                  <th className="px-3 py-2 font-semibold text-center w-20">หน่วย</th>
-                  <th className="px-3 py-2 font-semibold text-center w-24">จำนวน</th>
-                  <th className="px-3 py-2 font-semibold text-right w-32">ราคา/หน่วย</th>
-                  <th className="px-3 py-2 font-semibold text-right w-32">รวม</th>
+                  {vis.map((col) => (
+                    <th key={col.key} className={`px-3 py-2 font-semibold ${offerColAlign(col.key)}`}>{col.label}</th>
+                  ))}
                   <th className="px-3 py-2 w-10"></th>
                 </tr>
               </thead>
               <tbody>
-                {items.map((it, i) => (
-                  <tr key={i} className={`border-t border-pink-50 ${dragIdx === i ? "opacity-40" : ""}`}
-                    onDragOver={(e) => e.preventDefault()} onDrop={() => onDrop(i)}>
-                    <td className="px-1 py-2 text-center">
-                      <span draggable onDragStart={() => setDragIdx(i)} onDragEnd={() => setDragIdx(null)}
-                        className="cursor-grab active:cursor-grabbing text-pink-300 hover:text-pink-500 select-none" title="ลากเพื่อจัดลำดับ">⠿</span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2.5">
-                        {imgUrl(it.image_r2_key)
-                          ? <img src={imgUrl(it.image_r2_key)!} alt="" className="w-10 h-10 rounded-lg object-cover border border-pink-100 flex-shrink-0"
-                              onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.onerror = null; t.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' rx='8' fill='%23fce7f3'/><text x='20' y='26' font-size='18' text-anchor='middle'>🖼️</text></svg>"; }} />
-                          : <div className="w-10 h-10 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200 flex-shrink-0">🖼️</div>}
-                        <div className="min-w-0">
-                          <div className="font-medium text-slate-700 truncate">{it.name}</div>
-                          <div className="font-mono text-xs text-slate-400">{it.sku_code}</div>
-                          <input value={it.note ?? ""} onChange={(e) => patchItem(i, { note: e.target.value })} placeholder="หมายเหตุ"
-                            className="mt-1 w-full max-w-xs h-7 px-2 rounded border border-pink-100 text-xs outline-none focus:border-pink-300" />
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2 text-center text-slate-500">{it.uom_name ?? "—"}</td>
-                    <td className="px-3 py-2 text-center">
-                      <input type="number" min={0} value={it.qty} onChange={(e) => patchItem(i, { qty: Number(e.target.value) })}
-                        className="w-20 h-9 px-2 rounded-lg border border-pink-200 text-center outline-none focus:border-pink-400" />
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <input type="number" min={0} step="0.01" value={it.unit_price} onChange={(e) => patchItem(i, { unit_price: Number(e.target.value) })}
-                        className="w-28 h-9 px-2 rounded-lg border border-pink-200 text-right outline-none focus:border-pink-400" />
-                    </td>
-                    <td className="px-3 py-2 text-right font-semibold text-rose-600">{money(Number(it.unit_price || 0) * Number(it.qty || 0))}</td>
-                    <td className="px-3 py-2 text-center">
-                      <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 text-lg" title="ลบแถว">✕</button>
-                    </td>
-                  </tr>
-                ))}
+                {grouped
+                  ? groups.map(([gName, rows]) => (
+                      <GroupBlock key={gName} name={gName} colSpan={vis.length + 2}>
+                        {rows.map(({ it, i }) => renderRow(it, i))}
+                      </GroupBlock>
+                    ))
+                  : items.map((it, i) => renderRow(it, i))}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-pink-100">
-                  <td colSpan={5} className="px-3 py-3 text-right font-semibold text-slate-500">ยอดรวมทั้งหมด</td>
-                  <td className="px-3 py-3 text-right text-lg font-bold text-rose-600">{money(grandTotal)}</td>
+                  <td colSpan={vis.length + 1} className="px-3 py-3 text-right text-lg font-bold text-rose-600">
+                    <span className="font-semibold text-slate-500 text-sm mr-3">ยอดรวมทั้งหมด</span>{money(grandTotal)}
+                  </td>
                   <td></td>
                 </tr>
               </tfoot>
@@ -463,6 +525,17 @@ function OfferEditor({ id, canEdit, onBack }: {
         )}
       </div>
     </div>
+  );
+}
+
+function GroupBlock({ name, colSpan, children }: { name: string; colSpan: number; children: React.ReactNode }) {
+  return (
+    <>
+      <tr className="bg-rose-50/70">
+        <td colSpan={colSpan} className="px-3 py-1.5 text-xs font-semibold text-rose-500">📂 {name}</td>
+      </tr>
+      {children}
+    </>
   );
 }
 
