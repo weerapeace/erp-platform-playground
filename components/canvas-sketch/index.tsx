@@ -227,7 +227,7 @@ export function CanvasSketch({
     el.addEventListener("wheel", onWheel, { passive: false, capture: true });
     el.addEventListener("dblclick", onDbl, { capture: true });
     return () => { el.removeEventListener("wheel", onWheel, true); el.removeEventListener("dblclick", onDbl, true); };
-  }, []);
+  }, [scene]); // ผูกใหม่หลังกระดานโหลดเสร็จ (ตอน mount แรก wrapRef ยังไม่ render เพราะอยู่สถานะ loading)
 
   if (scene === "loading") {
     return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>กำลังโหลดกระดาน...</div>;
