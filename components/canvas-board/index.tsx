@@ -96,7 +96,21 @@ export function CanvasBoard<T>({
   const draggable = canDrag && (!!onReorder || !!onMove);
 
   // sync containers จาก props เมื่อไม่ได้ลากอยู่
-  useEffect(() => { if (!activeId) setContainers(buildContainers()); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [items, zones]);
+  // สำคัญ: ถ้าเนื้อหาเหมือนเดิม ต้องคืน prev (อย่าสร้าง object ใหม่) — ไม่งั้น parent ที่ส่ง zones/items
+  // เป็น reference ใหม่ทุก render จะทำให้ setState วนไม่จบ (React error #185: Maximum update depth)
+  useEffect(() => {
+    if (activeId) return;
+    setContainers((prev) => {
+      const next = buildContainers();
+      const pk = Object.keys(prev), nk = Object.keys(next);
+      const same = pk.length === nk.length && nk.every((k) => {
+        const a = prev[k], b = next[k];
+        return Array.isArray(a) && a.length === b.length && a.every((x, i) => x === b[i]);
+      });
+      return same ? prev : next;
+    });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [items, zones]);
 
   const findZone = (id: string): string | null => {
     if (containers[id]) return id;   // เป็น zone เอง (ตอน over โซนว่าง)

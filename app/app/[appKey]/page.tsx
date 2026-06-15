@@ -55,7 +55,9 @@ export default function StandaloneApp() {
       setLoaded(true);
     }).catch(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
-  }, [appKey, can]);
+    // ใช้ permsReady (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [appKey, permsReady]);
 
   if (!ready) return <Center>กำลังโหลด…</Center>;
   if (!user) return (
