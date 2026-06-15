@@ -25,9 +25,9 @@ import {
   isOverdue, withinThisWeek,
   listTasks, getTask, transitionTask, approveTask, deleteTask,
   addSubtask, updateSubtask, deleteSubtask, addComment, addAttachment, deleteAttachment,
-  listCampaigns, listBrands,
+  listCampaigns, listBrands, listMySubtasks,
   type CreativeTask, type CreativeStatus, type CreativePriority, type TaskDetail,
-  type Campaign, type BrandOption, type CreativeSubtask,
+  type Campaign, type BrandOption, type CreativeSubtask, type MySubtask,
 } from "./data";
 
 // ============================================================
@@ -104,6 +104,7 @@ export default function TasksPage() {
   const { statuses } = useCreativeStatuses();
   const [tasks, setTasks] = useState<CreativeTask[]>([]);
   const [myTasks, setMyTasks] = useState<CreativeTask[]>([]);
+  const [mySubs, setMySubs] = useState<MySubtask[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
   const [brands, setBrands] = useState<BrandOption[]>([]);
@@ -132,20 +133,25 @@ export default function TasksPage() {
     try { setMyTasks(await listTasks({ mine: true })); }
     catch (e) { pushToast("error", `โหลดงานของฉันไม่สำเร็จ: ${(e as Error).message}`); }
   }, [pushToast]);
+  const loadMySubs = useCallback(async () => { try { setMySubs(await listMySubtasks()); } catch { /* ignore */ } }, []);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      await Promise.all([loadAll(), loadMine()]);
+      await Promise.all([loadAll(), loadMine(), loadMySubs()]);
       try { const [b, c] = await Promise.all([listBrands(), listCampaigns()]); setBrands(b); setCampaigns(c); } catch { /* ignore */ }
       setLoading(false);
     })();
-  }, [loadAll, loadMine]);
+  }, [loadAll, loadMine, loadMySubs]);
 
   // เปิด drawer งานอัตโนมัติจากลิงก์ /tasks?task=<id> (เช่นกดมาจากการ์ดบน Canvas)
   useEffect(() => { const tid = new URLSearchParams(window.location.search).get("task"); if (tid) setDetailId(tid); }, []);
 
-  const reload = useCallback(async () => { await Promise.all([loadAll(), loadMine()]); }, [loadAll, loadMine]);
+  const reload = useCallback(async () => { await Promise.all([loadAll(), loadMine(), loadMySubs()]); }, [loadAll, loadMine, loadMySubs]);
+  const toggleMySub = useCallback(async (s: MySubtask) => {
+    try { await updateSubtask(s.task_id, s.id, { status: "done" }); pushToast("success", "ทำงานย่อยเสร็จแล้ว ✓"); await loadMySubs(); }
+    catch (e) { pushToast("error", (e as Error).message); }
+  }, [pushToast, loadMySubs]);
 
   const counts = useMemo(() => ({
     total: tasks.length,
@@ -216,7 +222,7 @@ export default function TasksPage() {
           <div className="py-20 text-center text-slate-400">กำลังโหลดข้อมูล...</div>
         ) : (
           <>
-            {view === "queue" && <QueueView tasks={myTasks} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
+            {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} onToggleSub={toggleMySub} />}
 
             {view === "table" && (
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -281,8 +287,8 @@ function StatChip({ label, value, tone = "slate" }: { label: string; value: numb
 // ============================================================
 // Queue View — หน้าพนักงาน ปุ่มใหญ่ งานตัวเองเด่น
 // ============================================================
-function QueueView({ tasks, onOpen, onMove, onCreate }: {
-  tasks: CreativeTask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void;
+function QueueView({ tasks, subtasks, onOpen, onMove, onCreate, onToggleSub }: {
+  tasks: CreativeTask[]; subtasks: MySubtask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void; onToggleSub: (s: MySubtask) => void;
 }) {
   const ordered = useMemo(() => [...tasks].filter((t) => !isTerminal(t.status)).sort((a, b) => {
     const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
@@ -290,12 +296,12 @@ function QueueView({ tasks, onOpen, onMove, onCreate }: {
     return (a.due_date || "9999").localeCompare(b.due_date || "9999");
   }), [tasks]);
 
-  if (ordered.length === 0) {
+  if (ordered.length === 0 && subtasks.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
         <div className="text-4xl mb-3">🎉</div>
         <p className="text-slate-600 font-medium">ไม่มีงานค้างในคิวของคุณ</p>
-        <p className="text-slate-400 text-sm mt-1">งานที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง</p>
+        <p className="text-slate-400 text-sm mt-1">งาน/งานย่อยที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง</p>
         <button onClick={onCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ สร้างงาน</button>
       </div>
     );
@@ -303,7 +309,27 @@ function QueueView({ tasks, onOpen, onMove, onCreate }: {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-slate-500">งานที่ต้องทำตอนนี้ · เรียงตามความสำคัญ + กำหนดส่ง ({ordered.length})</p>
+      {/* งานย่อยของฉัน */}
+      {subtasks.length > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-sm font-semibold text-slate-700 mb-2">🧩 งานย่อยของฉัน ({subtasks.length})</p>
+          <div className="space-y-1.5">
+            {subtasks.map((s) => (
+              <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200">
+                <input type="checkbox" checked={false} onChange={() => onToggleSub(s)} title="ทำเสร็จ" className="h-4 w-4 rounded border-slate-300 text-violet-600 cursor-pointer" />
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpen(s.task_id)}>
+                  <span className="text-sm text-slate-700">{s.title}</span>
+                  {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">ต้องเสร็จก่อน</span>}
+                  <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+                </div>
+                {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {ordered.length > 0 && <p className="text-sm text-slate-500">งานที่ต้องทำตอนนี้ · เรียงตามความสำคัญ + กำหนดส่ง ({ordered.length})</p>}
       {ordered.map((t, i) => {
         const od = isOverdue(t);
         const actions = transitionsFrom(t.status);

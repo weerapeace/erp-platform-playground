@@ -169,6 +169,16 @@ export async function deleteSubtask(taskId: string, subtaskId: string): Promise<
   await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks?subtask_id=${subtaskId}`, { method: "DELETE" }));
 }
 
+// ---- งานย่อยของฉัน (queue พนักงาน) ----
+export type MySubtask = {
+  id: string; title: string; status: string; due_date: string | null; required_before_next: boolean;
+  task_id: string; task_no: string | null; task_title: string | null; task_status: string | null;
+};
+export async function listMySubtasks(): Promise<MySubtask[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-tasks/my-subtasks"));
+  return (j.data as MySubtask[]) ?? [];
+}
+
 // ---- Comments ----
 export async function addComment(taskId: string, body: string, mentions: string[] = []): Promise<CreativeComment> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify({ body, mentions }) }));
