@@ -194,6 +194,36 @@ export function CanvasSketch({
     if (editable && dirtyRef.current && !discardRef.current) void doSave();
   }, [doSave, editable]);
 
+  // ล้อเมาส์ = ซูมเข้าหาตำแหน่งเมาส์ (shift+ล้อ = เลื่อนแนวนอนตามปกติ) + ดับเบิลคลิกการ์ด → เปิด drawer
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.shiftKey) return;
+      const api = apiRef.current; if (!api) return;
+      e.preventDefault(); e.stopPropagation();
+      const st = api.getAppState(); const z = st.zoom?.value || 1;
+      const nz = Math.min(30, Math.max(0.1, z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+      const ox = st.offsetLeft ?? 0, oy = st.offsetTop ?? 0;
+      const sx = (e.clientX - ox) / z - st.scrollX, sy = (e.clientY - oy) / z - st.scrollY;
+      api.updateScene({ appState: { zoom: { value: nz }, scrollX: (e.clientX - ox) / nz - sx, scrollY: (e.clientY - oy) / nz - sy } });
+    };
+    const onDbl = (e: MouseEvent) => {
+      const cb = cardCbRef.current; const api = apiRef.current; if (!cb || !api) return;
+      const st = api.getAppState(); const z = st.zoom?.value || 1;
+      const px = (e.clientX - (st.offsetLeft ?? 0)) / z - st.scrollX;
+      const py = (e.clientY - (st.offsetTop ?? 0)) / z - st.scrollY;
+      const els = api.getSceneElements() as any[];
+      for (let i = els.length - 1; i >= 0; i--) {
+        const it = els[i]; const d = it?.customData;
+        if (d?.kind && px >= it.x && px <= it.x + it.width && py >= it.y && py <= it.y + it.height) { e.preventDefault(); e.stopPropagation(); cb(d); return; }
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    el.addEventListener("dblclick", onDbl, { capture: true });
+    return () => { el.removeEventListener("wheel", onWheel, true); el.removeEventListener("dblclick", onDbl, true); };
+  }, []);
+
   if (scene === "loading") {
     return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>กำลังโหลดกระดาน...</div>;
   }
@@ -218,7 +248,7 @@ export function CanvasSketch({
           </span>
         )}
       </div>
-      <div className="rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
+      <div ref={wrapRef} className="rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
         <Excalidraw
           langCode="th-TH"
           viewModeEnabled={!editable}

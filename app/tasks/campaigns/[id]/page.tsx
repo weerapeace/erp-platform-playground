@@ -16,6 +16,7 @@ import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { CampaignDrawer, CAMPAIGN_STATUS } from "../campaign-drawer";
 import { CreateTaskModal, type CreatedTask } from "../../create-task-modal";
+import { SubtaskManager } from "../../subtask-manager";
 import { getCampaign, updateCampaign, type CampaignDetail } from "../../data";
 
 // โหลดของกลาง Excalidraw แบบ dynamic — ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
@@ -26,27 +27,25 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
-// การ์ด SKU บน Excalidraw: รูป(บน) + ข้อความ(ล่าง) ในกล่อง — ใส่ link (ให้คลิกได้) + customData (snapshot สำหรับ drawer)
+// การ์ด SKU บน Excalidraw: รูป(บน) + ข้อความ(ล่าง) ในกล่อง — customData = snapshot สำหรับ drawer (ดับเบิลคลิกการ์ดเปิด)
 function skuCardSkeleton(s: SkuPickerValue): Record<string, unknown>[] {
   const gid = `sku-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
-  const link = `https://card.local/sku/${s.id}`;
   const data = { kind: "sku", id: s.id, code: s.code, name: s.name, color: s.color ?? null, price: s.list_price ?? null, image_url: s.image_url ?? null };
   const hasImg = !!s.image_url;
   const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = hasImg ? imgH + 86 : 96;
   const priceLine = [s.color, s.list_price != null ? `${Number(s.list_price).toLocaleString()}฿` : null].filter(Boolean).join("  ·  ");
   const text = [`📦 ${s.code}`, s.name, priceLine].filter(Boolean).join("\n");
   const els: Record<string, unknown>[] = [
-    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#7c3aed", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], link, customData: data },
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#7c3aed", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
   ];
-  if (hasImg) els.push({ type: "image", _imageUrl: s.image_url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], link, customData: data });
-  els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#1e293b", groupIds: [gid], link, customData: data });
+  if (hasImg) els.push({ type: "image", _imageUrl: s.image_url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
+  els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#1e293b", groupIds: [gid], customData: data });
   return els;
 }
 
-// การ์ดงานบน Excalidraw: ชื่อ + รายการ subtask (snapshot) — link + customData
+// การ์ดงานบน Excalidraw: ชื่อ + รายการ subtask (snapshot) — customData (ดับเบิลคลิกการ์ดเปิด drawer จัดการสด)
 function taskCardSkeleton(t: CreatedTask): Record<string, unknown>[] {
   const gid = `task-${t.id}-${Math.random().toString(36).slice(2, 7)}`;
-  const link = `https://card.local/task/${t.id}`;
   const data = { kind: "task", id: t.id, task_no: t.task_no, title: t.title, subtasks: t.subtasks };
   const shown = t.subtasks.slice(0, 6);
   const subLines = t.subtasks.length
@@ -55,8 +54,8 @@ function taskCardSkeleton(t: CreatedTask): Record<string, unknown>[] {
   const text = `✅ ${t.title}\n${t.task_no}\n\nงานย่อย (${t.subtasks.length})\n${subLines}`;
   const W = 260, H = 96 + (Math.max(shown.length, 1) + (t.subtasks.length > 6 ? 1 : 0)) * 19;
   return [
-    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#f5f3ff", strokeColor: "#8b5cf6", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], link, customData: data },
-    { type: "text", x: 14, y: 14, width: W - 28, text, fontSize: 14, strokeColor: "#5b21b6", groupIds: [gid], link, customData: data },
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#f5f3ff", strokeColor: "#8b5cf6", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+    { type: "text", x: 14, y: 14, width: W - 28, text, fontSize: 14, strokeColor: "#5b21b6", groupIds: [gid], customData: data },
   ];
 }
 
@@ -121,7 +120,7 @@ export default function CampaignCanvasPage() {
 
       <div className="px-8 py-6">
         <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} />
-        <p className="text-xs text-slate-400 mt-2">🗂 Section = เฟรมแบบ Miro · 📦 SKU Card / ✅ Task Card กดที่ไอคอน 🔗 บนการ์ดเพื่อดูรายละเอียด · กระดานบันทึกอัตโนมัติ</p>
+        <p className="text-xs text-slate-400 mt-2">🗂 Section = เฟรมแบบ Miro · 📦 SKU / ✅ Task Card → <b>ดับเบิลคลิกการ์ด</b>เพื่อดู/จัดการ · ล้อเมาส์ = ซูม (shift+ล้อ = เลื่อน) · บันทึกอัตโนมัติ</p>
       </div>
 
       {/* เลือก SKU จริง → วางการ์ดลงกระดาน */}
@@ -134,7 +133,7 @@ export default function CampaignCanvasPage() {
       </ERPModal>
 
       {skuView && <SkuDrawer data={skuView} onClose={() => setSkuView(null)} />}
-      {taskView && <TaskCardDrawer data={taskView} onClose={() => setTaskView(null)} />}
+      {taskView && <TaskCardDrawer data={taskView} onClose={() => setTaskView(null)} pushToast={pushToast} />}
 
       {/* สร้างงานจริง (ฟอร์มเดียวกับหน้างาน) — ล็อกแคมเปญนี้ → วางการ์ดงานบนกระดาน */}
       <CreateTaskModal open={taskOpen} onClose={() => setTaskOpen(false)} pushToast={pushToast} lockedCampaignId={id} lockedCampaignLabel={name} onCreated={onTaskCreated} />
@@ -186,16 +185,15 @@ function SkuDrawer({ data, onClose }: { data: Record<string, unknown>; onClose: 
   );
 }
 
-// Drawer การ์ดงาน (snapshot subtask) + ลิงก์ไปจัดการงานเต็มที่หน้างาน
-function TaskCardDrawer({ data, onClose }: { data: Record<string, unknown>; onClose: () => void }) {
+// Drawer การ์ดงาน — จัดการ subtask สดได้ในหน้านี้เลย + ลิงก์ไปงานเต็ม (คอมเมนต์/ไฟล์/สถานะ)
+function TaskCardDrawer({ data, onClose, pushToast }: { data: Record<string, unknown>; onClose: () => void; pushToast: (type: "success" | "error" | "info", m: string) => void }) {
   const id = String(data.id ?? "");
   const taskNo = String(data.task_no ?? "");
   const title = String(data.title ?? "");
-  const subs = Array.isArray(data.subtasks) ? (data.subtasks as { title: string }[]) : [];
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[420px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <div className="fixed right-0 top-0 h-full w-[440px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-900 truncate">✅ {title || "งาน"}</h3>
@@ -204,16 +202,9 @@ function TaskCardDrawer({ data, onClose }: { data: Record<string, unknown>; onCl
           <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">งานย่อย ({subs.length})</p>
-            {subs.length === 0 ? <p className="text-sm text-slate-400 italic">ยังไม่มีงานย่อย</p> : (
-              <div className="space-y-1.5">
-                {subs.map((s, i) => <div key={i} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700"><span className="text-slate-300">☐</span>{s.title}</div>)}
-              </div>
-            )}
-          </div>
-          <a href={`/tasks?task=${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer" className="block text-center h-10 leading-10 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700">เปิดงานเต็ม (จัดการ/อัปเดต subtask) →</a>
-          <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-3">* รายการงานย่อยบนการ์ดเป็น snapshot ตอนสร้าง — อัปเดตล่าสุดดู/แก้ได้ที่ &quot;เปิดงานเต็ม&quot;</p>
+          {/* จัดการงานย่อยแบบสด (ติ๊กเสร็จ/เพิ่ม/แก้คน) */}
+          <SubtaskManager taskId={id} pushToast={pushToast} />
+          <a href={`/tasks?task=${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer" className="block text-center h-10 leading-10 rounded-lg border border-violet-200 text-violet-700 text-sm font-medium hover:bg-violet-50">เปิดงานเต็ม (คอมเมนต์ / ไฟล์ / เปลี่ยนสถานะ) →</a>
         </div>
       </div>
     </>

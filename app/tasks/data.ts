@@ -157,6 +157,10 @@ export async function deleteTask(id: string): Promise<void> {
 }
 
 // ---- Subtasks ----
+export async function listSubtasks(taskId: string): Promise<CreativeSubtask[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`));
+  return (j.data as CreativeSubtask[]) ?? [];
+}
 export async function addSubtask(taskId: string, body: { title: string; description?: string | null; assignee_ids?: string[]; due_date?: string | null; required_before_next?: boolean }): Promise<CreativeSubtask> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`, { method: "POST", body: JSON.stringify(body) }));
   return j.data as CreativeSubtask;
