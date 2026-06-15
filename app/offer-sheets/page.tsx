@@ -15,9 +15,11 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import {
-  SkuPicker, type SkuPickerValue,
+  type SkuPickerValue,
   CustomerPicker, type CustomerPickerValue,
 } from "@/components/pickers";
+import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
+import { exportTable } from "@/lib/export";
 import type { OfferItem, OfferListItem } from "@/app/api/offer-sheets/route";
 
 // ============================================================
@@ -194,7 +196,7 @@ function OfferEditor({ id, canEdit, onBack }: {
   canEdit: boolean;
   onBack: () => void;
 }) {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const [loading, setLoading] = useState(!!id);
   const [saving, setSaving] = useState(false);
 
@@ -204,6 +206,10 @@ function OfferEditor({ id, canEdit, onBack }: {
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("draft");
   const [items, setItems] = useState<OfferItem[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [offerNo, setOfferNo] = useState<string | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   // โหลดใบเดิม
   useEffect(() => {
@@ -219,24 +225,77 @@ function OfferEditor({ id, canEdit, onBack }: {
       setNote(d.note ?? "");
       setStatus(d.status ?? "draft");
       setItems((d.items ?? []) as OfferItem[]);
+      setShareToken(d.share_token ?? null);
+      setOfferNo(d.offer_no ?? null);
       if (d.customer_id) setCustomer({ id: d.customer_id, code: null, name: d.customer_name ?? "" });
       setLoading(false);
     })();
     return () => { alive = false; };
   }, [id]);
 
-  const addSku = (sku: SkuPickerValue | null) => {
-    if (!sku) return;
-    setItems((prev) => [...prev, {
-      sku_id: sku.id, sku_code: sku.code, name: sku.name,
-      image_r2_key: sku.image_key ?? null, uom_name: sku.uom_name ?? null,
-      unit_price: Number(sku.list_price ?? 0), qty: 1, note: null, sort_order: prev.length,
-    }]);
+  // เพิ่มหลายตัวจาก popup — ข้ามตัวที่มีอยู่แล้ว (กันซ้ำ)
+  const addSkus = (skus: SkuPickerValue[]) => {
+    setItems((prev) => {
+      const have = new Set(prev.map((it) => it.sku_id));
+      const fresh = skus.filter((s) => !have.has(s.id)).map((sku, k) => ({
+        sku_id: sku.id, sku_code: sku.code, name: sku.name,
+        image_r2_key: sku.image_key ?? null, uom_name: sku.uom_name ?? null,
+        unit_price: Number(sku.list_price ?? 0), qty: 1, note: null, sort_order: prev.length + k,
+      }));
+      return [...prev, ...fresh];
+    });
   };
 
   const patchItem = (i: number, patch: Partial<OfferItem>) =>
     setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   const removeItem = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+
+  // ลากจัดลำดับแถว
+  const onDrop = (target: number) => {
+    setItems((prev) => {
+      if (dragIdx === null || dragIdx === target) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(dragIdx, 1);
+      next.splice(target, 0, moved);
+      return next.map((it, k) => ({ ...it, sort_order: k }));
+    });
+    setDragIdx(null);
+  };
+
+  // ลิงก์แชร์สาธารณะ
+  const shareUrl = shareToken && typeof window !== "undefined" ? `${window.location.origin}/offer/${shareToken}` : null;
+  const copyLink = async () => {
+    if (!shareUrl) return;
+    try { await navigator.clipboard.writeText(shareUrl); alert("คัดลอกลิงก์แล้ว ✓\n" + shareUrl); }
+    catch { prompt("คัดลอกลิงก์นี้:", shareUrl); }
+  };
+  const shareLine = () => { if (shareUrl) window.open(`https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(shareUrl)}`, "_blank"); };
+  const printPdf = () => { if (shareToken) window.open(`/offer/${shareToken}?print=1`, "_blank"); };
+
+  // ดาวน์โหลด Excel
+  const exportExcel = async () => {
+    await exportTable({
+      format: "excel",
+      filename: `offer-${offerNo ?? "draft"}`,
+      rows: items.map((it) => ({
+        sku_code: it.sku_code, name: it.name, uom_name: it.uom_name,
+        qty: it.qty, unit_price: it.unit_price,
+        line_total: Number(it.unit_price || 0) * Number(it.qty || 0),
+        note: it.note,
+      })),
+      columns: [
+        { key: "sku_code", header: "รหัส SKU" },
+        { key: "name", header: "ชื่อสินค้า" },
+        { key: "uom_name", header: "หน่วย" },
+        { key: "qty", header: "จำนวน" },
+        { key: "unit_price", header: "ราคา/หน่วย" },
+        { key: "line_total", header: "รวม" },
+        { key: "note", header: "หมายเหตุ" },
+      ],
+      context: { entityType: "offer_sheets", mode: "visible", totalRows: items.length },
+      can: (p: string) => can(p as Parameters<typeof can>[0]),
+    });
+  };
 
   const grandTotal = items.reduce((s, it) => s + Number(it.unit_price || 0) * Number(it.qty || 0), 0);
 
@@ -260,15 +319,30 @@ function OfferEditor({ id, canEdit, onBack }: {
   return (
     <div className="max-w-5xl mx-auto p-5 sm:p-8">
       {/* แถบบน */}
-      <div className="flex items-center justify-between gap-3 mb-5">
+      <div className="flex items-center justify-between gap-2 mb-5 flex-wrap">
         <button onClick={onBack} className="text-rose-500 hover:text-rose-600 text-sm font-medium">← กลับ</button>
-        {canEdit && (
-          <button onClick={save} disabled={saving}
-            className="h-11 px-6 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold shadow-lg shadow-pink-200 hover:from-pink-600 hover:to-rose-600 disabled:opacity-50 transition">
-            {saving ? "กำลังบันทึก…" : "💾 บันทึก"}
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {items.length > 0 && (
+            <button onClick={exportExcel} className="h-10 px-4 rounded-full border border-pink-200 bg-white text-rose-500 text-sm font-medium hover:bg-pink-50">📊 Excel</button>
+          )}
+          {shareToken && (
+            <>
+              <button onClick={printPdf} className="h-10 px-4 rounded-full border border-pink-200 bg-white text-rose-500 text-sm font-medium hover:bg-pink-50">🖨️ พิมพ์ PDF</button>
+              <button onClick={copyLink} className="h-10 px-4 rounded-full border border-pink-200 bg-white text-rose-500 text-sm font-medium hover:bg-pink-50">🔗 คัดลอกลิงก์</button>
+              <button onClick={shareLine} className="h-10 px-4 rounded-full bg-[#06C755] text-white text-sm font-medium hover:brightness-95">แชร์ไลน์</button>
+            </>
+          )}
+          {canEdit && (
+            <button onClick={save} disabled={saving}
+              className="h-10 px-6 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white font-semibold shadow-lg shadow-pink-200 hover:from-pink-600 hover:to-rose-600 disabled:opacity-50 transition">
+              {saving ? "กำลังบันทึก…" : "💾 บันทึก"}
+            </button>
+          )}
+        </div>
       </div>
+      {!shareToken && canEdit && (
+        <p className="text-xs text-rose-300 mb-3 -mt-2">💡 บันทึกก่อน แล้วปุ่มพิมพ์ / แชร์ลิงก์ จะใช้งานได้</p>
+      )}
 
       {/* หัวเอกสาร */}
       <div className="bg-white rounded-2xl border border-pink-100 shadow-sm p-5 sm:p-6 mb-5">
@@ -305,20 +379,32 @@ function OfferEditor({ id, canEdit, onBack }: {
       <div className="bg-white rounded-2xl border border-pink-100 shadow-sm p-5 sm:p-6">
         <div className="flex items-center justify-between gap-3 mb-4">
           <h2 className="text-lg font-bold text-rose-600 flex items-center gap-2">🛍️ รายการสินค้า</h2>
-          <div className="w-72">
-            {canEdit && <SkuPicker value={null} onChange={addSku} salesOnly placeholder="+ เพิ่มสินค้า (ค้นหา SKU)" />}
-          </div>
+          {canEdit && (
+            <button onClick={() => setPickerOpen(true)}
+              className="h-10 px-5 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 text-white text-sm font-semibold shadow shadow-pink-200 hover:from-pink-600 hover:to-rose-600">
+              + เพิ่มสินค้า
+            </button>
+          )}
         </div>
+
+        <SkuMultiPickerModal
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onConfirm={addSkus}
+          salesOnly
+          excludeIds={items.map((it) => it.sku_id).filter((x): x is string => !!x)}
+        />
 
         {items.length === 0 ? (
           <div className="py-10 text-center text-pink-300 text-sm">
-            ยังไม่มีสินค้า — ค้นหาแล้วเลือกจากช่อง “เพิ่มสินค้า” ด้านบน
+            ยังไม่มีสินค้า — กดปุ่ม “เพิ่มสินค้า” เพื่อเลือกหลายรายการพร้อมกัน
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-pink-50 text-rose-500 text-left">
+                  <th className="px-1 py-2 w-6"></th>
                   <th className="px-3 py-2 font-semibold">สินค้า</th>
                   <th className="px-3 py-2 font-semibold text-center w-20">หน่วย</th>
                   <th className="px-3 py-2 font-semibold text-center w-24">จำนวน</th>
@@ -329,11 +415,17 @@ function OfferEditor({ id, canEdit, onBack }: {
               </thead>
               <tbody>
                 {items.map((it, i) => (
-                  <tr key={i} className="border-t border-pink-50">
+                  <tr key={i} className={`border-t border-pink-50 ${dragIdx === i ? "opacity-40" : ""}`}
+                    onDragOver={(e) => e.preventDefault()} onDrop={() => onDrop(i)}>
+                    <td className="px-1 py-2 text-center">
+                      <span draggable onDragStart={() => setDragIdx(i)} onDragEnd={() => setDragIdx(null)}
+                        className="cursor-grab active:cursor-grabbing text-pink-300 hover:text-pink-500 select-none" title="ลากเพื่อจัดลำดับ">⠿</span>
+                    </td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2.5">
                         {imgUrl(it.image_r2_key)
-                          ? <img src={imgUrl(it.image_r2_key)!} alt="" className="w-10 h-10 rounded-lg object-cover border border-pink-100 flex-shrink-0" />
+                          ? <img src={imgUrl(it.image_r2_key)!} alt="" className="w-10 h-10 rounded-lg object-cover border border-pink-100 flex-shrink-0"
+                              onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.onerror = null; t.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' rx='8' fill='%23fce7f3'/><text x='20' y='26' font-size='18' text-anchor='middle'>🖼️</text></svg>"; }} />
                           : <div className="w-10 h-10 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200 flex-shrink-0">🖼️</div>}
                         <div className="min-w-0">
                           <div className="font-medium text-slate-700 truncate">{it.name}</div>
@@ -361,7 +453,7 @@ function OfferEditor({ id, canEdit, onBack }: {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-pink-100">
-                  <td colSpan={4} className="px-3 py-3 text-right font-semibold text-slate-500">ยอดรวมทั้งหมด</td>
+                  <td colSpan={5} className="px-3 py-3 text-right font-semibold text-slate-500">ยอดรวมทั้งหมด</td>
                   <td className="px-3 py-3 text-right text-lg font-bold text-rose-600">{money(grandTotal)}</td>
                   <td></td>
                 </tr>
