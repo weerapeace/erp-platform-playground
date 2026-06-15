@@ -19,7 +19,7 @@ import { ERPModal } from "@/components/modal";
 import { DataTable } from "@/components/data-table";
 import { apiFetch } from "@/lib/api";
 import { internalEmail, isValidUsername, isValidPin } from "@/lib/internal-users";
-import { EmployeePicker, type EmployeePickerValue } from "@/components/pickers";
+import { RealEmployeePicker, type EmployeePickerValue } from "@/components/real-employee-picker";
 import type { AdminUser, AdminUsersResponse } from "@/app/api/admin/users/route";
 import type { PermCatalogItem, UserOverride } from "@/app/api/admin/user-permissions/route";
 
@@ -602,7 +602,7 @@ export default function AdminUsersPage() {
             {/* เชื่อมพนักงาน (HR) */}
             <label className="block">
               <span className="text-xs font-medium text-slate-600">🔗 เชื่อมพนักงาน</span>
-              <div className="mt-0.5"><EmployeePicker value={linkEmp} onChange={(v) => void saveLink(v)} disabled={linkBusy} placeholder="เลือกพนักงาน (เว้นว่าง = ไม่เชื่อม)" /></div>
+              <div className="mt-0.5"><RealEmployeePicker value={linkEmp} onChange={(v) => void saveLink(v)} disabled={linkBusy} disableCreate placeholder="เลือกพนักงาน (เว้นว่าง = ไม่เชื่อม)" /></div>
             </label>
 
             {/* ตั้งรหัสผ่าน/PIN ใหม่ */}
