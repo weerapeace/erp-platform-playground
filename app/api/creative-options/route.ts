@@ -19,7 +19,7 @@ export const revalidate = 0;
 // เพื่อให้ use-options / หน้า settings เดิมใช้งานต่อได้โดยไม่ต้องแก้
 export const KIND_TABLE: Record<string, string> = { task_type: "erp_task_types", platform: "erp_platforms" };
 const KINDS = new Set(Object.keys(KIND_TABLE));
-const mapRow = (r: Record<string, unknown>, kind: string) => ({ id: r.id, kind, key: r.code, label: r.name_th, sort_order: r.sort_order, is_active: r.is_active });
+const mapRow = (r: Record<string, unknown>, kind: string) => ({ id: r.id, kind, key: r.code, label: r.name_th, label_en: r.name_en ?? null, sort_order: r.sort_order, is_active: r.is_active });
 
 function deriveKey(label: string): string {
   const base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const out: Record<string, unknown>[] = [];
   for (const k of kinds) {
     const table = KIND_TABLE[k]; if (!table) continue;
-    const { data, error } = await admin.from(table).select("id, code, name_th, sort_order, is_active").eq("is_active", true).order("sort_order", { ascending: true });
+    const { data, error } = await admin.from(table).select("id, code, name_th, name_en, sort_order, is_active").eq("is_active", true).order("sort_order", { ascending: true });
     if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
     for (const r of (data ?? []) as Record<string, unknown>[]) out.push(mapRow(r, k));
   }

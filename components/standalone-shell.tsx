@@ -15,6 +15,7 @@ import Link from "next/link";
 import { Logo, BRAND } from "@/components/brand";
 import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
+import { LangToggle } from "@/components/i18n";
 import { useAuth, roleLabel } from "@/components/auth";
 
 export function StandaloneShell({
@@ -57,6 +58,7 @@ export function StandaloneShell({
           </button>
 
           <div className="ml-auto flex items-center gap-2">
+            <LangToggle />
             <NotificationBell />
             {user && (
               <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200">

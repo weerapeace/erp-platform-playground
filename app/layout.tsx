@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/auth";
 import { ToastProvider } from "@/components/toast";
+import { LanguageProvider } from "@/components/i18n";
 import { BRAND } from "@/components/brand";
 
 export const metadata: Metadata = {
@@ -39,7 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="th">
       <body className="bg-slate-50 text-slate-900 antialiased">
-        <AuthProvider><ToastProvider>{children}</ToastProvider></AuthProvider>
+        <AuthProvider><LanguageProvider><ToastProvider>{children}</ToastProvider></LanguageProvider></AuthProvider>
       </body>
     </html>
   );

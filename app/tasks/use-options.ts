@@ -1,25 +1,31 @@
 // ============================================================
-// ตัวเลือกที่ผู้ใช้จัดการได้ (ประเภทงาน/แพลตฟอร์ม) — โหลดจาก DB, มี fallback เป็นค่าในโค้ด
+// ตัวเลือกที่ผู้ใช้จัดการได้ (ประเภทงาน/แพลตฟอร์ม) — โหลดจาก DB (ตารางจริง), มี fallback ในโค้ด
+// รองรับ 2 ภาษา: label (ไทย) / label_en (อังกฤษ) — สลับตาม lang ปัจจุบัน
 // label registry (singleton) ให้ cell ที่อยู่นอก component อ่านชื่อจาก key ได้
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { TASK_TYPES, PLATFORMS } from "@/lib/creative-tasks";
+import { getLang, subscribeLang } from "@/lib/lang";
 
-export type Option = { id: string; kind: string; key: string; label: string; sort_order: number; is_active?: boolean };
+export type Option = { id: string; kind: string; key: string; label: string; label_en?: string | null; sort_order: number; is_active?: boolean };
 export type OptItem = { value: string; label: string };
 
-// label maps (อัปเดตเมื่อโหลด DB เสร็จ) — เริ่มจากค่า fallback ในโค้ด
+// label maps แยกภาษา (อัปเดตเมื่อโหลด DB เสร็จ) — เริ่มจากค่า fallback ในโค้ด (ไทย; en ใช้ไทยไปก่อน)
 let taskTypeMap: Record<string, string> = Object.fromEntries(TASK_TYPES.map((t) => [t.value, t.label]));
+let taskTypeMapEn: Record<string, string> = { ...taskTypeMap };
 let platformMap: Record<string, string> = Object.fromEntries(PLATFORMS.map((p) => [p.value, p.label]));
-export const taskTypeLabel = (k?: string | null): string => (k ? (taskTypeMap[k] ?? k) : "");
-export const platformLabel = (k?: string | null): string => (k ? (platformMap[k] ?? k) : "");
+let platformMapEn: Record<string, string> = { ...platformMap };
+const pick = (th: Record<string, string>, en: Record<string, string>, k: string) => (getLang() === "en" ? (en[k] ?? th[k]) : th[k]);
+export const taskTypeLabel = (k?: string | null): string => (k ? (pick(taskTypeMap, taskTypeMapEn, k) ?? k) : "");
+export const platformLabel = (k?: string | null): string => (k ? (pick(platformMap, platformMapEn, k) ?? k) : "");
 
-/** โหลดตัวเลือกทั้งสองชนิดสำหรับใช้ในฟอร์ม + อัปเดต label registry */
+/** โหลดตัวเลือกทั้งสองชนิดสำหรับใช้ในฟอร์ม + อัปเดต label registry (สลับภาษาได้สด) */
 export function useCreativeOptions() {
-  const [taskTypes, setTaskTypes] = useState<OptItem[]>(TASK_TYPES);
-  const [platforms, setPlatforms] = useState<OptItem[]>(PLATFORMS);
+  const [raw, setRaw] = useState<Option[]>([]);
+  const [lang, setLangState] = useState(getLang());
   const [loading, setLoading] = useState(true);
+  useEffect(() => subscribeLang(setLangState), []);
 
   const reload = useCallback(async () => {
     try {
@@ -27,16 +33,25 @@ export function useCreativeOptions() {
       const j = await res.json();
       if (j.error) throw new Error(j.error);
       const opts = (j.data as Option[]) ?? [];
-      const tt = opts.filter((o) => o.kind === "task_type").map((o) => ({ value: o.key, label: o.label }));
-      const pf = opts.filter((o) => o.kind === "platform").map((o) => ({ value: o.key, label: o.label }));
-      if (tt.length) { setTaskTypes(tt); taskTypeMap = Object.fromEntries(tt.map((o) => [o.value, o.label])); }
-      if (pf.length) { setPlatforms(pf); platformMap = Object.fromEntries(pf.map((o) => [o.value, o.label])); }
+      setRaw(opts);
+      const tt = opts.filter((o) => o.kind === "task_type");
+      const pf = opts.filter((o) => o.kind === "platform");
+      if (tt.length) { taskTypeMap = Object.fromEntries(tt.map((o) => [o.key, o.label])); taskTypeMapEn = Object.fromEntries(tt.map((o) => [o.key, o.label_en || o.label])); }
+      if (pf.length) { platformMap = Object.fromEntries(pf.map((o) => [o.key, o.label])); platformMapEn = Object.fromEntries(pf.map((o) => [o.key, o.label_en || o.label])); }
     } catch { /* คงค่า fallback */ }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { reload(); }, [reload]);
 
-  return { taskTypes, platforms, loading, reload };
+  const labelOf = (o: Option) => (lang === "en" ? (o.label_en || o.label) : o.label);
+  const taskTypes = raw.filter((o) => o.kind === "task_type").map((o) => ({ value: o.key, label: labelOf(o) }));
+  const platforms = raw.filter((o) => o.kind === "platform").map((o) => ({ value: o.key, label: labelOf(o) }));
+
+  return {
+    taskTypes: taskTypes.length ? taskTypes : TASK_TYPES,
+    platforms: platforms.length ? platforms : PLATFORMS,
+    loading, reload,
+  };
 }
 
 // ---- API client (สำหรับหน้าจัดการใน Settings) ----

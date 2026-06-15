@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
+import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
@@ -101,6 +102,7 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
 // ============================================================
 export default function TasksPage() {
   const { user } = useAuth();
+  const t = useT();
   const { statuses } = useCreativeStatuses();
   const [tasks, setTasks] = useState<CreativeTask[]>([]);
   const [myTasks, setMyTasks] = useState<CreativeTask[]>([]);
@@ -185,35 +187,35 @@ export default function TasksPage() {
   const onDelete = async (id: string) => { try { await deleteTask(id); pushToast("info", "ลบงานแล้ว"); setDetailId(null); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   return (
-    <StandaloneShell title="งาน Creative (Task Manager)" icon="🎨" accent="violet">
+    <StandaloneShell title={t("งาน Creative (Task Manager)", "Creative Tasks")} icon="🎨" accent="violet">
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">งาน Creative</h1>
-            <p className="text-slate-500 mt-1">ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t("งาน Creative", "Creative Tasks")}</h1>
+            <p className="text-slate-500 mt-1">{t("ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ", "Photo · Retouch · Banner · Video · Listing · Social — central table · workflow · approval")}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <a href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 แคมเปญ</a>
-            <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 คอนเทนต์</a>
-            <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔁 เทมเพลต</a>
-            {user?.role === "admin" && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title="ตั้งค่าสิทธิ์">⚙️</a>}
-            <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ สร้างงาน</button>
+            <a href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 {t("แคมเปญ", "Campaigns")}</a>
+            <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 {t("คอนเทนต์", "Content")}</a>
+            <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔁 {t("เทมเพลต", "Templates")}</a>
+            {user?.role === "admin" && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}>⚙️</a>}
+            <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
           </div>
         </div>
         <div className="flex gap-3 mt-4">
-          <StatChip label="งานทั้งหมด" value={counts.total} />
-          <StatChip label="งานของฉัน" value={counts.mine} tone="violet" />
-          <StatChip label="รอตรวจ" value={counts.review} tone="amber" />
-          <StatChip label="เกินกำหนด" value={counts.overdue} tone="red" />
+          <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} />
+          <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" />
+          <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" />
+          <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" />
         </div>
       </div>
 
       <div className="px-8 py-6 space-y-5">
         {/* View toggle */}
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-          <ViewToggleBtn active={view === "queue"} onClick={() => setView("queue")} icon="🙋" label="คิวงานของฉัน" />
-          <ViewToggleBtn active={view === "table"} onClick={() => setView("table")} icon="📋" label="ตาราง" />
+          <ViewToggleBtn active={view === "queue"} onClick={() => setView("queue")} icon="🙋" label={t("คิวงานของฉัน", "My queue")} />
+          <ViewToggleBtn active={view === "table"} onClick={() => setView("table")} icon="📋" label={t("ตาราง", "Table")} />
           <ViewToggleBtn active={view === "kanban"} onClick={() => setView("kanban")} icon="🟦" label="Kanban" />
           <ViewToggleBtn active={view === "canvas"} onClick={() => setView("canvas")} icon="🟪" label="Canvas" />
         </div>
@@ -228,10 +230,10 @@ export default function TasksPage() {
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                 <DataTable<CreativeTask>
                   data={tasks} columns={COLUMNS}
-                  title={`รายการงาน (${tasks.length})`}
-                  description="คลิกที่งานเพื่อดูรายละเอียด · ตารางกลางตัวเดียวกับทุกโมดูล"
-                  emptyMessage="ยังไม่มีงาน — กดปุ่ม สร้างงาน"
-                  searchPlaceholder="ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ..."
+                  title={`${t("รายการงาน", "Tasks")} (${tasks.length})`}
+                  description={t("คลิกที่งานเพื่อดูรายละเอียด · ตารางกลางตัวเดียวกับทุกโมดูล", "Click a row to view details · shared table used across modules")}
+                  emptyMessage={t("ยังไม่มีงาน — กดปุ่ม สร้างงาน", "No tasks yet — click New task")}
+                  searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
                   searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
                   views={VIEWS} tableId="creative-tasks" exportFilename="งาน-creative"
                   enableCards
