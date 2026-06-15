@@ -17,7 +17,7 @@ import { employeeLabelMap } from "@/lib/creative-tasks-server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["name", "brand_id", "objective", "status", "start_date", "end_date", "owner_id", "note"]);
+const EDITABLE = new Set(["name", "brand_id", "objective", "status", "start_date", "end_date", "owner_id", "note", "detail_html"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     objective: (c.objective as string) ?? null, status: String(c.status ?? "active"),
     start_date: (c.start_date as string) ?? null, end_date: (c.end_date as string) ?? null,
     owner_id: (c.owner_id as string) ?? null, owner_label: ownerMap.get(String(c.owner_id)) ?? null,
-    note: (c.note as string) ?? null, is_active: !!c.is_active,
+    note: (c.note as string) ?? null, detail_html: (c.detail_html as string) ?? null, is_active: !!c.is_active,
   };
   return NextResponse.json({ data: { campaign, tasks, summary, task_count: tasks.length }, error: null });
 }

@@ -6,10 +6,14 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { STATUS_META, getCampaign, updateCampaign, deleteTask, type CampaignDetail, type CreativeStatus, type CreativeTask } from "../data";
+import { STATUS_META, getCampaign, updateCampaign, deleteTask, listBrands, type CampaignDetail, type CreativeStatus, type CreativeTask, type BrandOption } from "../data";
 import { TaskDetailDrawer } from "../task-detail-drawer";
 import { applyTaskTransition } from "../task-actions";
 import { useRefetchOnFocus } from "@/lib/use-refetch-on-focus";
+import { ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
+import { UserPicker } from "@/components/pickers";
+import type { UserPickerValue } from "@/components/pickers";
+import { RichTextEditor } from "@/components/rich-text";
 
 export const CAMPAIGN_STATUS: { value: string; label: string; cls: string }[] = [
   { value: "planning", label: "วางแผน", cls: "bg-sky-50 text-sky-700 border-sky-200" },
@@ -23,9 +27,25 @@ type ToastType = "success" | "error" | "info";
 export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { campaignId: string; onClose: () => void; onChanged?: () => void; pushToast: (type: ToastType, m: string) => void }) {
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null); // งานที่กดเปิด (งานเต็มทับขึ้นมา)
+  const [editing, setEditing] = useState(false);
+  const [ef, setEf] = useState<{ name: string; brand_id: string; owner: UserPickerValue | null; start_date: string; end_date: string; objective: string; detail_html: string } | null>(null);
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { setDetail(await getCampaign(campaignId)); } catch (e) { pushToast("error", (e as Error).message); } }, [campaignId, pushToast]);
   useEffect(() => { load(); }, [load]);
   useRefetchOnFocus(load); // กลับมาที่แท็บ → โหลดงานในแคมเปญใหม่
+
+  const startEdit = async () => {
+    const c = detail?.campaign; if (!c) return;
+    if (!brands.length) { try { setBrands(await listBrands()); } catch { /* ignore */ } }
+    setEf({ name: c.name, brand_id: c.brand_id ?? "", owner: c.owner_id ? ({ id: c.owner_id, name: c.owner_label ?? "" } as UserPickerValue) : null, start_date: c.start_date ?? "", end_date: c.end_date ?? "", objective: c.objective ?? "", detail_html: c.detail_html ?? "" });
+    setEditing(true);
+  };
+  const saveEdit = async () => {
+    if (!ef) return; setBusy(true);
+    try { await updateCampaign(campaignId, { name: ef.name.trim(), brand_id: ef.brand_id || null, owner_id: ef.owner?.id ?? null, start_date: ef.start_date || null, end_date: ef.end_date || null, objective: ef.objective.trim() || null, detail_html: ef.detail_html || null }); setEditing(false); await load(); onChanged?.(); pushToast("success", "บันทึกแล้ว"); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
 
   const moveTask = async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); };
   const removeTask = async (tid: string) => { try { await deleteTask(tid); pushToast("info", "ลบงานแล้ว"); setTaskId(null); await load(); onChanged?.(); } catch (e) { pushToast("error", (e as Error).message); } };
@@ -47,9 +67,31 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 <h3 className="text-base font-semibold text-slate-900 truncate">{detail.campaign.name}</h3>
                 <span className="text-xs text-slate-500">{detail.task_count} งานในแคมเปญ</span>
               </div>
-              <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+              <div className="flex items-center gap-1">
+                {!editing && <button onClick={startEdit} className="h-8 px-2.5 flex items-center gap-1 rounded-md text-sm text-slate-600 hover:text-violet-700 hover:bg-violet-50 border border-slate-200">✏️ แก้ไข</button>}
+                <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              {editing && ef ? (
+                /* ---- โหมดแก้ไข ---- */
+                <div className="space-y-3">
+                  <div><label className="text-xs text-slate-400">ชื่อแคมเปญ</label><ERPInput value={ef.name} onChange={(e) => setEf({ ...ef, name: e.target.value })} /></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-xs text-slate-400">แบรนด์</label><ERPSelect value={ef.brand_id} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} placeholder="— ไม่ระบุ —" options={brands.map((b) => ({ value: b.id, label: b.name }))} /></div>
+                    <div><label className="text-xs text-slate-400">ผู้ดูแล</label><UserPicker value={ef.owner} onChange={(v) => setEf({ ...ef, owner: v })} disableCreate /></div>
+                    <div><label className="text-xs text-slate-400">เริ่ม</label><ERPInput type="date" value={ef.start_date} onChange={(e) => setEf({ ...ef, start_date: e.target.value })} /></div>
+                    <div><label className="text-xs text-slate-400">สิ้นสุด</label><ERPInput type="date" value={ef.end_date} onChange={(e) => setEf({ ...ef, end_date: e.target.value })} /></div>
+                  </div>
+                  <div><label className="text-xs text-slate-400">วัตถุประสงค์</label><ERPTextarea rows={2} value={ef.objective} onChange={(e) => setEf({ ...ef, objective: e.target.value })} /></div>
+                  <div><label className="text-xs text-slate-400 mb-1 block">รายละเอียด (จัดรูปแบบได้)</label><RichTextEditor value={ef.detail_html} onChange={(html) => setEf({ ...ef, detail_html: html })} placeholder="พิมพ์รายละเอียดแคมเปญ ใส่หัวข้อ/ลิสต์/ลิงก์ได้..." /></div>
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={saveEdit} disabled={busy} className="px-4 h-9 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-50">{busy ? "กำลังบันทึก..." : "บันทึก"}</button>
+                    <button onClick={() => setEditing(false)} disabled={busy} className="px-4 h-9 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                  </div>
+                </div>
+              ) : (
+              <>
               <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
                 <div><p className="text-xs text-slate-400 mb-0.5">แบรนด์</p><p className="font-medium text-slate-800">{detail.campaign.brand_label || "—"}</p></div>
                 <div><p className="text-xs text-slate-400 mb-0.5">ผู้ดูแล</p><p className="font-medium text-slate-800">{detail.campaign.owner_label || "—"}</p></div>
@@ -62,6 +104,9 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 </div>
               </div>
               {detail.campaign.objective && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">วัตถุประสงค์</p>{detail.campaign.objective}</div>}
+              {detail.campaign.detail_html && <div className="rounded-lg border border-slate-100 p-3"><p className="text-xs text-slate-400 mb-1.5">รายละเอียด</p><RichTextEditor value={detail.campaign.detail_html} onChange={() => {}} editable={false} /></div>}
+              </>
+              )}
 
               {/* status summary */}
               {summaryItems.length > 0 && (
