@@ -14,7 +14,7 @@ import { SkuPicker } from "@/components/pickers";
 import type { SkuPickerValue } from "@/components/pickers";
 import {
   CONTENT_STATUS_META, POST_TYPES,
-  listContent, getContent, createContent, updateContent, deleteContent,
+  listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
   type Campaign, type BrandOption, type Hashtag,
@@ -45,6 +45,9 @@ export default function ContentPage() {
   // create modal
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [templates, setTemplates] = useState<ContentItem[]>([]);
+  const [tplId, setTplId] = useState("");
+  const [tplCaptions, setTplCaptions] = useState<ContentCaption[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
@@ -56,13 +59,19 @@ export default function ContentPage() {
   }, []);
 
   const load = useCallback(async () => { try { setItems(await listContent()); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast]);
-  useEffect(() => { (async () => { setLoading(true); await load(); try { const [b, c] = await Promise.all([listBrands(), listCampaigns()]); setBrands(b); setCampaigns(c); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
+  useEffect(() => { (async () => { setLoading(true); await load(); try { const [b, c, tp] = await Promise.all([listBrands(), listCampaigns(), listContentTemplates()]); setBrands(b); setCampaigns(c); setTemplates(tp); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
   // เปิด drawer คอนเทนต์อัตโนมัติจากลิงก์ /tasks/content?content=<id> (กดมาจากการ์ดบน Canvas)
   useEffect(() => { const cid = new URLSearchParams(window.location.search).get("content"); if (cid) setDetailId(cid); }, []);
 
   const upd = (patch: Partial<typeof EMPTY_FORM>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   const togglePlatform = (v: string) => upd({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
-  const openCreate = () => { setForm(EMPTY_FORM); setDirty(false); setFormErr(null); setOpen(true); };
+  const openCreate = () => { setForm(EMPTY_FORM); setTplId(""); setTplCaptions([]); setDirty(false); setFormErr(null); setOpen(true); };
+  const applyTemplate = async (tid: string) => {
+    setTplId(tid);
+    if (!tid) { setTplCaptions([]); return; }
+    try { const d = await getContent(tid); upd({ post_type: d.post_type ?? "image", platforms: d.platforms ?? [], brand_id: d.brand_id ?? "", note: d.note ?? "" }); setTplCaptions(d.captions ?? []); }
+    catch (e) { pushToast("error", (e as Error).message); }
+  };
 
   const save = async () => {
     if (!form.title.trim()) { setFormErr("กรุณาใส่ชื่อคอนเทนต์"); return; }
@@ -72,6 +81,7 @@ export default function ContentPage() {
         title: form.title.trim(), campaign_id: form.campaign_id || null, brand_id: form.brand_id || null,
         sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null, post_type: form.post_type || null,
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
+        captions: tplCaptions.length ? form.platforms.map((p) => { const c = tplCaptions.find((x) => x.platform === p); return { platform: p, caption: c?.caption ?? null, hashtags: c?.hashtags ?? null, caption_type: c?.caption_type ?? "short" }; }) : undefined,
       });
       setOpen(false); setDirty(false); pushToast("success", `สร้างคอนเทนต์ ${content_no} แล้ว`); await load();
     } catch (e) { setFormErr((e as Error).message); }
@@ -136,6 +146,15 @@ export default function ContentPage() {
           <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "สร้าง"}</button>
         </>}>
         {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
+        {templates.length > 0 && (
+          <div className="mb-4 flex items-center gap-2 bg-violet-50/60 border border-violet-100 rounded-lg px-3 py-2">
+            <span className="text-sm text-slate-600 shrink-0">📋 เริ่มจากเทมเพลต:</span>
+            <select value={tplId} onChange={(e) => applyTemplate(e.target.value)} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
+              <option value="">— ไม่ใช้เทมเพลต —</option>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
+          </div>
+        )}
         <ERPFormSection title="ข้อมูลคอนเทนต์" columns={2}>
           <ERPFormField label="ชื่อคอนเทนต์" required span={2}><ERPInput value={form.title} onChange={(e) => upd({ title: e.target.value })} placeholder="เช่น โปรโมต Heart Bag สีชมพู 7.7" /></ERPFormField>
           <ERPFormField label="ประเภทโพสต์"><ERPSelect value={form.post_type} options={POST_TYPES} onChange={(e) => upd({ post_type: e.target.value })} /></ERPFormField>
@@ -151,7 +170,7 @@ export default function ContentPage() {
         </ERPFormSection>
       </ERPModal>
 
-      {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={load} onDelete={(c) => setDelTarget(c)} pushToast={pushToast} />}
+      {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => { load(); listContentTemplates().then(setTemplates).catch(() => {}); }} onDelete={(c) => setDelTarget(c)} pushToast={pushToast} />}
 
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={onDelete}
         title="ลบคอนเทนต์" message={<span>ต้องการลบ <span className="font-semibold">{delTarget?.title}</span> ใช่ไหม?</span>} confirmText="ลบ" variant="danger" />
@@ -255,6 +274,14 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
     finally { setSaving(false); }
   };
 
+  const saveAsTemplate = async () => {
+    if (!d) return;
+    try {
+      await createContent({ is_template: true, title: `${d.title} (เทมเพลต)`, post_type: d.post_type, platforms: d.platforms ?? [], brand_id: d.brand_id, captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })) });
+      pushToast("success", "บันทึกเป็นเทมเพลตแล้ว ✓ (เลือกใช้ได้ตอนสร้างคอนเทนต์)"); onChanged();
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
+
   if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[640px] max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">กำลังโหลด...</div></>);
 
   return (
@@ -308,7 +335,8 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
           {(status === "published") && <div><label className="text-xs text-slate-400">ลิงก์โพสต์ที่เผยแพร่</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
         </div>
 
-        <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex justify-end gap-2">
+        <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
+          {!d.is_template && <button onClick={saveAsTemplate} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 mr-auto">💾 บันทึกเป็นเทมเพลต</button>}
           <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
           <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         </div>

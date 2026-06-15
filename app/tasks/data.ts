@@ -250,12 +250,12 @@ export type ContentItem = {
   sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_price: number | null; product_name: string | null;
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
-  product_links: { platform: string; url: string }[]; note: string | null; updated_at: string;
+  product_links: { platform: string; url: string }[]; note: string | null; is_template?: boolean; updated_at: string;
 };
 export type ContentDetail = ContentItem & { captions: ContentCaption[] };
 export type Hashtag = { id: string; text: string; brand_id: string | null; category: string; platform: string | null; usage_count: number; status: string };
 
-export type ContentListParams = { search?: string; status?: string; campaign_id?: string; brand_id?: string; platform?: string };
+export type ContentListParams = { search?: string; status?: string; campaign_id?: string; brand_id?: string; platform?: string; templates?: boolean };
 export async function listContent(p: ContentListParams = {}): Promise<ContentItem[]> {
   const q = new URLSearchParams();
   if (p.search) q.set("search", p.search);
@@ -263,9 +263,11 @@ export async function listContent(p: ContentListParams = {}): Promise<ContentIte
   if (p.campaign_id) q.set("campaign_id", p.campaign_id);
   if (p.brand_id) q.set("brand_id", p.brand_id);
   if (p.platform) q.set("platform", p.platform);
+  if (p.templates) q.set("templates", "1");
   const j = await jsonOrThrow(await apiFetch(`/api/creative-content?${q.toString()}`));
   return (j.data as ContentItem[]) ?? [];
 }
+export async function listContentTemplates(): Promise<ContentItem[]> { return listContent({ templates: true }); }
 export async function getContent(id: string): Promise<ContentDetail> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${id}`));
   return j.data as ContentDetail;

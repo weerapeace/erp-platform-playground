@@ -19,7 +19,7 @@ export const revalidate = 0;
 
 export const SELECT = `id, content_no, title, campaign_id, brand_id, sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, note,
-  is_active, created_at, updated_at,
+  is_template, is_active, created_at, updated_at,
   brand:brands!brand_id(name, color),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price)`;
@@ -49,10 +49,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const brandId  = (searchParams.get("brand_id") ?? "").trim();
   const platform = (searchParams.get("platform") ?? "").trim();
   const includeInactive = searchParams.get("include_inactive") === "1";
+  const templatesOnly = searchParams.get("templates") === "1";
 
   const admin = supabaseAdmin();
   let q = admin.from("erp_creative_content").select(SELECT, { count: "exact" })
     .order("updated_at", { ascending: false }).limit(500);
+  q = q.eq("is_template", templatesOnly); // ปกติ=คอนเทนต์จริง, ?templates=1=แม่แบบ
   if (!includeInactive) q = q.eq("is_active", true);
   if (search)   { const t = `%${search}%`; q = q.or(`title.ilike.${t},content_no.ilike.${t}`); }
   if (status)   q = q.eq("status", status);
@@ -70,7 +72,7 @@ type Caption = { platform: string; caption?: string | null; hashtags?: string | 
 type CreateBody = {
   title?: string; campaign_id?: string | null; brand_id?: string | null; sku_id?: string | null; product_name?: string | null;
   post_type?: string | null; platforms?: string[]; status?: string; scheduled_at?: string | null;
-  product_links?: { platform: string; url: string }[]; note?: string | null; captions?: Caption[];
+  product_links?: { platform: string; url: string }[]; note?: string | null; captions?: Caption[]; is_template?: boolean;
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     content_no: no, title, campaign_id: body.campaign_id || null, brand_id: body.brand_id || null,
     sku_id: body.sku_id || null, product_name: body.product_name?.trim() || null, post_type: body.post_type || null,
     platforms: body.platforms ?? [], status: body.status || "draft", scheduled_at: body.scheduled_at || null,
-    product_links: body.product_links ?? [], note: body.note?.trim() || null, created_by: user?.id ?? null,
+    product_links: body.product_links ?? [], note: body.note?.trim() || null, is_template: !!body.is_template, created_by: user?.id ?? null,
   });
 
   let no = await nextContentNo(admin);
