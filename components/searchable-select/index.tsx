@@ -5,10 +5,16 @@
  * ใช้แทน <select> เมื่อ option เยอะ เช่น เลือก table ปลายทางของ relation
  *
  * <SearchableSelect value={v} options={[{value,label,badge?,sub?}]} onChange={setV} />
+ *
+ * dropdown วาดผ่าน portal + position:fixed → ลอยทะลุกล่องที่มี overflow (ไม่โดนตัด/จม)
+ * คำนวณตำแหน่งจากปุ่ม และเด้งขึ้นเองถ้าพื้นที่ด้านล่างไม่พอ
  */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export type SelectOption = { value: string; label: string; badge?: string; sub?: string; searchText?: string };
+
+type Pos = { left: number; top: number; width: number; openUp: boolean };
 
 export function SearchableSelect({
   value, options, onChange, placeholder = "— เลือก —", disabled, className,
@@ -22,6 +28,8 @@ export function SearchableSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [pos, setPos] = useState<Pos | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
   const cur = options.find((o) => o.value === value);
 
   const filtered = useMemo(() => {
@@ -36,19 +44,39 @@ export function SearchableSelect({
 
   const close = () => { setOpen(false); setQ(""); };
 
+  // คำนวณตำแหน่ง dropdown จาก rect ของปุ่ม (เด้งขึ้นถ้าด้านล่างไม่พอ)
+  const compute = useCallback(() => {
+    const el = btnRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const PANEL_MAX = 320;   // ความสูงโดยประมาณ (input ค้นหา + รายการ)
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < PANEL_MAX && r.top > spaceBelow;
+    setPos({ left: r.left, width: r.width, top: openUp ? r.top : r.bottom, openUp });
+  }, []);
+
+  useLayoutEffect(() => { if (open) compute(); }, [open, compute]);
+  useEffect(() => {
+    if (!open) return;
+    const h = () => compute();
+    window.addEventListener("scroll", h, true);   // capture → จับ scroll ของกล่องด้านในด้วย
+    window.addEventListener("resize", h);
+    return () => { window.removeEventListener("scroll", h, true); window.removeEventListener("resize", h); };
+  }, [open, compute]);
+
   return (
     <div className={`relative ${className ?? ""}`}>
-      <button type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
+      <button ref={btnRef} type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
         className="w-full h-9 px-2 text-sm text-left border border-slate-200 rounded-md bg-white flex items-center gap-1 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-500">
         <span className="flex-1 min-w-0 truncate">
           {cur ? <>{cur.label}{cur.badge ? ` ${cur.badge}` : ""}</> : <span className="text-slate-400">{placeholder}</span>}
         </span>
         <span className="text-slate-400 text-xs">▾</span>
       </button>
-      {open && !disabled && (
+      {open && !disabled && pos && createPortal(
         <>
-          <div className="fixed inset-0 z-40" onClick={close} />
-          <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-xl">
+          <div className="fixed inset-0 z-[1000]" onClick={close} />
+          <div className="fixed z-[1001] bg-white border border-slate-200 rounded-lg shadow-xl"
+            style={{ left: pos.left, top: pos.top, width: pos.width, transform: pos.openUp ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
             <div className="p-2 border-b border-slate-100">
               <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา…"
                 className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
@@ -65,7 +93,8 @@ export function SearchableSelect({
               ))}
             </div>
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );
