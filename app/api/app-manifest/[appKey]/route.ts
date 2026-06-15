@@ -46,12 +46,13 @@ export async function GET(
   const iconUrl = app?.icon_url as string | null;
 
   // ไอคอน: รูปจริงจาก R2 ถ้ามี ไม่งั้นใช้ไอคอนรวมของระบบ
+  // หมายเหตุ: รูปอัปโหลดมีขนาดอิสระ → ประกาศ sizes="any" (ถ้าฟิกซ์เป็น 192/512 แล้วไฟล์จริงไม่ตรง Chrome จะปฏิเสธไอคอน → ตกไปใช้ตัวอักษร)
+  const iconSrc = iconUrl ? `/api/r2-image?key=${encodeURIComponent(iconUrl)}` : "";
   const icons =
     iconUrl && SAFE_KEY.test(iconUrl)
       ? [
-          { src: `/api/r2-image?key=${encodeURIComponent(iconUrl)}`, sizes: "192x192", type: iconType(iconUrl), purpose: "any" },
-          { src: `/api/r2-image?key=${encodeURIComponent(iconUrl)}`, sizes: "512x512", type: iconType(iconUrl), purpose: "any" },
-          { src: `/api/r2-image?key=${encodeURIComponent(iconUrl)}`, sizes: "512x512", type: iconType(iconUrl), purpose: "maskable" },
+          { src: iconSrc, sizes: "any", type: iconType(iconUrl), purpose: "any" },
+          { src: iconSrc, sizes: "any", type: iconType(iconUrl), purpose: "maskable" },
         ]
       : [
           { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
