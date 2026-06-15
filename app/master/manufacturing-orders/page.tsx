@@ -409,6 +409,10 @@ export default function MoWorkspacePage() {
           exportFilename="manufacturing-orders" exportEntityType="mo"
           canCheck={(p) => can(p as Parameters<typeof can>[0])}
           onRowClick={canEdit ? openEdit : undefined}
+          selectable
+          bulkActions={[
+            { label: "🖨️ พิมพ์ใบสั่งงาน", onClick: (rows) => { const ids = rows.map((r) => r.id).filter(Boolean).join(","); if (ids) window.open(`/print/work-order?ids=${ids}`, "_blank", "noopener"); } },
+          ]}
           rowActions={canEdit ? [
             { label: "แก้", icon: "✏", onClick: openEdit },
             { label: "พิมพ์ใบสั่งงาน", icon: "🖨️", onClick: (r) => window.open(`/print/work-order/${r.id}`, "_blank", "noopener") },

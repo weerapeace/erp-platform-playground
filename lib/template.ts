@@ -106,13 +106,13 @@ const PAPER_DIMS: Record<string, { w: string; h: string }> = {
   Letter: { w: "215.9mm", h: "279.4mm" },
 };
 
-export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknown>): string {
+function reportCss(tpl: ReportTemplate): string {
   const dims = PAPER_DIMS[tpl.paper_size] ?? PAPER_DIMS.A4;
   const isLandscape = tpl.orientation === "landscape";
   const pageW = isLandscape ? dims.h : dims.w;
   const pageH = isLandscape ? dims.w : dims.h;
 
-  const css = `
+  return `
     *,*::before,*::after { box-sizing: border-box; }
     html, body { width: ${pageW}; min-height: 0; margin: 0; padding: 0; font-family: -apple-system, "Segoe UI", "Sarabun", sans-serif; color: #0f172a; background: white; overflow-x: hidden; }
     .doc { width: ${pageW}; min-height: ${pageH}; padding: 20mm 16mm; margin: 0 auto; background: white; overflow: visible; break-after: auto; page-break-after: auto; }
@@ -138,7 +138,17 @@ export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknow
     @page { size: ${tpl.paper_size} ${tpl.orientation}; margin: 0; }
     ${tpl.custom_css}
   `;
+}
 
+function reportDocDiv(tpl: ReportTemplate, data: Record<string, unknown>): string {
+  return `<div class="doc">
+  <header>${renderTemplate(tpl.header_html, data)}</header>
+  <main>${renderTemplate(tpl.body_html, data)}</main>
+  <footer>${renderTemplate(tpl.footer_html, data)}</footer>
+</div>`;
+}
+
+function wrapHtmlDoc(css: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -148,11 +158,25 @@ export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknow
 <style>${css}</style>
 </head>
 <body>
-<div class="doc">
-  <header>${renderTemplate(tpl.header_html, data)}</header>
-  <main>${renderTemplate(tpl.body_html, data)}</main>
-  <footer>${renderTemplate(tpl.footer_html, data)}</footer>
-</div>
+${body}
 </body>
 </html>`;
+}
+
+export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknown>): string {
+  return wrapHtmlDoc(reportCss(tpl), reportDocDiv(tpl, data));
+}
+
+/**
+ * พิมพ์หลายเอกสารในไฟล์เดียว (เทมเพลตเดียวกัน) — แต่ละชุดข้อมูลขึ้นหน้าใหม่
+ * ใช้กับ bulk print เช่น เลือกใบสั่งงานหลายใบแล้วพิมพ์ทีเดียว
+ */
+export function buildReportHtmlMulti(tpl: ReportTemplate, dataList: Record<string, unknown>[]): string {
+  const docs = dataList
+    .map((data, i) => {
+      const div = reportDocDiv(tpl, data);
+      return i < dataList.length - 1 ? div.replace('<div class="doc">', '<div class="doc" style="page-break-after: always; break-after: page;">') : div;
+    })
+    .join("\n");
+  return wrapHtmlDoc(reportCss(tpl), docs);
 }

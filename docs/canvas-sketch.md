@@ -29,7 +29,7 @@ ref.current?.insert([
 ]);
 ```
 
-ใช้จริง: Brainstorm Board (`app/projects/[id]/board`) — ปุ่ม Section / SKU Card / Task Card
+ใช้จริง: Campaign Canvas (`app/tasks/campaigns/[id]`) — ปุ่ม Section (Frame) / SKU Card / Task Card
 
 - 1 เอกสาร = 1 กระดาน (unique entity_type + entity_id)
 - component จัดการโหลด/บันทึกเองทั้งหมด — **บันทึกอัตโนมัติ**: หยุดวาด ~2.5 วิ → save เอง + flush ตอนปิดแท็บ/ปิด modal · มีตัวบอกสถานะ (รอบันทึก/กำลังบันทึก/✓ แล้ว) · บันทึกพลาด (เน็ตสะดุด) → ขึ้น ⚠ + ปุ่มลองใหม่ และจะลองซ้ำเองเมื่อแก้ครั้งถัดไป
