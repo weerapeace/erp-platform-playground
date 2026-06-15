@@ -123,7 +123,14 @@ export default function StandaloneApp() {
           // หน้า custom → แสดงหน้าจริงแบบ embed (ไม่มี sidebar ของ shell) เต็มพื้นที่ที่เหลือ
           <iframe key={embedSrc} src={embedSrc} title={cur.label} className="flex-1 w-full border-0" />
         ) : (
-          <div className="flex-1 flex items-center justify-center p-10 text-center text-slate-300 text-sm">— ยังไม่มีเมนูใน App นี้ —</div>
+          <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-2">
+            <div className="text-4xl mb-1">🗂️</div>
+            <div className="text-slate-600 font-medium">ยังไม่มีรายการใน {app?.label ?? "App"} นี้</div>
+            <div className="text-slate-400 text-sm max-w-xs">เพิ่มเมนู/หน้าเข้ามาได้ที่ <span className="font-medium text-slate-500">ตั้งค่า → จัดการเมนู</span> แล้วเลือก App นี้</div>
+            {can("admin.users") && (
+              <Link href="/admin/menu" className="mt-2 h-9 px-4 leading-9 bg-blue-600 text-white rounded-lg text-sm font-medium">ไปจัดการเมนู</Link>
+            )}
+          </div>
         )}
       </main>
 

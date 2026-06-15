@@ -43,7 +43,9 @@ export type Permission =
   | "admin.users" | "admin.audit_log"
   // สิทธิ์ระดับ "เข้าถึง App" (เฟส 2) — ผูกกับ erp_app_groups.permission_key (home เปิดให้ทุกคน)
   | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory" | "app.production"
-  | "app.sales" | "app.china_pay" | "app.payroll" | "app.settings";
+  | "app.sales" | "app.china_pay" | "app.payroll" | "app.settings"
+  | "app.design" | "app.misc"
+  | "offers.view" | "offers.edit";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
 
