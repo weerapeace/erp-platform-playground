@@ -10,8 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { StandaloneShell } from "@/components/standalone-shell";
+import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
-import { SkuPicker } from "@/components/pickers";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { CampaignDrawer, CAMPAIGN_STATUS } from "../campaign-drawer";
@@ -83,7 +83,7 @@ export default function CampaignCanvasPage() {
   const [err, setErr] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [skuOpen, setSkuOpen] = useState(false);
-  const [skuPick, setSkuPick] = useState<SkuPickerValue | null>(null);
+  const [skuSel, setSkuSel] = useState<SkuPickerValue[]>([]); // SKU ที่เลือก (หลายอัน)
   const [skuView, setSkuView] = useState<Record<string, unknown> | null>(null); // การ์ด SKU ที่กดดู
   const [taskOpen, setTaskOpen] = useState(false);   // modal สร้างงาน
   const [taskView, setTaskView] = useState<Record<string, unknown> | null>(null); // การ์ดงานที่กดดู
@@ -95,12 +95,15 @@ export default function CampaignCanvasPage() {
   const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "" });
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
   const { platforms: platformOpts } = useCreativeOptions();
+  const [fs, setFs] = useState(false); // เต็มจอ
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sketchRef = useRef<CanvasSketchControls | null>(null);
   const pushToast = useCallback((type: Toast["type"], message: string) => { const tid = Date.now() + Math.random(); setToasts((q) => [...q, { id: tid, type, message }]); setTimeout(() => setToasts((q) => q.filter((t) => t.id !== tid)), 3500); }, []);
 
   const load = useCallback(async () => { try { setDetail(await getCampaign(id)); } catch (e) { setErr((e as Error).message); } }, [id]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { const h = () => setFs(!!document.fullscreenElement); document.addEventListener("fullscreenchange", h); return () => document.removeEventListener("fullscreenchange", h); }, []);
+  const toggleFs = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); };
 
   const setStatus = async (status: string) => { try { await updateCampaign(id, { status }); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -110,7 +113,14 @@ export default function CampaignCanvasPage() {
     void sketchRef.current.insert([{ type: "frame", children: [], name: name.trim() || "โซนใหม่", x: 0, y: 0, width: 560, height: 400 }]);
     setSectionOpen(false); setSectionName("");
   };
-  const confirmSku = () => { if (!skuPick || !sketchRef.current) return; void sketchRef.current.insert(skuCardSkeleton(skuPick)); setSkuOpen(false); setSkuPick(null); };
+  const confirmSku = () => {
+    if (!skuSel.length || !sketchRef.current) return;
+    // วางหลายใบเรียงข้างกันในครั้งเดียว (เลื่อน x ต่อใบ)
+    const all: Record<string, unknown>[] = [];
+    skuSel.forEach((s, i) => { const dx = i * 270; for (const el of skuCardSkeleton(s)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+    void sketchRef.current.insert(all);
+    setSkuOpen(false); setSkuSel([]);
+  };
   const onTaskCreated = (t: CreatedTask) => { sketchRef.current?.insert(taskCardSkeleton(t)); pushToast("success", `สร้างงาน ${t.task_no} + วางการ์ดแล้ว`); };
   const createContentCard = async () => {
     if (!cForm.title.trim()) { pushToast("error", "กรุณาใส่ชื่อคอนเทนต์"); return; }
@@ -149,11 +159,12 @@ export default function CampaignCanvasPage() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setSectionOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 Section</button>
-            <button onClick={() => { setSkuPick(null); setSkuOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📦 SKU Card</button>
+            <button onClick={() => { setSkuSel([]); setSkuOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📦 SKU Card</button>
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ การ์ดบนกระดาน</button>
             <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 รายละเอียด</button>
+            <button onClick={toggleFs} title="เต็มจอ" className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{fs ? "⛶ ออกเต็มจอ" : "⛶ เต็มจอ"}</button>
           </div>
         </div>
       </div>
@@ -163,13 +174,13 @@ export default function CampaignCanvasPage() {
         <p className="text-xs text-slate-400 mt-2">🗂 Section · 📦 SKU · ✅ Task · 📱 Content → <b>ดับเบิลคลิกการ์ด</b>เพื่อดู/จัดการ · ล้อเมาส์ = ซูม (shift+ล้อ = เลื่อน) · บันทึกอัตโนมัติ</p>
       </div>
 
-      {/* เลือก SKU จริง → วางการ์ดลงกระดาน */}
+      {/* เลือก SKU หลายอัน (checkbox) → วางการ์ดทีเดียว */}
       <ERPModal open={skuOpen} onClose={() => setSkuOpen(false)} title="เพิ่มการ์ดสินค้า (SKU) ลงกระดาน" size="md"
         footer={<>
           <button onClick={() => setSkuOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">ยกเลิก</button>
-          <button onClick={confirmSku} disabled={!skuPick} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">เพิ่มการ์ด</button>
+          <button onClick={confirmSku} disabled={!skuSel.length} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">เพิ่มการ์ด{skuSel.length ? ` (${skuSel.length})` : ""}</button>
         </>}>
-        <SkuPicker value={skuPick} onChange={setSkuPick} />
+        <SkuMultiPick selected={skuSel} onChange={setSkuSel} />
       </ERPModal>
 
       {skuView && <SkuDrawer data={skuView} onClose={() => setSkuView(null)} />}
@@ -347,5 +358,42 @@ function ContentCardDrawer({ data, onClose }: { data: Record<string, unknown>; o
         </div>
       </div>
     </>
+  );
+}
+
+// เลือก SKU หลายอัน (ค้นหา + checkbox)
+function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onChange: (v: SkuPickerValue[]) => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SkuPickerValue[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    let active = true; setLoading(true);
+    const tmr = setTimeout(async () => {
+      try {
+        const res = await apiFetch(`/api/pickers/skus?${new URLSearchParams({ search: query, limit: "30", sales_only: "false" })}`);
+        const j = await res.json(); const rows = (j.data ?? []) as Record<string, unknown>[];
+        if (active) setResults(rows.map((r) => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), color: r.color != null ? String(r.color) : null, list_price: r.list_price == null ? null : Number(r.list_price), image_key: r.image_key == null ? null : String(r.image_key), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null })));
+      } catch { if (active) setResults([]); } finally { if (active) setLoading(false); }
+    }, 250);
+    return () => { active = false; clearTimeout(tmr); };
+  }, [query]);
+  const toggle = (s: SkuPickerValue) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
+  return (
+    <div className="space-y-2">
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔍 ค้นหา SKU / ชื่อสินค้า..." className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-violet-50 text-violet-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
+      <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
+        {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">กำลังค้นหา...</p>
+          : results.length === 0 ? <p className="px-3 py-3 text-sm text-slate-400 text-center">ไม่พบ SKU</p>
+          : results.map((s) => { const on = selected.some((x) => x.id === s.id); return (
+            <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-violet-50/40" : ""}`}>
+              <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-violet-600 pointer-events-none" />
+              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+              {s.list_price != null && <span className="text-xs text-slate-400 shrink-0">{Number(s.list_price).toLocaleString()}฿</span>}
+            </button>
+          ); })}
+      </div>
+    </div>
   );
 }

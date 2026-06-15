@@ -5,10 +5,11 @@
 // ใช้ที่: TaskDetailDrawer (/tasks) และ drawer การ์ดงานบน Campaign Canvas
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { ImageAttach } from "@/components/image-attach";
 import { UserPicker } from "@/components/pickers";
+import { useAuth } from "@/components/auth";
 import type { UserPickerValue } from "@/components/pickers";
 import {
   listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment,
@@ -19,18 +20,30 @@ type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 
 /** กล่องจัดการงานย่อยแบบครบ (โหลดเอง) — ใช้บน canvas/หน้าอื่นได้ */
 export function SubtaskManager({ taskId, pushToast }: { taskId: string; pushToast: ToastFn }) {
+  const { user } = useAuth();
   const [subs, setSubs] = useState<CreativeSubtask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"mine" | "all">("all");
   const reload = useCallback(async () => { try { setSubs(await listSubtasks(taskId)); } catch (e) { pushToast("error", (e as Error).message); } finally { setLoading(false); } }, [taskId, pushToast]);
   useEffect(() => { reload(); }, [reload]);
   const done = subs.filter((s) => s.status === "done").length;
+  const mine = useMemo(() => subs.filter((s) => s.assignees.some((a) => a.id === user?.id)), [subs, user?.id]);
+  const shown = tab === "mine" ? mine : subs;
 
   return (
     <div>
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">งานย่อย {subs.length > 0 && `· ${done}/${subs.length}`}</p>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">งานย่อย {subs.length > 0 && `· ${done}/${subs.length}`}</p>
+        {subs.length > 0 && (
+          <div className="flex items-center gap-1 bg-slate-100 rounded-md p-0.5 text-xs">
+            <button onClick={() => setTab("mine")} className={`px-2 py-0.5 rounded ${tab === "mine" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ของฉัน ({mine.length})</button>
+            <button onClick={() => setTab("all")} className={`px-2 py-0.5 rounded ${tab === "all" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ทั้งหมด ({subs.length})</button>
+          </div>
+        )}
+      </div>
       {loading ? <p className="text-sm text-slate-400">กำลังโหลด...</p> : (
         <div className="space-y-2">
-          {subs.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} />)}
+          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? "ไม่มีงานย่อยที่มอบให้คุณ" : "ยังไม่มีงานย่อย"}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} />)}
         </div>
       )}
       <AddSubtaskForm onAdd={async (body) => { await addSubtask(taskId, body); await reload(); }} pushToast={pushToast} />

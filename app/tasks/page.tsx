@@ -94,6 +94,7 @@ export default function TasksPage() {
   const [mySubs, setMySubs] = useState<MySubtask[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
+  const [quick, setQuick] = useState<"" | "review" | "overdue">(""); // กรองด่วนจากการ์ดสถิติ
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
@@ -141,6 +142,7 @@ export default function TasksPage() {
     catch (e) { pushToast("error", (e as Error).message); }
   }, [pushToast, loadMySubs]);
 
+  const tableTasks = useMemo(() => quick === "review" ? tasks.filter((t) => t.status === "need_review") : quick === "overdue" ? tasks.filter(isOverdue) : tasks, [tasks, quick]);
   const counts = useMemo(() => ({
     total: tasks.length,
     mine: myTasks.length,
@@ -177,10 +179,10 @@ export default function TasksPage() {
           </div>
         </div>
         <div className="flex gap-3 mt-4">
-          <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} />
-          <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" />
-          <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" />
-          <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" />
+          <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} onClick={() => { setQuick(""); setView("table"); }} active={view === "table" && quick === ""} />
+          <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" onClick={() => setView("queue")} active={view === "queue"} />
+          <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" onClick={() => { setQuick("review"); setView("table"); }} active={view === "table" && quick === "review"} />
+          <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" onClick={() => { setQuick("overdue"); setView("table"); }} active={view === "table" && quick === "overdue"} />
         </div>
       </div>
 
@@ -202,8 +204,8 @@ export default function TasksPage() {
             {view === "table" && (
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                 <DataTable<CreativeTask>
-                  data={tasks} columns={COLUMNS}
-                  title={`${t("รายการงาน", "Tasks")} (${tasks.length})`}
+                  data={tableTasks} columns={COLUMNS}
+                  title={`${t("รายการงาน", "Tasks")}${quick === "review" ? " · รอตรวจ" : quick === "overdue" ? " · เกินกำหนด" : ""} (${tableTasks.length})`}
                   description={t("คลิกที่งานเพื่อดูรายละเอียด · ตารางกลางตัวเดียวกับทุกโมดูล", "Click a row to view details · shared table used across modules")}
                   emptyMessage={t("ยังไม่มีงาน — กดปุ่ม สร้างงาน", "No tasks yet — click New task")}
                   searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
@@ -254,9 +256,9 @@ export default function TasksPage() {
 function ViewToggleBtn({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: string; label: string }) {
   return <button onClick={onClick} className={`h-8 px-3 rounded-md text-sm font-medium transition-colors ${active ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
 }
-function StatChip({ label, value, tone = "slate" }: { label: string; value: number; tone?: "slate" | "violet" | "red" | "amber" }) {
+function StatChip({ label, value, tone = "slate", onClick, active }: { label: string; value: number; tone?: "slate" | "violet" | "red" | "amber"; onClick?: () => void; active?: boolean }) {
   const cls = { slate: "bg-slate-50 text-slate-700 border-slate-200", violet: "bg-violet-50 text-violet-700 border-violet-200", red: "bg-red-50 text-red-700 border-red-200", amber: "bg-amber-50 text-amber-700 border-amber-200" }[tone];
-  return <div className={`px-3 py-1.5 rounded-lg border text-sm ${cls}`}><span className="font-bold">{value}</span> <span className="opacity-70">{label}</span></div>;
+  return <button onClick={onClick} className={`px-3 py-1.5 rounded-lg border text-sm transition-all ${cls} ${active ? "ring-2 ring-violet-400" : "hover:brightness-95"}`}><span className="font-bold">{value}</span> <span className="opacity-70">{label}</span></button>;
 }
 
 // ============================================================
