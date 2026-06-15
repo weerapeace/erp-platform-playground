@@ -24,7 +24,7 @@ import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_RANK, isOverdue, withinThisWeek,
-  listTasks, deleteTask, updateSubtask,
+  listTasks, deleteTask,
   listCampaigns, listBrands, listMySubtasks,
   type CreativeTask, type CreativeStatus, type CreativePriority,
   type Campaign, type BrandOption, type MySubtask,
@@ -140,10 +140,6 @@ export default function TasksPage() {
 
   const reload = useCallback(async () => { await Promise.all([loadAll(), loadMine(), loadMySubs()]); }, [loadAll, loadMine, loadMySubs]);
   useRefetchOnFocus(reload); // กลับมาที่แท็บ → โหลดงานใหม่ (กันค้างเก่า)
-  const toggleMySub = useCallback(async (s: MySubtask) => {
-    try { await updateSubtask(s.task_id, s.id, { status: "done" }); pushToast("success", "ทำงานย่อยเสร็จแล้ว ✓"); await loadMySubs(); }
-    catch (e) { pushToast("error", (e as Error).message); }
-  }, [pushToast, loadMySubs]);
 
   const tableTasks = useMemo(() => quick === "review" ? tasks.filter((t) => t.status === "need_review") : quick === "overdue" ? tasks.filter(isOverdue) : tasks, [tasks, quick]);
   const counts = useMemo(() => ({
@@ -203,7 +199,7 @@ export default function TasksPage() {
           <div className="py-20 text-center text-slate-400">กำลังโหลดข้อมูล...</div>
         ) : (
           <>
-            {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} onToggleSub={toggleMySub} />}
+            {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
 
             {view === "table" && (
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -271,8 +267,12 @@ function StatChip({ label, value, tone = "slate", onClick, active }: { label: st
 // ============================================================
 // Queue View — หน้าพนักงาน ปุ่มใหญ่ งานตัวเองเด่น
 // ============================================================
-function QueueView({ tasks, subtasks, onOpen, onMove, onCreate, onToggleSub }: {
-  tasks: CreativeTask[]; subtasks: MySubtask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void; onToggleSub: (s: MySubtask) => void;
+// สี/ป้ายสถานะงานย่อย (ให้ตรงกับ SUB_STEPS ในงานย่อย)
+const SUB_STATUS_LABEL: Record<string, string> = { todo: "ยังไม่เริ่ม", in_progress: "กำลังทำ", submitted: "รออนุมัติ", approved: "อนุมัติแล้ว", doing: "กำลังทำ", done: "อนุมัติแล้ว", posted: "อนุมัติแล้ว" };
+const SUB_STATUS_DOT: Record<string, string> = { todo: "bg-slate-400", in_progress: "bg-blue-500", submitted: "bg-amber-500", approved: "bg-emerald-500", doing: "bg-blue-500", done: "bg-emerald-500", posted: "bg-emerald-500" };
+
+function QueueView({ tasks, subtasks, onOpen, onMove, onCreate }: {
+  tasks: CreativeTask[]; subtasks: MySubtask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void;
 }) {
   const ordered = useMemo(() => [...tasks].filter((t) => !isTerminal(t.status)).sort((a, b) => {
     const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
@@ -299,10 +299,11 @@ function QueueView({ tasks, subtasks, onOpen, onMove, onCreate, onToggleSub }: {
           <p className="text-sm font-semibold text-slate-700 mb-2">🧩 งานย่อยของฉัน ({subtasks.length})</p>
           <div className="space-y-1.5">
             {subtasks.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200">
-                <input type="checkbox" checked={false} onChange={() => onToggleSub(s)} title="ทำเสร็จ" className="h-4 w-4 rounded border-slate-300 text-violet-600 cursor-pointer" />
-                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpen(s.task_id)}>
+              <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 cursor-pointer" onClick={() => onOpen(s.task_id)} title="กดเพื่อเปิดงาน → เริ่ม/ส่งงาน">
+                <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_STATUS_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_STATUS_LABEL[s.status] ?? "ยังไม่เริ่ม"} />
+                <div className="flex-1 min-w-0">
                   <span className="text-sm text-slate-700">{s.title}</span>
+                  <span className="ml-2 text-[10px] text-slate-400">{SUB_STATUS_LABEL[s.status] ?? "ยังไม่เริ่ม"}</span>
                   {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">ต้องเสร็จก่อน</span>}
                   <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
                 </div>

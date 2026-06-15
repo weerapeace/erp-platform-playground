@@ -23,7 +23,7 @@ export const SELECT = `id, task_no, title, description, task_type, brand_id, cam
   product_name, priority, status, progress_percent, assignee_id, reviewer_id, approver_id,
   start_date, due_date, completed_at, approval_status, asset_status, platforms,
   drive_folder_url, final_asset_url, published_url, blocker_status, blocker_reason,
-  is_active, created_at, updated_at,
+  is_active, created_by, created_at, updated_at,
   brand:brands!brand_id(name, color),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, standard_price, cover_image_r2_key),

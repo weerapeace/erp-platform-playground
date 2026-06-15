@@ -156,8 +156,9 @@ export function CanvasSketch({
         try {
           const lib: any = await import("@excalidraw/excalidraw");
 
-          // โหลดรูป (ถ้ามี) → addFiles ก่อนวาง element
+          // โหลดรูป (ถ้ามี) → addFiles ก่อนวาง element + จำสัดส่วนรูปจริง (กันรูปยืดเบี้ยว)
           const urlToFileId = new Map<string, string>();
+          const urlToRatio = new Map<string, number>(); // natural width/height
           const work = skeletons.map((s) => ({ ...s }));
           for (const s of work) {
             const url = s._imageUrl as string | undefined;
@@ -171,9 +172,21 @@ export function CanvasSketch({
                   fileId = `f${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
                   api.addFiles([{ id: fileId, dataURL, mimeType: blob.type || "image/png", created: Date.now() }]);
                   urlToFileId.set(url, fileId);
+                  // อ่านขนาดจริงของรูป → เก็บอัตราส่วน
+                  try { const dim = await new Promise<{ w: number; h: number }>((resolve, reject) => { const im = new Image(); im.onload = () => resolve({ w: im.naturalWidth || 1, h: im.naturalHeight || 1 }); im.onerror = reject; im.src = dataURL; }); if (dim.h > 0) urlToRatio.set(url, dim.w / dim.h); } catch { /* ใช้กรอบเดิม */ }
                 } catch (e) { console.error("[canvas-sketch] image load failed:", e); }
               }
               if (fileId) s.fileId = fileId;
+              // ปรับ width/height ให้พอดีในกรอบโดยคงสัดส่วน (object-contain) + จัดกึ่งกลางกรอบ
+              const ratio = urlToRatio.get(url);
+              const boxW = Number(s.width) || 0, boxH = Number(s.height) || 0;
+              if (ratio && boxW > 0 && boxH > 0) {
+                let newW = boxW, newH = boxW / ratio;
+                if (newH > boxH) { newH = boxH; newW = boxH * ratio; }
+                s.x = (Number(s.x) || 0) + (boxW - newW) / 2;
+                s.y = (Number(s.y) || 0) + (boxH - newH) / 2;
+                s.width = newW; s.height = newH;
+              }
             }
             delete s._imageUrl;
           }

@@ -43,6 +43,7 @@ export type CreativeTask = {
   drive_folder_url: string | null; final_asset_url: string | null; published_url: string | null;
   blocker_status: string | null; blocker_reason: string | null;
   is_active: boolean;
+  created_by: string | null;
   created_at: string; updated_at: string;
 };
 

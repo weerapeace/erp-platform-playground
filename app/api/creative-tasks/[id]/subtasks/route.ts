@@ -11,12 +11,18 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { subtaskAssigneesMap, setSubtaskAssignees } from "@/lib/creative-tasks-server";
+import { subtaskAssigneesMap, setSubtaskAssignees, notify } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order"]);
+
+// อ่าน role ของผู้ใช้ปัจจุบัน (admin/manager/...) — ใช้คุมสิทธิ์ละเอียดของงานย่อย
+async function currentRole(request: NextRequest): Promise<string> {
+  try { const { data } = await supabaseFromRequest(request).rpc("erp_current_user"); return ((data as { role?: string | null } | null)?.role) ?? "viewer"; }
+  catch { return "viewer"; }
+}
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -69,10 +75,26 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const subtaskId = String(body.subtask_id ?? "");
   if (!subtaskId) return NextResponse.json({ error: "subtask_id required" }, { status: 400 });
 
+  const admin = supabaseAdmin();
+  // งานแม่ (ผู้สร้าง + ผู้ตรวจ) + role ผู้ใช้ — ใช้คุมสิทธิ์ละเอียด
+  const [{ data: parent }, role] = await Promise.all([
+    admin.from("erp_creative_tasks").select("created_by, reviewer_id, task_no, title").eq("id", id).maybeSingle(),
+    currentRole(request),
+  ]);
+  const isManager = role === "admin" || role === "manager";
+  const isCreator = !!user?.id && user.id === (parent?.created_by as string | null);
+  const isReviewer = !!user?.id && user.id === (parent?.reviewer_id as string | null);
+
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
 
-  const admin = supabaseAdmin();
+  // ⑤ แก้ "ผู้รับผิดชอบ" ได้เฉพาะ admin/ผจก./คนสร้างงานแม่
+  if (Array.isArray(body.assignee_ids) && !(isManager || isCreator))
+    return NextResponse.json({ error: "คุณไม่มีสิทธิ์เปลี่ยนผู้รับผิดชอบงานย่อย" }, { status: 403 });
+  // ④ อนุมัติ (status → approved) ได้เฉพาะ admin/ผจก./ผู้ตรวจของงาน
+  if (patch.status === "approved" && !(isManager || isReviewer))
+    return NextResponse.json({ error: "คุณไม่มีสิทธิ์อนุมัติงานย่อยนี้" }, { status: 403 });
+
   if (Array.isArray(body.assignee_ids)) {
     await setSubtaskAssignees(admin, subtaskId, body.assignee_ids as string[]);
     patch.assignee_id = (body.assignee_ids as string[])[0] || null; // sync legacy single field
@@ -87,6 +109,24 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     row = data as Record<string, unknown> | null;
   }
   await writeAudit(admin, { action: "subtask:update", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { subtask_id: subtaskId } });
+
+  // ④ ส่งงาน (status → submitted) → แจ้งเตือน ผู้ตรวจ + admin/ผจก. ให้มากดอนุมัติ
+  if (patch.status === "submitted") {
+    try {
+      const { data: mgrs } = await admin.from("user_profiles").select("id").in("role", ["admin", "manager"]);
+      const recipients = new Set<string>([...((mgrs ?? []) as { id: string }[]).map((m) => m.id)]);
+      if (parent?.reviewer_id) recipients.add(String(parent.reviewer_id));
+      recipients.delete(String(user?.id ?? "")); // ไม่ต้องเตือนตัวเอง
+      const subTitle = String(row?.title ?? "งานย่อย");
+      const taskLabel = `${parent?.task_no ? parent.task_no + " " : ""}${parent?.title ?? ""}`.trim();
+      await Promise.all([...recipients].map((uid) => notify(admin, {
+        userId: uid, eventType: "subtask_submitted", priority: "high",
+        title: `รออนุมัติงานย่อย: ${subTitle}`, body: taskLabel || null,
+        linkUrl: `/tasks?task=${id}`, entityId: id,
+      })));
+    } catch { /* แจ้งเตือนล้มเหลวไม่ทำให้บันทึกพัง */ }
+  }
+
   const aMap = await subtaskAssigneesMap(admin, [subtaskId]);
   return NextResponse.json({ data: row ? { ...row, assignees: aMap.get(subtaskId) ?? [] } : null, error: null });
 }

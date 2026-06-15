@@ -10,6 +10,7 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
+import { useAuth } from "@/components/auth";
 import { SubtaskManager } from "./subtask-manager";
 import { taskTypeLabel, platformLabel, useCreativeOptions } from "./use-options";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
@@ -52,6 +53,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   pushToast: ToastFn;
 }) {
   const { taskTypes, platforms: platformOpts } = useCreativeOptions();
+  const { user } = useAuth();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -93,6 +95,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const t = detail;
   const isClosed = isTerminal(t.status);
   const actions = transitionsFrom(t.status);
+  // สิทธิ์งานย่อย: ผจก./admin = จัดการได้หมด · ผู้ตรวจ = อนุมัติได้ · คนสร้างงาน = แก้ผู้รับผิดชอบได้
+  const isManager = user?.role === "admin" || user?.role === "manager";
+  const canApproveSub = isManager || (!!user?.id && user.id === t.reviewer_id);
+  const canManageAssignees = isManager || (!!user?.id && user.id === t.created_by);
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(t, toKey); await refresh(); setBusy(false); };
   const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(t.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
@@ -197,7 +203,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           )}
 
           {/* subtasks — ใช้ของกลางจัดการสด */}
-          <SubtaskManager taskId={t.id} pushToast={pushToast} />
+          <SubtaskManager taskId={t.id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
 
           {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) */}
           <div>
