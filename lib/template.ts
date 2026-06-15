@@ -172,11 +172,15 @@ export function buildReportHtml(tpl: ReportTemplate, data: Record<string, unknow
  * ใช้กับ bulk print เช่น เลือกใบสั่งงานหลายใบแล้วพิมพ์ทีเดียว
  */
 export function buildReportHtmlMulti(tpl: ReportTemplate, dataList: Record<string, unknown>[]): string {
-  const docs = dataList
-    .map((data, i) => {
-      const div = reportDocDiv(tpl, data);
-      return i < dataList.length - 1 ? div.replace('<div class="doc">', '<div class="doc" style="page-break-after: always; break-after: page;">') : div;
-    })
-    .join("\n");
-  return wrapHtmlDoc(reportCss(tpl), docs);
+  // ห่อแต่ละใบด้วย .doc-page แล้วบังคับแบ่งหน้า — ต้องใช้ !important เพราะ .doc มี break-after:auto!important ในโหมดพิมพ์
+  const breakCss = `
+    .doc-page { break-after: page; page-break-after: always; }
+    .doc-page:last-child { break-after: auto; page-break-after: auto; }
+    @media print {
+      .doc-page { break-after: page !important; page-break-after: always !important; }
+      .doc-page:last-child { break-after: auto !important; page-break-after: auto !important; }
+    }
+  `;
+  const body = dataList.map((data) => `<div class="doc-page">${reportDocDiv(tpl, data)}</div>`).join("\n");
+  return wrapHtmlDoc(reportCss(tpl) + breakCss, body);
 }
