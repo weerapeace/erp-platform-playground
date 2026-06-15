@@ -19,6 +19,7 @@ export const revalidate = 0;
 
 export type CostLine = {
   id?: string; item_id: string | null; item_name: string | null; group_name: string | null;
+  group_code?: string | null; price_basis?: string | null;   // ตีราคาแบบกลุ่ม: code กลุ่ม + ฐานราคา (avg/set/manual)
   calc_method: string | null; width_cm: number | null; length_cm: number | null; pieces: number | null;
   face_width_cm: number | null; waste_percent: number | null; divisor: number | null;
   qty: number | null; uom: string | null; unit_price: number | null; amount: number | null;
@@ -48,6 +49,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const rows = lines.map((l, i) => ({
     sheet_id: id,
     item_id: l.item_id || null, item_name: l.item_name?.trim() || null, group_name: l.group_name || null,
+    group_code: l.group_code || null, price_basis: l.price_basis || null,
     calc_method: l.calc_method || null,
     width_cm: num(l.width_cm), length_cm: num(l.length_cm), pieces: num(l.pieces),
     face_width_cm: num(l.face_width_cm), waste_percent: num(l.waste_percent), divisor: num(l.divisor),

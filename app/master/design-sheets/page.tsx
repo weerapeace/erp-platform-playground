@@ -30,7 +30,7 @@ import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
-import type { PriceItem } from "@/app/api/design-sheets/price-items/route";
+import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
 
@@ -111,6 +111,21 @@ function rowFromItem(it: PriceItem, idx: number): CostRow {
     unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit,
     amount: null, note: null, sort_order: idx + 1,
   });
+}
+
+// ราคาฐานของกลุ่มตามที่เลือก (avg/set) — 'set' ที่ยังไม่ตั้งค่า → ถอยใช้ค่าเฉลี่ย
+function groupBasisPrice(g: PriceGroup, basis: string | null): number | null {
+  if (basis === "set") return g.set_price ?? g.avg_price;
+  return g.avg_price;
+}
+// ฟิลด์บรรทัดเมื่อเลือกแบบ "กลุ่ม" (item_id = null = จับคู่วัสดุจริงทีหลัง)
+function rowFieldsFromGroup(g: PriceGroup, basis: string): Partial<CostRow> {
+  return {
+    item_id: null, item_name: `[กลุ่ม] ${g.name}`, group_name: g.name, group_code: g.code,
+    price_basis: basis, calc_method: g.calc_method,
+    waste_percent: g.loss_percent, divisor: g.divisor, uom: g.uom_default,
+    unit_price: groupBasisPrice(g, basis),
+  };
 }
 
 /** ข้อความ tooltip อธิบายวิธีคำนวณปริมาณของบรรทัด */
@@ -196,6 +211,7 @@ export default function DesignSheetsPage() {
 
   // ---- เฟส 4: ตีราคา ----
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
+  const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
   const [costLines, setCostLines] = useState<CostRow[]>([]);
   const [costDirty, setCostDirty] = useState(false);
   const [costSaving, setCostSaving] = useState(false);
@@ -316,7 +332,7 @@ export default function DesignSheetsPage() {
   }, []);
 
   const openPm = () => { setPmOpen(true); setPmEditId(null); setPmName(""); setPmGroup(""); setPmPrice(""); setPmUom(""); setPmFace(""); setPmWidth(""); setPmLength(""); void loadPm(); };
-  const closePm = () => { setPmOpen(false); setPriceItems([]); };   // ปิดแล้ว dropdown วัสดุในตารางตีราคารีโหลดเอง
+  const closePm = () => { setPmOpen(false); setPriceItems([]); setPriceGroups([]); };   // ปิดแล้ว dropdown วัสดุ/กลุ่มในตารางตีราคารีโหลดเอง
   const numOrNull = (s: string) => (s === "" ? null : Number(s));
 
   const pmAdd = async () => {
@@ -426,7 +442,7 @@ export default function DesignSheetsPage() {
   useEffect(() => {
     if (!form?.id || priceItems.length > 0) return;
     apiFetch("/api/design-sheets/price-items").then((r) => r.json())
-      .then((j) => { if (!j.error) setPriceItems((j.data ?? []) as PriceItem[]); }).catch(() => {});
+      .then((j) => { if (!j.error) { setPriceItems((j.data ?? []) as PriceItem[]); setPriceGroups((j.groups ?? []) as PriceGroup[]); } }).catch(() => {});
   }, [form?.id, priceItems.length]);
 
   // เช็ครหัส Parent SKU (ตัวที่กำลังพิมพ์ในช่องเพิ่ม) แบบหน่วง 400ms
@@ -852,22 +868,45 @@ export default function DesignSheetsPage() {
   // คอลัมน์ตารางตีราคา (ใช้ LineItemsGrid กลาง) — เลือกวัสดุ → เติมชนิด/สูตร/เผื่อเสีย/ราคาอัตโนมัติ แล้วคำนวณสด
   const numInputCls = "w-full h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
-    { key: "item", header: "วัสดุ", minWidth: 200, sortable: true, getValue: (r) => r.item_name,
-      render: (r, u) => (
-        <SearchableSelect value={r.item_id ?? ""} disabled={!canEdit} placeholder="— เลือก/พิมพ์ค้นหาวัสดุ —"
-          options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
-          onChange={(itemId) => {
-            const it = priceItems.find((p) => p.id === itemId);
-            if (!it) { u({ item_id: null }); return; }
-            const piece = isPieceGroup(it.group_code, it.group_name);
-            // ชนิดชิ้น: ไม่เติมขนาด default (เว้นว่าง ให้กรอกขนาดที่ตัดใช้จริง) — ราคา/cm² หารจากขนาดแผ่นในตัววัสดุ
-            u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code, calc_method: it.calc_method,
-                waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
-                pieces: piece ? (r.pieces ?? 1) : r.pieces,
-                uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
-                unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
-          }} />
-      ) },
+    { key: "item", header: "วัสดุ / กลุ่ม", minWidth: 220, sortable: true, getValue: (r) => r.item_name,
+      render: (r, u) => {
+        const inGroupMode = !r.item_id && !!r.group_code;   // เลือกแบบกลุ่ม (จับคู่วัสดุจริงทีหลัง)
+        const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
+        return (
+          <div className="space-y-1">
+            <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!canEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
+              options={[
+                ...priceGroups.map((pg) => ({ value: `grp:${pg.code}`, label: `📦 ${pg.name}`,
+                  sub: `กลุ่ม · เฉลี่ย ${pg.avg_price != null ? fmtBaht(pg.avg_price) : "—"}${pg.set_price != null ? ` · ตั้ง ${fmtBaht(pg.set_price)}` : ""}` })),
+                ...priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined })),
+              ]}
+              onChange={(val) => {
+                if (val.startsWith("grp:")) {
+                  const pg = priceGroups.find((x) => x.code === val.slice(4));
+                  if (pg) u(rowFieldsFromGroup(pg, "avg")); else u({ item_id: null });
+                  return;
+                }
+                const it = priceItems.find((p) => p.id === val);
+                if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
+                const piece = isPieceGroup(it.group_code, it.group_name);
+                // เลือกตัวเฉพาะ: เก็บ group_code ของตัวนั้นไว้ (ใช้ตรวจชนิดชิ้น) แต่ price_basis = null (ไม่ใช่โหมดกลุ่ม)
+                u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code, price_basis: null, calc_method: it.calc_method,
+                    waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
+                    pieces: piece ? (r.pieces ?? 1) : r.pieces,
+                    uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
+                    unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
+              }} />
+            {inGroupMode && canEdit && (
+              <select value={r.price_basis ?? "avg"} title="ฐานราคาของกลุ่ม"
+                onChange={(e) => u({ price_basis: e.target.value, unit_price: g ? groupBasisPrice(g, e.target.value) : r.unit_price })}
+                className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
+                <option value="avg">ฐาน: เฉลี่ย{g?.avg_price != null ? ` (${fmtBaht(g.avg_price)})` : ""}</option>
+                <option value="set">ฐาน: ตั้งไว้{g?.set_price != null ? ` (${fmtBaht(g.set_price)})` : " — ยังไม่ตั้ง"}</option>
+              </select>
+            )}
+          </div>
+        );
+      } },
     { key: "group", header: "ชนิด / สูตร", width: 116, sortable: true, getValue: (r) => r.group_name,
       groupLabel: (r) => r.group_name || "ไม่ระบุชนิด",
       render: (r) => (
@@ -918,7 +957,7 @@ export default function DesignSheetsPage() {
     { key: "note", header: "หมายเหตุ", minWidth: 120, getValue: (r) => r.note,
       render: (r, u) => <input value={r.note ?? ""} disabled={!canEdit} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-  ], [priceItems, canEdit]);
+  ], [priceItems, priceGroups, canEdit]);
 
   if (!canView) return <AccessDenied />;
 

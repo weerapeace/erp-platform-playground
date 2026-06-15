@@ -19,6 +19,13 @@ export type PriceItem = {
   group_name: string | null; group_code: string | null; calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
 };
 
+// กลุ่มวัสดุ (สำหรับตีราคาแบบ "กลุ่ม") — ราคาเฉลี่ยจากวัสดุในกลุ่ม + ราคาตั้ง
+export type PriceGroup = {
+  code: string; name: string;
+  calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
+  avg_price: number | null; set_price: number | null; item_count: number;
+};
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { data, error } = await supabaseAdmin().from("design_price_items")
@@ -43,5 +50,32 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       uom_default: (g?.uom_default as string) ?? null,
     };
   });
-  return NextResponse.json({ data: items, error: null });
+  // กลุ่มวัสดุ + ราคาเฉลี่ย (จากวัสดุในกลุ่ม) + ราคาตั้ง
+  const { data: grpData } = await supabaseAdmin().from("material_groups")
+    .select("code, name, calc_method, loss_percent, divisor, uom_default, set_price")
+    .eq("is_active", true).order("sort_order", { ascending: true });
+  // เฉลี่ยราคาต่อกลุ่ม จาก items ที่ดึงมาแล้ว
+  const sumByGroup = new Map<string, { sum: number; n: number }>();
+  for (const it of items) {
+    if (it.group_code && it.price_per_unit != null) {
+      const e = sumByGroup.get(it.group_code) ?? { sum: 0, n: 0 };
+      e.sum += it.price_per_unit; e.n += 1; sumByGroup.set(it.group_code, e);
+    }
+  }
+  const groups: PriceGroup[] = ((grpData ?? []) as Array<Record<string, unknown>>).map((g) => {
+    const code = String(g.code);
+    const agg = sumByGroup.get(code);
+    return {
+      code, name: String(g.name),
+      calc_method: (g.calc_method as string) ?? null,
+      loss_percent: g.loss_percent != null ? Number(g.loss_percent) : null,
+      divisor: g.divisor != null ? Number(g.divisor) : null,
+      uom_default: (g.uom_default as string) ?? null,
+      avg_price: agg && agg.n > 0 ? Math.round((agg.sum / agg.n) * 100) / 100 : null,
+      set_price: g.set_price != null ? Number(g.set_price) : null,
+      item_count: agg?.n ?? 0,
+    };
+  });
+
+  return NextResponse.json({ data: items, groups, error: null });
 }
