@@ -51,6 +51,7 @@ export function ApproveActions({ prId, approved, onChanged, compact, stop }: {
   const { user } = useAuth();
   const [busy, setBusy] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [delOpen, setDelOpen] = useState(false);
 
   const approve = async () => {
     setBusy(true);
@@ -62,6 +63,11 @@ export function ApproveActions({ prId, approved, onChanged, compact, stop }: {
     try { await callApi("/api/purchasing/pr-approve", { pr_ids: [prId], action: "reject", reason: reason || "ไม่ระบุเหตุผล", actor: user?.name }); toast.success("ไม่อนุมัติแล้ว — ย้ายไปแท็บไม่อนุมัติ"); onChanged(); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ไม่สำเร็จ"); } finally { setBusy(false); }
   };
+  const doDelete = async () => {
+    setDelOpen(false); setBusy(true);
+    try { await callApi("/api/purchasing/pr-delete", { pr_ids: [prId], actor: user?.name }); toast.success("ลบแล้ว (กู้คืนได้ภายหลัง)"); onChanged(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); } finally { setBusy(false); }
+  };
   const sp = (fn: () => void) => (e: React.MouseEvent) => { if (stop) e.stopPropagation(); fn(); };
 
   return (
@@ -70,14 +76,19 @@ export function ApproveActions({ prId, approved, onChanged, compact, stop }: {
         <>
           {!approved && <button onClick={sp(approve)} disabled={busy} title="อนุมัติ" className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-emerald-200 shadow-sm hover:bg-emerald-50 text-emerald-600 text-xs disabled:opacity-50">✓</button>}
           <button onClick={sp(() => setRejectOpen(true))} disabled={busy} title="ไม่อนุมัติ" className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-rose-200 shadow-sm hover:bg-rose-50 text-rose-500 text-xs disabled:opacity-50">✕</button>
+          <button onClick={sp(() => setDelOpen(true))} disabled={busy} title="ลบ (กู้คืนได้)" className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-rose-50 text-slate-500 hover:text-rose-500 text-xs disabled:opacity-50">🗑</button>
         </>
       ) : (
         <div className="flex gap-2">
           {!approved && <button onClick={sp(approve)} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">✓ อนุมัติ</button>}
           <button onClick={sp(() => setRejectOpen(true))} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-rose-300 text-rose-600 hover:bg-rose-50 disabled:opacity-50">✕ ไม่อนุมัติ</button>
+          <button onClick={sp(() => setDelOpen(true))} disabled={busy} className="h-9 px-3 text-sm rounded-lg border border-slate-200 text-slate-500 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50">🗑 ลบ</button>
         </div>
       )}
       <RejectReasonModal open={rejectOpen} count={1} onClose={() => setRejectOpen(false)} onConfirm={(r) => void doReject(r)} />
+      <ConfirmDialog open={delOpen} onClose={() => setDelOpen(false)} onConfirm={() => void doDelete()}
+        title="ลบรายการขอซื้อ" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
+        message="ลบรายการนี้ออก? (ลบแบบซ่อน — กู้คืนได้ภายหลัง)" />
     </>
   );
 }
