@@ -9,8 +9,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
+import { CanvasSketch } from "@/components/canvas-sketch";
 import { PROJECT_STATUS, SUMMARY_FIELDS, PRODUCTION_TASKS, getProject, updateProject, listItems, sendToProduction, type ProjectDetail, type BoardItem } from "../../data";
 import { BoardCanvas } from "./board-canvas";
+
+type BoardTab = "draw" | "cards";
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
@@ -22,6 +25,7 @@ export default function BoardPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [prodOpen, setProdOpen] = useState(false);
+  const [tab, setTab] = useState<BoardTab>("draw");
   const pushToast = (type: Toast["type"], message: string) => { const tid = Date.now() + Math.random(); setToasts((q) => [...q, { id: tid, type, message }]); setTimeout(() => setToasts((q) => q.filter((t) => t.id !== tid)), 3500); };
 
   const load = useCallback(async () => { try { setP(await getProject(id)); } catch (e) { setErr((e as Error).message); } }, [id]);
@@ -83,10 +87,18 @@ export default function BoardPage() {
           </div>
         )}
 
-        {/* กระดาน Canvas */}
-        {p.board_id
-          ? <BoardCanvas boardId={p.board_id} pushToast={pushToast} />
-          : <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center text-slate-400">ไม่พบกระดานของโปรเจกต์นี้</div>}
+        {/* กระดาน Canvas — 2 โหมด: วาดอิสระ (Excalidraw ของกลาง) / การ์ดเลือกทิศทาง */}
+        {p.board_id ? (
+          <div>
+            <div className="flex items-center gap-1 mb-3 bg-slate-100 rounded-lg p-1 w-fit">
+              <button onClick={() => setTab("draw")} className={`h-8 px-3 rounded-md text-sm font-medium transition-colors ${tab === "draw" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🖌 กระดานวาด</button>
+              <button onClick={() => setTab("cards")} className={`h-8 px-3 rounded-md text-sm font-medium transition-colors ${tab === "cards" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>🎯 เลือกทิศทาง (การ์ด)</button>
+            </div>
+            {tab === "draw"
+              ? <CanvasSketch entityType="creative_board" entityId={p.board_id} height="calc(100vh - 260px)" />
+              : <BoardCanvas boardId={p.board_id} pushToast={pushToast} />}
+          </div>
+        ) : <div className="bg-white rounded-xl border-2 border-dashed border-slate-200 p-12 text-center text-slate-400">ไม่พบกระดานของโปรเจกต์นี้</div>}
       </div>
 
       {summaryOpen && <SummaryModal project={p} onClose={() => setSummaryOpen(false)} onSaved={load} pushToast={pushToast} />}

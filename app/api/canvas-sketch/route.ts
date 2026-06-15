@@ -18,12 +18,19 @@ import { r2PutObject, isR2Configured } from "@/lib/r2";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// สิทธิ์ของกระดานขึ้นกับชนิดเอกสาร (server เลือกเอง — client ระบุไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
+const PERM: Record<string, { view: string; edit: string }> = {
+  design_sheet:   { view: "products.view", edit: "products.edit" },
+  creative_board: { view: "tasks.view",    edit: "tasks.edit" },
+};
+const permFor = (entityType: string) => PERM[entityType] ?? { view: "products.view", edit: "products.edit" };
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const entityType = (searchParams.get("entity_type") ?? "").trim();
   const entityId   = (searchParams.get("entity_id") ?? "").trim();
   if (!entityType || !entityId) return NextResponse.json({ data: null, error: "ต้องส่ง entity_type และ entity_id" }, { status: 400 });
+  const denied = await guardApi(request, permFor(entityType).view); if (denied) return denied;
 
   const { data } = await supabaseAdmin().from("erp_canvas_sketches")
     .select("scene, preview_r2_key, updated_at")
@@ -45,14 +52,14 @@ type PutBody = {
 };
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
-  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   let body: PutBody;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const entityType = (body.entity_type ?? "").trim();
   const entityId   = (body.entity_id ?? "").trim();
   if (!entityType || !entityId) return NextResponse.json({ error: "ต้องส่ง entity_type และ entity_id" }, { status: 400 });
+  const denied = await guardApi(request, permFor(entityType).edit); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
   // กันกระดานบวมเกิน (รูปฝังใน scene เป็น base64) — 8MB พอสำหรับงานวาดปกติ
   const sceneSize = body.scene ? JSON.stringify(body.scene).length : 0;
