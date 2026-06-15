@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
+import { ERPModal } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
 
@@ -21,6 +22,7 @@ export function PurchaseNeeds({ canEdit }: { canEdit: boolean }) {
   const [rows, setRows] = useState<PurchaseNeedRow[] | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);   // popup ยืนยันก่อนสร้างจริง
 
   const load = useCallback(async () => {
     setRows(null); setSel(new Set());
@@ -45,10 +47,16 @@ export function PurchaseNeeds({ canEdit }: { canEdit: boolean }) {
         body: JSON.stringify({ items, order_date: new Date().toISOString().slice(0, 10), actor: user?.name ?? user?.email ?? undefined }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`สร้างใบขอซื้อ ${j.created ?? items.length} รายการ — ดูที่หน้า "ขอซื้อ"`);
+      setConfirmOpen(false);
       await load();   // โหลดใหม่ → รายการที่ขอครบแล้วหายไป + สถานะการ์ดอัปเดต
     } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างใบขอซื้อไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
+
+  // สรุปคร่าว ๆ สำหรับ popup ยืนยัน
+  const chosen = (rows ?? []).filter((r) => sel.has(keyOf(r)));
+  const prCount = chosen.reduce((n, r) => n + r.mos.length, 0);   // 1 ใบขอซื้อต่อ (วัตถุดิบ × ใบสั่งผลิต)
+  const moCount = new Set(chosen.flatMap((r) => r.mos.map((m) => m.mo_no))).size;
 
   const columns = useMemo<MiniColumn<PurchaseNeedRow>[]>(() => [
     {
@@ -82,6 +90,7 @@ export function PurchaseNeeds({ canEdit }: { canEdit: boolean }) {
   if (rows === null) return <div className="text-center py-16 text-slate-400">กำลังโหลด…</div>;
 
   return (
+    <>
     <MiniTable
       rows={rows}
       rowKey={keyOf}
@@ -98,10 +107,39 @@ export function PurchaseNeeds({ canEdit }: { canEdit: boolean }) {
       emptyText="ไม่มีวัตถุดิบที่ต้องขอซื้อ (ขอครบ/มีของครบแล้ว) 🎉"
       noMatchText={(q) => `ไม่พบวัตถุดิบที่ตรงกับ “${q}”`}
       actions={canEdit && rows.length > 0 ? (
-        <button onClick={() => void createPR()} disabled={saving || sel.size === 0}
-          className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">{saving ? "กำลังสร้าง…" : `🛒 สร้างใบขอซื้อ (${sel.size})`}</button>
+        <button onClick={() => setConfirmOpen(true)} disabled={saving || sel.size === 0}
+          className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">{`🛒 สร้างใบขอซื้อ (${sel.size})`}</button>
       ) : undefined}
       footnote='ติ๊กเลือก → สร้างใบขอซื้อ (แยกต่อใบสั่งผลิต) → สถานะ "ขอแล้ว" เด้งกลับการ์ด/ป๊อปอัปอัตโนมัติ · ดูใบที่หน้า "ขอซื้อ"'
     />
+
+    <ERPModal open={confirmOpen} onClose={() => !saving && setConfirmOpen(false)} size="md"
+      title="ยืนยันสร้างใบขอซื้อ"
+      footer={<>
+        <button onClick={() => setConfirmOpen(false)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+        <button onClick={() => void createPR()} disabled={saving || chosen.length === 0} className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">{saving ? "กำลังสร้าง…" : "ยืนยันสร้าง"}</button>
+      </>}>
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-2 text-sm">
+          <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700">วัตถุดิบ <b>{chosen.length}</b> ชนิด</span>
+          <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">จะออกใบขอซื้อ <b>{prCount}</b> รายการ</span>
+          <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">ครอบคลุม <b>{moCount}</b> ใบสั่งผลิต</span>
+        </div>
+        <p className="text-[11px] text-slate-400">ระบบจะแยกใบขอซื้อตามใบสั่งผลิต เพื่อให้สถานะ &ldquo;ขอแล้ว&rdquo; เด้งกลับการ์ดแต่ละใบ</p>
+        <div className="border border-slate-200 rounded-lg max-h-72 overflow-y-auto divide-y divide-slate-50">
+          {chosen.map((r) => (
+            <div key={keyOf(r)} className="flex items-center justify-between gap-2 px-3 py-1.5">
+              <div className="min-w-0">
+                <p className="text-sm text-slate-800 truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> {r.component_name}</p>
+                <p className="text-[10px] text-slate-400">{r.material_type || "ไม่ระบุประเภท"} · {r.mos.length} ใบสั่งผลิต</p>
+              </div>
+              <span className="text-sm font-bold text-rose-600 tabular-nums shrink-0">{fmt(r.total_remaining)} <span className="text-[11px] font-normal text-slate-400">{r.uom ?? ""}</span></span>
+            </div>
+          ))}
+          {chosen.length === 0 && <div className="px-3 py-4 text-center text-sm text-slate-300">ยังไม่ได้เลือกวัตถุดิบ</div>}
+        </div>
+      </div>
+    </ERPModal>
+    </>
   );
 }
