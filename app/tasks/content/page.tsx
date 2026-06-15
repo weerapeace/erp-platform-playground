@@ -246,7 +246,7 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
     try {
       await updateContent(contentId, {
         status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null,
-        product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags })),
+        product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
       });
       pushToast("success", "บันทึกแล้ว"); await load(); onChanged();
     } catch (e) { pushToast("error", (e as Error).message); }
@@ -280,7 +280,7 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Caption แยกตามแพลตฟอร์ม</p>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} brandId={d.brand_id} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} brandId={d.brand_id} links={links} skuPrice={d.sku_price} skuColor={d.sku_color} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -315,8 +315,17 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
   );
 }
 
-// caption ต่อ 1 แพลตฟอร์ม + ตัวเลือก hashtag จากคลัง
-function CaptionCard({ cap, brandId, onChange, pushToast }: { cap: ContentCaption; brandId: string | null; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+// ประเภท caption (สี) — กดแล้วประกอบข้อมูลสินค้าให้ตามชนิด
+const CAPTION_TYPES: { key: string; label: string; cls: string; active: string }[] = [
+  { key: "short",         label: "Short",        cls: "bg-slate-50 text-slate-600 border-slate-200",     active: "bg-slate-700 text-white border-slate-700" },
+  { key: "landing",       label: "Landing Page", cls: "bg-sky-50 text-sky-700 border-sky-200",           active: "bg-sky-600 text-white border-sky-600" },
+  { key: "product_links", label: "Product Links",cls: "bg-emerald-50 text-emerald-700 border-emerald-200", active: "bg-emerald-600 text-white border-emerald-600" },
+  { key: "page_links",    label: "Page Links",   cls: "bg-violet-50 text-violet-700 border-violet-200",  active: "bg-violet-600 text-white border-violet-600" },
+];
+const CAP_MARK = "\n———\n"; // เส้นคั่น caption ที่พิมพ์เอง กับบล็อกข้อมูลสินค้าที่ระบบเติม
+
+// caption ต่อ 1 แพลตฟอร์ม + ประเภท caption + ตัวเลือก hashtag จากคลัง
+function CaptionCard({ cap, brandId, links, skuPrice, skuColor, onChange, pushToast }: { cap: ContentCaption; brandId: string | null; links: { platform: string; url: string }[]; skuPrice: number | null; skuColor: string | null; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const [showTags, setShowTags] = useState(false);
   const [tags, setTags] = useState<Hashtag[]>([]);
   const [newTag, setNewTag] = useState("");
@@ -340,11 +349,37 @@ function CaptionCard({ cap, brandId, onChange, pushToast }: { cap: ContentCaptio
     try { await navigator.clipboard.writeText(text); pushToast("success", `คัดลอก ${platformLabel(cap.platform)} แล้ว`); } catch { pushToast("error", "คัดลอกไม่สำเร็จ"); }
   };
 
+  // สร้างบล็อกข้อมูลสินค้าตามประเภท (ดึงจาก product_links + ราคา/สีของ SKU)
+  const buildBlock = (type: string): string => {
+    const shopee = links.find((l) => l.platform === "shopee" && l.url.trim())?.url;
+    const lazada = links.find((l) => l.platform === "lazada" && l.url.trim())?.url;
+    const anyLink = links.find((l) => l.url.trim())?.url;
+    const priceLine = skuPrice != null ? `💰 ราคา ${Number(skuPrice).toLocaleString()} บาท` : null;
+    const colorLine = skuColor ? `🎨 สี ${skuColor}` : null;
+    const out: string[] = [];
+    if (type === "landing") { if (anyLink) out.push(`🛒 สั่งซื้อ: ${anyLink}`); }
+    else if (type === "product_links") { if (shopee) out.push(`🛒 Shopee: ${shopee}`); if (lazada) out.push(`🛒 Lazada: ${lazada}`); if (priceLine) out.push(priceLine); if (colorLine) out.push(colorLine); }
+    else if (type === "page_links") { if (priceLine) out.push(priceLine); if (colorLine) out.push(colorLine); }
+    return out.join("\n");
+  };
+  // กดประเภท → เก็บประเภท + เติมบล็อกสินค้า (แทนที่บล็อกเดิม คงข้อความที่พิมพ์เอง)
+  const applyType = (type: string) => {
+    const base = (cap.caption ?? "").split(CAP_MARK)[0].replace(/\s+$/, "");
+    const block = buildBlock(type);
+    onChange({ caption_type: type, caption: block ? `${base}${CAP_MARK}${block}` : base });
+  };
+
   return (
     <div className="border border-slate-200 rounded-lg p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-slate-700">{platformLabel(cap.platform)}</span>
         <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 คัดลอก</button>
+      </div>
+      {/* ประเภท caption — กดแล้วเติมข้อมูลสินค้าให้ตามชนิด */}
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {CAPTION_TYPES.map((tp) => { const on = (cap.caption_type ?? "short") === tp.key; return (
+          <button key={tp.key} onClick={() => applyType(tp.key)} title="กดเพื่อเปลี่ยนประเภท caption (เติมข้อมูลสินค้าให้)" className={`px-2 py-0.5 rounded-full text-xs border ${on ? tp.active : tp.cls}`}>{tp.label}</button>
+        ); })}
       </div>
       <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`} />
       <div className="mt-2">

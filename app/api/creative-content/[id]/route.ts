@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   return NextResponse.json({ data: { ...flattenContent(data as Record<string, unknown>), captions: caps ?? [] }, error: null });
 }
 
-type Caption = { platform: string; caption?: string | null; hashtags?: string | null };
+type Caption = { platform: string; caption?: string | null; hashtags?: string | null; caption_type?: string | null };
 type PatchBody = Record<string, unknown> & { captions?: Caption[]; product_links?: { platform: string; url: string }[] };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -54,7 +54,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // แทนที่ captions ทั้งชุด (ถ้าส่งมา)
   if (Array.isArray(body.captions)) {
     await admin.from("erp_creative_content_captions").delete().eq("content_id", id);
-    const caps = body.captions.filter((c) => c?.platform).map((c, i) => ({ content_id: id, platform: c.platform, caption: c.caption ?? null, hashtags: c.hashtags ?? null, sort_order: i }));
+    const caps = body.captions.filter((c) => c?.platform).map((c, i) => ({ content_id: id, platform: c.platform, caption: c.caption ?? null, hashtags: c.hashtags ?? null, caption_type: c.caption_type ?? "short", sort_order: i }));
     if (caps.length) { const { error: cErr } = await admin.from("erp_creative_content_captions").insert(caps); if (cErr) return NextResponse.json({ error: friendlyDbError(cErr.message) }, { status: 400 }); }
   }
 

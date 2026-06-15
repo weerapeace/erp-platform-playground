@@ -22,12 +22,12 @@ export const SELECT = `id, content_no, title, campaign_id, brand_id, sku_id, pro
   is_active, created_at, updated_at,
   brand:brands!brand_id(name, color),
   campaign:erp_creative_campaigns!campaign_id(name),
-  sku:skus_v2!sku_id(code, name_th)`;
+  sku:skus_v2!sku_id(code, name_th, color, color_th, list_price)`;
 
 export function flattenContent(r: Record<string, unknown>): Record<string, unknown> {
   const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
   const c = (Array.isArray(r.campaign) ? r.campaign[0] : r.campaign) as { name?: string } | null;
-  const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string } | null;
+  const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string; color?: string | null; color_th?: string | null; list_price?: number | null } | null;
   const out: Record<string, unknown> = { ...r };
   delete out.brand; delete out.campaign; delete out.sku;
   out.brand_label = b?.name ?? null;
@@ -35,6 +35,8 @@ export function flattenContent(r: Record<string, unknown>): Record<string, unkno
   out.campaign_label = c?.name ?? null;
   out.sku_code = s?.code ?? null;
   out.sku_name = s?.name_th ?? null;
+  out.sku_color = (s?.color_th as string) ?? (s?.color as string) ?? null;
+  out.sku_price = s?.list_price ?? null;
   return out;
 }
 
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ data: items, total: count ?? items.length, error: null });
 }
 
-type Caption = { platform: string; caption?: string | null; hashtags?: string | null };
+type Caption = { platform: string; caption?: string | null; hashtags?: string | null; caption_type?: string | null };
 type CreateBody = {
   title?: string; campaign_id?: string | null; brand_id?: string | null; sku_id?: string | null; product_name?: string | null;
   post_type?: string | null; platforms?: string[]; status?: string; scheduled_at?: string | null;
@@ -97,7 +99,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // captions เริ่มต้น (ถ้าส่งมา)
   if (Array.isArray(body.captions) && body.captions.length > 0) {
-    const caps = body.captions.filter((c) => c?.platform).map((c, i) => ({ content_id: created!.id, platform: c.platform, caption: c.caption ?? null, hashtags: c.hashtags ?? null, sort_order: i }));
+    const caps = body.captions.filter((c) => c?.platform).map((c, i) => ({ content_id: created!.id, platform: c.platform, caption: c.caption ?? null, hashtags: c.hashtags ?? null, caption_type: c.caption_type ?? "short", sort_order: i }));
     if (caps.length) await admin.from("erp_creative_content_captions").insert(caps);
   }
 

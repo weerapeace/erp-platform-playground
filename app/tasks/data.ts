@@ -241,13 +241,13 @@ export async function listBrands(): Promise<BrandOption[]> {
 // ============================================================
 // Content / Social
 // ============================================================
-export type ContentCaption = { id?: string; platform: string; caption: string | null; hashtags: string | null; sort_order?: number };
+export type ContentCaption = { id?: string; platform: string; caption: string | null; hashtags: string | null; caption_type?: string; sort_order?: number };
 export type ContentItem = {
   [key: string]: unknown;
   id: string; content_no: string | null; title: string;
   campaign_id: string | null; campaign_label: string | null;
   brand_id: string | null; brand_label: string | null; brand_color: string | null;
-  sku_id: string | null; sku_code: string | null; sku_name: string | null; product_name: string | null;
+  sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_price: number | null; product_name: string | null;
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
   product_links: { platform: string; url: string }[]; note: string | null; updated_at: string;
