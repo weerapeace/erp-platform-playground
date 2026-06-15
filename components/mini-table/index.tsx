@@ -122,6 +122,12 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     return [...map.entries()].map(([name, rs]) => ({ name, rows: rs })).sort((a, b) => a.name.localeCompare(b.name, "th"));
   }, [sorted, groupBy, grouped]);
 
+  // คลิกหัวคอลัมน์เพื่อเรียง (เฉพาะคอลัมน์ที่มี sortValue) — สลับ asc/desc
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setDir("asc"); }
+  };
+
   const allKeys = sorted.map(rowKey);
   const allSel = allKeys.length > 0 && allKeys.every((k) => sel.has(k));
   const toggleKey = (k: string) => { const n = new Set(sel); n.has(k) ? n.delete(k) : n.add(k); setSel(n); };
@@ -139,7 +145,19 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
           <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className="w-4 h-4 accent-rose-600" />
         </span>
       )}
-      {columns.map((c) => <span key={c.key} className={alignCls(c.align)}>{c.header}</span>)}
+      {columns.map((c) => {
+        const canSort = !!c.sortValue;
+        const active = sortKey === c.key;
+        if (!canSort) return <span key={c.key} className={`flex items-center gap-1 ${alignCls(c.align)}`}>{c.header}</span>;
+        return (
+          <span key={c.key} className={`flex items-center gap-1 ${alignCls(c.align)}`}>
+            <button type="button" onClick={() => toggleSort(c.key)} title="คลิกเพื่อเรียง" className={`inline-flex items-center gap-1 hover:text-slate-900 ${active ? "text-rose-600" : ""}`}>
+              {c.header}
+              <span className="text-[9px] leading-none">{active ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
+            </button>
+          </span>
+        );
+      })}
     </div>
   );
 
