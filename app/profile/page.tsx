@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, roleLabel, roleColor } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { supabaseBrowser } from "@/lib/supabase-browser";
 
 function avatarSrc(v: string | null): string | null {
   if (!v) return null;
@@ -25,6 +26,26 @@ export default function ProfilePage() {
   const [error, setError]     = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const seeded = useRef(false);
+
+  // เปลี่ยนรหัสผ่าน/PIN ตัวเอง (ผ่าน Supabase auth) — ผู้ใช้ภายในใช้อีเมล @pin.local + PIN เป็นรหัสผ่าน
+  const isPin = !!user?.email?.endsWith("@pin.local");
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwMsg, setPwMsg] = useState<string | null>(null);
+  const [pwErr, setPwErr] = useState<string | null>(null);
+
+  const changePassword = async () => {
+    setPwMsg(null); setPwErr(null);
+    if (isPin) { if (!/^\d{6}$/.test(pw1)) { setPwErr("PIN ต้องเป็นตัวเลข 6 หลัก"); return; } }
+    else if (pw1.length < 6) { setPwErr("รหัสผ่านอย่างน้อย 6 ตัวอักษร"); return; }
+    if (pw1 !== pw2) { setPwErr("ยืนยันไม่ตรงกัน"); return; }
+    setPwBusy(true);
+    const { error: e } = await supabaseBrowser.auth.updateUser({ password: pw1 });
+    if (e) setPwErr(e.message);
+    else { setPwMsg(isPin ? "เปลี่ยน PIN แล้ว" : "เปลี่ยนรหัสผ่านแล้ว"); setPw1(""); setPw2(""); }
+    setPwBusy(false);
+  };
 
   // seed จาก user (ครั้งแรกที่โหลดเสร็จ)
   useEffect(() => {
@@ -108,6 +129,15 @@ export default function ProfilePage() {
             </div>
           </div>
 
+          {/* วางลิงก์รูป (รองรับ GIF) — avatarSrc รองรับ URL http อยู่แล้ว */}
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">หรือวางลิงก์รูป (รองรับ GIF)</span>
+            <input value={avatar?.startsWith("http") ? avatar : ""} disabled={busy || uploadBusy}
+              onChange={(e) => setAvatar(e.target.value.trim() || null)} placeholder="https://…/avatar.gif"
+              className="w-full h-9 mt-1 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60" />
+            <span className="block text-[11px] text-slate-400 mt-0.5">วางลิงก์รูป/GIF จากเว็บ — เว้นว่างถ้าใช้รูปที่อัปโหลด</span>
+          </label>
+
           {/* ชื่อ */}
           <label className="block">
             <span className="text-xs font-medium text-slate-600">ชื่อแสดงผล</span>
@@ -124,6 +154,23 @@ export default function ProfilePage() {
           <button onClick={save} disabled={busy || uploadBusy}
             className="w-full h-10 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
             {busy ? "กำลังบันทึก..." : "💾 บันทึก"}
+          </button>
+        </div>
+
+        {/* เปลี่ยนรหัสผ่าน / PIN ของตัวเอง */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6 mt-5 space-y-3">
+          <div className="text-sm font-semibold text-slate-800">{isPin ? "🔑 เปลี่ยน PIN" : "🔑 เปลี่ยนรหัสผ่าน"}</div>
+          {pwErr && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {pwErr}</div>}
+          {pwMsg && <div className="px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">✓ {pwMsg}</div>}
+          <input type="password" value={pw1} onChange={(e) => setPw1(e.target.value)} disabled={pwBusy}
+            inputMode={isPin ? "numeric" : "text"} placeholder={isPin ? "PIN ใหม่ (6 หลัก)" : "รหัสผ่านใหม่ (อย่างน้อย 6 ตัว)"}
+            className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60" />
+          <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} disabled={pwBusy}
+            inputMode={isPin ? "numeric" : "text"} placeholder={isPin ? "ยืนยัน PIN ใหม่" : "ยืนยันรหัสผ่านใหม่"}
+            className="w-full h-10 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60" />
+          <button onClick={changePassword} disabled={pwBusy || !pw1 || !pw2}
+            className="w-full h-10 text-sm font-semibold bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">
+            {pwBusy ? "กำลังเปลี่ยน..." : (isPin ? "เปลี่ยน PIN" : "เปลี่ยนรหัสผ่าน")}
           </button>
         </div>
       </div>
