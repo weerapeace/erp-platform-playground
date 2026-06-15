@@ -19,11 +19,12 @@ export type PriceItem = {
   group_name: string | null; group_code: string | null; calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
 };
 
-// กลุ่มวัสดุ (สำหรับตีราคาแบบ "กลุ่ม") — ราคาเฉลี่ยจากวัสดุในกลุ่ม + ราคาตั้ง
+// กลุ่มวัสดุ (สำหรับตีราคาแบบ "กลุ่ม") — ราคาเฉลี่ยจากวัสดุในกลุ่ม + ราคาตั้ง + ราคาซื้อจริงล่าสุด (GR→PO)
 export type PriceGroup = {
   code: string; name: string;
   calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
   avg_price: number | null; set_price: number | null; item_count: number;
+  latest_price: number | null; latest_currency: string | null;   // ราคา PO ของรายการที่รับล่าสุด (สกุลตามจริง)
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -50,10 +51,40 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       uom_default: (g?.uom_default as string) ?? null,
     };
   });
-  // กลุ่มวัสดุ + ราคาเฉลี่ย (จากวัสดุในกลุ่ม) + ราคาตั้ง
-  const { data: grpData } = await supabaseAdmin().from("material_groups")
-    .select("code, name, calc_method, loss_percent, divisor, uom_default, set_price")
+  const admin = supabaseAdmin();
+  // กลุ่มวัสดุ + ราคาเฉลี่ย (จากวัสดุในกลุ่ม) + ราคาตั้ง + สินค้าตัวแทน (ref_sku_ids)
+  const { data: grpData } = await admin.from("material_groups")
+    .select("code, name, calc_method, loss_percent, divisor, uom_default, set_price, ref_sku_ids")
     .eq("is_active", true).order("sort_order", { ascending: true });
+
+  // ราคาซื้อจริงล่าสุด (GR→PO) ต่อ SKU ตัวแทน: ใบรับล่าสุด (receive_date) → ราคาในบรรทัด PO
+  const allRefSkus = [...new Set(((grpData ?? []) as Array<Record<string, unknown>>)
+    .flatMap((g) => (Array.isArray(g.ref_sku_ids) ? (g.ref_sku_ids as string[]) : [])))];
+  const latestBySku = new Map<string, { price: number | null; currency: string | null; date: string }>();
+  if (allRefSkus.length) {
+    const { data: grl } = await admin.from("goods_receipt_lines_v2")
+      .select("item_sku_id, gr_id, po_line_id, created_at")
+      .in("item_sku_id", allRefSkus).eq("is_active", true).not("po_line_id", "is", null);
+    const lines = (grl ?? []) as Array<Record<string, unknown>>;
+    const grIds = [...new Set(lines.map((l) => String(l.gr_id)))];
+    const polIds = [...new Set(lines.map((l) => String(l.po_line_id)))];
+    const [{ data: grs }, { data: pols }] = await Promise.all([
+      grIds.length ? admin.from("goods_receipts_v2").select("id, receive_date, is_active").in("id", grIds) : Promise.resolve({ data: [] }),
+      polIds.length ? admin.from("purchase_order_lines_v2").select("id, price_est, currency").in("id", polIds) : Promise.resolve({ data: [] }),
+    ]);
+    const grMap = new Map((grs ?? []).map((g: Record<string, unknown>) => [String(g.id), g]));
+    const polMap = new Map((pols ?? []).map((p: Record<string, unknown>) => [String(p.id), p]));
+    for (const l of lines) {
+      const gr = grMap.get(String(l.gr_id)); if (!gr || gr.is_active === false) continue;
+      const pol = polMap.get(String(l.po_line_id)); if (!pol) continue;
+      const date = (gr.receive_date as string) || (l.created_at as string) || "";
+      const sku = String(l.item_sku_id);
+      const prev = latestBySku.get(sku);
+      if (!prev || date > prev.date) {
+        latestBySku.set(sku, { price: pol.price_est != null ? Number(pol.price_est) : null, currency: (pol.currency as string) ?? null, date });
+      }
+    }
+  }
   // เฉลี่ยราคาต่อกลุ่ม จาก items ที่ดึงมาแล้ว
   const sumByGroup = new Map<string, { sum: number; n: number }>();
   for (const it of items) {
@@ -65,6 +96,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const groups: PriceGroup[] = ((grpData ?? []) as Array<Record<string, unknown>>).map((g) => {
     const code = String(g.code);
     const agg = sumByGroup.get(code);
+    // ราคาซื้อจริงล่าสุดของกลุ่ม = ตัวที่รับล่าสุด ในบรรดา SKU ตัวแทนของกลุ่ม
+    const refs = Array.isArray(g.ref_sku_ids) ? (g.ref_sku_ids as string[]) : [];
+    let latest: { price: number | null; currency: string | null; date: string } | null = null;
+    for (const sku of refs) {
+      const e = latestBySku.get(sku);
+      if (e && (!latest || e.date > latest.date)) latest = e;
+    }
     return {
       code, name: String(g.name),
       calc_method: (g.calc_method as string) ?? null,
@@ -74,6 +112,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       avg_price: agg && agg.n > 0 ? Math.round((agg.sum / agg.n) * 100) / 100 : null,
       set_price: g.set_price != null ? Number(g.set_price) : null,
       item_count: agg?.n ?? 0,
+      latest_price: latest?.price ?? null, latest_currency: latest?.currency ?? null,
     };
   });
 

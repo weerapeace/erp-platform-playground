@@ -25,6 +25,7 @@ import { RichTextEditor } from "@/components/rich-text";
 import type { Attachment } from "@/app/api/attachments/route";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
+import { GroupRefSkusModal } from "./group-ref-modal";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
@@ -113,9 +114,10 @@ function rowFromItem(it: PriceItem, idx: number): CostRow {
   });
 }
 
-// ราคาฐานของกลุ่มตามที่เลือก (avg/set) — 'set' ที่ยังไม่ตั้งค่า → ถอยใช้ค่าเฉลี่ย
+// ราคาฐานของกลุ่มตามที่เลือก (avg/set/latest) — ถ้าค่าที่เลือกไม่มี → ถอยใช้ค่าเฉลี่ย
 function groupBasisPrice(g: PriceGroup, basis: string | null): number | null {
   if (basis === "set") return g.set_price ?? g.avg_price;
+  if (basis === "latest") return g.latest_price ?? g.avg_price;
   return g.avg_price;
 }
 // ฟิลด์บรรทัดเมื่อเลือกแบบ "กลุ่ม" (item_id = null = จับคู่วัสดุจริงทีหลัง)
@@ -212,6 +214,7 @@ export default function DesignSheetsPage() {
   // ---- เฟส 4: ตีราคา ----
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
+  const [groupRefOpen, setGroupRefOpen] = useState(false);   // โมดอลผูกสินค้าตัวแทนต่อกลุ่ม
   const [costLines, setCostLines] = useState<CostRow[]>([]);
   const [costDirty, setCostDirty] = useState(false);
   const [costSaving, setCostSaving] = useState(false);
@@ -897,12 +900,18 @@ export default function DesignSheetsPage() {
                     unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
               }} />
             {inGroupMode && canEdit && (
-              <select value={r.price_basis ?? "avg"} title="ฐานราคาของกลุ่ม"
-                onChange={(e) => u({ price_basis: e.target.value, unit_price: g ? groupBasisPrice(g, e.target.value) : r.unit_price })}
-                className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
-                <option value="avg">ฐาน: เฉลี่ย{g?.avg_price != null ? ` (${fmtBaht(g.avg_price)})` : ""}</option>
-                <option value="set">ฐาน: ตั้งไว้{g?.set_price != null ? ` (${fmtBaht(g.set_price)})` : " — ยังไม่ตั้ง"}</option>
-              </select>
+              <>
+                <select value={r.price_basis ?? "avg"} title="ฐานราคาของกลุ่ม"
+                  onChange={(e) => u({ price_basis: e.target.value, unit_price: g ? groupBasisPrice(g, e.target.value) : r.unit_price })}
+                  className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
+                  <option value="avg">ฐาน: เฉลี่ย{g?.avg_price != null ? ` (${fmtBaht(g.avg_price)})` : ""}</option>
+                  <option value="set">ฐาน: ตั้งไว้{g?.set_price != null ? ` (${fmtBaht(g.set_price)})` : " — ยังไม่ตั้ง"}</option>
+                  <option value="latest">ฐาน: ซื้อจริงล่าสุด{g?.latest_price != null ? ` (${g.latest_currency && g.latest_currency !== "THB" ? `${g.latest_currency} ` : ""}${g.latest_price.toLocaleString("th-TH")})` : " — ยังไม่มี/ยังไม่ผูกสินค้า"}</option>
+                </select>
+                {r.price_basis === "latest" && g?.latest_currency && g.latest_currency !== "THB" && (
+                  <div className="text-[10px] text-amber-600">⚠ ราคาเป็น {g.latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”</div>
+                )}
+              </>
             )}
           </div>
         );
@@ -1324,6 +1333,7 @@ export default function DesignSheetsPage() {
             {/* แท็บตีราคา (เฟส 4) — สูตรเดียวกับ BOM, วัสดุจาก master /master/design-price-items */}
             {modalTab === "cost" && form.id && <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {canEdit && <button onClick={() => setGroupRefOpen(true)} className="h-8 px-3 text-sm font-medium bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-300 hover:text-blue-700">🔗 ผูกราคาซื้อ (กลุ่ม)</button>}
                 {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
               </div>
               {priceItems.length === 0 && (
@@ -1566,6 +1576,9 @@ export default function DesignSheetsPage() {
           </label>
         </div>
       </ERPModal>
+
+      {/* โมดอลผูกสินค้าตัวแทนต่อกลุ่ม (เฟส 2) — ปิดแล้วรีโหลดราคา (latest อาจเปลี่ยน) */}
+      <GroupRefSkusModal open={groupRefOpen} onClose={() => { setGroupRefOpen(false); setPriceItems([]); setPriceGroups([]); }} />
 
       {/* ป๊อปจัดการวัสดุตีราคา — CRUD ผ่าน API กลาง master-v2 (เหมือนหน้า /master/design-price-items) */}
       <ERPModal open={pmOpen} onClose={closePm} size="lg" title="🧮 จัดการวัสดุตีราคา"
