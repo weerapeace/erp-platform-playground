@@ -17,6 +17,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
 import { CreateTaskModal } from "./create-task-modal";
+import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
 import { applyTaskTransition } from "./task-actions";
 import { taskTypeLabel } from "./use-options";
@@ -100,6 +101,8 @@ export default function TasksPage() {
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
+  // คลังความรู้
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
   // detail drawer
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -174,6 +177,7 @@ export default function TasksPage() {
             <a href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 {t("แคมเปญ", "Campaigns")}</a>
             <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 {t("คอนเทนต์", "Content")}</a>
             <a href="/tasks/templates" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🔁 {t("เทมเพลต", "Templates")}</a>
+            <button onClick={() => setKnowledgeOpen(true)} className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📚 {t("ความรู้", "Knowledge")}</button>
             {user?.role === "admin" && <a href="/tasks/settings" className="h-10 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50" title={t("ตั้งค่าสิทธิ์", "Settings")}>⚙️</a>}
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
           </div>
@@ -247,6 +251,9 @@ export default function TasksPage() {
           onMove={applyMove} onDelete={onDelete} pushToast={pushToast}
         />
       )}
+
+      {/* คลังความรู้ — แก้ไขได้ (ของกลางในโมดูล) */}
+      {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={user?.role === "admin" || user?.role === "manager"} pushToast={pushToast} />}
 
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((p) => p.filter((t) => t.id !== id))} />
     </StandaloneShell>

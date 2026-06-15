@@ -229,6 +229,23 @@ export async function deleteCampaign(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-campaigns/${id}`, { method: "DELETE" }));
 }
 
+// ---- คลังความรู้ (Knowledge) ----
+export type KnowledgePage = { id: string; title: string; body_html: string | null; sort_order: number; updated_at: string };
+export async function listKnowledge(): Promise<KnowledgePage[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-knowledge"));
+  return (j.data as KnowledgePage[]) ?? [];
+}
+export async function createKnowledge(title: string): Promise<KnowledgePage> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-knowledge", { method: "POST", body: JSON.stringify({ title }) }));
+  return j.data as KnowledgePage;
+}
+export async function updateKnowledge(id: string, patch: { title?: string; body_html?: string | null; sort_order?: number }): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-knowledge/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+}
+export async function deleteKnowledge(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-knowledge/${id}`, { method: "DELETE" }));
+}
+
 // ---- Brands (ของกลาง /api/brands) ----
 export async function listBrands(): Promise<BrandOption[]> {
   const j = await jsonOrThrow(await apiFetch("/api/brands"));
