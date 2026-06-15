@@ -35,7 +35,7 @@ const AUTOSAVE_MS = 2500;   // หยุดวาดกี่ ms แล้วค
 export type CanvasSketchControls = { isDirty: () => boolean; save: () => Promise<void>; discard: () => void; insert: (skeletons: Record<string, unknown>[]) => Promise<void> };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen,
 }: {
   entityType: string;
   entityId:   string;
@@ -43,8 +43,10 @@ export function CanvasSketch({
   height?:    string;
   /** แจ้งสถานะ "มีแก้ค้าง" ขึ้นไปข้างนอก (ใช้เตือนก่อนปิด popup) */
   onDirtyChange?: (dirty: boolean) => void;
-  /** ให้ภายนอกถือ handle เรียก save()/discard() ได้ */
+  /** ให้ภายนอกถือ handle เรียก save()/discard()/insert() ได้ */
   controlsRef?: MutableRefObject<CanvasSketchControls | null>;
+  /** คลิกการ์ดที่มี customData.kind → เปิด drawer (เช่น sku/task) — ระบบจะ preventDefault ลิงก์ให้เอง */
+  onCardOpen?: (data: Record<string, unknown>) => void;
 }) {
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -58,6 +60,7 @@ export function CanvasSketch({
   const discardRef = useRef(false);    // true = ผู้ใช้เลือก "ทิ้ง" → ไม่ flush ตอน unmount
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
+  const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
 
   useEffect(() => {
@@ -140,17 +143,42 @@ export function CanvasSketch({
       save: doSave,
       discard: () => { discardRef.current = true; markDirty(false); setSaveState("idle"); },
       // แทรก element (การ์ด/โซน) ลงกลางจอ แล้วบันทึกอัตโนมัติ
+      // skeleton ที่เป็นรูปให้ใส่ `_imageUrl` (แทน fileId) — ระบบจะโหลดรูป → ลงทะเบียนไฟล์ → ใส่ fileId ให้เอง
       insert: async (skeletons) => {
         const api = apiRef.current;
         if (!api || !skeletons?.length) return;
         try {
           const lib: any = await import("@excalidraw/excalidraw");
+
+          // โหลดรูป (ถ้ามี) → addFiles ก่อนวาง element
+          const urlToFileId = new Map<string, string>();
+          const work = skeletons.map((s) => ({ ...s }));
+          for (const s of work) {
+            const url = s._imageUrl as string | undefined;
+            if (s.type === "image" && url && !s.fileId) {
+              let fileId = urlToFileId.get(url);
+              if (!fileId) {
+                try {
+                  const res = await fetch(url);
+                  const blob = await res.blob();
+                  const dataURL: string = await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(blob); });
+                  fileId = `f${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+                  api.addFiles([{ id: fileId, dataURL, mimeType: blob.type || "image/png", created: Date.now() }]);
+                  urlToFileId.set(url, fileId);
+                } catch (e) { console.error("[canvas-sketch] image load failed:", e); }
+              }
+              if (fileId) s.fileId = fileId;
+            }
+            delete s._imageUrl;
+          }
+
           const st = api.getAppState();
           const center = lib.viewportCoordsToSceneCoords(
             { clientX: (st.offsetLeft ?? 0) + (st.width ?? 800) / 2, clientY: (st.offsetTop ?? 0) + (st.height ?? 600) / 2 },
             st,
           );
-          const placed = skeletons.map((s) => ({ ...s, x: (Number(s.x) || 0) + center.x, y: (Number(s.y) || 0) + center.y }));
+          // ทิ้ง image element ที่โหลดรูปไม่สำเร็จ (ไม่มี fileId) กัน Excalidraw error
+          const placed = work.filter((s) => s.type !== "image" || s.fileId).map((s) => ({ ...s, x: (Number(s.x) || 0) + center.x, y: (Number(s.y) || 0) + center.y }));
           const els = lib.convertToExcalidrawElements(placed);
           api.updateScene({ elements: [...api.getSceneElements(), ...els] });
           if (editable) queueSave();
@@ -199,6 +227,11 @@ export function CanvasSketch({
           onChange={(elements: any, appState: any, files: any) => {
             latestRef.current = { elements, appState, files };   // จับ snapshot เสมอ (รวมตอน load)
             if (readyRef.current && editable) queueSave();
+          }}
+          onLinkOpen={(el: any, ev: any) => {
+            // การ์ดของเรา (มี customData.kind) → เปิด drawer แทนการเปิดลิงก์
+            const data = el?.customData as Record<string, unknown> | undefined;
+            if (data?.kind && cardCbRef.current) { ev?.preventDefault?.(); cardCbRef.current(data); }
           }}
         />
       </div>
