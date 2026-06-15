@@ -7,11 +7,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal } from "@/components/modal";
-import { CanvasSketch } from "@/components/canvas-sketch";
 import { PROJECT_STATUS, SUMMARY_FIELDS, PRODUCTION_TASKS, getProject, updateProject, listItems, sendToProduction, type ProjectDetail, type BoardItem } from "../../data";
 import { BoardCanvas } from "./board-canvas";
+
+// โหลดของกลาง Excalidraw แบบ dynamic — ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
+const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
+  ssr: false,
+  loading: () => <div className="h-[60vh] flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl">กำลังโหลดกระดาน...</div>,
+});
 
 type BoardTab = "draw" | "cards";
 
