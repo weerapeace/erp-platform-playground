@@ -6,7 +6,9 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { STATUS_META, getCampaign, updateCampaign, type CampaignDetail, type CreativeStatus } from "../data";
+import { STATUS_META, getCampaign, updateCampaign, deleteTask, type CampaignDetail, type CreativeStatus, type CreativeTask } from "../data";
+import { TaskDetailDrawer } from "../task-detail-drawer";
+import { applyTaskTransition } from "../task-actions";
 
 export const CAMPAIGN_STATUS: { value: string; label: string; cls: string }[] = [
   { value: "planning", label: "วางแผน", cls: "bg-sky-50 text-sky-700 border-sky-200" },
@@ -19,8 +21,12 @@ type ToastType = "success" | "error" | "info";
 
 export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { campaignId: string; onClose: () => void; onChanged?: () => void; pushToast: (type: ToastType, m: string) => void }) {
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null); // งานที่กดเปิด (งานเต็มทับขึ้นมา)
   const load = useCallback(async () => { try { setDetail(await getCampaign(campaignId)); } catch (e) { pushToast("error", (e as Error).message); } }, [campaignId, pushToast]);
   useEffect(() => { load(); }, [load]);
+
+  const moveTask = async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); };
+  const removeTask = async (tid: string) => { try { await deleteTask(tid); pushToast("info", "ลบงานแล้ว"); setTaskId(null); await load(); onChanged?.(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   const setStatus = async (status: string) => { try { await updateCampaign(campaignId, { status }); await load(); onChanged?.(); pushToast("success", "อัปเดตสถานะแล้ว"); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -73,12 +79,12 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
                 ) : (
                   <div className="space-y-1.5">
                     {detail.tasks.map((t) => { const m = STATUS_META[t.status] ?? STATUS_META.backlog; return (
-                      <div key={t.id} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2">
+                      <button key={t.id} onClick={() => setTaskId(t.id)} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-left hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
                         <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${m.dot}`} />
                         <span className="text-sm text-slate-700 flex-1 line-clamp-1">{t.title}</span>
                         <span className="text-xs text-slate-400">{t.assignee_label || "—"}</span>
                         <span className="text-[11px] text-slate-400">{t.progress_percent}%</span>
-                      </div>
+                      </button>
                     ); })}
                   </div>
                 )}
@@ -88,6 +94,9 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
           </>
         )}
       </div>
+
+      {/* งานเต็มทับขึ้นมา — ปิดแล้วกลับมาที่รายละเอียดแคมเปญ (ย้อนกลับได้) */}
+      {taskId && <TaskDetailDrawer taskId={taskId} onClose={() => setTaskId(null)} onChanged={load} onMove={moveTask} onDelete={removeTask} pushToast={pushToast} />}
     </>
   );
 }
