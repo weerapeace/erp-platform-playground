@@ -11,23 +11,23 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { DataTable } from "@/components/data-table";
-import { ERPModal } from "@/components/modal";
-import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { UserPicker, SkuPicker } from "@/components/pickers";
-import type { UserPickerValue, SkuPickerValue } from "@/components/pickers";
+import { ERPInput, ERPTextarea } from "@/components/form";
+import { UserPicker } from "@/components/pickers";
+import type { UserPickerValue } from "@/components/pickers";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
-import { useCreativeOptions, taskTypeLabel, platformLabel } from "./use-options";
+import { CreateTaskModal } from "./create-task-modal";
+import { taskTypeLabel, platformLabel } from "./use-options";
 import { useCreativeStatuses, statusMeta, transitionsFrom, transitionBetween, isTerminal } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
   isOverdue, withinThisWeek,
-  listTasks, getTask, createTask, transitionTask, approveTask, deleteTask,
+  listTasks, getTask, transitionTask, approveTask, deleteTask,
   addSubtask, updateSubtask, deleteSubtask, addComment, addAttachment, deleteAttachment,
-  listCampaigns, listBrands, listTemplates,
+  listCampaigns, listBrands,
   type CreativeTask, type CreativeStatus, type CreativePriority, type TaskDetail,
-  type Campaign, type BrandOption, type TaskTemplate, type CreativeSubtask,
+  type Campaign, type BrandOption, type CreativeSubtask,
 } from "./data";
 
 // ============================================================
@@ -78,8 +78,6 @@ const VIEWS = [
   { id: "done", label: "✅ เสร็จ/ปิดงาน", filter: (r: Record<string, unknown>) => isTerminal(r.status as string) },
 ];
 
-const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
-
 // ============================================================
 // Toast
 // ============================================================
@@ -99,26 +97,10 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
 }
 
 // ============================================================
-// Create form
-// ============================================================
-type FormState = {
-  title: string; description: string; task_type: string;
-  brand_id: string; campaign_id: string;
-  assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
-  priority: CreativePriority; due_date: string;
-  product: SkuPickerValue | null; platforms: string[]; drive_folder_url: string;
-};
-const EMPTY_FORM: FormState = {
-  title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
-  assignee: null, reviewer: null, priority: "normal", due_date: "", product: null, platforms: [], drive_folder_url: "",
-};
-
-// ============================================================
 // Main page
 // ============================================================
 export default function TasksPage() {
   const { user } = useAuth();
-  const { taskTypes, platforms } = useCreativeOptions();
   const { statuses } = useCreativeStatuses();
   const [tasks, setTasks] = useState<CreativeTask[]>([]);
   const [myTasks, setMyTasks] = useState<CreativeTask[]>([]);
@@ -126,15 +108,9 @@ export default function TasksPage() {
   const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [templates, setTemplates] = useState<TaskTemplate[]>([]);
-  const [tplId, setTplId] = useState("");
 
   // create modal
-  const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [formErr, setFormErr] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   // detail drawer
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -161,10 +137,13 @@ export default function TasksPage() {
     (async () => {
       setLoading(true);
       await Promise.all([loadAll(), loadMine()]);
-      try { const [b, c, tp] = await Promise.all([listBrands(), listCampaigns(), listTemplates()]); setBrands(b); setCampaigns(c); setTemplates(tp); } catch { /* ignore */ }
+      try { const [b, c] = await Promise.all([listBrands(), listCampaigns()]); setBrands(b); setCampaigns(c); } catch { /* ignore */ }
       setLoading(false);
     })();
   }, [loadAll, loadMine]);
+
+  // เปิด drawer งานอัตโนมัติจากลิงก์ /tasks?task=<id> (เช่นกดมาจากการ์ดบน Canvas)
+  useEffect(() => { const tid = new URLSearchParams(window.location.search).get("task"); if (tid) setDetailId(tid); }, []);
 
   const reload = useCallback(async () => { await Promise.all([loadAll(), loadMine()]); }, [loadAll, loadMine]);
 
@@ -176,36 +155,7 @@ export default function TasksPage() {
   }), [tasks, myTasks]);
 
   // ---- create ----
-  const openCreate = () => { setForm(EMPTY_FORM); setTplId(""); setFormErr(null); setDirty(false); setModalOpen(true); };
-  const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
-  const applyTemplate = (id: string) => {
-    setTplId(id);
-    const t = templates.find((x) => x.id === id);
-    if (t) updateForm({ task_type: t.task_type ?? form.task_type, priority: (t.default_priority as CreativePriority) ?? form.priority, platforms: t.platforms ?? [], brand_id: t.brand_id ?? form.brand_id });
-  };
-  const togglePlatform = (v: string) => updateForm({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
-
-  const save = async () => {
-    if (!form.title.trim()) { setFormErr("กรุณากรอกชื่องาน"); return; }
-    setSaving(true); setFormErr(null);
-    const tpl = templates.find((t) => t.id === tplId);
-    const subtasks = tpl?.steps?.filter((s) => s.title?.trim()).map((s) => ({ title: s.title, description: s.description ?? null, assignee_ids: s.assignee_ids ?? [], required_before_next: !!s.required_before_next })) ?? [];
-    try {
-      const { task_no } = await createTask({
-        title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
-        brand_id: form.brand_id || null, campaign_id: form.campaign_id || null,
-        assignee_id: form.assignee?.id ?? null, reviewer_id: form.reviewer?.id ?? null,
-        priority: form.priority, due_date: form.due_date || null,
-        sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null,
-        platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
-        subtasks,
-      });
-      setModalOpen(false); setDirty(false);
-      pushToast("success", `สร้างงาน ${task_no} แล้ว`);
-      await reload();
-    } catch (e) { setFormErr((e as Error).message); }
-    finally { setSaving(false); }
-  };
+  const openCreate = () => setCreateOpen(true);
 
   // ---- workflow (เส้นทาง + ชนิด อ่านจาก DB) ----
   const applyMove = useCallback(async (task: CreativeTask, toKey: string, force?: boolean) => {
@@ -302,44 +252,9 @@ export default function TasksPage() {
         )}
       </div>
 
-      {/* Create modal */}
-      <ERPModal
-        open={modalOpen} onClose={() => setModalOpen(false)} title="สร้างงานใหม่"
-        description="ผู้รับผิดชอบ + สินค้า ใช้ Picker กลาง (ดึงข้อมูลจริง)" size="lg" hasUnsavedChanges={dirty}
-        footer={<>
-          <button onClick={() => setModalOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "สร้างงาน"}</button>
-        </>}
-      >
-        {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
-        {templates.length > 0 && (
-          <div className="mb-4 flex items-center gap-2 bg-violet-50/60 border border-violet-100 rounded-lg px-3 py-2">
-            <span className="text-sm text-slate-600 shrink-0">🔁 เริ่มจากเทมเพลต:</span>
-            <select value={tplId} onChange={(e) => applyTemplate(e.target.value)} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
-              <option value="">— ไม่ใช้เทมเพลต —</option>
-              {templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.steps?.length ?? 0} ขั้นตอน)</option>)}
-            </select>
-          </div>
-        )}
-        <ERPFormSection title="ข้อมูลงาน" columns={2}>
-          <ERPFormField label="ชื่องาน" required span={2}><ERPInput value={form.title} onChange={(e) => updateForm({ title: e.target.value })} placeholder="เช่น ถ่ายรูปกระเป๋า Summer 8 สี" /></ERPFormField>
-          <ERPFormField label="ประเภทงาน"><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => updateForm({ task_type: e.target.value })} /></ERPFormField>
-          <ERPFormField label="ความสำคัญ"><ERPSelect value={form.priority} options={PRIORITY_OPTIONS} onChange={(e) => updateForm({ priority: e.target.value as CreativePriority })} /></ERPFormField>
-          <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => updateForm({ brand_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label="แคมเปญ"><ERPSelect value={form.campaign_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => updateForm({ campaign_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label="ผู้รับผิดชอบ"><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></ERPFormField>
-          <ERPFormField label="ผู้ตรวจ/อนุมัติ"><UserPicker value={form.reviewer} onChange={(v) => updateForm({ reviewer: v })} disableCreate /></ERPFormField>
-          <ERPFormField label="กำหนดส่ง"><ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} /></ERPFormField>
-          <ERPFormField label="โฟลเดอร์ Drive (ลิงก์)"><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>
-          <ERPFormField label="สินค้า/SKU (ถ้ามี)" span={2}><SkuPicker value={form.product} onChange={(v) => updateForm({ product: v })} /></ERPFormField>
-          <ERPFormField label="แพลตฟอร์ม" span={2}>
-            <div className="flex flex-wrap gap-1.5">
-              {platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}
-            </div>
-          </ERPFormField>
-          <ERPFormField label="รายละเอียด" span={2}><ERPTextarea value={form.description} rows={2} onChange={(e) => updateForm({ description: e.target.value })} placeholder="อธิบายงาน/บรีฟเพิ่มเติม" /></ERPFormField>
-        </ERPFormSection>
-      </ERPModal>
+      {/* Create modal (ของกลาง — ใช้ร่วมกับ Campaign Canvas) */}
+      <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast}
+        onCreated={async (t) => { pushToast("success", `สร้างงาน ${t.task_no} แล้ว`); await reload(); }} />
 
       {/* Detail drawer */}
       {detailId && (
