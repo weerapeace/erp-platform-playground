@@ -67,10 +67,14 @@ export type CreativeAttachment = {
   content_type: string | null; size_bytes: number | null; created_at: string;
 };
 
+export type TaskSkuRef = { id: string; code: string | null; name: string | null; color?: string | null; price?: number | null; image_key?: string | null };
+export type TaskParentRef = { id: string; code: string | null; name: string | null };
 export type TaskDetail = CreativeTask & {
   subtasks: CreativeSubtask[];
   comments: CreativeComment[];
   attachments: CreativeAttachment[];
+  skus?: TaskSkuRef[];
+  parent_skus?: TaskParentRef[];
 };
 
 export type Campaign = {

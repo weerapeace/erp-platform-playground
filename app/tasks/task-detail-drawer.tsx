@@ -120,20 +120,27 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <Field label="ผู้ตรวจ/อนุมัติ" value={t.reviewer_label || t.approver_label} />
             <Field label="กำหนดส่ง" value={t.due_date} highlight={isOverdue(t)} />
             <Field label="แคมเปญ" value={campaignName} />
-            <Field label="Parent SKU" value={t.parent_sku_code ? `${t.parent_sku_code}${t.parent_sku_name ? " · " + t.parent_sku_name : ""}` : null} />
+            <Field label="Parent SKU" value={(t.parent_skus && t.parent_skus.length) ? t.parent_skus.map((p) => p.code).filter(Boolean).join(", ") : (t.parent_sku_code || null)} />
           </div>
-          {/* SKU card */}
-          {(t.sku_code || t.product_name) && (
-            <div className="bg-slate-50 rounded-lg p-3 text-sm">
-              <p className="text-xs text-slate-400 mb-1">สินค้าที่เกี่ยวข้อง</p>
-              {t.sku_code && <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded mr-2">{t.sku_code}</span>}
-              <span className="text-slate-700">{t.sku_name || t.product_name}</span>
-              <div className="flex gap-4 mt-1.5 text-xs text-slate-500">
-                {t.sku_color && <span>สี: {t.sku_color}</span>}
-                {t.sku_price != null && <span>ราคา: {Number(t.sku_price).toLocaleString()}</span>}
+          {/* SKU cards (m2m — ใส่ได้หลายรายการ) */}
+          {(() => {
+            const list = (t.skus && t.skus.length) ? t.skus : (t.sku_code ? [{ id: "_", code: t.sku_code, name: t.sku_name || t.product_name, color: t.sku_color, price: t.sku_price }] : []);
+            return list.length > 0 ? (
+              <div className="bg-slate-50 rounded-lg p-3 text-sm">
+                <p className="text-xs text-slate-400 mb-1.5">สินค้าที่เกี่ยวข้อง ({list.length})</p>
+                <div className="space-y-1.5">
+                  {list.map((s, i) => (
+                    <div key={s.id || i} className="flex items-center gap-2 flex-wrap">
+                      {s.code && <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{s.code}</span>}
+                      <span className="text-slate-700">{s.name}</span>
+                      {s.color && <span className="text-xs text-slate-400">สี: {s.color}</span>}
+                      {s.price != null && <span className="text-xs text-slate-400">{Number(s.price).toLocaleString()}฿</span>}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            ) : null;
+          })()}
           {/* platforms */}
           {t.platforms && t.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{t.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
           {/* description */}

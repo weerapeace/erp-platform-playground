@@ -26,11 +26,11 @@ type FormState = {
   brand_id: string; campaign_id: string;
   assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
   priority: CreativePriority; due_date: string;
-  product: SkuPickerValue | null; parent: ParentSkuPickerValue | null; platforms: string[]; drive_folder_url: string;
+  products: SkuPickerValue[]; parents: ParentSkuPickerValue[]; platforms: string[]; drive_folder_url: string;
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
-  assignee: null, reviewer: null, priority: "normal", due_date: "", product: null, parent: null, platforms: [], drive_folder_url: "",
+  assignee: null, reviewer: null, priority: "normal", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "",
 };
 
 // แถวงานย่อยในขั้นที่ 2
@@ -97,8 +97,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         brand_id: form.brand_id || null, campaign_id: (lockedCampaignId ?? form.campaign_id) || null,
         assignee_id: form.assignee?.id ?? null, reviewer_id: form.reviewer?.id ?? null,
         priority: form.priority, due_date: form.due_date || null,
-        sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null,
-        parent_sku_id: form.parent?.id ?? null,
+        sku_id: form.products[0]?.id ?? null, product_name: form.products[0]?.name ?? null, sku_ids: form.products.map((p) => p.id),
+        parent_sku_id: form.parents[0]?.id ?? null, parent_sku_ids: form.parents.map((p) => p.id),
         platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
         subtasks,
       });
@@ -183,10 +183,16 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
 
       {/* STEP 3 — สินค้า */}
       {step === 3 && (
-        <ERPFormSection title="สินค้าที่เกี่ยวข้อง (ถ้ามี)" columns={2}>
-          <ERPFormField label="สินค้า/SKU"><SkuPicker value={form.product} onChange={(v) => updateForm({ product: v })} /></ERPFormField>
-          <ERPFormField label="Parent SKU (ตระกูลสินค้า)"><ParentSkuPicker value={form.parent} onChange={(v) => updateForm({ parent: v })} /></ERPFormField>
-          <div className="col-span-2 text-xs text-slate-400">ขั้นนี้ไม่บังคับ — กด “สร้างงาน” ได้เลยถ้าไม่ต้องผูกสินค้า</div>
+        <ERPFormSection title="สินค้าที่เกี่ยวข้อง (ใส่ได้หลายรายการ)" columns={2}>
+          <ERPFormField label="สินค้า/SKU">
+            <SkuPicker value={null} onChange={(v) => { if (v && !form.products.some((p) => p.id === v.id)) updateForm({ products: [...form.products, v] }); }} />
+            {form.products.length > 0 && <div className="flex flex-wrap gap-1.5 mt-1.5">{form.products.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono text-slate-500">{p.code}</span>{p.name}<button onClick={() => updateForm({ products: form.products.filter((x) => x.id !== p.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}</div>}
+          </ERPFormField>
+          <ERPFormField label="Parent SKU (ตระกูลสินค้า)">
+            <ParentSkuPicker value={null} onChange={(v) => { if (v && !form.parents.some((p) => p.id === v.id)) updateForm({ parents: [...form.parents, v] }); }} />
+            {form.parents.length > 0 && <div className="flex flex-wrap gap-1.5 mt-1.5">{form.parents.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono text-slate-500">{p.code}</span>{p.name}<button onClick={() => updateForm({ parents: form.parents.filter((x) => x.id !== p.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}</div>}
+          </ERPFormField>
+          <div className="col-span-2 text-xs text-slate-400">ขั้นนี้ไม่บังคับ — เลือกได้หลายรายการ (เลือกแล้วเลือกต่อได้) · กด “สร้างงาน” ได้เลยถ้าไม่ต้องผูกสินค้า</div>
         </ERPFormSection>
       )}
     </ERPModal>

@@ -108,6 +108,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type CreateBody = {
   title?: string; description?: string | null; task_type?: string | null;
   brand_id?: string | null; campaign_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
+  sku_ids?: string[]; parent_sku_ids?: string[];
   priority?: string; status?: string; progress_percent?: number | null;
   assignee_id?: string | null; reviewer_id?: string | null; approver_id?: string | null;
   start_date?: string | null; due_date?: string | null;
@@ -171,6 +172,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const links = (pf ?? []).map((p) => ({ task_id: row!.id, platform_id: p.id as string }));
     if (links.length) await admin.from("erp_creative_task_platforms").insert(links);
   }
+
+  // SKU / Parent SKU m2m → junction (② คง sku_id/parent_sku_id เดิม = ตัวแรก เป็น fallback)
+  const skuIds = [...new Set((Array.isArray(body.sku_ids) ? body.sku_ids : (body.sku_id ? [body.sku_id] : [])).filter(Boolean))];
+  if (skuIds.length) await admin.from("erp_creative_task_skus").insert(skuIds.map((s) => ({ task_id: row!.id, sku_id: s })));
+  const parentIds = [...new Set((Array.isArray(body.parent_sku_ids) ? body.parent_sku_ids : (body.parent_sku_id ? [body.parent_sku_id] : [])).filter(Boolean))];
+  if (parentIds.length) await admin.from("erp_creative_task_parent_skus").insert(parentIds.map((p) => ({ task_id: row!.id, parent_sku_id: p })));
 
   await writeAudit(admin, {
     action: "create", entityType: "creative_task", entityId: row.id,

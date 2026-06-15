@@ -43,11 +43,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (error) return NextResponse.json({ error: friendlyDbError(error) }, { status: 500 });
   if (!row) return NextResponse.json({ error: "ไม่พบงาน" }, { status: 404 });
 
-  const [{ data: subtasks }, { data: comments }, { data: attachments }] = await Promise.all([
+  const [{ data: subtasks }, { data: comments }, { data: attachments }, { data: skuLinks }, { data: parentLinks }] = await Promise.all([
     admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true }),
     admin.from("erp_creative_comments").select("*").eq("task_id", id).order("created_at", { ascending: true }),
     admin.from("erp_creative_attachments").select("*").eq("task_id", id).order("created_at", { ascending: true }),
+    admin.from("erp_creative_task_skus").select("sku:skus_v2!sku_id(id, code, name_th, color, color_th, list_price, cover_image_r2_key)").eq("task_id", id),
+    admin.from("erp_creative_task_parent_skus").select("parent:parent_skus_v2!parent_sku_id(id, code, name_th)").eq("task_id", id),
   ]);
+
+  const skus = ((skuLinks ?? []) as Record<string, unknown>[]).map((l) => { const s = (Array.isArray(l.sku) ? l.sku[0] : l.sku) as Record<string, unknown> | null; return s ? { id: s.id, code: s.code, name: s.name_th, color: (s.color_th as string) ?? (s.color as string) ?? null, price: s.list_price, image_key: s.cover_image_r2_key } : null; }).filter(Boolean);
+  const parent_skus = ((parentLinks ?? []) as Record<string, unknown>[]).map((l) => { const p = (Array.isArray(l.parent) ? l.parent[0] : l.parent) as Record<string, unknown> | null; return p ? { id: p.id, code: p.code, name: p.name_th } : null; }).filter(Boolean);
 
   const subRows = (subtasks ?? []) as Record<string, unknown>[];
   const empMap = await employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string]);
@@ -62,7 +67,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const subs = subRows.map((s) => ({ ...s, assignees: aMap.get(String(s.id)) ?? [], attachments: subAtt.get(String(s.id)) ?? [] }));
 
-  return NextResponse.json({ data: { ...task, subtasks: subs, comments: comments ?? [], attachments: taskAtt }, error: null });
+  return NextResponse.json({ data: { ...task, subtasks: subs, comments: comments ?? [], attachments: taskAtt, skus, parent_skus }, error: null });
 }
 
 // ---- PATCH ----
