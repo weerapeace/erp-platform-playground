@@ -118,6 +118,16 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
     finally { setSaving(false); }
   };
   const onDelete = async () => { if (!delId) return; try { await deleteTemplate(delId.id); pushToast("info", "ลบแล้ว"); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelId(null); } };
+  const copyTemplate = async (t: TaskTemplate) => {
+    try {
+      await createTemplate({
+        name: `${t.name} (สำเนา)`, task_type: t.task_type ?? null, default_priority: t.default_priority,
+        brand_id: t.brand_id ?? null, description: t.description ?? null, platforms: t.platforms ?? [],
+        steps: (Array.isArray(t.steps) ? t.steps : []).map((s) => ({ title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next, assignee_ids: s.assignee_ids ?? [] })),
+      });
+      pushToast("success", "ทำสำเนาเทมเพลตแล้ว"); await load();
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
 
   return (
     <div>
@@ -133,7 +143,10 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
               <div key={t.id} onClick={() => openEdit(t)} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 cursor-pointer">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">{t.task_type ? taskTypeLabel(t.task_type) : "งานทั่วไป"}</span>
-                  <button onClick={(e) => { e.stopPropagation(); setDelId(t); }} className="text-xs text-slate-300 hover:text-red-500">ลบ</button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); copyTemplate(t); }} className="text-xs text-slate-400 hover:text-violet-600">⧉ สำเนา</button>
+                    <button onClick={(e) => { e.stopPropagation(); setDelId(t); }} className="text-xs text-slate-300 hover:text-red-500">ลบ</button>
+                  </div>
                 </div>
                 <p className="font-semibold text-slate-800">{t.name}</p>
                 <p className="text-xs text-slate-400 mt-1">{(t.steps?.length ?? 0)} ขั้นตอน · {(t.platforms?.length ?? 0)} แพลตฟอร์ม</p>
