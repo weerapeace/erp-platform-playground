@@ -6,8 +6,9 @@
 // ข้อมูลจาก /api/creative-campaigns (ดู app/tasks/data.ts)
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSWRLite } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
@@ -16,7 +17,7 @@ import type { UserPickerValue } from "@/components/pickers";
 import { CAMPAIGN_STATUS } from "./campaign-drawer";
 import {
   listCampaigns, createCampaign, deleteCampaign, listBrands,
-  type Campaign, type BrandOption,
+  type Campaign,
 } from "../data";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
@@ -28,9 +29,6 @@ const EMPTY: FormState = { name: "", brand_id: "", objective: "", owner: null, s
 
 export default function CampaignsPage() {
   const router = useRouter();
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [brands, setBrands] = useState<BrandOption[]>([]);
-  const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [dirty, setDirty] = useState(false);
@@ -45,11 +43,13 @@ export default function CampaignsPage() {
     setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
   }, []);
 
-  const load = useCallback(async () => {
-    try { setCampaigns(await listCampaigns()); } catch (e) { pushToast("error", (e as Error).message); }
-  }, [pushToast]);
-
-  useEffect(() => { (async () => { setLoading(true); await load(); try { setBrands(await listBrands()); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
+  // ใช้ SWR คีย์เดียวกับหน้างาน → สลับ /tasks ↔ แคมเปญ ใช้ข้อมูลซ้ำ เห็นทันที
+  const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
+  const brandsSWR = useSWRLite("creative:brands", () => listBrands());
+  const campaigns = campaignsSWR.data ?? [];
+  const brands = brandsSWR.data ?? [];
+  const loading = campaignsSWR.loading;
+  const load = useCallback(async () => { await campaignsSWR.revalidate(true); }, [campaignsSWR]);
 
   const update = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   const openCreate = () => { setForm({ ...EMPTY, start_date: new Date().toISOString().slice(0, 10) }); setDirty(false); setFormErr(null); setModalOpen(true); };

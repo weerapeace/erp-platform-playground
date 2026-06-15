@@ -4,6 +4,7 @@
 // ============================================================
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { cachedJson, invalidateCache } from "@/lib/client-cache";
 import { statusColor } from "@/lib/creative-status-colors";
 import { STATUS_META as FALLBACK_META } from "@/lib/creative-tasks";
 
@@ -36,10 +37,9 @@ export function useCreativeStatuses() {
   const [statuses, setStatuses] = useState<Status[]>(STATUSES);
   const [transitions, setTransitions] = useState<Transition[]>(TRANSITIONS);
   const [loading, setLoading] = useState(STATUSES.length === 0);
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (force = false) => {
     try {
-      const r = await apiFetch("/api/creative-statuses");
-      const j = await r.json();
+      const j = await cachedJson<{ statuses?: Status[]; transitions?: Transition[]; error?: string }>("/api/creative-statuses", force ? 0 : 5 * 60 * 1000);
       if (j.error) throw new Error(j.error);
       const st = (j.statuses as Status[]) ?? [], tr = (j.transitions as Transition[]) ?? [];
       setRegistry(st, tr); setStatuses(st); setTransitions(tr);
@@ -52,14 +52,16 @@ export function useCreativeStatuses() {
 
 // ---- API client (หน้าตั้งค่า) ----
 async function ok(res: Response): Promise<Record<string, unknown>> { const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`); return j; }
+// หลังแก้สถานะ/เส้นทาง → ล้างแคชเพื่อให้ทุกหน้าเห็นค่าใหม่รอบถัดไป
+function bust<T>(v: T): T { invalidateCache("/api/creative-statuses"); return v; }
 export async function listStatuses(): Promise<{ statuses: Status[]; transitions: Transition[] }> {
   const j = await ok(await apiFetch("/api/creative-statuses"));
   return { statuses: (j.statuses as Status[]) ?? [], transitions: (j.transitions as Transition[]) ?? [] };
 }
 export async function createStatus(body: { label: string; color?: string; progress_percent?: number; is_terminal?: boolean; is_approval_gate?: boolean }): Promise<Status> {
-  const j = await ok(await apiFetch("/api/creative-statuses", { method: "POST", body: JSON.stringify(body) })); return j.data as Status;
+  const j = await ok(await apiFetch("/api/creative-statuses", { method: "POST", body: JSON.stringify(body) })); return bust(j.data as Status);
 }
-export async function updateStatus(id: string, patch: Record<string, unknown>): Promise<void> { await ok(await apiFetch(`/api/creative-statuses/${id}`, { method: "PATCH", body: JSON.stringify(patch) })); }
-export async function deleteStatus(id: string): Promise<void> { await ok(await apiFetch(`/api/creative-statuses/${id}`, { method: "DELETE" })); }
-export async function setTransition(body: { from_key: string; to_key: string; label?: string; kind?: string }): Promise<void> { await ok(await apiFetch("/api/creative-statuses/transitions", { method: "POST", body: JSON.stringify(body) })); }
-export async function deleteTransition(id: string): Promise<void> { await ok(await apiFetch(`/api/creative-statuses/transitions?id=${id}`, { method: "DELETE" })); }
+export async function updateStatus(id: string, patch: Record<string, unknown>): Promise<void> { await ok(await apiFetch(`/api/creative-statuses/${id}`, { method: "PATCH", body: JSON.stringify(patch) })); bust(0); }
+export async function deleteStatus(id: string): Promise<void> { await ok(await apiFetch(`/api/creative-statuses/${id}`, { method: "DELETE" })); bust(0); }
+export async function setTransition(body: { from_key: string; to_key: string; label?: string; kind?: string }): Promise<void> { await ok(await apiFetch("/api/creative-statuses/transitions", { method: "POST", body: JSON.stringify(body) })); bust(0); }
+export async function deleteTransition(id: string): Promise<void> { await ok(await apiFetch(`/api/creative-statuses/transitions?id=${id}`, { method: "DELETE" })); bust(0); }

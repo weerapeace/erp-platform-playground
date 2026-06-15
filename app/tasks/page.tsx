@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
-import { useRefetchOnFocus } from "@/lib/use-refetch-on-focus";
+import { useSWRLite } from "@/lib/swr-lite";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
@@ -90,14 +90,8 @@ export default function TasksPage() {
   const { user } = useAuth();
   const t = useT();
   const { statuses } = useCreativeStatuses();
-  const [tasks, setTasks] = useState<CreativeTask[]>([]);
-  const [myTasks, setMyTasks] = useState<CreativeTask[]>([]);
-  const [mySubs, setMySubs] = useState<MySubtask[]>([]);
-  const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
   const [quick, setQuick] = useState<"" | "review" | "overdue">(""); // กรองด่วนจากการ์ดสถิติ
-  const [brands, setBrands] = useState<BrandOption[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -116,30 +110,24 @@ export default function TasksPage() {
     setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
   }, []);
 
-  const loadAll = useCallback(async () => {
-    try { setTasks(await listTasks({ sort_by: "updated_at", sort_dir: "desc" })); }
-    catch (e) { pushToast("error", `โหลดงานไม่สำเร็จ: ${(e as Error).message}`); }
-  }, [pushToast]);
-  const loadMine = useCallback(async () => {
-    try { setMyTasks(await listTasks({ mine: true })); }
-    catch (e) { pushToast("error", `โหลดงานของฉันไม่สำเร็จ: ${(e as Error).message}`); }
-  }, [pushToast]);
-  const loadMySubs = useCallback(async () => { try { setMySubs(await listMySubtasks()); } catch { /* ignore */ } }, []);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      await Promise.all([loadAll(), loadMine(), loadMySubs()]);
-      try { const [b, c] = await Promise.all([listBrands(), listCampaigns()]); setBrands(b); setCampaigns(c); } catch { /* ignore */ }
-      setLoading(false);
-    })();
-  }, [loadAll, loadMine, loadMySubs]);
+  // โหลดข้อมูลแบบ stale-while-revalidate (ของกลาง) — กลับเข้าหน้านี้ใหม่ = โชว์ทันที แล้วอัปเดตเงียบ
+  const tasksSWR = useSWRLite("creative:tasks:all", () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }));
+  const mineSWR = useSWRLite("creative:tasks:mine", () => listTasks({ mine: true }));
+  const subsSWR = useSWRLite("creative:my-subtasks", () => listMySubtasks());
+  const brandsSWR = useSWRLite("creative:brands", () => listBrands());
+  const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
+  const tasks = useMemo(() => tasksSWR.data ?? [], [tasksSWR.data]);
+  const myTasks = useMemo(() => mineSWR.data ?? [], [mineSWR.data]);
+  const mySubs = useMemo(() => subsSWR.data ?? [], [subsSWR.data]);
+  const brands = useMemo(() => brandsSWR.data ?? [], [brandsSWR.data]);
+  const campaigns = useMemo(() => campaignsSWR.data ?? [], [campaignsSWR.data]);
+  const loading = tasksSWR.loading; // โชว์ skeleton เฉพาะตอนยังไม่เคยมีข้อมูลจริง
 
   // เปิด drawer งานอัตโนมัติจากลิงก์ /tasks?task=<id> (เช่นกดมาจากการ์ดบน Canvas)
   useEffect(() => { const tid = new URLSearchParams(window.location.search).get("task"); if (tid) setDetailId(tid); }, []);
 
-  const reload = useCallback(async () => { await Promise.all([loadAll(), loadMine(), loadMySubs()]); }, [loadAll, loadMine, loadMySubs]);
-  useRefetchOnFocus(reload); // กลับมาที่แท็บ → โหลดงานใหม่ (กันค้างเก่า)
+  // หลังบันทึก/ลบ → บังคับโหลดงานใหม่ (focus revalidate มีในตัว hook แล้ว)
+  const reload = useCallback(async () => { await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]); }, [tasksSWR, mineSWR, subsSWR]);
 
   const tableTasks = useMemo(() => quick === "review" ? tasks.filter((t) => t.status === "need_review") : quick === "overdue" ? tasks.filter(isOverdue) : tasks, [tasks, quick]);
   const counts = useMemo(() => ({

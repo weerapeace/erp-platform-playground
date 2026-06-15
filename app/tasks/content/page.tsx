@@ -7,6 +7,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSWRLite } from "@/lib/swr-lite";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
@@ -17,7 +18,7 @@ import {
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
-  type Campaign, type BrandOption, type Hashtag,
+  type BrandOption, type Hashtag,
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
 
@@ -33,10 +34,6 @@ const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentSt
 
 export default function ContentPage() {
   const { platforms } = useCreativeOptions();
-  const [items, setItems] = useState<ContentItem[]>([]);
-  const [brands, setBrands] = useState<BrandOption[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(true);
   const [view, setView] = useState<"list" | "calendar">("list");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<ContentItem | null>(null);
@@ -45,7 +42,6 @@ export default function ContentPage() {
   // create modal
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [templates, setTemplates] = useState<ContentItem[]>([]);
   const [tplId, setTplId] = useState("");
   const [tplCaptions, setTplCaptions] = useState<ContentCaption[]>([]);
   const [dirty, setDirty] = useState(false);
@@ -58,8 +54,18 @@ export default function ContentPage() {
     setTimeout(() => setToasts((p) => p.filter((t) => t.id !== id)), 3500);
   }, []);
 
-  const load = useCallback(async () => { try { setItems(await listContent()); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast]);
-  useEffect(() => { (async () => { setLoading(true); await load(); try { const [b, c, tp] = await Promise.all([listBrands(), listCampaigns(), listContentTemplates()]); setBrands(b); setCampaigns(c); setTemplates(tp); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
+  // SWR (stale-while-revalidate) — กลับเข้าหน้านี้ใหม่เห็นทันที + ใช้ brands/campaigns ร่วมกับหน้าอื่น
+  const itemsSWR = useSWRLite("creative:content", () => listContent());
+  const templatesSWR = useSWRLite("creative:content-templates", () => listContentTemplates());
+  const brandsSWR = useSWRLite("creative:brands", () => listBrands());
+  const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
+  const items = itemsSWR.data ?? [];
+  const templates = templatesSWR.data ?? [];
+  const brands = brandsSWR.data ?? [];
+  const campaigns = campaignsSWR.data ?? [];
+  const loading = itemsSWR.loading;
+  const load = useCallback(async () => { await itemsSWR.revalidate(true); }, [itemsSWR]);
+  const reloadTemplates = useCallback(async () => { await templatesSWR.revalidate(true); }, [templatesSWR]);
   // เปิด drawer คอนเทนต์อัตโนมัติจากลิงก์ /tasks/content?content=<id> (กดมาจากการ์ดบน Canvas)
   useEffect(() => { const cid = new URLSearchParams(window.location.search).get("content"); if (cid) setDetailId(cid); }, []);
 
@@ -170,7 +176,7 @@ export default function ContentPage() {
         </ERPFormSection>
       </ERPModal>
 
-      {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => { load(); listContentTemplates().then(setTemplates).catch(() => {}); }} onDelete={(c) => setDelTarget(c)} pushToast={pushToast} />}
+      {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => { load(); reloadTemplates(); }} onDelete={(c) => setDelTarget(c)} pushToast={pushToast} />}
 
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={onDelete}
         title="ลบคอนเทนต์" message={<span>ต้องการลบ <span className="font-semibold">{delTarget?.title}</span> ใช่ไหม?</span>} confirmText="ลบ" variant="danger" />
