@@ -160,6 +160,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // แพลตฟอร์ม m2m → junction (Phase A) — map code→id; ยังเขียน text[] คู่ขนานไว้ (insertRow) เป็น fallback
+  if (Array.isArray(body.platforms) && body.platforms.length) {
+    const { data: pf } = await admin.from("erp_platforms").select("id, code").in("code", body.platforms);
+    const links = (pf ?? []).map((p) => ({ task_id: row!.id, platform_id: p.id as string }));
+    if (links.length) await admin.from("erp_creative_task_platforms").insert(links);
+  }
+
   await writeAudit(admin, {
     action: "create", entityType: "creative_task", entityId: row.id,
     actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { task_no: taskNo, title },
