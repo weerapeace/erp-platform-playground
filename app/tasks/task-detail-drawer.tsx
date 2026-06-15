@@ -7,12 +7,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ERPInput } from "@/components/form";
+import { ImageAttach } from "@/components/image-attach";
 import { SubtaskManager } from "./subtask-manager";
 import { taskTypeLabel, platformLabel } from "./use-options";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue,
-  getTask, updateTask, addComment, addAttachment,
+  getTask, updateTask, addComment, addAttachment, deleteAttachment,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption,
 } from "./data";
 
@@ -149,16 +150,26 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           {/* subtasks — ใช้ของกลางจัดการสด */}
           <SubtaskManager taskId={t.id} pushToast={pushToast} />
 
-          {/* attachments */}
+          {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ไฟล์/ลิงก์แนบ ({t.attachments.length})</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">รูปแนบ</p>
+            <ImageAttach
+              images={t.attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
+              onAttach={async (r) => { await addAttachment(t.id, { kind: "image", ...r }); await load(); }}
+              onDelete={async (aid) => { await deleteAttachment(t.id, aid); await load(); }}
+              pushToast={pushToast} />
+          </div>
+
+          {/* attachments (ลิงก์) */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ลิงก์แนบ ({t.attachments.filter((a) => a.kind !== "image").length})</p>
             <div className="space-y-1.5 mb-2">
-              {t.attachments.map((a) => (
+              {t.attachments.filter((a) => a.kind !== "image").map((a) => (
                 <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm text-violet-700 hover:bg-violet-50">
                   🔗 <span className="truncate">{a.label || a.url}</span>
                 </a>
               ))}
-              {t.attachments.length === 0 && <p className="text-sm text-slate-400 italic">ยังไม่มีไฟล์แนบ</p>}
+              {t.attachments.filter((a) => a.kind !== "image").length === 0 && <p className="text-sm text-slate-400 italic">ยังไม่มีลิงก์แนบ</p>}
             </div>
             <div className="flex gap-2">
               <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder="ชื่อ (ไม่บังคับ)" />

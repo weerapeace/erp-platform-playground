@@ -25,8 +25,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { data, error } = await admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   const rows = (data ?? []) as Record<string, unknown>[];
-  const aMap = await subtaskAssigneesMap(admin, rows.map((r) => String(r.id)));
-  return NextResponse.json({ data: rows.map((r) => ({ ...r, assignees: aMap.get(String(r.id)) ?? [] })), error: null });
+  const subIds = rows.map((r) => String(r.id));
+  const aMap = await subtaskAssigneesMap(admin, subIds);
+  // ไฟล์/รูปแนบของแต่ละงานย่อย
+  const attBy = new Map<string, Record<string, unknown>[]>();
+  if (subIds.length) {
+    const { data: atts } = await admin.from("erp_creative_attachments").select("*").in("subtask_id", subIds).order("created_at", { ascending: true });
+    for (const a of (atts ?? []) as Record<string, unknown>[]) { const k = String(a.subtask_id); const arr = attBy.get(k) ?? []; arr.push(a); attBy.set(k, arr); }
+  }
+  return NextResponse.json({ data: rows.map((r) => ({ ...r, assignees: aMap.get(String(r.id)) ?? [], attachments: attBy.get(String(r.id)) ?? [] })), error: null });
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {

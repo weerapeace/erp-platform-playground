@@ -190,7 +190,7 @@ export async function addComment(taskId: string, body: string, mentions: string[
 }
 
 // ---- Attachments ----
-export async function addAttachment(taskId: string, body: { kind?: string; label?: string; url?: string; subtask_id?: string }): Promise<CreativeAttachment> {
+export async function addAttachment(taskId: string, body: { kind?: string; label?: string; url?: string; r2_key?: string; file_name?: string; content_type?: string; size_bytes?: number; subtask_id?: string }): Promise<CreativeAttachment> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/attachments`, { method: "POST", body: JSON.stringify(body) }));
   return j.data as CreativeAttachment;
 }

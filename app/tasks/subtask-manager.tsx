@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ERPInput, ERPTextarea } from "@/components/form";
+import { ImageAttach } from "@/components/image-attach";
 import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import {
@@ -108,9 +109,17 @@ export function SubtaskCard({ sub, taskId, reload, pushToast }: { sub: CreativeS
             <UserPicker value={adding} onChange={addAssignee} disableCreate />
           </div>
           <div>
-            <p className="text-[11px] text-slate-400 mb-1">ไฟล์/ลิงก์ส่งงาน</p>
+            <p className="text-[11px] text-slate-400 mb-1">รูปแนบ (ย่อ ≤800px)</p>
+            <ImageAttach
+              images={(sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
+              onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
+              onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
+              pushToast={pushToast} />
+          </div>
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">ลิงก์ส่งงาน</p>
             <div className="space-y-1 mb-1.5">
-              {(sub.attachments ?? []).map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
+              {(sub.attachments ?? []).filter((a) => a.kind !== "image").map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
             </div>
             <div className="flex gap-1.5">
               <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder="ชื่อ" />
