@@ -19,6 +19,7 @@ import { ERPModal } from "@/components/modal";
 import { DataTable } from "@/components/data-table";
 import { apiFetch } from "@/lib/api";
 import { internalEmail, isValidUsername, isValidPin } from "@/lib/internal-users";
+import { EmployeePicker, type EmployeePickerValue } from "@/components/pickers";
 import type { AdminUser, AdminUsersResponse } from "@/app/api/admin/users/route";
 import type { PermCatalogItem, UserOverride } from "@/app/api/admin/user-permissions/route";
 
@@ -65,6 +66,46 @@ export default function AdminUsersPage() {
   // edit drawer (row click) — เปลี่ยน role / toggle active / ชื่อ / รูป
   const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [editBusy, setEditBusy] = useState(false);
+  // เชื่อมพนักงาน + ตั้งรหัสผ่านใหม่ (ในแถบแก้ผู้ใช้)
+  const [linkEmp, setLinkEmp] = useState<EmployeePickerValue | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [rpw, setRpw] = useState("");
+  const [rpwBusy, setRpwBusy] = useState(false);
+  const [rpwNote, setRpwNote] = useState<string | null>(null);
+
+  // โหลด "พนักงานที่ผูกไว้" เมื่อเปิดแถบแก้ผู้ใช้
+  useEffect(() => {
+    setLinkEmp(null); setRpw(""); setRpwNote(null);
+    if (!editUser) return;
+    let alive = true;
+    apiFetch(`/api/admin/users/link-employee?user_id=${editUser.id}`).then((r) => r.json()).then((j) => {
+      if (alive && j.employee_id) setLinkEmp({ id: j.employee_id, name: j.employee_label ?? "", code: "" } as EmployeePickerValue);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [editUser]);
+
+  const saveLink = async (emp: EmployeePickerValue | null) => {
+    if (!editUser) return;
+    setLinkEmp(emp); setLinkBusy(true);
+    const j = await apiFetch("/api/admin/users/link-employee", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: editUser.id, employee_id: emp?.id ?? null }),
+    }).then((r) => r.json());
+    setLinkBusy(false);
+    if (j.error) setRpwNote(`❌ เชื่อมพนักงานไม่สำเร็จ: ${j.error}`);
+  };
+  const resetPw = async () => {
+    if (!editUser) return;
+    const pw = rpw.trim();
+    if (pw.length < 6) { setRpwNote("รหัสผ่าน/PIN อย่างน้อย 6 ตัว"); return; }
+    setRpwBusy(true); setRpwNote(null);
+    const j = await apiFetch("/api/admin/users/reset-password", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: editUser.id, password: pw }),
+    }).then((r) => r.json());
+    setRpwBusy(false);
+    if (j.error) setRpwNote(`❌ ${j.error}`); else { setRpwNote("✓ ตั้งรหัสผ่านใหม่ให้แล้ว"); setRpw(""); }
+  };
   const [editName, setEditName]     = useState("");
   const [editAvatar, setEditAvatar] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -557,6 +598,25 @@ export default function AdminUsersPage() {
               className="w-full h-9 text-sm font-medium border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50 disabled:opacity-50">
               🔑 จัดการสิทธิ์เฉพาะคน (ยกเว้นจากตำแหน่ง)
             </button>
+
+            {/* เชื่อมพนักงาน (HR) */}
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">🔗 เชื่อมพนักงาน</span>
+              <div className="mt-0.5"><EmployeePicker value={linkEmp} onChange={(v) => void saveLink(v)} disabled={linkBusy} placeholder="เลือกพนักงาน (เว้นว่าง = ไม่เชื่อม)" /></div>
+            </label>
+
+            {/* ตั้งรหัสผ่าน/PIN ใหม่ */}
+            <div>
+              <span className="text-xs font-medium text-slate-600">🔑 ตั้งรหัสผ่าน/PIN ใหม่ให้ผู้ใช้นี้</span>
+              <div className="flex gap-2 mt-0.5">
+                <input type="text" value={rpw} onChange={(e) => setRpw(e.target.value)} disabled={rpwBusy}
+                  placeholder={editUser.email?.endsWith("@pin.local") ? "PIN ใหม่ (6 หลัก)" : "รหัสผ่านใหม่ (≥ 6 ตัว)"}
+                  className="flex-1 h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60" />
+                <button type="button" onClick={() => void resetPw()} disabled={rpwBusy || !rpw.trim()}
+                  className="h-9 px-3 text-sm font-medium bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50">{rpwBusy ? "..." : "ตั้ง"}</button>
+              </div>
+              {rpwNote && <span className={`block text-[11px] mt-0.5 ${rpwNote.startsWith("✓") ? "text-emerald-600" : "text-rose-600"}`}>{rpwNote}</span>}
+            </div>
 
             {/* บันทึกชื่อ/รูป */}
             <button onClick={saveProfile} disabled={editBusy || uploadBusy}
