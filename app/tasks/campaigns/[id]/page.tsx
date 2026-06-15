@@ -19,7 +19,8 @@ import { CreateTaskModal, type CreatedTask } from "../../create-task-modal";
 import { TaskDetailDrawer } from "../../task-detail-drawer";
 import { applyTaskTransition } from "../../task-actions";
 import { useCreativeOptions } from "../../use-options";
-import { getCampaign, updateCampaign, deleteTask, createContent, POST_TYPES, type CampaignDetail, type CreativeTask } from "../../data";
+import { getCampaign, updateCampaign, deleteTask, createContent, listBrands, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
+import { ContentDrawer } from "../../content/page";
 
 // โหลดของกลาง Excalidraw แบบ dynamic — ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -94,6 +95,7 @@ export default function CampaignCanvasPage() {
   const [contentOpen, setContentOpen] = useState(false); // modal สร้างคอนเทนต์
   const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "" });
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
+  const [brands, setBrands] = useState<BrandOption[]>([]);
   const { platforms: platformOpts } = useCreativeOptions();
   const [fs, setFs] = useState(false); // เต็มจอ
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -102,6 +104,7 @@ export default function CampaignCanvasPage() {
 
   const load = useCallback(async () => { try { setDetail(await getCampaign(id)); } catch (e) { setErr((e as Error).message); } }, [id]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
   useEffect(() => { const h = () => setFs(!!document.fullscreenElement); document.addEventListener("fullscreenchange", h); return () => document.removeEventListener("fullscreenchange", h); }, []);
   const toggleFs = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); };
 
@@ -281,7 +284,7 @@ export default function CampaignCanvasPage() {
         </div>
       </ERPModal>
 
-      {contentView && <ContentCardDrawer data={contentView} onClose={() => setContentView(null)} />}
+      {contentView && <ContentDrawer contentId={String(contentView.id ?? "")} brands={brands} onClose={() => setContentView(null)} onChanged={() => {}} pushToast={pushToast} />}
 
       {drawerOpen && <CampaignDrawer campaignId={id} onClose={() => setDrawerOpen(false)} onChanged={load} pushToast={pushToast} />}
 
@@ -382,31 +385,6 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
   );
 }
 
-// Drawer การ์ดคอนเทนต์ (snapshot) + ลิงก์ไปจัดการเต็ม (caption/hashtag/ลิงก์) ที่หน้าคอนเทนต์
-function ContentCardDrawer({ data, onClose }: { data: Record<string, unknown>; onClose: () => void }) {
-  const cid = String(data.id ?? "");
-  const contentNo = String(data.content_no ?? "");
-  const title = String(data.title ?? "");
-  const platforms = Array.isArray(data.platforms) ? (data.platforms as string[]) : [];
-  return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[420px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <div className="min-w-0"><h3 className="text-base font-semibold text-slate-900 truncate">📱 {title || "คอนเทนต์"}</h3><span className="font-mono text-xs text-slate-500">{contentNo}</span></div>
-          <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          <div>
-            <p className="text-xs text-slate-400 mb-1">แพลตฟอร์ม</p>
-            {platforms.length ? <div className="flex flex-wrap gap-1.5">{platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 rounded-full px-2 py-0.5">{p}</span>)}</div> : <p className="text-sm text-slate-400 italic">—</p>}
-          </div>
-          <a href={`/tasks/content?content=${encodeURIComponent(cid)}`} target="_blank" rel="noopener noreferrer" className="block text-center h-10 leading-10 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700">เปิดเต็ม (caption / hashtag / ลิงก์) →</a>
-        </div>
-      </div>
-    </>
-  );
-}
 
 // เลือก SKU หลายอัน (ค้นหา + checkbox)
 function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onChange: (v: SkuPickerValue[]) => void }) {

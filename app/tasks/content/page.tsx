@@ -233,9 +233,9 @@ function MonthCalendar({ items, onOpen }: { items: ContentItem[]; onOpen: (id: s
 // ============================================================
 // Content detail drawer — caption หลายแพลตฟอร์ม + คลัง hashtag + ลิงก์
 // ============================================================
-function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushToast }: {
+export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushToast }: {
   contentId: string; brands: BrandOption[];
-  onClose: () => void; onChanged: () => void; onDelete: (c: ContentItem) => void;
+  onClose: () => void; onChanged: () => void; onDelete?: (c: ContentItem) => void;
   pushToast: (type: Toast["type"], m: string) => void;
 }) {
   const { platforms } = useCreativeOptions();
@@ -291,7 +291,7 @@ function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushTo
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0"><h3 className="text-base font-semibold text-slate-900 truncate">{d.title}</h3><span className="font-mono text-xs text-slate-500">{d.content_no}</span></div>
           <div className="flex items-center gap-1">
-            <button onClick={() => onDelete(d)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">ลบ</button>
+            {onDelete && <button onClick={() => onDelete(d)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">ลบ</button>}
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
           </div>
         </div>
