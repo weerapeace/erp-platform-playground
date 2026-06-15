@@ -109,8 +109,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type CreateBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
   status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
-  parent_sku_code?: string | null;
+  parent_sku_code?: string | null;        // เดิม (รหัสเดี่ยว) — ยังรองรับเพื่อ backward compat
+  parent_sku_codes?: string[];            // ใหม่ — หลายรหัส
 };
+
+// รวม/ปรับรหัส Parent SKU จาก payload (รองรับทั้งฟิลด์เดี่ยวเดิม + array ใหม่) → uppercase, ตัดช่องว่าง, ตัดซ้ำ
+function normalizeParentCodes(body: { parent_sku_code?: string | null; parent_sku_codes?: string[] }): string[] {
+  const raw = Array.isArray(body.parent_sku_codes)
+    ? body.parent_sku_codes
+    : (body.parent_sku_code ? [body.parent_sku_code] : []);
+  const out: string[] = [];
+  for (const c of raw) {
+    const code = String(c ?? "").trim().toUpperCase();
+    if (code && !out.includes(code)) out.push(code);
+  }
+  return out;
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -124,12 +138,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const status = body.status && (await isValidDsStatus(admin, body.status)) ? body.status : "design";
 
-  // ตั้ง Parent SKU ตั้งแต่ตอนสร้าง — รหัสซ้ำ = ห้ามบันทึก (เฟส 5)
-  const parentSku = body.parent_sku_code?.trim().toUpperCase() || null;
-  if (parentSku) {
-    const { data: dup } = await admin.from("parent_skus_v2").select("code").ilike("code", parentSku).limit(1);
-    if ((dup ?? []).length > 0) {
-      return NextResponse.json({ error: `รหัส ${parentSku} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ` }, { status: 400 });
+  // ตั้ง Parent SKU ตั้งแต่ตอนสร้าง (หลายรหัสได้) — รหัสซ้ำในระบบ = ห้ามบันทึก (เฟส 5)
+  const parentCodes = normalizeParentCodes(body);
+  if (parentCodes.length) {
+    const { data: dup } = await admin.from("parent_skus_v2").select("code").in("code", parentCodes);
+    const taken = (dup ?? []).map((d) => String((d as { code: string }).code).toUpperCase());
+    if (taken.length) {
+      return NextResponse.json({ error: `รหัส ${taken.join(", ")} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ` }, { status: 400 });
     }
   }
 
@@ -137,7 +152,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: row, error } = await admin.from("design_sheets").insert({
     code, name, brand_id: body.brand_id || null, detail: body.detail ?? null, note: body.note ?? null,
     status, order_date: body.order_date || null, deadline: body.deadline || null,
-    drive_link: body.drive_link?.trim() || null, parent_sku_code: parentSku,
+    drive_link: body.drive_link?.trim() || null,
+    parent_sku_codes: parentCodes, parent_sku_code: parentCodes[0] ?? null,   // เก็บ array + ตัวแรก (backward compat)
     is_active: true, created_by: user?.id ?? null,
   }).select("id, code").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });

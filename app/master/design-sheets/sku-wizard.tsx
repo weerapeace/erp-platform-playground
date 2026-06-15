@@ -18,7 +18,7 @@ const FAMILIES: [string, string][] = [
 type SkuRow = { code: string; color: string; name: string; price: string };
 
 export function SkuWizard({
-  open, onClose, sheetId, sheetName, brandId, parentCodeDefault, defaultPrice, onDone,
+  open, onClose, sheetId, sheetName, brandId, parentCodeDefault, parentCodeOptions, defaultPrice, onDone,
 }: {
   open: boolean;
   onClose: () => void;
@@ -26,6 +26,8 @@ export function SkuWizard({
   sheetName: string;
   brandId: string | null;
   parentCodeDefault: string;
+  /** รายการรหัส Parent SKU ของใบงาน (ถ้ามีหลายตัว → โชว์ตัวเลือกให้สร้างทีละตัว) */
+  parentCodeOptions?: string[];
   /** ราคาที่เสนอ (ผ่านแล้ว) ใช้เป็นราคาตั้งต้นของ SKU */
   defaultPrice: number | null;
   /** เรียกหลังสร้างสำเร็จ — refresh + อัปเดตสถานะใบเป็น sku_created */
@@ -110,6 +112,17 @@ export function SkuWizard({
         {/* ---- Parent SKU ---- */}
         <div className="p-3 border border-slate-200 rounded-lg bg-slate-50/60 space-y-2">
           <div className="text-xs font-medium text-slate-500">สินค้าหลัก (Parent SKU)</div>
+          {/* ใบงานมีหลายรหัส → เลือกตัวที่จะสร้าง (ทีละตัว) */}
+          {(parentCodeOptions?.length ?? 0) > 1 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-[11px] text-slate-400">เลือกรหัสที่จะสร้าง:</span>
+              {parentCodeOptions!.map((c) => (
+                <button key={c} type="button" onClick={() => setPCode(c)}
+                  className={`px-2 py-0.5 text-xs font-mono rounded border ${pCode === c ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-200 text-slate-600 hover:border-blue-300"}`}>{c}</button>
+              ))}
+              <span className="text-[10px] text-slate-300">(สร้างทีละตัว)</span>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
               <span className="text-xs text-slate-500">รหัส Parent SKU *</span>

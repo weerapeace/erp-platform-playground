@@ -48,11 +48,11 @@ type FormState = {
   id: string | null; code: string;
   name: string; brand_id: string; detail: string; note: string;
   status: string; order_date: string; deadline: string; drive_link: string;
-  parent_sku_code: string;
+  parent_sku_codes: string[];   // ตั้งได้หลาย Parent SKU
 };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 // วันที่สั่ง default = วันนี้ (แก้ได้)
-const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", drive_link: "", parent_sku_code: "" });
+const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", drive_link: "", parent_sku_codes: [] });
 
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
@@ -221,6 +221,7 @@ export default function DesignSheetsPage() {
   // ---- เฟส 5: ตั้ง Parent SKU + ตัวเช็ครหัส ----
   const [skuCheck, setSkuCheck] = useState<ParentSkuCheck | null>(null);
   const [skuChecking, setSkuChecking] = useState(false);
+  const [skuInput, setSkuInput] = useState("");   // ช่องพิมพ์รหัส Parent SKU ที่กำลังจะเพิ่ม
 
   // ---- ปุ่ม ＋ เพิ่มแบรนด์ใหม่จากในฟอร์ม ----
   const [brandModal, setBrandModal] = useState(false);
@@ -428,9 +429,9 @@ export default function DesignSheetsPage() {
       .then((j) => { if (!j.error) setPriceItems((j.data ?? []) as PriceItem[]); }).catch(() => {});
   }, [form?.id, priceItems.length]);
 
-  // เช็ครหัส Parent SKU แบบหน่วง 400ms ระหว่างพิมพ์
+  // เช็ครหัส Parent SKU (ตัวที่กำลังพิมพ์ในช่องเพิ่ม) แบบหน่วง 400ms
   useEffect(() => {
-    const code = form?.parent_sku_code?.trim() ?? "";
+    const code = skuInput.trim();
     if (!code) { setSkuCheck(null); setSkuChecking(false); return; }
     setSkuChecking(true);
     const t = setTimeout(() => {
@@ -440,7 +441,18 @@ export default function DesignSheetsPage() {
         .finally(() => setSkuChecking(false));
     }, 400);
     return () => clearTimeout(t);
-  }, [form?.parent_sku_code]);
+  }, [skuInput]);
+
+  // เพิ่มรหัสที่พิมพ์เข้า "รายการ Parent SKU" (กันซ้ำในลิสต์ + ห้ามตัวที่มีอยู่ในระบบ)
+  const addParentCode = () => {
+    const code = skuInput.trim().toUpperCase();
+    if (!code) return;
+    if (skuCheck?.exists) { setFormErr(`รหัส ${code} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ`); return; }
+    setForm((f) => (f && !f.parent_sku_codes.includes(code) ? { ...f, parent_sku_codes: [...f.parent_sku_codes, code] } : f));
+    setSkuInput(""); setSkuCheck(null);
+  };
+  const removeParentCode = (code: string) =>
+    setForm((f) => (f ? { ...f, parent_sku_codes: f.parent_sku_codes.filter((c) => c !== code) } : f));
 
   const saveCost = useCallback(async (): Promise<boolean> => {
     if (!form?.id) return false;
@@ -715,8 +727,10 @@ export default function DesignSheetsPage() {
         id: d.id, code: d.code ?? "", name: d.name ?? "", brand_id: d.brand_id ?? "",
         detail: d.detail ?? "", note: d.note ?? "", status: d.status ?? "design",
         order_date: d.order_date ?? "", deadline: d.deadline ?? "", drive_link: d.drive_link ?? "",
-        parent_sku_code: d.parent_sku_code ?? "",
+        parent_sku_codes: Array.isArray(d.parent_sku_codes) ? (d.parent_sku_codes as string[])
+          : (d.parent_sku_code ? [String(d.parent_sku_code)] : []),
       });
+      setSkuInput("");
       const ce = (Array.isArray(d.cost_extra) ? d.cost_extra : []) as CostExtra[];
       setCostExtra(ce.length ? ce.map((c) => ({ label: String(c.label ?? ""), amount: Number(c.amount) || 0 })) : DEFAULT_COST_EXTRA);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดไม่ได้"); }
@@ -726,12 +740,16 @@ export default function DesignSheetsPage() {
   const save = async () => {
     if (!form) return;
     if (!form.name.trim()) { setFormErr("กรุณาใส่ชื่องาน"); return; }
-    if (form.parent_sku_code.trim() && skuCheck?.exists) { setFormErr(`รหัส Parent SKU "${form.parent_sku_code.trim().toUpperCase()}" มีอยู่แล้ว — ห้ามตั้งซ้ำ`); return; }
+    // รหัสที่ค้างพิมพ์ในช่องเพิ่ม (ยังไม่กด Enter) → ถ้าซ้ำห้ามบันทึก, ถ้าใช้ได้ให้รวมเข้าไปด้วย
+    const pending = skuInput.trim().toUpperCase();
+    if (pending && skuCheck?.exists) { setFormErr(`รหัส Parent SKU "${pending}" มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ`); return; }
+    const parentCodes = [...form.parent_sku_codes];
+    if (pending && !parentCodes.includes(pending)) parentCodes.push(pending);
     setSaving(true); setFormErr(null);
     const payload = {
       name: form.name.trim(), brand_id: form.brand_id || null, detail: form.detail || null, note: form.note || null,
       status: form.status, order_date: form.order_date || null, deadline: form.deadline || null, drive_link: form.drive_link || null,
-      parent_sku_code: form.parent_sku_code.trim() ? form.parent_sku_code.trim().toUpperCase() : null,
+      parent_sku_codes: parentCodes,
     };
     try {
       const res = form.id
@@ -1122,23 +1140,41 @@ export default function DesignSheetsPage() {
                     className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">↗ เปิด</a>}
                 </div>
               </label>
-              {/* เฟส 5: ตั้ง Parent SKU + เช็ครหัสสด (ซ้ำ=แดง ห้ามบันทึก · ข้ามเลข=เตือนแต่ตั้งได้) */}
-              <label className="block">
-                <span className="text-[11px] text-slate-500">Parent SKU ที่จะตั้ง</span>
-                <input value={form.parent_sku_code} onChange={(e) => patch({ parent_sku_code: e.target.value.toUpperCase() })} disabled={!canEdit} placeholder="เช่น CTL085"
-                  className={`w-full h-8 mt-0.5 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 disabled:bg-slate-50 ${
-                    skuCheck?.exists ? "border-rose-400 bg-rose-50 focus:ring-rose-400"
-                    : skuCheck?.skipped ? "border-amber-300 focus:ring-amber-400"
-                    : "border-slate-200 focus:ring-blue-500"}`} />
+              {/* เฟส 5: ตั้ง Parent SKU ได้หลายตัว (chips) + เช็ครหัสสด (ซ้ำ=แดง ห้ามเพิ่ม · ข้ามเลข=เตือนแต่เพิ่มได้) */}
+              <div className="block">
+                <span className="text-[11px] text-slate-500">Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)</span>
+                {form.parent_sku_codes.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {form.parent_sku_codes.map((c) => (
+                      <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono bg-blue-50 border border-blue-200 text-blue-700 rounded">
+                        {c}
+                        {canEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="text-blue-300 hover:text-rose-500 leading-none">✕</button>}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {canEdit && (
+                  <div className="flex gap-1 mt-1">
+                    <input value={skuInput} onChange={(e) => setSkuInput(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentCode(); } }}
+                      placeholder="เช่น CTL085 แล้วกด Enter"
+                      className={`flex-1 h-8 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 ${
+                        skuCheck?.exists ? "border-rose-400 bg-rose-50 focus:ring-rose-400"
+                        : skuCheck?.skipped ? "border-amber-300 focus:ring-amber-400"
+                        : "border-slate-200 focus:ring-blue-500"}`} />
+                    <button type="button" onClick={addParentCode} disabled={!skuInput.trim() || skuCheck?.exists}
+                      className="h-8 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">＋ เพิ่ม</button>
+                  </div>
+                )}
                 <div className="mt-0.5 text-[11px] min-h-[14px]">
                   {skuChecking ? <span className="text-slate-300">กำลังเช็ครหัส...</span>
-                    : !form.parent_sku_code.trim() ? null
-                    : skuCheck?.exists ? <span className="text-rose-600 font-medium">✕ รหัสนี้มีอยู่แล้ว — ห้ามตั้งซ้ำ (บันทึกไม่ได้)</span>
-                    : skuCheck?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ {skuCheck.latest} (ตั้งได้ แต่เช็คว่าตั้งใจ)</span>
+                    : !skuInput.trim() ? null
+                    : skuCheck?.exists ? <span className="text-rose-600 font-medium">✕ รหัสนี้มีอยู่แล้ว — เพิ่มไม่ได้</span>
+                    : skuCheck?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ {skuCheck.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)</span>
                     : skuCheck?.latest ? <span className="text-slate-400">✓ ใช้ได้ · ล่าสุดที่ตั้ง: <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · ถัดไป: <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · เลขสูงสุด: {skuCheck.max_code}</> : null}</span>
                     : skuCheck ? <span className="text-emerald-600">✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้</span> : null}
                 </div>
-              </label>
+              </div>
             </div>
 
             <div className="block">
@@ -1444,7 +1480,7 @@ export default function DesignSheetsPage() {
       {form?.id && (
         <SkuWizard open={skuWizard} onClose={() => setSkuWizard(false)}
           sheetId={form.id} sheetName={form.name} brandId={form.brand_id || null}
-          parentCodeDefault={form.parent_sku_code || ""} defaultPrice={offeredPrice}
+          parentCodeOptions={form.parent_sku_codes} parentCodeDefault={form.parent_sku_codes[0] || ""} defaultPrice={offeredPrice}
           onDone={() => { patch({ status: "sku_created" }); refresh(); }} />
       )}
 

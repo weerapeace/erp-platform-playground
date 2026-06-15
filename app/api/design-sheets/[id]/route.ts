@@ -34,7 +34,7 @@ type CostExtra = { label: string; amount: number };
 type PatchBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
   status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
-  is_active?: boolean; parent_sku_code?: string | null; cost_extra?: CostExtra[];
+  is_active?: boolean; parent_sku_code?: string | null; parent_sku_codes?: string[]; cost_extra?: CostExtra[];
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -72,16 +72,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "สถานะไม่ถูกต้อง — เช็ครายการสถานะที่ Admin · Workflows" }, { status: 400 });
   }
 
-  // เฟส 5: ตั้ง Parent SKU — รหัสซ้ำกับที่มีอยู่ = ห้ามบันทึก (ตั้งข้ามเลข = เตือนฝั่งหน้าจอ แต่บันทึกได้)
-  if (body.parent_sku_code !== undefined) {
-    const code = body.parent_sku_code?.trim().toUpperCase() || null;
-    if (code) {
-      const { data: dup } = await admin.from("parent_skus_v2").select("code").ilike("code", code).limit(1);
-      if ((dup ?? []).length > 0) {
-        return NextResponse.json({ error: `รหัส ${code} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ` }, { status: 400 });
+  // เฟส 5: ตั้ง Parent SKU (หลายรหัสได้) — รหัสซ้ำกับที่มีอยู่ = ห้ามบันทึก
+  if (body.parent_sku_codes !== undefined || body.parent_sku_code !== undefined) {
+    const raw = Array.isArray(body.parent_sku_codes)
+      ? body.parent_sku_codes
+      : (body.parent_sku_code ? [body.parent_sku_code] : []);
+    const codes: string[] = [];
+    for (const c of raw) {
+      const code = String(c ?? "").trim().toUpperCase();
+      if (code && !codes.includes(code)) codes.push(code);
+    }
+    if (codes.length) {
+      const { data: dup } = await admin.from("parent_skus_v2").select("code").in("code", codes);
+      const taken = (dup ?? []).map((d) => String((d as { code: string }).code).toUpperCase());
+      if (taken.length) {
+        return NextResponse.json({ error: `รหัส ${taken.join(", ")} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ` }, { status: 400 });
       }
     }
-    patch.parent_sku_code = code;
+    patch.parent_sku_codes = codes;
+    patch.parent_sku_code = codes[0] ?? null;   // เก็บตัวแรกไว้ด้วย (backward compat)
   }
 
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });
