@@ -72,7 +72,12 @@ export function CanvasSketch({
       .then((j) => {
         if (!alive) return;
         const sc = j?.data?.scene as Record<string, unknown> | null;
-        setScene(sc && typeof sc === "object" ? { elements: (sc.elements as unknown[]) ?? [], files: (sc.files as Record<string, unknown>) ?? {} } : null);
+        // ล้าง link ออกจากการ์ดเก่า (มี customData.kind) — ไม่ให้ขึ้นไอคอน 🔗 รก (เปิดด้วยดับเบิลคลิกแทน)
+        const els = ((sc?.elements as Record<string, unknown>[]) ?? []).map((el) => {
+          const d = el?.customData as Record<string, unknown> | undefined;
+          return d?.kind && el.link ? { ...el, link: null } : el;
+        });
+        setScene(sc && typeof sc === "object" ? { elements: els, files: (sc.files as Record<string, unknown>) ?? {} } : null);
         setTimeout(() => { readyRef.current = true; }, 800);
       })
       .catch(() => { if (alive) { setScene(null); setTimeout(() => { readyRef.current = true; }, 800); } });
