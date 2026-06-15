@@ -138,6 +138,26 @@ export default function CampaignCanvasPage() {
   const removeTask = useCallback(async (tid: string) => { try { await deleteTask(tid); pushToast("info", "ลบงานแล้ว"); setTaskView(null); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast]);
   const openCards = () => { setCards(sketchRef.current?.listCards() ?? []); setCardsOpen(true); };
 
+  // ⑦ ลากงานที่มีอยู่แล้วในแคมเปญ → วางบนกระดาน (เป็นการ์ดงาน)
+  const [dragPanelOpen, setDragPanelOpen] = useState(false);
+  const [boardTaskIds, setBoardTaskIds] = useState<Set<string>>(new Set());
+  const refreshBoardIds = useCallback(() => {
+    const ids = (sketchRef.current?.listCards() ?? []).filter((c) => c.kind === "task").map((c) => String(c.data.id));
+    setBoardTaskIds(new Set(ids));
+  }, []);
+  const openDragPanel = () => { refreshBoardIds(); setDragPanelOpen(true); };
+  const placeTaskCard = useCallback((t: CreativeTask) => {
+    if (!sketchRef.current) { pushToast("info", "กระดานยังโหลดไม่เสร็จ ลองอีกครั้ง"); return; }
+    sketchRef.current.insert(taskCardSkeleton({ id: t.id, task_no: t.task_no ?? "", title: t.title, subtasks: [] }));
+    setBoardTaskIds((prev) => new Set(prev).add(t.id));
+    pushToast("success", `วางการ์ดงาน ${t.task_no} แล้ว`);
+  }, [pushToast]);
+  const onCanvasDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const tid = e.dataTransfer.getData("text/task-id"); if (!tid) return;
+    const t = detail?.tasks.find((x) => x.id === tid); if (t) placeTaskCard(t);
+  }, [detail, placeTaskCard]);
+
   if (err) return <StandaloneShell title="แคมเปญ" icon="📣" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
   const name = detail?.campaign.name ?? "แคมเปญ";
@@ -161,6 +181,7 @@ export default function CampaignCanvasPage() {
             <button onClick={() => setSectionOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 Section</button>
             <button onClick={() => { setSkuSel([]); setSkuOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📦 SKU Card</button>
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
+            <button onClick={openDragPanel} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🧲 ลากงานเข้า</button>
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ การ์ดบนกระดาน</button>
             <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 รายละเอียด</button>
@@ -170,7 +191,33 @@ export default function CampaignCanvasPage() {
       </div>
 
       <div className="px-8 py-6">
-        <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} />
+        <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
+          <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} />
+
+          {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
+          {dragPanelOpen && (
+            <div className="absolute top-3 left-3 z-10 w-72 max-h-[70%] bg-white rounded-xl border border-slate-200 shadow-xl flex flex-col">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100">
+                <span className="text-sm font-semibold text-slate-700">🧲 ลากงานเข้ากระดาน</span>
+                <button onClick={() => setDragPanelOpen(false)} className="h-6 w-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100">✕</button>
+              </div>
+              <p className="px-3 pt-2 text-[11px] text-slate-400">ลากการ์ดไปวางบนกระดาน หรือกดเพื่อวางตรงกลาง</p>
+              <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                {(detail?.tasks ?? []).filter((t) => !boardTaskIds.has(t.id)).length === 0 ? (
+                  <p className="text-sm text-slate-400 italic p-2">ทุกงานอยู่บนกระดานแล้ว 🎉</p>
+                ) : (detail?.tasks ?? []).filter((t) => !boardTaskIds.has(t.id)).map((t) => (
+                  <div key={t.id} draggable
+                    onDragStart={(e) => { e.dataTransfer.setData("text/task-id", t.id); e.dataTransfer.effectAllowed = "copy"; }}
+                    onClick={() => placeTaskCard(t)}
+                    className="cursor-grab active:cursor-grabbing border border-slate-200 rounded-lg px-2.5 py-1.5 hover:border-violet-300 hover:bg-violet-50/40">
+                    <p className="text-sm text-slate-700 line-clamp-1">✅ {t.title}</p>
+                    <p className="text-[11px] text-slate-400">{t.task_no} · {t.assignee_label || "—"}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <p className="text-xs text-slate-400 mt-2">🗂 Section · 📦 SKU · ✅ Task · 📱 Content → <b>ดับเบิลคลิกการ์ด</b>เพื่อดู/จัดการ · ล้อเมาส์ = ซูม (shift+ล้อ = เลื่อน) · บันทึกอัตโนมัติ</p>
       </div>
 
