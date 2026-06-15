@@ -18,6 +18,17 @@ import {
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 
+// ④ สถานะงานย่อยหลายขั้น: ยังไม่เริ่ม → กำลังทำ → ส่งงาน → อนุมัติ → โพสต์แล้ว
+export const SUB_STEPS = [
+  { key: "todo",        label: "ยังไม่เริ่ม", dot: "bg-slate-400" },
+  { key: "in_progress", label: "กำลังทำ",     dot: "bg-blue-500" },
+  { key: "submitted",   label: "ส่งงาน",      dot: "bg-amber-500" },
+  { key: "approved",    label: "อนุมัติ",     dot: "bg-emerald-500" },
+  { key: "posted",      label: "โพสต์แล้ว",   dot: "bg-violet-500" },
+];
+const subStepDot = (st: string) => (SUB_STEPS.find((s) => s.key === st)?.dot ?? (st === "done" ? "bg-violet-500" : "bg-slate-400"));
+const isSubDone = (st: string) => st === "posted" || st === "done";
+
 /** กล่องจัดการงานย่อยแบบครบ (โหลดเอง) — ใช้บน canvas/หน้าอื่นได้ */
 export function SubtaskManager({ taskId, pushToast }: { taskId: string; pushToast: ToastFn }) {
   const { user } = useAuth();
@@ -26,7 +37,7 @@ export function SubtaskManager({ taskId, pushToast }: { taskId: string; pushToas
   const [tab, setTab] = useState<"mine" | "all">("all");
   const reload = useCallback(async () => { try { setSubs(await listSubtasks(taskId)); } catch (e) { pushToast("error", (e as Error).message); } finally { setLoading(false); } }, [taskId, pushToast]);
   useEffect(() => { reload(); }, [reload]);
-  const done = subs.filter((s) => s.status === "done").length;
+  const done = subs.filter((s) => isSubDone(s.status)).length;
   const mine = useMemo(() => subs.filter((s) => s.assignees.some((a) => a.id === user?.id)), [subs, user?.id]);
   const shown = tab === "mine" ? mine : subs;
 
@@ -103,8 +114,11 @@ export function SubtaskCard({ sub, taskId, reload, pushToast }: { sub: CreativeS
   return (
     <div className="border border-slate-200 rounded-lg">
       <div className="flex items-center gap-2 px-3 py-2">
-        <input type="checkbox" checked={sub.status === "done"} onChange={() => patch({ status: sub.status === "done" ? "todo" : "done" })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
-        <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${sub.status === "done" ? "line-through text-slate-400" : "text-slate-700"}`}>{sub.title}</button>
+        <span className={`h-2 w-2 rounded-full shrink-0 ${subStepDot(sub.status)}`} />
+        <select value={sub.status === "done" ? "posted" : sub.status} onChange={(e) => patch({ status: e.target.value })} className="text-xs border border-slate-200 rounded-md px-1 py-0.5 bg-white shrink-0">
+          {SUB_STEPS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${isSubDone(sub.status) ? "line-through text-slate-400" : "text-slate-700"}`}>{sub.title}</button>
         {sub.required_before_next && <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">ต้องเสร็จก่อน</span>}
         <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <span key={a.id} title={a.label} className="h-5 w-5 rounded-full bg-violet-100 text-violet-700 text-[10px] flex items-center justify-center border border-white">{(a.label || "?").slice(0, 1)}</span>)}</div>
         {(sub.attachments?.length ?? 0) > 0 && <span className="text-[10px] text-slate-400">📎{sub.attachments!.length}</span>}

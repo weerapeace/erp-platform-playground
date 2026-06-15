@@ -31,7 +31,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await admin.from("erp_creative_subtasks")
     .select("id, title, status, due_date, required_before_next, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active)")
     .in("id", ids)
-    .neq("status", "done")
+    .not("status", "in", "(done,posted)")
     .order("due_date", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 

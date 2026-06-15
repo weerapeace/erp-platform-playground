@@ -6,10 +6,12 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from "react";
-import { ERPInput } from "@/components/form";
+import { ERPInput, ERPSelect } from "@/components/form";
+import { UserPicker } from "@/components/pickers";
+import type { UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
 import { SubtaskManager } from "./subtask-manager";
-import { taskTypeLabel, platformLabel } from "./use-options";
+import { taskTypeLabel, platformLabel, useCreativeOptions } from "./use-options";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue,
@@ -18,6 +20,8 @@ import {
 } from "./data";
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
+type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[]; assignee: UserPickerValue | null; reviewer: UserPickerValue | null };
 
 export function StatusBadge({ status }: { status: string }) {
   const m = statusMeta(status);
@@ -47,11 +51,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   onDelete: (id: string) => void;
   pushToast: ToastFn;
 }) {
+  const { taskTypes, platforms: platformOpts } = useCreativeOptions();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [ef, setEf] = useState<EditForm | null>(null);
 
   const load = useCallback(async () => {
     try { setDetail(await getTask(taskId)); }
@@ -60,6 +67,20 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   useEffect(() => { load(); }, [load]);
 
   const refresh = async () => { await load(); await onChanged(); };
+  const startEdit = () => {
+    const d = detail; if (!d) return;
+    setEf({ task_type: d.task_type ?? "", priority: d.priority, brand_id: d.brand_id ?? "", due_date: d.due_date ?? "", platforms: d.platforms ?? [],
+      assignee: d.assignee_id ? ({ id: d.assignee_id, name: d.assignee_label ?? "" } as UserPickerValue) : null,
+      reviewer: d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null });
+    setEditing(true);
+  };
+  const saveEdit = async () => {
+    if (!ef || !detail) return; setBusy(true);
+    try {
+      await updateTask(detail.id, { task_type: ef.task_type || null, priority: ef.priority, brand_id: ef.brand_id || null, due_date: ef.due_date || null, platforms: ef.platforms, assignee_id: ef.assignee?.id ?? null, reviewer_id: ef.reviewer?.id ?? null });
+      setEditing(false); await refresh(); pushToast("success", "บันทึกแล้ว");
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
 
   if (!detail) {
     return (
@@ -93,6 +114,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <span className="font-mono text-xs text-slate-500">{t.task_no}</span>
           </div>
           <div className="flex items-center gap-1">
+            {!editing && <button onClick={startEdit} className="h-8 px-2 text-xs text-violet-700 hover:bg-violet-50 rounded-md">✏️ แก้ไข</button>}
             <button onClick={() => onDelete(t.id)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">ลบ</button>
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
           </div>
@@ -112,16 +134,36 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500" style={{ width: `${t.progress_percent}%` }} /></div>
             {t.blocker_status === "blocked" && t.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ ติดปัญหา: {t.blocker_reason}</p>}
           </div>
-          {/* meta */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-            <Field label="ประเภทงาน" value={t.task_type ? taskTypeLabel(t.task_type) : null} />
-            <Field label="แบรนด์" value={t.brand_label} dot={brandColor} />
-            <Field label="ผู้รับผิดชอบ" value={t.assignee_label} />
-            <Field label="ผู้ตรวจ/อนุมัติ" value={t.reviewer_label || t.approver_label} />
-            <Field label="กำหนดส่ง" value={t.due_date} highlight={isOverdue(t)} />
-            <Field label="แคมเปญ" value={campaignName} />
-            <Field label="Parent SKU" value={(t.parent_skus && t.parent_skus.length) ? t.parent_skus.map((p) => p.code).filter(Boolean).join(", ") : (t.parent_sku_code || null)} />
-          </div>
+          {/* meta / แก้ไข */}
+          {editing && ef ? (
+            <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-slate-400">ประเภทงาน</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
+                <div><label className="text-xs text-slate-400">ความสำคัญ</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
+                <div><label className="text-xs text-slate-400">แบรนด์</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
+                <div><label className="text-xs text-slate-400">กำหนดส่ง</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
+                <div><label className="text-xs text-slate-400">ผู้รับผิดชอบ</label><UserPicker value={ef.assignee} onChange={(v) => setEf({ ...ef, assignee: v })} disableCreate /></div>
+                <div><label className="text-xs text-slate-400">ผู้ตรวจ/อนุมัติ</label><UserPicker value={ef.reviewer} onChange={(v) => setEf({ ...ef, reviewer: v })} disableCreate /></div>
+              </div>
+              <div><label className="text-xs text-slate-400">แพลตฟอร์ม</label>
+                <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = ef.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">ยกเลิก</button>
+                <button onClick={saveEdit} disabled={busy} className="h-8 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{busy ? "..." : "บันทึก"}</button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+              <Field label="ประเภทงาน" value={t.task_type ? taskTypeLabel(t.task_type) : null} />
+              <Field label="แบรนด์" value={t.brand_label} dot={brandColor} />
+              <Field label="ผู้รับผิดชอบ" value={t.assignee_label} />
+              <Field label="ผู้ตรวจ/อนุมัติ" value={t.reviewer_label || t.approver_label} />
+              <Field label="กำหนดส่ง" value={t.due_date} highlight={isOverdue(t)} />
+              <Field label="แคมเปญ" value={campaignName} />
+              <Field label="Parent SKU" value={(t.parent_skus && t.parent_skus.length) ? t.parent_skus.map((p) => p.code).filter(Boolean).join(", ") : (t.parent_sku_code || null)} />
+            </div>
+          )}
           {/* SKU cards (m2m — ใส่ได้หลายรายการ) */}
           {(() => {
             const list = (t.skus && t.skus.length) ? t.skus : (t.sku_code ? [{ id: "_", code: t.sku_code, name: t.sku_name || t.product_name, color: t.sku_color, price: t.sku_price }] : []);
@@ -142,7 +184,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             ) : null;
           })()}
           {/* platforms */}
-          {t.platforms && t.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{t.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
+          {!editing && t.platforms && t.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{t.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
           {/* description */}
           {t.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">รายละเอียด</p>{t.description}</div>}
           {/* links */}
