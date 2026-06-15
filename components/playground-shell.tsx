@@ -15,6 +15,8 @@ export const ShellPresentContext = createContext(false);
 export const useShellPresent = () => useContext(ShellPresentContext);
 import { useAuth, roleLabel, roleColor, AccessDenied } from "@/components/auth";
 import { NotificationBell } from "@/components/notification-bell";
+import { LangToggle, useT } from "@/components/i18n";
+import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
@@ -753,6 +755,7 @@ function UserSwitcher() {
   const { user, logout, ready } = useAuth();
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const t = useT();
 
   if (!ready) {
     return <div className="p-3 border-t border-slate-100"><div className="h-9 bg-slate-100 rounded-lg animate-pulse" /></div>;
@@ -774,6 +777,7 @@ function UserSwitcher() {
 
   return (
     <div className="p-3 border-t border-slate-100 relative">
+      <LangSync />
       <div className="flex items-center gap-1">
         <button onClick={() => setOpen(!open)}
           className="flex-1 flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 transition-colors text-left">
@@ -796,9 +800,13 @@ function UserSwitcher() {
             <div className="text-xs text-slate-500 truncate">{user.email}</div>
           </div>
           <Link href="/profile" onClick={() => setOpen(false)}
-            className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 โปรไฟล์ของฉัน</Link>
+            className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 {t("โปรไฟล์ของฉัน", "My Profile")}</Link>
+          <div className="px-3 py-1.5 flex items-center justify-between gap-2">
+            <span className="text-xs text-slate-500">🌐 ภาษา / Language</span>
+            <LangToggle />
+          </div>
           <button onClick={async () => { setOpen(false); await logout(); router.push("/login"); }}
-            className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50">ออกจากระบบ</button>
+            className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50">{t("ออกจากระบบ", "Log out")}</button>
         </div>
       )}
     </div>
