@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
+import { useRefetchOnFocus } from "@/lib/use-refetch-on-focus";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
@@ -134,6 +135,7 @@ export default function TasksPage() {
   useEffect(() => { const tid = new URLSearchParams(window.location.search).get("task"); if (tid) setDetailId(tid); }, []);
 
   const reload = useCallback(async () => { await Promise.all([loadAll(), loadMine(), loadMySubs()]); }, [loadAll, loadMine, loadMySubs]);
+  useRefetchOnFocus(reload); // กลับมาที่แท็บ → โหลดงานใหม่ (กันค้างเก่า)
   const toggleMySub = useCallback(async (s: MySubtask) => {
     try { await updateSubtask(s.task_id, s.id, { status: "done" }); pushToast("success", "ทำงานย่อยเสร็จแล้ว ✓"); await loadMySubs(); }
     catch (e) { pushToast("error", (e as Error).message); }

@@ -28,6 +28,9 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
 
+// โซนสำเร็จรูปสำหรับกระดานแคมเปญ
+const SECTION_PRESETS = ["Brainstorming (ไอเดีย)", "Reference", "Information (ข้อมูล)", "Products (สินค้าใน Campaign)", "Tasks (งาน)"];
+
 // การ์ด SKU บน Excalidraw: รูป(บน) + ข้อความ(ล่าง) ในกล่อง — customData = snapshot สำหรับ drawer (ดับเบิลคลิกการ์ดเปิด)
 function skuCardSkeleton(s: SkuPickerValue): Record<string, unknown>[] {
   const gid = `sku-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
@@ -72,6 +75,8 @@ export default function CampaignCanvasPage() {
   const [taskView, setTaskView] = useState<Record<string, unknown> | null>(null); // การ์ดงานที่กดดู
   const [cardsOpen, setCardsOpen] = useState(false); // ป๊อปอัปสรุปการ์ด
   const [cards, setCards] = useState<{ kind: string; data: Record<string, unknown> }[]>([]);
+  const [sectionOpen, setSectionOpen] = useState(false); // ป๊อปอัปเลือก Section
+  const [sectionName, setSectionName] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sketchRef = useRef<CanvasSketchControls | null>(null);
   const pushToast = useCallback((type: Toast["type"], message: string) => { const tid = Date.now() + Math.random(); setToasts((q) => [...q, { id: tid, type, message }]); setTimeout(() => setToasts((q) => q.filter((t) => t.id !== tid)), 3500); }, []);
@@ -82,11 +87,10 @@ export default function CampaignCanvasPage() {
   const setStatus = async (status: string) => { try { await updateCampaign(id, { status }); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   // Section = Frame ของ Excalidraw (อยู่ข้างหลัง, เปลี่ยนชื่อ/ย่อขยายที่ตัวมันเอง, ลากของเข้าไปแล้วเลื่อนตามกัน)
-  const addSection = () => {
+  const insertSection = (name: string) => {
     if (!sketchRef.current) { pushToast("info", "กระดานยังโหลดไม่เสร็จ ลองอีกครั้ง"); return; }
-    const name = window.prompt("ชื่อโซน (Section)", "ไอเดีย");
-    if (name === null) return;
     void sketchRef.current.insert([{ type: "frame", children: [], name: name.trim() || "โซนใหม่", x: 0, y: 0, width: 560, height: 400 }]);
+    setSectionOpen(false); setSectionName("");
   };
   const confirmSku = () => { if (!skuPick || !sketchRef.current) return; void sketchRef.current.insert(skuCardSkeleton(skuPick)); setSkuOpen(false); setSkuPick(null); };
   const onTaskCreated = (t: CreatedTask) => { sketchRef.current?.insert(taskCardSkeleton(t)); pushToast("success", `สร้างงาน ${t.task_no} + วางการ์ดแล้ว`); };
@@ -103,8 +107,8 @@ export default function CampaignCanvasPage() {
 
   return (
     <StandaloneShell title={name} icon="📣" accent="violet">
-      {/* Top bar */}
-      <div className="bg-white border-b border-slate-200 px-8 py-4">
+      {/* Top bar (sticky) */}
+      <div className="bg-white border-b border-slate-200 px-8 py-4 sticky top-14 z-20">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">
             <a href="/tasks/campaigns" className="text-sm text-slate-500 hover:text-slate-800">แคมเปญ</a>
@@ -117,7 +121,7 @@ export default function CampaignCanvasPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={addSection} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 Section</button>
+            <button onClick={() => setSectionOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 Section</button>
             <button onClick={() => { setSkuPick(null); setSkuOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📦 SKU Card</button>
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ การ์ดบนกระดาน</button>
@@ -142,6 +146,26 @@ export default function CampaignCanvasPage() {
 
       {skuView && <SkuDrawer data={skuView} onClose={() => setSkuView(null)} />}
       {taskView && <TaskDetailDrawer taskId={String(taskView.id ?? "")} onClose={() => setTaskView(null)} onChanged={() => {}} onMove={moveTask} onDelete={removeTask} pushToast={pushToast} />}
+
+      {/* เลือกโซน (Section) จากชุดสำเร็จ หรือพิมพ์เอง */}
+      <ERPModal open={sectionOpen} onClose={() => setSectionOpen(false)} title="เพิ่มโซน (Section)" size="sm"
+        footer={<button onClick={() => setSectionOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">ปิด</button>}>
+        <div className="space-y-3">
+          <p className="text-xs text-slate-400">เลือกโซนสำเร็จรูป (กดแล้ววางบนกระดานเลย)</p>
+          <div className="grid grid-cols-1 gap-1.5">
+            {SECTION_PRESETS.map((s) => (
+              <button key={s} onClick={() => insertSection(s)} className="w-full text-left h-10 px-3 rounded-lg border border-slate-200 text-sm text-slate-700 hover:border-violet-300 hover:bg-violet-50/40">{s}</button>
+            ))}
+          </div>
+          <div className="border-t border-slate-100 pt-3">
+            <p className="text-xs text-slate-400 mb-1.5">หรือพิมพ์ชื่อเอง</p>
+            <div className="flex gap-2">
+              <input value={sectionName} onChange={(e) => setSectionName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sectionName.trim() && insertSection(sectionName)} placeholder="ชื่อโซน..." className="flex-1 h-9 border border-slate-200 rounded-lg px-2 text-sm" />
+              <button onClick={() => sectionName.trim() && insertSection(sectionName)} disabled={!sectionName.trim()} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">เพิ่ม</button>
+            </div>
+          </div>
+        </div>
+      </ERPModal>
 
       {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
       <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title="การ์ดบนกระดาน" size="md"

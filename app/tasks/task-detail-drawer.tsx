@@ -12,7 +12,7 @@ import { taskTypeLabel, platformLabel } from "./use-options";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue,
-  getTask, addComment, addAttachment,
+  getTask, updateTask, addComment, addAttachment,
   type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption,
 } from "./data";
 
@@ -85,8 +85,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
       <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         {/* header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900 truncate">{t.title}</h3>
+          <div className="min-w-0 flex-1 mr-2">
+            <input defaultValue={t.title} title="คลิกเพื่อแก้ชื่องาน"
+              onBlur={async (e) => { const v = e.target.value.trim(); if (v && v !== t.title) { try { await updateTask(t.id, { title: v }); await refresh(); } catch (err) { pushToast("error", (err as Error).message); } } }}
+              className="text-base font-semibold text-slate-900 w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-violet-400 focus:outline-none" />
             <span className="font-mono text-xs text-slate-500">{t.task_no}</span>
           </div>
           <div className="flex items-center gap-1">

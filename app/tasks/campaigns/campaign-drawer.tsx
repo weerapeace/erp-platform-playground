@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { STATUS_META, getCampaign, updateCampaign, deleteTask, type CampaignDetail, type CreativeStatus, type CreativeTask } from "../data";
 import { TaskDetailDrawer } from "../task-detail-drawer";
 import { applyTaskTransition } from "../task-actions";
+import { useRefetchOnFocus } from "@/lib/use-refetch-on-focus";
 
 export const CAMPAIGN_STATUS: { value: string; label: string; cls: string }[] = [
   { value: "planning", label: "วางแผน", cls: "bg-sky-50 text-sky-700 border-sky-200" },
@@ -24,6 +25,7 @@ export function CampaignDrawer({ campaignId, onClose, onChanged, pushToast }: { 
   const [taskId, setTaskId] = useState<string | null>(null); // งานที่กดเปิด (งานเต็มทับขึ้นมา)
   const load = useCallback(async () => { try { setDetail(await getCampaign(campaignId)); } catch (e) { pushToast("error", (e as Error).message); } }, [campaignId, pushToast]);
   useEffect(() => { load(); }, [load]);
+  useRefetchOnFocus(load); // กลับมาที่แท็บ → โหลดงานในแคมเปญใหม่
 
   const moveTask = async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); };
   const removeTask = async (tid: string) => { try { await deleteTask(tid); pushToast("info", "ลบงานแล้ว"); setTaskId(null); await load(); onChanged?.(); } catch (e) { pushToast("error", (e as Error).message); } };
