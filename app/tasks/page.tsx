@@ -421,6 +421,7 @@ function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMov
             <Field label="ผู้ตรวจ/อนุมัติ" value={t.reviewer_label || t.approver_label} />
             <Field label="กำหนดส่ง" value={t.due_date} highlight={isOverdue(t)} />
             <Field label="แคมเปญ" value={campaignName} />
+            <Field label="Parent SKU" value={t.parent_sku_code ? `${t.parent_sku_code}${t.parent_sku_name ? " · " + t.parent_sku_name : ""}` : null} />
           </div>
           {/* SKU card */}
           {(t.sku_code || t.product_name) && (

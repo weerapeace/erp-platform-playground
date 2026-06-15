@@ -9,8 +9,8 @@
 import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { UserPicker, SkuPicker } from "@/components/pickers";
-import type { UserPickerValue, SkuPickerValue } from "@/components/pickers";
+import { UserPicker, SkuPicker, ParentSkuPicker } from "@/components/pickers";
+import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
 import { useCreativeOptions } from "./use-options";
 import {
   PRIORITY_META, createTask, listCampaigns, listBrands, listTemplates,
@@ -24,11 +24,11 @@ type FormState = {
   brand_id: string; campaign_id: string;
   assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
   priority: CreativePriority; due_date: string;
-  product: SkuPickerValue | null; platforms: string[]; drive_folder_url: string;
+  product: SkuPickerValue | null; parent: ParentSkuPickerValue | null; platforms: string[]; drive_folder_url: string;
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
-  assignee: null, reviewer: null, priority: "normal", due_date: "", product: null, platforms: [], drive_folder_url: "",
+  assignee: null, reviewer: null, priority: "normal", due_date: "", product: null, parent: null, platforms: [], drive_folder_url: "",
 };
 
 export type CreatedTask = { id: string; task_no: string; title: string; subtasks: { title: string }[] };
@@ -79,6 +79,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         assignee_id: form.assignee?.id ?? null, reviewer_id: form.reviewer?.id ?? null,
         priority: form.priority, due_date: form.due_date || null,
         sku_id: form.product?.id ?? null, product_name: form.product?.name ?? null,
+        parent_sku_id: form.parent?.id ?? null,
         platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
         subtasks,
       });
@@ -119,7 +120,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         <ERPFormField label="ผู้ตรวจ/อนุมัติ"><UserPicker value={form.reviewer} onChange={(v) => updateForm({ reviewer: v })} disableCreate /></ERPFormField>
         <ERPFormField label="กำหนดส่ง"><ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} /></ERPFormField>
         <ERPFormField label="โฟลเดอร์ Drive (ลิงก์)"><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>
-        <ERPFormField label="สินค้า/SKU (ถ้ามี)" span={2}><SkuPicker value={form.product} onChange={(v) => updateForm({ product: v })} /></ERPFormField>
+        <ERPFormField label="สินค้า/SKU (ถ้ามี)"><SkuPicker value={form.product} onChange={(v) => updateForm({ product: v })} /></ERPFormField>
+        <ERPFormField label="Parent SKU (ตระกูลสินค้า)"><ParentSkuPicker value={form.parent} onChange={(v) => updateForm({ parent: v })} /></ERPFormField>
         <ERPFormField label="แพลตฟอร์ม" span={2}>
           <div className="flex flex-wrap gap-1.5">
             {platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}

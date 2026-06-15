@@ -19,22 +19,26 @@ import { nextTaskNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssigne
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export const SELECT = `id, task_no, title, description, task_type, brand_id, campaign_id, sku_id,
+export const SELECT = `id, task_no, title, description, task_type, brand_id, campaign_id, sku_id, parent_sku_id,
   product_name, priority, status, progress_percent, assignee_id, reviewer_id, approver_id,
   start_date, due_date, completed_at, approval_status, asset_status, platforms,
   drive_folder_url, final_asset_url, published_url, blocker_status, blocker_reason,
   is_active, created_at, updated_at,
   brand:brands!brand_id(name, color),
   campaign:erp_creative_campaigns!campaign_id(name),
-  sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, standard_price, cover_image_r2_key)`;
+  sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, standard_price, cover_image_r2_key),
+  parent:parent_skus_v2!parent_sku_id(code, name_th)`;
 
 /** map แถวดิบ + join → flat object พร้อม label (ของกลางใน module นี้) */
 export function flattenTask(r: Record<string, unknown>, empMap: Map<string, string>): Record<string, unknown> {
   const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
   const c = (Array.isArray(r.campaign) ? r.campaign[0] : r.campaign) as { name?: string } | null;
   const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as Record<string, unknown> | null;
+  const par = (Array.isArray(r.parent) ? r.parent[0] : r.parent) as { code?: string; name_th?: string } | null;
   const out: Record<string, unknown> = { ...r };
-  delete out.brand; delete out.campaign; delete out.sku;
+  delete out.brand; delete out.campaign; delete out.sku; delete out.parent;
+  out.parent_sku_code = par?.code ?? null;
+  out.parent_sku_name = par?.name_th ?? null;
   out.brand_label = b?.name ?? null;
   out.brand_color = b?.color ?? null;
   out.campaign_label = c?.name ?? null;
@@ -103,7 +107,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 type CreateBody = {
   title?: string; description?: string | null; task_type?: string | null;
-  brand_id?: string | null; campaign_id?: string | null; sku_id?: string | null; product_name?: string | null;
+  brand_id?: string | null; campaign_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
   priority?: string; status?: string; progress_percent?: number | null;
   assignee_id?: string | null; reviewer_id?: string | null; approver_id?: string | null;
   start_date?: string | null; due_date?: string | null;
@@ -129,6 +133,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const insertRow = (taskNo: string) => ({
     task_no: taskNo, title, description: body.description?.trim() || null, task_type: body.task_type || null,
     brand_id: body.brand_id || null, campaign_id: body.campaign_id || null, sku_id: body.sku_id || null,
+    parent_sku_id: body.parent_sku_id || null,
     product_name: body.product_name?.trim() || null, priority: body.priority || "normal", status,
     progress_percent: progress, assignee_id: body.assignee_id || null, reviewer_id: body.reviewer_id || null,
     approver_id: body.approver_id || null, start_date: body.start_date || null, due_date: body.due_date || null,
