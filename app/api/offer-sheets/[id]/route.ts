@@ -11,6 +11,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { itemsToRows, type OfferSaveBody } from "../route";
+import { normalizeOfferLayoutConfig } from "@/lib/offer-layout";
+import { normalizeOfferTemplateKey } from "@/lib/offer-templates";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -48,6 +50,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     offer_date:    body.offer_date || null,
     note:          body.note ?? null,
     status:        body.status ?? "draft",
+    column_config: normalizeOfferLayoutConfig(body.column_config),
+    template_key:  normalizeOfferTemplateKey(body.template_key),
     updated_at:    new Date().toISOString(),
   }).eq("id", id);
   if (ue) return NextResponse.json({ error: ue.message }, { status: 500 });

@@ -21,6 +21,14 @@ import {
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import { LineColumnsManager, visibleColumns, type LineColumnConfig } from "@/components/line-item-columns";
 import { OFFER_ITEM_COLUMNS, DEFAULT_OFFER_COLS, offerColAlign, offerGroupValue } from "@/lib/offer-columns";
+import { resolveOfferLayoutConfig } from "@/lib/offer-layout";
+import {
+  DEFAULT_OFFER_TEMPLATE_KEY,
+  OFFER_TEMPLATES,
+  getOfferTemplate,
+  normalizeOfferTemplateKey,
+  type OfferTemplateKey,
+} from "@/lib/offer-templates";
 import { exportTable } from "@/lib/export";
 import type { OfferItem, OfferListItem } from "@/app/api/offer-sheets/route";
 
@@ -213,22 +221,16 @@ function OfferEditor({ id, canEdit, onBack }: {
   const [offerNo, setOfferNo] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [colConfig, setColConfig] = useState<LineColumnConfig>(DEFAULT_OFFER_COLS);
+  const [templateKey, setTemplateKey] = useState<OfferTemplateKey>(DEFAULT_OFFER_TEMPLATE_KEY);
 
-  // โหลดค่าตั้งคอลัมน์ (รวมทั้งโมดูล)
-  useEffect(() => {
-    apiFetch("/api/offer-sheets/settings").then((r) => r.json()).then((j) => {
-      if (j.data) setColConfig({
-        order: j.data.order?.length ? j.data.order : DEFAULT_OFFER_COLS.order,
-        hidden: j.data.hidden ?? [],
-        groupBy: j.data.groupBy ?? null,
-      });
-    }).catch(() => {});
-  }, []);
-
-  // แก้ค่าตั้งคอลัมน์ → บันทึกทันที (มีผลกับทุกคน)
+  // แก้ค่าตั้งคอลัมน์เฉพาะใบนี้เท่านั้น
   const updateCols = (c: LineColumnConfig) => {
     setColConfig(c);
-    apiFetch("/api/offer-sheets/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) }).catch(() => {});
+  };
+  const applyTemplate = (key: OfferTemplateKey) => {
+    const template = getOfferTemplate(key);
+    setTemplateKey(template.key);
+    setColConfig(template.columns);
   };
 
   // โหลดใบเดิม
@@ -245,6 +247,8 @@ function OfferEditor({ id, canEdit, onBack }: {
       setNote(d.note ?? "");
       setStatus(d.status ?? "draft");
       setItems((d.items ?? []) as OfferItem[]);
+      setColConfig(resolveOfferLayoutConfig(d.column_config));
+      setTemplateKey(normalizeOfferTemplateKey(d.template_key));
       setShareToken(d.share_token ?? null);
       setOfferNo(d.offer_no ?? null);
       if (d.customer_id) setCustomer({ id: d.customer_id, code: null, name: d.customer_name ?? "" });
@@ -392,6 +396,8 @@ function OfferEditor({ id, canEdit, onBack }: {
     const body = JSON.stringify({
       title, customer_id: customer?.id ?? null, customer_name: customer?.name ?? null,
       offer_date: offerDate, note, status, items, actorName: user?.name ?? null,
+      column_config: colConfig,
+      template_key: templateKey,
     });
     const res = id
       ? await apiFetch(`/api/offer-sheets/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body })
@@ -459,6 +465,33 @@ function OfferEditor({ id, canEdit, onBack }: {
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="ข้อความถึงลูกค้า / เงื่อนไข"
                 className="w-full px-3 py-2 rounded-lg border border-pink-200 focus:border-pink-400 focus:ring-2 focus:ring-pink-100 outline-none text-sm" />
             </Field>
+          </div>
+          <div className="sm:col-span-2">
+            <div className="block text-xs font-medium text-rose-400 mb-2">รูปแบบเอกสารใบนี้</div>
+            <div className="grid sm:grid-cols-3 gap-3">
+              {OFFER_TEMPLATES.map((template) => (
+                <button
+                  key={template.key}
+                  type="button"
+                  onClick={() => applyTemplate(template.key)}
+                  className={`text-left rounded-xl border p-3 transition ${
+                    templateKey === template.key
+                      ? "border-rose-300 bg-rose-50 shadow-sm"
+                      : "border-pink-100 bg-white hover:bg-pink-50/50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-slate-800">{template.label}</span>
+                    {templateKey === template.key && <span className="text-xs text-rose-500">ใช้อยู่</span>}
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{template.description}</p>
+                  <div className="mt-2 inline-flex rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-rose-500 border border-pink-100">
+                    {template.bestFor}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-rose-300">เลือก template จะตั้งคอลัมน์ของใบนี้ใหม่ ไม่กระทบใบเสนออื่น</p>
           </div>
         </div>
       </div>

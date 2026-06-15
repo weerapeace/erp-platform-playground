@@ -13,6 +13,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { normalizeOfferLayoutConfig, type OfferLayoutConfig } from "@/lib/offer-layout";
+import { normalizeOfferTemplateKey, type OfferTemplateKey } from "@/lib/offer-templates";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,6 +49,8 @@ export type OfferListItem = {
   grand_total:   number;
   created_at:    string;
   updated_at:    string;
+  column_config?: OfferLayoutConfig | null;
+  template_key?: OfferTemplateKey;
 };
 
 export type OfferSaveBody = {
@@ -58,6 +62,8 @@ export type OfferSaveBody = {
   status?:        string;
   items?:         OfferItem[];
   actorName?:     string | null;
+  column_config?: OfferLayoutConfig | null;
+  template_key?:   string | null;
 };
 
 // แปลงรายการ → แถวสำหรับ insert (ใช้ทั้ง POST นี้ และ PUT ใน [id])
@@ -112,6 +118,8 @@ export async function GET(request: NextRequest) {
     id: s.id, offer_no: s.offer_no, title: s.title, customer_id: s.customer_id,
     customer_name: s.customer_name, offer_date: s.offer_date, status: s.status,
     share_token: s.share_token, created_at: s.created_at, updated_at: s.updated_at,
+    column_config: normalizeOfferLayoutConfig(s.column_config),
+    template_key: normalizeOfferTemplateKey(s.template_key),
     item_count: totals[s.id]?.count ?? 0,
     grand_total: totals[s.id]?.total ?? 0,
   }));
@@ -148,6 +156,8 @@ export async function POST(request: NextRequest) {
     offer_date:    body.offer_date || now.toISOString().slice(0, 10),
     note:          body.note ?? null,
     status:        body.status ?? "draft",
+    column_config: normalizeOfferLayoutConfig(body.column_config),
+    template_key:  normalizeOfferTemplateKey(body.template_key),
     share_token,
     created_by:    actorId,
   }).select("*").single();

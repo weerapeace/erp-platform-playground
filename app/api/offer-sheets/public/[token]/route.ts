@@ -6,6 +6,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { resolveOfferLayoutConfig } from "@/lib/offer-layout";
+import { normalizeOfferTemplateKey } from "@/lib/offer-templates";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,7 +18,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
   const db = supabaseAdmin();
   const { data: sheet, error } = await db.from("offer_sheets")
-    .select("id, offer_no, title, customer_name, offer_date, note, status")
+    .select("id, offer_no, title, customer_name, offer_date, note, status, column_config, template_key")
     .eq("share_token", token).single();
   if (error || !sheet) return NextResponse.json({ data: null, error: "ไม่พบเอกสาร" }, { status: 404 });
 
@@ -24,7 +26,13 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .select("sku_code, name, image_r2_key, uom_name, color, category, unit_price, qty, note, sort_order")
     .eq("offer_id", sheet.id).order("sort_order", { ascending: true });
 
-  const { data: settings } = await db.from("app_settings").select("offer_columns").eq("id", 1).single();
-
-  return NextResponse.json({ data: { ...sheet, items: items ?? [], columns: settings?.offer_columns ?? null }, error: null });
+  return NextResponse.json({
+    data: {
+      ...sheet,
+      template_key: normalizeOfferTemplateKey(sheet.template_key),
+      items: items ?? [],
+      columns: resolveOfferLayoutConfig(sheet.column_config),
+    },
+    error: null,
+  });
 }
