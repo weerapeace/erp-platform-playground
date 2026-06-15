@@ -37,6 +37,9 @@ function avatarSrc(v: string | null | undefined): string | null {
   return v.startsWith("http") ? v : `/api/r2-image?key=${encodeURIComponent(v)}`;
 }
 
+// ⑥ จานสีประจำตัวพนักงาน (เลือกง่าย + เลือกเองได้)
+const USER_COLORS = ["#7c3aed", "#2563eb", "#0891b2", "#059669", "#65a30d", "#d97706", "#dc2626", "#db2777", "#9333ea", "#475569"];
+
 function relTime(iso: string | null) {
   if (!iso) return "ยังไม่เคยเข้าระบบ";
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -108,6 +111,7 @@ export default function AdminUsersPage() {
   };
   const [editName, setEditName]     = useState("");
   const [editAvatar, setEditAvatar] = useState<string | null>(null);
+  const [editColor, setEditColor]   = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const prevEditId = useRef<string | null>(null);
@@ -161,6 +165,7 @@ export default function AdminUsersPage() {
       prevEditId.current = editUser?.id ?? null;
       setEditName(editUser?.display_name ?? "");
       setEditAvatar(editUser?.avatar_url ?? null);
+      setEditColor(editUser?.color ?? null);
     }
   }, [editUser]);
 
@@ -189,6 +194,7 @@ export default function AdminUsersPage() {
           user_id: editUser.id,
           display_name: editName.trim(),
           avatar_url: editAvatar ?? "",
+          color: editColor ?? "",
           actor: me?.name,
         }),
       });
@@ -196,7 +202,7 @@ export default function AdminUsersPage() {
       if (json.error) throw new Error(json.error);
       setSavedAt(new Date().toLocaleTimeString("th-TH"));
       await load();
-      setEditUser(prev => prev ? { ...prev, display_name: editName.trim() || null, avatar_url: editAvatar } : null);
+      setEditUser(prev => prev ? { ...prev, display_name: editName.trim() || null, avatar_url: editAvatar, color: editColor } : null);
     } catch (err) { setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
     finally { setEditBusy(false); }
   };
@@ -579,6 +585,22 @@ export default function AdminUsersPage() {
                 placeholder={editUser.email.split("@")[0]}
                 className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60" />
             </label>
+
+            {/* ⑥ สีประจำตัว — ใช้กับวงกลม avatar ในงาน/งานย่อย */}
+            <div>
+              <span className="text-xs font-medium text-slate-600">สีประจำตัว</span>
+              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                {USER_COLORS.map((c) => (
+                  <button key={c} type="button" onClick={() => setEditColor(c)} disabled={editBusy}
+                    className={`h-7 w-7 rounded-full border-2 transition-transform hover:scale-110 ${editColor === c ? "border-slate-700 ring-2 ring-offset-1 ring-slate-300" : "border-white shadow"}`}
+                    style={{ background: c }} title={c} />
+                ))}
+                <label className="h-7 w-7 rounded-full border border-dashed border-slate-300 flex items-center justify-center cursor-pointer text-slate-400 text-xs" title="เลือกสีเอง">
+                  🎨<input type="color" value={editColor ?? "#7c3aed"} onChange={(e) => setEditColor(e.target.value)} className="sr-only" />
+                </label>
+                {editColor && <button type="button" onClick={() => setEditColor(null)} disabled={editBusy} className="text-xs text-slate-400 hover:text-red-500 ml-1">ล้างสี</button>}
+              </div>
+            </div>
 
             <div className="text-xs text-slate-500">
               <div>อีเมล: <span className="text-slate-700">{editUser.email}</span></div>

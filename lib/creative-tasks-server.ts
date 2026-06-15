@@ -50,16 +50,23 @@ export async function setSubtaskAssignees(admin: Admin, subtaskId: string, userI
   if (clean.length) await admin.from("erp_creative_subtask_assignees").insert(clean.map((user_id) => ({ subtask_id: subtaskId, user_id })));
 }
 
-/** ผู้รับผิดชอบของหลาย subtask → Map<subtask_id, {id,label}[]> */
-export async function subtaskAssigneesMap(admin: Admin, subtaskIds: string[]): Promise<Map<string, { id: string; label: string }[]>> {
-  const map = new Map<string, { id: string; label: string }[]>();
+/** ผู้รับผิดชอบของหลาย subtask → Map<subtask_id, {id,label,color}[]> */
+export async function subtaskAssigneesMap(admin: Admin, subtaskIds: string[]): Promise<Map<string, { id: string; label: string; color: string | null }[]>> {
+  const map = new Map<string, { id: string; label: string; color: string | null }[]>();
   if (subtaskIds.length === 0) return map;
   const { data } = await admin.from("erp_creative_subtask_assignees").select("subtask_id, user_id").in("subtask_id", subtaskIds);
   const rows = (data ?? []) as { subtask_id: string; user_id: string }[];
-  const labels = await userLabelMap(admin, rows.map((r) => r.user_id));
+  const userIds = rows.map((r) => r.user_id);
+  const labels = await userLabelMap(admin, userIds);
+  // สีประจำตัว (user_profiles.color) — ใช้ระบาย avatar
+  const colorMap = new Map<string, string | null>();
+  if (userIds.length) {
+    const { data: cs } = await admin.from("user_profiles").select("id, color").in("id", [...new Set(userIds.map(String))]);
+    for (const c of (cs ?? []) as { id: string; color: string | null }[]) colorMap.set(String(c.id), c.color);
+  }
   for (const r of rows) {
     const arr = map.get(r.subtask_id) ?? [];
-    arr.push({ id: r.user_id, label: labels.get(String(r.user_id)) ?? "" });
+    arr.push({ id: r.user_id, label: labels.get(String(r.user_id)) ?? "", color: colorMap.get(String(r.user_id)) ?? null });
     map.set(r.subtask_id, arr);
   }
   return map;

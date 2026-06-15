@@ -12,6 +12,7 @@ export type AdminUser = {
   role:               "admin" | "manager" | "staff" | "viewer";
   active:             boolean;
   avatar_url:         string | null;
+  color:              string | null;
   last_seen_at:       string | null;
   last_sign_in_at:    string | null;
   email_confirmed_at: string | null;
@@ -31,7 +32,14 @@ export async function GET(request: NextRequest) {
   if (error) {
     return NextResponse.json({ data: [], error: error.message } satisfies AdminUsersResponse, { status: 500 });
   }
-  return NextResponse.json({ data: (data as AdminUser[]) ?? [], error: null } satisfies AdminUsersResponse);
+  const users = (data as AdminUser[]) ?? [];
+  // เติมสีประจำตัว (user_profiles.color) เข้า list — RPC เดิมไม่มีคอลัมน์นี้
+  try {
+    const { data: colors } = await supabaseAdmin().from("user_profiles").select("id, color").in("id", users.map((u) => u.id));
+    const cmap = new Map(((colors ?? []) as { id: string; color: string | null }[]).map((c) => [c.id, c.color]));
+    for (const u of users) u.color = cmap.get(u.id) ?? null;
+  } catch { /* ไม่มีสีก็ปล่อยว่าง */ }
+  return NextResponse.json({ data: users, error: null } satisfies AdminUsersResponse);
 }
 
 // ---- POST /api/admin/users — invite ใหม่ ----
@@ -103,6 +111,7 @@ type UpdateBody = {
   active?:       boolean;
   display_name?: string;
   avatar_url?:   string | null;
+  color?:        string | null;
   actor?:        string;
 };
 
@@ -140,6 +149,15 @@ export async function PATCH(request: NextRequest) {
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     updated = data;
+  }
+  // ⑥ สีประจำตัว — ตรวจสิทธิ์ admin.users แล้วเขียนตรงที่ user_profiles (RPC เดิมไม่มีช่องนี้)
+  if (body.color !== undefined) {
+    const { data: can, error: canErr } = await client.rpc("erp_can", { p_permission: "admin.users" });
+    if (canErr) return NextResponse.json({ error: canErr.message }, { status: 500 });
+    if (can !== true) return NextResponse.json({ error: "ไม่มีสิทธิ์แก้สีผู้ใช้ (admin.users)" }, { status: 403 });
+    const { error } = await supabaseAdmin().from("user_profiles").update({ color: body.color || null }).eq("id", body.user_id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    updated = { ...(updated as object ?? {}), color: body.color || null };
   }
   return NextResponse.json({ data: updated, error: null });
 }

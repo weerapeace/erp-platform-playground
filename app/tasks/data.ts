@@ -47,7 +47,7 @@ export type CreativeTask = {
   created_at: string; updated_at: string;
 };
 
-export type SubtaskAssignee = { id: string; label: string };
+export type SubtaskAssignee = { id: string; label: string; color?: string | null };
 export type CreativeSubtask = {
   id: string; task_id: string; title: string; description: string | null;
   assignee_id: string | null;

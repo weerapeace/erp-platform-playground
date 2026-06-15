@@ -137,7 +137,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {isSubDone(st) && <span className="shrink-0 text-xs font-medium text-emerald-600">✓ {subStepLabel(st)}</span>}
         <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${isSubDone(st) ? "line-through text-slate-400" : "text-slate-700"}`}>{sub.title}</button>
         {sub.required_before_next && <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">ต้องเสร็จก่อน</span>}
-        <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <span key={a.id} title={a.label} className="h-5 w-5 rounded-full bg-violet-100 text-violet-700 text-[10px] flex items-center justify-center border border-white">{(a.label || "?").slice(0, 1)}</span>)}</div>
+        <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <span key={a.id} title={a.label} className="h-5 w-5 rounded-full text-[10px] flex items-center justify-center border border-white" style={a.color ? { background: a.color, color: "#fff" } : { background: "#ede9fe", color: "#6d28d9" }}>{(a.label || "?").slice(0, 1)}</span>)}</div>
         {attachCount > 0 && <span className="text-[10px] text-slate-400">📎{attachCount}</span>}
         <button onClick={() => setOpen((o) => !o)} className="text-slate-300 text-xs">{open ? "▲" : "▼"}</button>
       </div>
