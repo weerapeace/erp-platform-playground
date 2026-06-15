@@ -32,7 +32,7 @@ const AUTOSAVE_MS = 2500;   // หยุดวาดกี่ ms แล้วค
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
-export type CanvasSketchControls = { isDirty: () => boolean; save: () => Promise<void>; discard: () => void; insert: (skeletons: Record<string, unknown>[]) => Promise<void> };
+export type CanvasSketchControls = { isDirty: () => boolean; save: () => Promise<void>; discard: () => void; insert: (skeletons: Record<string, unknown>[]) => Promise<void>; listCards: () => { kind: string; data: Record<string, unknown> }[] };
 
 export function CanvasSketch({
   entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen,
@@ -50,6 +50,7 @@ export function CanvasSketch({
 }) {
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [selFont, setSelFont] = useState<number | null>(null); // ขนาด font ของ text ที่เลือก (null = ไม่ได้เลือก text)
 
   const apiRef     = useRef<any>(null);
   const latestRef  = useRef<{ elements: any; appState: any; files: any } | null>(null);  // snapshot ล่าสุดจาก onChange
@@ -189,6 +190,19 @@ export function CanvasSketch({
           if (editable) queueSave();
         } catch (e) { console.error("[canvas-sketch] insert failed:", e); }
       },
+      // รายการการ์ดบนกระดาน (dedup ตาม kind+id) — ใช้ทำป๊อปอัปสรุป
+      listCards: () => {
+        const api = apiRef.current; if (!api) return [];
+        const seen = new Set<string>(); const out: { kind: string; data: Record<string, unknown> }[] = [];
+        for (const el of api.getSceneElements() as any[]) {
+          const d = el?.customData as Record<string, unknown> | undefined;
+          if (!d?.kind) continue;
+          const key = `${d.kind}:${d.id ?? ""}`;
+          if (seen.has(key)) continue;
+          seen.add(key); out.push({ kind: String(d.kind), data: d });
+        }
+        return out;
+      },
     };
     return () => { if (controlsRef) controlsRef.current = null; };
   }, [controlsRef, doSave, queueSave, editable]);
@@ -205,6 +219,7 @@ export function CanvasSketch({
     const el = wrapRef.current; if (!el) return;
     const onWheel = (e: WheelEvent) => {
       if (e.shiftKey) return;
+      if ((e.target as HTMLElement)?.tagName !== "CANVAS") return; // อยู่บนแผงเครื่องมือ/เมนู → เลื่อนปกติ ไม่ซูม
       const api = apiRef.current; if (!api) return;
       e.preventDefault(); e.stopPropagation();
       const st = api.getAppState(); const z = st.zoom?.value || 1;
@@ -229,6 +244,16 @@ export function CanvasSketch({
     return () => { el.removeEventListener("wheel", onWheel, true); el.removeEventListener("dblclick", onDbl, true); };
   }, [scene]); // ผูกใหม่หลังกระดานโหลดเสร็จ (ตอน mount แรก wrapRef ยังไม่ render เพราะอยู่สถานะ loading)
 
+  // ปรับขนาด font ของ text ที่เลือก (ละเอียดกว่า S/M/L/XL ของ Excalidraw)
+  const setFont = (size: number) => {
+    const api = apiRef.current; if (!api) return;
+    const ns = Math.min(200, Math.max(8, Math.round(size)));
+    const sel = api.getAppState().selectedElementIds || {};
+    api.updateScene({ elements: (api.getSceneElements() as any[]).map((e) => (e.type === "text" && sel[e.id] && e.fontSize) ? { ...e, fontSize: ns, width: e.width * (ns / e.fontSize), height: e.height * (ns / e.fontSize) } : e) });
+    setSelFont(ns);
+    if (editable) queueSave();
+  };
+
   if (scene === "loading") {
     return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>กำลังโหลดกระดาน...</div>;
   }
@@ -239,6 +264,14 @@ export function CanvasSketch({
         <span className="text-xs text-slate-400 flex-1 min-w-[200px]">
           🖼 วางรูป = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P
         </span>
+        {editable && selFont != null && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
+            <span className="text-slate-400">ขนาดอักษร</span>
+            <button onClick={() => setFont(selFont - 2)} className="h-5 w-5 rounded hover:bg-slate-100">−</button>
+            <input type="number" value={selFont} onChange={(e) => { const v = parseInt(e.target.value || "0", 10); if (v) setFont(v); }} className="w-12 h-6 text-center border border-slate-200 rounded" />
+            <button onClick={() => setFont(selFont + 2)} className="h-5 w-5 rounded hover:bg-slate-100">＋</button>
+          </span>
+        )}
         {editable && (
           <span className="text-[11px] inline-flex items-center gap-1.5">
             {saveState === "dirty"  && <span className="text-slate-400">● จะบันทึกอัตโนมัติเมื่อหยุดวาด...</span>}
@@ -261,6 +294,9 @@ export function CanvasSketch({
           initialData={scene ? { elements: scene.elements as any, files: scene.files as any, scrollToContent: true } : undefined}
           onChange={(elements: any, appState: any, files: any) => {
             latestRef.current = { elements, appState, files };   // จับ snapshot เสมอ (รวมตอน load)
+            const sel = appState?.selectedElementIds || {};
+            const tx = (elements as any[]).find((e) => !e.isDeleted && e.type === "text" && sel[e.id]);
+            setSelFont(tx ? Math.round(tx.fontSize) : null);
             if (readyRef.current && editable) queueSave();
           }}
           onLinkOpen={(el: any, ev: any) => {

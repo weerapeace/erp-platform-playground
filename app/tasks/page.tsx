@@ -12,38 +12,21 @@ import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
-import { ERPInput } from "@/components/form";
-import { UserPicker } from "@/components/pickers";
-import type { UserPickerValue } from "@/components/pickers";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
 import { CreateTaskModal } from "./create-task-modal";
-import { taskTypeLabel, platformLabel } from "./use-options";
-import { useCreativeStatuses, statusMeta, transitionsFrom, transitionBetween, isTerminal } from "./use-statuses";
-import { SubtaskCard, AddSubtaskForm } from "./subtask-manager";
+import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
+import { applyTaskTransition } from "./task-actions";
+import { taskTypeLabel } from "./use-options";
+import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
-  PRIORITY_META, APPROVAL_META, ASSET_META, PRIORITY_RANK,
-  isOverdue, withinThisWeek,
-  listTasks, getTask, transitionTask, approveTask, deleteTask,
-  addSubtask, updateSubtask, addComment, addAttachment,
+  PRIORITY_RANK, isOverdue, withinThisWeek,
+  listTasks, deleteTask, updateSubtask,
   listCampaigns, listBrands, listMySubtasks,
-  type CreativeTask, type CreativeStatus, type CreativePriority, type TaskDetail,
+  type CreativeTask, type CreativeStatus, type CreativePriority,
   type Campaign, type BrandOption, type MySubtask,
 } from "./data";
-
-// ============================================================
-// Badges
-// ============================================================
-function StatusBadge({ status }: { status: string }) {
-  const m = statusMeta(status);
-  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}><span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />{m.label}</span>;
-}
-function PriorityBadge({ priority }: { priority: CreativePriority }) {
-  const m = PRIORITY_META[priority] ?? PRIORITY_META.normal;
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}>{m.label}</span>;
-}
-
 
 // ============================================================
 // Table columns + views
@@ -166,23 +149,10 @@ export default function TasksPage() {
   // ---- create ----
   const openCreate = () => setCreateOpen(true);
 
-  // ---- workflow (เส้นทาง + ชนิด อ่านจาก DB) ----
+  // ---- workflow (เส้นทาง + ชนิด อ่านจาก DB) — ใช้ของกลาง applyTaskTransition ----
   const applyMove = useCallback(async (task: CreativeTask, toKey: string, force?: boolean) => {
-    if (force) {
-      try { await transitionTask(task.id, toKey, undefined, true); pushToast("success", `→ ${statusMeta(toKey).label}`); await reload(); }
-      catch (e) { pushToast("error", (e as Error).message); }
-      return;
-    }
-    const tr = transitionBetween(task.status, toKey);
-    if (!tr) { pushToast("error", `เปลี่ยน "${statusMeta(task.status).label}" → "${statusMeta(toKey).label}" ไม่ได้`); return; }
-    try {
-      if (tr.kind === "approve") await approveTask(task.id, "approve", undefined, toKey);
-      else if (tr.kind === "reject" || tr.kind === "revise") { const c = (typeof window !== "undefined" && window.prompt(tr.kind === "reject" ? "เหตุผลที่ไม่ผ่าน:" : "สิ่งที่ต้องแก้:")) || ""; await approveTask(task.id, tr.kind as "reject" | "revise", c, toKey); }
-      else if (tr.kind === "block") { const reason = (typeof window !== "undefined" && window.prompt("ติดปัญหาเรื่องอะไร?")) || ""; await transitionTask(task.id, toKey, reason); }
-      else await transitionTask(task.id, toKey);
-      pushToast("success", `→ ${statusMeta(toKey).label}`);
-      await reload();
-    } catch (e) { pushToast("error", (e as Error).message); }
+    const ok = await applyTaskTransition(task, toKey, { pushToast, force });
+    if (ok) await reload();
   }, [pushToast, reload]);
 
   const onDelete = async (id: string) => { try { await deleteTask(id); pushToast("info", "ลบงานแล้ว"); setDetailId(null); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
@@ -368,187 +338,3 @@ function QueueView({ tasks, subtasks, onOpen, onMove, onCreate, onToggleSub }: {
   );
 }
 
-// ============================================================
-// Detail Drawer (โหลดรายละเอียดจริงจาก API)
-// ============================================================
-function TaskDetailDrawer({ taskId, brands, campaigns, onClose, onChanged, onMove, onDelete, pushToast }: {
-  taskId: string; brands: BrandOption[]; campaigns: Campaign[];
-  onClose: () => void; onChanged: () => Promise<void> | void;
-  onMove: (t: CreativeTask, toKey: string) => Promise<void>;
-  onDelete: (id: string) => void;
-  pushToast: (type: Toast["type"], message: string) => void;
-}) {
-  const [detail, setDetail] = useState<TaskDetail | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [commentText, setCommentText] = useState("");
-  const [linkLabel, setLinkLabel] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
-
-  const load = useCallback(async () => {
-    try { setDetail(await getTask(taskId)); }
-    catch (e) { pushToast("error", `โหลดรายละเอียดไม่สำเร็จ: ${(e as Error).message}`); }
-  }, [taskId, pushToast]);
-  useEffect(() => { load(); }, [load]);
-
-  const refresh = async () => { await load(); await onChanged(); };
-
-  if (!detail) {
-    return (
-      <>
-        <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-        <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex items-center justify-center"><span className="text-slate-400">กำลังโหลด...</span></div>
-      </>
-    );
-  }
-  const t = detail;
-  const isClosed = isTerminal(t.status);
-  const actions = transitionsFrom(t.status);
-  const doneSub = t.subtasks.filter((s) => s.status === "done").length;
-
-  const handleMove = async (toKey: string) => { setBusy(true); await onMove(t, toKey); await refresh(); setBusy(false); };
-  const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(t.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
-  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(t.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
-
-  const brandColor = brands.find((b) => b.id === t.brand_id)?.color ?? t.brand_color;
-  const campaignName = campaigns.find((c) => c.id === t.campaign_id)?.name ?? t.campaign_label;
-
-  return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
-        {/* header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900 truncate">{t.title}</h3>
-            <span className="font-mono text-xs text-slate-500">{t.task_no}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => onDelete(t.id)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">ลบ</button>
-            <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* status row */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={t.status} />
-            <PriorityBadge priority={t.priority} />
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[t.approval_status].cls}`}>อนุมัติ: {APPROVAL_META[t.approval_status].label}</span>
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[t.asset_status].cls}`}>{ASSET_META[t.asset_status].label}</span>
-          </div>
-          {/* progress */}
-          <div>
-            <div className="flex justify-between text-xs text-slate-400 mb-1"><span>ความคืบหน้า</span><span>{t.progress_percent}%</span></div>
-            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500" style={{ width: `${t.progress_percent}%` }} /></div>
-            {t.blocker_status === "blocked" && t.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ ติดปัญหา: {t.blocker_reason}</p>}
-          </div>
-          {/* meta */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-            <Field label="ประเภทงาน" value={t.task_type ? taskTypeLabel(t.task_type) : null} />
-            <Field label="แบรนด์" value={t.brand_label} dot={brandColor} />
-            <Field label="ผู้รับผิดชอบ" value={t.assignee_label} />
-            <Field label="ผู้ตรวจ/อนุมัติ" value={t.reviewer_label || t.approver_label} />
-            <Field label="กำหนดส่ง" value={t.due_date} highlight={isOverdue(t)} />
-            <Field label="แคมเปญ" value={campaignName} />
-            <Field label="Parent SKU" value={t.parent_sku_code ? `${t.parent_sku_code}${t.parent_sku_name ? " · " + t.parent_sku_name : ""}` : null} />
-          </div>
-          {/* SKU card */}
-          {(t.sku_code || t.product_name) && (
-            <div className="bg-slate-50 rounded-lg p-3 text-sm">
-              <p className="text-xs text-slate-400 mb-1">สินค้าที่เกี่ยวข้อง</p>
-              {t.sku_code && <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded mr-2">{t.sku_code}</span>}
-              <span className="text-slate-700">{t.sku_name || t.product_name}</span>
-              <div className="flex gap-4 mt-1.5 text-xs text-slate-500">
-                {t.sku_color && <span>สี: {t.sku_color}</span>}
-                {t.sku_price != null && <span>ราคา: {Number(t.sku_price).toLocaleString()}</span>}
-              </div>
-            </div>
-          )}
-          {/* platforms */}
-          {t.platforms && t.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{t.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
-          {/* description */}
-          {t.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">รายละเอียด</p>{t.description}</div>}
-          {/* links */}
-          {(t.drive_folder_url || t.final_asset_url || t.published_url) && (
-            <div className="flex flex-wrap gap-2">
-              {t.drive_folder_url && <a href={t.drive_folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">📁 โฟลเดอร์ Drive</a>}
-              {t.final_asset_url && <a href={t.final_asset_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🖼 ไฟล์จริง</a>}
-              {t.published_url && <a href={t.published_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🔗 ลิงก์ที่เผยแพร่</a>}
-            </div>
-          )}
-
-          {/* subtasks */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">งานย่อย {t.subtasks.length > 0 && `· ${doneSub}/${t.subtasks.length}`}</p>
-            <div className="space-y-2">
-              {t.subtasks.map((s) => <SubtaskCard key={s.id} sub={s} taskId={t.id} reload={refresh} pushToast={pushToast} />)}
-            </div>
-            <AddSubtaskForm onAdd={async (body) => { await addSubtask(t.id, body); await refresh(); }} pushToast={pushToast} />
-          </div>
-
-          {/* attachments */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ไฟล์/ลิงก์แนบ ({t.attachments.length})</p>
-            <div className="space-y-1.5 mb-2">
-              {t.attachments.map((a) => (
-                <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm text-violet-700 hover:bg-violet-50">
-                  🔗 <span className="truncate">{a.label || a.url}</span>
-                </a>
-              ))}
-              {t.attachments.length === 0 && <p className="text-sm text-slate-400 italic">ยังไม่มีไฟล์แนบ</p>}
-            </div>
-            <div className="flex gap-2">
-              <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder="ชื่อ (ไม่บังคับ)" />
-              <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="วางลิงก์ Drive/URL" />
-              <button onClick={addLink} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">แนบ</button>
-            </div>
-          </div>
-
-          {/* comments */}
-          <div className="border-t border-slate-100 pt-4">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ความคิดเห็น ({t.comments.length})</p>
-            <div className="space-y-2 mb-3">
-              {t.comments.map((c) => (
-                <div key={c.id} className="bg-slate-50 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || "ผู้ใช้"}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
-                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
-                </div>
-              ))}
-              {t.comments.length === 0 && <p className="text-sm text-slate-400 italic">ยังไม่มีความคิดเห็น</p>}
-            </div>
-            <div className="flex gap-2">
-              <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="เขียนความคิดเห็น..." />
-              <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">ส่ง</button>
-            </div>
-          </div>
-        </div>
-
-        {/* footer actions */}
-        <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">
-          {actions.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center w-full">{isClosed ? `งานปิดแล้ว (${statusMeta(t.status).label})` : "ไม่มีการกระทำ"} — ดูได้อย่างเดียว</p>
-          ) : actions.map((a, i) => {
-            const cls = a.kind === "approve" ? "bg-emerald-600 text-white hover:bg-emerald-700"
-              : a.kind === "reject" ? "text-red-600 border border-red-200 hover:bg-red-50"
-              : a.kind === "revise" ? "text-orange-700 border border-orange-200 hover:bg-orange-50"
-              : a.kind === "block" ? "text-red-600 border border-red-200 hover:bg-red-50"
-              : i === 0 ? "flex-1 bg-violet-600 text-white hover:bg-violet-700" : "text-slate-600 border border-slate-200 hover:bg-slate-50";
-            return <button key={a.to_key} disabled={busy} onClick={() => handleMove(a.to_key)} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
-          })}
-        </div>
-      </div>
-    </>
-  );
-}
-
-function Field({ label, value, highlight, dot }: { label: string; value: string | null | undefined; highlight?: boolean; dot?: string | null }) {
-  return (
-    <div>
-      <p className="text-xs text-slate-400 mb-0.5">{label}</p>
-      <p className={`text-sm font-medium flex items-center gap-1.5 ${highlight ? "text-red-600" : "text-slate-800"}`}>
-        {dot && value && <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: dot || "#cbd5e1" }} />}
-        {highlight && "⚠ "}{value || "—"}
-      </p>
-    </div>
-  );
-}

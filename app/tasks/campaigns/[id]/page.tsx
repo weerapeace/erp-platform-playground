@@ -16,8 +16,9 @@ import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { CampaignDrawer, CAMPAIGN_STATUS } from "../campaign-drawer";
 import { CreateTaskModal, type CreatedTask } from "../../create-task-modal";
-import { SubtaskManager } from "../../subtask-manager";
-import { getCampaign, updateCampaign, type CampaignDetail } from "../../data";
+import { TaskDetailDrawer } from "../../task-detail-drawer";
+import { applyTaskTransition } from "../../task-actions";
+import { getCampaign, updateCampaign, deleteTask, type CampaignDetail, type CreativeTask } from "../../data";
 
 // โหลดของกลาง Excalidraw แบบ dynamic — ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -69,6 +70,8 @@ export default function CampaignCanvasPage() {
   const [skuView, setSkuView] = useState<Record<string, unknown> | null>(null); // การ์ด SKU ที่กดดู
   const [taskOpen, setTaskOpen] = useState(false);   // modal สร้างงาน
   const [taskView, setTaskView] = useState<Record<string, unknown> | null>(null); // การ์ดงานที่กดดู
+  const [cardsOpen, setCardsOpen] = useState(false); // ป๊อปอัปสรุปการ์ด
+  const [cards, setCards] = useState<{ kind: string; data: Record<string, unknown> }[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sketchRef = useRef<CanvasSketchControls | null>(null);
   const pushToast = useCallback((type: Toast["type"], message: string) => { const tid = Date.now() + Math.random(); setToasts((q) => [...q, { id: tid, type, message }]); setTimeout(() => setToasts((q) => q.filter((t) => t.id !== tid)), 3500); }, []);
@@ -89,6 +92,10 @@ export default function CampaignCanvasPage() {
   const onTaskCreated = (t: CreatedTask) => { sketchRef.current?.insert(taskCardSkeleton(t)); pushToast("success", `สร้างงาน ${t.task_no} + วางการ์ดแล้ว`); };
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด
   const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); }, []);
+  // workflow/ลบงาน สำหรับ TaskDetailDrawer เต็มบน canvas
+  const moveTask = useCallback(async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); }, [pushToast]);
+  const removeTask = useCallback(async (tid: string) => { try { await deleteTask(tid); pushToast("info", "ลบงานแล้ว"); setTaskView(null); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast]);
+  const openCards = () => { setCards(sketchRef.current?.listCards() ?? []); setCardsOpen(true); };
 
   if (err) return <StandaloneShell title="แคมเปญ" icon="📣" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
@@ -113,6 +120,7 @@ export default function CampaignCanvasPage() {
             <button onClick={addSection} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 Section</button>
             <button onClick={() => { setSkuPick(null); setSkuOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📦 SKU Card</button>
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
+            <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ การ์ดบนกระดาน</button>
             <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 รายละเอียด</button>
           </div>
         </div>
@@ -133,7 +141,13 @@ export default function CampaignCanvasPage() {
       </ERPModal>
 
       {skuView && <SkuDrawer data={skuView} onClose={() => setSkuView(null)} />}
-      {taskView && <TaskCardDrawer data={taskView} onClose={() => setTaskView(null)} pushToast={pushToast} />}
+      {taskView && <TaskDetailDrawer taskId={String(taskView.id ?? "")} onClose={() => setTaskView(null)} onChanged={() => {}} onMove={moveTask} onDelete={removeTask} pushToast={pushToast} />}
+
+      {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
+      <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title="การ์ดบนกระดาน" size="md"
+        footer={<button onClick={() => setCardsOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">ปิด</button>}>
+        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); }} />
+      </ERPModal>
 
       {/* สร้างงานจริง (ฟอร์มเดียวกับหน้างาน) — ล็อกแคมเปญนี้ → วางการ์ดงานบนกระดาน */}
       <CreateTaskModal open={taskOpen} onClose={() => setTaskOpen(false)} pushToast={pushToast} lockedCampaignId={id} lockedCampaignLabel={name} onCreated={onTaskCreated} />
@@ -185,28 +199,40 @@ function SkuDrawer({ data, onClose }: { data: Record<string, unknown>; onClose: 
   );
 }
 
-// Drawer การ์ดงาน — จัดการ subtask สดได้ในหน้านี้เลย + ลิงก์ไปงานเต็ม (คอมเมนต์/ไฟล์/สถานะ)
-function TaskCardDrawer({ data, onClose, pushToast }: { data: Record<string, unknown>; onClose: () => void; pushToast: (type: "success" | "error" | "info", m: string) => void }) {
-  const id = String(data.id ?? "");
-  const taskNo = String(data.task_no ?? "");
-  const title = String(data.title ?? "");
+// สรุปการ์ดบนกระดาน (Task / SKU) + กดเปิด
+function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<string, unknown> }[]; onOpen: (c: { kind: string; data: Record<string, unknown> }) => void }) {
+  const tasks = cards.filter((c) => c.kind === "task");
+  const skus = cards.filter((c) => c.kind === "sku");
+  if (cards.length === 0) return <p className="text-sm text-slate-400 text-center py-6">ยังไม่มีการ์ดบนกระดาน — กด ✅ Task Card / 📦 SKU Card เพื่อเพิ่ม</p>;
   return (
-    <>
-      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[440px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900 truncate">✅ {title || "งาน"}</h3>
-            <span className="font-mono text-xs text-slate-500">{taskNo}</span>
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">✅ การ์ดงาน ({tasks.length})</p>
+        {tasks.length === 0 ? <p className="text-sm text-slate-400 italic">—</p> : (
+          <div className="space-y-1.5">
+            {tasks.map((c, i) => (
+              <button key={i} onClick={() => onOpen(c)} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 hover:border-violet-300 hover:bg-violet-50/40 text-left">
+                <span className="text-sm text-slate-700 flex-1 truncate">{String(c.data.title ?? "งาน")}</span>
+                <span className="font-mono text-[11px] text-slate-400 shrink-0">{String(c.data.task_no ?? "")}</span>
+              </button>
+            ))}
           </div>
-          <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {/* จัดการงานย่อยแบบสด (ติ๊กเสร็จ/เพิ่ม/แก้คน) */}
-          <SubtaskManager taskId={id} pushToast={pushToast} />
-          <a href={`/tasks?task=${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer" className="block text-center h-10 leading-10 rounded-lg border border-violet-200 text-violet-700 text-sm font-medium hover:bg-violet-50">เปิดงานเต็ม (คอมเมนต์ / ไฟล์ / เปลี่ยนสถานะ) →</a>
-        </div>
+        )}
       </div>
-    </>
+      <div>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">📦 การ์ดสินค้า ({skus.length})</p>
+        {skus.length === 0 ? <p className="text-sm text-slate-400 italic">—</p> : (
+          <div className="space-y-1.5">
+            {skus.map((c, i) => (
+              <button key={i} onClick={() => onOpen(c)} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 hover:border-violet-300 hover:bg-violet-50/40 text-left">
+                <span className="font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{String(c.data.code ?? "")}</span>
+                <span className="text-sm text-slate-700 flex-1 truncate">{String(c.data.name ?? "")}</span>
+                {c.data.price != null && <span className="text-xs text-slate-400 shrink-0">{Number(c.data.price).toLocaleString()}฿</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
