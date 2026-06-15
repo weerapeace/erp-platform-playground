@@ -20,8 +20,9 @@ export const revalidate = 0;
 
 // สิทธิ์ของกระดานขึ้นกับชนิดเอกสาร (server เลือกเอง — client ระบุไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
 const PERM: Record<string, { view: string; edit: string }> = {
-  design_sheet:   { view: "products.view", edit: "products.edit" },
-  creative_board: { view: "tasks.view",    edit: "tasks.edit" },
+  design_sheet:     { view: "products.view", edit: "products.edit" },
+  creative_board:   { view: "tasks.view",    edit: "tasks.edit" },
+  creative_campaign:{ view: "tasks.view",    edit: "tasks.edit" },
 };
 const permFor = (entityType: string) => PERM[entityType] ?? { view: "products.view", edit: "products.edit" };
 
