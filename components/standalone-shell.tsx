@@ -8,61 +8,83 @@
 //   (แชร์ SKU/Parent SKU ผ่าน API กลางเหมือนเดิม ไม่ต้อง sync)
 // วิธีใช้: หน้า module ครอบด้วย <StandaloneShell title=... icon=...>{children}</StandaloneShell>
 // แทนการครอบด้วย <PlaygroundShell>
+// - collapsible: หัวบาร์พับเก็บ (เหลือแถบบางๆ) เลื่อนเมาส์ไปขอบบนค่อยโชว์ → กระดานเต็มจอ
 // ============================================================
 
 import { useState } from "react";
 import { Logo, BRAND } from "@/components/brand";
 import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
-import { LangToggle } from "@/components/i18n";
+import { LangToggle, useT } from "@/components/i18n";
 import { AccountMenu } from "@/components/account-menu";
 
 export function StandaloneShell({
-  title, icon, accent = "violet", children,
+  title, icon, accent = "violet", collapsible = false, children,
 }: {
   title: string;
   icon?: string;
   accent?: "violet" | "blue" | "emerald" | "slate";
+  collapsible?: boolean;
   children: React.ReactNode;
 }) {
+  const t = useT();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false); // โหมดพับ: หัวบาร์โผล่อยู่ไหม
   const dot = { violet: "bg-violet-500", blue: "bg-blue-500", emerald: "bg-emerald-500", slate: "bg-slate-500" }[accent];
+
+  const headerInner = (
+    <>
+      <div className="h-1 accent-bg" />   {/* แถบสีธีมส่วนตัว (accent) */}
+      <div className="h-14 px-4 flex items-center gap-3">
+        {/* แบรนด์ + ชื่อโมดูล */}
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Logo size={26} className="flex-shrink-0" />
+          <span className={`h-1.5 w-1.5 rounded-full ${dot} hidden sm:block`} />
+          <div className="leading-tight min-w-0">
+            <div className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
+              {icon && <span>{icon}</span>}{title}
+            </div>
+            <div className="text-[10px] text-slate-400">{BRAND.name} · {t("โหมดแอปแยก", "Standalone app")}</div>
+          </div>
+        </div>
+
+        {/* ค้นหา (ของกลาง) */}
+        <button onClick={() => setSearchOpen(true)}
+          className="ml-2 hidden md:flex items-center gap-2 h-9 px-3 text-xs text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors min-w-[180px]">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+          </svg>
+          <span className="flex-1 text-left">{t("ค้นหา...", "Search...")}</span>
+          <kbd className="text-[9px] font-mono bg-white border border-slate-200 px-1 rounded text-slate-400">⌘K</kbd>
+        </button>
+
+        <div className="ml-auto flex items-center gap-2">
+          <LangToggle />
+          <NotificationBell />
+          <AccountMenu />
+        </div>
+      </div>
+    </>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
-      {/* Top bar — โฟกัส ไม่มี sidebar */}
-      <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
-        <div className="h-1 accent-bg" />   {/* แถบสีธีมส่วนตัว (accent) */}
-        <div className="h-14 px-4 flex items-center gap-3">
-          {/* แบรนด์ + ชื่อโมดูล */}
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Logo size={26} className="flex-shrink-0" />
-            <span className={`h-1.5 w-1.5 rounded-full ${dot} hidden sm:block`} />
-            <div className="leading-tight min-w-0">
-              <div className="text-sm font-bold text-slate-900 truncate flex items-center gap-1.5">
-                {icon && <span>{icon}</span>}{title}
-              </div>
-              <div className="text-[10px] text-slate-400">{BRAND.name} · โหมดแอปแยก</div>
+      {collapsible ? (
+        // โหมดพับ: หัวบาร์ลอย (overlay) ซ่อนอัตโนมัติ เลื่อนเมาส์ขอบบนค่อยโผล่
+        <div className="fixed top-0 inset-x-0 z-40" onMouseEnter={() => setExpanded(true)} onMouseLeave={() => setExpanded(false)}>
+          <header className={`bg-white border-b border-slate-200 shadow-sm transition-transform duration-200 ease-out ${expanded ? "translate-y-0" : "-translate-y-full"}`}>
+            {headerInner}
+          </header>
+          {/* แถบจับ (peek) โผล่ตอนพับ — เลื่อนเมาส์มาที่นี่เพื่อกางหัวบาร์ */}
+          {!expanded && (
+            <div className="h-2 accent-bg flex items-center justify-center cursor-pointer group">
+              <span className="text-[9px] leading-none text-white/80 opacity-0 group-hover:opacity-100 transition-opacity">▾ {t("เลื่อนเมาส์เพื่อแสดงเมนู", "hover to show menu")}</span>
             </div>
-          </div>
-
-          {/* ค้นหา (ของกลาง) */}
-          <button onClick={() => setSearchOpen(true)}
-            className="ml-2 hidden md:flex items-center gap-2 h-9 px-3 text-xs text-slate-500 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors min-w-[180px]">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-            </svg>
-            <span className="flex-1 text-left">ค้นหา...</span>
-            <kbd className="text-[9px] font-mono bg-white border border-slate-200 px-1 rounded text-slate-400">⌘K</kbd>
-          </button>
-
-          <div className="ml-auto flex items-center gap-2">
-            <LangToggle />
-            <NotificationBell />
-            <AccountMenu />
-          </div>
+          )}
         </div>
-      </header>
+      ) : (
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200">{headerInner}</header>
+      )}
 
       {/* Content */}
       <main className="flex-1 flex flex-col">{children}</main>
