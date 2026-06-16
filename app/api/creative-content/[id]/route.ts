@@ -17,7 +17,7 @@ import { SELECT, flattenContent } from "../route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["title", "campaign_id", "brand_id", "sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "note"]);
+const EDITABLE = new Set(["title", "campaign_id", "brand_id", "sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "note", "discount_value", "discount_is_percent"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;

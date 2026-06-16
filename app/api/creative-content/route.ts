@@ -19,19 +19,21 @@ export const revalidate = 0;
 
 export const SELECT = `id, content_no, title, campaign_id, brand_id, sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, note,
+  discount_value, discount_is_percent,
   is_template, is_active, created_at, updated_at,
-  brand:brands!brand_id(name, color),
+  brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price)`;
 
 export function flattenContent(r: Record<string, unknown>): Record<string, unknown> {
-  const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
+  const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null; shop_channels?: { label: string; value: string }[] } | null;
   const c = (Array.isArray(r.campaign) ? r.campaign[0] : r.campaign) as { name?: string } | null;
   const s = (Array.isArray(r.sku) ? r.sku[0] : r.sku) as { code?: string; name_th?: string; color?: string | null; color_th?: string | null; list_price?: number | null } | null;
   const out: Record<string, unknown> = { ...r };
   delete out.brand; delete out.campaign; delete out.sku;
   out.brand_label = b?.name ?? null;
   out.brand_color = b?.color ?? null;
+  out.brand_shop_channels = b?.shop_channels ?? [];
   out.campaign_label = c?.name ?? null;
   out.sku_code = s?.code ?? null;
   out.sku_name = s?.name_th ?? null;
@@ -73,6 +75,7 @@ type CreateBody = {
   title?: string; campaign_id?: string | null; brand_id?: string | null; sku_id?: string | null; product_name?: string | null;
   post_type?: string | null; platforms?: string[]; status?: string; scheduled_at?: string | null;
   product_links?: { platform: string; url: string }[]; note?: string | null; captions?: Caption[]; is_template?: boolean;
+  discount_value?: number | null; discount_is_percent?: boolean;
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -89,6 +92,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     sku_id: body.sku_id || null, product_name: body.product_name?.trim() || null, post_type: body.post_type || null,
     platforms: body.platforms ?? [], status: body.status || "draft", scheduled_at: body.scheduled_at || null,
     product_links: body.product_links ?? [], note: body.note?.trim() || null, is_template: !!body.is_template, created_by: user?.id ?? null,
+    discount_value: body.discount_value ?? null, discount_is_percent: !!body.discount_is_percent,
   });
 
   let no = await nextContentNo(admin);

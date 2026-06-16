@@ -269,7 +269,21 @@ export type ContentItem = {
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
   product_links: { platform: string; url: string }[]; note: string | null; is_template?: boolean; updated_at: string;
+  discount_value?: number | null; discount_is_percent?: boolean;
+  brand_shop_channels?: { label: string; value: string }[];
 };
+
+// ---- แม่แบบแคปชั่น + ช่องทางร้าน ----
+export type CaptionTemplate = { id?: string; key: string; label: string; body: string; sort_order?: number };
+export type ShopChannel = { label: string; value: string };
+export async function getCaptionTemplates(brandId: string | null): Promise<{ templates: CaptionTemplate[]; shop_channels: ShopChannel[]; is_brand_specific: boolean }> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-caption-templates${brandId ? `?brand_id=${brandId}` : ""}`));
+  const d = j.data as { templates: CaptionTemplate[]; shop_channels: ShopChannel[]; is_brand_specific: boolean };
+  return { templates: d.templates ?? [], shop_channels: d.shop_channels ?? [], is_brand_specific: !!d.is_brand_specific };
+}
+export async function saveCaptionTemplates(brandId: string | null, templates: CaptionTemplate[], shop_channels?: ShopChannel[]): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/creative-caption-templates", { method: "PUT", body: JSON.stringify({ brand_id: brandId, templates, shop_channels }) }));
+}
 export type ContentDetail = ContentItem & { captions: ContentCaption[] };
 export type Hashtag = { id: string; text: string; brand_id: string | null; category: string; platform: string | null; usage_count: number; status: string };
 
