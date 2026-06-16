@@ -19,17 +19,16 @@ import { LangToggle, useT } from "@/components/i18n";
 import { AccountMenu } from "@/components/account-menu";
 
 export function StandaloneShell({
-  title, icon, accent = "violet", collapsible = false, children,
+  title, icon, accent = "violet", children,
 }: {
   title: string;
   icon?: string;
   accent?: "violet" | "blue" | "emerald" | "slate";
-  collapsible?: boolean;
+  collapsible?: boolean;   // (เลิกใช้) เดิมหัวบาร์พับซ่อน — ทำให้ทับแถบเครื่องมือกระดาน จึงใช้หัวบาร์ปกติเสมอ
   children: React.ReactNode;
 }) {
   const t = useT();
   const [searchOpen, setSearchOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false); // โหมดพับ: หัวบาร์โผล่อยู่ไหม
   const dot = { violet: "bg-violet-500", blue: "bg-blue-500", emerald: "bg-emerald-500", slate: "bg-slate-500" }[accent];
 
   const headerInner = (
@@ -69,22 +68,8 @@ export function StandaloneShell({
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
-      {collapsible ? (
-        // โหมดพับ: หัวบาร์ลอย (overlay) ซ่อนอัตโนมัติ เลื่อนเมาส์ขอบบนค่อยโผล่
-        <div className="fixed top-0 inset-x-0 z-40" onMouseEnter={() => setExpanded(true)} onMouseLeave={() => setExpanded(false)}>
-          <header className={`bg-white border-b border-slate-200 shadow-sm transition-transform duration-200 ease-out ${expanded ? "translate-y-0" : "-translate-y-full"}`}>
-            {headerInner}
-          </header>
-          {/* แถบจับ (peek) โผล่ตอนพับ — เลื่อนเมาส์มาที่นี่เพื่อกางหัวบาร์ */}
-          {!expanded && (
-            <div className="h-2 accent-bg flex items-center justify-center cursor-pointer group">
-              <span className="text-[9px] leading-none text-white/80 opacity-0 group-hover:opacity-100 transition-opacity">▾ {t("เลื่อนเมาส์เพื่อแสดงเมนู", "hover to show menu")}</span>
-            </div>
-          )}
-        </div>
-      ) : (
-        <header className="sticky top-0 z-30 bg-white border-b border-slate-200">{headerInner}</header>
-      )}
+      {/* หัวบาร์ปกติ (sticky) — ดันเนื้อหาลง ไม่ลอยทับแถบเครื่องมือกระดาน */}
+      <header className="sticky top-0 z-30 bg-white border-b border-slate-200">{headerInner}</header>
 
       {/* Content */}
       <main className="flex-1 flex flex-col">{children}</main>
