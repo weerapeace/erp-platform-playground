@@ -30,6 +30,9 @@ type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
 const AUTOSAVE_MS = 1000;       // หยุดวาดกี่ ms แล้วค่อยบันทึก (เซฟไวขึ้น)
 const MAX_AUTOSAVE_MS = 8000;   // เซฟกันลืม: แม้แก้ต่อเนื่องไม่หยุด ก็เซฟทุก ~8 วิ
+const BROADCAST_MS = 200;       // realtime: ส่งสภาพกระดานให้คนอื่นทุก ~200ms (throttle)
+// collab worker (แยกต่างหาก) — ห้อง WebSocket ต่อ board
+const COLLAB_URL = (process.env.NEXT_PUBLIC_COLLAB_URL || "wss://erp-collab.weerapeace.workers.dev").replace(/\/$/, "");
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
@@ -42,12 +45,14 @@ export type CanvasSketchControls = {
 };
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady, collab = false,
 }: {
   entityType: string;
   entityId:   string;
   editable?:  boolean;
   height?:    string;
+  /** เปิด realtime หลายคนพร้อมกัน (ต่อ collab worker) */
+  collab?:    boolean;
   /** แจ้งสถานะ "มีแก้ค้าง" ขึ้นไปข้างนอก (ใช้เตือนก่อนปิด popup) */
   onDirtyChange?: (dirty: boolean) => void;
   /** ให้ภายนอกถือ handle เรียก save()/discard()/insert() ได้ */
@@ -60,6 +65,11 @@ export function CanvasSketch({
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [selFont, setSelFont] = useState<number | null>(null); // ขนาด font ของ text ที่เลือก (null = ไม่ได้เลือก text)
+  const [peers, setPeers] = useState(0); // realtime: จำนวนคนอื่นในห้อง
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const applyingRemoteRef = useRef(false);   // กันส่งซ้ำตอนเอาของคนอื่นมาวาง
+  const bcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const apiRef     = useRef<any>(null);
   const latestRef  = useRef<{ elements: any; appState: any; files: any } | null>(null);  // snapshot ล่าสุดจาก onChange
@@ -154,6 +164,35 @@ export function CanvasSketch({
     timerRef.current = setTimeout(() => void doSave(), AUTOSAVE_MS);
     if (!maxTimerRef.current) maxTimerRef.current = setTimeout(() => void doSave(), MAX_AUTOSAVE_MS);
   }, [doSave]);
+
+  // realtime: ส่งสภาพกระดานปัจจุบันให้คนอื่นในห้อง (throttle ~200ms)
+  const broadcast = useCallback(() => {
+    if (!collab) return;
+    if (bcTimerRef.current) return; // มีคิวส่งอยู่แล้ว
+    bcTimerRef.current = setTimeout(() => {
+      bcTimerRef.current = null;
+      const a = apiRef.current; const w = wsRef.current;
+      if (!a || !w || w.readyState !== 1) return;
+      try { w.send(JSON.stringify({ t: "scene", elements: a.getSceneElementsIncludingDeleted() })); } catch { /* noop */ }
+    }, BROADCAST_MS);
+  }, [collab]);
+
+  // realtime: เอาของคนอื่นมา merge (เลือกตัว version ใหม่กว่าต่อ id — รองรับลบด้วย isDeleted)
+  const applyRemote = useCallback((remoteEls: any[]) => {
+    const api = apiRef.current; if (!api || !Array.isArray(remoteEls)) return;
+    const local = api.getSceneElementsIncludingDeleted() as any[];
+    const byId = new Map<string, any>(local.map((e) => [e.id, e]));
+    let changed = false;
+    for (const r of remoteEls) {
+      if (!r?.id) continue;
+      const cur = byId.get(r.id);
+      if (!cur || (r.version ?? 0) > (cur.version ?? 0)) { byId.set(r.id, r); changed = true; }
+    }
+    if (!changed) return;
+    applyingRemoteRef.current = true;
+    try { api.updateScene({ elements: [...byId.values()] }); }
+    finally { setTimeout(() => { applyingRemoteRef.current = false; }, 0); }
+  }, []);
 
   // ให้ภายนอกถือ handle: เช็คมีแก้ค้าง / สั่งบันทึก / สั่งทิ้ง (ใช้ตอนถามก่อนปิด popup)
   useEffect(() => {
@@ -278,6 +317,35 @@ export function CanvasSketch({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [editable, doSave]);
 
+  // realtime: ต่อ collab worker (ห้อง = entityType:entityId) — sync สดหลายคน
+  useEffect(() => {
+    if (!collab || !editable || scene === "loading") return;
+    let closedByUs = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const room = encodeURIComponent(`${entityType}:${entityId}`);
+    const connect = () => {
+      let ws: WebSocket;
+      try { ws = new WebSocket(`${COLLAB_URL}/room/${room}`); } catch { return; }
+      wsRef.current = ws;
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+          if (msg.t === "scene") applyRemote(msg.elements);
+          else if (msg.t === "presence" || msg.t === "hello") setPeers(Math.max(0, (msg.peers ?? 1) - 1));
+        } catch { /* ข้ามข้อความที่ parse ไม่ได้ */ }
+      };
+      ws.onclose = () => { if (!closedByUs) reconnectTimer = setTimeout(connect, 1500); };
+      ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
+    };
+    connect();
+    return () => {
+      closedByUs = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      try { wsRef.current?.close(); } catch { /* noop */ }
+      wsRef.current = null; setPeers(0);
+    };
+  }, [collab, editable, scene, entityType, entityId, applyRemote]);
+
   // ล้อเมาส์ = ซูมเข้าหาตำแหน่งเมาส์ (shift+ล้อ = เลื่อนแนวนอนตามปกติ) + ดับเบิลคลิกการ์ด → เปิด drawer
   const wrapRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -369,6 +437,11 @@ export function CanvasSketch({
             {translating ? "⏳ กำลังแปล..." : "🌐 แปลภาษา"}
           </button>
         )}
+        {collab && peers > 0 && (
+          <span className="text-[11px] inline-flex items-center gap-1 text-emerald-600 border border-emerald-200 bg-emerald-50 rounded-md px-2 py-0.5" title="คนอื่นกำลังดู/แก้กระดานนี้พร้อมคุณ">
+            👥 {peers} คนออนไลน์
+          </span>
+        )}
         {editable && (
           <span className="text-[11px] inline-flex items-center gap-1.5">
             {saveState === "dirty"  && <span className="text-slate-400">● จะบันทึกอัตโนมัติเมื่อหยุดวาด...</span>}
@@ -394,7 +467,7 @@ export function CanvasSketch({
             const sel = appState?.selectedElementIds || {};
             const tx = (elements as any[]).find((e) => !e.isDeleted && e.type === "text" && sel[e.id]);
             setSelFont(tx ? Math.round(tx.fontSize) : null);
-            if (readyRef.current && editable) queueSave();
+            if (readyRef.current && editable) { queueSave(); if (collab && !applyingRemoteRef.current) broadcast(); }
           }}
           onLinkOpen={(el: any, ev: any) => {
             // การ์ดของเรา (มี customData.kind) → เปิด drawer แทนการเปิดลิงก์
