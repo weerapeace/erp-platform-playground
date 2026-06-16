@@ -2,13 +2,15 @@
 
 /**
  * AccountMenu (ของกลาง) — คลิกชื่อผู้ใช้ → popup จัดการบัญชี
- *  - แก้ไขโปรไฟล์ (ลิงก์ /profile) · เปลี่ยนสีธีม (accent) · เปลี่ยนรหัสผ่าน · ออกจากระบบ
+ *  - แก้ไขโปรไฟล์ (เปิด popup ในที่เดียว ไม่เปลี่ยนหน้า) · เปลี่ยนสีธีม (accent) · ออกจากระบบ
  *  - ฝัง <ThemeSync/> ให้สีธีมโหลด/บันทึกอัตโนมัติ
  */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, roleLabel } from "@/components/auth";
 import { ThemeSync } from "@/components/theme-sync";
+import { ProfileEditor } from "@/components/profile-editor";
+import { ERPModal } from "@/components/modal";
 import { getTheme, setTheme } from "@/lib/theme";
 
 const SWATCHES = ["#7c3aed", "#2563eb", "#0891b2", "#059669", "#ea580c", "#e11d48", "#475569"];
@@ -17,6 +19,7 @@ export function AccountMenu() {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [cur, setCur] = useState<string | null>(getTheme());
   if (!user) return null;
 
@@ -44,7 +47,7 @@ export function AccountMenu() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1">
             <div className="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 truncate">{user.email}</div>
-            <button type="button" onClick={() => { setOpen(false); router.push("/profile"); }}
+            <button type="button" onClick={() => { setOpen(false); setProfileOpen(true); }}
               className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 โปรไฟล์ของฉัน (แก้ชื่อ/รูป)</button>
 
             {/* สีธีม (accent) */}
@@ -64,13 +67,18 @@ export function AccountMenu() {
               </div>
             </div>
 
-            <button type="button" onClick={() => { setOpen(false); router.push("/profile"); }}
+            <button type="button" onClick={() => { setOpen(false); setProfileOpen(true); }}
               className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100">🔑 เปลี่ยนรหัสผ่าน/PIN</button>
             <button onClick={async () => { setOpen(false); await logout(); router.push("/login"); }}
               className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 border-t border-slate-100">ออกจากระบบ</button>
           </div>
         </>
       )}
+
+      {/* ป๊อปอัปแก้โปรไฟล์ — ในที่เดียว ไม่ต้องเปลี่ยนหน้า */}
+      <ERPModal open={profileOpen} onClose={() => setProfileOpen(false)} title="👤 โปรไฟล์ของฉัน" size="md" storageKey="profile-editor">
+        <ProfileEditor />
+      </ERPModal>
     </div>
   );
 }
