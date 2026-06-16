@@ -163,6 +163,15 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// URL callback หลัง OAuth/magic-link — ฝัง ?next= (จาก login_next) ไว้ใน URL
+// เพื่อให้กลับมาหน้าเดิมได้แม้คลิกลิงก์จากอีเมล/อุปกรณ์อื่น (sessionStorage หาย)
+function callbackUrlWithNext(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const base = `${window.location.origin}/auth/callback`;
+  const n = sessionStorage.getItem("login_next");
+  return n && n.startsWith("/") && !n.startsWith("//") ? `${base}?next=${encodeURIComponent(n)}` : base;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser]   = useState<AuthUser | null>(null);
   // สิทธิ์จริงของผู้ใช้จาก DB (ตั้งที่ /admin/roles) — null = โหลดไม่ได้/ยังไม่โหลด → can() ถอยไปใช้ค่าสำรองในโค้ด (กันล็อกเอาต์)
@@ -220,9 +229,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Magic Link — ส่ง link เข้า email, user คลิก → login เสร็จ
   const loginWithMagicLink = useCallback(async (email: string) => {
     setLoginError(null);
-    const redirectTo = typeof window !== "undefined"
-      ? `${window.location.origin}/auth/callback`
-      : undefined;
+    const redirectTo = callbackUrlWithNext();
     const { error } = await supabaseBrowser.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: redirectTo },
@@ -237,9 +244,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Google OAuth — redirect ไป Google login → กลับมาที่ /auth/callback
   const loginWithGoogle = useCallback(async () => {
     setLoginError(null);
-    const redirectTo = typeof window !== "undefined"
-      ? `${window.location.origin}/auth/callback`
-      : undefined;
+    const redirectTo = callbackUrlWithNext();
     const { error } = await supabaseBrowser.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo },

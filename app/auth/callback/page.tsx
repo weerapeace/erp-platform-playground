@@ -12,11 +12,14 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth";
 
-// หน้าที่จะไปต่อหลัง login: จาก sessionStorage (ตั้งไว้ตอนกดลิงก์/Google) → /apps
+// หน้าที่จะไปต่อหลัง login: อ่านจาก URL ?next= ก่อน (เชื่อถือได้ข้ามอีเมล/อุปกรณ์)
+// แล้วค่อย sessionStorage (login_next) → ไม่งั้น /apps
 function resolveNext(): string {
   if (typeof window === "undefined") return "/apps";
-  const n = sessionStorage.getItem("login_next");
+  const fromUrl = new URL(window.location.href).searchParams.get("next");
+  const fromStore = sessionStorage.getItem("login_next");
   sessionStorage.removeItem("login_next");
+  const n = fromUrl || fromStore;
   return n && n.startsWith("/") && !n.startsWith("//") ? n : "/apps";
 }
 
