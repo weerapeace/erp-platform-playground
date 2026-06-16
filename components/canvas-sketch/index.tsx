@@ -124,27 +124,33 @@ export function CanvasSketch({
       const files = snap.files ?? {};
       const sceneJson = JSON.parse(lib.serializeAsJSON(elements, appState, files, "local"));
 
-      // ถ่ายภาพกระดานเป็น PNG (ใบพิมพ์ใช้) — กระดานว่างถ่ายไม่ได้ ข้ามไป
+      // ถ่ายภาพกระดานเป็น PNG (ใบพิมพ์ใช้) — มี timeout 6วิ กันค้าง (กระดานว่าง/ถ่ายไม่ได้ ข้ามไป)
       let b64: string | null = null;
       if ((elements?.length ?? 0) > 0) {
         try {
-          const blob: Blob = await lib.exportToBlob({
-            elements, files, mimeType: "image/png", maxWidthOrHeight: 1600,
-            appState: { ...appState, exportBackground: true, viewBackgroundColor: "#ffffff" },
-          });
+          const blob: Blob = await Promise.race([
+            lib.exportToBlob({ elements, files, mimeType: "image/png", maxWidthOrHeight: 1600, appState: { ...appState, exportBackground: true, viewBackgroundColor: "#ffffff" } }),
+            new Promise<never>((_, rej) => setTimeout(() => rej(new Error("png timeout")), 6000)),
+          ]);
           b64 = await new Promise<string>((resolve, reject) => {
             const fr = new FileReader();
             fr.onload = () => resolve(String(fr.result).split(",")[1] ?? "");
             fr.onerror = reject;
             fr.readAsDataURL(blob);
           });
-        } catch (e) { console.error("[canvas-sketch] export PNG failed:", e); }
+        } catch (e) { console.error("[canvas-sketch] export PNG failed/skip:", e); }
       }
 
-      const res = await apiFetch("/api/canvas-sketch", {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, scene: sceneJson, preview_png_base64: b64 }),
-      });
+      // PUT เซฟ scene — มี abort timeout 20วิ กัน fetch ค้างไม่จบ
+      const ctrl = new AbortController();
+      const abortTimer = setTimeout(() => ctrl.abort(), 20000);
+      let res: Response;
+      try {
+        res = await apiFetch("/api/canvas-sketch", {
+          method: "PUT", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
+          body: JSON.stringify({ entity_type: entityType, entity_id: entityId, scene: sceneJson, preview_png_base64: b64 }),
+        });
+      } finally { clearTimeout(abortTimer); }
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setSaveState("saved");
       try { setSavedAt(new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { setSavedAt("✓"); }
@@ -161,7 +167,7 @@ export function CanvasSketch({
   // มีการแก้ → ตั้งเวลาบันทึกอัตโนมัติ (debounce หยุดวาด ~1วิ) + เซฟกันลืมทุก ~8วิ ถ้าแก้ต่อเนื่อง
   const queueSave = useCallback(() => {
     markDirty(true);
-    setSaveState("dirty");
+    if (!savingRef.current) setSaveState("dirty"); // อย่าเด้งทับสถานะ "กำลังบันทึก"
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void doSave(), AUTOSAVE_MS);
     if (!maxTimerRef.current) maxTimerRef.current = setTimeout(() => void doSave(), MAX_AUTOSAVE_MS);
