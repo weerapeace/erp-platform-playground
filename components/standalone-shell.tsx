@@ -11,12 +11,11 @@
 // ============================================================
 
 import { useState } from "react";
-import Link from "next/link";
 import { Logo, BRAND } from "@/components/brand";
 import { NotificationBell } from "@/components/notification-bell";
 import { GlobalSearch } from "@/components/global-search";
 import { LangToggle } from "@/components/i18n";
-import { useAuth, roleLabel } from "@/components/auth";
+import { AccountMenu } from "@/components/account-menu";
 
 export function StandaloneShell({
   title, icon, accent = "violet", children,
@@ -26,7 +25,6 @@ export function StandaloneShell({
   accent?: "violet" | "blue" | "emerald" | "slate";
   children: React.ReactNode;
 }) {
-  const { user } = useAuth();
   const [searchOpen, setSearchOpen] = useState(false);
   const dot = { violet: "bg-violet-500", blue: "bg-blue-500", emerald: "bg-emerald-500", slate: "bg-slate-500" }[accent];
 
@@ -34,6 +32,7 @@ export function StandaloneShell({
     <div className="min-h-screen flex flex-col bg-slate-50">
       {/* Top bar — โฟกัส ไม่มี sidebar */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200">
+        <div className="h-1 accent-bg" />   {/* แถบสีธีมส่วนตัว (accent) */}
         <div className="h-14 px-4 flex items-center gap-3">
           {/* แบรนด์ + ชื่อโมดูล */}
           <div className="flex items-center gap-2.5 min-w-0">
@@ -60,18 +59,7 @@ export function StandaloneShell({
           <div className="ml-auto flex items-center gap-2">
             <LangToggle />
             <NotificationBell />
-            {user && (
-              <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-slate-200">
-                <div className="leading-tight text-right">
-                  <div className="text-xs font-medium text-slate-700 truncate max-w-[120px]">{user.name}</div>
-                  <div className="text-[10px] text-slate-400">{roleLabel(user.role)}</div>
-                </div>
-              </div>
-            )}
-            {/* กลับเข้า ERP เต็ม (แท็บเดิม) */}
-            <Link href="/apps" className="h-9 px-3 flex items-center gap-1.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap">
-              ⊞ <span className="hidden sm:inline">ทุก App</span>
-            </Link>
+            <AccountMenu />
           </div>
         </div>
       </header>

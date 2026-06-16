@@ -9,6 +9,12 @@
   box-sizing: border-box;
 }
 
+/* สีเน้น (accent) ของผู้ใช้ — override runtime ผ่าน lib/theme (--accent) · ค่า default = ม่วง */
+:root { --accent: #7c3aed; }
+.accent-bg   { background-color: var(--accent) !important; }
+.accent-text { color: var(--accent) !important; }
+.accent-border { border-color: var(--accent) !important; }
+
 /* F25: ซ่อน scrollbar (ยังเลื่อน/swipe ได้) — ใช้กับ tabs ที่ล้น */
 .scrollbar-hide {
   -ms-overflow-style: none;
