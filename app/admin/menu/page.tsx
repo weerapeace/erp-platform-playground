@@ -48,6 +48,12 @@ export default function MenuManagerPage() {
   const [naApp, setNaApp] = useState({ key: "", label: "", icon: "📦" });
   const [editAppId, setEditAppId] = useState<string | null>(null);   // แอปที่กำลังตั้งค่าไอคอน/สี (PWA)
   const [uploadingApp, setUploadingApp] = useState(false);
+  const [origin, setOrigin] = useState("");   // โดเมนเว็บ (สำหรับลิงก์ส่งให้คนอื่น)
+  useEffect(() => { setOrigin(window.location.origin); }, []);
+  const copyShareLink = async (key: string) => {
+    try { await navigator.clipboard.writeText(`${origin}/app/${key}`); flash("คัดลอกลิงก์แล้ว"); }
+    catch { setErr("คัดลอกไม่สำเร็จ — ก๊อปลิงก์เองจากช่อง"); }
+  };
 
   // แก้ฟิลด์ของ App (เช่น icon_url, theme_color) — optimistic + reload
   const patchApp = async (id: string, p: Partial<AppGroup>) => {
@@ -244,6 +250,15 @@ export default function MenuManagerPage() {
                   className="h-8 px-3 leading-8 text-xs font-medium bg-white border border-slate-200 rounded hover:border-blue-300 hover:text-blue-700">
                   เปิดแอปนี้ ↗ (กดปุ่ม “📲 ติดตั้งแอป” ในหน้านั้นเพื่อลงเครื่อง)
                 </a>
+              </div>
+
+              {/* ลิงก์สำหรับส่งให้คนอื่น */}
+              <div className="flex items-center gap-2 mt-3">
+                <span className="text-xs text-slate-500 whitespace-nowrap">🔗 ลิงก์ส่งให้คนอื่น</span>
+                <input readOnly value={`${origin}/app/${editApp.key}`} onFocus={(e) => e.currentTarget.select()}
+                  className="flex-1 h-8 px-2 text-xs font-mono bg-slate-50 border border-slate-200 rounded text-slate-600" />
+                <button type="button" onClick={() => void copyShareLink(editApp.key)}
+                  className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap">📋 คัดลอก</button>
               </div>
 
               {/* สิทธิ์เข้าแอป + หน้าเริ่มต้น */}
