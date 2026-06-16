@@ -22,6 +22,21 @@ const CACHE_HEADERS = {
   "CDN-Cache-Control": "public, max-age=86400",
 };
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// edge cache ของ Cloudflare (caches.default) — รูปซ้ำ "ข้ามผู้ใช้" ไม่ต้องเรียก worker/อ่าน R2 ใหม่
+// ปลอดภัย: ถ้าเข้าไม่ได้ → คืน null แล้วทำงานปกติ
+async function getEdgeCache(): Promise<{ cache: any; waitUntil: (p: Promise<unknown>) => void } | null> {
+  try {
+    const cache = (globalThis as any).caches?.default;
+    if (!cache) return null;
+    const mod: any = await import(/* webpackIgnore: true */ ("@opennextjs/cloudflare" as string));
+    const ctx = mod.getCloudflareContext ? mod.getCloudflareContext() : null;
+    const wu = ctx?.ctx?.waitUntil;
+    if (!wu) return null; // ไม่มี waitUntil → ข้าม (กัน put ครึ่งๆ กลางๆ)
+    return { cache, waitUntil: wu.bind(ctx.ctx) };
+  } catch { return null; }
+}
+
 export async function GET(request: NextRequest): Promise<Response> {
   // F17: ไม่ต้อง auth — Cloudflare Access protects URL (image proxy = read-only CDN)
   const key = new URL(request.url).searchParams.get("key");
@@ -31,6 +46,9 @@ export async function GET(request: NextRequest): Promise<Response> {
     });
   }
 
+  const edge = await getEdgeCache();
+  if (edge) { try { const hit = await edge.cache.match(request); if (hit) return hit; } catch { /* miss */ } }
+
   try {
     const obj = await r2GetObject(key);
     if (!obj) {
@@ -38,7 +56,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         status: 404, headers: { "Content-Type": "application/json" },
       });
     }
-    return new Response(obj.body, {
+    const res = new Response(obj.body, {
       status: 200,
       headers: {
         "Content-Type":   obj.httpMetadata?.contentType ?? "image/jpeg",
@@ -46,6 +64,9 @@ export async function GET(request: NextRequest): Promise<Response> {
         ...CACHE_HEADERS,
       },
     });
+    // เก็บลง edge cache เบื้องหลัง (ไม่หน่วง response) — รอบหน้าเสิร์ฟจาก edge ไม่แตะ worker
+    if (edge) { try { edge.waitUntil(edge.cache.put(request, res.clone())); } catch { /* noop */ } }
+    return res;
   } catch (e) {
     return new Response(JSON.stringify({ error: String((e as Error).message ?? e) }), {
       status: 500, headers: { "Content-Type": "application/json" },

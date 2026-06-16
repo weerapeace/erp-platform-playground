@@ -91,6 +91,7 @@ export function CanvasSketch({
   const hadContentRef = useRef(false); // เคยมีชิ้นงานจริงไหม — กันเซฟ "ว่าง" ทับงานดี (เช่นตอนปิดหน้า Excalidraw เคลียร์ scene)
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // เซฟกันลืมระหว่างแก้ต่อเนื่อง
+  const lastPngAtRef = useRef(0); // ถ่าย PNG ล่าสุดเมื่อไหร่ — ถ่ายเฉพาะทุก ~30วิ/ตอนปิด (ลด payload เซฟถี่ๆ)
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
@@ -118,7 +119,7 @@ export function CanvasSketch({
     return () => { alive = false; };
   }, [entityType, entityId]);
 
-  const doSave = useCallback(async () => {
+  const doSave = useCallback(async (forcePng = false) => {
     // ใช้ snapshot ล่าสุดที่จับไว้ตอน onChange — ไม่อ่านจาก api สด
     // (กัน bug: ตอนปิด/สลับแท็บ Excalidraw ถูกถอด → getSceneElements() คืนว่าง → ทับของดี)
     const snap = latestRef.current;
@@ -145,9 +146,10 @@ export function CanvasSketch({
       const files = snap.files ?? {};
       const sceneJson = JSON.parse(lib.serializeAsJSON(elements, appState, files, "local"));
 
-      // ถ่ายภาพกระดานเป็น PNG (ใบพิมพ์ใช้) — มี timeout 6วิ กันค้าง (กระดานว่าง/ถ่ายไม่ได้ ข้ามไป)
+      // ถ่ายภาพกระดานเป็น PNG (ใบพิมพ์ใช้) — เฉพาะทุก ~30วิ หรือตอนปิด/บันทึกเอง (ลด payload เซฟถี่ๆ) + timeout 6วิ กันค้าง
       let b64: string | null = null;
-      if ((elements?.length ?? 0) > 0) {
+      const wantPng = (elements?.length ?? 0) > 0 && (forcePng || Date.now() - lastPngAtRef.current > 30000);
+      if (wantPng) {
         try {
           const blob: Blob = await Promise.race([
             lib.exportToBlob({ elements, files, mimeType: "image/png", maxWidthOrHeight: 1600, appState: { ...appState, exportBackground: true, viewBackgroundColor: "#ffffff" } }),
@@ -159,6 +161,7 @@ export function CanvasSketch({
             fr.onerror = reject;
             fr.readAsDataURL(blob);
           });
+          lastPngAtRef.current = Date.now();
         } catch (e) { console.error("[canvas-sketch] export PNG failed/skip:", e); }
       }
 
@@ -234,7 +237,7 @@ export function CanvasSketch({
     if (!controlsRef) return;
     controlsRef.current = {
       isDirty: () => dirtyRef.current,
-      save: doSave,
+      save: () => doSave(true),
       discard: () => { discardRef.current = true; markDirty(false); setSaveState("idle"); },
       // แทรก element (การ์ด/โซน) ลงกลางจอ แล้วบันทึกอัตโนมัติ
       // skeleton ที่เป็นรูปให้ใส่ `_imageUrl` (แทน fileId) — ระบบจะโหลดรูป → ลงทะเบียนไฟล์ → ใส่ fileId ให้เอง
@@ -339,14 +342,14 @@ export function CanvasSketch({
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
-    if (editable && dirtyRef.current && !discardRef.current) void doSave();
+    if (editable && dirtyRef.current && !discardRef.current) void doSave(true);
   }, [doSave, editable]);
 
   // เตือนตอนปิดแท็บ/ออกจากหน้า ถ้ายังมีงานค้างเซฟ (กำลังบันทึกอยู่หรือยังไม่ได้บันทึก)
   useEffect(() => {
     if (!editable) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (dirtyRef.current || savingRef.current) { void doSave(); e.preventDefault(); e.returnValue = ""; }
+      if (dirtyRef.current || savingRef.current) { void doSave(true); e.preventDefault(); e.returnValue = ""; }
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);

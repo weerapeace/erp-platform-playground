@@ -36,10 +36,11 @@ export function invalidateSWR(prefix?: string): void {
 export function useSWRLite<T>(
   key: string | null,
   fetcher: () => Promise<T>,
-  opts: { dedupeMs?: number; revalidateOnFocus?: boolean } = {},
+  opts: { dedupeMs?: number; revalidateOnFocus?: boolean; focusStaleMs?: number } = {},
 ): { data: T | undefined; loading: boolean; error: Error | null; revalidate: (force?: boolean) => Promise<void>; mutate: (d: T) => void } {
   const dedupeMs = opts.dedupeMs ?? 2000;
   const revalidateOnFocus = opts.revalidateOnFocus ?? true;
+  const focusStaleMs = opts.focusStaleMs ?? 30000; // สลับแท็บ → refetch เฉพาะข้อมูลที่เก่ากว่านี้ (ลดยิงซ้ำ/ประหยัด)
   const fetcherRef = useRef(fetcher); fetcherRef.current = fetcher;
   const [, force] = useState(0);
   const has = !!key && cache.has(key);
@@ -71,14 +72,19 @@ export function useSWRLite<T>(
   // โหลดครั้งแรก / เปลี่ยน key
   useEffect(() => { void revalidate(false); }, [revalidate]);
 
-  // กลับมาที่แท็บ → revalidate เงียบ
+  // กลับมาที่แท็บ → revalidate เงียบ "เฉพาะเมื่อข้อมูลเก่าพอ" (กันยิงซ้ำทุกครั้งที่สลับแท็บ = ประหยัด request)
   useEffect(() => {
     if (!revalidateOnFocus || !key) return;
-    const fn = () => { if (document.visibilityState === "visible") void revalidate(false); };
+    const fn = () => {
+      if (document.visibilityState !== "visible") return;
+      const cur = cache.get(key);
+      if (cur && Date.now() - cur.at < focusStaleMs) return; // ยังไม่เก่าพอ → ไม่ต้องโหลดใหม่
+      void revalidate(false);
+    };
     window.addEventListener("focus", fn);
     document.addEventListener("visibilitychange", fn);
     return () => { window.removeEventListener("focus", fn); document.removeEventListener("visibilitychange", fn); };
-  }, [revalidate, revalidateOnFocus, key]);
+  }, [revalidate, revalidateOnFocus, key, focusStaleMs]);
 
   const data = key ? (cache.get(key) as Entry<T> | undefined)?.data : undefined;
   return { data, loading: loading && data === undefined, error, revalidate, mutate: (d: T) => key && mutateSWR(key, d) };

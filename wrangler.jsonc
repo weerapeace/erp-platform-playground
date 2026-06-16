@@ -28,8 +28,10 @@
     "binding": "ASSETS"
   },
 
+  // เก็บ log แบบสุ่ม 10% ของ request (ลดจำนวน observability events — ยัง debug ได้)
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "head_sampling_rate": 0.1
   },
 
   // Non-secret vars (committed) — secrets ผ่าน wrangler-action's secrets parameter
