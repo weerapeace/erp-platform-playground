@@ -9,6 +9,7 @@
 // ============================================================
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
+import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import {
   PRIORITY_META, isOverdue,
@@ -46,11 +47,11 @@ const STICKY_COLORS = ["#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#
 const TEXT_COLORS = ["#1e293b", "#dc2626", "#ea580c", "#ca8a04", "#16a34a", "#2563eb", "#7c3aed", "#db2777", "#ffffff"];
 const FILL_COLORS = ["transparent", "#ffffff", "#fef9c3", "#dcfce7", "#dbeafe", "#fae8ff", "#ffe4e6", "#1e293b"];
 const FONT_SIZES = [12, 14, 16, 20, 24, 32, 44];
-const FONTS: { label: string; value: string }[] = [
-  { label: "ค่าเริ่มต้น", value: "" },
-  { label: "ไม่มีหัว (Sans)", value: "system-ui, -apple-system, 'Segoe UI', sans-serif" },
-  { label: "มีเชิง (Serif)", value: "Georgia, 'Times New Roman', serif" },
-  { label: "พิมพ์ดีด (Mono)", value: "'Courier New', monospace" },
+const FONTS_VALUES: string[] = [
+  "",
+  "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  "Georgia, 'Times New Roman', serif",
+  "'Courier New', monospace",
 ];
 const DEF_STYLE: Style = { fontSize: 16, bold: false, italic: false, underline: false, color: "#1e293b", align: "left", fontFamily: "" };
 
@@ -82,6 +83,13 @@ export function CanvasBoard({
   onAddTask?: () => void;
   startMaximized?: boolean;
 }) {
+  const t = useT();
+  const FONTS = useMemo(() => [
+    { label: t("ค่าเริ่มต้น", "Default"), value: FONTS_VALUES[0] },
+    { label: t("ไม่มีหัว (Sans)", "Sans-serif"), value: FONTS_VALUES[1] },
+    { label: t("มีเชิง (Serif)", "Serif"), value: FONTS_VALUES[2] },
+    { label: t("พิมพ์ดีด (Mono)", "Monospace"), value: FONTS_VALUES[3] },
+  ], [t]);
   const columns = useMemo(() => statuses.map((s) => s.key), [statuses]);
   const [freeMove, setFreeMove] = useState(false);   // ย้ายอิสระ (ข้ามกฎ workflow)
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -215,7 +223,7 @@ export function CanvasBoard({
         img.onerror = () => place(320, 220);
         img.src = url;
       } catch (err) {
-        alert("อัปโหลดรูปไม่สำเร็จ: " + ((err as Error).message ?? err));
+        alert(t("อัปโหลดรูปไม่สำเร็จ: ", "Image upload failed: ") + ((err as Error).message ?? err));
       } finally { setUploading(false); }
     };
     window.addEventListener("paste", onPaste);
@@ -381,37 +389,37 @@ export function CanvasBoard({
     <div ref={wrapRef} className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "relative"}>
       {/* Toolbar */}
       <div className={`${isMax ? "" : "absolute top-3 left-3"} z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit`}>
-        <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
-        <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
+        <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title={t("เลือก/ลาก", "Select / Drag")}>🖱️</ToolBtn>
+        <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title={t("เลื่อนกระดาน", "Pan canvas")}>✋</ToolBtn>
         <Sep />
-        <ToolBtn active={tool === "box"} onClick={() => setTool("box")} title="กล่อง">▭</ToolBtn>
-        <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title="ข้อความ">𝐓</ToolBtn>
-        <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title="โน้ตกาว">🟨</ToolBtn>
-        <ToolBtn active={tool === "connect"} onClick={() => { setTool(tool === "connect" ? "select" : "connect"); setConnectFrom(null); }} title="เชื่อมลูกศร (คลิกต้นทาง → ปลายทาง)">↗</ToolBtn>
+        <ToolBtn active={tool === "box"} onClick={() => setTool("box")} title={t("กล่อง", "Box")}>▭</ToolBtn>
+        <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title={t("ข้อความ", "Text")}>𝐓</ToolBtn>
+        <ToolBtn active={tool === "sticky"} onClick={() => setTool("sticky")} title={t("โน้ตกาว", "Sticky note")}>🟨</ToolBtn>
+        <ToolBtn active={tool === "connect"} onClick={() => { setTool(tool === "connect" ? "select" : "connect"); setConnectFrom(null); }} title={t("เชื่อมลูกศร (คลิกต้นทาง → ปลายทาง)", "Connect arrow (click source → target)")}>↗</ToolBtn>
         <Sep />
-        <ToolBtn onClick={undo} title="ย้อนกลับ (Ctrl+Z)" disabled={!past.length}>↶</ToolBtn>
-        <ToolBtn onClick={redo} title="ทำซ้ำ (Ctrl+Y)" disabled={!future.length}>↷</ToolBtn>
+        <ToolBtn onClick={undo} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} disabled={!past.length}>↶</ToolBtn>
+        <ToolBtn onClick={redo} title={t("ทำซ้ำ (Ctrl+Y)", "Redo (Ctrl+Y)")} disabled={!future.length}>↷</ToolBtn>
         <Sep />
-        <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title="ซูมออก">➖</ToolBtn>
+        <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title={t("ซูมออก", "Zoom out")}>➖</ToolBtn>
         <span className="text-xs text-slate-500 tabular-nums w-10 text-center">{Math.round(vp.scale * 100)}%</span>
-        <ToolBtn onClick={() => zoomBtn(1.2)} title="ซูมเข้า">➕</ToolBtn>
+        <ToolBtn onClick={() => zoomBtn(1.2)} title={t("ซูมเข้า", "Zoom in")}>➕</ToolBtn>
         <Sep />
-        <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
-        <ToolBtn onClick={resetLayout} title="จัดเรียงการ์ดใหม่">↺</ToolBtn>
-        <ToolBtn onClick={toggleFs} title={isMax ? "ย่อกลับ (Esc)" : "ขยายเต็มหน้าต่าง"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
+        <ToolBtn onClick={resetView} title={t("จัดมุมมองกลับ", "Reset view")}>🎯</ToolBtn>
+        <ToolBtn onClick={resetLayout} title={t("จัดเรียงการ์ดใหม่", "Reset card layout")}>↺</ToolBtn>
+        <ToolBtn onClick={toggleFs} title={isMax ? t("ย่อกลับ (Esc)", "Restore (Esc)") : t("ขยายเต็มหน้าต่าง", "Fullscreen")}>{isMax ? "🗗" : "⛶"}</ToolBtn>
         <Sep />
-        <ToolBtn active={freeMove} onClick={() => setFreeMove(f => !f)} title={freeMove ? "ย้ายอิสระ: เปิด — ลากไปสถานะไหนก็ได้ (ข้าม workflow)" : "ย้ายอิสระ: ปิด — ลากตามเส้นทาง workflow"}>{freeMove ? "🔓" : "🔒"}</ToolBtn>
-        {onAddTask && <button onClick={onAddTask} title="เพิ่มงานใหม่" className="h-8 px-2.5 ml-0.5 flex items-center gap-1 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">＋ งาน</button>}
+        <ToolBtn active={freeMove} onClick={() => setFreeMove(f => !f)} title={freeMove ? t("ย้ายอิสระ: เปิด — ลากไปสถานะไหนก็ได้ (ข้าม workflow)", "Free move: ON — drag to any status (bypass workflow)") : t("ย้ายอิสระ: ปิด — ลากตามเส้นทาง workflow", "Free move: OFF — follow workflow transitions")}>{freeMove ? "🔓" : "🔒"}</ToolBtn>
+        {onAddTask && <button onClick={onAddTask} title={t("เพิ่มงานใหม่", "Add task")} className="h-8 px-2.5 ml-0.5 flex items-center gap-1 rounded-md text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">＋ {t("งาน", "Task")}</button>}
       </div>
       {/* ปุ่มออกจากเต็มจอ (ลอยมุมขวาบน) */}
-      {isMax && <button onClick={toggleFs} title="ออกจากเต็มจอ (Esc)" className="absolute top-3 right-3 z-30 h-9 w-9 flex items-center justify-center rounded-lg bg-white border border-slate-200 shadow-md text-slate-500 hover:text-slate-800 hover:bg-slate-50">✕</button>}
+      {isMax && <button onClick={toggleFs} title={t("ออกจากเต็มจอ (Esc)", "Exit fullscreen (Esc)")} className="absolute top-3 right-3 z-30 h-9 w-9 flex items-center justify-center rounded-lg bg-white border border-slate-200 shadow-md text-slate-500 hover:text-slate-800 hover:bg-slate-50">✕</button>}
       {tool === "connect" ? (
         <div className="absolute top-3 right-3 z-20 text-xs font-medium text-blue-700 bg-blue-50 rounded px-2.5 py-1.5 border border-blue-200">
-          ↗ โหมดเชื่อมลูกศร: {connectFrom ? "คลิกวัตถุปลายทาง" : "คลิกวัตถุต้นทาง"} · ชี้ที่เส้นแล้วกด ✕ เพื่อลบ
+          ↗ {t("โหมดเชื่อมลูกศร", "Connect mode")}: {connectFrom ? t("คลิกวัตถุปลายทาง", "Click target object") : t("คลิกวัตถุต้นทาง", "Click source object")} · {t("ชี้ที่เส้นแล้วกด ✕ เพื่อลบ", "Hover a line and click ✕ to delete")}
         </div>
       ) : !isMax && (
         <div className="absolute top-3 right-3 z-20 text-[11px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-200">
-          ดับเบิลคลิกการ์ด = ดูรายละเอียด · วางรูป (Ctrl+V) ได้ · ↗ เชื่อมลูกศร · Del = ลบ · Ctrl+Z = ย้อน
+          {t("ดับเบิลคลิกการ์ด = ดูรายละเอียด · วางรูป (Ctrl+V) ได้ · ↗ เชื่อมลูกศร · Del = ลบ · Ctrl+Z = ย้อน", "Double-click card = view details · Paste image (Ctrl+V) · ↗ Connect arrow · Del = delete · Ctrl+Z = undo")}
         </div>
       )}
 
@@ -432,7 +440,7 @@ export function CanvasBoard({
                   <span className="text-xs font-medium text-slate-400 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
                 </div>
                 {/* ที่จับปรับขนาดโซน (มุมขวาล่าง) */}
-                <div onPointerDown={(e) => startZoneResize(e, z.key, z.w, z.h)} title="ลากปรับขนาดโซน" className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize opacity-0 group-hover:opacity-100" style={{ background: "linear-gradient(135deg, transparent 50%, #cbd5e1 50%)" }} />
+                <div onPointerDown={(e) => startZoneResize(e, z.key, z.w, z.h)} title={t("ลากปรับขนาดโซน", "Drag to resize zone")} className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize opacity-0 group-hover:opacity-100" style={{ background: "linear-gradient(135deg, transparent 50%, #cbd5e1 50%)" }} />
               </div>
             );
           })}
@@ -485,11 +493,11 @@ export function CanvasBoard({
                       onFocus={() => { editStartRef.current = clone(board); }}
                       onBlur={() => { if (editStartRef.current) { pushPast(editStartRef.current); editStartRef.current = null; } }}
                       onChange={e => setBoard(b => ({ ...b, objects: b.objects.map(x => x.id === o.id ? { ...x, text: e.target.value } : x) }))}
-                      placeholder="พิมพ์ข้อความ..." style={styleOf(o)}
+                      placeholder={t("พิมพ์ข้อความ...", "Type text...")} style={styleOf(o)}
                       className="w-full h-full bg-transparent resize-none p-2 outline-none placeholder:text-slate-400 cursor-text" />
                   ) : (
                     <div className="w-full h-full p-2 whitespace-pre-wrap overflow-hidden cursor-grab active:cursor-grabbing" style={styleOf(o)}>
-                      {o.text || <span className="text-slate-300">กล่อง</span>}
+                      {o.text || <span className="text-slate-300">{t("กล่อง", "Box")}</span>}
                     </div>
                   )}
                   {selected && <div onPointerDown={e => startResize(e, o.id)} className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />}
@@ -504,11 +512,11 @@ export function CanvasBoard({
                     onFocus={() => { editStartRef.current = clone(board); }}
                     onBlur={() => { if (editStartRef.current) { pushPast(editStartRef.current); editStartRef.current = null; } }}
                     onChange={e => setBoard(b => ({ ...b, objects: b.objects.map(x => x.id === o.id ? { ...x, text: e.target.value } : x) }))}
-                    placeholder="พิมพ์ข้อความ..." style={{ ...styleOf(o), background: o.highlight }}
+                    placeholder={t("พิมพ์ข้อความ...", "Type text...")} style={{ ...styleOf(o), background: o.highlight }}
                     className="w-full h-full resize-none p-1 rounded outline-none placeholder:text-slate-400 cursor-text" />
                 ) : (
                   <div className="w-full h-full p-1 rounded whitespace-pre-wrap cursor-grab active:cursor-grabbing" style={{ ...styleOf(o), background: o.highlight }}>
-                    {o.text || <span className="text-slate-300">ข้อความ</span>}
+                    {o.text || <span className="text-slate-300">{t("ข้อความ", "Text")}</span>}
                   </div>
                 )}
                 {selected && <div onPointerDown={e => startResize(e, o.id)} className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize" style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />}
@@ -523,13 +531,13 @@ export function CanvasBoard({
               <div key={s.id} className={`absolute rounded-lg shadow-md ${connectFrom === s.id ? "ring-2 ring-blue-400" : selected ? "ring-2 ring-violet-400" : ""}`} style={{ left: s.x, top: s.y, width: 180, minHeight: 120, background: s.color }}
                 onPointerDown={e => startDrag(e, s.id)}>
                 <div className="flex justify-between items-center px-2 pt-1 cursor-grab active:cursor-grabbing">
-                  <span className="text-[10px] text-slate-500">โน้ต</span>
+                  <span className="text-[10px] text-slate-500">{t("โน้ต", "Note")}</span>
                 </div>
                 <textarea value={s.text} onPointerDown={e => e.stopPropagation()}
                   onFocus={() => { setSelId(s.id); editStartRef.current = clone(board); }}
                   onBlur={() => { if (editStartRef.current) { pushPast(editStartRef.current); editStartRef.current = null; } }}
                   onChange={e => setBoard(b => ({ ...b, stickies: b.stickies.map(x => x.id === s.id ? { ...x, text: e.target.value } : x) }))}
-                  placeholder="พิมพ์โน้ต..." style={{ fontSize: s.fontSize }}
+                  placeholder={t("พิมพ์โน้ต...", "Type a note...")} style={{ fontSize: s.fontSize }}
                   className="w-full bg-transparent resize-none px-2 pb-2 text-slate-700 outline-none placeholder:text-slate-400 cursor-text" rows={4} />
               </div>
             );
@@ -544,7 +552,7 @@ export function CanvasBoard({
 
         {uploading && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-slate-900/90 text-white text-sm rounded-lg px-3 py-1.5 shadow-lg">
-            <span className="h-3 w-3 rounded-full border-2 border-white/40 border-t-white animate-spin" /> กำลังอัปโหลดรูปขึ้น R2...
+            <span className="h-3 w-3 rounded-full border-2 border-white/40 border-t-white animate-spin" /> {t("กำลังอัปโหลดรูปขึ้น R2...", "Uploading image to R2...")}
           </div>
         )}
 
@@ -561,7 +569,7 @@ export function CanvasBoard({
               {o && <>
                 <BarSep />
                 <div className="relative flex items-center pl-2.5 pr-1 hover:bg-slate-50">
-                  <select value={o.fontFamily} onChange={e => patchObject(o.id, { fontFamily: e.target.value })} title="ฟอนต์"
+                  <select value={o.fontFamily} onChange={e => patchObject(o.id, { fontFamily: e.target.value })} title={t("ฟอนต์", "Font")}
                     className="appearance-none bg-transparent text-sm text-slate-700 outline-none cursor-pointer pr-4 max-w-[112px]"
                     style={{ fontFamily: o.fontFamily || undefined }}>
                     {FONTS.map(f => <option key={f.label} value={f.value}>{f.label}</option>)}
@@ -572,34 +580,34 @@ export function CanvasBoard({
                 <div className="flex items-center pl-2.5 pr-1.5 gap-1.5">
                   <span className="text-sm text-slate-700 tabular-nums w-5 text-center">{o.fontSize}</span>
                   <div className="flex flex-col text-slate-400">
-                    <button onClick={() => setSize(1)} title="ใหญ่ขึ้น" className="h-3 flex items-center hover:text-slate-700"><IconCaret dir="up" /></button>
-                    <button onClick={() => setSize(-1)} title="เล็กลง" className="h-3 flex items-center hover:text-slate-700"><IconCaret dir="down" /></button>
+                    <button onClick={() => setSize(1)} title={t("ใหญ่ขึ้น", "Increase size")} className="h-3 flex items-center hover:text-slate-700"><IconCaret dir="up" /></button>
+                    <button onClick={() => setSize(-1)} title={t("เล็กลง", "Decrease size")} className="h-3 flex items-center hover:text-slate-700"><IconCaret dir="down" /></button>
                   </div>
                 </div>
                 <BarSep />
-                <BarBtn active={o.bold} onClick={() => patchObject(o.id, { bold: !o.bold })} title="ตัวหนา"><span className="font-bold text-[15px]">B</span></BarBtn>
-                <BarBtn active={o.italic} onClick={() => patchObject(o.id, { italic: !o.italic })} title="ตัวเอียง"><span className="italic font-serif text-[15px]">I</span></BarBtn>
-                <BarBtn active={o.underline} onClick={() => patchObject(o.id, { underline: !o.underline })} title="ขีดเส้นใต้"><span className="underline text-[15px]">U</span></BarBtn>
+                <BarBtn active={o.bold} onClick={() => patchObject(o.id, { bold: !o.bold })} title={t("ตัวหนา", "Bold")}><span className="font-bold text-[15px]">B</span></BarBtn>
+                <BarBtn active={o.italic} onClick={() => patchObject(o.id, { italic: !o.italic })} title={t("ตัวเอียง", "Italic")}><span className="italic font-serif text-[15px]">I</span></BarBtn>
+                <BarBtn active={o.underline} onClick={() => patchObject(o.id, { underline: !o.underline })} title={t("ขีดเส้นใต้", "Underline")}><span className="underline text-[15px]">U</span></BarBtn>
                 <BarSep />
-                <BarBtn onClick={() => patchObject(o.id, { align: nextAlign[o.align] })} title="จัดชิด (สลับ)"><IconAlign align={o.align} /></BarBtn>
+                <BarBtn onClick={() => patchObject(o.id, { align: nextAlign[o.align] })} title={t("จัดชิด (สลับ)", "Alignment (cycle)")}><IconAlign align={o.align} /></BarBtn>
                 <BarSep />
-                <BarBtn active={pop === "text"} onClick={() => setPop(pop === "text" ? null : "text")} title="สีตัวอักษร">
+                <BarBtn active={pop === "text"} onClick={() => setPop(pop === "text" ? null : "text")} title={t("สีตัวอักษร", "Text color")}>
                   <span className="flex flex-col items-center leading-none gap-0.5"><span className="text-[15px] font-semibold">A</span><span className="block h-1 w-4 rounded-sm" style={{ background: o.color }} /></span>
                 </BarBtn>
-                <BarBtn active={pop === "fill"} onClick={() => setPop(pop === "fill" ? null : "fill")} title={o.type === "box" ? "สีพื้น" : "ไฮไลต์"}>
+                <BarBtn active={pop === "fill"} onClick={() => setPop(pop === "fill" ? null : "fill")} title={o.type === "box" ? t("สีพื้น", "Fill color") : t("ไฮไลต์", "Highlight")}>
                   <Swatch c={o.type === "box" ? o.fill : o.highlight} className="h-5 w-5" />
                 </BarBtn>
               </>}
 
               {selKind === "sticky" && <>
                 <BarSep />
-                <BarBtn active={pop === "fill"} onClick={() => setPop(pop === "fill" ? null : "fill")} title="สีโน้ต">
+                <BarBtn active={pop === "fill"} onClick={() => setPop(pop === "fill" ? null : "fill")} title={t("สีโน้ต", "Note color")}>
                   <Swatch c={(sel as Sticky).color} className="h-5 w-5" />
                 </BarBtn>
               </>}
 
               <BarSep />
-              <BarBtn active={pop === "more"} onClick={() => setPop(pop === "more" ? null : "more")} title="เพิ่มเติม"><IconMore /></BarBtn>
+              <BarBtn active={pop === "more"} onClick={() => setPop(pop === "more" ? null : "more")} title={t("เพิ่มเติม", "More options")}><IconMore /></BarBtn>
 
               {/* popovers */}
               {pop === "text" && o && <ColorPopover colors={TEXT_COLORS} value={o.color} onPick={c => { patchObject(o.id, { color: c }); setPop(null); }} />}
@@ -610,12 +618,12 @@ export function CanvasBoard({
               ) : null)}
               {pop === "more" && (
                 <div className="absolute top-full right-0 mt-1.5 bg-white border border-slate-200 rounded-lg shadow-lg py-1 w-40 text-sm">
-                  <MenuItem onClick={() => { duplicateSelected(); setPop(null); }}>⧉ คัดลอก</MenuItem>
+                  <MenuItem onClick={() => { duplicateSelected(); setPop(null); }}>⧉ {t("คัดลอก", "Duplicate")}</MenuItem>
                   {o && <>
-                    <MenuItem onClick={() => { bringFront(); setPop(null); }}>⬆ ขึ้นหน้าสุด</MenuItem>
-                    <MenuItem onClick={() => { sendBack(); setPop(null); }}>⬇ ลงหลังสุด</MenuItem>
+                    <MenuItem onClick={() => { bringFront(); setPop(null); }}>⬆ {t("ขึ้นหน้าสุด", "Bring to front")}</MenuItem>
+                    <MenuItem onClick={() => { sendBack(); setPop(null); }}>⬇ {t("ลงหลังสุด", "Send to back")}</MenuItem>
                   </>}
-                  <MenuItem danger onClick={() => { deleteSelected(); setPop(null); }}>🗑 ลบ</MenuItem>
+                  <MenuItem danger onClick={() => { deleteSelected(); setPop(null); }}>🗑 {t("ลบ", "Delete")}</MenuItem>
                 </div>
               )}
             </div>

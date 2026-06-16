@@ -7,6 +7,7 @@
 // ============================================================
 
 import { useState } from "react";
+import { useT } from "@/components/i18n";
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   useDraggable, useDroppable, type DragStartEvent, type DragEndEvent,
@@ -47,6 +48,7 @@ function DraggableCard({ task, onClick }: { task: CreativeTask; onClick: () => v
 }
 
 function Column({ statusKey, label, tasks, onCardClick }: { statusKey: string; label: string; tasks: CreativeTask[]; onCardClick: (id: string) => void }) {
+  const t = useT();
   const { setNodeRef, isOver } = useDroppable({ id: statusKey });
   const m = statusMeta(statusKey);
   return (
@@ -57,7 +59,7 @@ function Column({ statusKey, label, tasks, onCardClick }: { statusKey: string; l
       </div>
       <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-violet-50" : "bg-slate-50/60"}`}>
         {tasks.map((t) => <DraggableCard key={t.id} task={t} onClick={() => onCardClick(t.id)} />)}
-        {tasks.length === 0 && <div className="h-20 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">ลากการ์ดมาวางที่นี่</div>}
+        {tasks.length === 0 && <div className="h-20 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">{t("ลากการ์ดมาวางที่นี่", "Drag cards here")}</div>}
       </div>
     </div>
   );

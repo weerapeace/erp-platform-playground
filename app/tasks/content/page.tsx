@@ -23,6 +23,7 @@ import {
   type BrandOption, type Hashtag, type CaptionTemplate,
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
+import { useT } from "@/components/i18n";
 
 const POST_TYPE_LABEL = Object.fromEntries(POST_TYPES.map((p) => [p.value, p.label]));
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
@@ -35,6 +36,7 @@ function StatusBadge({ status }: { status: ContentStatus }) {
 const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentStatus, brand_id: "", campaign_id: "", scheduled_at: "", product: null as SkuPickerValue | null, platforms: [] as string[], note: "" };
 
 export default function ContentPage() {
+  const t = useT();
   const { platforms } = useCreativeOptions();
   const [view, setView] = useState<"list" | "calendar">("list");
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -82,7 +84,7 @@ export default function ContentPage() {
   };
 
   const save = async () => {
-    if (!form.title.trim()) { setFormErr("กรุณาใส่ชื่อคอนเทนต์"); return; }
+    if (!form.title.trim()) { setFormErr(t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
     setSaving(true); setFormErr(null);
     try {
       const { content_no } = await createContent({
@@ -91,40 +93,40 @@ export default function ContentPage() {
         platforms: form.platforms, status: form.status, scheduled_at: form.scheduled_at || null, note: form.note.trim() || null,
         captions: tplCaptions.length ? form.platforms.map((p) => { const c = tplCaptions.find((x) => x.platform === p); return { platform: p, caption: c?.caption ?? null, hashtags: c?.hashtags ?? null, caption_type: c?.caption_type ?? "short" }; }) : undefined,
       });
-      setOpen(false); setDirty(false); pushToast("success", `สร้างคอนเทนต์ ${content_no} แล้ว`); await load();
+      setOpen(false); setDirty(false); pushToast("success", t(`สร้างคอนเทนต์ ${content_no} แล้ว`, `Content ${content_no} created`)); await load();
     } catch (e) { setFormErr((e as Error).message); }
     finally { setSaving(false); }
   };
 
-  const onDelete = async () => { if (!delTarget) return; try { await deleteContent(delTarget.id); pushToast("info", "ลบแล้ว"); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
+  const onDelete = async () => { if (!delTarget) return; try { await deleteContent(delTarget.id); pushToast("info", t("ลบแล้ว", "Deleted")); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
 
   return (
-    <StandaloneShell title="คอนเทนต์ Social" icon="📱" accent="violet">
+    <StandaloneShell title={t("คอนเทนต์ Social", "Social Content")} icon="📱" accent="violet">
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">คอนเทนต์ Social</h1>
-            <p className="text-slate-500 mt-1">โพสต์โซเชียล · เขียน caption ได้หลายแพลตฟอร์มต่อ 1 คอนเทนต์ · คลัง hashtag · ปฏิทิน</p>
+            <h1 className="text-2xl font-bold text-slate-900">{t("คอนเทนต์ Social", "Social Content")}</h1>
+            <p className="text-slate-500 mt-1">{t("โพสต์โซเชียล · เขียน caption ได้หลายแพลตฟอร์มต่อ 1 คอนเทนต์ · คลัง hashtag · ปฏิทิน", "Social posts · Write captions per platform per content · Hashtag library · Calendar")}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← งาน</a>
-            <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ สร้างคอนเทนต์</button>
+            <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งาน", "Tasks")}</a>
+            <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "Create Content")}</button>
           </div>
         </div>
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
-          <button onClick={() => setView("list")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📋 รายการ</button>
-          <button onClick={() => setView("calendar")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🗓️ ปฏิทิน</button>
+          <button onClick={() => setView("list")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📋 {t("รายการ", "List")}</button>
+          <button onClick={() => setView("calendar")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🗓️ {t("ปฏิทิน", "Calendar")}</button>
         </div>
       </div>
 
       <div className="px-8 py-6">
-        {loading ? <div className="py-20 text-center text-slate-400">กำลังโหลด...</div>
+        {loading ? <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
           : view === "calendar" ? <MonthCalendar items={items} onOpen={(id) => setDetailId(id)} />
           : items.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
               <div className="text-4xl mb-3">📱</div>
-              <p className="text-slate-600 font-medium">ยังไม่มีคอนเทนต์</p>
-              <button onClick={openCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ สร้างคอนเทนต์</button>
+              <p className="text-slate-600 font-medium">{t("ยังไม่มีคอนเทนต์", "No content yet")}</p>
+              <button onClick={openCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างคอนเทนต์", "Create Content")}</button>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -148,40 +150,40 @@ export default function ContentPage() {
       </div>
 
       {/* create modal */}
-      <ERPModal open={open} onClose={() => setOpen(false)} title="สร้างคอนเทนต์ใหม่" size="lg" hasUnsavedChanges={dirty}
+      <ERPModal open={open} onClose={() => setOpen(false)} title={t("สร้างคอนเทนต์ใหม่", "Create New Content")} size="lg" hasUnsavedChanges={dirty}
         footer={<>
-          <button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "สร้าง"}</button>
+          <button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง", "Create")}</button>
         </>}>
         {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
         {templates.length > 0 && (
           <div className="mb-4 flex items-center gap-2 bg-violet-50/60 border border-violet-100 rounded-lg px-3 py-2">
-            <span className="text-sm text-slate-600 shrink-0">📋 เริ่มจากเทมเพลต:</span>
+            <span className="text-sm text-slate-600 shrink-0">📋 {t("เริ่มจากเทมเพลต:", "Start from template:")}</span>
             <select value={tplId} onChange={(e) => applyTemplate(e.target.value)} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
-              <option value="">— ไม่ใช้เทมเพลต —</option>
+              <option value="">{t("— ไม่ใช้เทมเพลต —", "— No template —")}</option>
               {templates.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
             </select>
           </div>
         )}
-        <ERPFormSection title="ข้อมูลคอนเทนต์" columns={2}>
-          <ERPFormField label="ชื่อคอนเทนต์" required span={2}><ERPInput value={form.title} onChange={(e) => upd({ title: e.target.value })} placeholder="เช่น โปรโมต Heart Bag สีชมพู 7.7" /></ERPFormField>
-          <ERPFormField label="ประเภทโพสต์"><ERPSelect value={form.post_type} options={POST_TYPES} onChange={(e) => upd({ post_type: e.target.value })} /></ERPFormField>
-          <ERPFormField label="สถานะ"><ERPSelect value={form.status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => upd({ status: e.target.value as ContentStatus })} /></ERPFormField>
-          <ERPFormField label="แบรนด์"><ERPSelect value={form.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => upd({ brand_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label="แคมเปญ"><ERPSelect value={form.campaign_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
-          <ERPFormField label="ตั้งเวลาโพสต์"><ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} /></ERPFormField>
-          <ERPFormField label="สินค้า/SKU (ถ้ามี)"><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
-          <ERPFormField label="แพลตฟอร์ม" span={2}>
+        <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
+          <ERPFormField label={t("ชื่อคอนเทนต์", "Content Title")} required span={2}><ERPInput value={form.title} onChange={(e) => upd({ title: e.target.value })} placeholder={t("เช่น โปรโมต Heart Bag สีชมพู 7.7", "e.g. Promote Heart Bag Pink 7.7")} /></ERPFormField>
+          <ERPFormField label={t("ประเภทโพสต์", "Post Type")}><ERPSelect value={form.post_type} options={POST_TYPES} onChange={(e) => upd({ post_type: e.target.value })} /></ERPFormField>
+          <ERPFormField label={t("สถานะ", "Status")}><ERPSelect value={form.status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => upd({ status: e.target.value as ContentStatus })} /></ERPFormField>
+          <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => upd({ brand_id: e.target.value })} /></ERPFormField>
+          <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => upd({ campaign_id: e.target.value })} /></ERPFormField>
+          <ERPFormField label={t("ตั้งเวลาโพสต์", "Schedule Post")}><ERPInput type="datetime-local" value={form.scheduled_at} onChange={(e) => upd({ scheduled_at: e.target.value })} /></ERPFormField>
+          <ERPFormField label={t("สินค้า/SKU (ถ้ามี)", "Product/SKU (if any)")}><SkuPicker value={form.product} onChange={(v) => upd({ product: v })} /></ERPFormField>
+          <ERPFormField label={t("แพลตฟอร์ม", "Platforms")} span={2}>
             <div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlatform(p.value)} className={`px-2.5 py-1 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"}`}>{p.label}</button>)}</div>
           </ERPFormField>
-          <ERPFormField label="โน้ต/บรีฟ" span={2}><ERPTextarea value={form.note} rows={2} onChange={(e) => upd({ note: e.target.value })} /></ERPFormField>
+          <ERPFormField label={t("โน้ต/บรีฟ", "Note/Brief")} span={2}><ERPTextarea value={form.note} rows={2} onChange={(e) => upd({ note: e.target.value })} /></ERPFormField>
         </ERPFormSection>
       </ERPModal>
 
       {detailId && <ContentDrawer contentId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => { load(); reloadTemplates(); }} onDelete={(c) => setDelTarget(c)} pushToast={pushToast} />}
 
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={onDelete}
-        title="ลบคอนเทนต์" message={<span>ต้องการลบ <span className="font-semibold">{delTarget?.title}</span> ใช่ไหม?</span>} confirmText="ลบ" variant="danger" />
+        title={t("ลบคอนเทนต์", "Delete Content")} message={<span>{t("ต้องการลบ", "Delete")} <span className="font-semibold">{delTarget?.title}</span> {t("ใช่ไหม?", "?")}</span>} confirmText={t("ลบ", "Delete")} variant="danger" />
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
         {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}
@@ -194,6 +196,7 @@ export default function ContentPage() {
 // Month calendar (เดือนปัจจุบัน + เลื่อนเดือน) — แสดงคอนเทนต์ตามวันตั้งเวลา
 // ============================================================
 function MonthCalendar({ items, onOpen }: { items: ContentItem[]; onOpen: (id: string) => void }) {
+  const t = useT();
   const [offset, setOffset] = useState(0);
   const base = useMemo(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth() + offset, 1); }, [offset]);
   const year = base.getFullYear(), month = base.getMonth();
@@ -214,7 +217,7 @@ function MonthCalendar({ items, onOpen }: { items: ContentItem[]; onOpen: (id: s
         <h2 className="font-semibold text-slate-800">{monthName}</h2>
         <button onClick={() => setOffset((o) => o + 1)} className="h-8 w-8 rounded-md hover:bg-slate-100 text-slate-500">›</button>
       </div>
-      <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-1">{["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"].map((d) => <div key={d} className="py-1">{d}</div>)}</div>
+      <div className="grid grid-cols-7 gap-1 text-center text-xs text-slate-400 mb-1">{[t("อา","Sun"), t("จ","Mon"), t("อ","Tue"), t("พ","Wed"), t("พฤ","Thu"), t("ศ","Fri"), t("ส","Sat")].map((d) => <div key={d} className="py-1">{d}</div>)}</div>
       <div className="grid grid-cols-7 gap-1">
         {Array.from({ length: first }).map((_, i) => <div key={`e${i}`} />)}
         {Array.from({ length: days }).map((_, i) => {
@@ -228,7 +231,7 @@ function MonthCalendar({ items, onOpen }: { items: ContentItem[]; onOpen: (id: s
                 {list.slice(0, 3).map((c) => { const m = CONTENT_STATUS_META[c.status] ?? CONTENT_STATUS_META.draft; return (
                   <button key={c.id} onClick={() => onOpen(c.id)} className={`w-full text-left text-[10px] leading-tight px-1.5 py-1 rounded border ${m.cls} truncate`} title={c.title}>{c.title}</button>
                 ); })}
-                {list.length > 3 && <div className="text-[10px] text-slate-400">+{list.length - 3} อื่น ๆ</div>}
+                {list.length > 3 && <div className="text-[10px] text-slate-400">+{list.length - 3} {t("อื่น ๆ", "more")}</div>}
               </div>
             </div>
           );
@@ -246,6 +249,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   onClose: () => void; onChanged: () => void; onDelete?: (c: ContentItem) => void;
   pushToast: (type: Toast["type"], m: string) => void;
 }) {
+  const t = useT();
   const { platforms } = useCreativeOptions();
   const [d, setD] = useState<ContentDetail | null>(null);
   const [caps, setCaps] = useState<ContentCaption[]>([]);
@@ -312,7 +316,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
       });
-      pushToast("success", "บันทึกแล้ว"); await load(); onChanged();
+      pushToast("success", t("บันทึกแล้ว", "Saved")); await load(); onChanged();
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
   };
@@ -321,11 +325,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     if (!d) return;
     try {
       await createContent({ is_template: true, title: `${d.title} (เทมเพลต)`, post_type: d.post_type, platforms: d.platforms ?? [], brand_id: d.brand_id, captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })) });
-      pushToast("success", "บันทึกเป็นเทมเพลตแล้ว ✓ (เลือกใช้ได้ตอนสร้างคอนเทนต์)"); onChanged();
+      pushToast("success", t("บันทึกเป็นเทมเพลตแล้ว ✓ (เลือกใช้ได้ตอนสร้างคอนเทนต์)", "Saved as template ✓ (available when creating content)")); onChanged();
     } catch (e) { pushToast("error", (e as Error).message); }
   };
 
-  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[640px] max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">กำลังโหลด...</div></>);
+  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[640px] max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
 
   return (
     <>
@@ -334,7 +338,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0"><h3 className="text-base font-semibold text-slate-900 truncate">{d.title}</h3><span className="font-mono text-xs text-slate-500">{d.content_no}</span></div>
           <div className="flex items-center gap-1">
-            {onDelete && <button onClick={() => onDelete(d)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">ลบ</button>}
+            {onDelete && <button onClick={() => onDelete(d)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>}
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
           </div>
         </div>
@@ -342,44 +346,44 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* status + schedule */}
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs text-slate-400">สถานะ</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
-            <div><label className="text-xs text-slate-400">ตั้งเวลาโพสต์</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
+            <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
+            <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
           </div>
           {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">สินค้า</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("สินค้า", "Product")}</p>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="text-xs text-slate-400">SKU (สีเดี่ยว)</label><SkuPicker value={sku} onChange={setSku} /></div>
-              <div><label className="text-xs text-slate-400">Parent SKU (ทุกสี)</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
+              <div><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
+              <div><label className="text-xs text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
             </div>
             <div className="mt-2">
-              <label className="text-xs text-slate-400">สีที่มี (ตัวแปร {"{color}"})</label>
-              <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)</span>}</div>
+              <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
+              <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">{t("— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)", "— Select SKU (single color) or Parent SKU (all child colors)")}</span>}</div>
             </div>
           </div>
 
           {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ราคา / ส่วนลด</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ราคา / ส่วนลด", "Price / Discount")}</p>
             <div className="flex items-end gap-2 flex-wrap">
-              <div><label className="text-xs text-slate-400">ราคาเต็ม (จาก SKU)</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : "— (ไม่มี SKU)"}</div></div>
-              <div><label className="text-xs text-slate-400">ส่วนลด</label>
+              <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
+              <div><label className="text-xs text-slate-400">{t("ส่วนลด", "Discount")}</label>
                 <div className="flex">
                   <input value={discountValue} onChange={(e) => setDiscountValue(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" className="h-9 w-24 border border-slate-200 rounded-l-lg px-2 text-sm" />
-                  <button type="button" onClick={() => setDiscountPct((p) => !p)} title="สลับ บาท/เปอร์เซ็นต์" className="h-9 px-3 text-sm border border-l-0 border-slate-200 rounded-r-lg bg-slate-50 hover:bg-slate-100">{discountPct ? "%" : "฿"}</button>
+                  <button type="button" onClick={() => setDiscountPct((p) => !p)} title={t("สลับ บาท/เปอร์เซ็นต์", "Toggle Baht/Percent")} className="h-9 px-3 text-sm border border-l-0 border-slate-200 rounded-r-lg bg-slate-50 hover:bg-slate-100">{discountPct ? "%" : "฿"}</button>
                 </div>
               </div>
-              <div><label className="text-xs text-slate-400">ราคาขายจริง</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
+              <div><label className="text-xs text-slate-400">{t("ราคาขายจริง", "Selling Price")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
             </div>
           </div>
 
           {/* captions per platform */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Caption แยกตามแพลตฟอร์ม</p>
-              <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ จัดการแม่แบบ</button>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
+              <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("จัดการแม่แบบ", "Manage Templates")}</button>
             </div>
-            {caps.length === 0 ? <p className="text-sm text-slate-400 italic">ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)</p> : (
+            {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
                 {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
               </div>
@@ -388,7 +392,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
           {/* product links */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ลิงก์สินค้า (Shopee/Lazada/Website)</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์สินค้า (Shopee/Lazada/Website)", "Product Links (Shopee/Lazada/Website)")}</p>
             <div className="space-y-2">
               {links.map((l, i) => (
                 <div key={i} className="flex gap-2">
@@ -399,18 +403,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   <button onClick={() => setLinks((ls) => ls.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
                 </div>
               ))}
-              <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ เพิ่มลิงก์</button>
+              <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
             </div>
           </div>
 
           {/* published url */}
-          {(status === "published") && <div><label className="text-xs text-slate-400">ลิงก์โพสต์ที่เผยแพร่</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
+          {(status === "published") && <div><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
         </div>
 
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
-          {!d.is_template && <button onClick={saveAsTemplate} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 mr-auto">💾 บันทึกเป็นเทมเพลต</button>}
-          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
-          <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+          {!d.is_template && <button onClick={saveAsTemplate} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 mr-auto">💾 {t("บันทึกเป็นเทมเพลต", "Save as Template")}</button>}
+          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </div>
       </div>
 
@@ -423,6 +427,7 @@ type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: 
 
 // caption ต่อ 1 แพลตฟอร์ม: เลือกแม่แบบ + พิมพ์ข้อความล้วน + preview ที่ประกอบเสร็จ (คัดลอกได้)
 function CaptionCard({ cap, templates, sharedVars, brandId, onChange, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
   const [showTags, setShowTags] = useState(false);
   const [tags, setTags] = useState<Hashtag[]>([]);
   const [newTag, setNewTag] = useState("");
@@ -446,34 +451,34 @@ function CaptionCard({ cap, templates, sharedVars, brandId, onChange, pushToast 
   const tpl = templates.find((t) => t.key === typeKey) ?? templates[0];
   // ประกอบ preview จากแม่แบบ + ตัวแปร (ถ้าไม่มีแม่แบบ → caption + hashtags ตรงๆ)
   const preview = tpl ? renderCaption(tpl.body, { caption: cap.caption, hashtags: cap.hashtags, ...sharedVars }) : `${cap.caption ?? ""}\n\n${cap.hashtags ?? ""}`.trim();
-  const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", `คัดลอก ${platformLabel(cap.platform)} แล้ว`); } catch { pushToast("error", "คัดลอกไม่สำเร็จ"); } };
+  const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
 
   return (
     <div className="border border-slate-200 rounded-lg p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-slate-700">{platformLabel(cap.platform)}</span>
-        <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 คัดลอกผลลัพธ์</button>
+        <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอกผลลัพธ์", "Copy Result")}</button>
       </div>
       {/* เลือกแม่แบบ */}
       <div className="flex flex-wrap gap-1.5 mb-2">
         {templates.map((tp) => { const on = typeKey === tp.key; return (
           <button key={tp.key} onClick={() => onChange({ caption_type: tp.key })} className={`px-2.5 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"}`}>{tp.label}</button>
         ); })}
-        {templates.length === 0 && <span className="text-xs text-slate-400">ยังไม่มีแม่แบบ — กด ⚙️ จัดการแม่แบบ</span>}
+        {templates.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มีแม่แบบ — กด ⚙️ จัดการแม่แบบ", "No templates yet — click ⚙️ Manage Templates")}</span>}
       </div>
-      <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`} />
+      <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />
       <div className="mt-2">
-        <ERPInput value={cap.hashtags ?? ""} onChange={(e) => onChange({ hashtags: e.target.value })} placeholder="#hashtag คั่นด้วยเว้นวรรค" />
-        <button onClick={() => setShowTags((s) => !s)} className="text-xs text-violet-700 hover:underline mt-1">{showTags ? "ซ่อนคลัง hashtag" : "＋ เลือกจากคลัง hashtag"}</button>
+        <ERPInput value={cap.hashtags ?? ""} onChange={(e) => onChange({ hashtags: e.target.value })} placeholder={t("#hashtag คั่นด้วยเว้นวรรค", "#hashtag separated by space")} />
+        <button onClick={() => setShowTags((s) => !s)} className="text-xs text-violet-700 hover:underline mt-1">{showTags ? t("ซ่อนคลัง hashtag", "Hide Hashtag Library") : t("＋ เลือกจากคลัง hashtag", "＋ Select from Hashtag Library")}</button>
         {showTags && (
           <div className="mt-2 bg-slate-50 rounded-lg p-2">
             <div className="flex gap-1.5 mb-2">
-              <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNew()} placeholder="เพิ่ม hashtag ใหม่เข้าคลัง" className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
-              <button onClick={addNew} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50">เพิ่ม</button>
+              <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNew()} placeholder={t("เพิ่ม hashtag ใหม่เข้าคลัง", "Add new hashtag to library")} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
+              <button onClick={addNew} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50">{t("เพิ่ม", "Add")}</button>
             </div>
-            {loadingTags ? <p className="text-xs text-slate-400">กำลังโหลด...</p> : tags.length === 0 ? <p className="text-xs text-slate-400">ยังไม่มี hashtag ในคลัง (พิมพ์เพิ่มด้านบน)</p> : (
+            {loadingTags ? <p className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : tags.length === 0 ? <p className="text-xs text-slate-400">{t("ยังไม่มี hashtag ในคลัง (พิมพ์เพิ่มด้านบน)", "No hashtags in library yet (type above to add)")}</p> : (
               <div className="flex flex-wrap gap-1.5">
-                {tags.map((h) => <button key={h.id} onClick={() => appendTag(h.text)} className="text-xs bg-white border border-slate-200 rounded-full px-2 py-0.5 text-slate-600 hover:border-violet-300 hover:text-violet-700" title={`ใช้ ${h.usage_count} ครั้ง`}>{h.text}</button>)}
+                {tags.map((h) => <button key={h.id} onClick={() => appendTag(h.text)} className="text-xs bg-white border border-slate-200 rounded-full px-2 py-0.5 text-slate-600 hover:border-violet-300 hover:text-violet-700" title={t(`ใช้ ${h.usage_count} ครั้ง`, `Used ${h.usage_count} times`)}>{h.text}</button>)}
               </div>
             )}
           </div>
@@ -481,7 +486,7 @@ function CaptionCard({ cap, templates, sharedVars, brandId, onChange, pushToast 
       </div>
       {/* preview ผลลัพธ์ที่จะคัดลอก */}
       <div className="mt-2">
-        <p className="text-[11px] text-slate-400 mb-1">ตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)</p>
+        <p className="text-[11px] text-slate-400 mb-1">{t("ตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</p>
         <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
       </div>
     </div>
@@ -490,6 +495,7 @@ function CaptionCard({ cap, templates, sharedVars, brandId, onChange, pushToast 
 
 // ตั้งค่าแม่แบบแคปชั่น + ช่องทางร้าน (ต่อแบรนด์ หรือ ค่ากลาง)
 function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushToast }: { brandId: string | null; brandLabel: string | null; onClose: () => void; onSaved: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
   const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
   const [channels, setChannels] = useState<ShopChannel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -502,29 +508,29 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
   const setActiveBody = (body: string) => setTemplates((ts) => ts.map((t, i) => i === activeIdx ? { ...t, body } : t));
   const setActiveLabel = (label: string) => setTemplates((ts) => ts.map((t, i) => i === activeIdx ? { ...t, label } : t));
   const insertVar = (v: string) => setActiveBody((active?.body ?? "") + v);
-  const addTemplate = () => { setTemplates((ts) => [...ts, { key: `custom_${ts.length + 1}`, label: "แม่แบบใหม่", body: "{caption}\n\n{hashtags}" }]); setActiveIdx(templates.length); };
-  const removeActive = () => { if (!active || !window.confirm(`ลบแม่แบบ "${active.label}" ?`)) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
+  const addTemplate = () => { setTemplates((ts) => [...ts, { key: `custom_${ts.length + 1}`, label: t("แม่แบบใหม่", "New Template"), body: "{caption}\n\n{hashtags}" }]); setActiveIdx(templates.length); };
+  const removeActive = () => { if (!active || !window.confirm(t(`ลบแม่แบบ "${active.label}" ?`, `Delete template "${active.label}"?`))) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
 
   // preview ตัวอย่าง (ใช้ข้อมูลสมมติ)
   const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้" };
 
   const save = async () => {
     setSaving(true);
-    try { await saveCaptionTemplates(brandId, templates, channels); pushToast("success", "บันทึกแม่แบบแล้ว"); onSaved(); }
+    try { await saveCaptionTemplates(brandId, templates, channels); pushToast("success", t("บันทึกแม่แบบแล้ว", "Template saved")); onSaved(); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); }
   };
 
   return (
-    <ERPModal open onClose={onClose} title={`จัดการแม่แบบแคปชั่น${brandId ? ` — ${brandLabel ?? "แบรนด์"}` : " — ค่ากลาง (ทุกแบรนด์)"}`} size="xl"
+    <ERPModal open onClose={onClose} title={`${t("จัดการแม่แบบแคปชั่น", "Manage Caption Templates")}${brandId ? ` — ${brandLabel ?? t("แบรนด์", "Brand")}` : ` — ${t("ค่ากลาง (ทุกแบรนด์)", "Default (all brands)")}`}`} size="xl"
       footer={<>
-        <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">ปิด</button>
-        <button onClick={save} disabled={saving || loading} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+        <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
+        <button onClick={save} disabled={saving || loading} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
       </>}>
-      {loading ? <p className="text-sm text-slate-400 p-4">กำลังโหลด...</p> : (
+      {loading ? <p className="text-sm text-slate-400 p-4">{t("กำลังโหลด...", "Loading...")}</p> : (
         <div className="space-y-4">
           {brandId && (
             <div>
-              <p className="text-xs font-semibold text-slate-500 mb-1.5">ช่องทางร้าน (ใช้กับตัวแปร {"{shop}"})</p>
+              <p className="text-xs font-semibold text-slate-500 mb-1.5">{t("ช่องทางร้าน (ใช้กับตัวแปร", "Shop channels (used with variable")} {"{shop}"})</p>
               <div className="space-y-1.5">
                 {channels.map((c, i) => (
                   <div key={i} className="flex gap-2">
@@ -533,7 +539,7 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
                     <button onClick={() => setChannels((cs) => cs.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
                   </div>
                 ))}
-                <button onClick={() => setChannels((cs) => [...cs, { label: "", value: "" }])} className="text-sm text-violet-700 hover:underline">＋ เพิ่มช่องทาง</button>
+                <button onClick={() => setChannels((cs) => [...cs, { label: "", value: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มช่องทาง", "Add Channel")}</button>
               </div>
             </div>
           )}
@@ -541,29 +547,29 @@ function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushTo
           {/* แท็บแม่แบบ */}
           <div className="flex flex-wrap gap-1.5">
             {templates.map((t, i) => <button key={i} onClick={() => setActiveIdx(i)} className={`px-2.5 py-1 rounded-lg text-xs border ${i === activeIdx ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{t.label || t.key}</button>)}
-            <button onClick={addTemplate} className="px-2.5 py-1 rounded-lg text-xs border border-dashed border-slate-300 text-slate-500">＋ แม่แบบ</button>
+            <button onClick={addTemplate} className="px-2.5 py-1 rounded-lg text-xs border border-dashed border-slate-300 text-slate-500">＋ {t("แม่แบบ", "Template")}</button>
           </div>
 
           {active && (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <div><label className="text-xs text-slate-400">ชื่อแม่แบบ</label><input value={active.label} onChange={(e) => setActiveLabel(e.target.value)} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" /></div>
+                <div><label className="text-xs text-slate-400">{t("ชื่อแม่แบบ", "Template Name")}</label><input value={active.label} onChange={(e) => setActiveLabel(e.target.value)} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" /></div>
                 <div>
-                  <label className="text-xs text-slate-400">เนื้อหาแม่แบบ (แทรกตัวแปรได้)</label>
+                  <label className="text-xs text-slate-400">{t("เนื้อหาแม่แบบ (แทรกตัวแปรได้)", "Template Body (variables insertable)")}</label>
                   <textarea value={active.body} onChange={(e) => setActiveBody(e.target.value)} rows={10} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono leading-relaxed" />
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {CAPTION_VARS.map((v) => <button key={v.key} onClick={() => insertVar(v.label)} title={v.hint} className="text-[11px] bg-slate-100 hover:bg-violet-100 text-slate-600 rounded px-1.5 py-0.5">{v.label}</button>)}
                 </div>
-                <button onClick={removeActive} className="text-xs text-red-500 hover:underline">ลบแม่แบบนี้</button>
+                <button onClick={removeActive} className="text-xs text-red-500 hover:underline">{t("ลบแม่แบบนี้", "Delete this template")}</button>
               </div>
               <div>
-                <label className="text-xs text-slate-400">ตัวอย่าง (ใช้ข้อมูลสมมติ)</label>
+                <label className="text-xs text-slate-400">{t("ตัวอย่าง (ใช้ข้อมูลสมมติ)", "Preview (sample data)")}</label>
                 <pre className="mt-0.5 text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed h-[280px] overflow-y-auto">{renderCaption(active.body, sampleVars) || "—"}</pre>
               </div>
             </div>
           )}
-          <p className="text-[11px] text-slate-400">บรรทัดที่ตัวแปรว่างทั้งหมดจะถูกตัดออกอัตโนมัติ · {brandId ? "บันทึกแล้วจะใช้เฉพาะแบรนด์นี้" : "นี่คือค่ากลางที่ทุกแบรนด์ใช้ ถ้ายังไม่ตั้งของตัวเอง"}</p>
+          <p className="text-[11px] text-slate-400">{t("บรรทัดที่ตัวแปรว่างทั้งหมดจะถูกตัดออกอัตโนมัติ", "Lines where all variables are empty will be removed automatically")} · {brandId ? t("บันทึกแล้วจะใช้เฉพาะแบรนด์นี้", "Saved settings apply to this brand only") : t("นี่คือค่ากลางที่ทุกแบรนด์ใช้ ถ้ายังไม่ตั้งของตัวเอง", "This is the default used by all brands that haven't set their own")}</p>
         </div>
       )}
     </ERPModal>

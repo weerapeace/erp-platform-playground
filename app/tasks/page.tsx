@@ -129,12 +129,12 @@ export default function TasksPage() {
   // หลังบันทึก/ลบ → บังคับโหลดงานใหม่ (focus revalidate มีในตัว hook แล้ว)
   const reload = useCallback(async () => { await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]); }, [tasksSWR, mineSWR, subsSWR]);
 
-  const tableTasks = useMemo(() => quick === "review" ? tasks.filter((t) => t.status === "need_review") : quick === "overdue" ? tasks.filter(isOverdue) : tasks, [tasks, quick]);
+  const tableTasks = useMemo(() => quick === "review" ? tasks.filter((tk) => tk.status === "need_review") : quick === "overdue" ? tasks.filter(isOverdue) : tasks, [tasks, quick]);
   const counts = useMemo(() => ({
     total: tasks.length,
     mine: myTasks.length,
     overdue: tasks.filter(isOverdue).length,
-    review: tasks.filter((t) => t.status === "need_review").length,
+    review: tasks.filter((tk) => tk.status === "need_review").length,
   }), [tasks, myTasks]);
 
   // ---- create ----
@@ -146,7 +146,7 @@ export default function TasksPage() {
     if (ok) await reload();
   }, [pushToast, reload]);
 
-  const onDelete = async (id: string) => { try { await deleteTask(id); pushToast("info", "ลบงานแล้ว"); setDetailId(null); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const onDelete = async (id: string) => { try { await deleteTask(id); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setDetailId(null); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   return (
     <StandaloneShell title={t("งาน Creative (Task Manager)", "Creative Tasks")} icon="🎨" accent="violet">
@@ -184,7 +184,7 @@ export default function TasksPage() {
         </div>
 
         {loading ? (
-          <div className="py-20 text-center text-slate-400">กำลังโหลดข้อมูล...</div>
+          <div className="py-20 text-center text-slate-400">{t("กำลังโหลดข้อมูล...", "Loading data...")}</div>
         ) : (
           <>
             {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
@@ -193,7 +193,7 @@ export default function TasksPage() {
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                 <DataTable<CreativeTask>
                   data={tableTasks} columns={COLUMNS}
-                  title={`${t("รายการงาน", "Tasks")}${quick === "review" ? " · รอตรวจ" : quick === "overdue" ? " · เกินกำหนด" : ""} (${tableTasks.length})`}
+                  title={`${t("รายการงาน", "Tasks")}${quick === "review" ? ` · ${t("รอตรวจ", "In review")}` : quick === "overdue" ? ` · ${t("เกินกำหนด", "Overdue")}` : ""} (${tableTasks.length})`}
                   description={t("คลิกที่งานเพื่อดูรายละเอียด · ตารางกลางตัวเดียวกับทุกโมดูล", "Click a row to view details · shared table used across modules")}
                   emptyMessage={t("ยังไม่มีงาน — กดปุ่ม สร้างงาน", "No tasks yet — click New task")}
                   searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
@@ -208,15 +208,15 @@ export default function TasksPage() {
 
             {view === "kanban" && (
               <div>
-                <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด</p>
-                <KanbanBoard tasks={tasks} statuses={statuses} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to); }} />
+                <p className="text-xs text-slate-400 mb-2">💡 {t("ลากการ์ดข้ามคอลัมน์เพื่อเปลี่ยนสถานะ · คลิกการ์ดเพื่อดูรายละเอียด", "Drag cards across columns to change status · click a card to view details")}</p>
+                <KanbanBoard tasks={tasks} statuses={statuses} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to); }} />
               </div>
             )}
 
             {view === "canvas" && (
               <div>
-                <p className="text-xs text-slate-400 mb-2">💡 ลากการ์ดอิสระ · ปล่อยในโซนสถานะเพื่อเปลี่ยนสถานะ · วาดกล่อง/โน้ต/ลูกศร/วางรูปได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด</p>
-                <CanvasBoard tasks={tasks} statuses={statuses} startMaximized onAddTask={openCreate} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to, force) => { const t = tasks.find((x) => x.id === taskId); if (t) applyMove(t, to, force); }} />
+                <p className="text-xs text-slate-400 mb-2">💡 {t("ลากการ์ดอิสระ · ปล่อยในโซนสถานะเพื่อเปลี่ยนสถานะ · วาดกล่อง/โน้ต/ลูกศร/วางรูปได้ · ดับเบิลคลิกการ์ด = ดูรายละเอียด", "Drag cards freely · drop into a status zone to change status · draw boxes/notes/arrows/images · double-click a card to view details")}</p>
+                <CanvasBoard tasks={tasks} statuses={statuses} startMaximized onAddTask={openCreate} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to, force) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to, force); }} />
               </div>
             )}
           </>
@@ -225,7 +225,7 @@ export default function TasksPage() {
 
       {/* Create modal (ของกลาง — ใช้ร่วมกับ Campaign Canvas) */}
       <CreateTaskModal open={createOpen} onClose={() => setCreateOpen(false)} pushToast={pushToast}
-        onCreated={async (t) => { pushToast("success", `สร้างงาน ${t.task_no} แล้ว`); await reload(); }} />
+        onCreated={async (newTask) => { pushToast("success", `${t("สร้างงาน", "Task created")} ${newTask.task_no}`); await reload(); }} />
 
       {/* Detail drawer */}
       {detailId && (
@@ -262,6 +262,7 @@ const SUB_STATUS_DOT: Record<string, string> = { todo: "bg-slate-400", in_progre
 function QueueView({ tasks, subtasks, onOpen, onMove, onCreate }: {
   tasks: CreativeTask[]; subtasks: MySubtask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void;
 }) {
+  const t = useT();
   const ordered = useMemo(() => [...tasks].filter((t) => !isTerminal(t.status)).sort((a, b) => {
     const pr = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
     if (pr !== 0) return pr;
@@ -272,9 +273,9 @@ function QueueView({ tasks, subtasks, onOpen, onMove, onCreate }: {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
         <div className="text-4xl mb-3">🎉</div>
-        <p className="text-slate-600 font-medium">ไม่มีงานค้างในคิวของคุณ</p>
-        <p className="text-slate-400 text-sm mt-1">งาน/งานย่อยที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง</p>
-        <button onClick={onCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ สร้างงาน</button>
+        <p className="text-slate-600 font-medium">{t("ไม่มีงานค้างในคิวของคุณ", "Your queue is clear")}</p>
+        <p className="text-slate-400 text-sm mt-1">{t("งาน/งานย่อยที่มอบหมายให้คุณจะแสดงที่นี่ เรียงตามความสำคัญและกำหนดส่ง", "Tasks and subtasks assigned to you will appear here, sorted by priority and due date")}</p>
+        <button onClick={onCreate} className="mt-4 h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างงาน", "New task")}</button>
       </div>
     );
   }
@@ -284,15 +285,15 @@ function QueueView({ tasks, subtasks, onOpen, onMove, onCreate }: {
       {/* งานย่อยของฉัน */}
       {subtasks.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <p className="text-sm font-semibold text-slate-700 mb-2">🧩 งานย่อยของฉัน ({subtasks.length})</p>
+          <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({subtasks.length})</p>
           <div className="space-y-1.5">
             {subtasks.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 cursor-pointer" onClick={() => onOpen(s.task_id)} title="กดเพื่อเปิดงาน → เริ่ม/ส่งงาน">
-                <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_STATUS_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_STATUS_LABEL[s.status] ?? "ยังไม่เริ่ม"} />
+              <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 cursor-pointer" onClick={() => onOpen(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}>
+                <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_STATUS_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
                 <div className="flex-1 min-w-0">
                   <span className="text-sm text-slate-700">{s.title}</span>
-                  <span className="ml-2 text-[10px] text-slate-400">{SUB_STATUS_LABEL[s.status] ?? "ยังไม่เริ่ม"}</span>
-                  {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">ต้องเสร็จก่อน</span>}
+                  <span className="ml-2 text-[10px] text-slate-400">{SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
+                  {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must complete first")}</span>}
                   <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
                 </div>
                 {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
@@ -302,34 +303,34 @@ function QueueView({ tasks, subtasks, onOpen, onMove, onCreate }: {
         </div>
       )}
 
-      {ordered.length > 0 && <p className="text-sm text-slate-500">งานที่ต้องทำตอนนี้ · เรียงตามความสำคัญ + กำหนดส่ง ({ordered.length})</p>}
-      {ordered.map((t, i) => {
-        const od = isOverdue(t);
-        const actions = transitionsFrom(t.status);
+      {ordered.length > 0 && <p className="text-sm text-slate-500">{t("งานที่ต้องทำตอนนี้ · เรียงตามความสำคัญ + กำหนดส่ง", "Tasks to do now · sorted by priority + due date")} ({ordered.length})</p>}
+      {ordered.map((task, i) => {
+        const od = isOverdue(task);
+        const actions = transitionsFrom(task.status);
         return (
-          <div key={t.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 transition-colors">
+          <div key={task.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 transition-colors">
             <div className="flex items-start gap-4">
               <div className="h-9 w-9 rounded-full bg-violet-50 text-violet-700 font-bold flex items-center justify-center shrink-0">{i + 1}</div>
-              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpen(t.id)}>
+              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpen(task.id)}>
                 <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <PriorityBadge priority={t.priority} />
-                  <StatusBadge status={t.status} />
-                  {t.task_type && <span className="text-xs text-slate-400">{taskTypeLabel(t.task_type)}</span>}
+                  <PriorityBadge priority={task.priority} />
+                  <StatusBadge status={task.status} />
+                  {task.task_type && <span className="text-xs text-slate-400">{taskTypeLabel(task.task_type)}</span>}
                 </div>
-                <p className="text-base font-semibold text-slate-800 leading-snug">{t.title}</p>
+                <p className="text-base font-semibold text-slate-800 leading-snug">{task.title}</p>
                 <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
-                  <span className="font-mono">{t.task_no}</span>
-                  {t.brand_label && <span>· {t.brand_label}</span>}
-                  {t.sku_code && <span>· 📦 {t.sku_code}</span>}
-                  {t.due_date && <span className={od ? "text-red-600 font-semibold" : ""}>· {od ? "⚠ เกินกำหนด " : "ส่ง "}{t.due_date}</span>}
+                  <span className="font-mono">{task.task_no}</span>
+                  {task.brand_label && <span>· {task.brand_label}</span>}
+                  {task.sku_code && <span>· 📦 {task.sku_code}</span>}
+                  {task.due_date && <span className={od ? "text-red-600 font-semibold" : ""}>· {od ? `⚠ ${t("เกินกำหนด", "Overdue")} ` : `${t("ส่ง", "Due")} `}{task.due_date}</span>}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2 mt-3 flex-wrap pl-13">
               {actions.map((a) => (
-                <button key={a.to_key} onClick={() => onMove(t, a.to_key)} className="h-9 px-4 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700">{a.label}</button>
+                <button key={a.to_key} onClick={() => onMove(task, a.to_key)} className="h-9 px-4 text-sm font-medium rounded-lg bg-violet-600 text-white hover:bg-violet-700">{a.label}</button>
               ))}
-              <button onClick={() => onOpen(t.id)} className="h-9 px-4 text-sm font-medium rounded-lg text-slate-600 border border-slate-200 hover:bg-slate-50">📂 เปิดงาน</button>
+              <button onClick={() => onOpen(task.id)} className="h-9 px-4 text-sm font-medium rounded-lg text-slate-600 border border-slate-200 hover:bg-slate-50">📂 {t("เปิดงาน", "Open task")}</button>
             </div>
           </div>
         );

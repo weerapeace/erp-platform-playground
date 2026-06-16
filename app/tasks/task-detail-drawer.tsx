@@ -11,6 +11,7 @@ import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
 import { useAuth } from "@/components/auth";
+import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
 import { taskTypeLabel, platformLabel, useCreativeOptions } from "./use-options";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
@@ -54,6 +55,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 }) {
   const { taskTypes, platforms: platformOpts } = useCreativeOptions();
   const { user } = useAuth();
+  const t = useT();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
@@ -64,7 +66,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
   const load = useCallback(async () => {
     try { setDetail(await getTask(taskId)); }
-    catch (e) { pushToast("error", `โหลดรายละเอียดไม่สำเร็จ: ${(e as Error).message}`); }
+    catch (e) { pushToast("error", `${t("โหลดรายละเอียดไม่สำเร็จ", "Failed to load details")}: ${(e as Error).message}`); }
   }, [taskId, pushToast]);
   useEffect(() => { load(); }, [load]);
 
@@ -80,7 +82,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     if (!ef || !detail) return; setBusy(true);
     try {
       await updateTask(detail.id, { task_type: ef.task_type || null, priority: ef.priority, brand_id: ef.brand_id || null, due_date: ef.due_date || null, platforms: ef.platforms, assignee_id: ef.assignee?.id ?? null, reviewer_id: ef.reviewer?.id ?? null });
-      setEditing(false); await refresh(); pushToast("success", "บันทึกแล้ว");
+      setEditing(false); await refresh(); pushToast("success", t("บันทึกแล้ว", "Saved"));
     } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
 
@@ -88,24 +90,24 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     return (
       <>
         <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-        <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex items-center justify-center"><span className="text-slate-400">กำลังโหลด...</span></div>
+        <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex items-center justify-center"><span className="text-slate-400">{t("กำลังโหลด...", "Loading...")}</span></div>
       </>
     );
   }
-  const t = detail;
-  const isClosed = isTerminal(t.status);
-  const actions = transitionsFrom(t.status);
+  const d = detail;
+  const isClosed = isTerminal(d.status);
+  const actions = transitionsFrom(d.status);
   // สิทธิ์งานย่อย: ผจก./admin = จัดการได้หมด · ผู้ตรวจ = อนุมัติได้ · คนสร้างงาน = แก้ผู้รับผิดชอบได้
   const isManager = user?.role === "admin" || user?.role === "manager";
-  const canApproveSub = isManager || (!!user?.id && user.id === t.reviewer_id);
-  const canManageAssignees = isManager || (!!user?.id && user.id === t.created_by);
+  const canApproveSub = isManager || (!!user?.id && user.id === d.reviewer_id);
+  const canManageAssignees = isManager || (!!user?.id && user.id === d.created_by);
 
-  const handleMove = async (toKey: string) => { setBusy(true); await onMove(t, toKey); await refresh(); setBusy(false); };
-  const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(t.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
-  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(t.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
+  const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(d.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(d.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
 
-  const brandColor = brands.find((b) => b.id === t.brand_id)?.color ?? t.brand_color;
-  const campaignName = campaigns.find((c) => c.id === t.campaign_id)?.name ?? t.campaign_label;
+  const brandColor = brands.find((b) => b.id === d.brand_id)?.color ?? d.brand_color;
+  const campaignName = campaigns.find((c) => c.id === d.campaign_id)?.name ?? d.campaign_label;
 
   return (
     <>
@@ -114,14 +116,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         {/* header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0 flex-1 mr-2">
-            <input defaultValue={t.title} title="คลิกเพื่อแก้ชื่องาน"
-              onBlur={async (e) => { const v = e.target.value.trim(); if (v && v !== t.title) { try { await updateTask(t.id, { title: v }); await refresh(); } catch (err) { pushToast("error", (err as Error).message); } } }}
+            <input defaultValue={d.title} title={t("คลิกเพื่อแก้ชื่องาน", "Click to edit task name")}
+              onBlur={async (e) => { const v = e.target.value.trim(); if (v && v !== d.title) { try { await updateTask(d.id, { title: v }); await refresh(); } catch (err) { pushToast("error", (err as Error).message); } } }}
               className="text-base font-semibold text-slate-900 w-full bg-transparent border-b border-transparent hover:border-slate-200 focus:border-violet-400 focus:outline-none" />
-            <span className="font-mono text-xs text-slate-500">{t.task_no}</span>
+            <span className="font-mono text-xs text-slate-500">{d.task_no}</span>
           </div>
           <div className="flex items-center gap-1">
-            {!editing && <button onClick={startEdit} className="h-8 px-2 text-xs text-violet-700 hover:bg-violet-50 rounded-md">✏️ แก้ไข</button>}
-            <button onClick={() => onDelete(t.id)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">ลบ</button>
+            {!editing && <button onClick={startEdit} className="h-8 px-2 text-xs text-violet-700 hover:bg-violet-50 rounded-md">✏️ {t("แก้ไข", "Edit")}</button>}
+            <button onClick={() => onDelete(d.id)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
           </div>
         </div>
@@ -129,59 +131,59 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
           {/* status row */}
           <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={t.status} />
-            <PriorityBadge priority={t.priority} />
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[t.approval_status].cls}`}>อนุมัติ: {APPROVAL_META[t.approval_status].label}</span>
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[t.asset_status].cls}`}>{ASSET_META[t.asset_status].label}</span>
+            <StatusBadge status={d.status} />
+            <PriorityBadge priority={d.priority} />
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[d.approval_status].cls}`}>{t("อนุมัติ", "Approval")}: {APPROVAL_META[d.approval_status].label}</span>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[d.asset_status].cls}`}>{ASSET_META[d.asset_status].label}</span>
           </div>
           {/* progress */}
           <div>
-            <div className="flex justify-between text-xs text-slate-400 mb-1"><span>ความคืบหน้า</span><span>{t.progress_percent}%</span></div>
-            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500" style={{ width: `${t.progress_percent}%` }} /></div>
-            {t.blocker_status === "blocked" && t.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ ติดปัญหา: {t.blocker_reason}</p>}
+            <div className="flex justify-between text-xs text-slate-400 mb-1"><span>{t("ความคืบหน้า", "Progress")}</span><span>{d.progress_percent}%</span></div>
+            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500" style={{ width: `${d.progress_percent}%` }} /></div>
+            {d.blocker_status === "blocked" && d.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ {t("ติดปัญหา", "Blocked")}: {d.blocker_reason}</p>}
           </div>
           {/* meta / แก้ไข */}
           {editing && ef ? (
             <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-slate-400">ประเภทงาน</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
-                <div><label className="text-xs text-slate-400">ความสำคัญ</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
-                <div><label className="text-xs text-slate-400">แบรนด์</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: "— ไม่ระบุ —" }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
-                <div><label className="text-xs text-slate-400">กำหนดส่ง</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
-                <div><label className="text-xs text-slate-400">ผู้รับผิดชอบ</label><UserPicker value={ef.assignee} onChange={(v) => setEf({ ...ef, assignee: v })} disableCreate /></div>
-                <div><label className="text-xs text-slate-400">ผู้ตรวจ/อนุมัติ</label><UserPicker value={ef.reviewer} onChange={(v) => setEf({ ...ef, reviewer: v })} disableCreate /></div>
+                <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
+                <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
+                <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
+                <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
+                <div><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบ", "Assignee")}</label><UserPicker value={ef.assignee} onChange={(v) => setEf({ ...ef, assignee: v })} disableCreate /></div>
+                <div><label className="text-xs text-slate-400">{t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")}</label><UserPicker value={ef.reviewer} onChange={(v) => setEf({ ...ef, reviewer: v })} disableCreate /></div>
               </div>
-              <div><label className="text-xs text-slate-400">แพลตฟอร์ม</label>
+              <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
                 <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = ef.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
               </div>
               <div className="flex justify-end gap-2">
-                <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">ยกเลิก</button>
-                <button onClick={saveEdit} disabled={busy} className="h-8 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{busy ? "..." : "บันทึก"}</button>
+                <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
+                <button onClick={saveEdit} disabled={busy} className="h-8 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
               </div>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              <Field label="ประเภทงาน" value={t.task_type ? taskTypeLabel(t.task_type) : null} />
-              <Field label="แบรนด์" value={t.brand_label} dot={brandColor} />
-              <Field label="ผู้รับผิดชอบ" value={t.assignee_label} />
-              <Field label="ผู้ตรวจ/อนุมัติ" value={t.reviewer_label || t.approver_label} />
-              <Field label="กำหนดส่ง" value={t.due_date} highlight={isOverdue(t)} />
-              <Field label="แคมเปญ" value={campaignName} />
-              <Field label="Parent SKU" value={(t.parent_skus && t.parent_skus.length) ? t.parent_skus.map((p) => p.code).filter(Boolean).join(", ") : (t.parent_sku_code || null)} />
+              <Field label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null} />
+              <Field label={t("แบรนด์", "Brand")} value={d.brand_label} dot={brandColor} />
+              <Field label={t("ผู้รับผิดชอบ", "Assignee")} value={d.assignee_label} />
+              <Field label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label} />
+              <Field label={t("กำหนดส่ง", "Due Date")} value={d.due_date} highlight={isOverdue(d)} />
+              <Field label={t("แคมเปญ", "Campaign")} value={campaignName} />
+              <Field label="Parent SKU" value={(d.parent_skus && d.parent_skus.length) ? d.parent_skus.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)} />
             </div>
           )}
           {/* SKU cards (m2m — ใส่ได้หลายรายการ) */}
           {(() => {
-            const list = (t.skus && t.skus.length) ? t.skus : (t.sku_code ? [{ id: "_", code: t.sku_code, name: t.sku_name || t.product_name, color: t.sku_color, price: t.sku_price }] : []);
+            const list = (d.skus && d.skus.length) ? d.skus : (d.sku_code ? [{ id: "_", code: d.sku_code, name: d.sku_name || d.product_name, color: d.sku_color, price: d.sku_price }] : []);
             return list.length > 0 ? (
               <div className="bg-slate-50 rounded-lg p-3 text-sm">
-                <p className="text-xs text-slate-400 mb-1.5">สินค้าที่เกี่ยวข้อง ({list.length})</p>
+                <p className="text-xs text-slate-400 mb-1.5">{t("สินค้าที่เกี่ยวข้อง", "Related Products")} ({list.length})</p>
                 <div className="space-y-1.5">
                   {list.map((s, i) => (
                     <div key={s.id || i} className="flex items-center gap-2 flex-wrap">
                       {s.code && <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{s.code}</span>}
                       <span className="text-slate-700">{s.name}</span>
-                      {s.color && <span className="text-xs text-slate-400">สี: {s.color}</span>}
+                      {s.color && <span className="text-xs text-slate-400">{t("สี", "Color")}: {s.color}</span>}
                       {s.price != null && <span className="text-xs text-slate-400">{Number(s.price).toLocaleString()}฿</span>}
                     </div>
                   ))}
@@ -190,64 +192,64 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             ) : null;
           })()}
           {/* platforms */}
-          {!editing && t.platforms && t.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{t.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
+          {!editing && d.platforms && d.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
           {/* description */}
-          {t.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">รายละเอียด</p>{t.description}</div>}
+          {d.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">{t("รายละเอียด", "Description")}</p>{d.description}</div>}
           {/* links */}
-          {(t.drive_folder_url || t.final_asset_url || t.published_url) && (
+          {(d.drive_folder_url || d.final_asset_url || d.published_url) && (
             <div className="flex flex-wrap gap-2">
-              {t.drive_folder_url && <a href={t.drive_folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">📁 โฟลเดอร์ Drive</a>}
-              {t.final_asset_url && <a href={t.final_asset_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🖼 ไฟล์จริง</a>}
-              {t.published_url && <a href={t.published_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🔗 ลิงก์ที่เผยแพร่</a>}
+              {d.drive_folder_url && <a href={d.drive_folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">📁 {t("โฟลเดอร์ Drive", "Drive Folder")}</a>}
+              {d.final_asset_url && <a href={d.final_asset_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🖼 {t("ไฟล์จริง", "Final Asset")}</a>}
+              {d.published_url && <a href={d.published_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🔗 {t("ลิงก์ที่เผยแพร่", "Published Link")}</a>}
             </div>
           )}
 
           {/* subtasks — ใช้ของกลางจัดการสด */}
-          <SubtaskManager taskId={t.id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
+          <SubtaskManager taskId={d.id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
 
           {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">รูปแนบ</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปแนบ", "Images")}</p>
             <ImageAttach
-              images={t.attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
-              onAttach={async (r) => { await addAttachment(t.id, { kind: "image", ...r }); await load(); }}
-              onDelete={async (aid) => { await deleteAttachment(t.id, aid); await load(); }}
+              images={d.attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
+              onAttach={async (r) => { await addAttachment(d.id, { kind: "image", ...r }); await load(); }}
+              onDelete={async (aid) => { await deleteAttachment(d.id, aid); await load(); }}
               pushToast={pushToast} />
           </div>
 
           {/* attachments (ลิงก์) */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ลิงก์แนบ ({t.attachments.filter((a) => a.kind !== "image").length})</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์แนบ", "Attachments")} ({d.attachments.filter((a) => a.kind !== "image").length})</p>
             <div className="space-y-1.5 mb-2">
-              {t.attachments.filter((a) => a.kind !== "image").map((a) => (
+              {d.attachments.filter((a) => a.kind !== "image").map((a) => (
                 <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm text-violet-700 hover:bg-violet-50">
                   🔗 <span className="truncate">{a.label || a.url}</span>
                 </a>
               ))}
-              {t.attachments.filter((a) => a.kind !== "image").length === 0 && <p className="text-sm text-slate-400 italic">ยังไม่มีลิงก์แนบ</p>}
+              {d.attachments.filter((a) => a.kind !== "image").length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีลิงก์แนบ", "No attachments yet")}</p>}
             </div>
             <div className="flex gap-2">
-              <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder="ชื่อ (ไม่บังคับ)" />
-              <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="วางลิงก์ Drive/URL" />
-              <button onClick={addLink} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">แนบ</button>
+              <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ (ไม่บังคับ)", "Label (optional)")} />
+              <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder={t("วางลิงก์ Drive/URL", "Paste Drive/URL link")} />
+              <button onClick={addLink} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">{t("แนบ", "Attach")}</button>
             </div>
           </div>
 
           {/* comments */}
           <div className="border-t border-slate-100 pt-4">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ความคิดเห็น ({t.comments.length})</p>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
             <div className="space-y-2 mb-3">
-              {t.comments.map((c) => (
+              {d.comments.map((c) => (
                 <div key={c.id} className="bg-slate-50 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || "ผู้ใช้"}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
+                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
                   <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
                 </div>
               ))}
-              {t.comments.length === 0 && <p className="text-sm text-slate-400 italic">ยังไม่มีความคิดเห็น</p>}
+              {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
             </div>
             <div className="flex gap-2">
-              <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="เขียนความคิดเห็น..." />
-              <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">ส่ง</button>
+              <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
+              <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">{t("ส่ง", "Send")}</button>
             </div>
           </div>
         </div>
@@ -255,7 +257,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         {/* footer actions */}
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">
           {actions.length === 0 ? (
-            <p className="text-sm text-slate-400 text-center w-full">{isClosed ? `งานปิดแล้ว (${statusMeta(t.status).label})` : "ไม่มีการกระทำ"} — ดูได้อย่างเดียว</p>
+            <p className="text-sm text-slate-400 text-center w-full">{isClosed ? `${t("งานปิดแล้ว", "Task closed")} (${statusMeta(d.status).label})` : t("ไม่มีการกระทำ", "No actions available")} — {t("ดูได้อย่างเดียว", "Read only")}</p>
           ) : actions.map((a, i) => {
             const cls = a.kind === "approve" ? "bg-emerald-600 text-white hover:bg-emerald-700"
               : a.kind === "reject" ? "text-red-600 border border-red-200 hover:bg-red-50"
