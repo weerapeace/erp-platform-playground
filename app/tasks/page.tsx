@@ -33,10 +33,11 @@ import {
 // ============================================================
 // Table columns + views
 // ============================================================
-const COLUMNS: ColumnDef<CreativeTask>[] = [
-  { accessorKey: "task_no", header: "เลขที่งาน", size: 140, cell: ({ getValue }) => <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">{(getValue() as string) || "—"}</span> },
+type Tfn = (th: string, en: string) => string;
+function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
+  { accessorKey: "task_no", header: t("เลขที่งาน", "Task no."), size: 140, cell: ({ getValue }) => <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">{(getValue() as string) || "—"}</span> },
   {
-    accessorKey: "title", header: "ชื่องาน",
+    accessorKey: "title", header: t("ชื่องาน", "Title"),
     cell: ({ row }) => (
       <div className="min-w-0">
         <div className="text-sm font-medium text-slate-800 line-clamp-1">{row.original.title}</div>
@@ -47,23 +48,23 @@ const COLUMNS: ColumnDef<CreativeTask>[] = [
       </div>
     ),
   },
-  { accessorKey: "brand_label", header: "แบรนด์", size: 120, meta: { filterable: true }, cell: ({ row }) => row.original.brand_label ? <span className="inline-flex items-center gap-1.5 text-sm text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.original.brand_color || "#cbd5e1" }} />{row.original.brand_label}</span> : <span className="text-slate-300">—</span> },
-  { accessorKey: "assignee_label", header: "ผู้รับผิดชอบ", size: 130, meta: { filterable: true }, cell: ({ getValue }) => (getValue() as string) || <span className="text-slate-300">—</span> },
-  { accessorKey: "priority", header: "ความสำคัญ", size: 100, cell: ({ getValue }) => <PriorityBadge priority={getValue() as CreativePriority} /> },
-  { accessorKey: "status", header: "สถานะ", size: 120, cell: ({ getValue }) => <StatusBadge status={getValue() as CreativeStatus} /> },
-  { accessorKey: "progress_percent", header: "คืบหน้า", size: 90, cell: ({ getValue }) => { const v = (getValue() as number) ?? 0; return <div className="flex items-center gap-1.5"><div className="h-1.5 w-12 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${v}%` }} /></div><span className="text-[11px] text-slate-400">{v}%</span></div>; } },
-  { accessorKey: "due_date", header: "กำหนดส่ง", size: 110, cell: ({ row }) => { const t = row.original; if (!t.due_date) return <span className="text-xs text-slate-400">—</span>; const od = isOverdue(t); return <span className={`text-xs ${od ? "text-red-600 font-semibold" : "text-slate-500"}`}>{od && "⚠ "}{t.due_date}</span>; } },
-];
+  { accessorKey: "brand_label", header: t("แบรนด์", "Brand"), size: 120, meta: { filterable: true }, cell: ({ row }) => row.original.brand_label ? <span className="inline-flex items-center gap-1.5 text-sm text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.original.brand_color || "#cbd5e1" }} />{row.original.brand_label}</span> : <span className="text-slate-300">—</span> },
+  { accessorKey: "assignee_label", header: t("ผู้รับผิดชอบ", "Assignee"), size: 130, meta: { filterable: true }, cell: ({ getValue }) => (getValue() as string) || <span className="text-slate-300">—</span> },
+  { accessorKey: "priority", header: t("ความสำคัญ", "Priority"), size: 100, cell: ({ getValue }) => <PriorityBadge priority={getValue() as CreativePriority} /> },
+  { accessorKey: "status", header: t("สถานะ", "Status"), size: 120, cell: ({ getValue }) => <StatusBadge status={getValue() as CreativeStatus} /> },
+  { accessorKey: "progress_percent", header: t("คืบหน้า", "Progress"), size: 90, cell: ({ getValue }) => { const v = (getValue() as number) ?? 0; return <div className="flex items-center gap-1.5"><div className="h-1.5 w-12 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${v}%` }} /></div><span className="text-[11px] text-slate-400">{v}%</span></div>; } },
+  { accessorKey: "due_date", header: t("กำหนดส่ง", "Due date"), size: 110, cell: ({ row }) => { const row0 = row.original; if (!row0.due_date) return <span className="text-xs text-slate-400">—</span>; const od = isOverdue(row0); return <span className={`text-xs ${od ? "text-red-600 font-semibold" : "text-slate-500"}`}>{od && "⚠ "}{row0.due_date}</span>; } },
+]; }
 
-const VIEWS = [
-  { id: "all", label: "ทั้งหมด" },
-  { id: "active", label: "🔵 กำลังดำเนินการ", filter: (r: Record<string, unknown>) => !isTerminal(r.status as string) },
-  { id: "need_review", label: "🟡 รอตรวจ/อนุมัติ", filter: (r: Record<string, unknown>) => r.status === "need_review" },
-  { id: "overdue", label: "⚠️ เกินกำหนด", filter: (r: Record<string, unknown>) => isOverdue(r as CreativeTask) },
-  { id: "this_week", label: "🗓️ สัปดาห์นี้", filter: (r: Record<string, unknown>) => withinThisWeek(r as CreativeTask) },
-  { id: "blocked", label: "🔴 ติดปัญหา", filter: (r: Record<string, unknown>) => r.status === "blocked" },
-  { id: "done", label: "✅ เสร็จ/ปิดงาน", filter: (r: Record<string, unknown>) => isTerminal(r.status as string) },
-];
+function makeViews(t: Tfn) { return [
+  { id: "all", label: t("ทั้งหมด", "All") },
+  { id: "active", label: t("🔵 กำลังดำเนินการ", "🔵 In progress"), filter: (r: Record<string, unknown>) => !isTerminal(r.status as string) },
+  { id: "need_review", label: t("🟡 รอตรวจ/อนุมัติ", "🟡 Pending review"), filter: (r: Record<string, unknown>) => r.status === "need_review" },
+  { id: "overdue", label: t("⚠️ เกินกำหนด", "⚠️ Overdue"), filter: (r: Record<string, unknown>) => isOverdue(r as CreativeTask) },
+  { id: "this_week", label: t("🗓️ สัปดาห์นี้", "🗓️ This week"), filter: (r: Record<string, unknown>) => withinThisWeek(r as CreativeTask) },
+  { id: "blocked", label: t("🔴 ติดปัญหา", "🔴 Blocked"), filter: (r: Record<string, unknown>) => r.status === "blocked" },
+  { id: "done", label: t("✅ เสร็จ/ปิดงาน", "✅ Done"), filter: (r: Record<string, unknown>) => isTerminal(r.status as string) },
+]; }
 
 // ============================================================
 // Toast
@@ -89,6 +90,8 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
 export default function TasksPage() {
   const { user } = useAuth();
   const t = useT();
+  const COLUMNS = useMemo(() => makeColumns(t), [t]);
+  const VIEWS = useMemo(() => makeViews(t), [t]);
   const { statuses } = useCreativeStatuses();
   const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
   const [quick, setQuick] = useState<"" | "review" | "overdue">(""); // กรองด่วนจากการ์ดสถิติ
