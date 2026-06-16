@@ -44,7 +44,8 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
-  const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") ?? "24", 10)));
+  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "24", 10)));
+  const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const salesOnly = searchParams.get("sales_only") === "true";
   const tokens = cleanSearch(search);
   const parentIdsByToken = new Map<string, string[]>();
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
     query = query.or(parts.join(","));
   }
 
-  const { data, error } = await query.order("code", { ascending: true }).limit(limit);
+  const { data, error } = await query.order("code", { ascending: true }).range(offset, offset + limit - 1);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
   const rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {

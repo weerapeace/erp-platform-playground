@@ -29,31 +29,39 @@ export function SkuMultiPickerModal({
   excludeIds?: string[];
   salesOnly?: boolean;
 }) {
+  const PAGE = 40;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SkuPickerValue[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   // เก็บ object เต็มของตัวที่เลือก (ค้นหาแล้วเปลี่ยนคำ ผลลัพธ์หาย แต่ยังจำที่เลือกไว้)
   const [picked, setPicked] = useState<Map<string, SkuPickerValue>>(new Map());
 
   const excluded = useMemo(() => new Set(excludeIds), [excludeIds]);
 
-  const load = useCallback(async (q: string) => {
-    setLoading(true);
+  // off=0 → โหลดใหม่ (แทนที่) · off>0 → โหลดเพิ่ม (ต่อท้าย)
+  const fetchPage = useCallback(async (q: string, off: number) => {
+    if (off > 0) setLoadingMore(true); else setLoading(true);
     try {
-      const params = new URLSearchParams({ search: q, limit: "40" });
+      const params = new URLSearchParams({ search: q, limit: String(PAGE), offset: String(off) });
       if (salesOnly) params.set("sales_only", "true");
       const res = await apiFetch(`/api/pickers/skus?${params}`);
       const j = await res.json();
-      setResults((j.data ?? []) as SkuPickerValue[]);
-    } catch { setResults([]); }
-    setLoading(false);
+      const rows = (j.data ?? []) as SkuPickerValue[];
+      setResults((prev) => (off > 0 ? [...prev, ...rows] : rows));
+      setHasMore(rows.length === PAGE);
+      setOffset(off + rows.length);
+    } catch { if (off === 0) setResults([]); }
+    finally { if (off > 0) setLoadingMore(false); else setLoading(false); }
   }, [salesOnly]);
 
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => load(query), 250);
+    const t = setTimeout(() => fetchPage(query, 0), 250);
     return () => clearTimeout(t);
-  }, [open, query, load]);
+  }, [open, query, fetchPage]);
 
   useEffect(() => {
     if (open) { setQuery(""); setPicked(new Map()); }
@@ -144,6 +152,12 @@ export function SkuMultiPickerModal({
                 );
               })}
             </ul>
+          )}
+          {hasMore && !loading && (
+            <button type="button" onClick={() => fetchPage(query, offset)} disabled={loadingMore}
+              className="w-full py-2.5 text-sm font-medium text-rose-500 hover:bg-pink-50 disabled:opacity-50 border-t border-pink-50">
+              {loadingMore ? "กำลังโหลด..." : "ดูเพิ่มเติม ↓"}
+            </button>
           )}
         </div>
       </div>
