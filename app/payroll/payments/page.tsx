@@ -793,6 +793,23 @@ function SummaryBox({ label, value, strong = false }: { label: string; value: st
   );
 }
 
+// สีประจำธนาคาร (chip) — SCB ม่วง · กสิกร เขียว · กรุงไทย ฟ้า · กรุงศรี เหลือง · อื่นๆ ไล่ตามธนาคาร
+function bankTone(bank: string | null | undefined): string {
+  const b = (bank ?? "").toLowerCase();
+  if (!b) return "bg-slate-50 text-slate-400 border-slate-200";
+  if (b.includes("scb") || b.includes("ไทยพาณิชย์")) return "bg-purple-50 text-purple-700 border-purple-200";
+  if (b.includes("kasikorn") || b.includes("กสิกร")) return "bg-green-50 text-green-700 border-green-200";
+  if (b.includes("krung thai") || b.includes("กรุงไทย") || b.includes("ktb")) return "bg-sky-50 text-sky-700 border-sky-200";
+  if (b.includes("krungsri") || b.includes("กรุงศรี") || b.includes("ayudhya")) return "bg-yellow-50 text-yellow-800 border-yellow-300";
+  if (b.includes("bangkok") || b.includes("กรุงเทพ") || b.includes("bbl")) return "bg-indigo-50 text-indigo-700 border-indigo-200";
+  if (b.includes("ttb") || b.includes("ทหารไทย") || b.includes("ธนชาต")) return "bg-orange-50 text-orange-700 border-orange-200";
+  if (b.includes("ออมสิน") || b.includes("gsb")) return "bg-pink-50 text-pink-700 border-pink-200";
+  if (b.includes("เกษตร") || b.includes("ธ.ก.ส") || b.includes("baac")) return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (b.includes("uob")) return "bg-blue-50 text-blue-700 border-blue-200";
+  if (b.includes("cimb")) return "bg-rose-50 text-rose-700 border-rose-200";
+  return "bg-slate-100 text-slate-600 border-slate-200";
+}
+
 function PaymentLinesTable({
   lines,
   columns,
@@ -811,20 +828,50 @@ function PaymentLinesTable({
     return "text-left";
   };
 
+  // เรียงตามหัวคอลัมน์ (คลิกสลับ ขึ้น/ลง)
+  const [sortKey, setSortKey] = useState<PaymentReportColumn | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const toggleSort = (k: PaymentReportColumn) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("asc"); }
+  };
+  const sortVal = (l: BatchLine): string | number => {
+    switch (sortKey) {
+      case "employee": return l.employee_name ?? "";
+      case "bank": return l.bank_name ?? "";
+      case "account_name": return l.bank_account_name ?? l.employee_name ?? "";
+      case "account_no": return l.bank_account_no ?? "";
+      case "amount": return l.paid_amount ?? 0;
+      case "status": return l.status ?? "";
+      default: return "";
+    }
+  };
+  const sortedLines = useMemo(() => {
+    if (!sortKey) return lines;
+    const arr = [...lines].sort((a, b) => {
+      const av = sortVal(a), bv = sortVal(b);
+      if (typeof av === "number" && typeof bv === "number") return av - bv;
+      return String(av).localeCompare(String(bv), "th");
+    });
+    return sortDir === "desc" ? arr.reverse() : arr;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, sortKey, sortDir]);
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[980px] text-sm">
         <thead className="bg-slate-50 text-xs text-slate-500">
           <tr>
             {columns.map((column) => (
-              <th key={column.key} className={`px-3 py-2 ${headerAlign(column.key)}`}>
-                {column.label}
+              <th key={column.key} onClick={() => toggleSort(column.key)}
+                className={`px-3 py-2 cursor-pointer select-none hover:text-slate-700 ${headerAlign(column.key)}`}>
+                {column.label}{sortKey === column.key ? (sortDir === "asc" ? " ▲" : " ▼") : <span className="text-slate-300"> ↕</span>}
               </th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {lines.map((line) => (
+          {sortedLines.map((line) => (
             <tr key={line.id ?? line.employee_id} className="border-t border-slate-100 hover:bg-slate-50">
               {columns.map((column) => {
                 if (column.key === "employee") {
@@ -837,7 +884,11 @@ function PaymentLinesTable({
                 }
 
                 if (column.key === "bank") {
-                  return <td key={column.key} className="px-3 py-2">{line.bank_name || "-"}</td>;
+                  return (
+                    <td key={column.key} className="px-3 py-2">
+                      <span className={`inline-block rounded-md border px-2 py-0.5 text-xs ${bankTone(line.bank_name)}`}>{line.bank_name || "-"}</span>
+                    </td>
+                  );
                 }
 
                 if (column.key === "account_name") {
