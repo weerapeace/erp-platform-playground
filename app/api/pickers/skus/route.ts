@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
       is_active,
       parent_skus_v2 ( cover_image_r2_key, product_categories ( name ) ),
       uom:uoms!uom_id ( name )
-    `)
+    `, { count: "exact" })
     .eq("is_active", true);
   if (salesOnly) query = query.eq("sale_ok", true);
   // ตัวกรอง server-side
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
   if (fUomId) query = query.eq("uom_id", fUomId);
   if (fCategoryParentIds) {
     // ไม่มี parent ในหมวดนี้ → ไม่มีผลลัพธ์
-    if (fCategoryParentIds.length === 0) return NextResponse.json({ data: [], error: null });
+    if (fCategoryParentIds.length === 0) return NextResponse.json({ data: [], total: 0, error: null });
     query = query.in("parent_sku_id", fCategoryParentIds);
   }
   // กรองตาม Parent SKU โดยตรง (ดึง SKU ลูกทั้งหมดของ parent — เช่น รวมสีในคอนเทนต์)
@@ -139,8 +139,8 @@ export async function GET(request: NextRequest) {
     query = query.or(parts.join(","));
   }
 
-  const { data, error } = await query.order(orderCol, { ascending: sortAsc }).range(offset, offset + limit - 1);
-  if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  const { data, error, count } = await query.order(orderCol, { ascending: sortAsc }).range(offset, offset + limit - 1);
+  if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
 
   const rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {
     const uom = Array.isArray(row.uom) ? row.uom[0] : row.uom;
@@ -161,5 +161,5 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  return NextResponse.json({ data: rows, error: null });
+  return NextResponse.json({ data: rows, total: count ?? rows.length, error: null });
 }

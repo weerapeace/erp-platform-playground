@@ -55,6 +55,7 @@ export function SkuMultiPickerModal({
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [total, setTotal] = useState(0);   // จำนวนทั้งหมดที่ตรงเงื่อนไข (จาก server)
   // sort / group / filter (ทำบนรายการที่โหลดมา — มิตินิยามกลางในตัวนี้ ไม่ hardcode รายหน้า)
   const [sortKey, setSortKey] = useState<DimKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -92,6 +93,7 @@ export function SkuMultiPickerModal({
       const j = await res.json();
       const rows = (j.data ?? []) as SkuPickerValue[];
       setResults((prev) => (off > 0 ? [...prev, ...rows] : rows));
+      setTotal(Number(j.total ?? rows.length));
       setHasMore(rows.length === PAGE);
       setOffset(off + rows.length);
     } catch { if (off === 0) setResults([]); }
@@ -247,11 +249,21 @@ export function SkuMultiPickerModal({
         </div>
 
         {selectable.length > 0 && (
-          <label className="flex items-center gap-2 px-1 text-sm text-rose-500 cursor-pointer select-none">
-            <input type="checkbox" checked={allOnPagePicked} onChange={toggleAll}
-              className="rounded border-pink-300 text-pink-500" />
-            เลือกทั้งหมด ({processed.length} รายการ)
-          </label>
+          <div className="flex items-center justify-between gap-2 px-1">
+            <label className="flex items-center gap-2 text-sm text-rose-500 cursor-pointer select-none">
+              <input type="checkbox" checked={allOnPagePicked} onChange={toggleAll}
+                className="rounded border-pink-300 text-pink-500" />
+              เลือกที่โหลดแล้ว ({processed.length} รายการ)
+            </label>
+            <span className="text-[11px] text-slate-400">
+              พบทั้งหมด {total.toLocaleString("th-TH")} · แสดง {results.length}
+            </span>
+          </div>
+        )}
+        {total > results.length && (
+          <p className="px-1 text-[11px] text-amber-600">
+            ⚠ มี {total.toLocaleString("th-TH")} รายการ — พิมพ์ให้เจาะจงขึ้น (เช่น รหัส/สี) หรือกด “ดูเพิ่มเติม” ด้านล่างให้ครบ
+          </p>
         )}
 
         <div className="max-h-[55vh] overflow-auto rounded-lg border border-pink-100">
