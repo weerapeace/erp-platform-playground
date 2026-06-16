@@ -18,6 +18,7 @@ export type BomMatGroup = { slot: string; label: string; items: { code: string; 
 export type ProductSpec = {
   parent: { id: string | null; code: string | null; name: string | null; family: string | null; size_summary: string | null; work_instruction_notes: string | null; image_url: string | null } | null;
   sku_id: string | null;        // id ของ skus_v2 (เผื่อแก้ SKU เองตอนไม่มี parent)
+  image_url: string | null;     // รูปหลัก (ระดับบนสุด ไม่ผูกกับ parent)
   legacy: SpecField[];          // ช่องเดิมบน Parent (materials/zipper/...)
   model_attrs: SpecField[];     // attribute ระดับ Parent (สเปกร่วม)
   sku_attrs: SpecField[];       // attribute ระดับ SKU (ต่อสี/แบบ)
@@ -115,6 +116,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const pkey = parent ? (parent as Record<string, unknown>).cover_image_r2_key as string | null : null;
   // ใช้รูปของ SKU รุ่นสีนั้นก่อน (ถ้าไม่มี ค่อย fallback รูป Parent)
   const imgKey = skuRow.cover_image_r2_key ?? pkey ?? null;
+  const imgUrl = imgKey ? `/api/r2-image?key=${encodeURIComponent(imgKey)}` : null;
 
   // วัตถุดิบจาก BOM เวอร์ชั่นหลัก (is_default) → จัดกลุ่มตามช่อง (slot_code)
   let bom_materials: BomMatGroup[] = []; let bom_version: string | null = null;
@@ -138,6 +140,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({
     sku_id: skuRow.id ? String(skuRow.id) : null,
+    image_url: imgUrl,        // รูปหลัก (SKU ก่อน, fallback Parent) — ไม่ผูกกับ parent จึงไม่หายเมื่อ SKU ไม่มี parent
     parent: parent ? {
       id: (parent as { id?: string }).id ?? null,
       code: (parent as Record<string, unknown>).code as string ?? null,
@@ -145,7 +148,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       family: (parent as Record<string, unknown>).product_family as string ?? null,
       size_summary: str((parent as Record<string, unknown>).size_summary) || null,
       work_instruction_notes: str((parent as Record<string, unknown>).work_instruction_notes) || null,
-      image_url: imgKey ? `/api/r2-image?key=${encodeURIComponent(imgKey)}` : null,
+      image_url: imgUrl,
     } : null,
     legacy, model_attrs, sku_attrs, bom_materials, bom_version, error: null,
   });

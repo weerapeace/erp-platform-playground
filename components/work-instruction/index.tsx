@@ -40,7 +40,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   const [skuEditOpen, setSkuEditOpen] = useState(false);   // popup แก้ Parent SKU/SKU ตรงนั้น
   const [lightbox, setLightbox] = useState(false);   // คลิกรูป → เด้งรูปใหญ่
   const [imgErr, setImgErr] = useState(false);        // รูปหาย/โหลดไม่ได้ → โชว์ placeholder
-  useEffect(() => { setImgErr(false); }, [spec?.parent?.image_url]);
+  useEffect(() => { setImgErr(false); }, [spec?.image_url, spec?.parent?.image_url]);
   // inline edit (กด ✎ → แก้เฉพาะช่องนั้น)
   const [editData, setEditData] = useState<EditData | null>(null);
   const [editField, setEditField] = useState<{ section: string; key: string } | null>(null);
@@ -130,14 +130,17 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
     ? [...(spec?.model_attrs ?? []), ...(spec?.sku_attrs ?? [])].filter((f) => f.sku_code && !bomSkus.includes(f.sku_code)).map((f) => ({ code: f.sku_code as string, name: f.value }))
     : [];
   const missingUniq = [...new Map(missing.map((m) => [m.code, m])).values()];
+  // รูปหลัก: ระดับบนสุดก่อน (SKU) แล้ว fallback parent — กันรูปหายตอน SKU ไม่มี parent
+  const img = spec?.image_url ?? spec?.parent?.image_url ?? null;
+  const titleName = spec?.parent?.name ?? spec?.parent?.code ?? sku;
 
   return (
     <>
     {/* เด้งรูปใหญ่ตอนคลิก */}
-    {lightbox && spec?.parent?.image_url && (
+    {lightbox && img && (
       <div className="fixed inset-0 z-[120] bg-black/70 flex items-center justify-center p-6 cursor-zoom-out" onClick={() => setLightbox(false)} title="คลิกเพื่อปิด">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={spec.parent.image_url} alt="" className="max-w-[92vw] max-h-[92vh] object-contain rounded-lg shadow-2xl bg-white" />
+        <img src={img} alt="" className="max-w-[92vw] max-h-[92vh] object-contain rounded-lg shadow-2xl bg-white" />
       </div>
     )}
     <div className={`border border-slate-200 rounded-lg bg-white ${className}`}>
@@ -157,22 +160,22 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
           : empty || !spec ? <div className="text-xs text-slate-300 py-3 text-center">ยังไม่มีรายละเอียดสั่งงาน{editable ? " — กด ✎ แก้ไขละเอียดสินค้า เพื่อเพิ่ม" : ""}</div>
           : (
             <div className="space-y-2.5">
-              {spec.parent && (
+              {(spec.parent || img) && (
                 <div className="flex gap-2 items-center">
-                  {spec.parent.image_url && !imgErr ? (
+                  {img && !imgErr ? (
                     <button type="button" onClick={() => setLightbox(true)} className="relative group/zoom shrink-0" title="คลิกเพื่อดูรูปใหญ่">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spec.parent.image_url} alt="" onError={() => setImgErr(true)} className="w-12 h-12 rounded-md object-cover border border-slate-100 cursor-zoom-in" />
+                      <img src={img} alt="" onError={() => setImgErr(true)} className="w-12 h-12 rounded-md object-cover border border-slate-100 cursor-zoom-in" />
                       {/* รูปลอยตอนเอาเมาส์ชี้ */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={spec.parent.image_url} alt="" className="hidden group-hover/zoom:block absolute z-50 left-0 top-14 w-72 h-72 object-contain rounded-xl border border-slate-200 bg-white shadow-2xl p-2 pointer-events-none" />
+                      <img src={img} alt="" className="hidden group-hover/zoom:block absolute z-50 left-0 top-14 w-72 h-72 object-contain rounded-xl border border-slate-200 bg-white shadow-2xl p-2 pointer-events-none" />
                     </button>
                   ) : (
                     <span className="w-12 h-12 shrink-0 rounded-md border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-300 text-lg" title={imgErr ? "รูปหาย — ไฟล์ไม่อยู่ในที่เก็บ (ต้องอัปโหลดรูปใหม่)" : ""}>📦</span>
                   )}
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-slate-800 truncate">{spec.parent.name ?? spec.parent.code}</div>
-                    {spec.parent.size_summary && <div className="text-[11px] text-slate-400">ขนาด: {spec.parent.size_summary}</div>}
+                    <div className="text-sm font-medium text-slate-800 truncate">{titleName}</div>
+                    {spec.parent?.size_summary && <div className="text-[11px] text-slate-400">ขนาด: {spec.parent.size_summary}</div>}
                   </div>
                 </div>
               )}

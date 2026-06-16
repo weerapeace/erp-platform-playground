@@ -34,6 +34,7 @@ export type MoSummary = {
 export type ProductSpecRow = { key: string; label: string; value: string; order?: number };
 export type ProductSpecGroup = { label: string; items: { code: string; name: string; count: number }[] };
 export type ProductSpec = {
+  image_url?: string | null;     // รูปหลัก (ระดับบนสุด ไม่ผูกกับ parent)
   parent?: {
     name?: string | null;
     family?: string | null;
@@ -185,7 +186,7 @@ export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null): Record<
   }));
   return {
     ...woScalars(mo, spec),
-    product_image_html: photoHtml(spec?.parent?.image_url),
+    product_image_html: photoHtml(spec?.image_url ?? spec?.parent?.image_url),
     material_summary: materialSummaryRows(mo),
     product_spec_rows: productSpecRows(spec),
     lines,
