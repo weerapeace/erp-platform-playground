@@ -6,7 +6,6 @@
  *  - ฝัง <ThemeSync/> ให้สีธีมโหลด/บันทึกอัตโนมัติ
  */
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth, roleLabel } from "@/components/auth";
 import { ThemeSync } from "@/components/theme-sync";
@@ -45,8 +44,8 @@ export function AccountMenu() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1">
             <div className="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 truncate">{user.email}</div>
-            <Link href="/profile" onClick={() => setOpen(false)}
-              className="block px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 โปรไฟล์ของฉัน (แก้ชื่อ/รูป)</Link>
+            <button type="button" onClick={() => { setOpen(false); router.push("/profile"); }}
+              className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 โปรไฟล์ของฉัน (แก้ชื่อ/รูป)</button>
 
             {/* สีธีม (accent) */}
             <div className="px-3 py-2 border-t border-slate-100">
@@ -65,8 +64,8 @@ export function AccountMenu() {
               </div>
             </div>
 
-            <Link href="/profile" onClick={() => setOpen(false)}
-              className="block px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100">🔑 เปลี่ยนรหัสผ่าน/PIN</Link>
+            <button type="button" onClick={() => { setOpen(false); router.push("/profile"); }}
+              className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 border-t border-slate-100">🔑 เปลี่ยนรหัสผ่าน/PIN</button>
             <button onClick={async () => { setOpen(false); await logout(); router.push("/login"); }}
               className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50 border-t border-slate-100">ออกจากระบบ</button>
           </div>
