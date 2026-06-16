@@ -92,10 +92,12 @@ export function SkuMultiPickerModal({
       const res = await apiFetch(`/api/pickers/skus?${buildParams(q, off)}`);
       const j = await res.json();
       const rows = (j.data ?? []) as SkuPickerValue[];
+      const newTotal = Number(j.total ?? rows.length);
+      const loaded = off + rows.length;
       setResults((prev) => (off > 0 ? [...prev, ...rows] : rows));
-      setTotal(Number(j.total ?? rows.length));
-      setHasMore(rows.length === PAGE);
-      setOffset(off + rows.length);
+      setTotal(newTotal);
+      setHasMore(rows.length > 0 && loaded < newTotal);   // ยังไม่ครบทั้งหมด → โชว์ "ดูเพิ่มเติม"
+      setOffset(loaded);
     } catch { if (off === 0) setResults([]); }
     finally { if (off > 0) setLoadingMore(false); else setLoading(false); }
   }, [buildParams]);
