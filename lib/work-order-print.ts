@@ -311,8 +311,8 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .wo-photo { width: 45mm; height: 42mm; }
 .wo-photo img, .detail-photo img { width: 100%; height: 100%; object-fit: contain; }
 .photo-empty { color: #94a3b8; font-size: 10px; text-align: center; }
-.product-name { font-size: 15px; font-weight: 800; line-height: 1.25; }
-.product-code { margin-top: 1mm; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: #475569; }
+.product-name { font-size: 13px; font-weight: 300; font-style: italic; line-height: 1.3; color: #334155; }
+.product-code { margin-top: 1.5mm; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 19px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; }
 .product-size { margin-top: 1mm; color: #334155; }
 .wo-qty { text-align: center; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; padding: 1mm 2mm; }
 .qty-big { font-size: 30px; font-weight: 900; line-height: 1; }
@@ -344,8 +344,9 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   .wo-hero { grid-template-columns: 35mm 1.4fr 24mm 46mm; gap: 2mm; padding: 2mm; margin-bottom: 2mm; }
   .wo-photo { width: 35mm; height: 31mm; }
   .wo-qr { width: 15mm; height: 15mm; }
-  .product-name { font-size: 12px; }
-  .product-code, .product-size { margin-top: 0.5mm; }
+  .product-name { font-size: 11px; }
+  .product-code { font-size: 16px; margin-top: 1mm; }
+  .product-size { margin-top: 0.5mm; }
   .qty-big { font-size: 22px; }
   .section-title { font-size: 10px; margin: 1.5mm 0 1mm; }
   .summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: 0.75mm 1mm; }
