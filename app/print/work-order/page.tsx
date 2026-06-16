@@ -9,7 +9,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtmlMulti } from "@/lib/template";
-import { WORKORDER_PRINT_TEMPLATE, buildWoHtmlData, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
+import { WORKORDER_PRINT_TEMPLATE, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
 
 function BulkPrintInner() {
   const sp = useSearchParams();
@@ -41,7 +41,8 @@ function BulkPrintInner() {
               specCache.set(sku, spec);
             }
           }
-          out.push(buildWoHtmlData(mo, spec));
+          const qr_html = await woQrHtml(`${window.location.origin}/print/work-order/${mo.id}`);
+          out.push({ ...buildWoHtmlData(mo, spec), qr_html });
           if (!cancelled) setDone((d) => d + 1);
         }
         if (!cancelled) setData(out);

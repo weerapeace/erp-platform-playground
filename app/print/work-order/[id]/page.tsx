@@ -6,7 +6,7 @@ import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml } from "@/lib/template";
-import { WORKORDER_PRINT_TEMPLATE, woScalars, woTableRows, buildWoHtmlData, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
+import { WORKORDER_PRINT_TEMPLATE, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
 
@@ -44,6 +44,14 @@ export default function PrintWorkOrderPage() {
   const [loading, setLoading] = useState(true);
   const [genMsg, setGenMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [qrHtml, setQrHtml] = useState("");
+
+  useEffect(() => {
+    if (!mo) { setQrHtml(""); return; }
+    let on = true;
+    void woQrHtml(`${window.location.origin}/print/work-order/${mo.id}`).then((h) => { if (on) setQrHtml(h); });
+    return () => { on = false; };
+  }, [mo]);
 
   useEffect(() => {
     Promise.all([
@@ -128,8 +136,8 @@ export default function PrintWorkOrderPage() {
       body_html: template.body_html,
       footer_html: template.footer_html,
       custom_css: template.custom_css,
-    }, buildWoHtmlData(mo, spec));
-  }, [mo, spec, selectedRow, pdfmeTemplate]);
+    }, { ...buildWoHtmlData(mo, spec), qr_html: qrHtml });
+  }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml]);
 
   return (
     <div className="min-h-screen bg-slate-100">

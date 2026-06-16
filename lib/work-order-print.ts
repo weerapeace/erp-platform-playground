@@ -61,6 +61,19 @@ export type MoDetail = {
   summary?: MoSummary[];
 };
 
+/**
+ * สร้าง QR Code เป็น data-URL (offline ไม่ต้องต่อเน็ต) → คืน <img> สำหรับฝังในเทมเพลต
+ * โหลด lib qrcode แบบ dynamic เฉพาะตอนเรียก (ไม่กระทบ bundle หลัก)
+ */
+export async function woQrHtml(url: string): Promise<string> {
+  if (!url) return "";
+  try {
+    const QR = (await import("qrcode")).default;
+    const dataUrl = await QR.toDataURL(url, { margin: 0, width: 200, errorCorrectionLevel: "M" });
+    return `<img class="wo-qr" src="${dataUrl}" alt="QR ใบสั่งงาน" />`;
+  } catch { return ""; }
+}
+
 export const thaiDate = (iso: string | null | undefined) => {
   if (!iso) return "-";
   return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
@@ -200,10 +213,13 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <div>ชิ้น · สูตร {{bom_version}}</div>
   </div>
   <div class="wo-meta">
-    <div><span class="label">เลขที่:</span> {{mo_number}}</div>
-    <div><span class="label">วันที่สั่ง:</span> {{created_at_th}}</div>
-    <div><span class="label">กำหนดส่ง:</span> {{due_date_th}}</div>
-    <div><span class="label">สถานะ:</span> {{status_label}}</div>
+    <div class="wo-meta-text">
+      <div><span class="label">เลขที่:</span> {{mo_number}}</div>
+      <div><span class="label">วันที่สั่ง:</span> {{created_at_th}}</div>
+      <div><span class="label">กำหนดส่ง:</span> {{due_date_th}}</div>
+      <div><span class="label">สถานะ:</span> {{status_label}}</div>
+    </div>
+    <div class="wo-qr-box">{{{qr_html}}}</div>
   </div>
 </section>`,
   body_html: `<section class="summary-section">
@@ -285,13 +301,13 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   custom_css: `
 .doc { font-size: 10.5px; color: #111827; }
 .doc-header { text-align: center; line-height: 1.2; margin-bottom: 4mm; }
-.company-name { font-size: 16px; font-weight: 700; }
+.company-name { font-size: 12px; font-weight: 700; color: #475569; }
 .doc-title { text-align: center; font-size: 24px; font-weight: 800; margin: 3mm 0 5mm; }
 .muted { color: #64748b; font-size: 10px; }
 .label { font-weight: 700; }
-.wo-hero { display: grid; grid-template-columns: 26mm 1.5fr 36mm 43mm; gap: 3mm; border: 1px solid #111; padding: 3mm; margin-bottom: 4mm; align-items: center; }
+.wo-hero { display: grid; grid-template-columns: 45mm 1.4fr 30mm 52mm; gap: 3mm; border: 1px solid #111; padding: 3mm; margin-bottom: 4mm; align-items: center; }
 .wo-photo, .detail-photo { border: 1px solid #cbd5e1; background: #f8fafc; display: grid; place-items: center; overflow: hidden; }
-.wo-photo { width: 26mm; height: 24mm; }
+.wo-photo { width: 45mm; height: 42mm; }
 .wo-photo img, .detail-photo img { width: 100%; height: 100%; object-fit: contain; }
 .photo-empty { color: #94a3b8; font-size: 10px; text-align: center; }
 .product-name { font-size: 15px; font-weight: 800; line-height: 1.25; }
@@ -299,7 +315,9 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .product-size { margin-top: 1mm; color: #334155; }
 .wo-qty { text-align: center; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; padding: 1mm 2mm; }
 .qty-big { font-size: 30px; font-weight: 900; line-height: 1; }
-.wo-meta { line-height: 1.55; }
+.wo-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 2mm; line-height: 1.55; }
+.wo-qr-box { flex-shrink: 0; }
+.wo-qr { width: 18mm; height: 18mm; display: block; }
 .section-title { font-size: 12px; font-weight: 800; margin: 3mm 0 1.5mm; }
 .summary-section { page-break-inside: avoid; break-inside: avoid; }
 .summary-table, .doc-table, .detail-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -320,10 +338,11 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 @media print {
   .doc { padding: 8mm 9mm !important; font-size: 9.2px; }
   .doc-header { margin-bottom: 1.5mm; }
-  .company-name { font-size: 13px; }
+  .company-name { font-size: 10px; }
   .doc-title { font-size: 20px; margin: 1.5mm 0 2.5mm; }
-  .wo-hero { grid-template-columns: 20mm 1.7fr 26mm 35mm; gap: 2mm; padding: 2mm; margin-bottom: 2mm; }
-  .wo-photo { width: 20mm; height: 18mm; }
+  .wo-hero { grid-template-columns: 35mm 1.4fr 24mm 46mm; gap: 2mm; padding: 2mm; margin-bottom: 2mm; }
+  .wo-photo { width: 35mm; height: 31mm; }
+  .wo-qr { width: 15mm; height: 15mm; }
   .product-name { font-size: 12px; }
   .product-code, .product-size { margin-top: 0.5mm; }
   .qty-big { font-size: 22px; }
