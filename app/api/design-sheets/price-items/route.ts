@@ -17,6 +17,8 @@ export type PriceItem = {
   price_per_unit: number | null; uom: string | null; face_width_cm: number | null;
   width_cm: number | null; length_cm: number | null;
   group_name: string | null; group_code: string | null; calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
+  // ราคาจาก SKU ที่ผูกกับวัสดุนี้ (design_price_item_id) — เฟส 5: วัสดุตีราคาเป็นกลุ่มเอง
+  sku_count: number; sku_latest_price: number | null; sku_latest_currency: string | null; sku_avg_price: number | null;
 };
 
 // กลุ่มวัสดุ (สำหรับตีราคาแบบ "กลุ่ม") — ราคาเฉลี่ยจากวัสดุในกลุ่ม + ราคาตั้ง + ราคาซื้อจริงล่าสุด (GR→PO)
@@ -49,17 +51,33 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       loss_percent: g?.loss_percent != null ? Number(g.loss_percent) : null,
       divisor: g?.divisor != null ? Number(g.divisor) : null,
       uom_default: (g?.uom_default as string) ?? null,
+      sku_count: 0, sku_latest_price: null, sku_latest_currency: null, sku_avg_price: null,
     };
   });
   const admin = supabaseAdmin();
+
+  // SKU ที่ผูกกับแต่ละวัสดุตีราคา (one-to-many) → ใช้คิดราคาล่าสุด/เฉลี่ย
+  const itemIds = items.map((it) => it.id);
+  const skusByItem = new Map<string, string[]>();
+  if (itemIds.length) {
+    const { data: linkedSkus } = await admin.from("skus_v2")
+      .select("id, design_price_item_id").in("design_price_item_id", itemIds);
+    for (const s of (linkedSkus ?? []) as Array<Record<string, unknown>>) {
+      const item = String(s.design_price_item_id);
+      (skusByItem.get(item) ?? skusByItem.set(item, []).get(item)!).push(String(s.id));
+    }
+  }
   // กลุ่มวัสดุ + ราคาเฉลี่ย (จากวัสดุในกลุ่ม) + ราคาตั้ง + สินค้าตัวแทน (ref_sku_ids)
   const { data: grpData } = await admin.from("material_groups")
     .select("code, name, calc_method, loss_percent, divisor, uom_default, set_price, ref_sku_ids")
     .eq("is_active", true).order("sort_order", { ascending: true });
 
   // ราคาซื้อจริงล่าสุด (GR→PO) ต่อ SKU ตัวแทน: ใบรับล่าสุด (receive_date) → ราคาในบรรทัด PO
-  const allRefSkus = [...new Set(((grpData ?? []) as Array<Record<string, unknown>>)
-    .flatMap((g) => (Array.isArray(g.ref_sku_ids) ? (g.ref_sku_ids as string[]) : [])))];
+  const allRefSkus = [...new Set([
+    ...((grpData ?? []) as Array<Record<string, unknown>>)
+      .flatMap((g) => (Array.isArray(g.ref_sku_ids) ? (g.ref_sku_ids as string[]) : [])),
+    ...[...skusByItem.values()].flat(),   // SKU ที่ผูกกับวัสดุตีราคา
+  ])];
   const latestBySku = new Map<string, { price: number | null; currency: string | null; date: string }>();
   if (allRefSkus.length) {
     const { data: grl } = await admin.from("goods_receipt_lines_v2")
@@ -85,6 +103,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }
     }
   }
+  // เติมราคา "ล่าสุด/เฉลี่ย" ต่อวัสดุตีราคา จาก SKU ที่ผูก
+  for (const it of items) {
+    const skuIds = skusByItem.get(it.id) ?? [];
+    it.sku_count = skuIds.length;
+    if (skuIds.length === 0) continue;
+    let latest: { price: number | null; currency: string | null; date: string } | null = null;
+    let sum = 0, n = 0;
+    for (const sku of skuIds) {
+      const e = latestBySku.get(sku);
+      if (!e) continue;
+      if (!latest || e.date > latest.date) latest = e;
+      if (e.price != null) { sum += e.price; n += 1; }
+    }
+    it.sku_latest_price = latest?.price ?? null;
+    it.sku_latest_currency = latest?.currency ?? null;
+    it.sku_avg_price = n > 0 ? Math.round((sum / n) * 100) / 100 : null;
+  }
+
   // เฉลี่ยราคาต่อกลุ่ม จาก items ที่ดึงมาแล้ว
   const sumByGroup = new Map<string, { sum: number; n: number }>();
   for (const it of items) {

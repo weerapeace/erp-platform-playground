@@ -26,6 +26,7 @@ import type { Attachment } from "@/app/api/attachments/route";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { GroupRefSkusModal } from "./group-ref-modal";
+import { PriceItemSkusModal } from "./price-item-skus-modal";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
@@ -119,6 +120,12 @@ function groupBasisPrice(g: PriceGroup, basis: string | null): number | null {
   if (basis === "set") return g.set_price ?? g.avg_price;
   if (basis === "latest") return g.latest_price ?? g.avg_price;
   return g.avg_price;
+}
+// ราคาฐานของ "วัสดุตีราคา" ตามที่เลือก (manual/latest/avg) — ดึงจาก SKU ที่ผูก, ถอยใช้ราคากรอกเองถ้าไม่มี
+function itemBasisPrice(it: PriceItem, basis: string | null): number | null {
+  if (basis === "latest") return it.sku_latest_price ?? it.price_per_unit;
+  if (basis === "avg")    return it.sku_avg_price ?? it.price_per_unit;
+  return it.price_per_unit;   // manual (ค่าเริ่มต้น)
 }
 // ฟิลด์บรรทัดเมื่อเลือกแบบ "กลุ่ม" (item_id = null = จับคู่วัสดุจริงทีหลัง)
 function rowFieldsFromGroup(g: PriceGroup, basis: string): Partial<CostRow> {
@@ -215,6 +222,7 @@ export default function DesignSheetsPage() {
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
   const [groupRefOpen, setGroupRefOpen] = useState(false);   // โมดอลผูกสินค้าตัวแทนต่อกลุ่ม
+  const [priceItemSkusOpen, setPriceItemSkusOpen] = useState(false);   // โมดอลผูก SKU เข้าวัสดุตีราคา
   const [costLines, setCostLines] = useState<CostRow[]>([]);
   const [costDirty, setCostDirty] = useState(false);
   const [costSaving, setCostSaving] = useState(false);
@@ -873,45 +881,46 @@ export default function DesignSheetsPage() {
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
     { key: "item", header: "วัสดุ / กลุ่ม", minWidth: 220, sortable: true, getValue: (r) => r.item_name,
       render: (r, u) => {
-        const inGroupMode = !r.item_id && !!r.group_code;   // เลือกแบบกลุ่ม (จับคู่วัสดุจริงทีหลัง)
+        const inGroupMode = !r.item_id && !!r.group_code;   // รายการเดิมที่เคยเลือกแบบกลุ่ม
         const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
+        const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) : undefined;
         return (
           <div className="space-y-1">
             <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!canEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
-              options={[
-                ...priceGroups.map((pg) => ({ value: `grp:${pg.code}`, label: `📦 ${pg.name}`,
-                  sub: `กลุ่ม · เฉลี่ย ${pg.avg_price != null ? fmtBaht(pg.avg_price) : "—"}${pg.set_price != null ? ` · ตั้ง ${fmtBaht(pg.set_price)}` : ""}` })),
-                ...priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined })),
-              ]}
+              options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
               onChange={(val) => {
-                if (val.startsWith("grp:")) {
-                  const pg = priceGroups.find((x) => x.code === val.slice(4));
-                  if (pg) u(rowFieldsFromGroup(pg, "avg")); else u({ item_id: null });
-                  return;
-                }
                 const it = priceItems.find((p) => p.id === val);
                 if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
                 const piece = isPieceGroup(it.group_code, it.group_name);
-                // เลือกตัวเฉพาะ: เก็บ group_code ของตัวนั้นไว้ (ใช้ตรวจชนิดชิ้น) แต่ price_basis = null (ไม่ใช่โหมดกลุ่ม)
-                u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code, price_basis: null, calc_method: it.calc_method,
+                // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
+                u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
+                    price_basis: piece ? null : "manual", calc_method: it.calc_method,
                     waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
                     pieces: piece ? (r.pieces ?? 1) : r.pieces,
                     uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
                     unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
               }} />
+            {/* ฐานราคาของวัสดุ (กรอกเอง/ล่าสุด/เฉลี่ย) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
+            {item && !rowIsPiece(r) && canEdit && (
+              <select value={r.price_basis ?? "manual"} title="ฐานราคาจาก SKU ที่ผูกกับวัสดุนี้"
+                onChange={(e) => u({ price_basis: e.target.value, unit_price: itemBasisPrice(item, e.target.value) })}
+                className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
+                <option value="manual">ฐาน: กรอกเอง{item.price_per_unit != null ? ` (${fmtBaht(item.price_per_unit)})` : ""}</option>
+                <option value="latest">ฐาน: ซื้อจริงล่าสุด{item.sku_latest_price != null ? ` (${item.sku_latest_currency && item.sku_latest_currency !== "THB" ? `${item.sku_latest_currency} ` : ""}${item.sku_latest_price.toLocaleString("th-TH")})` : item.sku_count > 0 ? " — ยังไม่มีราคาซื้อ" : " — ยังไม่ผูก SKU"}</option>
+                <option value="avg">ฐาน: เฉลี่ยจาก SKU{item.sku_avg_price != null ? ` (${fmtBaht(item.sku_avg_price)})` : " — ยังไม่มี"}</option>
+              </select>
+            )}
+            {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
+              <div className="text-[10px] text-amber-600">⚠ ราคาเป็น {item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”</div>
+            )}
             {inGroupMode && canEdit && (
-              <>
-                <select value={r.price_basis ?? "avg"} title="ฐานราคาของกลุ่ม"
-                  onChange={(e) => u({ price_basis: e.target.value, unit_price: g ? groupBasisPrice(g, e.target.value) : r.unit_price })}
-                  className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
-                  <option value="avg">ฐาน: เฉลี่ย{g?.avg_price != null ? ` (${fmtBaht(g.avg_price)})` : ""}</option>
-                  <option value="set">ฐาน: ตั้งไว้{g?.set_price != null ? ` (${fmtBaht(g.set_price)})` : " — ยังไม่ตั้ง"}</option>
-                  <option value="latest">ฐาน: ซื้อจริงล่าสุด{g?.latest_price != null ? ` (${g.latest_currency && g.latest_currency !== "THB" ? `${g.latest_currency} ` : ""}${g.latest_price.toLocaleString("th-TH")})` : " — ยังไม่มี/ยังไม่ผูกสินค้า"}</option>
-                </select>
-                {r.price_basis === "latest" && g?.latest_currency && g.latest_currency !== "THB" && (
-                  <div className="text-[10px] text-amber-600">⚠ ราคาเป็น {g.latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”</div>
-                )}
-              </>
+              <select value={r.price_basis ?? "avg"} title="ฐานราคาของกลุ่ม (รายการเดิม)"
+                onChange={(e) => u({ price_basis: e.target.value, unit_price: g ? groupBasisPrice(g, e.target.value) : r.unit_price })}
+                className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
+                <option value="avg">ฐาน: เฉลี่ย{g?.avg_price != null ? ` (${fmtBaht(g.avg_price)})` : ""}</option>
+                <option value="set">ฐาน: ตั้งไว้{g?.set_price != null ? ` (${fmtBaht(g.set_price)})` : " — ยังไม่ตั้ง"}</option>
+                <option value="latest">ฐาน: ซื้อจริงล่าสุด{g?.latest_price != null ? ` (${g.latest_price.toLocaleString("th-TH")})` : " —"}</option>
+              </select>
             )}
           </div>
         );
@@ -1334,6 +1343,7 @@ export default function DesignSheetsPage() {
             {modalTab === "cost" && form.id && <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {canEdit && <button onClick={() => setGroupRefOpen(true)} className="h-8 px-3 text-sm font-medium bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-300 hover:text-blue-700">🔗 ผูกราคาซื้อ (กลุ่ม)</button>}
+                {canEdit && <button onClick={() => setPriceItemSkusOpen(true)} className="h-8 px-3 text-sm font-medium bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-300 hover:text-blue-700">🔗 ผูก SKU (วัสดุ)</button>}
                 {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
               </div>
               {priceItems.length === 0 && (
@@ -1579,6 +1589,9 @@ export default function DesignSheetsPage() {
 
       {/* โมดอลผูกสินค้าตัวแทนต่อกลุ่ม (เฟส 2) — ปิดแล้วรีโหลดราคา (latest อาจเปลี่ยน) */}
       <GroupRefSkusModal open={groupRefOpen} onClose={() => { setGroupRefOpen(false); setPriceItems([]); setPriceGroups([]); }} />
+
+      {/* ผูก SKU เข้าวัสดุตีราคา (เฟส 5) — ปิดแล้วรีโหลดราคา (latest อาจเปลี่ยน) */}
+      <PriceItemSkusModal open={priceItemSkusOpen} onClose={() => { setPriceItemSkusOpen(false); setPriceItems([]); setPriceGroups([]); }} />
 
       {/* ป๊อปจัดการวัสดุตีราคา — CRUD ผ่าน API กลาง master-v2 (เหมือนหน้า /master/design-price-items) */}
       <ERPModal open={pmOpen} onClose={closePm} size="lg" title="🧮 จัดการวัสดุตีราคา"
