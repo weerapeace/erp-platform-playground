@@ -12,13 +12,13 @@ import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from 
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { SkuPicker } from "@/components/pickers";
-import type { SkuPickerValue } from "@/components/pickers";
+import { SkuPicker, ParentSkuPicker } from "@/components/pickers";
+import type { SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
 import {
   CONTENT_STATUS_META, POST_TYPES,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag,
-  getCaptionTemplates, saveCaptionTemplates,
+  getCaptionTemplates, saveCaptionTemplates, getParentSkuColors,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
   type BrandOption, type Hashtag, type CaptionTemplate,
 } from "../data";
@@ -260,6 +260,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [discountValue, setDiscountValue] = useState<string>("");
   const [discountPct, setDiscountPct] = useState(false);
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
+  // สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี
+  const [sku, setSku] = useState<SkuPickerValue | null>(null);
+  const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
+  const [parentColors, setParentColors] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -268,6 +272,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       setLinks(Array.isArray(detail.product_links) ? detail.product_links : []);
       setDiscountValue(detail.discount_value != null ? String(detail.discount_value) : "");
       setDiscountPct(!!detail.discount_is_percent);
+      setSku(detail.sku_id ? { id: detail.sku_id, code: detail.sku_code ?? "", name: detail.sku_name ?? detail.product_name ?? "", color: detail.sku_color, list_price: detail.sku_price } : null);
+      setParent(detail.parent_sku_id ? { id: detail.parent_sku_id, code: detail.parent_sku_code ?? "", name: detail.parent_sku_name ?? "" } : null);
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์
       const platforms = detail.platforms ?? [];
       const byPlat = new Map(detail.captions.map((c) => [c.platform, c]));
@@ -284,20 +290,25 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   const setCap = (platform: string, patch: Partial<ContentCaption>) => setCaps((cs) => cs.map((c) => c.platform === platform ? { ...c, ...patch } : c));
 
-  // ราคาเต็ม = ราคา SKU · ราคาขาย = ราคา SKU − ส่วนลด
-  const fakePrice = d?.sku_price ?? null;
+  // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
+  useEffect(() => { if (!parent?.id) { setParentColors([]); return; } let live = true; getParentSkuColors(parent.id).then((cs) => { if (live) setParentColors(cs); }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
+
+  // ราคาเต็ม = ราคา SKU ที่เลือก · ราคาขาย = ราคา − ส่วนลด · สี = SKU เดี่ยว หรือ รวมสีลูกของ Parent
+  const fakePrice = sku?.list_price ?? null;
   const realPrice = computeRealPrice(fakePrice, discountValue === "" ? null : Number(discountValue), discountPct);
+  const colorText = parentColors.length ? parentColors.join(", ") : (sku?.color ?? null);
   // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
   const sharedVars = useMemo(() => ({
     shop: shopChannels, fake_price: fakePrice, real_price: realPrice,
-    price: d?.sku_price ?? null, color: d?.sku_color ?? null, sku: d?.sku_code ?? null, product: d?.sku_name ?? d?.product_name ?? null,
-  }), [shopChannels, fakePrice, realPrice, d?.sku_price, d?.sku_color, d?.sku_code, d?.sku_name, d?.product_name]);
+    price: fakePrice, color: colorText, sku: sku?.code ?? null, product: sku?.name ?? d?.product_name ?? null,
+  }), [shopChannels, fakePrice, realPrice, colorText, sku?.code, sku?.name, d?.product_name]);
 
   const save = async () => {
     setSaving(true);
     try {
       await updateContent(contentId, {
         status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null,
+        sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
       });
@@ -334,7 +345,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             <div><label className="text-xs text-slate-400">สถานะ</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
             <div><label className="text-xs text-slate-400">ตั้งเวลาโพสต์</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
           </div>
-          {(d.sku_code || d.product_name) && <div className="text-sm text-slate-600 bg-slate-50 rounded-lg p-2">📦 {d.sku_code} {d.sku_name || d.product_name}</div>}
+          {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">สินค้า</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs text-slate-400">SKU (สีเดี่ยว)</label><SkuPicker value={sku} onChange={setSku} /></div>
+              <div><label className="text-xs text-slate-400">Parent SKU (ทุกสี)</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
+            </div>
+            <div className="mt-2">
+              <label className="text-xs text-slate-400">สีที่มี (ตัวแปร {"{color}"})</label>
+              <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)</span>}</div>
+            </div>
+          </div>
 
           {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
           <div>

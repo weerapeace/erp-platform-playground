@@ -14,7 +14,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
-import { CAMPAIGN_STATUS } from "./campaign-drawer";
+import { CAMPAIGN_STATUS, CampaignDrawer } from "./campaign-drawer";
 import {
   listCampaigns, createCampaign, deleteCampaign, listBrands,
   type Campaign,
@@ -30,6 +30,7 @@ const EMPTY: FormState = { name: "", brand_id: "", objective: "", owner: null, s
 export default function CampaignsPage() {
   const router = useRouter();
   const [modalOpen, setModalOpen] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -108,6 +109,10 @@ export default function CampaignsPage() {
                     {(c.start_date || c.end_date) && <span>· 🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
                     {c.owner_label && <span>· 👤 {c.owner_label}</span>}
                   </div>
+                  <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2">
+                    <button onClick={(e) => { e.stopPropagation(); setDetailId(c.id); }} className="text-xs font-medium text-violet-700 hover:underline">📋 ดูรายละเอียด</button>
+                    <button onClick={(e) => { e.stopPropagation(); router.push(`/tasks/campaigns/${c.id}`); }} className="text-xs font-medium text-slate-500 hover:text-violet-700">🟪 เข้ากระดาน</button>
+                  </div>
                 </div>
               );
             })}
@@ -136,6 +141,8 @@ export default function CampaignsPage() {
       <ConfirmDialog open={!!delTarget} onClose={() => setDelTarget(null)} onConfirm={onDelete}
         title="ลบแคมเปญ" message={<span>ต้องการลบ <span className="font-semibold">{delTarget?.name}</span> ใช่ไหม? (งานในแคมเปญจะไม่ถูกลบ แต่จะไม่ผูกกับแคมเปญนี้)</span>}
         confirmText="ลบแคมเปญ" variant="danger" />
+
+      {detailId && <CampaignDrawer campaignId={detailId} onClose={() => setDetailId(null)} onChanged={load} pushToast={pushToast} />}
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
         {toasts.map((t) => <div key={t.id} className={`flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}><span>{t.type === "success" ? "✓" : t.type === "error" ? "⚠️" : "ℹ️"}</span>{t.message}</div>)}

@@ -70,6 +70,9 @@ export async function GET(request: NextRequest) {
     `)
     .eq("is_active", true);
   if (salesOnly) query = query.eq("sale_ok", true);
+  // กรองตาม Parent SKU โดยตรง (ดึง SKU ลูกทั้งหมดของ parent — เช่น รวมสีในคอนเทนต์)
+  const parentSkuId = (searchParams.get("parent_sku_id") ?? "").trim();
+  if (parentSkuId) query = query.eq("parent_sku_id", parentSkuId);
 
   for (const token of tokens) {
     const parentIds = parentIdsByToken.get(token) ?? [];

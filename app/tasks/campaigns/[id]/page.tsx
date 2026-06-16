@@ -19,7 +19,7 @@ import { CreateTaskModal, type CreatedTask } from "../../create-task-modal";
 import { TaskDetailDrawer } from "../../task-detail-drawer";
 import { applyTaskTransition } from "../../task-actions";
 import { useCreativeOptions } from "../../use-options";
-import { getCampaign, updateCampaign, deleteTask, createContent, listBrands, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
+import { getCampaign, updateCampaign, deleteTask, createContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
 import { ContentDrawer } from "../../content/page";
 
 // โหลดของกลาง Excalidraw แบบ dynamic — ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
@@ -149,9 +149,10 @@ export default function CampaignCanvasPage() {
     setBoardTaskIds(new Set(ids));
   }, []);
   const openDragPanel = () => { refreshBoardIds(); setDragPanelOpen(true); };
-  const placeTaskCard = useCallback((t: CreativeTask) => {
+  const placeTaskCard = useCallback(async (t: CreativeTask) => {
     if (!sketchRef.current) { pushToast("info", "กระดานยังโหลดไม่เสร็จ ลองอีกครั้ง"); return; }
-    sketchRef.current.insert(taskCardSkeleton({ id: t.id, task_no: t.task_no ?? "", title: t.title, subtasks: [] }));
+    const subs = await listSubtasks(t.id).catch(() => []);
+    sketchRef.current.insert(taskCardSkeleton({ id: t.id, task_no: t.task_no ?? "", title: t.title, subtasks: subs.map((s) => ({ title: s.title })) }));
     setBoardTaskIds((prev) => new Set(prev).add(t.id));
     pushToast("success", `วางการ์ดงาน ${t.task_no} แล้ว`);
   }, [pushToast]);
@@ -160,6 +161,20 @@ export default function CampaignCanvasPage() {
     const tid = e.dataTransfer.getData("text/task-id"); if (!tid) return;
     const t = detail?.tasks.find((x) => x.id === tid); if (t) placeTaskCard(t);
   }, [detail, placeTaskCard]);
+
+  // ② ซิงค์งานย่อยสดบนการ์ดงานเมื่อเปิดกระดาน (การ์ดเก็บ snapshot — อัปเดตให้ตรงปัจจุบัน)
+  const syncTaskCards = useCallback(() => {
+    sketchRef.current?.refreshCards(async ({ kind, id, data }) => {
+      if (kind !== "task" || !id) return null;
+      const subs = await listSubtasks(id);
+      const shown = subs.slice(0, 6);
+      const subLines = subs.length
+        ? shown.map((s) => `${(s.status === "approved" || s.status === "posted" || s.status === "done") ? "☑" : "☐"} ${s.title}`).join("\n") + (subs.length > 6 ? `\n… อีก ${subs.length - 6}` : "")
+        : "— ยังไม่มีงานย่อย —";
+      const text = `✅ ${data.title ?? ""}\n${data.task_no ?? ""}\n\nงานย่อย (${subs.length})\n${subLines}`;
+      return { text, data: { subtasks: subs.map((s) => ({ title: s.title })) } };
+    });
+  }, []);
 
   if (err) return <StandaloneShell title="แคมเปญ" icon="📣" accent="violet"><div className="p-8 text-red-600">{err}</div></StandaloneShell>;
 
@@ -195,7 +210,7 @@ export default function CampaignCanvasPage() {
 
       <div className="px-8 py-6">
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
-          <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} />
+          <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (

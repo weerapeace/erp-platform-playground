@@ -32,10 +32,16 @@ const AUTOSAVE_MS = 2500;   // หยุดวาดกี่ ms แล้วค
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
-export type CanvasSketchControls = { isDirty: () => boolean; save: () => Promise<void>; discard: () => void; insert: (skeletons: Record<string, unknown>[]) => Promise<void>; listCards: () => { kind: string; data: Record<string, unknown> }[] };
+export type CanvasSketchControls = {
+  isDirty: () => boolean; save: () => Promise<void>; discard: () => void;
+  insert: (skeletons: Record<string, unknown>[]) => Promise<void>;
+  listCards: () => { kind: string; data: Record<string, unknown> }[];
+  /** ซิงค์ข้อความบนการ์ดสด — builder คืน {text, data?} เพื่ออัปเดตข้อความ+snapshot (เช่น งานย่อยล่าสุด) */
+  refreshCards: (builder: (card: { kind: string; id: string; data: Record<string, unknown> }) => Promise<{ text: string; data?: Record<string, unknown> } | null>) => Promise<void>;
+};
 
 export function CanvasSketch({
-  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen,
+  entityType, entityId, editable = true, height = "58vh", onDirtyChange, controlsRef, onCardOpen, onReady,
 }: {
   entityType: string;
   entityId:   string;
@@ -47,6 +53,8 @@ export function CanvasSketch({
   controlsRef?: MutableRefObject<CanvasSketchControls | null>;
   /** คลิกการ์ดที่มี customData.kind → เปิด drawer (เช่น sku/task) — ระบบจะ preventDefault ลิงก์ให้เอง */
   onCardOpen?: (data: Record<string, unknown>) => void;
+  /** เรียกครั้งเดียวเมื่อกระดานโหลดเสร็จพร้อมใช้ (ใช้ซิงค์การ์ดสด ฯลฯ) */
+  onReady?: () => void;
 }) {
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
@@ -62,6 +70,7 @@ export function CanvasSketch({
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
+  const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
   const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
 
   useEffect(() => {
@@ -79,9 +88,9 @@ export function CanvasSketch({
           return d?.kind && el.link ? { ...el, link: null } : el;
         });
         setScene(sc && typeof sc === "object" ? { elements: els, files: (sc.files as Record<string, unknown>) ?? {} } : null);
-        setTimeout(() => { readyRef.current = true; }, 800);
+        setTimeout(() => { readyRef.current = true; if (alive) readyCbRef.current?.(); }, 800);
       })
-      .catch(() => { if (alive) { setScene(null); setTimeout(() => { readyRef.current = true; }, 800); } });
+      .catch(() => { if (alive) { setScene(null); setTimeout(() => { readyRef.current = true; if (alive) readyCbRef.current?.(); }, 800); } });
     return () => { alive = false; };
   }, [entityType, entityId]);
 
@@ -215,6 +224,33 @@ export function CanvasSketch({
           seen.add(key); out.push({ kind: String(d.kind), data: d });
         }
         return out;
+      },
+      // ซิงค์ข้อความบนการ์ดสด: ไล่กลุ่ม (group) ที่เป็นการ์ด → builder คืนข้อความใหม่ → อัปเดต text + ปรับสูงกล่อง
+      refreshCards: async (builder) => {
+        const api = apiRef.current; if (!api) return;
+        const els = api.getSceneElements() as any[];
+        const groups = new Map<string, any[]>();
+        for (const el of els) {
+          const gid = el?.groupIds?.[0]; const d = el?.customData as Record<string, unknown> | undefined;
+          if (!gid || !d?.kind) continue;
+          const arr = groups.get(gid) ?? []; arr.push(el); groups.set(gid, arr);
+        }
+        const updates = new Map<string, { text: string; data?: Record<string, unknown> }>();
+        for (const [gid, arr] of groups) {
+          const d = arr[0].customData as Record<string, unknown>;
+          try { const res = await builder({ kind: String(d.kind), id: String(d.id ?? ""), data: d }); if (res && res.text != null) updates.set(gid, res); }
+          catch { /* ข้ามการ์ดที่ดึงไม่ได้ */ }
+        }
+        if (updates.size === 0) return;
+        const next = els.map((el) => {
+          const gid = el?.groupIds?.[0]; const u = gid ? updates.get(gid) : undefined; if (!u) return el;
+          const merged = { ...el.customData, ...(u.data ?? {}) };
+          if (el.type === "text") { const lines = u.text.split("\n").length; const fs = el.fontSize ?? 14; return { ...el, text: u.text, originalText: u.text, height: Math.round(lines * fs * 1.25), customData: merged }; }
+          if (el.type === "rectangle") { const lines = u.text.split("\n").length; return { ...el, height: 40 + lines * 18, customData: merged }; }
+          return { ...el, customData: merged };
+        });
+        api.updateScene({ elements: next });
+        if (editable) queueSave();
       },
     };
     return () => { if (controlsRef) controlsRef.current = null; };

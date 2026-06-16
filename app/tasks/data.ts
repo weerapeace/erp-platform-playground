@@ -266,12 +266,21 @@ export type ContentItem = {
   campaign_id: string | null; campaign_label: string | null;
   brand_id: string | null; brand_label: string | null; brand_color: string | null;
   sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_price: number | null; product_name: string | null;
+  parent_sku_id?: string | null; parent_sku_code?: string | null; parent_sku_name?: string | null;
   post_type: string | null; platforms: string[] | null; status: ContentStatus; approval_status: string;
   scheduled_at: string | null; published_at: string | null; published_url: string | null;
   product_links: { platform: string; url: string }[]; note: string | null; is_template?: boolean; updated_at: string;
   discount_value?: number | null; discount_is_percent?: boolean;
   brand_shop_channels?: { label: string; value: string }[];
 };
+
+// ดึงสีของ SKU ลูกทั้งหมดใต้ Parent SKU (รวมไม่ซ้ำ เช่น ["ดำ","น้ำตาล","แดง"])
+export async function getParentSkuColors(parentId: string): Promise<string[]> {
+  const res = await apiFetch(`/api/pickers/skus?parent_sku_id=${parentId}&limit=50`);
+  const j = await res.json().catch(() => ({}));
+  const rows = (j.data as { color?: string | null }[]) ?? [];
+  return [...new Set(rows.map((r) => (r.color ?? "").trim()).filter(Boolean))];
+}
 
 // ---- แม่แบบแคปชั่น + ช่องทางร้าน ----
 export type CaptionTemplate = { id?: string; key: string; label: string; body: string; sort_order?: number };
