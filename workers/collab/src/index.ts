@@ -68,9 +68,9 @@ export default {
     if (url.pathname === "/" || url.pathname === "/health") {
       return new Response("erp-collab ok", { status: 200, headers: { "content-type": "text/plain" } });
     }
-    const m = url.pathname.match(/^\/room\/([A-Za-z0-9_-]+)$/);
+    const m = url.pathname.match(/^\/room\/([^/]+)$/); // รับ room id ที่ encode มา (มี %3A ฯลฯ)
     if (!m) return new Response("not found", { status: 404 });
-    const id = env.ROOMS.idFromName(m[1]);
+    const id = env.ROOMS.idFromName(decodeURIComponent(m[1]));
     const stub = env.ROOMS.get(id);
     return stub.fetch(req);
   },
