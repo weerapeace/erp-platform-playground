@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSWRLite } from "@/lib/swr-lite";
+import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from "@/lib/caption-template";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
@@ -17,8 +18,9 @@ import {
   CONTENT_STATUS_META, POST_TYPES,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
   listCampaigns, listBrands, listHashtags, createHashtag,
+  getCaptionTemplates, saveCaptionTemplates,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
-  type BrandOption, type Hashtag,
+  type BrandOption, type Hashtag, type CaptionTemplate,
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
 
@@ -252,12 +254,20 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [scheduledAt, setScheduledAt] = useState("");
   const [publishedUrl, setPublishedUrl] = useState("");
   const [saving, setSaving] = useState(false);
+  // แม่แบบ + ส่วนลด
+  const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
+  const [shopChannels, setShopChannels] = useState<ShopChannel[]>([]);
+  const [discountValue, setDiscountValue] = useState<string>("");
+  const [discountPct, setDiscountPct] = useState(false);
+  const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const detail = await getContent(contentId);
       setD(detail); setStatus(detail.status); setScheduledAt(detail.scheduled_at ? detail.scheduled_at.slice(0, 16) : ""); setPublishedUrl(detail.published_url ?? "");
       setLinks(Array.isArray(detail.product_links) ? detail.product_links : []);
+      setDiscountValue(detail.discount_value != null ? String(detail.discount_value) : "");
+      setDiscountPct(!!detail.discount_is_percent);
       // เตรียม caption ให้ครบทุกแพลตฟอร์มของคอนเทนต์
       const platforms = detail.platforms ?? [];
       const byPlat = new Map(detail.captions.map((c) => [c.platform, c]));
@@ -266,13 +276,29 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   }, [contentId, pushToast]);
   useEffect(() => { load(); }, [load]);
 
+  // โหลดแม่แบบ + ช่องทางร้านของแบรนด์คอนเทนต์
+  const loadTemplates = useCallback(async () => {
+    try { const r = await getCaptionTemplates(d?.brand_id ?? null); setTemplates(r.templates); setShopChannels(r.shop_channels); } catch { /* ใช้ค่าว่าง */ }
+  }, [d?.brand_id]);
+  useEffect(() => { if (d) loadTemplates(); }, [d, loadTemplates]);
+
   const setCap = (platform: string, patch: Partial<ContentCaption>) => setCaps((cs) => cs.map((c) => c.platform === platform ? { ...c, ...patch } : c));
+
+  // ราคาเต็ม = ราคา SKU · ราคาขาย = ราคา SKU − ส่วนลด
+  const fakePrice = d?.sku_price ?? null;
+  const realPrice = computeRealPrice(fakePrice, discountValue === "" ? null : Number(discountValue), discountPct);
+  // ตัวแปรสินค้าที่ใช้ร่วมทุก caption (ไม่รวม caption/hashtags ที่ต่างกันต่อแพลตฟอร์ม)
+  const sharedVars = useMemo(() => ({
+    shop: shopChannels, fake_price: fakePrice, real_price: realPrice,
+    price: d?.sku_price ?? null, color: d?.sku_color ?? null, sku: d?.sku_code ?? null, product: d?.sku_name ?? d?.product_name ?? null,
+  }), [shopChannels, fakePrice, realPrice, d?.sku_price, d?.sku_color, d?.sku_code, d?.sku_name, d?.product_name]);
 
   const save = async () => {
     setSaving(true);
     try {
       await updateContent(contentId, {
         status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null,
+        discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
       });
       pushToast("success", "บันทึกแล้ว"); await load(); onChanged();
@@ -310,12 +336,30 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           </div>
           {(d.sku_code || d.product_name) && <div className="text-sm text-slate-600 bg-slate-50 rounded-lg p-2">📦 {d.sku_code} {d.sku_name || d.product_name}</div>}
 
+          {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">ราคา / ส่วนลด</p>
+            <div className="flex items-end gap-2 flex-wrap">
+              <div><label className="text-xs text-slate-400">ราคาเต็ม (จาก SKU)</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : "— (ไม่มี SKU)"}</div></div>
+              <div><label className="text-xs text-slate-400">ส่วนลด</label>
+                <div className="flex">
+                  <input value={discountValue} onChange={(e) => setDiscountValue(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" className="h-9 w-24 border border-slate-200 rounded-l-lg px-2 text-sm" />
+                  <button type="button" onClick={() => setDiscountPct((p) => !p)} title="สลับ บาท/เปอร์เซ็นต์" className="h-9 px-3 text-sm border border-l-0 border-slate-200 rounded-r-lg bg-slate-50 hover:bg-slate-100">{discountPct ? "%" : "฿"}</button>
+                </div>
+              </div>
+              <div><label className="text-xs text-slate-400">ราคาขายจริง</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
+            </div>
+          </div>
+
           {/* captions per platform */}
           <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Caption แยกตามแพลตฟอร์ม</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Caption แยกตามแพลตฟอร์ม</p>
+              <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ จัดการแม่แบบ</button>
+            </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} brandId={d.brand_id} links={links} skuPrice={d.sku_price} skuColor={d.sku_color} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
@@ -347,21 +391,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         </div>
       </div>
+
+      {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
     </>
   );
 }
 
-// ประเภท caption (สี) — กดแล้วประกอบข้อมูลสินค้าให้ตามชนิด
-const CAPTION_TYPES: { key: string; label: string; cls: string; active: string }[] = [
-  { key: "short",         label: "Short",        cls: "bg-slate-50 text-slate-600 border-slate-200",     active: "bg-slate-700 text-white border-slate-700" },
-  { key: "landing",       label: "Landing Page", cls: "bg-sky-50 text-sky-700 border-sky-200",           active: "bg-sky-600 text-white border-sky-600" },
-  { key: "product_links", label: "Product Links",cls: "bg-emerald-50 text-emerald-700 border-emerald-200", active: "bg-emerald-600 text-white border-emerald-600" },
-  { key: "page_links",    label: "Page Links",   cls: "bg-violet-50 text-violet-700 border-violet-200",  active: "bg-violet-600 text-white border-violet-600" },
-];
-const CAP_MARK = "\n———\n"; // เส้นคั่น caption ที่พิมพ์เอง กับบล็อกข้อมูลสินค้าที่ระบบเติม
+type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: number | null; price: number | null; color: string | null; sku: string | null; product: string | null };
 
-// caption ต่อ 1 แพลตฟอร์ม + ประเภท caption + ตัวเลือก hashtag จากคลัง
-function CaptionCard({ cap, brandId, links, skuPrice, skuColor, onChange, pushToast }: { cap: ContentCaption; brandId: string | null; links: { platform: string; url: string }[]; skuPrice: number | null; skuColor: string | null; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+// caption ต่อ 1 แพลตฟอร์ม: เลือกแม่แบบ + พิมพ์ข้อความล้วน + preview ที่ประกอบเสร็จ (คัดลอกได้)
+function CaptionCard({ cap, templates, sharedVars, brandId, onChange, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const [showTags, setShowTags] = useState(false);
   const [tags, setTags] = useState<Hashtag[]>([]);
   const [newTag, setNewTag] = useState("");
@@ -380,42 +419,25 @@ function CaptionCard({ cap, brandId, links, skuPrice, skuColor, onChange, pushTo
     try { const h = await createHashtag({ text: t, brand_id: brandId || null, platform: cap.platform }); setNewTag(""); appendTag(h.text); await loadTags(); }
     catch (e) { pushToast("error", (e as Error).message); }
   };
-  const copy = async () => {
-    const text = `${cap.caption ?? ""}\n\n${cap.hashtags ?? ""}`.trim();
-    try { await navigator.clipboard.writeText(text); pushToast("success", `คัดลอก ${platformLabel(cap.platform)} แล้ว`); } catch { pushToast("error", "คัดลอกไม่สำเร็จ"); }
-  };
 
-  // สร้างบล็อกข้อมูลสินค้าตามประเภท (ดึงจาก product_links + ราคา/สีของ SKU)
-  const buildBlock = (type: string): string => {
-    const shopee = links.find((l) => l.platform === "shopee" && l.url.trim())?.url;
-    const lazada = links.find((l) => l.platform === "lazada" && l.url.trim())?.url;
-    const anyLink = links.find((l) => l.url.trim())?.url;
-    const priceLine = skuPrice != null ? `💰 ราคา ${Number(skuPrice).toLocaleString()} บาท` : null;
-    const colorLine = skuColor ? `🎨 สี ${skuColor}` : null;
-    const out: string[] = [];
-    if (type === "landing") { if (anyLink) out.push(`🛒 สั่งซื้อ: ${anyLink}`); }
-    else if (type === "product_links") { if (shopee) out.push(`🛒 Shopee: ${shopee}`); if (lazada) out.push(`🛒 Lazada: ${lazada}`); if (priceLine) out.push(priceLine); if (colorLine) out.push(colorLine); }
-    else if (type === "page_links") { if (priceLine) out.push(priceLine); if (colorLine) out.push(colorLine); }
-    return out.join("\n");
-  };
-  // กดประเภท → เก็บประเภท + เติมบล็อกสินค้า (แทนที่บล็อกเดิม คงข้อความที่พิมพ์เอง)
-  const applyType = (type: string) => {
-    const base = (cap.caption ?? "").split(CAP_MARK)[0].replace(/\s+$/, "");
-    const block = buildBlock(type);
-    onChange({ caption_type: type, caption: block ? `${base}${CAP_MARK}${block}` : base });
-  };
+  const typeKey = cap.caption_type ?? templates[0]?.key ?? "short";
+  const tpl = templates.find((t) => t.key === typeKey) ?? templates[0];
+  // ประกอบ preview จากแม่แบบ + ตัวแปร (ถ้าไม่มีแม่แบบ → caption + hashtags ตรงๆ)
+  const preview = tpl ? renderCaption(tpl.body, { caption: cap.caption, hashtags: cap.hashtags, ...sharedVars }) : `${cap.caption ?? ""}\n\n${cap.hashtags ?? ""}`.trim();
+  const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", `คัดลอก ${platformLabel(cap.platform)} แล้ว`); } catch { pushToast("error", "คัดลอกไม่สำเร็จ"); } };
 
   return (
     <div className="border border-slate-200 rounded-lg p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-sm font-medium text-slate-700">{platformLabel(cap.platform)}</span>
-        <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 คัดลอก</button>
+        <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 คัดลอกผลลัพธ์</button>
       </div>
-      {/* ประเภท caption — กดแล้วเติมข้อมูลสินค้าให้ตามชนิด */}
+      {/* เลือกแม่แบบ */}
       <div className="flex flex-wrap gap-1.5 mb-2">
-        {CAPTION_TYPES.map((tp) => { const on = (cap.caption_type ?? "short") === tp.key; return (
-          <button key={tp.key} onClick={() => applyType(tp.key)} title="กดเพื่อเปลี่ยนประเภท caption (เติมข้อมูลสินค้าให้)" className={`px-2 py-0.5 rounded-full text-xs border ${on ? tp.active : tp.cls}`}>{tp.label}</button>
+        {templates.map((tp) => { const on = typeKey === tp.key; return (
+          <button key={tp.key} onClick={() => onChange({ caption_type: tp.key })} className={`px-2.5 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"}`}>{tp.label}</button>
         ); })}
+        {templates.length === 0 && <span className="text-xs text-slate-400">ยังไม่มีแม่แบบ — กด ⚙️ จัดการแม่แบบ</span>}
       </div>
       <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`} />
       <div className="mt-2">
@@ -435,6 +457,93 @@ function CaptionCard({ cap, brandId, links, skuPrice, skuColor, onChange, pushTo
           </div>
         )}
       </div>
+      {/* preview ผลลัพธ์ที่จะคัดลอก */}
+      <div className="mt-2">
+        <p className="text-[11px] text-slate-400 mb-1">ตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)</p>
+        <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
+      </div>
     </div>
+  );
+}
+
+// ตั้งค่าแม่แบบแคปชั่น + ช่องทางร้าน (ต่อแบรนด์ หรือ ค่ากลาง)
+function CaptionTemplateSettings({ brandId, brandLabel, onClose, onSaved, pushToast }: { brandId: string | null; brandLabel: string | null; onClose: () => void; onSaved: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
+  const [channels, setChannels] = useState<ShopChannel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  useEffect(() => { (async () => { try { const r = await getCaptionTemplates(brandId); setTemplates(r.templates.length ? r.templates : []); setChannels(r.shop_channels); } catch (e) { pushToast("error", (e as Error).message); } finally { setLoading(false); } })(); }, [brandId, pushToast]);
+
+  const active = templates[activeIdx];
+  const setActiveBody = (body: string) => setTemplates((ts) => ts.map((t, i) => i === activeIdx ? { ...t, body } : t));
+  const setActiveLabel = (label: string) => setTemplates((ts) => ts.map((t, i) => i === activeIdx ? { ...t, label } : t));
+  const insertVar = (v: string) => setActiveBody((active?.body ?? "") + v);
+  const addTemplate = () => { setTemplates((ts) => [...ts, { key: `custom_${ts.length + 1}`, label: "แม่แบบใหม่", body: "{caption}\n\n{hashtags}" }]); setActiveIdx(templates.length); };
+  const removeActive = () => { if (!active || !window.confirm(`ลบแม่แบบ "${active.label}" ?`)) return; setTemplates((ts) => ts.filter((_, i) => i !== activeIdx)); setActiveIdx(0); };
+
+  // preview ตัวอย่าง (ใช้ข้อมูลสมมติ)
+  const sampleVars = { caption: "ข้อความตัวอย่างที่พิมพ์เอง", hashtags: "#LouisMontini #กระเป๋าหนัง", shop: channels, fake_price: 1290, real_price: 990, price: 1290, color: "ดำ", sku: "TTM061-04", product: "กระเป๋าสตางค์หนังแท้" };
+
+  const save = async () => {
+    setSaving(true);
+    try { await saveCaptionTemplates(brandId, templates, channels); pushToast("success", "บันทึกแม่แบบแล้ว"); onSaved(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} title={`จัดการแม่แบบแคปชั่น${brandId ? ` — ${brandLabel ?? "แบรนด์"}` : " — ค่ากลาง (ทุกแบรนด์)"}`} size="xl"
+      footer={<>
+        <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">ปิด</button>
+        <button onClick={save} disabled={saving || loading} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+      </>}>
+      {loading ? <p className="text-sm text-slate-400 p-4">กำลังโหลด...</p> : (
+        <div className="space-y-4">
+          {brandId && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 mb-1.5">ช่องทางร้าน (ใช้กับตัวแปร {"{shop}"})</p>
+              <div className="space-y-1.5">
+                {channels.map((c, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input value={c.label} onChange={(e) => setChannels((cs) => cs.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} placeholder="Shopee" className="h-9 w-32 border border-slate-200 rounded-lg px-2 text-sm" />
+                    <input value={c.value} onChange={(e) => setChannels((cs) => cs.map((x, j) => j === i ? { ...x, value: e.target.value } : x))} placeholder="Louis Montini Official" className="flex-1 h-9 border border-slate-200 rounded-lg px-2 text-sm" />
+                    <button onClick={() => setChannels((cs) => cs.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
+                  </div>
+                ))}
+                <button onClick={() => setChannels((cs) => [...cs, { label: "", value: "" }])} className="text-sm text-violet-700 hover:underline">＋ เพิ่มช่องทาง</button>
+              </div>
+            </div>
+          )}
+
+          {/* แท็บแม่แบบ */}
+          <div className="flex flex-wrap gap-1.5">
+            {templates.map((t, i) => <button key={i} onClick={() => setActiveIdx(i)} className={`px-2.5 py-1 rounded-lg text-xs border ${i === activeIdx ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{t.label || t.key}</button>)}
+            <button onClick={addTemplate} className="px-2.5 py-1 rounded-lg text-xs border border-dashed border-slate-300 text-slate-500">＋ แม่แบบ</button>
+          </div>
+
+          {active && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <div><label className="text-xs text-slate-400">ชื่อแม่แบบ</label><input value={active.label} onChange={(e) => setActiveLabel(e.target.value)} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" /></div>
+                <div>
+                  <label className="text-xs text-slate-400">เนื้อหาแม่แบบ (แทรกตัวแปรได้)</label>
+                  <textarea value={active.body} onChange={(e) => setActiveBody(e.target.value)} rows={10} className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono leading-relaxed" />
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {CAPTION_VARS.map((v) => <button key={v.key} onClick={() => insertVar(v.label)} title={v.hint} className="text-[11px] bg-slate-100 hover:bg-violet-100 text-slate-600 rounded px-1.5 py-0.5">{v.label}</button>)}
+                </div>
+                <button onClick={removeActive} className="text-xs text-red-500 hover:underline">ลบแม่แบบนี้</button>
+              </div>
+              <div>
+                <label className="text-xs text-slate-400">ตัวอย่าง (ใช้ข้อมูลสมมติ)</label>
+                <pre className="mt-0.5 text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed h-[280px] overflow-y-auto">{renderCaption(active.body, sampleVars) || "—"}</pre>
+              </div>
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400">บรรทัดที่ตัวแปรว่างทั้งหมดจะถูกตัดออกอัตโนมัติ · {brandId ? "บันทึกแล้วจะใช้เฉพาะแบรนด์นี้" : "นี่คือค่ากลางที่ทุกแบรนด์ใช้ ถ้ายังไม่ตั้งของตัวเอง"}</p>
+        </div>
+      )}
+    </ERPModal>
   );
 }
