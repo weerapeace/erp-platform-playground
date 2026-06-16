@@ -37,7 +37,11 @@ function bool(value: unknown): boolean {
 }
 
 function employeeName(row: Row = {}): string {
-  return [row.first_name, row.last_name].map(text).filter(Boolean).join(" ") || text(row.nickname) || text(row.employee_code);
+  const full = [row.first_name, row.last_name].map(text).filter(Boolean).join(" ");
+  const nick = text(row.nickname);
+  const base = full || nick || text(row.employee_code);
+  // โชว์ชื่อเล่นต่อท้ายด้วย (ถ้ามี และยังไม่อยู่ในชื่อแล้ว) เช่น "Khin Malar Tun (Khin)"
+  return nick && full && !full.includes(nick) ? `${base} (${nick})` : base;
 }
 
 function identityNo(row: Row = {}): string {
@@ -647,6 +651,29 @@ export async function cancelPaymentBatch(batchId: string, actor: Actor = {}) {
     metadata: { batch_no: detail.batch.batch_no, line_count: detail.lines.length },
   });
   return getPaymentBatchDetail(batchId);
+}
+
+// ลบรอบจ่าย — ได้เฉพาะรอบที่ "ยกเลิกแล้ว" เท่านั้น (กันลบรอบที่ยังใช้งาน/จ่ายแล้ว)
+export async function deletePaymentBatch(batchId: string, actor: Actor = {}) {
+  const admin = supabaseAdmin();
+  const detail = await getPaymentBatchDetail(batchId);
+  if (text(detail.batch.status) !== "cancelled") throw new Error("ลบได้เฉพาะรอบจ่ายที่ยกเลิกแล้ว");
+  const now = new Date().toISOString();
+  // ปลดลิงก์ payslip (ถ้ามี) ก่อนลบ กัน FK
+  await admin.from("payroll_payslips").update({ payment_batch_id: null, updated_at: now }).eq("payment_batch_id", batchId);
+  const { error: lineError } = await admin.from("payment_batch_lines").delete().eq("payment_batch_id", batchId);
+  if (lineError) throw new Error(lineError.message);
+  const { error: batchError } = await admin.from("payment_batches").delete().eq("id", batchId);
+  if (batchError) throw new Error(batchError.message);
+  await writeAudit(admin, {
+    action: "delete_payment_batch",
+    entityType: "payment_batches",
+    entityId: batchId,
+    actorId: actor.actorId,
+    actorName: actor.actorName,
+    metadata: { batch_no: detail.batch.batch_no, line_count: detail.lines.length },
+  });
+  return { deleted: true, batch_no: text(detail.batch.batch_no) };
 }
 
 export async function exportPaymentBatchCsv(batchId: string, actor: Actor = {}) {

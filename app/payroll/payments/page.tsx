@@ -370,6 +370,25 @@ export default function PayrollPaymentsPage() {
     }
   }
 
+  async function deleteBatch() {
+    if (!detail) return;
+    if (!confirm(`ลบรอบจ่าย "${detail.batch.batch_no}" ถาวร? (ลบได้เฉพาะรอบที่ยกเลิกแล้ว)`)) return;
+    setBusy("delete");
+    setErr(null);
+    setMsg(null);
+    try {
+      const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}`, { method: "DELETE" }).then((res) => res.json());
+      if (json.error) throw new Error(json.error);
+      setMsg("ลบรอบจ่ายแล้ว");
+      setDetail(null);
+      await Promise.all([loadBatches(periodId), refreshPeriods()]);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "ลบรอบจ่ายไม่สำเร็จ");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function markPeriodPaid() {
     if (!periodId) return;
     if (!confirm("ยืนยันปิดงวดนี้เป็นจ่ายแล้ว? ระบบจะตรวจว่ามีชุดจ่ายที่จ่ายแล้วและสลิปจ่ายครบก่อนปิดงวด")) return;
@@ -521,6 +540,7 @@ export default function PayrollPaymentsPage() {
                 {detail.batch.status === "draft" && <button onClick={() => batchAction("approve")} disabled={busy === "approve"} className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-40">อนุมัติ</button>}
                 {detail.batch.status === "approved" && <button onClick={() => batchAction("mark-paid")} disabled={busy === "mark-paid"} className="h-9 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40">{detail.batch.batch_type === "month_end" ? "จ่ายแล้ว + ปิดงวด" : "จ่ายแล้ว"}</button>}
                 {detail.batch.status !== "paid" && detail.batch.status !== "cancelled" && <button onClick={() => batchAction("cancel")} disabled={busy === "cancel"} className="h-9 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-40">ยกเลิก</button>}
+                {detail.batch.status === "cancelled" && <button onClick={deleteBatch} disabled={busy === "delete"} className="h-9 rounded-lg border border-red-300 px-3 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40">🗑 ลบรอบจ่าย</button>}
               </div>
             </div>
             <div className="grid gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-3 md:grid-cols-4">
