@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 import { apiFetch } from "@/lib/api";
@@ -389,6 +389,33 @@ export default function PayrollPaymentsPage() {
     }
   }
 
+  async function saveLine(lineId: string, patch: Record<string, unknown>) {
+    if (!detail) return;
+    setErr(null);
+    setMsg(null);
+    const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/line`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ line_id: lineId, ...patch }),
+    }).then((res) => res.json());
+    if (json.error) throw new Error(json.error);
+    setMsg("บันทึกการแก้ไขบรรทัดแล้ว");
+    await Promise.all([loadDetail(detail.batch.id), loadBatches(periodId), refreshPeriods()]);
+  }
+
+  async function saveOrder(orderedIds: string[]) {
+    if (!detail) return;
+    setErr(null);
+    const json = await apiFetch(`/api/payroll/payment-batches/${encodeURIComponent(detail.batch.id)}/reorder`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ordered_ids: orderedIds }),
+    }).then((res) => res.json());
+    if (json.error) throw new Error(json.error);
+    setMsg("บันทึกลำดับใหม่แล้ว");
+    await loadDetail(detail.batch.id);
+  }
+
   async function markPeriodPaid() {
     if (!periodId) return;
     if (!confirm("ยืนยันปิดงวดนี้เป็นจ่ายแล้ว? ระบบจะตรวจว่ามีชุดจ่ายที่จ่ายแล้วและสลิปจ่ายครบก่อนปิดงวด")) return;
@@ -590,6 +617,9 @@ export default function PayrollPaymentsPage() {
               columns={visiblePaymentReportColumns}
               copiedAccountNos={copiedAccountNos}
               onCopyAccount={copyAccountNo}
+              editable={detail.batch.status === "draft"}
+              onSaveLine={saveLine}
+              onReorder={saveOrder}
             />
           </>
         )}
@@ -810,28 +840,37 @@ function bankTone(bank: string | null | undefined): string {
   return "bg-slate-100 text-slate-600 border-slate-200";
 }
 
+type LineEditDraft = { paid_amount: string; bank_name: string; bank_account_no: string; bank_account_name: string };
+
 function PaymentLinesTable({
   lines,
   columns,
   copiedAccountNos,
   onCopyAccount,
+  editable = false,
+  onSaveLine,
+  onReorder,
 }: {
   lines: BatchLine[];
   columns: Array<{ key: PaymentReportColumn; label: string }>;
   copiedAccountNos: Set<string>;
   onCopyAccount: (accountNo: string) => void;
+  editable?: boolean;
+  onSaveLine?: (lineId: string, patch: Record<string, unknown>) => Promise<void>;
+  onReorder?: (orderedIds: string[]) => Promise<void>;
 }) {
-  const colSpan = Math.max(columns.length, 1);
   const headerAlign = (column: PaymentReportColumn) => {
     if (column === "amount") return "text-right";
     if (column === "status") return "text-center";
     return "text-left";
   };
 
-  // เรียงตามหัวคอลัมน์ (คลิกสลับ ขึ้น/ลง)
+  // โหมดเรียง: ตามคอลัมน์ (คลิกหัวตาราง) หรือ ลากเรียงเอง (บันทึกให้ทุกคนเห็น)
+  const [mode, setMode] = useState<"column" | "manual">("column");
   const [sortKey, setSortKey] = useState<PaymentReportColumn | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const toggleSort = (k: PaymentReportColumn) => {
+    if (mode !== "column") return;
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(k); setSortDir("asc"); }
   };
@@ -847,7 +886,7 @@ function PaymentLinesTable({
     }
   };
   const sortedLines = useMemo(() => {
-    if (!sortKey) return lines;
+    if (mode === "manual" || !sortKey) return lines;
     const arr = [...lines].sort((a, b) => {
       const av = sortVal(a), bv = sortVal(b);
       if (typeof av === "number" && typeof bv === "number") return av - bv;
@@ -855,117 +894,224 @@ function PaymentLinesTable({
     });
     return sortDir === "desc" ? arr.reverse() : arr;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, sortKey, sortDir]);
+  }, [lines, sortKey, sortDir, mode]);
+
+  // ลากเรียงเอง — ใช้ลำดับ local ระหว่างลาก แล้วบันทึกตอนปล่อย
+  const [manualLines, setManualLines] = useState<BatchLine[]>(lines);
+  useEffect(() => { setManualLines(lines); }, [lines]);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const displayLines = mode === "manual" ? manualLines : sortedLines;
+
+  const onDrop = async (toIndex: number) => {
+    if (dragIndex === null || dragIndex === toIndex) { setDragIndex(null); return; }
+    const next = [...manualLines];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(toIndex, 0, moved);
+    setManualLines(next);
+    setDragIndex(null);
+    if (onReorder) {
+      const ids = next.map((l) => l.id).filter((x): x is string => !!x);
+      try { setSavingOrder(true); await onReorder(ids); } finally { setSavingOrder(false); }
+    }
+  };
+
+  // แก้บรรทัด (เฉพาะรอบร่าง) — popup
+  const [editLine, setEditLine] = useState<BatchLine | null>(null);
+  const [draft, setDraft] = useState<LineEditDraft>({ paid_amount: "", bank_name: "", bank_account_no: "", bank_account_name: "" });
+  const [savingLine, setSavingLine] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+  const openEdit = (line: BatchLine) => {
+    setEditErr(null);
+    setEditLine(line);
+    setDraft({
+      paid_amount: line.paid_amount != null ? String(line.paid_amount) : "",
+      bank_name: line.bank_name ?? "",
+      bank_account_no: line.bank_account_no ?? "",
+      bank_account_name: line.bank_account_name ?? line.employee_name ?? "",
+    });
+  };
+  const submitEdit = async () => {
+    if (!editLine?.id || !onSaveLine) return;
+    setEditErr(null);
+    setSavingLine(true);
+    try {
+      await onSaveLine(editLine.id, {
+        paid_amount: draft.paid_amount,
+        bank_name: draft.bank_name,
+        bank_account_no: draft.bank_account_no,
+        bank_account_name: draft.bank_account_name,
+      });
+      setEditLine(null);
+    } catch (e) {
+      setEditErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setSavingLine(false);
+    }
+  };
+
+  const extraCols = (mode === "manual" ? 1 : 0) + (editable ? 1 : 0);
+  const colSpan = Math.max(columns.length + extraCols, 1);
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] text-sm">
-        <thead className="bg-slate-50 text-xs text-slate-500">
-          <tr>
-            {columns.map((column) => (
-              <th key={column.key} onClick={() => toggleSort(column.key)}
-                className={`px-3 py-2 cursor-pointer select-none hover:text-slate-700 ${headerAlign(column.key)}`}>
-                {column.label}{sortKey === column.key ? (sortDir === "asc" ? " ▲" : " ▼") : <span className="text-slate-300"> ↕</span>}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sortedLines.map((line) => (
-            <tr key={line.id ?? line.employee_id} className="border-t border-slate-100 hover:bg-slate-50">
-              {columns.map((column) => {
-                if (column.key === "employee") {
-                  return (
-                    <td key={column.key} className="px-3 py-2">
-                      <div className="font-medium text-slate-800">{line.employee_name || "-"}</div>
-                      <div className="font-mono text-xs text-slate-400">{line.employee_code || "-"}</div>
-                    </td>
-                  );
-                }
-
-                if (column.key === "bank") {
-                  return (
-                    <td key={column.key} className="px-3 py-2">
-                      <span className={`inline-block rounded-md border px-2 py-0.5 text-xs ${bankTone(line.bank_name)}`}>{line.bank_name || "-"}</span>
-                    </td>
-                  );
-                }
-
-                if (column.key === "account_name") {
-                  return <td key={column.key} className="px-3 py-2">{line.bank_account_name || line.employee_name || "-"}</td>;
-                }
-
-                if (column.key === "account_no") {
-                  const accountNo = line.bank_account_no || "";
-                  const copied = accountNo ? copiedAccountNos.has(accountNo) : false;
-
-                  return (
-                    <td key={column.key} className="px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs text-slate-600">{accountNo || "-"}</span>
-                        {accountNo && (
-                          <button
-                            type="button"
-                            onClick={() => onCopyAccount(accountNo)}
-                            className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold transition ${
-                              copied
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                            }`}
-                          >
-                            {copied ? "คัดลอกแล้ว" : "Copy"}
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  );
-                }
-
-                if (column.key === "amount") {
-                  return <td key={column.key} className="px-3 py-2 text-right font-semibold tabular-nums">{baht(line.paid_amount)}</td>;
-                }
-
-                return <td key={column.key} className="px-3 py-2 text-center">{badge(line.status ?? "draft")}</td>;
-              })}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs font-semibold">
+          <button type="button" onClick={() => setMode("column")}
+            className={`rounded-md px-3 py-1.5 transition ${mode === "column" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}>
+            เรียงตามคอลัมน์
+          </button>
+          <button type="button" onClick={() => { setMode("manual"); setSortKey(null); }}
+            className={`rounded-md px-3 py-1.5 transition ${mode === "manual" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}>
+            ลากเรียงเอง
+          </button>
+        </div>
+        {mode === "column" && <span className="text-xs text-slate-400">คลิกหัวคอลัมน์เพื่อเรียง ▲▼</span>}
+        {mode === "manual" && <span className="text-xs text-slate-400">{savingOrder ? "กำลังบันทึกลำดับ…" : "ลากแถวขึ้น/ลงเพื่อจัดลำดับ — บันทึกอัตโนมัติให้ทุกคนเห็น"}</span>}
+        {editable && <span className="ml-auto text-xs font-semibold text-amber-600">รอบร่าง — แก้ไขยอด/ธนาคารรายบรรทัดได้</span>}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-sm">
+          <thead className="bg-slate-50 text-xs text-slate-500">
+            <tr>
+              {mode === "manual" && <th className="w-8 px-2 py-2" />}
+              {columns.map((column) => (
+                <th key={column.key} onClick={() => toggleSort(column.key)}
+                  className={`px-3 py-2 select-none ${mode === "column" ? "cursor-pointer hover:text-slate-700" : ""} ${headerAlign(column.key)}`}>
+                  {column.label}{mode === "column" && (sortKey === column.key ? (sortDir === "asc" ? " ▲" : " ▼") : <span className="text-slate-300"> ↕</span>)}
+                </th>
+              ))}
+              {editable && <th className="w-16 px-2 py-2 text-center">แก้ไข</th>}
             </tr>
-          ))}
-          {!lines.length && <tr><td colSpan={colSpan} className="px-3 py-10 text-center text-sm text-slate-400">ไม่มีรายการใน tab นี้</td></tr>}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {displayLines.map((line, index) => (
+              <tr
+                key={line.id ?? line.employee_id}
+                draggable={mode === "manual"}
+                onDragStart={() => mode === "manual" && setDragIndex(index)}
+                onDragOver={(e) => { if (mode === "manual") e.preventDefault(); }}
+                onDrop={() => mode === "manual" && onDrop(index)}
+                className={`border-t border-slate-100 hover:bg-slate-50 ${mode === "manual" ? "cursor-grab" : ""} ${dragIndex === index ? "opacity-40" : ""}`}
+              >
+                {mode === "manual" && <td className="px-2 py-2 text-center text-slate-400 select-none">⠿</td>}
+                {columns.map((column) => {
+                  if (column.key === "employee") {
+                    return (
+                      <td key={column.key} className="px-3 py-2">
+                        <div className="font-medium text-slate-800">{line.employee_name || "-"}</div>
+                        <div className="font-mono text-xs text-slate-400">{line.employee_code || "-"}</div>
+                      </td>
+                    );
+                  }
+
+                  if (column.key === "bank") {
+                    return (
+                      <td key={column.key} className="px-3 py-2">
+                        <span className={`inline-block rounded-md border px-2 py-0.5 text-xs ${bankTone(line.bank_name)}`}>{line.bank_name || "-"}</span>
+                      </td>
+                    );
+                  }
+
+                  if (column.key === "account_name") {
+                    return <td key={column.key} className="px-3 py-2">{line.bank_account_name || line.employee_name || "-"}</td>;
+                  }
+
+                  if (column.key === "account_no") {
+                    const accountNo = line.bank_account_no || "";
+                    const copied = accountNo ? copiedAccountNos.has(accountNo) : false;
+
+                    return (
+                      <td key={column.key} className="px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs text-slate-600">{accountNo || "-"}</span>
+                          {accountNo && (
+                            <button
+                              type="button"
+                              onClick={() => onCopyAccount(accountNo)}
+                              className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold transition ${
+                                copied
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                              }`}
+                            >
+                              {copied ? "คัดลอกแล้ว" : "Copy"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  }
+
+                  if (column.key === "amount") {
+                    return <td key={column.key} className="px-3 py-2 text-right font-semibold tabular-nums">{baht(line.paid_amount)}</td>;
+                  }
+
+                  return <td key={column.key} className="px-3 py-2 text-center">{badge(line.status ?? "draft")}</td>;
+                })}
+                {editable && (
+                  <td className="px-2 py-2 text-center">
+                    {line.id ? (
+                      <button type="button" onClick={() => openEdit(line)} className="rounded-md border border-slate-200 px-2 py-1 text-xs hover:bg-slate-50" title="แก้บรรทัดนี้">✏️</button>
+                    ) : <span className="text-slate-300">-</span>}
+                  </td>
+                )}
+              </tr>
+            ))}
+            {!lines.length && <tr><td colSpan={colSpan} className="px-3 py-10 text-center text-sm text-slate-400">ไม่มีรายการใน tab นี้</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <ERPModal
+        open={!!editLine}
+        onClose={() => setEditLine(null)}
+        size="md"
+        title="แก้บรรทัดจ่าย (รอบร่าง)"
+        description="แก้เฉพาะรอบจ่ายนี้ ไม่กระทบข้อมูลพนักงานจริง"
+        footer={
+          <div className="flex w-full items-center justify-between">
+            <button onClick={() => setEditLine(null)} className="h-9 rounded-lg border border-slate-300 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={submitEdit} disabled={savingLine} className="h-9 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{savingLine ? "กำลังบันทึก…" : "บันทึก"}</button>
+          </div>
+        }
+      >
+        {editLine && (
+          <div className="space-y-3">
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <span className="font-medium text-slate-800">{editLine.employee_name}</span>
+              <span className="ml-2 font-mono text-xs text-slate-400">{editLine.employee_code}</span>
+            </div>
+            {editErr && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{editErr}</div>}
+            <LineEditField label="ยอดจ่าย (บาท)">
+              <input type="number" step="0.01" value={draft.paid_amount} onChange={(e) => setDraft((d) => ({ ...d, paid_amount: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-slate-300 px-3 text-sm text-right tabular-nums" />
+            </LineEditField>
+            <LineEditField label="ธนาคาร">
+              <input value={draft.bank_name} onChange={(e) => setDraft((d) => ({ ...d, bank_name: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+            </LineEditField>
+            <LineEditField label="เลขที่บัญชี">
+              <input value={draft.bank_account_no} onChange={(e) => setDraft((d) => ({ ...d, bank_account_no: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-slate-300 px-3 font-mono text-sm" />
+            </LineEditField>
+            <LineEditField label="ชื่อบัญชี">
+              <input value={draft.bank_account_name} onChange={(e) => setDraft((d) => ({ ...d, bank_account_name: e.target.value }))}
+                className="h-9 w-full rounded-lg border border-slate-300 px-3 text-sm" />
+            </LineEditField>
+          </div>
+        )}
+      </ERPModal>
     </div>
   );
+}
 
+function LineEditField({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[980px] text-sm">
-        <thead className="bg-slate-50 text-xs text-slate-500">
-          <tr>
-            <th className="px-3 py-2 text-left">พนักงาน</th>
-            <th className="px-3 py-2 text-left">ธนาคาร</th>
-            <th className="px-3 py-2 text-left">ชื่อบัญชี</th>
-            <th className="px-3 py-2 text-left">เลขที่บัญชี</th>
-            <th className="px-3 py-2 text-right">ยอดจ่าย</th>
-            <th className="px-3 py-2 text-center">สถานะ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line) => (
-            <tr key={line.id ?? line.employee_id} className="border-t border-slate-100 hover:bg-slate-50">
-              <td className="px-3 py-2">
-                <div className="font-medium text-slate-800">{line.employee_name || "-"}</div>
-                <div className="font-mono text-xs text-slate-400">{line.employee_code || "-"}</div>
-              </td>
-              <td className="px-3 py-2">{line.bank_name || "-"}</td>
-              <td className="px-3 py-2">{line.bank_account_name || line.employee_name || "-"}</td>
-              <td className="px-3 py-2 font-mono text-xs text-slate-600">{line.bank_account_no || "-"}</td>
-              <td className="px-3 py-2 text-right font-semibold tabular-nums">{baht(line.paid_amount)}</td>
-              <td className="px-3 py-2 text-center">{badge(line.status ?? "draft")}</td>
-            </tr>
-          ))}
-          {!lines.length && <tr><td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-400">รอบจ่ายนี้ยังไม่มีรายการ</td></tr>}
-        </tbody>
-      </table>
-    </div>
+    <label className="block">
+      <span className="mb-1 block text-xs font-semibold text-slate-500">{label}</span>
+      {children}
+    </label>
   );
 }
 

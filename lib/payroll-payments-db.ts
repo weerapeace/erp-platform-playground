@@ -273,6 +273,7 @@ export async function getPaymentBatchDetail(batchId: string): Promise<PaymentBat
     .from("payment_batch_lines")
     .select("*")
     .eq("payment_batch_id", batchId)
+    .order("sort_order", { ascending: true, nullsFirst: false })   // ลำดับที่ลากเรียงไว้ก่อน
     .order("created_at", { ascending: true });
   if (lineError) throw new Error(lineError.message);
   const lines = (lineRows ?? []) as Row[];
@@ -302,9 +303,9 @@ export async function getPaymentBatchDetail(batchId: string): Promise<PaymentBat
       employee_name: employeeName(emp),
       contract_type: text(contract.contract_type),
       wage_type: text(contract.wage_type),
-      bank_name: text(bank.bank_name),
-      bank_account_name: text(bank.account_name) || employeeName(emp),
-      bank_account_no: text(bank.account_no),
+      bank_name: text(line.bank_name_override) || text(bank.bank_name),
+      bank_account_name: text(line.bank_account_name_override) || text(bank.account_name) || employeeName(emp),
+      bank_account_no: text(line.bank_account_no_override) || text(bank.account_no),
       payslip_no: text(slip.payslip_no),
       payslip_id: text(slip.id || note.payslip_id),
       source: text(note.source),
@@ -674,6 +675,47 @@ export async function deletePaymentBatch(batchId: string, actor: Actor = {}) {
     metadata: { batch_no: detail.batch.batch_no, line_count: detail.lines.length },
   });
   return { deleted: true, batch_no: text(detail.batch.batch_no) };
+}
+
+// แก้ไขบรรทัด (เฉพาะรอบ "ร่าง") — ยอดจ่าย + override ธนาคาร/เลขบัญชี/ชื่อบัญชี (แก้แค่รอบนี้ ไม่กระทบข้อมูลพนักงาน)
+export async function updatePaymentBatchLine(
+  batchId: string,
+  lineId: string,
+  patch: { paid_amount?: number | null; bank_name?: string | null; bank_account_no?: string | null; bank_account_name?: string | null },
+  actor: Actor = {},
+) {
+  const admin = supabaseAdmin();
+  const detail = await getPaymentBatchDetail(batchId);
+  if (text(detail.batch.status) !== "draft") throw new Error("แก้ได้เฉพาะรอบจ่ายที่เป็นร่าง");
+  const now = new Date().toISOString();
+  const upd: Record<string, unknown> = { updated_at: now };
+  if (patch.paid_amount !== undefined) upd.paid_amount = patch.paid_amount;
+  if (patch.bank_name !== undefined) upd.bank_name_override = (patch.bank_name ?? "").trim() || null;
+  if (patch.bank_account_no !== undefined) upd.bank_account_no_override = (patch.bank_account_no ?? "").trim() || null;
+  if (patch.bank_account_name !== undefined) upd.bank_account_name_override = (patch.bank_account_name ?? "").trim() || null;
+  const { error } = await admin.from("payment_batch_lines").update(upd).eq("id", lineId).eq("payment_batch_id", batchId);
+  if (error) throw new Error(error.message);
+  await writeAudit(admin, {
+    action: "update_payment_batch_line", entityType: "payment_batch_lines", entityId: lineId,
+    actorId: actor.actorId, actorName: actor.actorName,
+    metadata: { batch_id: batchId, changed: Object.keys(upd).filter((k) => k !== "updated_at") },
+  });
+  return getPaymentBatchDetail(batchId);
+}
+
+// บันทึกลำดับที่ลากเรียง (sort_order) — ให้ทุกคนเห็นเหมือนกัน
+export async function reorderPaymentBatchLines(batchId: string, orderedIds: string[], actor: Actor = {}) {
+  const admin = supabaseAdmin();
+  const now = new Date().toISOString();
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await admin.from("payment_batch_lines").update({ sort_order: i, updated_at: now }).eq("id", orderedIds[i]).eq("payment_batch_id", batchId);
+    if (error) throw new Error(error.message);
+  }
+  await writeAudit(admin, {
+    action: "reorder_payment_batch_lines", entityType: "payment_batches", entityId: batchId,
+    actorId: actor.actorId, actorName: actor.actorName, metadata: { count: orderedIds.length },
+  });
+  return getPaymentBatchDetail(batchId);
 }
 
 export async function exportPaymentBatchCsv(batchId: string, actor: Actor = {}) {
