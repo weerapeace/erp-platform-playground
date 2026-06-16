@@ -88,6 +88,7 @@ export function CanvasSketch({
   const savingRef  = useRef(false);
   const pendingRef = useRef(false);    // มีแก้เพิ่มระหว่างกำลังบันทึก → บันทึกซ้ำต่อท้าย
   const discardRef = useRef(false);    // true = ผู้ใช้เลือก "ทิ้ง" → ไม่ flush ตอน unmount
+  const hadContentRef = useRef(false); // เคยมีชิ้นงานจริงไหม — กันเซฟ "ว่าง" ทับงานดี (เช่นตอนปิดหน้า Excalidraw เคลียร์ scene)
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // เซฟกันลืมระหว่างแก้ต่อเนื่อง
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
@@ -97,7 +98,7 @@ export function CanvasSketch({
 
   useEffect(() => {
     let alive = true;
-    readyRef.current = false; dirtyRef.current = false; discardRef.current = false; latestRef.current = null;
+    readyRef.current = false; dirtyRef.current = false; discardRef.current = false; latestRef.current = null; hadContentRef.current = false;
     setScene("loading"); setSaveState("idle");
     apiFetch(`/api/canvas-sketch?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`)
       .then((r) => r.json())
@@ -109,6 +110,7 @@ export function CanvasSketch({
           const d = el?.customData as Record<string, unknown> | undefined;
           return d?.kind && el.link ? { ...el, link: null } : el;
         });
+        if (els.some((e) => !(e as { isDeleted?: boolean }).isDeleted)) hadContentRef.current = true; // โหลดมามีงาน → ห้ามเซฟว่างทับ
         setScene(sc && typeof sc === "object" ? { elements: els, files: (sc.files as Record<string, unknown>) ?? {} } : null);
         setTimeout(() => { readyRef.current = true; if (alive) readyCbRef.current?.(); }, 800);
       })
@@ -122,6 +124,16 @@ export function CanvasSketch({
     const snap = latestRef.current;
     if (!snap) return;
     if (savingRef.current) { pendingRef.current = true; return; }
+    // กันเซฟ "ว่าง" ทับงานดี: ถ้าเคยมีงาน แต่ snapshot ตอนนี้ว่าง (มักเกิดตอนปิดหน้า/teardown ที่ Excalidraw เคลียร์ scene)
+    // → ลองใช้ของจริงจาก api ที่ยังเปิดอยู่; ถ้าก็ว่าง/อ่านไม่ได้ → ไม่บันทึก (กันงานหาย)
+    {
+      const snapEls = (snap.elements ?? []) as any[];
+      if (hadContentRef.current && !snapEls.some((e) => !e.isDeleted)) {
+        const live = (() => { try { return apiRef.current?.getSceneElementsIncludingDeleted?.() as any[] | undefined; } catch { return undefined; } })();
+        if (live && live.some((e) => !e.isDeleted)) { snap.elements = live; }   // ของจริงยังมีงาน → ใช้แทน
+        else { console.warn("[canvas-sketch] skip empty save (had content)"); return; }   // ยืนยันว่างไม่ได้ → ไม่บันทึกทับ
+      }
+    }
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     if (maxTimerRef.current) { clearTimeout(maxTimerRef.current); maxTimerRef.current = null; }
     savingRef.current = true; markDirty(false);
@@ -505,10 +517,13 @@ export function CanvasSketch({
           excalidrawAPI={(a: any) => { apiRef.current = a; }}
           initialData={scene ? { elements: scene.elements as any, files: scene.files as any, scrollToContent: true } : undefined}
           onChange={(elements: any, appState: any, files: any) => {
-            latestRef.current = { elements, appState, files };   // จับ snapshot เสมอ (รวมตอน load)
+            // จับ snapshot — แต่ "อย่า" ให้ตอน Excalidraw เคลียร์เป็นว่าง (teardown/ปิดหน้า) มาทับ snapshot ดี (กันเซฟว่าง)
+            const hasLive = (elements as any[]).some((e) => !e.isDeleted);
+            if (hasLive || !hadContentRef.current) latestRef.current = { elements, appState, files };
             const sel = appState?.selectedElementIds || {};
             const tx = (elements as any[]).find((e) => !e.isDeleted && e.type === "text" && sel[e.id]);
             setSelFont(tx ? Math.round(tx.fontSize) : null);
+            if ((elements as any[]).some((e) => !e.isDeleted)) hadContentRef.current = true; // เคยมีงานจริง
             // เซฟ/ส่ง เฉพาะเมื่อ "ชิ้นงานเปลี่ยนจริง" (ข้ามการเลือก/เลื่อนจอที่ไม่กระทบเนื้อหา → กันกระพริบ/loop)
             if (readyRef.current && editable) {
               const sig = sceneSig(elements as any[]);
