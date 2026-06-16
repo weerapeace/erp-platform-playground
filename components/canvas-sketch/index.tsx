@@ -28,7 +28,8 @@ const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).
 type Scene = { elements?: unknown[]; files?: Record<string, unknown> } | null;
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
-const AUTOSAVE_MS = 2500;   // หยุดวาดกี่ ms แล้วค่อยบันทึก
+const AUTOSAVE_MS = 1000;       // หยุดวาดกี่ ms แล้วค่อยบันทึก (เซฟไวขึ้น)
+const MAX_AUTOSAVE_MS = 8000;   // เซฟกันลืม: แม้แก้ต่อเนื่องไม่หยุด ก็เซฟทุก ~8 วิ
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
@@ -68,6 +69,7 @@ export function CanvasSketch({
   const pendingRef = useRef(false);    // มีแก้เพิ่มระหว่างกำลังบันทึก → บันทึกซ้ำต่อท้าย
   const discardRef = useRef(false);    // true = ผู้ใช้เลือก "ทิ้ง" → ไม่ flush ตอน unmount
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // เซฟกันลืมระหว่างแก้ต่อเนื่อง
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
@@ -100,6 +102,8 @@ export function CanvasSketch({
     const snap = latestRef.current;
     if (!snap) return;
     if (savingRef.current) { pendingRef.current = true; return; }
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (maxTimerRef.current) { clearTimeout(maxTimerRef.current); maxTimerRef.current = null; }
     savingRef.current = true; markDirty(false);
     setSaveState("saving");
     try {
@@ -142,12 +146,13 @@ export function CanvasSketch({
     }
   }, [entityType, entityId]);
 
-  // มีการแก้ → ตั้งเวลาบันทึกอัตโนมัติ (รีเซ็ตทุกครั้งที่ขยับ — บันทึกเมื่อหยุดวาด)
+  // มีการแก้ → ตั้งเวลาบันทึกอัตโนมัติ (debounce หยุดวาด ~1วิ) + เซฟกันลืมทุก ~8วิ ถ้าแก้ต่อเนื่อง
   const queueSave = useCallback(() => {
     markDirty(true);
     setSaveState("dirty");
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => void doSave(), AUTOSAVE_MS);
+    if (!maxTimerRef.current) maxTimerRef.current = setTimeout(() => void doSave(), MAX_AUTOSAVE_MS);
   }, [doSave]);
 
   // ให้ภายนอกถือ handle: เช็คมีแก้ค้าง / สั่งบันทึก / สั่งทิ้ง (ใช้ตอนถามก่อนปิด popup)
@@ -259,8 +264,19 @@ export function CanvasSketch({
   // flush ตอนสลับแท็บ/ปิด modal — ถ้ายังมีแก้ค้าง บันทึกให้เลย (เว้นกรณีผู้ใช้เลือก "ทิ้ง")
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
+    if (maxTimerRef.current) clearTimeout(maxTimerRef.current);
     if (editable && dirtyRef.current && !discardRef.current) void doSave();
   }, [doSave, editable]);
+
+  // เตือนตอนปิดแท็บ/ออกจากหน้า ถ้ายังมีงานค้างเซฟ (กำลังบันทึกอยู่หรือยังไม่ได้บันทึก)
+  useEffect(() => {
+    if (!editable) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current || savingRef.current) { void doSave(); e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [editable, doSave]);
 
   // ล้อเมาส์ = ซูมเข้าหาตำแหน่งเมาส์ (shift+ล้อ = เลื่อนแนวนอนตามปกติ) + ดับเบิลคลิกการ์ด → เปิด drawer
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -303,6 +319,32 @@ export function CanvasSketch({
     if (editable) queueSave();
   };
 
+  // แปลข้อความที่เลือก (ไทย↔อังกฤษ ผ่าน Cloudflare AI) → วางกล่องใหม่ข้างๆ ของเดิม
+  const [translating, setTranslating] = useState(false);
+  const translateSelected = async () => {
+    const api = apiRef.current; if (!api) return;
+    const sel = api.getAppState().selectedElementIds || {};
+    const texts = (api.getSceneElements() as any[]).filter((e) => e.type === "text" && sel[e.id] && !e.isDeleted && (e.text ?? "").trim());
+    if (!texts.length) return;
+    setTranslating(true);
+    try {
+      const lib: any = await import("@excalidraw/excalidraw");
+      const skeletons: Record<string, unknown>[] = [];
+      for (const el of texts) {
+        try {
+          const res = await apiFetch("/api/ai/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: el.text }) });
+          const j = await res.json(); if (j.error) throw new Error(j.error);
+          skeletons.push({ type: "text", x: el.x + (el.width || 200) + 28, y: el.y, text: String(j.data.translated), fontSize: el.fontSize || 20, strokeColor: el.strokeColor || "#1e293b", width: el.width || undefined });
+        } catch { /* ข้ามกล่องที่แปลไม่ได้ */ }
+      }
+      if (skeletons.length) {
+        const els = lib.convertToExcalidrawElements(skeletons);
+        api.updateScene({ elements: [...api.getSceneElements(), ...els] });
+        if (editable) queueSave();
+      }
+    } finally { setTranslating(false); }
+  };
+
   if (scene === "loading") {
     return <div className="flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl" style={{ height }}>กำลังโหลดกระดาน...</div>;
   }
@@ -320,6 +362,12 @@ export function CanvasSketch({
             <input type="number" value={selFont} onChange={(e) => { const v = parseInt(e.target.value || "0", 10); if (v) setFont(v); }} className="w-12 h-6 text-center border border-slate-200 rounded" />
             <button onClick={() => setFont(selFont + 2)} className="h-5 w-5 rounded hover:bg-slate-100">＋</button>
           </span>
+        )}
+        {editable && selFont != null && (
+          <button onClick={translateSelected} disabled={translating} title="แปลข้อความที่เลือก ไทย↔อังกฤษ (วางกล่องใหม่ข้างๆ)"
+            className="inline-flex items-center gap-1 text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50 disabled:opacity-50">
+            {translating ? "⏳ กำลังแปล..." : "🌐 แปลภาษา"}
+          </button>
         )}
         {editable && (
           <span className="text-[11px] inline-flex items-center gap-1.5">
