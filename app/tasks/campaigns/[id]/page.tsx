@@ -183,9 +183,9 @@ export default function CampaignCanvasPage() {
   const name = detail?.campaign.name ?? t("แคมเปญ", "Campaign");
 
   return (
-    <StandaloneShell title={name} icon="📣" accent="violet" collapsible>
-      {/* Top bar (sticky) -- หัวบาร์หลักพับเป็น overlay แล้ว จึงเริ่มที่ top-0 */}
-      <div className="bg-white border-b border-slate-200 px-8 py-4 sticky top-0 z-20">
+    <StandaloneShell title={name} icon="📣" accent="violet">
+      {/* Top bar (sticky) -- อยู่ใต้หัวบาร์หลัก (top-14) */}
+      <div className="bg-white border-b border-slate-200 px-8 py-4 sticky top-14 z-20">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3 min-w-0">
             <a href="/tasks/campaigns" className="text-sm text-slate-500 hover:text-slate-800">{t("แคมเปญ", "Campaigns")}</a>
@@ -212,7 +212,7 @@ export default function CampaignCanvasPage() {
 
       <div className="px-8 py-6">
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
-          <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 150px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} />
+          <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
