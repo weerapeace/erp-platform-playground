@@ -25,8 +25,9 @@ import { RichTextEditor } from "@/components/rich-text";
 import type { Attachment } from "@/app/api/attachments/route";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS, calcCostQty, buildStatusMeta, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
-import { GroupRefSkusModal } from "./group-ref-modal";
-import { PriceItemSkusModal } from "./price-item-skus-modal";
+import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
+import type { SkuPickerValue } from "@/components/pickers";
+import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
@@ -221,8 +222,10 @@ export default function DesignSheetsPage() {
   // ---- เฟส 4: ตีราคา ----
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
-  const [groupRefOpen, setGroupRefOpen] = useState(false);   // โมดอลผูกสินค้าตัวแทนต่อกลุ่ม
-  const [priceItemSkusOpen, setPriceItemSkusOpen] = useState(false);   // โมดอลผูก SKU เข้าวัสดุตีราคา
+  // ผูก SKU เข้าวัสดุตีราคา — ทำในตารางจัดการวัสดุตีราคา (ต่อแถว)
+  const [pmLinks, setPmLinks] = useState<Record<string, string[]>>({});   // item_id → sku_ids
+  const [pmLinkSkus, setPmLinkSkus] = useState<Record<string, SkuLite>>({}); // sku_id → {code,name}
+  const [pmLinkFor, setPmLinkFor] = useState<PmRow | null>(null);          // แถวที่กำลังเลือก SKU
   const [costLines, setCostLines] = useState<CostRow[]>([]);
   const [costDirty, setCostDirty] = useState(false);
   const [costSaving, setCostSaving] = useState(false);
@@ -333,14 +336,32 @@ export default function DesignSheetsPage() {
   const loadPm = useCallback(async () => {
     setPmLoading(true);
     try {
-      const [ir, gr] = await Promise.all([
+      const [ir, gr, ps] = await Promise.all([
         apiFetch("/api/master-v2/design-price-items?limit=500").then((r) => r.json()),
         apiFetch("/api/bom/material-groups").then((r) => r.json()),
+        apiFetch("/api/design-sheets/price-item-skus").then((r) => r.json()),
       ]);
       setPmRows((ir.data ?? ir.rows ?? []) as PmRow[]);
       setMgList((gr.data ?? []) as MaterialGroup[]);
+      if (!ps.error) { setPmLinks((ps.links ?? {}) as Record<string, string[]>); setPmLinkSkus((ps.skus ?? {}) as Record<string, SkuLite>); }
     } catch { /* ignore */ } finally { setPmLoading(false); }
   }, []);
+
+  // ผูก/ปลด SKU ของวัสดุตีราคาแถวหนึ่ง
+  const savePmLink = async (itemId: string, ids: string[]) => {
+    setPmLinks((m) => ({ ...m, [itemId]: ids }));
+    const j = await apiFetch("/api/design-sheets/price-item-skus", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item_id: itemId, sku_ids: ids }),
+    }).then((r) => r.json());
+    if (j.error) { toast.error(j.error); void loadPm(); } else toast.success("บันทึก SKU ที่ผูกแล้ว");
+  };
+  const onPmLinkPicked = (picked: SkuPickerValue[]) => {
+    if (!pmLinkFor) return;
+    setPmLinkSkus((m) => { const n = { ...m }; for (const s of picked) n[s.id] = { id: s.id, code: s.code, name: s.name }; return n; });
+    const ids = [...new Set([...(pmLinks[pmLinkFor.id] ?? []), ...picked.map((s) => s.id)])];
+    void savePmLink(pmLinkFor.id, ids);
+    setPmLinkFor(null);
+  };
 
   const openPm = () => { setPmOpen(true); setPmEditId(null); setPmName(""); setPmGroup(""); setPmPrice(""); setPmUom(""); setPmFace(""); setPmWidth(""); setPmLength(""); void loadPm(); };
   const closePm = () => { setPmOpen(false); setPriceItems([]); setPriceGroups([]); };   // ปิดแล้ว dropdown วัสดุ/กลุ่มในตารางตีราคารีโหลดเอง
@@ -1342,8 +1363,6 @@ export default function DesignSheetsPage() {
             {/* แท็บตีราคา (เฟส 4) — สูตรเดียวกับ BOM, วัสดุจาก master /master/design-price-items */}
             {modalTab === "cost" && form.id && <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-end gap-2">
-                {canEdit && <button onClick={() => setGroupRefOpen(true)} className="h-8 px-3 text-sm font-medium bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-300 hover:text-blue-700">🔗 ผูกราคาซื้อ (กลุ่ม)</button>}
-                {canEdit && <button onClick={() => setPriceItemSkusOpen(true)} className="h-8 px-3 text-sm font-medium bg-white border border-slate-200 text-slate-700 rounded-lg hover:border-blue-300 hover:text-blue-700">🔗 ผูก SKU (วัสดุ)</button>}
                 {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
               </div>
               {priceItems.length === 0 && (
@@ -1587,11 +1606,9 @@ export default function DesignSheetsPage() {
         </div>
       </ERPModal>
 
-      {/* โมดอลผูกสินค้าตัวแทนต่อกลุ่ม (เฟส 2) — ปิดแล้วรีโหลดราคา (latest อาจเปลี่ยน) */}
-      <GroupRefSkusModal open={groupRefOpen} onClose={() => { setGroupRefOpen(false); setPriceItems([]); setPriceGroups([]); }} />
-
-      {/* ผูก SKU เข้าวัสดุตีราคา (เฟส 5) — ปิดแล้วรีโหลดราคา (latest อาจเปลี่ยน) */}
-      <PriceItemSkusModal open={priceItemSkusOpen} onClose={() => { setPriceItemSkusOpen(false); setPriceItems([]); setPriceGroups([]); }} />
+      {/* เลือก SKU ผูกกับวัสดุตีราคาแถวที่กดในตารางจัดการวัสดุตีราคา */}
+      <SkuMultiPickerModal open={pmLinkFor !== null} onClose={() => setPmLinkFor(null)}
+        excludeIds={pmLinkFor ? (pmLinks[pmLinkFor.id] ?? []) : []} onConfirm={onPmLinkPicked} />
 
       {/* ป๊อปจัดการวัสดุตีราคา — CRUD ผ่าน API กลาง master-v2 (เหมือนหน้า /master/design-price-items) */}
       <ERPModal open={pmOpen} onClose={closePm} size="lg" title="🧮 จัดการวัสดุตีราคา"
@@ -1672,7 +1689,19 @@ export default function DesignSheetsPage() {
                       <tr key={r.id}>
                         <td className="border border-slate-200 px-2 py-1">
                           {editing ? <input value={pmEdit.name} onChange={(e) => setPmEdit({ ...pmEdit, name: e.target.value })} className="w-full h-7 px-1 text-sm border border-slate-200 rounded" />
-                            : <span className="text-slate-700">{r.name}</span>}
+                            : (<>
+                              <span className="text-slate-700">{r.name}</span>
+                              {(pmLinks[r.id]?.length ?? 0) > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {pmLinks[r.id].map((sid) => (
+                                    <span key={sid} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono bg-blue-50 border border-blue-200 text-blue-700 rounded">
+                                      {pmLinkSkus[sid]?.code ?? sid.slice(0, 6)}
+                                      <button type="button" onClick={() => void savePmLink(r.id, pmLinks[r.id].filter((x) => x !== sid))} className="text-blue-300 hover:text-rose-500 leading-none">✕</button>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </>)}
                         </td>
                         <td className="border border-slate-200 px-2 py-1 text-center">
                           {editing ? (
@@ -1716,6 +1745,8 @@ export default function DesignSheetsPage() {
                             <button onClick={() => void pmSaveEdit()} title="บันทึก" className="h-6 px-1.5 text-xs bg-emerald-600 text-white rounded mr-1">✓</button>
                             <button onClick={() => setPmEditId(null)} title="ยกเลิก" className="h-6 px-1.5 text-xs border border-slate-200 rounded">✕</button>
                           </>) : (<>
+                            <button onClick={() => setPmLinkFor(r)} title="ผูก SKU จัดซื้อ (ดึงราคาซื้อจริงล่าสุด/เฉลี่ย)"
+                              className={`h-6 px-1.5 text-xs border rounded mr-1 ${(pmLinks[r.id]?.length ?? 0) > 0 ? "border-blue-300 text-blue-600 bg-blue-50" : "border-slate-200 text-slate-500"}`}>🔗 {pmLinks[r.id]?.length ?? 0}</button>
                             <button onClick={() => pmCopy(r)} title="คัดลอกเป็นตัวใหม่" className="h-6 px-1.5 text-xs border border-slate-200 rounded text-slate-500 mr-1">⧉</button>
                             <button onClick={() => pmStartEdit(r)} title="แก้" className="h-6 px-1.5 text-xs border border-slate-200 rounded text-slate-500 mr-1">✏</button>
                             <button onClick={() => setPmDel(r)} title="เก็บเข้ากรุ" className="h-6 px-1.5 text-xs border border-rose-200 rounded text-rose-500">🗑</button>
