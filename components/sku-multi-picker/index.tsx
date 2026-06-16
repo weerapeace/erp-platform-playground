@@ -20,6 +20,25 @@ const imgUrl = (key: string | null | undefined) =>
 const money = (n: number | null | undefined) =>
   Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
+// มิติ sort/group/filter กลาง (นิยามครั้งเดียว ใช้ทุกที่ที่เรียก picker — ไม่ hardcode รายหน้า)
+type DimKey = "name" | "code" | "list_price" | "category" | "color" | "uom_name" | "sale_ok";
+const SORT_DIMS: { k: DimKey; label: string }[] = [
+  { k: "name", label: "ชื่อ" }, { k: "code", label: "รหัส" }, { k: "list_price", label: "ราคา" }, { k: "category", label: "หมวด" },
+];
+const GROUP_DIMS: { k: DimKey; label: string }[] = [
+  { k: "category", label: "หมวด" }, { k: "color", label: "สี" }, { k: "uom_name", label: "หน่วย" }, { k: "sale_ok", label: "สถานะขาย" },
+];
+const FILTER_DIMS = GROUP_DIMS;
+// ค่าของมิติ (ใช้ทั้ง group/filter/sort) — null → ป้าย "ไม่ระบุ"
+const dimVal = (s: SkuPickerValue, k: DimKey): string => {
+  if (k === "category") return s.category ?? "(ไม่มีหมวด)";
+  if (k === "color")    return s.color ?? "(ไม่ระบุสี)";
+  if (k === "uom_name") return s.uom_name ?? "(ไม่มีหน่วย)";
+  if (k === "sale_ok")  return s.sale_ok ? "ขายได้" : "ไม่ขาย";
+  if (k === "list_price") return String(s.list_price ?? 0);
+  return String((s as Record<string, unknown>)[k] ?? "");
+};
+
 export function SkuMultiPickerModal({
   open, onClose, onConfirm, excludeIds = [], salesOnly = false,
 }: {
@@ -36,6 +55,12 @@ export function SkuMultiPickerModal({
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  // sort / group / filter (ทำบนรายการที่โหลดมา — มิตินิยามกลางในตัวนี้ ไม่ hardcode รายหน้า)
+  const [sortKey, setSortKey] = useState<DimKey>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [groupKey, setGroupKey] = useState<DimKey | "">("");
+  const [filterField, setFilterField] = useState<DimKey | "">("");
+  const [filterValue, setFilterValue] = useState("");
   // เก็บ object เต็มของตัวที่เลือก (ค้นหาแล้วเปลี่ยนคำ ผลลัพธ์หาย แต่ยังจำที่เลือกไว้)
   const [picked, setPicked] = useState<Map<string, SkuPickerValue>>(new Map());
 
@@ -64,7 +89,7 @@ export function SkuMultiPickerModal({
   }, [open, query, fetchPage]);
 
   useEffect(() => {
-    if (open) { setQuery(""); setPicked(new Map()); }
+    if (open) { setQuery(""); setPicked(new Map()); setSortKey("name"); setSortDir("asc"); setGroupKey(""); setFilterField(""); setFilterValue(""); }
   }, [open]);
 
   const toggle = (sku: SkuPickerValue) => {
@@ -87,10 +112,72 @@ export function SkuMultiPickerModal({
     });
   };
 
+  // กรอง → เรียง → จัดกลุ่ม (บนรายการที่โหลดมา)
+  const processed = useMemo(() => {
+    let arr = selectable;
+    if (filterField && filterValue) arr = arr.filter((s) => dimVal(s, filterField) === filterValue);
+    arr = [...arr].sort((a, b) => {
+      let r: number;
+      if (sortKey === "list_price") r = (a.list_price ?? 0) - (b.list_price ?? 0);
+      else r = dimVal(a, sortKey).localeCompare(dimVal(b, sortKey), "th");
+      return sortDir === "asc" ? r : -r;
+    });
+    return arr;
+  }, [selectable, filterField, filterValue, sortKey, sortDir]);
+
+  // ค่าให้เลือกในตัวกรอง (จากรายการที่โหลดมา)
+  const filterValues = useMemo(
+    () => (filterField ? [...new Set(selectable.map((s) => dimVal(s, filterField)))].sort((a, b) => a.localeCompare(b, "th")) : []),
+    [selectable, filterField],
+  );
+
+  // จัดกลุ่ม → [ป้ายกลุ่ม, รายการ][]  (ไม่จัดกลุ่ม = กลุ่มเดียวป้ายว่าง)
+  const groups = useMemo<[string, SkuPickerValue[]][]>(() => {
+    if (!groupKey) return [["", processed]];
+    const m = new Map<string, SkuPickerValue[]>();
+    for (const s of processed) { const k = dimVal(s, groupKey); (m.get(k) ?? m.set(k, []).get(k)!).push(s); }
+    return [...m.entries()];
+  }, [processed, groupKey]);
+
+  const toggleGroupPick = (items: SkuPickerValue[]) => {
+    const allPicked = items.length > 0 && items.every((s) => picked.has(s.id));
+    setPicked((prev) => {
+      const next = new Map(prev);
+      if (allPicked) items.forEach((s) => next.delete(s.id)); else items.forEach((s) => next.set(s.id, s));
+      return next;
+    });
+  };
+
   const confirm = () => {
     if (picked.size === 0) return;
     onConfirm(Array.from(picked.values()));
     onClose();
+  };
+
+  const renderItem = (sku: SkuPickerValue) => {
+    const isExcluded = excluded.has(sku.id);
+    const checked = picked.has(sku.id);
+    return (
+      <li key={sku.id}>
+        <button type="button" disabled={isExcluded} onClick={() => toggle(sku)}
+          className={`w-full flex items-center gap-3 px-3 py-2 text-left ${isExcluded ? "opacity-40 cursor-not-allowed" : checked ? "bg-pink-50" : "hover:bg-pink-50/50"}`}>
+          <input type="checkbox" checked={checked} readOnly disabled={isExcluded}
+            className="rounded border-pink-300 text-pink-500 pointer-events-none flex-shrink-0" />
+          {imgUrl(sku.image_key)
+            ? <img src={imgUrl(sku.image_key)!} alt="" className="w-9 h-9 rounded-lg object-cover border border-pink-100 flex-shrink-0"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+            : <div className="w-9 h-9 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200 text-sm flex-shrink-0">🖼️</div>}
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-slate-700 truncate">{sku.name}</div>
+            <div className="font-mono text-xs text-slate-400">{sku.code}{isExcluded ? " · เพิ่มแล้ว" : ""}</div>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <div className="text-sm font-semibold text-rose-600">฿{money(sku.list_price)}</div>
+            <div className="text-[11px] text-slate-400">{sku.uom_name ?? ""}</div>
+          </div>
+        </button>
+      </li>
+    );
   };
 
   return (
@@ -111,47 +198,62 @@ export function SkuMultiPickerModal({
           placeholder="🔍 ค้นหา SKU / ชื่อสินค้า..."
           className="h-10 w-full rounded-lg border border-pink-200 px-3 text-sm outline-none focus:border-pink-400 focus:ring-1 focus:ring-pink-100" />
 
+        {/* แถบ จัดกลุ่ม / เรียง / กรอง (ทำบนรายการที่โหลดมา) */}
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-slate-400">🗂</span>
+          <select value={groupKey} onChange={(e) => setGroupKey(e.target.value as DimKey | "")}
+            className="h-8 rounded-lg border border-slate-200 px-2 bg-white" title="จัดกลุ่มตาม">
+            <option value="">ไม่จัดกลุ่ม</option>
+            {GROUP_DIMS.map((d) => <option key={d.k} value={d.k}>กลุ่ม: {d.label}</option>)}
+          </select>
+          <span className="ml-1 text-slate-400">🔃</span>
+          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as DimKey)}
+            className="h-8 rounded-lg border border-slate-200 px-2 bg-white" title="เรียงตาม">
+            {SORT_DIMS.map((d) => <option key={d.k} value={d.k}>เรียง: {d.label}</option>)}
+          </select>
+          <button type="button" onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            className="h-8 w-8 rounded-lg border border-slate-200 bg-white hover:bg-slate-50" title="สลับลำดับ">{sortDir === "asc" ? "▲" : "▼"}</button>
+          <span className="ml-1 text-slate-400">🔎</span>
+          <select value={filterField} onChange={(e) => { setFilterField(e.target.value as DimKey | ""); setFilterValue(""); }}
+            className="h-8 rounded-lg border border-slate-200 px-2 bg-white" title="กรองตาม">
+            <option value="">— ไม่กรอง —</option>
+            {FILTER_DIMS.map((d) => <option key={d.k} value={d.k}>กรอง: {d.label}</option>)}
+          </select>
+          {filterField && (
+            <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)}
+              className="h-8 rounded-lg border border-slate-200 px-2 bg-white max-w-[160px]" title="ค่าที่กรอง">
+              <option value="">ทั้งหมด</option>
+              {filterValues.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          )}
+        </div>
+
         {selectable.length > 0 && (
           <label className="flex items-center gap-2 px-1 text-sm text-rose-500 cursor-pointer select-none">
             <input type="checkbox" checked={allOnPagePicked} onChange={toggleAll}
               className="rounded border-pink-300 text-pink-500" />
-            เลือกทั้งหมด ({selectable.length} รายการ)
+            เลือกทั้งหมด ({processed.length} รายการ)
           </label>
         )}
 
         <div className="max-h-[55vh] overflow-auto rounded-lg border border-pink-100">
           {loading ? (
             <div className="px-4 py-10 text-center text-sm text-pink-300">กำลังโหลด...</div>
-          ) : results.length === 0 ? (
+          ) : processed.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-pink-300">ไม่พบสินค้า</div>
           ) : (
-            <ul className="divide-y divide-pink-50">
-              {results.map((sku) => {
-                const isExcluded = excluded.has(sku.id);
-                const checked = picked.has(sku.id);
-                return (
-                  <li key={sku.id}>
-                    <button type="button" disabled={isExcluded} onClick={() => toggle(sku)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 text-left ${isExcluded ? "opacity-40 cursor-not-allowed" : checked ? "bg-pink-50" : "hover:bg-pink-50/50"}`}>
-                      <input type="checkbox" checked={checked} readOnly disabled={isExcluded}
-                        className="rounded border-pink-300 text-pink-500 pointer-events-none flex-shrink-0" />
-                      {imgUrl(sku.image_key)
-                        ? <img src={imgUrl(sku.image_key)!} alt="" className="w-9 h-9 rounded-lg object-cover border border-pink-100 flex-shrink-0"
-                            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-                        : <div className="w-9 h-9 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200 text-sm flex-shrink-0">🖼️</div>}
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium text-slate-700 truncate">{sku.name}</div>
-                        <div className="font-mono text-xs text-slate-400">{sku.code}{isExcluded ? " · เพิ่มแล้ว" : ""}</div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <div className="text-sm font-semibold text-rose-600">฿{money(sku.list_price)}</div>
-                        <div className="text-[11px] text-slate-400">{sku.uom_name ?? ""}</div>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            groups.map(([label, items]) => (
+              <div key={label || "_"}>
+                {groupKey && (
+                  <label className="sticky top-0 z-10 flex items-center gap-2 bg-pink-50/90 px-3 py-1.5 text-xs font-medium text-rose-600 border-b border-pink-100 cursor-pointer select-none backdrop-blur">
+                    <input type="checkbox" checked={items.length > 0 && items.every((s) => picked.has(s.id))}
+                      onChange={() => toggleGroupPick(items)} className="rounded border-pink-300 text-pink-500" />
+                    {label} <span className="text-pink-300 font-normal">({items.length})</span>
+                  </label>
+                )}
+                <ul className="divide-y divide-pink-50">{items.map(renderItem)}</ul>
+              </div>
+            ))
           )}
           {hasMore && !loading && (
             <button type="button" onClick={() => fetchPage(query, offset)} disabled={loadingMore}
