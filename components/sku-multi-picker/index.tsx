@@ -23,7 +23,7 @@ const money = (n: number | null | undefined) =>
 // มิติ sort/group/filter กลาง (นิยามครั้งเดียว ใช้ทุกที่ที่เรียก picker — ไม่ hardcode รายหน้า)
 type DimKey = "name" | "code" | "list_price" | "category" | "color" | "uom_name" | "sale_ok";
 const SORT_DIMS: { k: DimKey; label: string }[] = [
-  { k: "name", label: "ชื่อ" }, { k: "code", label: "รหัส" }, { k: "list_price", label: "ราคา" }, { k: "category", label: "หมวด" },
+  { k: "code", label: "รหัส" }, { k: "name", label: "ชื่อ" }, { k: "list_price", label: "ราคา" },
 ];
 const GROUP_DIMS: { k: DimKey; label: string }[] = [
   { k: "category", label: "หมวด" }, { k: "color", label: "สี" }, { k: "uom_name", label: "หน่วย" }, { k: "sale_ok", label: "สถานะขาย" },
@@ -66,13 +66,29 @@ export function SkuMultiPickerModal({
 
   const excluded = useMemo(() => new Set(excludeIds), [excludeIds]);
 
+  // ค่าที่เลือกได้ในตัวกรอง (โหลดจากทั้งฐานข้อมูล ครั้งเดียวตอนเปิด)
+  const [facets, setFacets] = useState<{ categories: string[]; colors: string[]; uoms: string[] }>({ categories: [], colors: [], uoms: [] });
+
+  // map sort/filter ของ UI → query params ของ API (server-side)
+  const buildParams = useCallback((q: string, off: number) => {
+    const params = new URLSearchParams({ search: q, limit: String(PAGE), offset: String(off) });
+    if (salesOnly) params.set("sales_only", "true");
+    params.set("sort", sortKey === "list_price" ? "price" : sortKey === "name" ? "name" : "code");
+    params.set("dir", sortDir);
+    if (filterField && filterValue) {
+      if (filterField === "sale_ok") params.set("sale_ok", filterValue === "ขายได้" ? "true" : "false");
+      else if (filterField === "category") params.set("category", filterValue);
+      else if (filterField === "color") params.set("color", filterValue);
+      else if (filterField === "uom_name") params.set("uom", filterValue);
+    }
+    return params;
+  }, [salesOnly, sortKey, sortDir, filterField, filterValue]);
+
   // off=0 → โหลดใหม่ (แทนที่) · off>0 → โหลดเพิ่ม (ต่อท้าย)
   const fetchPage = useCallback(async (q: string, off: number) => {
     if (off > 0) setLoadingMore(true); else setLoading(true);
     try {
-      const params = new URLSearchParams({ search: q, limit: String(PAGE), offset: String(off) });
-      if (salesOnly) params.set("sales_only", "true");
-      const res = await apiFetch(`/api/pickers/skus?${params}`);
+      const res = await apiFetch(`/api/pickers/skus?${buildParams(q, off)}`);
       const j = await res.json();
       const rows = (j.data ?? []) as SkuPickerValue[];
       setResults((prev) => (off > 0 ? [...prev, ...rows] : rows));
@@ -80,13 +96,22 @@ export function SkuMultiPickerModal({
       setOffset(off + rows.length);
     } catch { if (off === 0) setResults([]); }
     finally { if (off > 0) setLoadingMore(false); else setLoading(false); }
-  }, [salesOnly]);
+  }, [buildParams]);
 
+  // โหลด/รีโหลด (offset 0) เมื่อ เปิด / คำค้น / เรียง / กรอง เปลี่ยน — server จัดการให้ทั้งฐาน
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(() => fetchPage(query, 0), 250);
     return () => clearTimeout(t);
   }, [open, query, fetchPage]);
+
+  // โหลด facets ครั้งเดียวตอนเปิด (ค่าตัวกรองจากทั้งฐานข้อมูล)
+  useEffect(() => {
+    if (!open) return;
+    apiFetch("/api/pickers/skus?facets=1").then((r) => r.json())
+      .then((j) => { if (!j.error) setFacets({ categories: j.categories ?? [], colors: j.colors ?? [], uoms: j.uoms ?? [] }); })
+      .catch(() => {});
+  }, [open]);
 
   useEffect(() => {
     if (open) { setQuery(""); setPicked(new Map()); setSortKey("name"); setSortDir("asc"); setGroupKey(""); setFilterField(""); setFilterValue(""); }
@@ -112,24 +137,17 @@ export function SkuMultiPickerModal({
     });
   };
 
-  // กรอง → เรียง → จัดกลุ่ม (บนรายการที่โหลดมา)
-  const processed = useMemo(() => {
-    let arr = selectable;
-    if (filterField && filterValue) arr = arr.filter((s) => dimVal(s, filterField) === filterValue);
-    arr = [...arr].sort((a, b) => {
-      let r: number;
-      if (sortKey === "list_price") r = (a.list_price ?? 0) - (b.list_price ?? 0);
-      else r = dimVal(a, sortKey).localeCompare(dimVal(b, sortKey), "th");
-      return sortDir === "asc" ? r : -r;
-    });
-    return arr;
-  }, [selectable, filterField, filterValue, sortKey, sortDir]);
+  // server กรอง/เรียงมาแล้ว — ฝั่ง client แค่ตัดตัวที่เพิ่มแล้วออก แล้วจัดกลุ่ม
+  const processed = selectable;
 
-  // ค่าให้เลือกในตัวกรอง (จากรายการที่โหลดมา)
-  const filterValues = useMemo(
-    () => (filterField ? [...new Set(selectable.map((s) => dimVal(s, filterField)))].sort((a, b) => a.localeCompare(b, "th")) : []),
-    [selectable, filterField],
-  );
+  // ค่าให้เลือกในตัวกรอง — มาจาก facets (ทั้งฐานข้อมูล) ไม่ใช่แค่ที่โหลด
+  const filterValues = useMemo(() => {
+    if (filterField === "category") return facets.categories;
+    if (filterField === "color") return facets.colors;
+    if (filterField === "uom_name") return facets.uoms;
+    if (filterField === "sale_ok") return ["ขายได้", "ไม่ขาย"];
+    return [];
+  }, [filterField, facets]);
 
   // จัดกลุ่ม → [ป้ายกลุ่ม, รายการ][]  (ไม่จัดกลุ่ม = กลุ่มเดียวป้ายว่าง)
   const groups = useMemo<[string, SkuPickerValue[]][]>(() => {

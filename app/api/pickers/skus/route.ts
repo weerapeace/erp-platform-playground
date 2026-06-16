@@ -42,18 +42,59 @@ export async function GET(request: NextRequest) {
   const denied = await guardApi(request, "products.view");
   if (denied) return denied;
 
+  const sb = supabaseFromRequest(request);
   const { searchParams } = new URL(request.url);
+
+  // facets — ค่าที่เลือกได้ในตัวกรอง (จากทั้งฐานข้อมูล ไม่ใช่แค่ที่โหลด)
+  if (searchParams.get("facets") === "1") {
+    const [cats, uoms, colors] = await Promise.all([
+      sb.from("product_categories").select("name").order("name").limit(1000),
+      sb.from("uoms").select("name").order("name").limit(1000),
+      sb.from("skus_v2").select("color_th").eq("is_active", true).not("color_th", "is", null).limit(5000),
+    ]);
+    const uniq = (rows: { data: Array<Record<string, unknown>> | null }, key: string) =>
+      [...new Set((rows.data ?? []).map((r) => String(r[key] ?? "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th"));
+    return NextResponse.json({
+      categories: uniq(cats, "name"), uoms: uniq(uoms, "name"), colors: uniq(colors, "color_th"), error: null,
+    });
+  }
+
   const search = (searchParams.get("search") ?? "").trim();
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "24", 10)));
   const offset = Math.max(0, parseInt(searchParams.get("offset") ?? "0", 10));
   const salesOnly = searchParams.get("sales_only") === "true";
+
+  // ตัวกรอง server-side (resolve เป็น id ก่อน — ชัวร์กว่ากรอง relation ซ้อน)
+  const fCategory = (searchParams.get("category") ?? "").trim();
+  const fColor = (searchParams.get("color") ?? "").trim();
+  const fUom = (searchParams.get("uom") ?? "").trim();
+  const fSaleOk = searchParams.get("sale_ok");   // "true" | "false" | null
+  let fCategoryParentIds: string[] | null = null;
+  let fUomId: string | null = null;
+  if (fCategory) {
+    const { data: cat } = await sb.from("product_categories").select("id").eq("name", fCategory).limit(1).maybeSingle();
+    const catId = (cat as { id?: string } | null)?.id;
+    const { data: parents } = catId
+      ? await sb.from("parent_skus_v2").select("id").eq("category_id", catId).limit(5000)
+      : { data: [] };
+    fCategoryParentIds = ((parents ?? []) as Array<{ id: string }>).map((p) => p.id);
+  }
+  if (fUom) {
+    const { data: u } = await sb.from("uoms").select("id").eq("name", fUom).limit(1).maybeSingle();
+    fUomId = (u as { id?: string } | null)?.id ?? null;
+  }
+  // เรียงลำดับ server-side
+  const sort = searchParams.get("sort") ?? "code";
+  const sortAsc = searchParams.get("dir") !== "desc";
+  const orderCol = sort === "name" ? "name_th" : sort === "price" ? "list_price" : "code";
+
   const tokens = cleanSearch(search);
   const parentIdsByToken = new Map<string, string[]>();
   for (const token of tokens) {
     parentIdsByToken.set(token, await findParentSkuIds(request, token));
   }
 
-  let query = supabaseFromRequest(request)
+  let query = sb
     .from("skus_v2")
     .select(`
       id,
@@ -71,6 +112,16 @@ export async function GET(request: NextRequest) {
     `)
     .eq("is_active", true);
   if (salesOnly) query = query.eq("sale_ok", true);
+  // ตัวกรอง server-side
+  if (fSaleOk === "true") query = query.eq("sale_ok", true);
+  if (fSaleOk === "false") query = query.eq("sale_ok", false);
+  if (fColor) query = query.or(`color_th.eq.${fColor},color.eq.${fColor}`);
+  if (fUomId) query = query.eq("uom_id", fUomId);
+  if (fCategoryParentIds) {
+    // ไม่มี parent ในหมวดนี้ → ไม่มีผลลัพธ์
+    if (fCategoryParentIds.length === 0) return NextResponse.json({ data: [], error: null });
+    query = query.in("parent_sku_id", fCategoryParentIds);
+  }
   // กรองตาม Parent SKU โดยตรง (ดึง SKU ลูกทั้งหมดของ parent — เช่น รวมสีในคอนเทนต์)
   const parentSkuId = (searchParams.get("parent_sku_id") ?? "").trim();
   if (parentSkuId) query = query.eq("parent_sku_id", parentSkuId);
@@ -88,7 +139,7 @@ export async function GET(request: NextRequest) {
     query = query.or(parts.join(","));
   }
 
-  const { data, error } = await query.order("code", { ascending: true }).range(offset, offset + limit - 1);
+  const { data, error } = await query.order(orderCol, { ascending: sortAsc }).range(offset, offset + limit - 1);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
   const rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {
