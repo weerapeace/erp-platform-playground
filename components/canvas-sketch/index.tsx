@@ -64,6 +64,7 @@ export function CanvasSketch({
 }) {
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [savedAt, setSavedAt] = useState<string | null>(null); // เวลาเซฟล่าสุด (โชว์ให้รู้ว่าบันทึกแล้วทุกครั้ง)
   const [selFont, setSelFont] = useState<number | null>(null); // ขนาด font ของ text ที่เลือก (null = ไม่ได้เลือก text)
   const [peers, setPeers] = useState(0); // realtime: จำนวนคนอื่นในห้อง
 
@@ -146,6 +147,7 @@ export function CanvasSketch({
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setSaveState("saved");
+      try { setSavedAt(new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { setSavedAt("✓"); }
     } catch (e) {
       console.error("[canvas-sketch] save failed:", e);
       markDirty(true);
@@ -387,6 +389,9 @@ export function CanvasSketch({
     if (editable) queueSave();
   };
 
+  // ถอนโฟกัสจากปุ่ม/ช่องของเรา → คืนให้กระดาน เพื่อให้คีย์ลัด (R/A/T/P) ทำงาน
+  const blurActive = () => { try { (document.activeElement as HTMLElement)?.blur?.(); } catch { /* noop */ } };
+
   // แปลข้อความที่เลือก (ไทย↔อังกฤษ ผ่าน Cloudflare AI) → วางกล่องใหม่ข้างๆ ของเดิม
   const [translating, setTranslating] = useState(false);
   const translateSelected = async () => {
@@ -426,13 +431,13 @@ export function CanvasSketch({
         {editable && selFont != null && (
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
             <span className="text-slate-400">ขนาดอักษร</span>
-            <button onClick={() => setFont(selFont - 2)} className="h-5 w-5 rounded hover:bg-slate-100">−</button>
+            <button onClick={() => { setFont(selFont - 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">−</button>
             <input type="number" value={selFont} onChange={(e) => { const v = parseInt(e.target.value || "0", 10); if (v) setFont(v); }} className="w-12 h-6 text-center border border-slate-200 rounded" />
-            <button onClick={() => setFont(selFont + 2)} className="h-5 w-5 rounded hover:bg-slate-100">＋</button>
+            <button onClick={() => { setFont(selFont + 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">＋</button>
           </span>
         )}
         {editable && selFont != null && (
-          <button onClick={translateSelected} disabled={translating} title="แปลข้อความที่เลือก ไทย↔อังกฤษ (วางกล่องใหม่ข้างๆ)"
+          <button onClick={() => { void translateSelected(); blurActive(); }} disabled={translating} title="แปลข้อความที่เลือก ไทย↔อังกฤษ (วางกล่องใหม่ข้างๆ)"
             className="inline-flex items-center gap-1 text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50 disabled:opacity-50">
             {translating ? "⏳ กำลังแปล..." : "🌐 แปลภาษา"}
           </button>
@@ -456,7 +461,23 @@ export function CanvasSketch({
           </span>
         )}
       </div>
-      <div ref={wrapRef} className="rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
+      <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
+        {/* ป้ายสถานะบันทึก — ลอยกลางล่าง เห็นชัดทุกครั้งที่เซฟ */}
+        {editable && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+            <span className={`px-2.5 py-1 rounded-full text-[11px] font-medium shadow-sm border bg-white/95 backdrop-blur ${
+              saveState === "error" ? "text-rose-600 border-rose-200"
+              : saveState === "saving" ? "text-blue-600 border-blue-200"
+              : saveState === "dirty" ? "text-amber-600 border-amber-200"
+              : "text-emerald-600 border-emerald-200"}`}>
+              {saveState === "saving" ? "⏳ กำลังบันทึก..."
+              : saveState === "error" ? "⚠ บันทึกไม่สำเร็จ"
+              : saveState === "dirty" ? "✎ มีการแก้ไข กำลังจะบันทึก..."
+              : savedAt ? `✓ บันทึกแล้ว · ${savedAt}`
+              : "พร้อมใช้งาน"}
+            </span>
+          </div>
+        )}
         <Excalidraw
           langCode="th-TH"
           viewModeEnabled={!editable}
