@@ -1,0 +1,17 @@
+# Realtime collab worker (แยกจากแอปหลัก OpenNext) — 1 board = 1 ห้อง Durable Object
+# WebSocket relay: ส่ง-รับการเปลี่ยนแปลงสดระหว่างผู้ใช้ในห้องเดียวกัน
+# Deploy: .github/workflows/deploy-collab.yml (ใช้ secret CF ชุดเดียวกับแอปหลัก)
+name = "erp-collab"
+main = "src/index.ts"
+compatibility_date = "2026-05-31"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "CanvasRoom"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["CanvasRoom"]
+
+[observability]
+enabled = true

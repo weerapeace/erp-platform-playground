@@ -1,0 +1,25 @@
+name: Deploy Collab Worker
+
+# เด้งเฉพาะเมื่อแก้ collab worker — ไม่กระทบ deploy แอปหลัก (OpenNext)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workers/collab/**"
+      - ".github/workflows/deploy-collab.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy collab worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken:         ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId:        ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion:  "4.95.0"
+          workingDirectory: workers/collab
+          command:          deploy
