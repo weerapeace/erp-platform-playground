@@ -18,6 +18,7 @@ import type { MoListItem } from "@/app/api/mo/route";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import { WorkInstructionPanel } from "@/components/work-instruction";
+import { MoStockActions } from "@/components/mo-stock-actions";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {
@@ -426,6 +427,7 @@ export default function MoWorkspacePage() {
         title={form?.id ? `แก้ใบสั่งผลิต: ${form.mo_no}` : "สร้างใบสั่งผลิตใหม่"}
         footer={<>
           {form?.id && <button type="button" onClick={() => window.open(`/print/work-order/${form.id}`, "_blank", "noopener")} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 mr-auto inline-flex items-center gap-1">🖨️ พิมพ์ใบสั่งงาน</button>}
+          {form?.id && <MoStockActions moId={form.id} moQty={form.qty} actor={user?.name} />}
           <button onClick={() => setForm(null)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
           <button onClick={save} disabled={saving || !canEdit} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         </>}>
