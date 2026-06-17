@@ -307,9 +307,11 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .muted { color: #64748b; font-size: 10px; }
 .label { font-weight: 700; }
 .wo-hero { display: grid; grid-template-columns: 55mm 1.3fr 28mm 50mm; gap: 3mm; border: 1px solid #111; padding: 3mm; margin-bottom: 4mm; align-items: center; }
-.wo-photo, .detail-photo { border: 1px solid #cbd5e1; background: #f8fafc; display: grid; place-items: center; overflow: hidden; }
-.wo-photo { width: 55mm; height: 41mm; }
-.wo-photo img, .detail-photo img { width: 100%; height: 100%; object-fit: contain; }
+.detail-photo { border: 1px solid #cbd5e1; background: #f8fafc; display: grid; place-items: center; overflow: hidden; }
+.detail-photo img { width: 100%; height: 100%; object-fit: contain; }
+/* รูปหัวเอกสาร: กรอบ fit ตามรูปจริง — เต็มความกว้างคอลัมน์ สูงตามสัดส่วนรูป (ไม่มีขอบขาว ไม่ครอป) */
+.wo-photo { width: 55mm; border: 1px solid #cbd5e1; background: #fff; overflow: hidden; line-height: 0; }
+.wo-photo img { display: block; width: 100%; height: auto; max-height: 55mm; object-fit: contain; }
 .photo-empty { color: #94a3b8; font-size: 10px; text-align: center; }
 .product-name { font-size: 13px; font-weight: 300; font-style: italic; line-height: 1.3; color: #334155; }
 .product-code { margin-top: 1.5mm; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 19px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; }
@@ -342,7 +344,8 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   .company-name { font-size: 10px; }
   .doc-title { font-size: 20px; margin: 1.5mm 0 2.5mm; }
   .wo-hero { grid-template-columns: 46mm 1.3fr 22mm 44mm; gap: 2mm; padding: 2mm; margin-bottom: 2mm; }
-  .wo-photo { width: 46mm; height: 34mm; }
+  .wo-photo { width: 46mm; }
+  .wo-photo img { max-height: 46mm; }
   .wo-qr { width: 15mm; height: 15mm; }
   .product-name { font-size: 11px; }
   .product-code { font-size: 16px; margin-top: 1mm; }
