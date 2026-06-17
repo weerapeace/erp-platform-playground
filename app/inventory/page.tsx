@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { ERPModal } from "@/components/modal";
-import { ProductPicker, WarehousePicker } from "@/components/pickers";
-import type { ProductPickerValue, WarehousePickerValue } from "@/components/pickers";
+import { SkuPicker, WarehousePicker } from "@/components/pickers";
+import type { SkuPickerValue, WarehousePickerValue } from "@/components/pickers";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -52,7 +52,7 @@ export default function InventoryPage() {
   // create modal
   const [modalOpen, setModalOpen] = useState(false);
   const [movType, setMovType] = useState<"in"|"out"|"transfer"|"adjust">("in");
-  const [product, setProduct] = useState<ProductPickerValue | null>(null);
+  const [product, setProduct] = useState<SkuPickerValue | null>(null);
   const [fromWh, setFromWh]   = useState<WarehousePickerValue | null>(null);
   const [toWh,   setToWh]     = useState<WarehousePickerValue | null>(null);
   const [qty, setQty]         = useState<string>("0");
@@ -456,7 +456,7 @@ export default function InventoryPage() {
           <div>
             <span className="text-xs font-medium text-slate-600">สินค้า *</span>
             <div className="mt-0.5">
-              <ProductPicker value={product} onChange={setProduct} />
+              <SkuPicker value={product} onChange={setProduct} />
             </div>
           </div>
 
