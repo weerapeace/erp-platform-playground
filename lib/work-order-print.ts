@@ -257,10 +257,10 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <thead>
       <tr>
         <th style="width:6%">ลำดับ</th>
-        <th style="width:12%">รหัส</th>
-        <th style="width:23%">วัตถุดิบ</th>
-        <th style="width:9%">ชนิด</th>
-        <th style="width:10%">บล็อกตัด</th>
+        <th style="width:15%">รหัส</th>
+        <th style="width:22%">วัตถุดิบ</th>
+        <th style="width:8%">ชนิด</th>
+        <th style="width:9%">บล็อกตัด</th>
         <th style="width:12%">กว้าง x ยาว</th>
         <th style="width:11%">ยอดรวมชิ้น</th>
         <th style="width:11%">รวมต้องใช้</th>
@@ -330,12 +330,12 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .section-title { font-size: 12px; font-weight: 800; margin: 3mm 0 1.5mm; }
 .summary-section { page-break-inside: avoid; break-inside: avoid; }
 .summary-table, .doc-table, .detail-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.summary-table th, .summary-table td, .doc-table th, .doc-table td { border: 1px solid #111; padding: 1.5mm 1.4mm; vertical-align: middle; }
+.summary-table th, .summary-table td, .doc-table th, .doc-table td { border: 1px solid #111; padding: 1.2mm 1mm; vertical-align: middle; }
 .summary-table th, .doc-table th { text-align: center; font-weight: 800; background: #f1f5f9; }
 .summary-table { margin-bottom: 3mm; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
-.code-cell { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9.5px; white-space: nowrap; color: #334155; }
+.code-cell { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 8.5px; line-height: 1.2; color: #334155; white-space: normal; word-break: break-all; overflow-wrap: anywhere; padding-left: 1mm !important; padding-right: 1mm !important; }
 .product-detail { margin-top: 5mm; display: grid; grid-template-columns: 28mm 1fr; gap: 3mm; border-top: 1px solid #cbd5e1; padding-top: 3mm; page-break-inside: avoid; break-inside: avoid; }
 .detail-photo { width: 28mm; height: 24mm; }
 .detail-title { font-size: 12px; font-weight: 800; margin-bottom: 1mm; }
@@ -358,7 +358,8 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   .product-size { margin-top: 0.5mm; }
   .qty-big { font-size: 22px; }
   .section-title { font-size: 10px; margin: 1.5mm 0 1mm; }
-  .summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: 0.75mm 1mm; }
+  .summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: 0.6mm 0.7mm; }
+  .code-cell { font-size: 7.5px; padding-left: 0.6mm !important; padding-right: 0.6mm !important; }
   .summary-table { margin-bottom: 1.5mm; }
   .product-detail { margin-top: 2mm; gap: 2mm; grid-template-columns: 22mm 1fr; padding-top: 2mm; }
   .detail-photo { width: 22mm; height: 17mm; }
