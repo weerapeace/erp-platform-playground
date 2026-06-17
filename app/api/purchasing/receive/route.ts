@@ -37,7 +37,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
-  let body: { po_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown; receipt_doc_r2_key?: string; bill_doc_r2_key?: string };
+  let body: { po_id?: string; warehouse_id?: string; receive_date?: string; receiver?: string; note?: string; actor?: string; lines?: unknown; receipt_doc_r2_key?: string; bill_doc_r2_key?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const poId = body.po_id;
@@ -110,25 +110,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const poStatus = allClosed ? "received" : anyReceived ? "partial" : "confirmed";
   await admin.from("purchase_orders_v2").update({ status: poStatus }).eq("id", poId);
 
-  // 3.5) รับเข้าสต็อก (ขั้น 4 แบบเล็ก) — เพิ่มยอดคงเหลือต่อ SKU เฉพาะ "ของดี" (qty_received)
-  // ของเสีย (qty_defective) ไม่เข้าสต็อก / บรรทัดที่ไม่มี SKU จริง (item_sku_id) ข้าม
+  // 3.5) รับเข้าสต็อก — ลงบัญชีเดินสต๊อก (ledger แยกคลัง) type "in" เข้าคลังปลายทาง
+  // เฉพาะ "ของดี" (qty_received) · ของเสีย/บรรทัดไม่มี SKU จริง → ข้าม
+  // คลังปลายทาง: ใช้ที่เลือกมา หรือ default คลังหลัก (WH-MAIN)
+  let toWarehouseId = body.warehouse_id ?? null;
+  if (!toWarehouseId) {
+    const { data: mainWh } = await admin.from("erp_playground_warehouses").select("id").eq("code", "WH-MAIN").maybeSingle();
+    toWarehouseId = (mainWh as { id?: string } | null)?.id ?? null;
+  }
   let stockedLines = 0;
   const stockWarnings: string[] = [];
-  for (const l of valid) {
-    const pl = lineById.get(String(l.po_line_id));
-    if (!pl || !pl.item_sku_id) continue;
-    const recQty = num(l.qty_received);
-    if (recQty <= 0) continue;
-    const { error: stkErr } = await admin.rpc("sku_stock_receive", {
-      p_sku_id:    pl.item_sku_id as string,
-      p_qty:       recQty,
-      p_uom:       (pl.uom as string) ?? null,
-      p_ref_id:    gr.id,
-      p_ref_label: grNo,
-      p_actor:     actor,
-    });
-    if (stkErr) { console.error("[receive] รับเข้าสต็อกไม่สำเร็จ:", stkErr.message); stockWarnings.push(`${pl.item_name ?? pl.item_sku_id}: ${stkErr.message}`); }
-    else stockedLines += 1;
+  if (!toWarehouseId) {
+    stockWarnings.push("ไม่พบคลังปลายทาง (WH-MAIN) — ยังไม่ได้บวกสต๊อก");
+  } else {
+    for (const l of valid) {
+      const pl = lineById.get(String(l.po_line_id));
+      if (!pl || !pl.item_sku_id) continue;
+      const recQty = num(l.qty_received);
+      if (recQty <= 0) continue;
+      const { error: stkErr } = await admin.rpc("erp_stock_post_internal", {
+        p_movement_type:   "in",
+        p_product_id:      pl.item_sku_id as string,
+        p_to_warehouse_id: toWarehouseId,
+        p_from_warehouse_id: null,
+        p_qty:             recQty,
+        p_unit_cost:       0,
+        p_reference_type:  "goods_receipt",
+        p_reference_id:    gr.id,
+        p_reference_label: grNo,
+        p_actor:           actor,
+      });
+      if (stkErr) { console.error("[receive] บวกสต๊อกไม่สำเร็จ:", stkErr.message); stockWarnings.push(`${pl.item_name ?? pl.item_sku_id}: ${stkErr.message}`); }
+      else stockedLines += 1;
+    }
   }
 
   // 4) audit — 1 แถวต่อ 1 ใบรับ (ของกลาง, เขียนลงตาราง audit_logs จริง)

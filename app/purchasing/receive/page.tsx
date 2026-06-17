@@ -16,6 +16,8 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { FileInput } from "@/components/file-input";
 import { useCardLayout, CardLayoutEditor, type CardField } from "@/components/card-layout";
+import { WarehousePicker } from "@/components/pickers";
+import type { WarehousePickerValue } from "@/components/pickers";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
 type Line = { id: string; item_name: string; qty: number; uom: string; qty_received: number };
@@ -100,6 +102,7 @@ export default function ReceiveGoodsPage() {
   // ไฟล์แนบ (บังคับทั้งคู่)
   const [receiptKey, setReceiptKey] = useState<string | null>(null);
   const [billKey, setBillKey] = useState<string | null>(null);
+  const [recvWh, setRecvWh] = useState<WarehousePickerValue | null>(null);   // คลังปลายทางที่รับเข้า (default คลังหลัก)
   const attachReady = !!receiptKey && !!billKey;
 
   // แท็บ B — สินค้าที่รอเข้า
@@ -197,6 +200,13 @@ export default function ReceiveGoodsPage() {
 
   // โหลดทุกแท็บ — แท็บ PO ใช้ข้อมูล pending นับ "รายการรอรับ" บนการ์ดใบ PO
   useEffect(() => { void loadPending(tab === "done" ? "done" : "pending"); }, [tab, loadPending]);
+
+  // default คลังปลายทาง = คลังหลัก (WH-MAIN)
+  useEffect(() => {
+    apiFetch("/api/master/warehouses?limit=50").then((r) => r.json())
+      .then((j) => { const m = ((j.data ?? []) as WarehousePickerValue[]).find((w) => w.code === "WH-MAIN"); if (m) setRecvWh(m); })
+      .catch(() => {});
+  }, []);
   // สลับแท็บ → ล้างร้านที่เลือกไว้ (รายชื่อร้านของแต่ละแท็บไม่เหมือนกัน)
   useEffect(() => { setActiveShop(null); setActiveMo(null); }, [tab]);
 
@@ -342,7 +352,7 @@ export default function ReceiveGoodsPage() {
   const postReceive = async (poIdArg: string, payloadLines: PayloadLine[]) => {
     const res = await apiFetch("/api/purchasing/receive", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ po_id: poIdArg, receiver: user?.name, lines: payloadLines, receipt_doc_r2_key: receiptKey, bill_doc_r2_key: billKey }),
+      body: JSON.stringify({ po_id: poIdArg, warehouse_id: recvWh?.id ?? null, receiver: user?.name, lines: payloadLines, receipt_doc_r2_key: receiptKey, bill_doc_r2_key: billKey }),
     });
     return res.json();
   };
@@ -439,7 +449,14 @@ export default function ReceiveGoodsPage() {
     <PlaygroundShell>
       <div className="p-6 max-w-7xl mx-auto">
         <h1 className="text-xl font-bold text-slate-800">📥 รับสินค้าเข้า</h1>
-        <p className="text-sm text-slate-500 mt-0.5 mb-4">เลือกวิธีรับ → กรอกจำนวนที่รับจริง → แนบใบรับ/บิล → บันทึก (รับเกินได้ · ถ้ารับไม่ครบจะถามว่าจบงานหรือรอของ)</p>
+        <p className="text-sm text-slate-500 mt-0.5 mb-3">เลือกวิธีรับ → กรอกจำนวนที่รับจริง → แนบใบรับ/บิล → บันทึก (รับเกินได้ · ถ้ารับไม่ครบจะถามว่าจบงานหรือรอของ)</p>
+
+        {/* คลังปลายทางที่รับเข้า (ของดีจะบวกสต๊อกเข้าคลังนี้) */}
+        <div className="mb-4 flex items-center gap-2">
+          <span className="text-sm text-slate-600">📥 รับเข้าคลัง:</span>
+          <div className="w-64"><WarehousePicker value={recvWh} onChange={setRecvWh} /></div>
+          <span className="text-[11px] text-slate-400">ของดีจะบวกสต๊อกเข้าคลังนี้</span>
+        </div>
 
         {/* แท็บเลือกมุมมอง */}
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden mb-4 text-sm">
