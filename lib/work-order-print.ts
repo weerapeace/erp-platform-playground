@@ -136,6 +136,7 @@ export function woTableRows(mo: MoDetail): string[][] {
       pieces ? numTh(pieces * qty) : "-",
       numTh(r2(qtyPer * qty)),
       mat.uom ?? "",
+      mat.component_sku ?? "",   // [8] รหัสวัตถุดิบ (ต่อท้าย กัน pdfme columns เดิมเลื่อน)
     ];
   });
 }
@@ -147,9 +148,10 @@ function materialSummaryRows(mo: MoDetail) {
   source.forEach((row) => {
     const materialType = dash(row.material_type);
     const componentName = dash(row.component_name ?? row.component_sku);
+    const code = dash(row.component_sku);
     const uom = dash(row.uom);
     const key = `${materialType}|${componentName}|${uom}`;
-    const prev = grouped.get(key) ?? { material_type: materialType, component_name: componentName, required: 0, uom };
+    const prev = grouped.get(key) ?? { material_type: materialType, code, component_name: componentName, required: 0, uom };
     prev.required += (Number(row.qty_per) || 0) * qty;
     grouped.set(key, prev);
   });
@@ -182,7 +184,7 @@ function productSpecRows(spec: ProductSpec | null) {
 export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null): Record<string, unknown> {
   const lines = woTableRows(mo).map((row) => ({
     idx: row[0], component_name: row[1], material_type: row[2], cut_block_code: row[3],
-    cut_size: row[4], total_pieces: row[5], required: row[6], uom: row[7],
+    cut_size: row[4], total_pieces: row[5], required: row[6], uom: row[7], code: row[8] || "-",
   }));
   return {
     ...woScalars(mo, spec),
@@ -229,6 +231,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <thead>
       <tr>
         <th>ชนิด</th>
+        <th>รหัส</th>
         <th>วัตถุดิบ</th>
         <th class="text-right">รวมต้องใช้</th>
         <th>หน่วย</th>
@@ -238,6 +241,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
       {{#material_summary}}
       <tr>
         <td>{{material_type}}</td>
+        <td class="code-cell">{{code}}</td>
         <td>{{component_name}}</td>
         <td class="text-right">{{required}}</td>
         <td class="text-center">{{uom}}</td>
@@ -252,20 +256,22 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   <table class="doc-table">
     <thead>
       <tr>
-        <th style="width:7%">ลำดับ</th>
-        <th style="width:30%">วัตถุดิบ</th>
-        <th style="width:10%">ชนิด</th>
-        <th style="width:12%">บล็อกตัด</th>
-        <th style="width:13%">กว้าง x ยาว</th>
-        <th style="width:12%">ยอดรวมชิ้น</th>
+        <th style="width:6%">ลำดับ</th>
+        <th style="width:12%">รหัส</th>
+        <th style="width:23%">วัตถุดิบ</th>
+        <th style="width:9%">ชนิด</th>
+        <th style="width:10%">บล็อกตัด</th>
+        <th style="width:12%">กว้าง x ยาว</th>
+        <th style="width:11%">ยอดรวมชิ้น</th>
         <th style="width:11%">รวมต้องใช้</th>
-        <th style="width:5%">หน่วย</th>
+        <th style="width:6%">หน่วย</th>
       </tr>
     </thead>
     <tbody>
       {{#lines}}
       <tr>
         <td class="text-center">{{idx}}</td>
+        <td class="code-cell">{{code}}</td>
         <td>{{component_name}}</td>
         <td class="text-center">{{material_type}}</td>
         <td class="text-center">{{cut_block_code}}</td>
@@ -309,9 +315,9 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .wo-hero { display: grid; grid-template-columns: 55mm 1.3fr 28mm 50mm; gap: 3mm; border: 1px solid #111; padding: 3mm; margin-bottom: 4mm; align-items: center; }
 .detail-photo { border: 1px solid #cbd5e1; background: #f8fafc; display: grid; place-items: center; overflow: hidden; }
 .detail-photo img { width: 100%; height: 100%; object-fit: contain; }
-/* รูปหัวเอกสาร: กรอบ fit ตามรูปจริง — เต็มความกว้างคอลัมน์ สูงตามสัดส่วนรูป (ไม่มีขอบขาว ไม่ครอป) */
-.wo-photo { width: 55mm; border: 1px solid #cbd5e1; background: #fff; overflow: hidden; line-height: 0; }
-.wo-photo img { display: block; width: 100%; height: auto; max-height: 55mm; object-fit: contain; }
+/* รูปหัวเอกสาร: เห็นเต็มทั้งใบ ไม่ตัด — กรอบหุ้มพอดีตัวรูป (คงสัดส่วน ย่อให้พอดีพื้นที่) */
+.wo-photo { display: flex; align-items: center; justify-content: center; }
+.wo-photo img { display: block; max-width: 100%; max-height: 52mm; width: auto; height: auto; border: 1px solid #cbd5e1; background: #fff; }
 .photo-empty { color: #94a3b8; font-size: 10px; text-align: center; }
 .product-name { font-size: 13px; font-weight: 300; font-style: italic; line-height: 1.3; color: #334155; }
 .product-code { margin-top: 1.5mm; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 19px; font-weight: 800; letter-spacing: 0.5px; color: #0f172a; }
@@ -329,6 +335,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .summary-table { margin-bottom: 3mm; }
 .text-center { text-align: center; }
 .text-right { text-align: right; }
+.code-cell { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9.5px; white-space: nowrap; color: #334155; }
 .product-detail { margin-top: 5mm; display: grid; grid-template-columns: 28mm 1fr; gap: 3mm; border-top: 1px solid #cbd5e1; padding-top: 3mm; page-break-inside: avoid; break-inside: avoid; }
 .detail-photo { width: 28mm; height: 24mm; }
 .detail-title { font-size: 12px; font-weight: 800; margin-bottom: 1mm; }
@@ -344,8 +351,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   .company-name { font-size: 10px; }
   .doc-title { font-size: 20px; margin: 1.5mm 0 2.5mm; }
   .wo-hero { grid-template-columns: 46mm 1.3fr 22mm 44mm; gap: 2mm; padding: 2mm; margin-bottom: 2mm; }
-  .wo-photo { width: 46mm; }
-  .wo-photo img { max-height: 46mm; }
+  .wo-photo img { max-height: 44mm; }
   .wo-qr { width: 15mm; height: 15mm; }
   .product-name { font-size: 11px; }
   .product-code { font-size: 16px; margin-top: 1mm; }
