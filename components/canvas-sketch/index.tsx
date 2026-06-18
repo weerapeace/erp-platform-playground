@@ -19,6 +19,7 @@ import { useState, useEffect, useRef, useCallback, type MutableRefObject } from 
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
 import { apiFetch } from "@/lib/api";
+import { supabaseBrowser } from "@/lib/supabase-browser";
 
 const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).Excalidraw, {
   ssr: false,
@@ -30,9 +31,8 @@ type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
 const AUTOSAVE_MS = 1000;       // หยุดวาดกี่ ms แล้วค่อยบันทึก (เซฟไวขึ้น)
 const MAX_AUTOSAVE_MS = 8000;   // เซฟกันลืม: แม้แก้ต่อเนื่องไม่หยุด ก็เซฟทุก ~8 วิ
-const BROADCAST_MS = 200;       // realtime: ส่งสภาพกระดานให้คนอื่นทุก ~200ms (throttle)
-// collab worker (แยกต่างหาก) — ห้อง WebSocket ต่อ board
-const COLLAB_URL = (process.env.NEXT_PUBLIC_COLLAB_URL || "wss://erp-collab.weerapeace.workers.dev").replace(/\/$/, "");
+const BROADCAST_MS = 200;       // realtime: ส่งให้คนอื่นทุก ~200ms (throttle)
+const BC_MAX_BYTES = 200_000;   // กันส่งก้อนใหญ่เกินลิมิต Supabase Broadcast (ของใหญ่ปล่อยให้ save+refresh sync)
 
 // ลายเซ็นกระดานแบบเบา (count + version รวม + id) — ใช้เทียบว่าเปลี่ยนจริงไหม กัน loop realtime
 function sceneSig(els: { id?: string; version?: number }[]): string {
@@ -86,10 +86,11 @@ export function CanvasSketch({
   const [serverCanEdit, setServerCanEdit] = useState(true); // server บอกว่าผู้ใช้มีสิทธิ์แก้ไหม (viewer = false)
   const canEditRef = useRef(true);
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const channelRef = useRef<ReturnType<typeof supabaseBrowser.channel> | null>(null); // Supabase Realtime channel
   const applyingRemoteRef = useRef(false);   // กันส่งซ้ำตอนเอาของคนอื่นมาวาง
   const bcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSigRef = useRef<string>("");     // ลายเซ็นกระดานล่าสุดที่ส่ง/รับ — กัน loop ส่งวนไม่จบ
+  const lastVerRef = useRef<Map<string, number>>(new Map()); // version ล่าสุดต่อ element ที่ส่ง/รับ — ส่งเฉพาะที่เปลี่ยน (delta)
   const lastChangeSigRef = useRef<string>(""); // ลายเซ็นล่าสุดที่ทำให้ "save/ส่ง" — กัน onChange ที่ไม่เปลี่ยนชิ้นงาน (เลือก/เลื่อนจอ) มา trigger รัวๆ
 
   const apiRef     = useRef<any>(null);
@@ -239,19 +240,26 @@ export function CanvasSketch({
     if (!maxTimerRef.current) maxTimerRef.current = setTimeout(() => void doSave(), MAX_AUTOSAVE_MS);
   }, [doSave]);
 
-  // realtime: ส่งสภาพกระดานปัจจุบันให้คนอื่นในห้อง (throttle ~200ms) — กันส่งซ้ำถ้าไม่เปลี่ยนจริง (ตัด loop)
+  // realtime: ส่งเฉพาะ "ชิ้นที่เปลี่ยน" (delta) ให้คนอื่นในห้อง (throttle ~200ms) ผ่าน Supabase Broadcast
   const broadcast = useCallback(() => {
     if (!collab) return;
     if (bcTimerRef.current) return; // มีคิวส่งอยู่แล้ว
     bcTimerRef.current = setTimeout(() => {
       bcTimerRef.current = null;
-      const a = apiRef.current; const w = wsRef.current;
-      if (!a || !w || w.readyState !== 1) return;
+      const a = apiRef.current; const ch = channelRef.current;
+      if (!a || !ch) return;
       const els = a.getSceneElementsIncludingDeleted() as any[];
       const sig = sceneSig(els);
-      if (sig === lastSigRef.current) return; // กระดานไม่เปลี่ยนจากที่ส่ง/รับล่าสุด → ไม่ส่ง (กัน loop)
+      if (sig === lastSigRef.current) return; // ไม่เปลี่ยนจากที่ส่ง/รับล่าสุด → ไม่ส่ง (กัน loop)
       lastSigRef.current = sig;
-      try { w.send(JSON.stringify({ t: "scene", elements: els })); } catch { /* noop */ }
+      const changed = els.filter((e) => (e.version ?? 0) > (lastVerRef.current.get(e.id) ?? -1)); // เฉพาะที่เปลี่ยน
+      if (!changed.length) return;
+      for (const e of changed) lastVerRef.current.set(e.id, e.version ?? 0);
+      const payload = { els: changed };
+      try {
+        if (JSON.stringify(payload).length > BC_MAX_BYTES) return; // ใหญ่ไป → ข้าม (save+refresh จะ sync)
+        void ch.send({ type: "broadcast", event: "scene", payload });
+      } catch { /* noop */ }
     }, BROADCAST_MS);
   }, [collab]);
 
@@ -263,6 +271,7 @@ export function CanvasSketch({
     let changed = false;
     for (const r of remoteEls) {
       if (!r?.id) continue;
+      lastVerRef.current.set(r.id, Math.max(lastVerRef.current.get(r.id) ?? -1, r.version ?? 0)); // จำว่ารับแล้ว → ไม่ส่งกลับ
       const cur = byId.get(r.id);
       if (!cur || (r.version ?? 0) > (cur.version ?? 0)) { byId.set(r.id, r); changed = true; }
     }
@@ -397,32 +406,21 @@ export function CanvasSketch({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [editable, doSave]);
 
-  // realtime: ต่อ collab worker (ห้อง = entityType:entityId) — sync สดหลายคน
+  // realtime: ต่อห้อง Supabase Broadcast (browser ↔ Supabase ตรงๆ ไม่ผ่าน Cloudflare worker → ไม่กิน CPU)
   useEffect(() => {
     if (!collab || !editable || scene === "loading") return;
-    let closedByUs = false;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    const room = encodeURIComponent(`${entityType}:${entityId}`);
-    const connect = () => {
-      let ws: WebSocket;
-      try { ws = new WebSocket(`${COLLAB_URL}/room/${room}`); } catch { return; }
-      wsRef.current = ws;
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
-          if (msg.t === "scene") applyRemote(msg.elements);
-          else if (msg.t === "presence" || msg.t === "hello") setPeers(Math.max(0, (msg.peers ?? 1) - 1));
-        } catch { /* ข้ามข้อความที่ parse ไม่ได้ */ }
-      };
-      ws.onclose = () => { if (!closedByUs) reconnectTimer = setTimeout(connect, 1500); };
-      ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
-    };
-    connect();
+    lastVerRef.current = new Map();
+    const room = `canvas:${entityType}:${entityId}`;
+    const myKey = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const channel = supabaseBrowser.channel(room, { config: { broadcast: { self: false }, presence: { key: myKey } } });
+    channel
+      .on("broadcast", { event: "scene" }, (msg: { payload?: { els?: any[] } }) => { applyRemote(msg?.payload?.els ?? []); })
+      .on("presence", { event: "sync" }, () => { const n = Object.keys(channel.presenceState()).length; setPeers(Math.max(0, n - 1)); })
+      .subscribe((status) => { if (status === "SUBSCRIBED") void channel.track({ at: Date.now() }); });
+    channelRef.current = channel;
     return () => {
-      closedByUs = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      try { wsRef.current?.close(); } catch { /* noop */ }
-      wsRef.current = null; setPeers(0);
+      try { void supabaseBrowser.removeChannel(channel); } catch { /* noop */ }
+      channelRef.current = null; setPeers(0);
     };
   }, [collab, editable, scene, entityType, entityId, applyRemote]);
 
