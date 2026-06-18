@@ -14,7 +14,7 @@
  *   - show_in_form   (POST bulk) — field show ในฟอร์ม
  */
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
@@ -291,6 +291,50 @@ export function StudioPanel({
   const [viewDefault, setViewDefault] = useState(true);
   const [viewSaving, setViewSaving] = useState(false);
   const [viewMsg, setViewMsg] = useState<string | null>(null);
+  // มุมมองที่มีอยู่แล้วของตารางนี้ (ไว้เลือกมาแก้ไข) + id ที่กำลังแก้ ("" = สร้างใหม่)
+  type SavedViewLite = { id: string; label: string; visibility: "personal" | "team" | "system"; is_default: boolean; config: Record<string, unknown> };
+  const [views, setViews] = useState<SavedViewLite[]>([]);
+  const [editingViewId, setEditingViewId] = useState<string>("");
+
+  const loadViews = useCallback(async () => {
+    if (!tableId) return;
+    try {
+      const j = await apiFetch(`/api/saved-views?table_id=${encodeURIComponent(tableId)}`).then((r) => r.json());
+      setViews(((j.data as SavedViewLite[]) ?? []));
+    } catch { /* เงียบไว้ — ไม่กระทบการสร้างใหม่ */ }
+  }, [tableId]);
+  useEffect(() => { void loadViews(); }, [loadViews]);
+
+  // ยกชุดคอลัมน์ของมุมมองมาใส่ตัวออกแบบ (โชว์/ซ่อน + ลำดับ) ให้ preview ตรงกับมุมมองนั้น
+  const applyViewConfig = (config: Record<string, unknown>) => {
+    const vis = (config?.columnVisibility as Record<string, boolean>) ?? {};
+    const order = (config?.columnOrder as string[]) ?? [];
+    setItems((prev) => {
+      // คอลัมน์ที่อยู่ใน order มาก่อนตามลำดับ ที่เหลือต่อท้ายตามเดิม
+      const rank = new Map(order.map((k, i) => [k, i]));
+      const sorted = [...prev].sort((a, b) => {
+        const ra = rank.has(a.key) ? rank.get(a.key)! : Infinity;
+        const rb = rank.has(b.key) ? rank.get(b.key)! : Infinity;
+        return ra - rb;
+      });
+      // โชว์/ซ่อนตามมุมมอง (เฉพาะคอลัมน์ที่มุมมองระบุไว้ — ที่เหลือคงเดิม)
+      return sorted.map((i) => (i.key in vis ? { ...i, isVisible: !!vis[i.key] } : i));
+    });
+    setDirty(true);
+  };
+
+  // เลือกมุมมองจาก dropdown: "" = สร้างใหม่ · id = หยิบมาแก้
+  const pickView = (id: string) => {
+    setEditingViewId(id);
+    setViewMsg(null);
+    if (!id) { setViewName(""); setViewVis("system"); setViewDefault(true); return; }
+    const v = views.find((x) => x.id === id);
+    if (!v) return;
+    setViewName(v.label);
+    setViewVis(v.visibility);
+    setViewDefault(!!v.is_default);
+    applyViewConfig(v.config ?? {});
+  };
   // ค่าเริ่มต้นตาราง (sort/group/สี/สรุป) — ของกลาง TableLayoutPanel: รวมปุ่มบันทึก + ยกค่าสรุปมาโชว์ inline
   const tlSaveRef = useRef<(() => Promise<void>) | null>(null);
   const [tlSummaries, setTlSummaries] = useState<SummaryMap>({});
@@ -307,6 +351,24 @@ export function StudioPanel({
       const columnVisibility: Record<string, boolean> = {};
       tableItems.forEach((i) => { columnVisibility[i.key] = !!i.isVisible; });
       const columnOrder = tableItems.map((i) => i.key);
+
+      if (editingViewId) {
+        // ── โหมดแก้มุมมองเดิม: คงค่า config อื่น (ตัวกรอง/ค้นหา) ไว้ เปลี่ยนแค่คอลัมน์+ลำดับ ──
+        const base = (views.find((v) => v.id === editingViewId)?.config ?? {}) as Record<string, unknown>;
+        const config = { ...base, columnVisibility, columnOrder };
+        const res = await apiFetch(`/api/saved-views?id=${encodeURIComponent(editingViewId)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label: viewName.trim(), visibility: viewVis, config, is_default: viewDefault }),
+        });
+        const j = await res.json();
+        if (j.error) { setViewMsg("❌ " + j.error); return; }
+        await loadViews();
+        setViewMsg(`✓ อัปเดตมุมมอง "${viewName.trim()}" แล้ว${viewDefault ? " · ตั้งเป็นค่าเริ่มต้น" : ""}`);
+        setTimeout(() => setViewMsg(null), 5000);
+        return;
+      }
+
+      // ── โหมดสร้างใหม่ ──
       const config = { baseViewId: "all", columnVisibility, columnOrder, colFilterValues: {}, globalSearch: "" };
       const res = await apiFetch("/api/saved-views", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -322,6 +384,7 @@ export function StudioPanel({
         });
       }
       setViewName("");
+      await loadViews();
       setViewMsg(`✓ บันทึกมุมมอง "${viewName.trim()}" แล้ว${viewDefault ? " · ตั้งเป็นค่าเริ่มต้น" : ""}`);
       setTimeout(() => setViewMsg(null), 5000);
     } catch (e) { setViewMsg("❌ " + (e instanceof Error ? e.message : "บันทึกไม่สำเร็จ")); }
@@ -583,7 +646,19 @@ export function StudioPanel({
               {/* บันทึกชุดคอลัมน์ปัจจุบันเป็น Saved View + ตั้ง default */}
               {tableId && (
                 <div className="mb-3 p-3 rounded-lg border border-indigo-100 bg-indigo-50/50 space-y-2">
-                  <div className="text-xs font-semibold text-indigo-700">📑 บันทึกชุดคอลัมน์นี้เป็นมุมมอง</div>
+                  <div className="text-xs font-semibold text-indigo-700">📑 มุมมองตาราง (Saved View)</div>
+                  {/* เลือก: สร้างใหม่ หรือ หยิบมุมมองเดิมมาแก้ */}
+                  {views.length > 0 && (
+                    <select value={editingViewId} onChange={(e) => pickView(e.target.value)}
+                      className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400">
+                      <option value="">➕ สร้างมุมมองใหม่…</option>
+                      {views.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          ✏️ {v.label}{v.is_default ? " ⭐" : ""} ({v.visibility === "system" ? "ทั้งระบบ" : v.visibility === "team" ? "ทีม" : "ส่วนตัว"})
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <input value={viewName} onChange={(e) => setViewName(e.target.value)} placeholder="ชื่อมุมมอง เช่น มุมมองเงินเดือน"
                     onKeyDown={(e) => { if (e.key === "Enter") void saveAsView(); }}
                     className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400" />
@@ -601,10 +676,14 @@ export function StudioPanel({
                   </div>
                   <button type="button" onClick={() => void saveAsView()} disabled={viewSaving || !viewName.trim()}
                     className="w-full h-8 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">
-                    {viewSaving ? "กำลังบันทึก..." : "💾 บันทึกเป็นมุมมอง"}
+                    {viewSaving ? "กำลังบันทึก..." : editingViewId ? "💾 อัปเดตมุมมองนี้" : "💾 บันทึกเป็นมุมมองใหม่"}
                   </button>
                   {viewMsg && <div className={`text-[11px] ${viewMsg.startsWith("✓") ? "text-emerald-600" : "text-red-600"}`}>{viewMsg}</div>}
-                  <div className="text-[10px] text-slate-400">บันทึกเฉพาะ &ldquo;คอลัมน์ + ลำดับ&rdquo; · ถ้าต้องการ view ที่มีตัวกรอง ให้สร้างจากตารางจริง (ปุ่ม + View)</div>
+                  <div className="text-[10px] text-slate-400">
+                    {editingViewId
+                      ? "กำลังแก้มุมมองเดิม — เปลี่ยน “คอลัมน์ที่โชว์ + ลำดับ” ตามที่จัดด้านล่าง · ตัวกรองเดิม (ถ้ามี) คงไว้"
+                      : "บันทึกเฉพาะ “คอลัมน์ + ลำดับ” · ถ้าต้องการ view ที่มีตัวกรอง ให้สร้างจากตารางจริง (ปุ่ม + View)"}
+                  </div>
                 </div>
               )}
               <TableEditor

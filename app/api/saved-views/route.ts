@@ -50,14 +50,19 @@ export async function POST(request: NextRequest) {
 }
 
 // ---- PATCH /api/saved-views?id=... ----
-// รองรับ: { is_default: boolean, label?: string }
+// รองรับ: { is_default?: boolean, label?: string, config?: object, visibility?, description? }
 // ถ้า is_default=true → unset default ของ view อื่นใน table+owner เดียวกันก่อน
 // F10d: ใช้ supabaseAdmin หลัง auth check (เพราะ RLS policy block UPDATE)
 export async function PATCH(request: NextRequest) {
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  let body: { is_default?: boolean; label?: string };
+  let body: {
+    is_default?: boolean; label?: string;
+    config?: Record<string, unknown>;
+    visibility?: "personal" | "team" | "system";
+    description?: string | null;
+  };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -87,6 +92,9 @@ export async function PATCH(request: NextRequest) {
   const patch: Record<string, unknown> = {};
   if (body.is_default !== undefined) patch.is_default = body.is_default;
   if (body.label !== undefined)      patch.label      = body.label;
+  if (body.config !== undefined)     patch.config     = body.config;
+  if (body.visibility !== undefined) patch.visibility = body.visibility;
+  if (body.description !== undefined) patch.description = body.description;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มี field ที่ update" }, { status: 400 });
 
   const { data, error } = await admin
