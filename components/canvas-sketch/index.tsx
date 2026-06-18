@@ -461,20 +461,30 @@ export function CanvasSketch({
   }, [editable, doSave]);
 
   // realtime: ต่อห้อง Supabase Broadcast (browser ↔ Supabase ตรงๆ ไม่ผ่าน Cloudflare worker → ไม่กิน CPU)
+  // ห้องแบบ private — เฉพาะผู้ใช้ที่ล็อกอิน (RLS realtime.messages policy canvas:* / authenticated)
   useEffect(() => {
     if (!collab || !editable || scene === "loading") return;
     lastVerRef.current = new Map();
     const room = `canvas:${entityType}:${entityId}`;
     const myKey = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const channel = supabaseBrowser.channel(room, { config: { broadcast: { self: false }, presence: { key: myKey } } });
-    channel
-      .on("broadcast", { event: "scene" }, (msg: { payload?: { els?: any[] } }) => { applyRemote(msg?.payload?.els ?? []); })
-      .on("broadcast", { event: "files" }, (msg: { payload?: { files?: any[] } }) => { const fs = msg?.payload?.files; if (fs?.length && apiRef.current) { try { apiRef.current.addFiles(fs); } catch { /* noop */ } } })
-      .on("presence", { event: "sync" }, () => { const n = Object.keys(channel.presenceState()).length; setPeers(Math.max(0, n - 1)); })
-      .subscribe((status) => { if (status === "SUBSCRIBED") void channel.track({ at: Date.now() }); });
-    channelRef.current = channel;
+    let channel: ReturnType<typeof supabaseBrowser.channel> | null = null;
+    let cancelled = false;
+    void (async () => {
+      // ส่ง token ของผู้ใช้ให้ realtime ก่อนเข้าห้อง private (กัน race ตอนเพิ่งโหลด session จาก localStorage)
+      try { const { data } = await supabaseBrowser.auth.getSession(); const tok = data.session?.access_token; if (tok) await supabaseBrowser.realtime.setAuth(tok); } catch { /* ไม่มี token ก็ลองต่อ — ถ้าไม่ผ่านจะใช้กระดานแบบเดี่ยวได้ปกติ */ }
+      if (cancelled) return;
+      const ch = supabaseBrowser.channel(room, { config: { private: true, broadcast: { self: false }, presence: { key: myKey } } });
+      ch
+        .on("broadcast", { event: "scene" }, (msg: { payload?: { els?: any[] } }) => { applyRemote(msg?.payload?.els ?? []); })
+        .on("broadcast", { event: "files" }, (msg: { payload?: { files?: any[] } }) => { const fs = msg?.payload?.files; if (fs?.length && apiRef.current) { try { apiRef.current.addFiles(fs); } catch { /* noop */ } } })
+        .on("presence", { event: "sync" }, () => { const n = Object.keys(ch.presenceState()).length; setPeers(Math.max(0, n - 1)); })
+        .subscribe((status) => { if (status === "SUBSCRIBED") void ch.track({ at: Date.now() }); });
+      channel = ch;
+      channelRef.current = ch;
+    })();
     return () => {
-      try { void supabaseBrowser.removeChannel(channel); } catch { /* noop */ }
+      cancelled = true;
+      if (channel) { try { void supabaseBrowser.removeChannel(channel); } catch { /* noop */ } }
       channelRef.current = null; setPeers(0);
     };
   }, [collab, editable, scene, entityType, entityId, applyRemote]);
