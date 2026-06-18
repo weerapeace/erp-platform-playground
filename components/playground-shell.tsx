@@ -263,6 +263,9 @@ function groupMenuRows(rows: MenuRow[]): { label: string; items: { href: string;
 // หน้า default ต่อแอป (เปิดหัวเมนูแล้วไปหน้านี้ก่อน แทนเมนูตัวแรกตาม sort_order)
 const APP_DEFAULT_HREF: Record<string, string> = { production: "/master/manufacturing-orders" };
 
+// หน้าที่เปิด "เต็มจอ" อัตโนมัติ (ซ่อน sidebar + แถบ App) — มีปุ่ม toggle กางคืน
+const FOCUS_ROUTES = ["/master/work-board"];
+
 const ROUTE_APP_FALLBACK: { prefix: string; app: string }[] = [
   { prefix: "/quotations", app: "sales" },
   { prefix: "/sales-orders", app: "sales" },
@@ -391,6 +394,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     else if (typeof window !== "undefined" && window.innerWidth < 1024) setNavCollapsed(true);   // จอเล็ก → พับให้
   }, []);
   const toggleNavCollapsed = () => setNavCollapsed((c) => { const n = !c; localStorage.setItem("nav_collapsed", n ? "1" : "0"); return n; });
+
+  // focus mode — บางหน้า (บอร์ดจ่ายงาน) ซ่อน sidebar + แถบ App ให้ทำงานเต็มจอ (มีปุ่ม toggle กางคืน)
+  const onFocusRoute = FOCUS_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"));
+  const [focus, setFocus] = useState(false);
+  useEffect(() => { setFocus(FOCUS_ROUTES.some((r) => pathname === r || pathname.startsWith(r + "/"))); }, [pathname]);
   const navExpanded = !navCollapsed || navHover;   // กางจริงเมื่อ ไม่พับ หรือ กำลัง hover
   // embed mode — เปิดหน้าในกรอบแอปเดี่ยว (?embed=1) → ซ่อน sidebar/แถบ App ของ shell (กันเมนูซ้อน)
   const [embed, setEmbed] = useState(false);
@@ -586,6 +594,14 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
       <KeyboardShortcutsModal open={helpOpen} onClose={() => setHelpOpen(false)} />
 
+      {/* ปุ่มสลับเต็มจอ — โชว์เฉพาะหน้าที่เปิดเต็มจอได้ (เช่น บอร์ดจ่ายงาน) */}
+      {onFocusRoute && (
+        <button onClick={() => setFocus((f) => !f)} title={focus ? "แสดงเมนู (ออกจากเต็มจอ)" : "ซ่อนเมนู (เต็มจอ)"}
+          className="fixed bottom-4 left-4 z-[60] h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-white border border-slate-200 shadow-md hover:bg-slate-50 text-sm text-slate-600">
+          {focus ? "☰ เมนู" : "⛶ เต็มจอ"}
+        </button>
+      )}
+
       {/* Mobile topbar */}
       <header className="md:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 h-12 flex items-center justify-between px-3">
         <button onClick={() => setMobileNavOpen(true)} aria-label="เปิดเมนู"
@@ -617,6 +633,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         onMouseEnter={() => navCollapsed && setNavHover(true)}
         onMouseLeave={() => setNavHover(false)}
         className={`
+        ${focus ? "!hidden" : ""}
         bg-white border-r border-slate-200 flex flex-col
         w-64 ${navExpanded ? "md:w-56" : "md:w-16"} flex-shrink-0
         fixed md:sticky top-0 h-screen z-50 md:z-auto
@@ -734,8 +751,8 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       {/* หมายเหตุ: ห้ามใส่ overflow-y-auto ที่ main — root เป็น min-h-screen (เลื่อนที่ body)
           overflow บน main จะกลายเป็น scrollport ปลอมที่ไม่เคยเลื่อน ทำให้ sticky ทุกตัวข้างในตาย */}
       <main id="main-content" className="flex-1 min-w-0 pt-12 md:pt-0 flex flex-col" tabIndex={-1}>
-        {/* โมดูลใหญ่ (App) tabs — ข้างบนสุด (โชว์เมื่อมีทะเบียนเมนูแล้ว) */}
-        {appGroups.length > 0 && menuRows && menuRows.length > 0 && (
+        {/* โมดูลใหญ่ (App) tabs — ข้างบนสุด (โชว์เมื่อมีทะเบียนเมนูแล้ว · ซ่อนตอน focus mode) */}
+        {!focus && appGroups.length > 0 && menuRows && menuRows.length > 0 && (
           <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-3 flex items-center gap-1 overflow-x-auto">
             {appGroups
               .filter((a) => !a.permission_key || can(a.permission_key as Parameters<typeof can>[0]))
