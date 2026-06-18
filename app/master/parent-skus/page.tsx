@@ -48,6 +48,14 @@ const CONFIG: MasterCRUDConfig = {
   serverMode:  true,
   pageLimit:   200,
   exportEntityType: "parent_skus_v2",
+  mediaGallery: {
+    entityType: "parent_skus_v2",
+    title: "รูปภาพเพิ่มเติม",
+    description: "เพิ่มได้สูงสุด 9 รูป · รูปละไม่เกิน 2MB · ลบแล้วจะย้ายไฟล์ใน R2 เข้าถังเก็บกลาง",
+    maxItems: 9,
+    maxSizeBytes: 2 * 1024 * 1024,
+    imageOnly: true,
+  },
   permissions: {
     view:   "products.view",
     create: "products.create",

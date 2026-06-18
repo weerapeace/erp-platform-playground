@@ -64,11 +64,21 @@ const isImage = (ct: string | null) => !!ct && ct.startsWith("image/");
 
 export function ImageManager({
   entityType, entityId, actor, readonly = false,
+  maxItems = 0,
+  maxSizeBytes = 10 * 1024 * 1024,
+  imageOnly = false,
+  title,
+  description,
 }: {
   entityType: string;
   entityId:   string;
   actor?:     string;
   readonly?:  boolean;
+  maxItems?: number;
+  maxSizeBytes?: number;
+  imageOnly?: boolean;
+  title?: string;
+  description?: string;
 }) {
   const [items,   setItems]   = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +86,8 @@ export function ImageManager({
   const [dragging, setDragging] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const maxSizeMb = Math.round((maxSizeBytes / 1024 / 1024) * 10) / 10;
+  const atMaxItems = maxItems > 0 && items.length >= maxItems;
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -89,14 +101,36 @@ export function ImageManager({
   useEffect(() => { fetchList(); }, [fetchList]);
 
   const upload = useCallback(async (files: FileList | File[]) => {
+    const incoming = Array.from(files);
+    if (incoming.length === 0) return;
+    if (maxItems > 0 && items.length + incoming.length > maxItems) {
+      setError(`เพิ่มได้สูงสุด ${maxItems} รูป`);
+      return;
+    }
+    const wrongType = imageOnly ? incoming.find(file => !(file.type || "").startsWith("image/")) : null;
+    if (wrongType) {
+      setError("รับเฉพาะไฟล์รูปภาพเท่านั้น");
+      return;
+    }
+    const tooLarge = incoming.find(file => file.size > maxSizeBytes);
+    if (tooLarge) {
+      setError(`ไฟล์ ${tooLarge.name} ใหญ่เกิน ${maxSizeMb}MB`);
+      return;
+    }
     setUploading(true); setError(null);
     try {
-      for (const file of Array.from(files)) {
+      for (const file of incoming) {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("entity_type", entityType);
         fd.append("entity_id", entityId);
         if (actor) fd.append("actor", actor);
+        if (imageOnly) {
+          fd.append("attachment_kind", "image_gallery");
+          fd.append("image_only", "1");
+        }
+        if (maxItems > 0) fd.append("max_items", String(maxItems));
+        fd.append("max_size_bytes", String(maxSizeBytes));
         const res = await apiFetch("/api/attachments", { method: "POST", body: fd });
         const json = await res.json();
         if (json.error) throw new Error(json.error);
@@ -105,7 +139,7 @@ export function ImageManager({
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "อัปโหลดไม่สำเร็จ");
     } finally { setUploading(false); }
-  }, [entityType, entityId, actor, fetchList]);
+  }, [entityType, entityId, actor, fetchList, imageOnly, items.length, maxItems, maxSizeBytes, maxSizeMb]);
 
   // วางรูปจาก clipboard (Ctrl+V) — ทำงานเฉพาะตอนเมาส์ชี้อยู่ในกล่องนี้
   // (กันชนกันเมื่อหน้าเดียวมี ImageManager หลายตัว เช่น รูปใบงาน + รูปประกอบ comment)
@@ -146,7 +180,16 @@ export function ImageManager({
 
   return (
     <div onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            {title ?? (imageOnly ? "รูปภาพ" : "รูปภาพ & ไฟล์แนบ")} {maxItems > 0 ? `(${items.length}/${maxItems})` : items.length > 0 ? `(${items.length})` : ""}
+          </p>
+          {description && <p className="mt-0.5 text-[11px] text-slate-400">{description}</p>}
+        </div>
+        {imageOnly && <span className="text-[11px] text-slate-400 whitespace-nowrap">ไม่เกิน {maxSizeMb}MB/รูป</span>}
+      </div>
+      <div className="hidden">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">รูปภาพ & ไฟล์แนบ {items.length > 0 && `(${items.length})`}</p>
       </div>
 
@@ -204,18 +247,26 @@ export function ImageManager({
         <div
           onDragOver={e => { e.preventDefault(); setDragging(true); }}
           onDragLeave={e => { e.preventDefault(); setDragging(false); }}
-          onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) upload(e.dataTransfer.files); }}
-          onClick={() => fileRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
-            dragging ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50"
+          onDrop={e => { e.preventDefault(); setDragging(false); if (!atMaxItems && e.dataTransfer.files.length) upload(e.dataTransfer.files); }}
+          onClick={() => { if (!atMaxItems) fileRef.current?.click(); }}
+          className={`image-manager-upload ${imageOnly ? "image-only-upload [&>p]:hidden" : ""} border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+            atMaxItems ? "border-slate-200 bg-slate-50 cursor-not-allowed" : dragging ? "border-blue-400 bg-blue-50 cursor-pointer" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50 cursor-pointer"
           }`}
         >
-          <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple className="hidden"
+          <input ref={fileRef} type="file" accept={imageOnly ? "image/*" : "image/*,application/pdf"} multiple className="hidden"
             onChange={e => { if (e.target.files?.length) upload(e.target.files); }} />
           {uploading ? (
             <p className="text-sm text-blue-600">⏳ กำลังอัปโหลด...</p>
+          ) : atMaxItems ? (
+            <p className="text-sm text-slate-500">ครบ {maxItems} รูปแล้ว</p>
           ) : (
             <>
+              {imageOnly && (
+                <div>
+                  <p className="text-sm text-slate-600">{dragging ? "วางรูปที่นี่" : "ลากรูปมาวาง · คลิกเลือก · หรือกด Ctrl+V"}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">รับเฉพาะรูปภาพ · ไม่เกิน {maxSizeMb}MB/รูป</p>
+                </div>
+              )}
               <p className="text-sm text-slate-600">{dragging ? "วางไฟล์ที่นี่" : "ลากรูป/ไฟล์มาวาง · คลิกเลือก · หรือชี้ที่กล่องนี้แล้วกด Ctrl+V"}</p>
               <p className="text-xs text-slate-400 mt-0.5">รูปภาพ หรือ PDF · ไม่เกิน 10MB</p>
             </>

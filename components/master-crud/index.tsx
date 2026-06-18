@@ -23,6 +23,7 @@ import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/a
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { RelationPeekModal } from "@/components/relation-peek";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
+import { ImageManager } from "@/components/image-manager";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { LayoutEditorModal } from "@/components/layout-editor";
 import { RelationMany2Many, RelationOne2Many, MasterDetailRelation } from "@/components/relation-multi";
@@ -419,6 +420,15 @@ export type MasterCRUDConfig = {
   pageLimit?: number;
   /** hook หลังบันทึก parent สำเร็จ ใช้กับข้อมูลลูกที่มากับฟอร์ม เช่น วันหยุดประจำงวด */
   afterSave?: (ctx: MasterCRUDSaveContext) => Promise<void> | void;
+  /** รูป/ไฟล์แนบหลายรายการแบบของกลาง ใช้ erp_playground_attachments + R2 */
+  mediaGallery?: {
+    entityType?: string;
+    title?: string;
+    description?: string;
+    maxItems?: number;
+    maxSizeBytes?: number;
+    imageOnly?: boolean;
+  };
   /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
@@ -2153,9 +2163,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           }
 
           return (
-            <div className="flex flex-col md:flex-row gap-5">
+            <div className="flex flex-col md:flex-row md:flex-wrap gap-5">
               {/* ซ้าย: รูป + core */}
-              <div className="md:w-72 md:flex-shrink-0 space-y-4">
+              <div className="md:w-72 md:flex-shrink-0 md:order-1 space-y-4">
                 {/* รูปใหญ่ */}
                 <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
                   {coverKey
@@ -2178,7 +2188,29 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
               </div>
 
               {/* ขวา: tabs (หมวดที่เหลือ) */}
-              <div className="flex-1 min-w-0">
+              {config.mediaGallery && (
+                <div className="w-full md:order-3 rounded-xl border border-slate-200 bg-white p-3">
+                  {editingId ? (
+                    <ImageManager
+                      entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
+                      entityId={String(editingId)}
+                      actor={user?.name ?? user?.email ?? undefined}
+                      readonly={drawerMode === "view" || !canEdit}
+                      title={config.mediaGallery.title}
+                      description={config.mediaGallery.description}
+                      maxItems={config.mediaGallery.maxItems ?? 9}
+                      maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
+                      imageOnly={config.mediaGallery.imageOnly ?? true}
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400 text-center py-3">
+                      บันทึกรายการก่อน แล้วค่อยเพิ่มรูปภาพเพิ่มเติม
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex-1 min-w-0 md:order-2">
                 {detailLoading && drawerMode === "view" && <div className="text-xs text-slate-400 mb-2">⏳ กำลังโหลด...</div>}
                 {drawerMode === "edit" && formErr && (
                   <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>
