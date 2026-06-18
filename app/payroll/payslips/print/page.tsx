@@ -66,6 +66,7 @@ export default function PayrollPayslipPrintPage() {
   );
 }
 
+// หมายเหตุ: export ไว้เพราะ /print/payroll-payslips ฝังใช้ (ทำให้เกิด .next/types route-export warning 1 จุด — ไม่กระทบ build)
 export function PayslipPrintContent({ embedded = false }: { embedded?: boolean } = {}) {
   const params = useSearchParams();
   const [data, setData] = useState<PrintResponse | null>(null);

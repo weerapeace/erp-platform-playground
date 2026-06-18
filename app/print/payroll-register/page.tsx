@@ -45,7 +45,7 @@ export default function PayrollRegisterPrintPage() {
   );
 }
 
-export function PayrollRegisterPrintContent({ embedded = false }: { embedded?: boolean } = {}) {
+function PayrollRegisterPrintContent({ embedded = false }: { embedded?: boolean } = {}) {
   const params = useSearchParams();
   const [data, setData] = useState<RegisterResponse | null>(null);
   const [loading, setLoading] = useState(true);

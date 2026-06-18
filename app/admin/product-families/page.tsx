@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
-import FamilyTemplatePage from "@/app/admin/family-template/page";
+import { FamilyTemplateView } from "@/app/admin/family-template/view";
 
 type Group = { id: string; name: string; parent_group_id: string | null; single_select: boolean; sort_order: number; color: string | null; icon: string | null };
 type Tag = { id: string; name: string; group_id: string | null };
@@ -72,7 +72,7 @@ export default function ProductFamiliesHub() {
         {msg && <div className="mb-2 text-xs">{msg}</div>}
         {tab === "groups" && <GroupsTab groups={groups} tags={tags} reload={load} patchGroup={patchGroup} setMsg={setMsg} />}
         {tab === "tags" && <TagsTab groups={groups} tags={tags} reload={load} setMsg={setMsg} />}
-        {tab === "template" && <FamilyTemplatePage embedded />}
+        {tab === "template" && <FamilyTemplateView embedded />}
       </div>
     </div>
   );

@@ -244,6 +244,7 @@ function MonthCalendar({ items, onOpen }: { items: ContentItem[]; onOpen: (id: s
 // ============================================================
 // Content detail drawer — caption หลายแพลตฟอร์ม + คลัง hashtag + ลิงก์
 // ============================================================
+// หมายเหตุ: export ไว้เพราะ tasks/campaigns ฝังใช้ (.next/types route-export warning 1 จุด — ไม่กระทบ build)
 export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete, pushToast }: {
   contentId: string; brands: BrandOption[];
   onClose: () => void; onChanged: () => void; onDelete?: (c: ContentItem) => void;
