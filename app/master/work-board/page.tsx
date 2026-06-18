@@ -123,6 +123,8 @@ export default function WorkBoardPage() {
   useEffect(() => { try { const v = localStorage.getItem("wb:pendingCols"); if (v) setPendingCols(Number(v) || null); } catch { /* ignore */ } }, []);
   const setPendCols = useCallback((n: number | null) => { setPendingCols(n); try { if (n) localStorage.setItem("wb:pendingCols", String(n)); else localStorage.removeItem("wb:pendingCols"); } catch { /* ignore */ } }, []);
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
+  // กลุ่ม B: ประวัติงานเสียต่อช่าง (จับด้วยชื่อ) → เตือนตอนจ่ายงาน
+  const [defectByWorker, setDefectByWorker] = useState<Record<string, { worker: string; count: number; last_at: string | null; types: string[] }>>({});
 
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Inter>(null);
@@ -189,6 +191,10 @@ export default function WorkBoardPage() {
   }, []);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ } })(); }, []);
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/craftsman-defects"); const j = await r.json();
+    const m: Record<string, { worker: string; count: number; last_at: string | null; types: string[] }> = {};
+    for (const d of (j.data ?? []) as { worker: string; count: number; last_at: string | null; types: string[] }[]) m[(d.worker ?? "").trim().toLowerCase()] = d;
+    setDefectByWorker(m); } catch { /* ignore */ } })(); }, []);
   useEffect(() => { try {
     const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r));
     const s = localStorage.getItem(ZONESIZE_KEY); if (s) setZoneSize(JSON.parse(s));
@@ -426,6 +432,8 @@ export default function WorkBoardPage() {
     if (!dispDept) return [];
     return dispIsHire ? craftsmen : craftsmen.filter((c) => c.department_id === dispDept.id);
   }, [dispDept, dispIsHire, craftsmen]);
+  // กลุ่ม B: หาประวัติงานเสียจากชื่อผู้รับงาน (ช่าง หรือชื่อแผนกถ้าไม่ระบุช่าง)
+  const defectOf = useCallback((name: string | null | undefined) => name ? defectByWorker[name.trim().toLowerCase()] : undefined, [defectByWorker]);
 
   // รับงานคืน (จากการ์ดบนบอร์ด) — รองรับรับคืนบางส่วน
   const submitReceive = async () => {
@@ -897,11 +905,26 @@ export default function WorkBoardPage() {
               <select value={dispCraftsman} onChange={(e) => setDispCraftsman(e.target.value)}
                 className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <option value="">— ทั้งแผนก (ไม่ระบุช่าง) —</option>
-                {deptCraftsmen.map((c) => <option key={c.id} value={c.id}>{c.code ? `[${c.code}] ` : ""}{c.name}</option>)}
+                {deptCraftsmen.map((c) => { const d = defectOf(c.name); return <option key={c.id} value={c.id}>{d ? "⚠️ " : ""}{c.code ? `[${c.code}] ` : ""}{c.name}{d ? ` — งานเสีย ${d.count}` : ""}</option>; })}
               </select>
               {dispIsHire ? <span className="text-[10px] text-indigo-500">งานเหมาเลือกพนักงานได้ทุกคน</span>
                 : deptCraftsmen.length === 0 && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
             </label>
+            {/* กลุ่ม B: เตือนถ้าผู้รับงาน (ช่างที่เลือก หรือชื่อแผนก) เคยมีประวัติงานเสีย */}
+            {(() => {
+              const craftName = deptCraftsmen.find((c) => c.id === dispCraftsman)?.name ?? null;
+              const targetName = craftName ?? dispDept?.name ?? "";
+              const d = defectOf(targetName);
+              if (!d) return null;
+              return (
+                <div className={`rounded-lg border px-3 py-2 text-xs ${dispIsHire ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
+                  ⚠️ <b>{targetName}</b> เคยมีประวัติงานเสีย <b>{d.count}</b> ครั้ง
+                  {d.types.length > 0 && <span className="opacity-70"> ({d.types.slice(0, 3).join(", ")}{d.types.length > 3 ? "…" : ""})</span>}
+                  {d.last_at && <span className="opacity-60"> · ล่าสุด {new Date(d.last_at).toLocaleDateString("th-TH")}</span>}
+                  {dispIsHire && <div className="mt-0.5 text-[11px] font-medium">เป็นช่างเหมา — โปรดพิจารณาก่อนจ่ายงาน</div>}
+                </div>
+              );
+            })()}
           </div>
         )}
       </ERPModal>
