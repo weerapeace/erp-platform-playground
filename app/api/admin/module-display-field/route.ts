@@ -12,11 +12,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "admin.field_registry.edit"); if (denied) return denied;
   let b: { module_key?: string; field?: string; actor?: string };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!b.module_key) return NextResponse.json({ error: "ต้องมี module_key" }, { status: 400 });

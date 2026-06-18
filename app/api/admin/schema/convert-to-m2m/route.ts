@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -20,6 +21,7 @@ export const revalidate = 0;
 const KEY_RE = /^[a-z][a-z0-9_]{0,62}$/;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "admin.schema.create_table"); if (denied) return denied;
   let b: { module_key?: string; column?: string; target_table?: string; target_label_field?: string; label?: string; actor?: string };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 

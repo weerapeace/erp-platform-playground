@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,6 +14,7 @@ export const revalidate = 0;
 const JT_RE = /^[a-z][a-z0-9_]+_m2m$/;   // junction ต้องลงท้าย _m2m
 
 export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "admin.schema.view"); if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const junction = searchParams.get("junction") ?? "";
   if (!JT_RE.test(junction)) return NextResponse.json({ links: [], error: "param ไม่ถูกต้อง" }, { status: 400 });
@@ -41,6 +43,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "admin.schema.add_field"); if (denied) return denied;
   const b = await request.json().catch(() => ({}));
   if (!JT_RE.test(b.junction ?? "")) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
 
@@ -66,6 +69,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const denied = await guardApi(request, "admin.schema.delete_field"); if (denied) return denied;
   const b = await request.json().catch(() => ({}));
   if (!JT_RE.test(b.junction ?? "")) return NextResponse.json({ error: "param ไม่ถูกต้อง" }, { status: 400 });
 
