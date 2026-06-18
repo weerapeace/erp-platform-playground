@@ -83,6 +83,8 @@ export function CanvasSketch({
   const [lastMerged, setLastMerged] = useState(false); // เซฟล่าสุดมีการรวมงานกับคนอื่นไหม
   const [selFont, setSelFont] = useState<number | null>(null); // ขนาด font ของ text ที่เลือก (null = ไม่ได้เลือก text)
   const [peers, setPeers] = useState(0); // realtime: จำนวนคนอื่นในห้อง
+  const [serverCanEdit, setServerCanEdit] = useState(true); // server บอกว่าผู้ใช้มีสิทธิ์แก้ไหม (viewer = false)
+  const canEditRef = useRef(true);
 
   const wsRef = useRef<WebSocket | null>(null);
   const applyingRemoteRef = useRef(false);   // กันส่งซ้ำตอนเอาของคนอื่นมาวาง
@@ -123,6 +125,7 @@ export function CanvasSketch({
         });
         if (els.some((e) => !(e as { isDeleted?: boolean }).isDeleted)) hadContentRef.current = true; // โหลดมามีงาน → ห้ามเซฟว่างทับ
         baseRevRef.current = Number(j?.data?.rev) || 0; // จำเวอร์ชันที่โหลดมา
+        { const ce = j?.data?.can_edit !== false; canEditRef.current = ce; setServerCanEdit(ce); } // viewer = อ่านอย่างเดียว
         setScene(sc && typeof sc === "object" ? { elements: els, files: (sc.files as Record<string, unknown>) ?? {} } : null);
         setTimeout(() => { readyRef.current = true; if (alive) readyCbRef.current?.(); }, 800);
       })
@@ -135,6 +138,7 @@ export function CanvasSketch({
     // (กัน bug: ตอนปิด/สลับแท็บ Excalidraw ถูกถอด → getSceneElements() คืนว่าง → ทับของดี)
     const snap = latestRef.current;
     if (!snap) return;
+    if (!canEditRef.current) return; // ไม่มีสิทธิ์แก้ → ไม่เซฟ (กันขึ้น error ให้ viewer)
     if (savingRef.current) { pendingRef.current = true; return; }
     // กันเซฟ "ว่าง" ทับงานดี: ถ้าเคยมีงาน แต่ snapshot ตอนนี้ว่าง (มักเกิดตอนปิดหน้า/teardown ที่ Excalidraw เคลียร์ scene)
     // → ลองใช้ของจริงจาก api ที่ยังเปิดอยู่; ถ้าก็ว่าง/อ่านไม่ได้ → ไม่บันทึก (กันงานหาย)
@@ -204,7 +208,11 @@ export function CanvasSketch({
           try { lastChangeSigRef.current = sceneSig(mergedEls); apiRef.current?.updateScene?.({ elements: mergedEls }); } catch { /* noop */ }
           continue;
         }
-        if (j.conflict) { setSaveState("error"); break; } // ชนซ้ำหลายรอบ → หยุด (ไม่ทับ)
+        if (j.conflict) { // ชนถี่ (2 คนแก้พร้อมกัน) → ไม่ขึ้น error, ตั้งเวลาลองใหม่อีก 1.5วิ
+          markDirty(true); setSaveState("dirty");
+          if (!timerRef.current) timerRef.current = setTimeout(() => void doSave(forcePng), 1500);
+          break;
+        }
 
         baseRevRef.current = Number(j.rev) || baseRevRef.current + 1;
         setLastMerged(merged);
@@ -498,7 +506,7 @@ export function CanvasSketch({
         <span className="text-xs text-slate-400 flex-1 min-w-[200px]">
           🖼 วางรูป = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P
         </span>
-        {editable && selFont != null && (
+        {editable && serverCanEdit && selFont != null && (
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
             <span className="text-slate-400">ขนาดอักษร</span>
             <button onClick={() => { setFont(selFont - 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">−</button>
@@ -506,7 +514,7 @@ export function CanvasSketch({
             <button onClick={() => { setFont(selFont + 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">＋</button>
           </span>
         )}
-        {editable && selFont != null && (
+        {editable && serverCanEdit && selFont != null && (
           <button onClick={() => { void translateSelected(); blurActive(); }} disabled={translating} title="แปลข้อความที่เลือก ไทย↔อังกฤษ (วางกล่องใหม่ข้างๆ)"
             className="inline-flex items-center gap-1 text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50 disabled:opacity-50">
             {translating ? "⏳ กำลังแปล..." : "🌐 แปลภาษา"}
@@ -517,7 +525,8 @@ export function CanvasSketch({
             👥 {peers} คนออนไลน์
           </span>
         )}
-        {editable && (
+        {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)</span>}
+        {editable && serverCanEdit && (
           <span className="text-[11px] inline-flex items-center gap-1.5">
             {saveState === "dirty"  && <span className="text-slate-400">● จะบันทึกอัตโนมัติเมื่อหยุดวาด...</span>}
             {saveState === "saving" && <span className="text-blue-500">⏳ กำลังบันทึก...</span>}
@@ -533,7 +542,7 @@ export function CanvasSketch({
       </div>
       <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
         {/* ป้ายสถานะบันทึก — ลอยกลางล่าง เห็นชัดทุกครั้งที่เซฟ */}
-        {editable && (
+        {editable && serverCanEdit && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
             <span className={`px-2.5 py-1 rounded-full text-[11px] font-medium shadow-sm border bg-white/95 backdrop-blur ${
               saveState === "error" ? "text-rose-600 border-rose-200"
@@ -550,7 +559,7 @@ export function CanvasSketch({
         )}
         <Excalidraw
           langCode="th-TH"
-          viewModeEnabled={!editable}
+          viewModeEnabled={!(editable && serverCanEdit)}
           excalidrawAPI={(a: any) => { apiRef.current = a; }}
           initialData={scene ? { elements: scene.elements as any, files: scene.files as any, scrollToContent: true } : undefined}
           onChange={(elements: any, appState: any, files: any) => {
@@ -562,7 +571,7 @@ export function CanvasSketch({
             setSelFont(tx ? Math.round(tx.fontSize) : null);
             if ((elements as any[]).some((e) => !e.isDeleted)) hadContentRef.current = true; // เคยมีงานจริง
             // เซฟ/ส่ง เฉพาะเมื่อ "ชิ้นงานเปลี่ยนจริง" (ข้ามการเลือก/เลื่อนจอที่ไม่กระทบเนื้อหา → กันกระพริบ/loop)
-            if (readyRef.current && editable) {
+            if (readyRef.current && editable && canEditRef.current) {
               const sig = sceneSig(elements as any[]);
               if (sig !== lastChangeSigRef.current) {
                 lastChangeSigRef.current = sig;

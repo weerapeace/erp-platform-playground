@@ -32,6 +32,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const entityId   = (searchParams.get("entity_id") ?? "").trim();
   if (!entityType || !entityId) return NextResponse.json({ data: null, error: "ต้องส่ง entity_type และ entity_id" }, { status: 400 });
   const denied = await guardApi(request, permFor(entityType).view); if (denied) return denied;
+  // ตรวจสิทธิ์แก้ด้วย (cache แล้ว = ถูก) → client เอาไปทำ read-only ถ้าแก้ไม่ได้ (กันวาดแล้วเซฟไม่ได้)
+  const canEdit = (await guardApi(request, permFor(entityType).edit)) === null;
 
   const { data } = await supabaseAdmin().from("erp_canvas_sketches")
     .select("scene, preview_r2_key, updated_at, rev")
@@ -40,8 +42,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     data: data ? {
       scene: data.scene ?? null,
       preview_url: data.preview_r2_key ? `/api/r2-image?key=${encodeURIComponent(data.preview_r2_key)}` : null,
-      updated_at: data.updated_at, rev: (data.rev as number) ?? 0,
-    } : { scene: null, preview_url: null, rev: 0 },
+      updated_at: data.updated_at, rev: (data.rev as number) ?? 0, can_edit: canEdit,
+    } : { scene: null, preview_url: null, rev: 0, can_edit: canEdit },
     error: null,
   });
 }
