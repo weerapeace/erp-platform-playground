@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenTask } from "../route";
+import { SELECT, flattenTask } from "../shared";
 import { canTransition as canTransitionDB, getStatusMeta } from "@/lib/creative-statuses-server";
 import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap } from "@/lib/creative-tasks-server";
 

@@ -9,7 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { cleanCartons } from "../route";
+import { cleanCartons } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

@@ -12,6 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { cleanCartons } from "./shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,11 +40,6 @@ export type CartonLabelRow = {
 const n = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
 const s = (v: unknown) => (v == null ? null : String(v).trim() || null);
 
-// แปลง body → คอลัมน์ที่อนุญาต (กันยัดคอลัมน์มั่ว)
-export function cleanCartons(v: unknown): CartonItem[] {
-  if (!Array.isArray(v)) return [];
-  return v.map((c) => ({ qty: n((c as Record<string, unknown>)?.qty) })).filter((c) => c.qty >= 0);
-}
 function buildPayload(body: Record<string, unknown>) {
   return {
     from_text: s(body.from_text) ?? "หจก. ไอ.เอส.จี เทรดดิ้ง",

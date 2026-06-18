@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenTask } from "../../creative-tasks/route";
+import { SELECT, flattenTask } from "../../creative-tasks/shared";
 import { employeeLabelMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
