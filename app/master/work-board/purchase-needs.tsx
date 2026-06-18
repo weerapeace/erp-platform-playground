@@ -41,6 +41,8 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
   const [mode, setMode] = useState<"type" | "mo">("type");  // จัดกลุ่มตามประเภท / ตามใบสั่งผลิต
   const [drafts, setDrafts] = useState<Record<string, string>>({});  // จำนวนที่มี (กำลังพิมพ์) ต่อ summary_id
   const [busy, setBusy] = useState<string | null>(null);
+  const [printMenuOpen, setPrintMenuOpen] = useState(false);
+  const [printSel, setPrintSel] = useState<Set<string>>(new Set());  // ประเภทที่เลือกพิมพ์
 
   const load = useCallback(async () => {
     setRows(null); setSel(new Set()); setDrafts({});
@@ -158,9 +160,38 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       <button onClick={() => setMode("mo")} className={`h-8 px-3 border-l border-slate-200 ${mode === "mo" ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>ตามใบสั่งผลิต</button>
     </div>
   );
+  const allTypes = [...new Set((rows ?? []).map((r) => r.material_type || "ไม่ระบุประเภท"))].sort((a, b) => a.localeCompare(b, "th"));
+  const openPrint = (types: string[]) => {
+    setPrintMenuOpen(false);
+    const qs = types.length ? `?types=${encodeURIComponent(types.join(","))}` : "";
+    window.open(`/print/purchase-needs${qs}`, "_blank", "noopener");
+  };
   const printBtn = (
-    <a href="/print/purchase-needs" target="_blank" rel="noreferrer" title="พิมพ์รายการ (มีช่องเช็ค ซื้อแล้ว/เตรียมแล้ว)"
-      className="h-8 px-3 inline-flex items-center text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨️ พิมพ์</a>
+    <div className="relative">
+      <button type="button" onClick={() => setPrintMenuOpen((o) => !o)} title="พิมพ์รายการ (เลือกพิมพ์ทั้งหมด/เฉพาะประเภท)"
+        className="h-8 px-3 inline-flex items-center gap-1 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨️ พิมพ์ <span className="text-[9px] text-slate-400">▾</span></button>
+      {printMenuOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPrintMenuOpen(false)} />
+          <div className="absolute right-0 top-9 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2 min-w-[230px]">
+            <button type="button" onClick={() => openPrint([])} className="w-full text-left px-2 py-1.5 text-sm rounded-md hover:bg-slate-50 text-slate-700">🖨️ พิมพ์ทั้งหมด</button>
+            <div className="border-t border-slate-100 my-1.5" />
+            <div className="text-[11px] text-slate-400 px-1 mb-1">เลือกพิมพ์เฉพาะประเภท</div>
+            <div className="max-h-56 overflow-y-auto">
+              {allTypes.map((t) => (
+                <label key={t} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-slate-50 rounded cursor-pointer">
+                  <input type="checkbox" checked={printSel.has(t)} onChange={() => setPrintSel((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; })} className="w-4 h-4 accent-rose-600" />
+                  <span className="truncate">{t}</span>
+                </label>
+              ))}
+              {allTypes.length === 0 && <div className="px-1 py-2 text-xs text-slate-300">ไม่มีข้อมูล</div>}
+            </div>
+            <button type="button" disabled={printSel.size === 0} onClick={() => openPrint([...printSel])}
+              className="mt-1.5 w-full h-8 text-sm font-medium bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-40">🖨️ พิมพ์ที่เลือก ({printSel.size})</button>
+          </div>
+        </>
+      )}
+    </div>
   );
 
   return (
