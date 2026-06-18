@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -97,6 +98,7 @@ async function nextMoNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string
 
 // ---- GET list ----
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
   const limit  = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
@@ -142,6 +144,7 @@ type CreateBody = {
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
   let body: CreateBody;

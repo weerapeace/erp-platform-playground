@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -158,6 +159,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type CreateBody = Partial<BomHeader> & { lines?: BomLine[]; sizes?: BomSize[]; actor?: string };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 
