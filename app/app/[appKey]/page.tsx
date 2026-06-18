@@ -31,6 +31,10 @@ export default function StandaloneApp() {
   const [loaded, setLoaded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);   // มือถือ: sheet "เพิ่มเติม" (เมนูเกิน 5)
   const initedRef = useRef(false);   // ตั้งหน้าเริ่มต้น (default landing) แค่ครั้งแรก
+  const [deepSrc, setDeepSrc] = useState<string | null>(null);   // หน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก)
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const lastSavedRef = useRef<string>("");
+  const stripEmbed = (p: string) => p.replace(/([?&])embed=1(&?)/, (_m, p1, p2) => (p2 ? p1 : "")).replace(/[?&]$/, "");
 
   useEffect(() => {
     let alive = true;
@@ -46,10 +50,13 @@ export default function StandaloneApp() {
           && (!m.permission_key || can(m.permission_key as Parameters<typeof can>[0])))
         .sort((a, b) => a.sort_order - b.sort_order);
       setItems(its);
-      // หน้าเริ่มต้น (default landing) — เด้งเมนูที่ตั้งไว้ ครั้งแรกครั้งเดียว
-      if (!initedRef.current && ag?.default_href) {
-        const i = its.findIndex((m) => m.href === ag.default_href);
-        if (i >= 0) setActive(i);
+      // ครั้งแรกครั้งเดียว: คืนหน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก) ไม่งั้นใช้ default landing
+      if (!initedRef.current) {
+        const saved = (() => { try { return sessionStorage.getItem(`appdeep:${appKey}`); } catch { return null; } })();
+        const base = (h: string) => h.split("?")[0];
+        const deepIdx = saved ? its.findIndex((m) => base(saved).startsWith(base(m.href))) : -1;
+        if (saved && deepIdx >= 0) { setActive(deepIdx); setDeepSrc(saved); lastSavedRef.current = saved; }
+        else if (ag?.default_href) { const i = its.findIndex((m) => m.href === ag.default_href); if (i >= 0) setActive(i); }
       }
       initedRef.current = true;
       setLoaded(true);
@@ -58,6 +65,21 @@ export default function StandaloneApp() {
     // ใช้ permsReady (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [appKey, permsReady]);
+
+  // จำหน้าลึกในกรอบ (iframe) ทุก 1.5วิ → refresh แล้วกลับมาหน้าเดิม (ฝั่ง browser ล้วน ไม่กิน CPU worker)
+  useEffect(() => {
+    const c = items[active];
+    if (!c || c.href.startsWith("/m/")) return; // เฉพาะหน้า custom (ใช้ iframe)
+    const id = setInterval(() => {
+      try {
+        const w = iframeRef.current?.contentWindow;
+        if (!w) return;
+        const path = stripEmbed(w.location.pathname + w.location.search);
+        if (path && path !== lastSavedRef.current) { lastSavedRef.current = path; sessionStorage.setItem(`appdeep:${appKey}`, path); }
+      } catch { /* ยังไม่พร้อม/อ่านไม่ได้ */ }
+    }, 1500);
+    return () => clearInterval(id);
+  }, [appKey, active, items]);
 
   if (!ready) return <Center>กำลังโหลด…</Center>;
   if (!user) return (
@@ -88,9 +110,13 @@ export default function StandaloneApp() {
   const barCols = barItems.length + (hasMore ? 1 : 0);
   const onBar = active < barItems.length;   // เมนูที่กำลังเปิดอยู่ในแถบล่างไหม (ไม่งั้น highlight ปุ่มเพิ่มเติม)
 
-  const goto = (i: number) => { setActive(i); setMoreOpen(false); };
+  // กดเมนู → ไปหน้าหลักของเมนูนั้น (ล้างหน้าลึกที่จำไว้)
+  const goto = (i: number) => { setActive(i); setDeepSrc(null); lastSavedRef.current = ""; try { sessionStorage.removeItem(`appdeep:${appKey}`); } catch { /* noop */ } setMoreOpen(false); };
   // หน้า custom โหลดผ่าน iframe → ส่ง embed=1 ให้ shell ในหน้านั้นซ่อน sidebar/แถบ App ของตัวเอง (กันเมนูซ้อน)
-  const embedSrc = cur ? `${cur.href}${cur.href.includes("?") ? "&" : "?"}embed=1` : "";
+  // ถ้ามีหน้าลึกที่จำไว้และเป็นของเมนูนี้ → เปิดหน้าลึกนั้น (กัน refresh เด้งหน้าแรก)
+  const baseHref = cur ? cur.href.split("?")[0] : "";
+  const startHref = (deepSrc && cur && deepSrc.split("?")[0].startsWith(baseHref)) ? deepSrc : (cur?.href ?? "");
+  const embedSrc = cur ? `${startHref}${startHref.includes("?") ? "&" : "?"}embed=1` : "";
 
   return (
     // h-dvh + flex column: header บน · เนื้อหาเต็มกว้าง · เมนูแบบพับ-ขยาย (iPad: ☰ drawer ซ้าย · มือถือ: แถบล่าง)
@@ -121,7 +147,7 @@ export default function StandaloneApp() {
           </div>
         ) : cur ? (
           // หน้า custom → แสดงหน้าจริงแบบ embed (ไม่มี sidebar ของ shell) เต็มพื้นที่ที่เหลือ
-          <iframe key={embedSrc} src={embedSrc} title={cur.label} className="flex-1 w-full border-0" />
+          <iframe ref={iframeRef} key={cur.href} src={embedSrc} title={cur.label} className="flex-1 w-full border-0" />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-2">
             <div className="text-4xl mb-1">🗂️</div>
