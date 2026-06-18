@@ -637,10 +637,15 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // (ไม่งั้น serverFetch/fetchList จะเปลี่ยน identity ตอน registry โหลด → DataTable refetch ซ้ำ = กระพริบ)
   const relatedFieldsRef = useRef(relatedFields);
   relatedFieldsRef.current = relatedFields;
+  // สำหรับ "ตาราง list": resolve เฉพาะ related field ที่โชว์เป็นคอลัมน์จริง (is_visible)
+  // → ไม่เสียเวลายิง Tokyo หาค่าของคอลัมน์ที่ซ่อนอยู่ (เคยทำให้ตารางค้าง 6-7 วิ)
+  // ฟอร์ม/รายละเอียดยังใช้ relatedFieldsRef เต็ม (โชว์ค่าได้แม้ซ่อนในตาราง)
+  const visibleRelatedFieldsRef = useRef(relatedFields);
+  visibleRelatedFieldsRef.current = useMemo(() => relatedFields.filter((f) => f.is_visible), [relatedFields]);
 
   // โหลดค่า related "เฉพาะ id ที่อยู่ในแถวหน้านี้" (เร็ว ไม่โหลดทั้งตาราง) + cache ต่อ id
   // เรียกก่อน enrich เพื่อกันกระพริบ — id ที่เคยโหลดแล้วจะไม่ดึงซ้ำ
-  const ensureRelatedMaps = useCallback(async (rowsToResolve: Row[]) => {
+  const ensureRelatedMaps = useCallback(async (rowsToResolve: Row[], fields?: typeof relatedFields) => {
     const CHUNK = 80;  // กัน URL ยาวเกิน (include_ids)
     const resolveInChunks = async (cfg: { target_table: string; target_label_field: string }, ids: string[]) => {
       const out = new Map<string, { label: string }>();
@@ -650,7 +655,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       }
       return out;
     };
-    for (const f of relatedFieldsRef.current) {
+    for (const f of (fields ?? relatedFieldsRef.current)) {
       const rc = (f.relation_config ?? {}) as Record<string, unknown>;
       const targetTable = String(rc.target_table ?? "");
       const tmk = String(rc.target_module_key ?? rc.target_table ?? "");
@@ -683,8 +688,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   }, []);
 
   // เติมค่า related ลงใน row (ใช้ทั้ง list + detail) จาก map ที่โหลดไว้
-  const enrichRelated = useCallback((list: Row[]): Row[] => {
-    const rfs = relatedFieldsRef.current;
+  const enrichRelated = useCallback((list: Row[], fields?: typeof relatedFields): Row[] => {
+    const rfs = fields ?? relatedFieldsRef.current;
     if (rfs.length === 0) return list;
     return list.map((r) => {
       const o: Row = { ...r };
@@ -936,8 +941,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       const raw = (json.data ?? []) as Row[];
-      await ensureRelatedMaps(raw);
-      const enriched = enrichRelated(raw);
+      const vis = visibleRelatedFieldsRef.current;
+      await ensureRelatedMaps(raw, vis);
+      const enriched = enrichRelated(raw, vis);
       setRows(enriched);
       setListCache(url, enriched);
     } catch (err) { if (!cached) setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
@@ -975,8 +981,9 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     const json = await res.json();
     if (json.error) throw new Error(json.error);
     const raw = (json.data ?? []) as Row[];
-    await ensureRelatedMaps(raw);
-    return { rows: enrichRelated(raw), total: (json.total as number) ?? 0 };
+    const vis = visibleRelatedFieldsRef.current;
+    await ensureRelatedMaps(raw, vis);
+    return { rows: enrichRelated(raw, vis), total: (json.total as number) ?? 0 };
   }, [apiBase, config.apiPath, config.baseFilter, config.extraQuery, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
