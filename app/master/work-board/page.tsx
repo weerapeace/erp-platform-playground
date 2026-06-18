@@ -838,10 +838,16 @@ export default function WorkBoardPage() {
         (() => {
           const p = plans.find((x) => x.id === activePlan);
           if (!p) return <div className="text-center py-20 text-slate-400 text-sm">ไม่พบแผน</div>;
+          // ค่าแรงผลิตต่อชิ้น (จากแผนกลุ่ม A) + รูป ต่อใบสั่งผลิต — ส่งให้หน้าแผนคิดค่าแรง/โชว์รูป
+          const laborPerUnit: Record<string, number> = {};
+          const imageByMo: Record<string, string | null> = {};
+          for (const m of board.pending) { if (m.qty > 0 && m.labor) laborPerUnit[m.mo_no] = m.labor.prod_plan / m.qty; if (m.image_url) imageByMo[m.mo_no] = m.image_url; }
+          for (const w of board.workOrders) { const k = String(w.mo_no); if (laborPerUnit[k] == null && (w.qty || 0) > 0 && w.labor) laborPerUnit[k] = w.labor.prod_plan / (w.qty || 1); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
           return <DispatchPlanBoard
             planId={p.id} planName={p.name} planStatus={p.status} startDate={p.start_date} endDate={p.end_date}
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut")}
             pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker}
+            laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}

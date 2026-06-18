@@ -14,19 +14,30 @@ import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
 type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null };
-type WOLite = { id: string; mo_no: string; qty: number; department_id: string | null; stage: string; assignee_name: string | null; product_sku: string | null; product_name: string | null; status: string };
+type WOLite = { id: string; mo_no: string; qty: number; department_id: string | null; stage: string; assignee_name: string | null; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number } };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
+const baht = (n: number) => "฿" + fmt(n);
+
+function Thumb({ url }: { url?: string | null }) {
+  if (!url) return <span className="w-7 h-7 shrink-0 rounded bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-300 text-[11px]">📦</span>;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt="" className="w-7 h-7 shrink-0 rounded object-cover border border-slate-200" />;
+}
 
 export function DispatchPlanBoard({
-  planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker, canEdit,
+  planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
+  laborPerUnit, imageByMo, canEdit,
   onApplied, onRenamed, onDates, onDeleted,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
-  defectByWorker: DefectMap; canEdit: boolean;
+  defectByWorker: DefectMap;
+  laborPerUnit: Record<string, number>;   // mo_no → ค่าแรงผลิตต่อชิ้น (จากแผนกลุ่ม A)
+  imageByMo: Record<string, string | null>;
+  canEdit: boolean;
   onApplied: () => void; onRenamed: (name: string) => void; onDates: (start: string | null, end: string | null) => void; onDeleted: () => void;
 }) {
   const toast = useToast();
@@ -53,6 +64,9 @@ export function DispatchPlanBoard({
   useEffect(() => { setSelected(null); void load(); }, [load]);
 
   const defectOf = (nm: string | null | undefined) => nm ? defectByWorker[nm.trim().toLowerCase()] : undefined;
+  // ค่าแรงผลิตของรายการร่าง = จำนวน × ค่าแรงต่อชิ้น (จากแผนกลุ่ม A)
+  const lineLabor = (l: DispatchPlanLine) => (Number(l.qty) || 0) * (laborPerUnit[l.mo_no ?? ""] ?? 0);
+  const woLabor = (w: WOLite) => w.labor?.prod_plan ?? ((Number(w.qty) || 0) * (laborPerUnit[w.mo_no] ?? 0));
 
   // จำนวนที่วางแผนไปแล้วต่อใบ (ในแผนนี้) → เหลือให้วางแผนได้อีกเท่าไร
   const draftedByMo = useMemo(() => {
@@ -161,8 +175,14 @@ export function DispatchPlanBoard({
               return (
                 <button key={p.id} type="button" disabled={!editable} onClick={() => setSelected(on ? null : p.mo_no)}
                   className={`w-full text-left rounded-lg px-2 py-1.5 mb-1.5 bg-white ${on ? "ring-2 ring-indigo-400 border-indigo-300" : "border border-slate-200"} ${editable ? "cursor-pointer hover:bg-slate-50" : ""}`}>
-                  <div className="text-sm font-semibold text-slate-800 truncate">{p.product_sku}</div>
-                  <div className="text-[11px] text-slate-500">{p.mo_no} · เหลือวางแผน {fmt(availOf(p))}/{fmt(p.remaining)}</div>
+                  <div className="flex items-center gap-2">
+                    <Thumb url={p.image_url} />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-slate-800 truncate">{p.product_sku}</div>
+                      <div className="text-[11px] text-slate-500 truncate">{p.mo_no} · เหลือวางแผน {fmt(availOf(p))}/{fmt(p.remaining)}</div>
+                      <div className="text-[10px] text-slate-400">ค่าแรงผลิต {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</div>
+                    </div>
+                  </div>
                 </button>
               );
             })}
@@ -173,21 +193,26 @@ export function DispatchPlanBoard({
           {departments.map((d) => {
             const reals = realByDept.get(d.id) ?? [];
             const drafts = draftByDept.get(d.id) ?? [];
-            const draftQty = drafts.reduce((a, l) => a + (Number(l.qty) || 0), 0);
-            const realQty = reals.reduce((a, w) => a + (Number(w.qty) || 0), 0);
+            const totQty = drafts.reduce((a, l) => a + (Number(l.qty) || 0), 0) + reals.reduce((a, w) => a + (Number(w.qty) || 0), 0);
+            const totLabor = drafts.reduce((a, l) => a + lineLabor(l), 0) + reals.reduce((a, w) => a + woLabor(w), 0);
             const canDrop = editable && !!selected;
             return (
               <div key={d.id} onClick={() => canDrop && addLine(d)}
                 className={`rounded-xl border p-2 min-h-[140px] ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between gap-1 mb-2">
                   <span className="text-sm font-bold text-slate-700 truncate">{d.name}</span>
-                  <span className="text-[11px] text-slate-400">{draftQty > 0 ? `ร่าง ${fmt(draftQty)}` : reals.length ? `${fmt(realQty)} ชิ้น` : ""}</span>
+                  {totQty > 0 && <span className="text-[10px] text-slate-500 text-right shrink-0 leading-tight">{fmt(totQty)} ชิ้น<br />ค่าแรง {baht(totLabor)}</span>}
                 </div>
                 {/* ใบจ่ายจริง (ล็อก) */}
                 {reals.map((w) => (
                   <div key={w.id} className="rounded-lg px-2 py-1.5 mb-1.5 bg-slate-50 border border-slate-200 opacity-70">
-                    <div className="flex items-center justify-between"><span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span><span className="text-slate-400">🔒</span></div>
-                    <div className="text-[11px] text-slate-400 truncate">{w.assignee_name ?? "—"} · {fmt(w.qty)} ชิ้น</div>
+                    <div className="flex items-center gap-2">
+                      <Thumb url={w.image_url} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between"><span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span><span className="text-slate-400">🔒</span></div>
+                        <div className="text-[11px] text-slate-400 truncate">{w.assignee_name ?? "—"} · {fmt(w.qty)} ชิ้น · {baht(woLabor(w))}</div>
+                      </div>
+                    </div>
                   </div>
                 ))}
                 {/* รายการร่าง */}
@@ -196,12 +221,16 @@ export function DispatchPlanBoard({
                   return (
                     <div key={l.id} className="rounded-lg px-2 py-1.5 mb-1.5" style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Thumb url={imageByMo[l.mo_no ?? ""]} />
+                          <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
+                        </div>
                         <div className="flex items-center gap-1 shrink-0">
                           <span className="text-[10px] px-1 rounded" style={{ color: "#0f6e56", border: "0.5px solid #5dcaa5" }}>ร่าง</span>
                           {editable && <button onClick={() => removeLine(l.id)} className="text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
                         </div>
                       </div>
+                      <div className="text-[10px] mt-0.5" style={{ color: "#0f6e56" }}>ค่าแรงผลิต {baht(lineLabor(l))} ({fmt(Number(l.qty) || 0)} × {baht(laborPerUnit[l.mo_no ?? ""] ?? 0)})</div>
                       <div className="flex items-center gap-1.5 mt-1">
                         <input type="number" min={0} step="any" value={Number(l.qty) || 0} disabled={!editable}
                           onChange={(e) => updateLine(l.id, { qty: Number(e.target.value) })}
