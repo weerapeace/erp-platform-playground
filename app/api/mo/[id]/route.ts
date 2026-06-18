@@ -63,7 +63,16 @@ type SaveBody = {
   product_sku?: string; product_name?: string; qty?: number; due_date?: string | null;
   bom_code?: string | null; bom_version?: string | null; status?: string; note?: string; reexplode?: boolean;
   materials?: MatEdit[];   // แก้ checklist เตรียม/จำนวนที่มี/ขอซื้อ (เฟส B)
+  size_breakdown?: { label: string; qty: number }[] | null;   // กลุ่ม C: แบ่งจำนวนตามไซส์
 };
+
+function cleanSizes(raw: unknown): { label: string; qty: number }[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out = raw
+    .map((s) => ({ label: String((s as { label?: unknown })?.label ?? "").trim(), qty: Number((s as { qty?: unknown })?.qty) || 0 }))
+    .filter((s) => s.label && s.qty > 0);
+  return out.length > 0 ? out : null;
+}
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -75,24 +84,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const admin = supabaseAdmin();
-  const { data: existing, error: exErr } = await admin.from("manufacturing_orders").select("mo_no, qty, bom_code").eq("id", id).single();
+  const { data: existing, error: exErr } = await admin.from("manufacturing_orders").select("mo_no, qty, bom_code, size_breakdown").eq("id", id).single();
   if (exErr) return NextResponse.json({ error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const moNo = (existing as { mo_no: string }).mo_no;
-  const newQty = body.qty != null ? Number(body.qty) : (existing as { qty: number }).qty;
   const newBom = body.bom_code !== undefined ? body.bom_code : (existing as { bom_code: string | null }).bom_code;
+  // ไซส์: ถ้าส่งมาใช้ของใหม่ ไม่งั้นคงของเดิม — จำนวนรวมคิดจากผลบวกไซส์ถ้ามี
+  const sizesProvided = body.size_breakdown !== undefined;
+  const effSizes = sizesProvided ? cleanSizes(body.size_breakdown) : cleanSizes((existing as { size_breakdown?: unknown }).size_breakdown);
+  const newQty = effSizes ? effSizes.reduce((a, s) => a + s.qty, 0) : (body.qty != null ? Number(body.qty) : (existing as { qty: number }).qty);
 
   const { error } = await admin.from("manufacturing_orders").update({
     product_sku: body.product_sku, product_name: body.product_name ?? null, qty: newQty,
     status: body.status, due_date: body.due_date || null, bom_code: newBom, bom_version: body.bom_version ?? null, note: body.note ?? null,
+    ...(sizesProvided ? { size_breakdown: effSizes } : {}),
   }).eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
-  // กางสูตรใหม่เมื่อจำนวน/สูตรเปลี่ยน หรือสั่ง reexplode
+  // กางสูตรใหม่เมื่อจำนวน/สูตร/ไซส์เปลี่ยน หรือสั่ง reexplode
   const qtyChanged = newQty !== (existing as { qty: number }).qty;
   const bomChanged = newBom !== (existing as { bom_code: string | null }).bom_code;
-  const reexploded = body.reexplode || qtyChanged || bomChanged;
+  const reexploded = body.reexplode || qtyChanged || bomChanged || sizesProvided;
   if (reexploded) {
-    await explodeBom(admin, newBom ?? null, moNo, newQty);
+    await explodeBom(admin, newBom ?? null, moNo, newQty, effSizes);
   } else if (Array.isArray(body.materials)) {
     // อัปเดต checklist เตรียม/จำนวนที่มี/ขอซื้อ ที่ "สรุปต่อวัตถุดิบ" (เฉพาะเมื่อไม่ได้กางสูตรใหม่)
     for (const m of body.materials) {

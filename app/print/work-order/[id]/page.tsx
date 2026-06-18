@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { parseDesignerDescription } from "@/lib/report-designer";
-import { buildReportHtml } from "@/lib/template";
+import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
 import { WORKORDER_PRINT_TEMPLATE, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec } from "@/lib/work-order-print";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
@@ -129,14 +129,25 @@ export default function PrintWorkOrderPage() {
   const html = useMemo(() => {
     if (!mo || pdfmeTemplate) return "";
     const template = selectedRow ?? WORKORDER_PRINT_TEMPLATE;
-    return buildReportHtml({
-      paper_size: selectedRow?.paper_size ?? WORKORDER_PRINT_TEMPLATE.paper_size,
-      orientation: selectedRow?.orientation ?? WORKORDER_PRINT_TEMPLATE.orientation,
-      header_html: template.header_html,
-      body_html: template.body_html,
-      footer_html: template.footer_html,
-      custom_css: template.custom_css,
-    }, { ...buildWoHtmlData(mo, spec), qr_html: qrHtml });
+    const tplObj: ReportTemplate = {
+      paper_size: (selectedRow?.paper_size as ReportTemplate["paper_size"]) ?? WORKORDER_PRINT_TEMPLATE.paper_size,
+      orientation: (selectedRow?.orientation as ReportTemplate["orientation"]) ?? WORKORDER_PRINT_TEMPLATE.orientation,
+      header_html: template.header_html ?? "",
+      body_html: template.body_html ?? "",
+      footer_html: template.footer_html ?? "",
+      custom_css: template.custom_css ?? "",
+    };
+    // กลุ่ม C: ถ้าใบนี้แบ่งหลายไซส์ → พิมพ์แยกหน้าต่อไซส์ (วัตถุดิบที่ผันตามไซส์ตามไซส์นั้น + ของกลางทุกไซส์)
+    const sizes = (mo.size_breakdown ?? []).filter((s) => s && (Number(s.qty) || 0) > 0);
+    if (sizes.length >= 2) {
+      const dataList = sizes.map((s) => {
+        const mats = (mo.materials ?? []).filter((m) => m.size_label === s.label || m.size_label == null);
+        const perMo: MoDetail = { ...mo, qty: s.qty, product_name: `${mo.product_name ?? mo.product_sku ?? ""} · ไซส์ ${s.label}`, materials: mats, summary: undefined };
+        return { ...buildWoHtmlData(perMo, spec), qr_html: qrHtml };
+      });
+      return buildReportHtmlMulti(tplObj, dataList);
+    }
+    return buildReportHtml(tplObj, { ...buildWoHtmlData(mo, spec), qr_html: qrHtml });
   }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml]);
 
   return (

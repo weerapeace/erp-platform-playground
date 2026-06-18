@@ -38,8 +38,10 @@ type FormState = {
   materials: PreviewMat[];   // ต่อบล็อก (แท็บรายละเอียด)
   summary: SummaryMat[];     // รวมต่อวัตถุดิบ (แท็บวัตถุดิบที่ต้องใช้ + checklist)
   requested: Record<string, number>;  // วัตถุดิบ(รหัส) → จำนวนที่ขอซื้อไปแล้ว (จากใบขอซื้อที่ผูก MO นี้)
+  sizes: { label: string; sort?: number }[];   // กลุ่ม C: ไซส์ที่สูตรนี้รองรับ (ถ้ามี)
+  size_qty: Record<string, number>;            // กลุ่ม C: จำนวนต่อไซส์ของใบนี้
 };
-const empty = (): FormState => ({ id: null, mo_no: "", product_sku: "", product_name: "", product_image: null, qty: 1, due_date: "", bom_code: null, bom_version: null, bom_id: null, status: "draft", note: "", materials: [], summary: [], requested: {} });
+const empty = (): FormState => ({ id: null, mo_no: "", product_sku: "", product_name: "", product_image: null, qty: 1, due_date: "", bom_code: null, bom_version: null, bom_id: null, status: "draft", note: "", materials: [], summary: [], requested: {}, sizes: [], size_qty: {} });
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   draft:       { label: "ร่าง",        cls: "bg-slate-100 text-slate-600" },
@@ -148,35 +150,45 @@ export default function MoWorkspacePage() {
     }
   };
 
-  // ดึงสูตร (lines) ของ bom id มาทำ preview
-  const loadBomLines = async (bomId: string): Promise<PreviewMat[]> => {
+  // ดึงสูตร (lines + ไซส์) ของ bom id มาทำ preview
+  const loadBom = async (bomId: string): Promise<{ mats: PreviewMat[]; sizes: { label: string; sort?: number }[] }> => {
     try {
       const res = await apiFetch(`/api/bom/${bomId}`); const j = await res.json();
-      return ((j.data?.lines ?? []) as Array<Record<string, unknown>>).map((l, i) => ({
+      const mats = ((j.data?.lines ?? []) as Array<Record<string, unknown>>).map((l, i) => ({
         key: `m${i}`, id: null, component_sku: (l.component_sku as string) ?? null, component_name: (l.component_name as string) ?? null,
         material_type: (l.material_type as string) ?? null, qty_per: Number(l.qty) || 0, uom: (l.uom as string) ?? null,
         cut_block_code: (l.cut_block_code as string) ?? null,
         cut_width: l.cut_width != null ? Number(l.cut_width) : null, cut_length: l.cut_length != null ? Number(l.cut_length) : null,
         pieces: l.pieces != null ? Number(l.pieces) : null, on_hand_qty: 0, is_ready: false, purchase_override: null, cut_done: false,
       }));
-    } catch { return []; }
+      const sizes = (j.data?.sizes ?? []) as { label: string; sort?: number }[];
+      return { mats, sizes };
+    } catch { return { mats: [], sizes: [] }; }
   };
 
   const onPickProduct = async (sku: string, name: string, image: string | null) => {
-    patch({ product_sku: sku, product_name: name, product_image: image, bom_code: null, bom_version: null, bom_id: null, materials: [] });
+    patch({ product_sku: sku, product_name: name, product_image: image, bom_code: null, bom_version: null, bom_id: null, materials: [], sizes: [], size_qty: {} });
     try {
       const res = await apiFetch(`/api/bom/versions?product_sku=${encodeURIComponent(sku)}`); const j = await res.json();
       const vers = (j.data ?? []) as Version[]; setVersions(vers);
       const def = vers.find((v) => v.is_default) ?? vers[0];
-      if (def) { const mats = await loadBomLines(def.id); patch({ bom_id: def.id, bom_code: def.bom_code, bom_version: def.version, materials: mats }); }
+      if (def) { const { mats, sizes } = await loadBom(def.id); patch({ bom_id: def.id, bom_code: def.bom_code, bom_version: def.version, materials: mats, sizes, size_qty: {} }); }
     } catch { setVersions([]); }
   };
 
   const selectVersion = async (vid: string) => {
     const v = versions.find((x) => x.id === vid); if (!v) return;
-    const mats = await loadBomLines(v.id);
-    patch({ bom_id: v.id, bom_code: v.bom_code, bom_version: v.version, materials: mats });
+    const { mats, sizes } = await loadBom(v.id);
+    patch({ bom_id: v.id, bom_code: v.bom_code, bom_version: v.version, materials: mats, sizes, size_qty: {} });
   };
+
+  // กลุ่ม C: ตั้งจำนวนต่อไซส์ + คำนวณจำนวนรวมอัตโนมัติ
+  const setSizeQty = (label: string, val: number) => setForm((f) => {
+    if (!f) return f;
+    const sq = { ...f.size_qty, [label]: Math.max(0, val || 0) };
+    const total = f.sizes.reduce((a, s) => a + (sq[s.label] || 0), 0);
+    return { ...f, size_qty: sq, qty: total };
+  });
 
   const openCreate = () => { setForm(empty()); setVersions([]); setFormErr(null); setWoList([]); };
 
@@ -218,10 +230,18 @@ export default function MoWorkspacePage() {
         qty: Number(d.qty) || 1, due_date: d.due_date ?? "", bom_code: d.bom_code ?? null, bom_version: d.bom_version ?? null, bom_id: null,
         status: d.status ?? "draft", note: d.note ?? "", materials: mats, summary: summ,
         requested: (d.requested ?? {}) as Record<string, number>,
+        sizes: [], size_qty: {},   // เติมจาก BOM ด้านล่าง (เมื่อเจอ cur)
       });
       // เวอร์ชั่น BOM (โหลดขนานมาแล้วด้านบน)
       const vers = (vj.data ?? []) as Version[]; setVersions(vers);
-      const cur = vers.find((v) => v.bom_code === d.bom_code); if (cur) patch({ bom_id: cur.id });
+      const cur = vers.find((v) => v.bom_code === d.bom_code);
+      if (cur) {
+        // โหลดไซส์ของสูตร + จำนวนต่อไซส์ที่เคยบันทึก (กลุ่ม C)
+        const { sizes } = await loadBom(cur.id);
+        const sq: Record<string, number> = {};
+        for (const s of ((d.size_breakdown ?? []) as { label: string; qty: number }[])) sq[s.label] = Number(s.qty) || 0;
+        patch({ bom_id: cur.id, sizes, size_qty: sq });
+      }
       if (d.mo_no) void loadWorkOrders(d.mo_no);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดไม่ได้"); }
     finally { setLoadingForm(false); }
@@ -234,6 +254,8 @@ export default function MoWorkspacePage() {
     setSaving(true); setFormErr(null);
     const payload: Record<string, unknown> = { product_sku: form.product_sku, product_name: form.product_name || null, qty: form.qty,
       due_date: form.due_date || null, bom_code: form.bom_code, bom_version: form.bom_version, status: form.status, note: form.note || null };
+    // กลุ่ม C: ส่งจำนวนต่อไซส์ (ถ้าสูตรมีไซส์) — server คำนวณจำนวนรวม + แตกวัตถุดิบตามไซส์
+    if (form.sizes.length > 0) payload.size_breakdown = form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 }));
     if (form.id) payload.materials = form.summary.filter((m) => m.id).map((m) => {
       const req = m.qty_per * (form.qty || 0);
       const base = Math.max(0, Math.round((req - (m.on_hand_qty || 0)) * 10000) / 10000);
@@ -475,9 +497,10 @@ export default function MoWorkspacePage() {
 
             <div className="grid grid-cols-3 gap-2">
               <label className="block">
-                <span className="text-[11px] text-slate-500">จำนวนผลิต</span>
+                <span className="text-[11px] text-slate-500">จำนวนผลิต{form.sizes.length > 0 ? " (รวมไซส์)" : ""}</span>
                 <input type="number" min={0} step="any" value={form.qty} onChange={(e) => patch({ qty: Number(e.target.value) })}
-                  className="w-full h-8 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  readOnly={form.sizes.length > 0} title={form.sizes.length > 0 ? "คิดจากผลบวกจำนวนต่อไซส์ด้านล่าง" : undefined}
+                  className={`w-full h-8 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${form.sizes.length > 0 ? "bg-slate-50 text-slate-500" : ""}`} />
               </label>
               <div>
                 <span className="text-[11px] text-slate-500">สูตร (BOM)</span>
@@ -495,6 +518,23 @@ export default function MoWorkspacePage() {
                 </select>
               </label>
             </div>
+
+            {/* กลุ่ม C: จำนวนต่อไซส์ (ถ้าสูตรมีไซส์) */}
+            {form.sizes.length > 0 && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50/40 px-3 py-2">
+                <div className="text-[11px] font-medium text-slate-600 mb-1.5">📏 จำนวนต่อไซส์ <span className="text-slate-400 font-normal">(สูตรนี้มีไซส์ — กรอกจำนวนที่จะผลิตแต่ละไซส์)</span></div>
+                <div className="flex flex-wrap gap-2">
+                  {form.sizes.map((s) => (
+                    <label key={s.label} className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1">
+                      <span className="text-xs font-medium text-slate-600 min-w-[2rem]">{s.label}</span>
+                      <input type="number" min={0} step="any" value={form.size_qty[s.label] ?? ""} onChange={(e) => setSizeQty(s.label, Number(e.target.value))} placeholder="0"
+                        className="w-16 h-7 px-1.5 text-sm text-right border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
+                    </label>
+                  ))}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-1.5">รวม <b className="text-slate-700">{fmt(form.qty)}</b> ชิ้น · วัตถุดิบที่ผันตามไซส์จะถูกแตกตัด/พิมพ์แยกตามไซส์</div>
+              </div>
+            )}
 
             <label className="block">
               <span className="text-[11px] text-slate-500">หมายเหตุ</span>

@@ -23,6 +23,7 @@ export type MoMat = {
   pieces?: number | null;
   qty_per?: number | null;
   uom?: string | null;
+  size_label?: string | null;   // กลุ่ม C: บล็อกนี้ของไซส์ไหน (null = ใช้ทุกไซส์)
 };
 export type MoSummary = {
   component_sku?: string | null;
@@ -60,6 +61,7 @@ export type MoDetail = {
   created_at?: string | null;
   materials?: MoMat[];
   summary?: MoSummary[];
+  size_breakdown?: { label: string; qty: number }[] | null;   // กลุ่ม C: จำนวนต่อไซส์
 };
 
 /**
