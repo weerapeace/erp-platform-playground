@@ -14,6 +14,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ComponentPicker } from "../bom/line-editor";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
+import { AssignToGroupModal, ManageGroupsModal } from "./mo-groups-modal";
 import type { MoListItem } from "@/app/api/mo/route";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
@@ -83,6 +84,8 @@ export default function MoWorkspacePage() {
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [loadingForm, setLoadingForm] = useState(false);
+  const [assignMos, setAssignMos] = useState<string[] | null>(null);   // จัดกลุ่ม: เลขใบที่เลือก
+  const [manageGroups, setManageGroups] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<MoListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
@@ -409,6 +412,7 @@ export default function MoWorkspacePage() {
           </div>
           <div className="flex items-center gap-2">
             <a href="/master/work-board" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 บอร์ดจ่ายงาน</a>
+            <button onClick={() => setManageGroups(true)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🗂 กลุ่มใบสั่งงาน</button>
             {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบสั่งผลิต</button>}
           </div>
         </div>
@@ -423,6 +427,7 @@ export default function MoWorkspacePage() {
           onRowClick={canEdit ? openEdit : undefined}
           selectable
           bulkActions={[
+            { label: "🗂 จัดกลุ่มใบสั่งงาน", onClick: (rows) => { const nos = rows.map((r) => r.mo_no).filter(Boolean); if (nos.length) setAssignMos(nos); } },
             { label: "🖨️ พิมพ์ใบสั่งงาน", onClick: (rows) => { const ids = rows.map((r) => r.id).filter(Boolean).join(","); if (ids) window.open(`/print/work-order?ids=${ids}`, "_blank", "noopener"); } },
           ]}
           rowActions={canEdit ? [
@@ -433,6 +438,9 @@ export default function MoWorkspacePage() {
           pageSize={20}
         />
       </div>
+
+      {assignMos && <AssignToGroupModal moNos={assignMos} onClose={() => setAssignMos(null)} onDone={() => setRefreshKey((k) => k + 1)} />}
+      {manageGroups && <ManageGroupsModal onClose={() => setManageGroups(false)} />}
 
       <ERPModal open={form !== null} onClose={() => !saving && setForm(null)} size="xl"
         title={form?.id ? `แก้ใบสั่งผลิต: ${form.mo_no}` : "สร้างใบสั่งผลิตใหม่"}
