@@ -105,6 +105,8 @@ export function CanvasSketch({
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // เซฟกันลืมระหว่างแก้ต่อเนื่อง
   const lastPngAtRef = useRef(0); // ถ่าย PNG ล่าสุดเมื่อไหร่ — ถ่ายเฉพาะทุก ~30วิ/ตอนปิด (ลด payload เซฟถี่ๆ)
   const baseRevRef = useRef(0);   // เวอร์ชันกระดานที่โหลดมา — ใช้กันเซฟทับกันเวลาหลายคนแก้
+  const uploadingRef = useRef(0); // จำนวนรูปที่กำลังอัปโหลดขึ้น R2 (ระหว่างนี้ยังไม่เซฟ base64 ก้อนใหญ่)
+  const hoistedRef = useRef<Set<string>>(new Set()); // fileId ที่ย้ายขึ้น R2 แล้ว (กันทำซ้ำ)
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
@@ -113,6 +115,7 @@ export function CanvasSketch({
   useEffect(() => {
     let alive = true;
     readyRef.current = false; dirtyRef.current = false; discardRef.current = false; latestRef.current = null; hadContentRef.current = false;
+    uploadingRef.current = 0; hoistedRef.current = new Set();
     setScene("loading"); setSaveState("idle");
     apiFetch(`/api/canvas-sketch?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(entityId)}`)
       .then((r) => r.json())
@@ -140,6 +143,12 @@ export function CanvasSketch({
     const snap = latestRef.current;
     if (!snap) return;
     if (!canEditRef.current) return; // ไม่มีสิทธิ์แก้ → ไม่เซฟ (กันขึ้น error ให้ viewer)
+    // ยังอัปโหลดรูปอยู่ → รอให้เป็นลิงก์ก่อน (กันเซฟ base64 ก้อนใหญ่) เว้นตอนปิด/บังคับเซฟ จะยอมเซฟ base64 กันรูปหาย
+    if (uploadingRef.current > 0 && !forcePng) {
+      setSaveState("dirty");
+      if (!timerRef.current) timerRef.current = setTimeout(() => void doSave(forcePng), 1000);
+      return;
+    }
     if (savingRef.current) { pendingRef.current = true; return; }
     // กันเซฟ "ว่าง" ทับงานดี: ถ้าเคยมีงาน แต่ snapshot ตอนนี้ว่าง (มักเกิดตอนปิดหน้า/teardown ที่ Excalidraw เคลียร์ scene)
     // → ลองใช้ของจริงจาก api ที่ยังเปิดอยู่; ถ้าก็ว่าง/อ่านไม่ได้ → ไม่บันทึก (กันงานหาย)
@@ -283,6 +292,35 @@ export function CanvasSketch({
     finally { setTimeout(() => { applyingRemoteRef.current = false; }, 0); }
   }, []);
 
+  // ย้ายรูป base64 ที่เพิ่งแปะ → เก็บเป็นไฟล์บน R2 แล้วแทน dataURL ด้วยลิงก์ (scene เล็ก โหลดไว โชว์ข้ามเครื่องได้)
+  const hoistImages = useCallback((files: Record<string, any> | undefined) => {
+    if (!apiRef.current || !files) return;
+    for (const fid of Object.keys(files)) {
+      const url = files[fid]?.dataURL as string | undefined;
+      if (!url || !url.startsWith("data:") || hoistedRef.current.has(fid)) continue;
+      hoistedRef.current.add(fid);
+      uploadingRef.current++;
+      void (async () => {
+        try {
+          const m = url.match(/^data:([^;]+);base64,([\s\S]*)$/);
+          if (!m) throw new Error("bad dataURL");
+          const mime = m[1]; const bin = atob(m[2]);
+          const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          const ext = (mime.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "");
+          const fd = new FormData();
+          fd.append("file", new File([arr], `cv-${fid}.${ext}`, { type: mime }));
+          fd.append("folder", "canvassketch");
+          const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+          const j = await res.json(); if (j.error || !j.r2_key) throw new Error(j.error || "upload failed");
+          const r2url = `/api/r2-image?key=${encodeURIComponent(j.r2_key)}`;
+          apiRef.current?.addFiles([{ id: fid, dataURL: r2url, mimeType: mime, created: Date.now() }]);
+          try { channelRef.current?.send({ type: "broadcast", event: "files", payload: { files: [{ id: fid, dataURL: r2url, mimeType: mime, created: Date.now() }] } }); } catch { /* noop */ }
+        } catch (e) { console.error("[canvas] hoist image failed:", e); hoistedRef.current.delete(fid); } // ล้มเหลว → คงเป็น base64 (ยังใช้ได้ในเครื่อง)
+        finally { uploadingRef.current = Math.max(0, uploadingRef.current - 1); if (uploadingRef.current === 0 && editable && canEditRef.current) queueSave(); }
+      })();
+    }
+  }, [editable, queueSave]);
+
   // ให้ภายนอกถือ handle: เช็คมีแก้ค้าง / สั่งบันทึก / สั่งทิ้ง (ใช้ตอนถามก่อนปิด popup)
   useEffect(() => {
     if (!controlsRef) return;
@@ -415,6 +453,7 @@ export function CanvasSketch({
     const channel = supabaseBrowser.channel(room, { config: { broadcast: { self: false }, presence: { key: myKey } } });
     channel
       .on("broadcast", { event: "scene" }, (msg: { payload?: { els?: any[] } }) => { applyRemote(msg?.payload?.els ?? []); })
+      .on("broadcast", { event: "files" }, (msg: { payload?: { files?: any[] } }) => { const fs = msg?.payload?.files; if (fs?.length && apiRef.current) { try { apiRef.current.addFiles(fs); } catch { /* noop */ } } })
       .on("presence", { event: "sync" }, () => { const n = Object.keys(channel.presenceState()).length; setPeers(Math.max(0, n - 1)); })
       .subscribe((status) => { if (status === "SUBSCRIBED") void channel.track({ at: Date.now() }); });
     channelRef.current = channel;
@@ -568,6 +607,7 @@ export function CanvasSketch({
             const tx = (elements as any[]).find((e) => !e.isDeleted && e.type === "text" && sel[e.id]);
             setSelFont(tx ? Math.round(tx.fontSize) : null);
             if ((elements as any[]).some((e) => !e.isDeleted)) hadContentRef.current = true; // เคยมีงานจริง
+            if (readyRef.current && editable && canEditRef.current) hoistImages(files); // รูป base64 ที่เพิ่งแปะ → ย้ายขึ้น R2
             // เซฟ/ส่ง เฉพาะเมื่อ "ชิ้นงานเปลี่ยนจริง" (ข้ามการเลือก/เลื่อนจอที่ไม่กระทบเนื้อหา → กันกระพริบ/loop)
             if (readyRef.current && editable && canEditRef.current) {
               const sig = sceneSig(elements as any[]);
