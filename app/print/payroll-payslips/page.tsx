@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import { PayslipPrintContent } from "@/app/payroll/payslips/print/page";
+import { PayslipPrintContent } from "@/app/payroll/payslips/print/content";
 
 export default function PayrollPayslipStandalonePrintPage() {
   return (

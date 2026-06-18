@@ -21,7 +21,7 @@ import { TaskDetailDrawer } from "../../task-detail-drawer";
 import { applyTaskTransition } from "../../task-actions";
 import { useCreativeOptions } from "../../use-options";
 import { getCampaign, updateCampaign, deleteTask, createContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
-import { ContentDrawer } from "../../content/page";
+import { ContentDrawer } from "../../content/content";
 
 // โหลดของกลาง Excalidraw แบบ dynamic -- ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
