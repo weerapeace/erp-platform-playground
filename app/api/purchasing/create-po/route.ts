@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { guardApi } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,6 +42,7 @@ type PR = {
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   // ตรวจ login
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
