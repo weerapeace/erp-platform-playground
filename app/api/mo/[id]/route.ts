@@ -9,7 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { explodeBom } from "../route";
+import { explodeBom } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
