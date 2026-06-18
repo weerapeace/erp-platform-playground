@@ -726,7 +726,7 @@ export default function WorkBoardPage() {
           <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
             <button onClick={() => setViewMode("board")} className={`h-9 px-3 font-medium ${viewMode === "board" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 บอร์ด</button>
             <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
-            <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ</button>
+            <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ/เตรียม</button>
           </div>
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>

@@ -50,6 +50,14 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 const STATUS_OPTS = [["draft","ร่าง"],["confirmed","ยืนยันแล้ว"],["in_progress","กำลังผลิต"],["done","เสร็จ"],["cancelled","ยกเลิก"]] as const;
 const fmt = (n: number) => (Math.round(n * 10000) / 10000).toLocaleString("th-TH");
 
+// รูปสินค้าเล็กในตาราง — มี fallback ถ้าไม่มีรูป/โหลดไม่ได้
+function MoThumb({ url }: { url: string | null | undefined }) {
+  const [err, setErr] = useState(false);
+  if (!url || err) return <span className="w-9 h-9 shrink-0 rounded border border-slate-100 bg-slate-50 flex items-center justify-center text-slate-300 text-sm">📦</span>;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={url} alt="" onError={() => setErr(true)} className="w-9 h-9 shrink-0 rounded object-cover border border-slate-100" />;
+}
+
 // ขั้นตอนงาน (จ่ายงาน) — ตัด/เตรียม → ประกอบ(รวมเย็บ) แล้วส่ง QC (โมดูลแยก)
 const STAGES = [["cut", "ตัด / เตรียม"], ["assemble", "ประกอบ (เย็บ)"]] as const;
 const stageLabel = (s: string) => STAGES.find((x) => x[0] === s)?.[1] ?? s;
@@ -378,8 +386,11 @@ export default function MoWorkspacePage() {
 
   const columns: ColumnDef<MoListItem>[] = useMemo(() => [
     { id: "mo_no", accessorKey: "mo_no", header: "เลขที่ MO", size: 150, cell: ({ getValue }) => <code className="font-mono text-xs text-slate-700">{getValue() as string}</code> },
-    { id: "product_sku", accessorKey: "product_sku", header: "สินค้า", size: 280, cell: ({ row }) => (
-      <div><code className="text-[10px] text-slate-400 font-mono">{row.original.product_sku}</code><div className="text-sm text-slate-700">{row.original.product_name}</div></div>) },
+    { id: "product_sku", accessorKey: "product_sku", header: "สินค้า", size: 300, cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <MoThumb url={row.original.product_image} />
+        <div className="min-w-0"><code className="text-[10px] text-slate-400 font-mono">{row.original.product_sku}</code><div className="text-sm text-slate-700 truncate">{row.original.product_name}</div></div>
+      </div>) },
     { id: "qty", accessorKey: "qty", header: "จำนวน", size: 90, cell: ({ getValue }) => <span className="tabular-nums">{fmt(getValue() as number)}</span> },
     { id: "bom_version", accessorKey: "bom_version", header: "สูตร", size: 90 },
     { id: "due_date", accessorKey: "due_date", header: "กำหนดส่ง", size: 110 },

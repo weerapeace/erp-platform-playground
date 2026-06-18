@@ -150,7 +150,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
           {sku && (spec?.parent?.id || spec?.sku_id) && <button type="button" onClick={(e) => { e.stopPropagation(); setSkuEditOpen(true); }} title={spec?.parent?.id ? "แก้ Parent SKU (popup)" : "แก้ SKU (popup)"} className="h-7 px-2 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ SKU</button>}
-          {sku && <a href={`/master/bom?search=${encodeURIComponent(sku)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="เปิดหน้าแก้ BOM (สูตร)" className="h-7 px-2 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ BOM</a>}
+          {sku && <a href={`/master/bom?search=${encodeURIComponent(sku)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="เปิดหน้าแก้ BOM (สูตร)" className="h-7 px-2 inline-flex items-center text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ BOM</a>}
           {editable && <button type="button" onClick={() => setEditOpen(true)} title="ลงรายละเอียดสินค้า" className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ ละเอียด</button>}
         </div>
       </div>

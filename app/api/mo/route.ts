@@ -18,6 +18,7 @@ export type MoListItem = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; status: string | null; due_date: string | null;
   bom_code: string | null; bom_version: string | null; is_active: boolean;
+  product_image?: string | null;   // รูปสินค้า (เติมในตอน list)
 };
 
 export type MoMaterial = {
@@ -115,7 +116,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data, error, count } = await q;
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
-  return NextResponse.json({ data: (data ?? []) as MoListItem[], total: count ?? 0, error: null });
+
+  // เติมรูปสินค้าต่อแถว (รูป SKU ก่อน, fallback Parent) — เพื่อโชว์ในหน้า MO list
+  const rows = (data ?? []) as MoListItem[];
+  const codes = [...new Set(rows.map((r) => r.product_sku).filter(Boolean))] as string[];
+  const imgMap = new Map<string, string>();
+  if (codes.length) {
+    const { data: skus } = await supabaseFromRequest(request)
+      .from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", codes);
+    for (const s of (skus ?? []) as Record<string, unknown>[]) {
+      const parRel = s.parent_skus_v2;
+      const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;
+      const key = (s.cover_image_r2_key as string | null) || par?.cover_image_r2_key || "";
+      if (key) imgMap.set(String(s.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
+    }
+  }
+  const withImg = rows.map((r) => ({ ...r, product_image: r.product_sku ? (imgMap.get(r.product_sku) ?? null) : null }));
+  return NextResponse.json({ data: withImg, total: count ?? 0, error: null });
 }
 
 // ---- POST create ----
