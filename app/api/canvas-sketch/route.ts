@@ -65,10 +65,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, permFor(entityType).edit); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  // กันกระดานบวมเกิน (รูปฝังใน scene เป็น base64) — 8MB พอสำหรับงานวาดปกติ
-  const sceneSize = body.scene ? JSON.stringify(body.scene).length : 0;
-  if (sceneSize > 8_000_000) {
-    return NextResponse.json({ error: "กระดานใหญ่เกิน 8MB — ลองลดขนาด/จำนวนรูปที่วางลงกระดาน" }, { status: 400 });
+  // กันกระดานบวมเกิน — วัดจาก content-length ของ request (ไม่ stringify ทั้ง scene ซ้ำ = ประหยัด CPU)
+  const sceneSize = Number(request.headers.get("content-length")) || 0;
+  if (sceneSize > 10_000_000) {
+    return NextResponse.json({ error: "กระดานใหญ่เกิน — ลองลดขนาด/จำนวนรูปที่วางลงกระดาน" }, { status: 400 });
   }
 
   // ภาพถ่ายกระดาน → R2 key ตายตัวต่อเอกสาร (ทับของเก่าอัตโนมัติ — เปลี่ยนภาพไม่ทิ้งไฟล์ขยะ)
