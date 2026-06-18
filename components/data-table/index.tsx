@@ -531,6 +531,14 @@ export function DataTable<T extends Record<string, unknown>>({
   const isServer = !!serverFetch;
   const { can } = useAuth();
 
+  // ---- Bootstrap gate (กันตารางกระพริบตอนโหลดครั้งแรก) ----
+  // ค่าตั้งค่าโหลดแบบ async หลายชุด (table-layouts + saved-views) ทยอยมาไม่พร้อมกัน
+  // ถ้าปล่อยให้ server fetch ยิงทันทีทุกครั้งที่ค่ามาถึง = โหลดซ้ำ 3 รอบ = กระพริบ 3 ที
+  // → รอทั้งสองชุดมาครบ + apply มุมมองเริ่มต้นก่อน แล้วค่อยยิง fetch รอบเดียว
+  const [layoutReady, setLayoutReady]   = useState(!tableId);   // ไม่มี tableId = ไม่มีอะไรต้องรอ
+  const [viewsReady,  setViewsReady]    = useState(!tableId);
+  const [bootstrapped, setBootstrapped] = useState(false);
+
   // ---- Permission by field: ซ่อนคอลัมน์ที่ไม่มีสิทธิ์ ----
   const columns = useMemo(
     () => columnsProp.filter(c => !c.meta?.permission || can(c.meta.permission as Permission)),
@@ -629,6 +637,7 @@ export function DataTable<T extends Record<string, unknown>>({
         layoutAppliedRef.current = true;
         try { if (layoutKey && layoutVer) localStorage.setItem(layoutKey, layoutVer); } catch { /* ignore */ }
       } catch { /* silent — fallback to component defaults */ }
+      finally { if (!cancelled) setLayoutReady(true); }   // ปลดล็อก bootstrap แม้ไม่มี/โหลด layout ไม่ได้
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -756,7 +765,8 @@ export function DataTable<T extends Record<string, unknown>>({
   // ---- Server-side state ----
   const [srvRows,     setSrvRows]     = useState<T[]>([]);
   const [srvTotal,    setSrvTotal]    = useState(0);
-  const [srvLoading,  setSrvLoading]  = useState(false);
+  // เริ่มเป็น true ใน server mode → โชว์ skeleton ต่อเนื่องตั้งแต่ mount จนข้อมูลรอบแรกมา (ไม่มีตารางเปล่าแวบ)
+  const [srvLoading,  setSrvLoading]  = useState(isServer);
   // เฟส 4 (แบบ A): batch ใหญ่สำหรับจัดกลุ่ม server mode
   const [srvGroupRows,    setSrvGroupRows]    = useState<T[]>([]);
   const [srvGroupLoading, setSrvGroupLoading] = useState(false);
@@ -794,6 +804,7 @@ export function DataTable<T extends Record<string, unknown>>({
   // ทยอยเปลี่ยนติดๆ กัน ทำให้ยิง fetch 4 รอบ = ตารางกระพริบ → รวบให้เหลือรอบเดียว
   useEffect(() => {
     if (!isServer || !serverFetch) return;
+    if (!bootstrapped) return;   // รอ layout + มุมมองเริ่มต้น มาครบก่อน → ยิง fetch รอบเดียว (กันกระพริบ)
     let active = true;
     setSrvLoading(true);
     const sort = sorting[0];
@@ -810,11 +821,12 @@ export function DataTable<T extends Record<string, unknown>>({
     }, 120);
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
+  }, [isServer, serverFetch, bootstrapped, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
 
   // เฟส 4 (แบบ A): server mode + จัดกลุ่ม → ดึง batch ใหญ่ (cap) มาจัดกลุ่มในจอ
   useEffect(() => {
     if (!isServer || !serverFetch || !groupBy) { setSrvGroupRows([]); setSrvGroupCapped(false); return; }
+    if (!bootstrapped) return;   // รอ bootstrap เหมือน fetch หลัก
     let active = true;
     setSrvGroupLoading(true);
     const sort = sorting[0];
@@ -831,7 +843,7 @@ export function DataTable<T extends Record<string, unknown>>({
     }, 120);
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, serverFetch, groupBy, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
+  }, [isServer, serverFetch, bootstrapped, groupBy, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
 
   // ---- Saved Views (Supabase — owner-based, ข้ามเครื่อง) ----
   const [userViews, setUserViews] = useState<StoredView[]>([]);
@@ -870,24 +882,21 @@ export function DataTable<T extends Record<string, unknown>>({
         owner_name:       r.owner_name ?? null,
       })));
     } catch { /* ignore */ }
+    finally { setViewsReady(true); }   // ปลดล็อก bootstrap แม้ไม่มี/โหลด views ไม่ได้
   }, [tableId]);
 
   useEffect(() => { fetchUserViews(); }, [fetchUserViews]);
 
-  // Auto-apply default view ตอนโหลดครั้งแรก (ถ้ามี is_default + ยังไม่เคย apply)
-  const defaultAppliedRef = useRef(false);
+  // Bootstrap: รอ layout + views มาครบ → apply มุมมองเริ่มต้น (ถ้ามี) → ปลดล็อก fetch
+  // apply + setBootstrapped อยู่ render เดียวกัน → fetch รอบแรกได้ค่าตัวกรอง/เรียงที่ถูกต้องเลย (ยิงรอบเดียว)
   useEffect(() => {
-    if (defaultAppliedRef.current) return;
-    if (userViews.length === 0) return;
+    if (bootstrapped) return;
+    if (!layoutReady || !viewsReady) return;
     const def = userViews.find(v => v.is_default);
-    if (def) {
-      defaultAppliedRef.current = true;
-      applyUserView(def);
-    } else {
-      defaultAppliedRef.current = true;
-    }
+    if (def) applyUserView(def);
+    setBootstrapped(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userViews.length]);
+  }, [layoutReady, viewsReady, bootstrapped]);
 
   // ---- Auto-detect fields from data not in defined columns ----
   const definedColumnKeys = useMemo(() => new Set(
