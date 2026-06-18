@@ -267,11 +267,17 @@ export function CanvasSketch({
           finally { clearTimeout(to); }
           const j = await res.json(); if (j.error || !j.r2_key) throw new Error(j.error || "upload failed");
           const r2url = `/api/r2-image?key=${encodeURIComponent(j.r2_key)}`;
-          const fileObj = { id: fid, dataURL: r2url, mimeType: type, created: Date.now() };
-          apiRef.current?.addFiles([fileObj]); // ให้ Excalidraw เรนเดอร์จากลิงก์ R2
-          // สำคัญ: เขียนลิงก์ลง snapshot ที่ใช้ "เซฟ" โดยตรง — เดิมพึ่ง addFiles→onChange ซึ่งไม่อัปเดต snap.files
-          // → เซฟ base64 ทับทุกครั้ง + ลูปอัปซ้ำไม่จบ. แก้ให้เซฟลิงก์ R2 จริง (scene เล็กลง โหลด/เซฟไว)
-          if (latestRef.current) latestRef.current = { ...latestRef.current, files: { ...(latestRef.current.files ?? {}), [fid]: fileObj } };
+          // สร้าง fileId ใหม่ให้รูป R2 — เพราะ addFiles ของ Excalidraw "ไม่แทน" ไฟล์ id เดิม (base64 ค้าง)
+          // แล้วชี้ image element ที่ใช้ fid เดิม → fid ใหม่ → base64 เดิมหลุดการอ้างอิง → ไม่ถูก serialize/เซฟ
+          const newFid = `r${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+          const fileObj = { id: newFid, dataURL: r2url, mimeType: type, created: Date.now() };
+          const api = apiRef.current;
+          if (api) {
+            api.addFiles([fileObj]);
+            const next = (api.getSceneElementsIncludingDeleted() as any[]).map((el) =>
+              (el.type === "image" && el.fileId === fid) ? { ...el, fileId: newFid, version: (el.version ?? 0) + 1 } : el);
+            api.updateScene({ elements: next }); // element เปลี่ยน → onChange เซฟ scene ใหม่ (ลิงก์ R2, ไม่มี base64)
+          }
           broadcastFiles([fileObj]); // ให้คนอื่นเรนเดอร์รูปได้
         } catch (e) { console.error("[canvas] hoist image failed:", e); hoistedRef.current.delete(fid); } // ล้มเหลว → คงเป็น base64 (ยังใช้ได้ในเครื่อง)
         finally { uploadingRef.current = Math.max(0, uploadingRef.current - 1); if (uploadingRef.current === 0 && editable && canEditRef.current) queueSave(); }
