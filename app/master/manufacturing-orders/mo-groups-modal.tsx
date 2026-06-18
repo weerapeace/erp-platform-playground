@@ -80,6 +80,42 @@ export function AssignToGroupModal({ moNos, onClose, onDone }: { moNos: string[]
   );
 }
 
+// ── field เลือกกลุ่ม (ในฟอร์มแก้ MO) — ติ๊ก chip เพื่อเข้า/ออกกลุ่ม บันทึกทันที ──
+export function MoGroupField({ moNo }: { moNo: string }) {
+  const toast = useToast();
+  const { groups, reload } = useGroups();
+  const [busy, setBusy] = useState<string | null>(null);
+  const toggle = async (g: MoGroup) => {
+    const has = g.mo_nos.includes(moNo);
+    setBusy(g.id);
+    try {
+      const body = has ? { id: g.id, remove_mos: [moNo] } : { id: g.id, add_mos: [moNo] };
+      const r = await apiFetch("/api/mo/groups", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      await reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div>
+      <span className="text-[11px] text-slate-500">กลุ่มใบสั่งงาน</span>
+      <div className="flex flex-wrap gap-1.5 mt-0.5">
+        {groups === null ? <span className="text-xs text-slate-300">กำลังโหลด…</span>
+          : groups.length === 0 ? <span className="text-xs text-slate-300">ยังไม่มีกลุ่ม — สร้างที่หน้ารายการ (เลือกใบ → 🗂 จัดกลุ่ม)</span>
+          : groups.map((g) => {
+            const on = g.mo_nos.includes(moNo);
+            return (
+              <button key={g.id} type="button" disabled={busy === g.id} onClick={() => void toggle(g)}
+                className={`text-xs px-2 py-1 rounded-full border transition-colors disabled:opacity-50 ${on ? "bg-rose-50 border-rose-300 text-rose-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                {on ? "✓ " : ""}{g.name}
+              </button>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
 // ── จัดการกลุ่ม (เปลี่ยนชื่อ/ลบ/เอาใบออก) ─────────────────────
 export function ManageGroupsModal({ onClose, onChanged }: { onClose: () => void; onChanged?: () => void }) {
   const toast = useToast();

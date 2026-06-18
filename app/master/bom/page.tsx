@@ -183,6 +183,24 @@ export default function BomWorkspacePage() {
     finally { setLoadingForm(false); }
   };
 
+  // เปิดสูตรของ SKU อัตโนมัติ (ใช้ตอนเปิดหน้านี้ใน popup จากแผงรายละเอียดสั่งงาน: ?open=<sku>)
+  const openBySku = async (sku: string) => {
+    setLoadingForm(true); setFormErr(null); setForm(emptyForm()); setVersions([]);
+    try {
+      const vers = await fetchVersions(sku);
+      const target = vers.find((v) => v.is_default) ?? vers[0];
+      if (!target) { setFormErr(`ไม่พบสูตร (BOM) ของ ${sku}`); return; }
+      const f = await loadFormById(target.id);
+      setForm(f); setDirty(false);
+    } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดสูตรไม่ได้"); }
+    finally { setLoadingForm(false); }
+  };
+  useEffect(() => {
+    const sku = new URLSearchParams(window.location.search).get("open");
+    if (sku) void openBySku(sku);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // สลับไปดู/แก้เวอร์ชั่นอื่นของสินค้าเดียวกัน
   const switchVersion = async (id: string) => {
     if (id === form?.id) return;

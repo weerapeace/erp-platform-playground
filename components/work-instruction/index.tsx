@@ -39,6 +39,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   const [editOpen, setEditOpen] = useState(false);
   const [skuMenuOpen, setSkuMenuOpen] = useState(false);   // เมนูเลือกว่าจะแก้ SKU หรือ Parent SKU
   const [skuPeek, setSkuPeek] = useState<{ moduleKey: string; recordId: string } | null>(null);   // popup แก้แบบเต็ม (RelationPeekModal)
+  const [bomOpen, setBomOpen] = useState(false);   // popup หน้า BOM (iframe embed)
   const [lightbox, setLightbox] = useState(false);   // คลิกรูป → เด้งรูปใหญ่
   const [imgErr, setImgErr] = useState(false);        // รูปหาย/โหลดไม่ได้ → โชว์ placeholder
   useEffect(() => { setImgErr(false); }, [spec?.image_url, spec?.parent?.image_url]);
@@ -164,7 +165,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
               )}
             </div>
           )}
-          {sku && <a href={`/master/bom?search=${encodeURIComponent(sku)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="เปิดหน้าแก้ BOM (สูตร)" className="h-7 px-2 inline-flex items-center text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ BOM</a>}
+          {sku && <button type="button" onClick={(e) => { e.stopPropagation(); setBomOpen(true); }} title="แก้ BOM (สูตร) — popup" className="h-7 px-2 inline-flex items-center text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ BOM</button>}
           {editable && <button type="button" onClick={() => setEditOpen(true)} title="ลงรายละเอียดสินค้า" className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ ละเอียด</button>}
         </div>
       </div>
@@ -246,6 +247,11 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
           onClose={() => setSkuPeek(null)}
           onChanged={() => { setEditData(null); loadSpec(); }}
         />
+      )}
+      {bomOpen && sku && (
+        <ERPModal open onClose={() => { setBomOpen(false); loadSpec(); }} size="xl" title={`✎ แก้ BOM (สูตร) — ${sku}`}>
+          <iframe src={`/master/bom?embed=1&open=${encodeURIComponent(sku)}`} className="w-full border-0 rounded-lg bg-slate-50" style={{ height: "78vh" }} title={`BOM ${sku}`} />
+        </ERPModal>
       )}
     </div>
     </>

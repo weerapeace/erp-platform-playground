@@ -1111,10 +1111,12 @@ export function DataTable<T extends Record<string, unknown>>({
             onChange={table.getToggleAllPageRowsSelectedHandler()} />
         ),
         cell: ({ row }) => (
-          <input type="checkbox" className="rounded border-slate-300 text-blue-600"
-            checked={row.getIsSelected()}
-            onClick={e => e.stopPropagation()}
-            onChange={row.getToggleSelectedHandler()} />
+          // ของกลาง: กด "รอบ ๆ" checkbox (ทั้งช่อง) ก็ติ๊กได้ — พื้นที่กดกว้างขึ้น
+          <label onClick={e => e.stopPropagation()} className="flex items-center justify-center -my-1.5 -mx-2 py-1.5 px-2 cursor-pointer">
+            <input type="checkbox" className="rounded border-slate-300 text-blue-600"
+              checked={row.getIsSelected()}
+              onChange={row.getToggleSelectedHandler()} />
+          </label>
         ),
         enableSorting: false, enableHiding: false,
       },
@@ -1968,8 +1970,8 @@ export function DataTable<T extends Record<string, unknown>>({
                   if (!collapsed) for (const row of grp) {
                     out.push(
                       <React.Fragment key={row.id}>
-                        <tr onClick={() => isRowClickable && handleRowClick(row.original)}
-                          className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable ? "cursor-pointer" : ""}`}>
+                        <tr onClick={() => { if (showSelectCol && selectedCount > 0) { row.toggleSelected(); return; } if (isRowClickable) handleRowClick(row.original); }}
+                          className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable || (showSelectCol && selectedCount > 0) ? "cursor-pointer" : ""}`}>
                           {row.getVisibleCells().map(cell => (
                             <td key={cell.id} className={`${cellPad} text-slate-700 overflow-hidden text-ellipsis`}>
                               {cell.column.columnDef.meta?.type === "image"
@@ -2005,9 +2007,9 @@ export function DataTable<T extends Record<string, unknown>>({
                   return (
                   <React.Fragment key={row.id}>
                   <tr
-                    onClick={() => isRowClickable && handleRowClick(row.original)}
+                    onClick={() => { if (showSelectCol && selectedCount > 0) { row.toggleSelected(); return; } if (isRowClickable) handleRowClick(row.original); }}
                     style={rcStyle}
-                    className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable ? "cursor-pointer" : ""}`}>
+                    className={`group transition-colors ${row.getIsSelected() ? "bg-blue-50" : "hover:bg-slate-50"} ${isRowClickable || (showSelectCol && selectedCount > 0) ? "cursor-pointer" : ""}`}>
                     {row.getVisibleCells().map(cell => {
                       const pin = pinnedStyle(cell.column);
                       const isPinned = !!cell.column.getIsPinned();

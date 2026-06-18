@@ -14,7 +14,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ComponentPicker } from "../bom/line-editor";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
-import { AssignToGroupModal, ManageGroupsModal } from "./mo-groups-modal";
+import { AssignToGroupModal, ManageGroupsModal, MoGroupField } from "./mo-groups-modal";
 import type { MoListItem } from "@/app/api/mo/route";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { Assignee } from "@/app/api/mo/assignees/route";
@@ -501,6 +501,9 @@ export default function MoWorkspacePage() {
               <input value={form.note} onChange={(e) => patch({ note: e.target.value })}
                 className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </label>
+
+            {/* กลุ่มใบสั่งงาน — เฉพาะใบที่บันทึกแล้ว (มีเลขใบ) */}
+            {form.id && form.mo_no && <MoGroupField moNo={form.mo_no} />}
 
             {/* รายละเอียดสั่งงาน (อ่านอย่างเดียว — ดึงจาก Parent ของสินค้า) */}
             {form.product_sku && <WorkInstructionPanel sku={form.product_sku} editable={canEdit} />}
