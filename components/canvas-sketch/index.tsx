@@ -83,6 +83,8 @@ export function CanvasSketch({
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
+  const editableRef = useRef(editable);    editableRef.current = editable;
+  const hoistRef = useRef<((files: Record<string, any>) => void) | null>(null); // ตัวย้ายรูปขึ้น R2 (ตั้งค่าหลัง hoistImages นิยาม)
   const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
 
   // ชั้น realtime (แชร์สดหลายคน) — แยกเป็น hook: broadcast/รับของคนอื่น/นับคนออนไลน์ ผ่าน Supabase Broadcast
@@ -109,7 +111,15 @@ export function CanvasSketch({
         baseRevRef.current = Number(j?.data?.rev) || 0; // จำเวอร์ชันที่โหลดมา
         { const ce = j?.data?.can_edit !== false; canEditRef.current = ce; setServerCanEdit(ce); } // viewer = อ่านอย่างเดียว
         setScene(sc && typeof sc === "object" ? { elements: els, files: (sc.files as Record<string, unknown>) ?? {} } : null);
-        setTimeout(() => { readyRef.current = true; if (alive) readyCbRef.current?.(); }, 800);
+        setTimeout(() => {
+          readyRef.current = true; if (alive) readyCbRef.current?.();
+          // ย้ายรูป base64 ที่ค้างมาแต่เดิม (ก่อนมีฟีเจอร์ R2) ขึ้น R2 ตั้งแต่เปิด — ไม่ต้องรอผู้ใช้แก้ไข
+          // ทำให้ scene เล็กลง (กระดานรูปเยอะเคยหนักหลาย MB → เซฟช้า) เซฟครั้งต่อไปไวขึ้นมาก
+          if (alive && editableRef.current && canEditRef.current) {
+            const f = (sc?.files as Record<string, any>) ?? {};
+            if (Object.keys(f).length) hoistRef.current?.(f);
+          }
+        }, 800);
       })
       .catch(() => { if (alive) { setScene(null); setTimeout(() => { readyRef.current = true; if (alive) readyCbRef.current?.(); }, 800); } });
     return () => { alive = false; };
@@ -250,7 +260,11 @@ export function CanvasSketch({
           const fd = new FormData();
           fd.append("file", new File([blob], `cv-${fid}.${ext}`, { type }));
           fd.append("folder", "canvassketch");
-          const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+          // timeout 25วิ กันอัปโหลดค้าง (ถ้าค้าง uploadingRef จะไม่ลด → ตัวกันเซฟรอตลอด → "กำลังบันทึก..." ค้าง)
+          const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 25000);
+          let res: Response;
+          try { res = await apiFetch("/api/admin/upload", { method: "POST", body: fd, signal: ctrl.signal }); }
+          finally { clearTimeout(to); }
           const j = await res.json(); if (j.error || !j.r2_key) throw new Error(j.error || "upload failed");
           const r2url = `/api/r2-image?key=${encodeURIComponent(j.r2_key)}`;
           apiRef.current?.addFiles([{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }]);
@@ -260,6 +274,7 @@ export function CanvasSketch({
       })();
     }
   }, [editable, queueSave, broadcastFiles]);
+  hoistRef.current = hoistImages; // ให้ effect โหลด (proactive hoist ตอนเปิด) เรียกได้โดยไม่ผูก dependency
 
   // ให้ภายนอกถือ handle: เช็คมีแก้ค้าง / สั่งบันทึก / สั่งทิ้ง (ใช้ตอนถามก่อนปิด popup)
   useEffect(() => {
