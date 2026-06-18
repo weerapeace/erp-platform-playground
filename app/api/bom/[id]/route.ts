@@ -41,13 +41,16 @@ export async function GET(
     .from("bom_headers").select("*").eq("id", id).single();
   if (hErr) return NextResponse.json({ data: null, error: hErr.message }, { status: 404 });
 
-  const { data: lines, error: lErr } = await supabase
-    .from("bom_lines").select("*")
-    .eq("bom_code", (header as BomHeader).bom_code)
-    .eq("is_active", true)
-    .order("sequence", { ascending: true, nullsFirst: false })
-    .order("id", { ascending: true });
+  // lines + sizes ยิงพร้อมกัน (ทั้งคู่ใช้แค่ bom_code) — ลด round-trip ตอนเปิดสูตรในป๊อปอัป
+  const bomCode = (header as BomHeader).bom_code;
+  const [linesRes, sizesRes] = await Promise.all([
+    supabase.from("bom_lines").select("*").eq("bom_code", bomCode).eq("is_active", true)
+      .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
+    supabase.from("bom_sizes").select("label, sort").eq("bom_code", bomCode).order("sort", { ascending: true }),
+  ]);
+  const { data: lines, error: lErr } = linesRes;
   if (lErr) return NextResponse.json({ data: null, error: lErr.message }, { status: 500 });
+  const sizes = sizesRes.data;
 
   // เติมข้อมูลจาก SKU (ชนิด/หน้ากว้าง/รูป/loss) ให้แต่ละบรรทัด — ดึงสดตอนเปิดสูตร
   const rawLines = (lines ?? []) as Array<Record<string, unknown>>;
@@ -89,9 +92,6 @@ export async function GET(
       image_key:     sku.image,
     };
   });
-
-  const { data: sizes } = await supabase.from("bom_sizes").select("label, sort")
-    .eq("bom_code", (header as BomHeader).bom_code).order("sort", { ascending: true });
 
   return NextResponse.json({ data: { ...header, lines: enriched, sizes: sizes ?? [] }, error: null });
 }
