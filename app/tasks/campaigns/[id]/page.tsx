@@ -84,6 +84,8 @@ export default function CampaignCanvasPage() {
   const id = String(useParams().id);
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [boardKey, setBoardKey] = useState(0); // เปลี่ยนเพื่อรีโหลดกระดานล่าสุด (แทน F5 ที่เด้งหน้าแรก)
+  const [refreshing, setRefreshing] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [skuOpen, setSkuOpen] = useState(false);
   const [skuSel, setSkuSel] = useState<SkuPickerValue[]>([]); // SKU ที่เลือก (หลายอัน)
@@ -109,6 +111,14 @@ export default function CampaignCanvasPage() {
   useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
   useEffect(() => { const h = () => setFs(!!document.fullscreenElement); document.addEventListener("fullscreenchange", h); return () => document.removeEventListener("fullscreenchange", h); }, []);
   const toggleFs = () => { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen?.(); };
+  // รีโหลดกระดานล่าสุด (เซฟของเราก่อน → remount กระดาน → ดึง scene ใหม่) โดยไม่ต้อง F5 ที่เด้งหน้าแรก
+  const refreshBoard = useCallback(async () => {
+    setRefreshing(true);
+    try { await sketchRef.current?.save?.(); } catch { /* เซฟ best-effort */ }
+    await load();
+    setBoardKey((k) => k + 1);
+    setTimeout(() => setRefreshing(false), 400);
+  }, [load]);
 
   const setStatus = async (status: string) => { try { await updateCampaign(id, { status }); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
 
@@ -205,6 +215,7 @@ export default function CampaignCanvasPage() {
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ {t("การ์ดบนกระดาน", "Cards on board")}</button>
             <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 {t("รายละเอียด", "Details")}</button>
+            <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{refreshing ? "⏳" : "🔄"} {t("รีเฟรช", "Refresh")}</button>
             <button onClick={toggleFs} title={t("เต็มจอ", "Fullscreen")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{fs ? `⛶ ${t("ออกเต็มจอ", "Exit Fullscreen")}` : `⛶ ${t("เต็มจอ", "Fullscreen")}`}</button>
           </div>
         </div>
@@ -213,7 +224,7 @@ export default function CampaignCanvasPage() {
       <div className="px-8 py-6">
         <div className="relative" onDragOver={(e) => { if (dragPanelOpen) e.preventDefault(); }} onDrop={onCanvasDrop}>
           {/* realtime (collab) ปิดชั่วคราว — การ merge ของคนอื่นไปทับงาน (ลบหาย) ต้องทำให้ปลอดภัยก่อนค่อยเปิด */}
-          <CanvasSketch entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} />
+          <CanvasSketch key={boardKey} entityType="creative_campaign" entityId={id} height="calc(100vh - 180px)" controlsRef={sketchRef} onCardOpen={onCardOpen} onReady={syncTaskCards} />
 
           {/* ⑦ แผงลากงานเข้ากระดาน (งานในแคมเปญที่ยังไม่อยู่บนกระดาน) */}
           {dragPanelOpen && (
