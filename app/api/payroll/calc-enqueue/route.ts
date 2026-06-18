@@ -11,11 +11,12 @@ import { guardPayroll } from "@/lib/payroll-auth";
 import { createJob, runInBackground, sendToQueue } from "@/lib/jobs";
 import { runJob } from "@/lib/job-runner";
 import { validatePayrollPeriod } from "@/lib/payroll-validation";
+import { timeRoute } from "@/lib/api-timing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+async function _POST(req: NextRequest): Promise<NextResponse> {
   const denied = await guardPayroll(req, "payroll.calculate"); if (denied) return denied;
   let body: { period_id?: string; actor?: string };
   try { body = await req.json(); } catch { body = {}; }
@@ -30,3 +31,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({ job_id: jobId, queued, error: null });
 }
+
+export const POST = timeRoute("payroll:calc-enqueue", _POST as any) as any;

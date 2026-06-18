@@ -6,8 +6,8 @@
 // กระดานแบบ miro: วางรูปจาก Ctrl+V/ลากไฟล์, กล่อง (R), ลูกศร (A), ข้อความ (T), วาดอิสระ (P)
 // เก็บลงตารางกลาง erp_canvas_sketches (1 กระดานต่อเอกสาร) ผ่าน /api/canvas-sketch
 //
-// บันทึกอัตโนมัติ: หยุดวาด ~2.5 วิ → save เอง (debounce) + flush ตอนปิดแท็บ/ปิด modal
-// ตอนบันทึกจะ "ถ่ายภาพกระดาน" เป็น PNG เก็บใน R2 ด้วย → ใบพิมพ์/การ์ดเอาไปใช้ได้
+// บันทึกอัตโนมัติ: หยุดวาด ~1 วิ → save เอง (debounce) + เซฟกันลืม ~8วิ + flush ตอนปิด · เซฟแบบเช็คเวอร์ชัน (กันทับกันหลายคน)
+// realtime หลายคน: ผ่าน Supabase Broadcast (ไม่กิน Cloudflare CPU) · รูปที่แปะ → ย้ายขึ้น R2 (กระดานเล็ก โหลดไว โชว์ข้ามเครื่อง)
 //
 // ใช้ที่: Design Sheets แท็บ 🖌 กระดาน · โมดูลอื่นใช้ได้เลย: <CanvasSketch entityType="..." entityId="..." />
 // doc: docs/canvas-sketch.md
@@ -49,6 +49,18 @@ function mergeById(a: any[], b: any[]): any[] {
   return [...map.values()];
 }
 
+// ย่อรูป (จาก dataURL base64) ให้ด้านยาวสุด ≤ max px ก่อนอัป R2 — กันไฟล์ใหญ่เกินลิมิต + กระดานเบา (PNG คงโปร่งใส)
+async function resizeDataUrl(dataURL: string, mime: string, max = 1600): Promise<{ blob: Blob; type: string }> {
+  const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataURL; });
+  let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
+  const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
+  canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
+  const type = mime === "image/png" ? "image/png" : "image/jpeg";
+  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b as Blob), type, 0.85));
+  return { blob, type };
+}
+
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
 export type CanvasSketchControls = {
@@ -66,7 +78,7 @@ export function CanvasSketch({
   entityId:   string;
   editable?:  boolean;
   height?:    string;
-  /** เปิด realtime หลายคนพร้อมกัน (ต่อ collab worker) */
+  /** เปิด realtime หลายคนพร้อมกัน (ผ่าน Supabase Broadcast — ไม่กิน Cloudflare CPU) */
   collab?:    boolean;
   /** แจ้งสถานะ "มีแก้ค้าง" ขึ้นไปข้างนอก (ใช้เตือนก่อนปิด popup) */
   onDirtyChange?: (dirty: boolean) => void;
@@ -207,15 +219,21 @@ export function CanvasSketch({
         const j = await res.json(); if (j.error) throw new Error(j.error);
 
         if (j.conflict && attempt < 3) {
-          // มีคนเซฟแทรก → รวมงาน 2 ฝั่ง (เอาชิ้นที่ใหม่กว่า) แล้วลองเซฟใหม่ด้วย rev ล่าสุด
+          // มีคนเซฟแทรก → รวมงาน 2 ฝั่ง (เอาชิ้นที่ใหม่กว่า) + รวมรูป (files) แล้วลองเซฟใหม่ด้วย rev ล่าสุด
           const remoteEls = ((j.scene?.elements ?? []) as any[]);
+          const remoteFiles = ((j.scene?.files ?? {}) as Record<string, any>);
           const mine = (sceneToSave.elements ?? []) as any[];
           const mergedEls = mergeById(mine, remoteEls);
-          sceneToSave = { ...sceneToSave, elements: mergedEls };
+          const mergedFiles = { ...remoteFiles, ...(sceneToSave.files ?? {}) }; // คงของเรา + เพิ่มรูปของคนอื่น
+          sceneToSave = { ...sceneToSave, elements: mergedEls, files: mergedFiles };
           baseRev = Number(j.rev) || 0; baseRevRef.current = baseRev;
           merged = true;
-          // อัปเดตบนจอให้เห็นงานที่รวมแล้ว (กัน onChange ที่ตามมาเซฟซ้ำด้วยการตั้ง lastChangeSig)
-          try { lastChangeSigRef.current = sceneSig(mergedEls); apiRef.current?.updateScene?.({ elements: mergedEls }); } catch { /* noop */ }
+          // อัปเดตบนจอให้เห็นงาน+รูปที่รวมแล้ว (กัน onChange ที่ตามมาเซฟซ้ำด้วยการตั้ง lastChangeSig)
+          try {
+            lastChangeSigRef.current = sceneSig(mergedEls);
+            const rf = Object.values(remoteFiles); if (rf.length) apiRef.current?.addFiles?.(rf); // รูปคนอื่นเรนเดอร์ได้
+            apiRef.current?.updateScene?.({ elements: mergedEls });
+          } catch { /* noop */ }
           continue;
         }
         if (j.conflict) { // ชนถี่ (2 คนแก้พร้อมกัน) → ไม่ขึ้น error, ตั้งเวลาลองใหม่อีก 1.5วิ
@@ -302,19 +320,17 @@ export function CanvasSketch({
       uploadingRef.current++;
       void (async () => {
         try {
-          const m = url.match(/^data:([^;]+);base64,([\s\S]*)$/);
-          if (!m) throw new Error("bad dataURL");
-          const mime = m[1]; const bin = atob(m[2]);
-          const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-          const ext = (mime.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "");
+          const mime = (url.match(/^data:([^;]+);base64,/)?.[1]) || "image/png";
+          const { blob, type } = await resizeDataUrl(url, mime, 1600); // ย่อ ≤1600px → ผ่านลิมิต 5MB + เบา
+          const ext = type === "image/png" ? "png" : "jpg";
           const fd = new FormData();
-          fd.append("file", new File([arr], `cv-${fid}.${ext}`, { type: mime }));
+          fd.append("file", new File([blob], `cv-${fid}.${ext}`, { type }));
           fd.append("folder", "canvassketch");
           const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
           const j = await res.json(); if (j.error || !j.r2_key) throw new Error(j.error || "upload failed");
           const r2url = `/api/r2-image?key=${encodeURIComponent(j.r2_key)}`;
-          apiRef.current?.addFiles([{ id: fid, dataURL: r2url, mimeType: mime, created: Date.now() }]);
-          try { channelRef.current?.send({ type: "broadcast", event: "files", payload: { files: [{ id: fid, dataURL: r2url, mimeType: mime, created: Date.now() }] } }); } catch { /* noop */ }
+          apiRef.current?.addFiles([{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }]);
+          try { channelRef.current?.send({ type: "broadcast", event: "files", payload: { files: [{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }] } }); } catch { /* noop */ }
         } catch (e) { console.error("[canvas] hoist image failed:", e); hoistedRef.current.delete(fid); } // ล้มเหลว → คงเป็น base64 (ยังใช้ได้ในเครื่อง)
         finally { uploadingRef.current = Math.max(0, uploadingRef.current - 1); if (uploadingRef.current === 0 && editable && canEditRef.current) queueSave(); }
       })();
@@ -346,14 +362,12 @@ export function CanvasSketch({
               let fileId = urlToFileId.get(url);
               if (!fileId) {
                 try {
-                  const res = await fetch(url);
-                  const blob = await res.blob();
-                  const dataURL: string = await new Promise((resolve, reject) => { const fr = new FileReader(); fr.onload = () => resolve(String(fr.result)); fr.onerror = reject; fr.readAsDataURL(blob); });
+                  // ใช้ URL เป็น dataURL ตรงๆ (รูปอยู่บน R2 อยู่แล้ว) — ไม่ต้องดึง+แปลง base64+อัปซ้ำ
                   fileId = `f${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-                  api.addFiles([{ id: fileId, dataURL, mimeType: blob.type || "image/png", created: Date.now() }]);
+                  api.addFiles([{ id: fileId, dataURL: url, mimeType: "image/png", created: Date.now() }]);
                   urlToFileId.set(url, fileId);
-                  // อ่านขนาดจริงของรูป → เก็บอัตราส่วน
-                  try { const dim = await new Promise<{ w: number; h: number }>((resolve, reject) => { const im = new Image(); im.onload = () => resolve({ w: im.naturalWidth || 1, h: im.naturalHeight || 1 }); im.onerror = reject; im.src = dataURL; }); if (dim.h > 0) urlToRatio.set(url, dim.w / dim.h); } catch { /* ใช้กรอบเดิม */ }
+                  // อ่านขนาดจริงของรูปจาก URL → เก็บอัตราส่วน
+                  try { const dim = await new Promise<{ w: number; h: number }>((resolve, reject) => { const im = new Image(); im.onload = () => resolve({ w: im.naturalWidth || 1, h: im.naturalHeight || 1 }); im.onerror = reject; im.src = url; }); if (dim.h > 0) urlToRatio.set(url, dim.w / dim.h); } catch { /* ใช้กรอบเดิม */ }
                 } catch (e) { console.error("[canvas-sketch] image load failed:", e); }
               }
               if (fileId) s.fileId = fileId;
@@ -563,24 +577,11 @@ export function CanvasSketch({
           </span>
         )}
         {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)</span>}
-        {editable && serverCanEdit && (
-          <span className="text-[11px] inline-flex items-center gap-1.5">
-            {saveState === "dirty"  && <span className="text-slate-400">● จะบันทึกอัตโนมัติเมื่อหยุดวาด...</span>}
-            {saveState === "saving" && <span className="text-blue-500">⏳ กำลังบันทึก...</span>}
-            {saveState === "saved"  && <span className="text-emerald-600">✓ บันทึกอัตโนมัติแล้ว</span>}
-            {saveState === "error"  && (
-              <>
-                <span className="text-rose-600">⚠ บันทึกไม่สำเร็จ</span>
-                <button onClick={() => void doSave()} className="h-6 px-2 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700">ลองใหม่</button>
-              </>
-            )}
-          </span>
-        )}
       </div>
       <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
-        {/* ป้ายสถานะบันทึก — ลอยกลางล่าง เห็นชัดทุกครั้งที่เซฟ */}
+        {/* ป้ายสถานะบันทึก — ลอยกลางล่าง เห็นชัดทุกครั้งที่เซฟ (กดลองใหม่ได้ตอน error) */}
         {editable && serverCanEdit && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5">
             <span className={`px-2.5 py-1 rounded-full text-[11px] font-medium shadow-sm border bg-white/95 backdrop-blur ${
               saveState === "error" ? "text-rose-600 border-rose-200"
               : saveState === "saving" ? "text-blue-600 border-blue-200"
@@ -592,6 +593,7 @@ export function CanvasSketch({
               : savedAt ? `✓ บันทึกแล้ว${lastMerged ? " (รวมงานกับคนอื่น)" : ""} · ${savedAt}`
               : "พร้อมใช้งาน"}
             </span>
+            {saveState === "error" && <button onClick={() => void doSave(true)} className="h-6 px-2 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700 shadow-sm">ลองใหม่</button>}
           </div>
         )}
         <Excalidraw
