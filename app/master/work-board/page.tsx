@@ -21,6 +21,8 @@ import { AddPieceworkModal } from "./add-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
 import { PurchaseNeeds } from "./purchase-needs";
+import { DispatchPlanBoard } from "./dispatch-plan-board";
+import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
@@ -125,6 +127,9 @@ export default function WorkBoardPage() {
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   // กลุ่ม B: ประวัติงานเสียต่อช่าง (จับด้วยชื่อ) → เตือนตอนจ่ายงาน
   const [defectByWorker, setDefectByWorker] = useState<Record<string, { worker: string; count: number; last_at: string | null; types: string[] }>>({});
+  // กลุ่ม D: แผนจ่ายงาน (ร่าง) — แท็บบนบอร์ด ("real" = บอร์ดจริง · id = แผนร่าง)
+  const [plans, setPlans] = useState<DispatchPlan[]>([]);
+  const [activePlan, setActivePlan] = useState<string>("real");
 
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Inter>(null);
@@ -195,6 +200,18 @@ export default function WorkBoardPage() {
     const m: Record<string, { worker: string; count: number; last_at: string | null; types: string[] }> = {};
     for (const d of (j.data ?? []) as { worker: string; count: number; last_at: string | null; types: string[] }[]) m[(d.worker ?? "").trim().toLowerCase()] = d;
     setDefectByWorker(m); } catch { /* ignore */ } })(); }, []);
+  // กลุ่ม D: โหลดรายการแผนจ่ายงาน
+  const loadPlans = useCallback(async () => {
+    try { const r = await apiFetch("/api/mo/dispatch-plans"); const j = await r.json(); setPlans((j.data ?? []) as DispatchPlan[]); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { void loadPlans(); }, [loadPlans]);
+  const createPlan = useCallback(async () => {
+    try {
+      const r = await apiFetch("/api/mo/dispatch-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `แผน ${plans.length + 1}` }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setPlans((ps) => [...ps, j.data as DispatchPlan]); setActivePlan((j.data as DispatchPlan).id);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "สร้างแผนไม่สำเร็จ"); }
+  }, [plans.length, toast]);
   useEffect(() => { try {
     const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r));
     const s = localStorage.getItem(ZONESIZE_KEY); if (s) setZoneSize(JSON.parse(s));
@@ -775,7 +792,18 @@ export default function WorkBoardPage() {
       </div>
 
       {/* Toolbar — เฉพาะมุมมองบอร์ด */}
+      {/* กลุ่ม D: แท็บแผนจ่ายงาน (ของจริง / แผนร่าง) */}
       {viewMode === "board" && (
+        <div className="flex items-center gap-1.5 flex-wrap mb-2">
+          <button onClick={() => setActivePlan("real")} className={`h-8 px-3 text-sm rounded-lg border ${activePlan === "real" ? "bg-blue-600 text-white border-blue-600 font-medium" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>✅ ของจริง</button>
+          {plans.map((p) => (
+            <button key={p.id} onClick={() => setActivePlan(p.id)} className={`h-8 px-3 text-sm rounded-lg border ${activePlan === p.id ? "bg-indigo-600 text-white border-indigo-600 font-medium" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>📅 {p.name}{p.status === "applied" ? " ✓" : p.line_count ? ` (${p.line_count})` : ""}</button>
+          ))}
+          {canDispatch && <button onClick={() => void createPlan()} className="h-8 px-2.5 text-sm rounded-lg border border-dashed border-slate-300 text-slate-500 hover:bg-slate-50">＋ สร้างแผน</button>}
+        </div>
+      )}
+
+      {viewMode === "board" && activePlan === "real" && (
       <div className="z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit mb-2">
         <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
         <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
@@ -806,6 +834,20 @@ export default function WorkBoardPage() {
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
+      ) : activePlan !== "real" ? (
+        (() => {
+          const p = plans.find((x) => x.id === activePlan);
+          if (!p) return <div className="text-center py-20 text-slate-400 text-sm">ไม่พบแผน</div>;
+          return <DispatchPlanBoard
+            planId={p.id} planName={p.name} planStatus={p.status}
+            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut")}
+            pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker}
+            canEdit={canDispatch}
+            onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
+            onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
+            onDeleted={() => { setActivePlan("real"); void loadPlans(); }}
+          />;
+        })()
       ) : (
         <div ref={boardRef} onPointerDown={onBoardDown} onPointerMove={onMove} onPointerUp={onUp}
           className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isMax ? "flex-1" : "h-[calc(100vh-230px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : "cursor-default"}`}
