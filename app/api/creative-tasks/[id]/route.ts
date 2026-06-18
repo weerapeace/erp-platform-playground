@@ -55,8 +55,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const parent_skus = ((parentLinks ?? []) as Record<string, unknown>[]).map((l) => { const p = (Array.isArray(l.parent) ? l.parent[0] : l.parent) as Record<string, unknown> | null; return p ? { id: p.id, code: p.code, name: p.name_th } : null; }).filter(Boolean);
 
   const subRows = (subtasks ?? []) as Record<string, unknown>[];
-  const empMap = await employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string]);
-  const aMap = await subtaskAssigneesMap(admin, subRows.map((s) => String(s.id)));
+  // empMap (จาก row) กับ aMap (จาก subRows) อิสระต่อกัน → ยิงพร้อมกัน ลด round-trip ตอนเปิดงาน
+  const [empMap, aMap] = await Promise.all([
+    employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string]),
+    subtaskAssigneesMap(admin, subRows.map((s) => String(s.id))),
+  ]);
   const task = flattenTask(row, empMap);
 
   // แยกไฟล์แนบ: ระดับงาน (subtask_id null) vs ระดับ subtask
