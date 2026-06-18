@@ -113,6 +113,7 @@ export function CanvasSketch({
   const pendingRef = useRef(false);    // มีแก้เพิ่มระหว่างกำลังบันทึก → บันทึกซ้ำต่อท้าย
   const discardRef = useRef(false);    // true = ผู้ใช้เลือก "ทิ้ง" → ไม่ flush ตอน unmount
   const hadContentRef = useRef(false); // เคยมีชิ้นงานจริงไหม — กันเซฟ "ว่าง" ทับงานดี (เช่นตอนปิดหน้า Excalidraw เคลียร์ scene)
+  const allowEmptyRef = useRef(false); // อนุญาตเซฟว่างครั้งนี้ (ผู้ใช้กด "ล้างกระดาน" ตั้งใจ)
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // เซฟกันลืมระหว่างแก้ต่อเนื่อง
   const lastPngAtRef = useRef(0); // ถ่าย PNG ล่าสุดเมื่อไหร่ — ถ่ายเฉพาะทุก ~30วิ/ตอนปิด (ลด payload เซฟถี่ๆ)
@@ -166,11 +167,12 @@ export function CanvasSketch({
     // → ลองใช้ของจริงจาก api ที่ยังเปิดอยู่; ถ้าก็ว่าง/อ่านไม่ได้ → ไม่บันทึก (กันงานหาย)
     {
       const snapEls = (snap.elements ?? []) as any[];
-      if (hadContentRef.current && !snapEls.some((e) => !e.isDeleted)) {
+      if (hadContentRef.current && !snapEls.some((e) => !e.isDeleted) && !allowEmptyRef.current) {
         const live = (() => { try { return apiRef.current?.getSceneElementsIncludingDeleted?.() as any[] | undefined; } catch { return undefined; } })();
         if (live && live.some((e) => !e.isDeleted)) { snap.elements = live; }   // ของจริงยังมีงาน → ใช้แทน
         else { console.warn("[canvas-sketch] skip empty save (had content)"); return; }   // ยืนยันว่างไม่ได้ → ไม่บันทึกทับ
       }
+      allowEmptyRef.current = false; // ใช้ครั้งเดียว
     }
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     if (maxTimerRef.current) { clearTimeout(maxTimerRef.current); maxTimerRef.current = null; }
@@ -521,6 +523,20 @@ export function CanvasSketch({
   // ถอนโฟกัสจากปุ่ม/ช่องของเรา → คืนให้กระดาน เพื่อให้คีย์ลัด (R/A/T/P) ทำงาน
   const blurActive = () => { try { (document.activeElement as HTMLElement)?.blur?.(); } catch { /* noop */ } };
 
+  // ล้างกระดานทั้งหมด (ตั้งใจ) — มาร์คทุกชิ้นเป็นลบ + เซฟว่าง (ข้ามตัวกันเซฟว่าง) + ซิงค์ให้คนอื่น
+  const clearBoard = () => {
+    const api = apiRef.current; if (!api) return;
+    if (!window.confirm("ล้างกระดานทั้งหมด? ลบทุกอย่างออก (กู้คืนไม่ได้)")) return;
+    const all = api.getSceneElementsIncludingDeleted() as any[];
+    const cleared = all.map((e) => e.isDeleted ? e : { ...e, isDeleted: true, version: (e.version ?? 0) + 1 });
+    api.updateScene({ elements: cleared });
+    latestRef.current = { elements: cleared, appState: api.getAppState(), files: {} };
+    allowEmptyRef.current = true;
+    lastChangeSigRef.current = sceneSig(cleared);
+    if (collab && !applyingRemoteRef.current) broadcast(); // ส่งการลบให้คนอื่น
+    void doSave(true);
+  };
+
   // แปลข้อความที่เลือก (ไทย↔อังกฤษ ผ่าน Cloudflare AI) → วางกล่องใหม่ข้างๆ ของเดิม
   const [translating, setTranslating] = useState(false);
   const translateSelected = async () => {
@@ -569,6 +585,12 @@ export function CanvasSketch({
           <button onClick={() => { void translateSelected(); blurActive(); }} disabled={translating} title="แปลข้อความที่เลือก ไทย↔อังกฤษ (วางกล่องใหม่ข้างๆ)"
             className="inline-flex items-center gap-1 text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50 disabled:opacity-50">
             {translating ? "⏳ กำลังแปล..." : "🌐 แปลภาษา"}
+          </button>
+        )}
+        {editable && serverCanEdit && (
+          <button onClick={() => { clearBoard(); blurActive(); }} title="ล้างกระดานทั้งหมด (ลบทุกอย่างออก)"
+            className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-md px-2 py-0.5">
+            🗑 ล้าง
           </button>
         )}
         {collab && peers > 0 && (
