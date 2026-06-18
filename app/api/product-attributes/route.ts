@@ -17,7 +17,7 @@ export const revalidate = 0;
 
 export type AttrDef = { id: string; product_family: string | null; key: string; label: string; scope: string; input_type: string; external_table: string | null; allow_custom_value: boolean; display_order: number; relation_filter: { tags?: string[] } | null; options: { id: string; label: string }[] };
 export type AttrVal = { option_id: string | null; option_ids: string[]; text_value: string | null; number_value: number | null; boolean_value: boolean | null };
-export const LEGACY_COLS = ["materials", "lining", "zipper", "strap", "thread", "spares", "logo"] as const;
+const LEGACY_COLS = ["materials", "lining", "zipper", "strap", "thread", "spares", "logo"] as const;
 
 const str = (v: unknown) => (v == null ? "" : String(v));
 

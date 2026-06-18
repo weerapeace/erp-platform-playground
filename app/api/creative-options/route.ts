@@ -17,7 +17,7 @@ export const revalidate = 0;
 // ----- map ชนิด → ตารางจริง (Phase A) -----
 // คงรูป response เดิม { id, kind, key, label, sort_order, is_active } (key=code, label=name_th)
 // เพื่อให้ use-options / หน้า settings เดิมใช้งานต่อได้โดยไม่ต้องแก้
-export const KIND_TABLE: Record<string, string> = { task_type: "erp_task_types", platform: "erp_platforms" };
+const KIND_TABLE: Record<string, string> = { task_type: "erp_task_types", platform: "erp_platforms" };
 const KINDS = new Set(Object.keys(KIND_TABLE));
 const mapRow = (r: Record<string, unknown>, kind: string) => ({ id: r.id, kind, key: r.code, label: r.name_th, label_en: r.name_en ?? null, sort_order: r.sort_order, is_active: r.is_active });
 

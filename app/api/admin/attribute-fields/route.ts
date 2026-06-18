@@ -24,7 +24,7 @@ function typeToDb(t: FieldType, externalTable?: string | null): { input_type: st
   if (t === "lookup") return { input_type: "text", external_table: externalTable || null };
   return { input_type: t, external_table: null };
 }
-export function dbToType(input_type: string, external_table: string | null): FieldType {
+function dbToType(input_type: string, external_table: string | null): FieldType {
   if (external_table === "skus_v2") return "sku";
   if (external_table) return "lookup";
   if (input_type === "many2one") return "select";
