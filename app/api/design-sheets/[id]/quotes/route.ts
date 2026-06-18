@@ -10,11 +10,10 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
+import { QUOTE_STATUSES } from "./shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-export const QUOTE_STATUSES = ["pending", "passed", "failed"] as const;
 
 export type DesignSheetQuote = {
   id: string; sheet_id: string; round: number;

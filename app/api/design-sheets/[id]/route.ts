@@ -15,7 +15,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { isValidDsStatus } from "../route";
+import { isValidDsStatus } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
