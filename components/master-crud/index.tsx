@@ -490,6 +490,29 @@ export type MasterCRUDConfig = {
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
 
+// SWR-lite cache สำหรับ "แถวในตาราง" (client mode) — อยู่ข้ามการสลับโมดูลใน session เดียว
+// เปลี่ยนโมดูลแล้วกลับเข้ามาใหม่ → โชว์ของเดิมทันที (ไม่เห็น "กำลังโหลด" กระพริบ) แล้วแอบโหลดสดเบื้องหลัง
+// key = URL เต็ม (รวม filter) · เก็บแถวที่ enrich label แล้ว · จำกัดจำนวน key กันบวม
+const listRowCache = new Map<string, Row[]>();
+function setListCache(url: string, rows: Row[]) {
+  if (listRowCache.size > 30 && !listRowCache.has(url)) {
+    const first = listRowCache.keys().next().value;
+    if (first) listRowCache.delete(first);
+  }
+  listRowCache.set(url, rows);
+}
+function buildListUrl(
+  apiBase: string, apiPath: string, pageLimit: number | undefined,
+  baseFilter: Record<string, unknown> | undefined, extraQueryString: string,
+  urlFilter: Record<string, unknown>,
+): string {
+  const limit = pageLimit ?? 200;  // F19: ลด default 500 → 200 (กัน Worker 1102)
+  const mergedBf = { ...urlFilter, ...(baseFilter ?? {}) };
+  const bf = Object.keys(mergedBf).length > 0
+    ? `&filters=${encodeURIComponent(JSON.stringify(mergedBf))}` : "";
+  return `${apiBase}${apiPath}?limit=${limit}&include_inactive=true${bf}${extraQueryString}`;
+}
+
 // ============================================================
 // MasterCRUDPage component
 // ============================================================
@@ -677,8 +700,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     });
   }, []);
 
-  const [rows,    setRows]    = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
+  // โหลดเริ่มต้นจาก cache ถ้ามี (กันจอกระพริบ "กำลังโหลด" ตอนกลับเข้าโมดูลเดิม)
+  const initialCached = config.serverMode
+    ? undefined
+    : listRowCache.get(buildListUrl(apiBase, config.apiPath, config.pageLimit, config.baseFilter, extraQueryString, {}));
+  const [rows,    setRows]    = useState<Row[]>(initialCached ?? []);
+  const [loading, setLoading] = useState(!initialCached);
   const [error,   setError]   = useState<string | null>(null);
   const [validationRules, setValidationRules] = useState<Record<string, ValidationRule>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
@@ -899,20 +926,21 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ---- Fetch (client mode) ----
   const fetchList = useCallback(async () => {
     if (config.serverMode) { setLoading(false); return; }  // server mode ไม่โหลดทั้งก้อน
-    setLoading(true); setError(null);
+    const url = buildListUrl(apiBase, config.apiPath, config.pageLimit, config.baseFilter, extraQueryString, urlFilter);
+    // SWR-lite: ถ้าเคยโหลด url นี้แล้ว → โชว์ทันที ไม่ต้องรอ Tokyo (แล้วค่อยโหลดสดทับเบื้องหลัง)
+    const cached = listRowCache.get(url);
+    if (cached) { setRows(cached); setLoading(false); } else { setLoading(true); }
+    setError(null);
     try {
-      // F19: ลด default 500 → 200 (กัน Worker 1102) — ใช้ search หา row ที่เหลือ
-      const limit = config.pageLimit ?? 200;
-      const mergedBf = { ...urlFilter, ...(config.baseFilter ?? {}) };
-      const bf = Object.keys(mergedBf).length > 0
-        ? `&filters=${encodeURIComponent(JSON.stringify(mergedBf))}` : "";
-      const res = await apiFetch(`${apiBase}${config.apiPath}?limit=${limit}&include_inactive=true${bf}${extraQueryString}`);
+      const res = await apiFetch(url);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       const raw = (json.data ?? []) as Row[];
       await ensureRelatedMaps(raw);
-      setRows(enrichRelated(raw));
-    } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
+      const enriched = enrichRelated(raw);
+      setRows(enriched);
+      setListCache(url, enriched);
+    } catch (err) { if (!cached) setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
   }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, extraQueryString, urlFilter, enrichRelated, ensureRelatedMaps]);
 
