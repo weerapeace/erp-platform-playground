@@ -27,6 +27,8 @@ import type { Brand } from "@/app/api/brands/route";
 
 type Dept = { id: string; name: string; note?: string | null; show_note?: boolean };
 type DeptFull = { id: string; name: string; status: string | null; note: string | null; show_note: boolean; display_order: number | null };
+// สรุปค่าแรง (กลุ่ม A) — ผลิต/งานเหมา × แผน/จริง
+type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; dispatched: number; remaining: number; due_date: string | null; status: string;
@@ -34,6 +36,7 @@ type PendingMO = {
   prep_done: boolean; cut_done: boolean;
   // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
   has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; ready: boolean;
+  labor?: Labor;
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
@@ -120,7 +123,6 @@ export default function WorkBoardPage() {
   useEffect(() => { try { const v = localStorage.getItem("wb:pendingCols"); if (v) setPendingCols(Number(v) || null); } catch { /* ignore */ } }, []);
   const setPendCols = useCallback((n: number | null) => { setPendingCols(n); try { if (n) localStorage.setItem("wb:pendingCols", String(n)); else localStorage.removeItem("wb:pendingCols"); } catch { /* ignore */ } }, []);
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
-  const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // ผลรวมค่าแรงต่อแผนก
 
   const boardRef = useRef<HTMLDivElement>(null);
   const interRef = useRef<Inter>(null);
@@ -159,6 +161,8 @@ export default function WorkBoardPage() {
   const [clWO, setClWO] = useState<WorkOrder | null>(null);   // เปิดเช็กลิสต์จากใบจ่ายงาน → มีแท็บ "รับงานคืน"
   const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
   const [saveLaborBom, setSaveLaborBom] = useState(false);    // บันทึกค่าแรงกลับเข้า BOM
+  const [estLabor, setEstLabor] = useState("");               // ค่าแรงผลิตที่วางแผน (ต่อใบสั่งผลิต)
+  const [estSaving, setEstSaving] = useState(false);
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clSummary, setClSummary] = useState<MoMatSummary[]>([]);   // ตารางวัตถุดิบกลาง (สรุป)
@@ -184,7 +188,7 @@ export default function WorkBoardPage() {
     } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } catch { /* ignore */ } })(); }, []);
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ } })(); }, []);
   useEffect(() => { try {
     const r = localStorage.getItem(ZONES_KEY); if (r) setZonePos(JSON.parse(r));
     const s = localStorage.getItem(ZONESIZE_KEY); if (s) setZoneSize(JSON.parse(s));
@@ -475,12 +479,40 @@ export default function WorkBoardPage() {
       toast.success("ยกเลิกใบจ่ายงานแล้ว"); closeChecklist();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
+  // กลุ่ม A: บันทึกค่าแรงผลิตที่วางแผน (ต่อใบสั่งผลิต) → โชว์เป็น "ผลิต-แผน" บนการ์ด/หัวแผนก
+  const saveEstLabor = async () => {
+    if (!checklistMO) return;
+    setEstSaving(true);
+    try {
+      const res = await apiFetch("/api/mo/est-labor", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mo_id: checklistMO.id, est_labor_cost: estLabor.trim() === "" ? null : Number(estLabor) || 0 }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("บันทึกค่าแรงผลิต (วางแผน) แล้ว"); await load(true);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setEstSaving(false); }
+  };
+  // กลุ่ม A: กด "งานเหมาเสร็จ" → นับเป็นค่าแรงงานเหมา-จริง
+  const togglePieceDone = async (r: MoPieceRow) => {
+    if (!canEdit || !r.selected_id) return;
+    const done = r.status !== "done";
+    setClPieceRows((rs) => rs.map((x) => x.key === r.key ? { ...x, status: done ? "done" : "pending" } : x));
+    try {
+      const res = await apiFetch("/api/mo/piecework", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: r.selected_id, done }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      void load(true);
+    } catch (e) {
+      setClPieceRows((rs) => rs.map((x) => x.key === r.key ? { ...x, status: done ? "pending" : "done" } : x));
+      toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
+    }
+  };
 
   // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
   useEffect(() => {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setIssType(""); setIssSev("medium"); setIssQty("");
-    if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); return; }
+    if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); return; }
+    // ค่าแรงผลิตที่วางแผนไว้ (จาก board) — กรอก/แก้ในป๊อปอัปได้
+    setEstLabor(checklistMO.labor?.prod_plan ? String(checklistMO.labor.prod_plan) : "");
     let cancel = false; setClLoading(true);
     void (async () => {
       try {
@@ -782,10 +814,17 @@ export default function WorkBoardPage() {
                     <div className="flex items-center gap-1.5 shrink-0">
                       {z.kind === "dept" && z.dept && (() => {
                         const staff = craftsmen.filter((c) => c.department_id === z.dept!.id);
-                        const total = deptWages[z.dept!.id] ?? 0;
+                        // ยอดรวมค่าแรงในแผนก (กลุ่ม A) — รวมจากการ์ดในแผนก: ผลิต/เหมา × แผน/จริง
+                        const L = z.woCards.reduce((a, w) => { const l = w.labor; if (l) { a.pp += l.prod_plan; a.pa += l.prod_actual; a.qp += l.piece_plan; a.qa += l.piece_actual; } return a; }, { pp: 0, pa: 0, qp: 0, qa: 0 });
+                        const hasLabor = !!(L.pp || L.pa || L.qp || L.qa);
                         return <>
                           <StaffAvatars staff={staff} />
-                          {total > 0 && <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 rounded-full px-1.5 py-0.5" title="ค่าแรงรวม (เงินเดือนพนักงานในแผนก)">💰 {fmt(total)}</span>}
+                          {hasLabor && (
+                            <div className="flex flex-col items-end leading-tight text-[9px] tabular-nums" title="ยอดรวมค่าแรงในแผนก — แผน/จริง (จริง = สีเขียว)">
+                              <span className="text-slate-500">ผลิต ฿{fmt(L.pp)}/<span className="text-emerald-600 font-medium">{fmt(L.pa)}</span></span>
+                              <span className="text-slate-500">เหมา ฿{fmt(L.qp)}/<span className="text-emerald-600 font-medium">{fmt(L.qa)}</span></span>
+                            </div>
+                          )}
                         </>;
                       })()}
                       <span className="text-xs font-medium text-slate-500 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
@@ -980,6 +1019,27 @@ export default function WorkBoardPage() {
                       {tabBtn("issue", `⚠️ ปัญหา${issN ? ` ${issN}` : ""}`)}
                       {tabBtn("hist", "🕑 ประวัติ")}
                     </div>
+                    {/* แถบค่าแรงใบนี้ (กลุ่ม A) — สรุป แผน/จริง + กรอกค่าแรงผลิตที่วางแผน */}
+                    {clTab !== "recv" && (
+                      <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 px-3 py-2 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-[11px] flex-wrap">
+                          <span className="font-medium text-slate-600">💰 ค่าแรงใบนี้ — แผน/<span className="text-emerald-600">จริง</span></span>
+                          <span className="text-slate-500 tabular-nums">
+                            ผลิต ฿{fmt(checklistMO.labor?.prod_plan ?? 0)}/<span className="text-emerald-600">฿{fmt(checklistMO.labor?.prod_actual ?? 0)}</span>
+                            {" · "}เหมา ฿{fmt(checklistMO.labor?.piece_plan ?? 0)}/<span className="text-emerald-600">฿{fmt(checklistMO.labor?.piece_actual ?? 0)}</span>
+                          </span>
+                        </div>
+                        {canEdit && (
+                          <div className="flex items-center gap-2">
+                            <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต (วางแผน)</label>
+                            <input type="number" min={0} step="any" value={estLabor} onChange={(e) => setEstLabor(e.target.value)} placeholder="—"
+                              className="w-28 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                            <button onClick={() => void saveEstLabor()} disabled={estSaving} className="h-8 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">{estSaving ? "บันทึก…" : "💾 บันทึก"}</button>
+                            <span className="text-[10px] text-slate-400 ml-auto">เหมา-จริง = กด “เสร็จ” ในแท็บ 🧵</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {clTab === "recv" && clWO ? (
                       <div className="space-y-3">
                         <div className="grid grid-cols-[6rem_1fr] gap-y-1.5 text-xs">
@@ -1096,18 +1156,30 @@ export default function WorkBoardPage() {
                             <span className="text-[11px] font-medium text-slate-500">เลือกงานเหมาที่จะจ่าย</span>
                             {canEdit && <button onClick={() => setAddPieceOpen(true)} className="text-[11px] text-blue-600 hover:underline">➕ เพิ่มงานเข้า BOM</button>}
                           </div>
-                          <div className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span></div>
+                          <div className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem] gap-2 px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[11px] font-medium text-slate-500"><span className="text-center">จ่าย</span><span>งาน</span><span className="text-right">จำนวนรวม</span><span className="text-center">เสร็จ</span></div>
                           <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-                            {clPieceRows.map((r) => (
-                              <label key={r.key} className="grid grid-cols-[2rem_1fr_5rem] gap-2 px-3 py-2 items-center cursor-pointer hover:bg-slate-50/60">
-                                <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" /></span>
+                            {clPieceRows.map((r) => {
+                              const done = r.status === "done";
+                              return (
+                              <div key={r.key} className="grid grid-cols-[2rem_1fr_4.5rem_3.6rem] gap-2 px-3 py-2 items-center hover:bg-slate-50/60">
+                                <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" title="เลือกจ่ายงานนี้" /></span>
                                 <div className="min-w-0">
                                   <p className="text-sm text-slate-800 truncate">{r.job_name} {r.is_detail && <span className="text-[10px] text-amber-600">★ละเอียด</span>}{!r.in_bom && <span className="text-[10px] text-slate-400">(เพิ่มเอง)</span>}</p>
-                                  <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น` : ""}</p>
+                                  <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น · รวม ฿${fmt(r.total_qty * r.rate)}` : ""}</p>
                                 </div>
                                 <span className="text-right text-sm font-semibold text-slate-700">{fmt(r.total_qty)}</span>
-                              </label>
-                            ))}
+                                <span className="flex justify-center">
+                                  {r.selected_id ? (
+                                    <button type="button" disabled={!canEdit} onClick={() => void togglePieceDone(r)}
+                                      className={`text-[10px] px-2 py-1 rounded-full border whitespace-nowrap ${done ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"}`}
+                                      title={done ? "งานเหมาเสร็จแล้ว — กดเพื่อยกเลิก" : "กดเมื่อทำงานเหมานี้เสร็จ (นับเป็นค่าแรงจริง)"}>
+                                      {done ? "✓ เสร็จ" : "ทำเสร็จ"}
+                                    </button>
+                                  ) : <span className="text-[10px] text-slate-300">—</span>}
+                                </span>
+                              </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )
@@ -1350,6 +1422,21 @@ function HistTab({ rows }: { rows: DispatchHistRow[] | null }) {
   );
 }
 
+// ---- ค่าแรงย่อบนการ์ด (กลุ่ม A): ผลิต/เหมา = แผน/จริง (จริงเป็นสีเขียว) ----
+function LaborMini({ labor }: { labor?: Labor }) {
+  if (!labor) return null;
+  if (!(labor.prod_plan || labor.prod_actual || labor.piece_plan || labor.piece_actual)) return null;
+  const cell = (plan: number, actual: number) => (
+    <span className="tabular-nums text-slate-600">฿{fmt(plan)}<span className="text-slate-300">/</span><span className="text-emerald-600 font-medium">฿{fmt(actual)}</span></span>
+  );
+  return (
+    <div className="mt-1 pt-1 border-t border-slate-100 text-[9px] leading-tight space-y-0.5" title="ค่าแรง แผน / จริง (จริง = สีเขียว)">
+      <div className="flex items-center justify-between"><span className="text-slate-400">ผลิต</span>{cell(labor.prod_plan, labor.prod_actual)}</div>
+      <div className="flex items-center justify-between"><span className="text-slate-400">เหมา</span>{cell(labor.piece_plan, labor.piece_actual)}</div>
+    </div>
+  );
+}
+
 // ---- เนื้อการ์ดใบสั่งผลิต (รอจ่าย) — กดเปิดเช็กลิสต์ · SKU หนา + วันที่ + เงาแบรนด์ ----
 function PendingBody({ mo }: { mo: PendingMO }) {
   const ready = mo.ready;
@@ -1374,6 +1461,7 @@ function PendingBody({ mo }: { mo: PendingMO }) {
         <span className="text-rose-600 font-semibold">เหลือ {fmt(mo.remaining)}/{fmt(mo.qty)}</span>
         <span className={daysLeftClass(mo.due_date)}>⏱ {daysLeftText(mo.due_date)}</span>
       </div>
+      <LaborMini labor={mo.labor} />
     </div>
   );
 }
@@ -1407,6 +1495,7 @@ function WOBody({ w }: { w: WorkOrder }) {
         <span className="px-2.5 py-1 rounded-lg text-sm font-bold text-white shadow-sm tabular-nums" style={{ background: border }}>{fmt(w.qty)} ชิ้น{w.received_qty > 0 && w.status !== "done" ? ` · รับ ${fmt(w.received_qty)}` : ""}</span>
         <span className={`text-[10px] ${daysLeftClass(w.due_date)}`}>⏱ {daysLeftText(w.due_date)}</span>
       </div>
+      <LaborMini labor={w.labor} />
       <div className="text-center font-mono text-[8px] text-slate-300 mt-1">{w.wo_no}</div>
     </div>
   );

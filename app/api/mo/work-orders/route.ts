@@ -25,6 +25,7 @@ export type WorkOrder = {
   labor_cost?: number | null;
   // เสริมจาก board API
   image_url?: string | null; brand?: string | null; brand_color?: string | null; mo_id?: string | null;
+  labor?: { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
