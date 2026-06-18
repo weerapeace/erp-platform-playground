@@ -11,7 +11,7 @@ import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { RecordFormModal } from "@/components/record-form-modal";
+import { RelationPeekModal } from "@/components/relation-peek";
 import { ComponentPicker } from "@/app/master/bom/line-editor";
 import type { ProductSpec, SpecField } from "@/app/api/product-spec/route";
 import type { AttrDef, AttrVal } from "@/app/api/product-attributes/route";
@@ -37,7 +37,8 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
-  const [skuEditOpen, setSkuEditOpen] = useState(false);   // popup แก้ Parent SKU/SKU ตรงนั้น
+  const [skuMenuOpen, setSkuMenuOpen] = useState(false);   // เมนูเลือกว่าจะแก้ SKU หรือ Parent SKU
+  const [skuPeek, setSkuPeek] = useState<{ moduleKey: string; recordId: string } | null>(null);   // popup แก้แบบเต็ม (RelationPeekModal)
   const [lightbox, setLightbox] = useState(false);   // คลิกรูป → เด้งรูปใหญ่
   const [imgErr, setImgErr] = useState(false);        // รูปหาย/โหลดไม่ได้ → โชว์ placeholder
   useEffect(() => { setImgErr(false); }, [spec?.image_url, spec?.parent?.image_url]);
@@ -149,7 +150,20 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
           <span>📋 รายละเอียดสั่งงาน</span><span className="text-slate-400 text-xs">{open ? "▾" : "▸"}</span>
         </button>
         <div className="flex items-center gap-1.5 shrink-0">
-          {sku && (spec?.parent?.id || spec?.sku_id) && <button type="button" onClick={(e) => { e.stopPropagation(); setSkuEditOpen(true); }} title={spec?.parent?.id ? "แก้ Parent SKU (popup)" : "แก้ SKU (popup)"} className="h-7 px-2 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ SKU</button>}
+          {sku && (spec?.parent?.id || spec?.sku_id) && (
+            <div className="relative">
+              <button type="button" onClick={(e) => { e.stopPropagation(); setSkuMenuOpen((o) => !o); }} title="แก้ SKU / Parent SKU" className="h-7 px-2 inline-flex items-center gap-1 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ SKU <span className="text-[9px] text-slate-400">▾</span></button>
+              {skuMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setSkuMenuOpen(false); }} />
+                  <div className="absolute right-0 top-8 z-50 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[180px]" onClick={(e) => e.stopPropagation()}>
+                    {spec?.sku_id && <button type="button" onClick={() => { setSkuPeek({ moduleKey: "skus-v2", recordId: spec.sku_id! }); setSkuMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">✎ แก้ SKU <span className="text-slate-400">({sku})</span></button>}
+                    {spec?.parent?.id && <button type="button" onClick={() => { setSkuPeek({ moduleKey: "parent-skus-v2", recordId: spec.parent!.id! }); setSkuMenuOpen(false); }} className="w-full text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50">✎ แก้ Parent SKU <span className="text-slate-400">({spec.parent.code})</span></button>}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {sku && <a href={`/master/bom?search=${encodeURIComponent(sku)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title="เปิดหน้าแก้ BOM (สูตร)" className="h-7 px-2 inline-flex items-center text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ BOM</a>}
           {editable && <button type="button" onClick={() => setEditOpen(true)} title="ลงรายละเอียดสินค้า" className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-600 hover:bg-slate-100">✎ ละเอียด</button>}
         </div>
@@ -225,13 +239,12 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
         </div>
       )}
       {editOpen && <WorkInstructionEditor sku={sku} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); setEditData(null); loadSpec(); }} />}
-      {skuEditOpen && (spec?.parent?.id || spec?.sku_id) && (
-        <RecordFormModal
-          moduleKey={spec?.parent?.id ? "parent-skus-v2" : "skus-v2"}
-          editId={(spec?.parent?.id ?? spec?.sku_id) as string}
-          title={spec?.parent?.id ? "แก้ Parent SKU" : "แก้ SKU"}
-          onClose={() => setSkuEditOpen(false)}
-          onSaved={() => { setSkuEditOpen(false); setEditData(null); loadSpec(); }}
+      {skuPeek && (
+        <RelationPeekModal
+          moduleKey={skuPeek.moduleKey}
+          recordId={skuPeek.recordId}
+          onClose={() => setSkuPeek(null)}
+          onChanged={() => { setEditData(null); loadSpec(); }}
         />
       )}
     </div>
