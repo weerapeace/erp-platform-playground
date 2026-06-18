@@ -267,8 +267,12 @@ export function CanvasSketch({
           finally { clearTimeout(to); }
           const j = await res.json(); if (j.error || !j.r2_key) throw new Error(j.error || "upload failed");
           const r2url = `/api/r2-image?key=${encodeURIComponent(j.r2_key)}`;
-          apiRef.current?.addFiles([{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }]);
-          broadcastFiles([{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }]); // ให้คนอื่นเรนเดอร์รูปได้
+          const fileObj = { id: fid, dataURL: r2url, mimeType: type, created: Date.now() };
+          apiRef.current?.addFiles([fileObj]); // ให้ Excalidraw เรนเดอร์จากลิงก์ R2
+          // สำคัญ: เขียนลิงก์ลง snapshot ที่ใช้ "เซฟ" โดยตรง — เดิมพึ่ง addFiles→onChange ซึ่งไม่อัปเดต snap.files
+          // → เซฟ base64 ทับทุกครั้ง + ลูปอัปซ้ำไม่จบ. แก้ให้เซฟลิงก์ R2 จริง (scene เล็กลง โหลด/เซฟไว)
+          if (latestRef.current) latestRef.current = { ...latestRef.current, files: { ...(latestRef.current.files ?? {}), [fid]: fileObj } };
+          broadcastFiles([fileObj]); // ให้คนอื่นเรนเดอร์รูปได้
         } catch (e) { console.error("[canvas] hoist image failed:", e); hoistedRef.current.delete(fid); } // ล้มเหลว → คงเป็น base64 (ยังใช้ได้ในเครื่อง)
         finally { uploadingRef.current = Math.max(0, uploadingRef.current - 1); if (uploadingRef.current === 0 && editable && canEditRef.current) queueSave(); }
       })();
