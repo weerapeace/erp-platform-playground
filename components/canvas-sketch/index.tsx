@@ -19,47 +19,13 @@ import { useState, useEffect, useRef, useCallback, type MutableRefObject } from 
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
 import { apiFetch } from "@/lib/api";
-import { supabaseBrowser } from "@/lib/supabase-browser";
+import { useCanvasRealtime } from "./use-canvas-realtime";
+import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl } from "./utils";
 
 const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).Excalidraw, {
   ssr: false,
   loading: () => <div className="h-full flex items-center justify-center text-slate-400 text-sm">กำลังโหลดกระดาน...</div>,
 });
-
-type Scene = { elements?: unknown[]; files?: Record<string, unknown> } | null;
-type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
-
-const AUTOSAVE_MS = 1000;       // หยุดวาดกี่ ms แล้วค่อยบันทึก (เซฟไวขึ้น)
-const MAX_AUTOSAVE_MS = 8000;   // เซฟกันลืม: แม้แก้ต่อเนื่องไม่หยุด ก็เซฟทุก ~8 วิ
-const BROADCAST_MS = 200;       // realtime: ส่งให้คนอื่นทุก ~200ms (throttle)
-const BC_MAX_BYTES = 200_000;   // กันส่งก้อนใหญ่เกินลิมิต Supabase Broadcast (ของใหญ่ปล่อยให้ save+refresh sync)
-
-// ลายเซ็นกระดานแบบเบา (count + version รวม + id) — ใช้เทียบว่าเปลี่ยนจริงไหม กัน loop realtime
-function sceneSig(els: { id?: string; version?: number }[]): string {
-  let h = els.length | 0;
-  for (const e of els) h = (Math.imul(h, 31) + (e.version ?? 0) + (e.id ? e.id.charCodeAt(0) + e.id.length : 0)) | 0;
-  return `${els.length}:${h}`;
-}
-
-// รวมชิ้นงาน 2 ฝั่งต่อ id — เอาตัว version ใหม่กว่า (รองรับลบด้วย isDeleted) · เสมอกัน = เก็บฝั่ง a (ของเรา)
-function mergeById(a: any[], b: any[]): any[] {
-  const map = new Map<string, any>();
-  for (const e of a) if (e?.id) map.set(e.id, e);
-  for (const e of b) { if (!e?.id) continue; const cur = map.get(e.id); if (!cur || (e.version ?? 0) > (cur.version ?? 0)) map.set(e.id, e); }
-  return [...map.values()];
-}
-
-// ย่อรูป (จาก dataURL base64) ให้ด้านยาวสุด ≤ max px ก่อนอัป R2 — กันไฟล์ใหญ่เกินลิมิต + กระดานเบา (PNG คงโปร่งใส)
-async function resizeDataUrl(dataURL: string, mime: string, max = 1600): Promise<{ blob: Blob; type: string }> {
-  const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataURL; });
-  let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-  if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
-  const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
-  canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
-  const type = mime === "image/png" ? "image/png" : "image/jpeg";
-  const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b as Blob), type, 0.85));
-  return { blob, type };
-}
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
@@ -94,15 +60,9 @@ export function CanvasSketch({
   const [savedAt, setSavedAt] = useState<string | null>(null); // เวลาเซฟล่าสุด (โชว์ให้รู้ว่าบันทึกแล้วทุกครั้ง)
   const [lastMerged, setLastMerged] = useState(false); // เซฟล่าสุดมีการรวมงานกับคนอื่นไหม
   const [selFont, setSelFont] = useState<number | null>(null); // ขนาด font ของ text ที่เลือก (null = ไม่ได้เลือก text)
-  const [peers, setPeers] = useState(0); // realtime: จำนวนคนอื่นในห้อง
   const [serverCanEdit, setServerCanEdit] = useState(true); // server บอกว่าผู้ใช้มีสิทธิ์แก้ไหม (viewer = false)
   const canEditRef = useRef(true);
 
-  const channelRef = useRef<ReturnType<typeof supabaseBrowser.channel> | null>(null); // Supabase Realtime channel
-  const applyingRemoteRef = useRef(false);   // กันส่งซ้ำตอนเอาของคนอื่นมาวาง
-  const bcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSigRef = useRef<string>("");     // ลายเซ็นกระดานล่าสุดที่ส่ง/รับ — กัน loop ส่งวนไม่จบ
-  const lastVerRef = useRef<Map<string, number>>(new Map()); // version ล่าสุดต่อ element ที่ส่ง/รับ — ส่งเฉพาะที่เปลี่ยน (delta)
   const lastChangeSigRef = useRef<string>(""); // ลายเซ็นล่าสุดที่ทำให้ "save/ส่ง" — กัน onChange ที่ไม่เปลี่ยนชิ้นงาน (เลือก/เลื่อนจอ) มา trigger รัวๆ
 
   const apiRef     = useRef<any>(null);
@@ -124,6 +84,11 @@ export function CanvasSketch({
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
   const markDirty  = (d: boolean) => { dirtyRef.current = d; dirtyCbRef.current?.(d); };
+
+  // ชั้น realtime (แชร์สดหลายคน) — แยกเป็น hook: broadcast/รับของคนอื่น/นับคนออนไลน์ ผ่าน Supabase Broadcast
+  const { peers, broadcast, broadcastFiles, applyingRemoteRef } = useCanvasRealtime({
+    collab, editable, ready: scene !== "loading", entityType, entityId, apiRef,
+  });
 
   useEffect(() => {
     let alive = true;
@@ -269,49 +234,6 @@ export function CanvasSketch({
     if (!maxTimerRef.current) maxTimerRef.current = setTimeout(() => void doSave(), MAX_AUTOSAVE_MS);
   }, [doSave]);
 
-  // realtime: ส่งเฉพาะ "ชิ้นที่เปลี่ยน" (delta) ให้คนอื่นในห้อง (throttle ~200ms) ผ่าน Supabase Broadcast
-  const broadcast = useCallback(() => {
-    if (!collab) return;
-    if (bcTimerRef.current) return; // มีคิวส่งอยู่แล้ว
-    bcTimerRef.current = setTimeout(() => {
-      bcTimerRef.current = null;
-      const a = apiRef.current; const ch = channelRef.current;
-      if (!a || !ch) return;
-      const els = a.getSceneElementsIncludingDeleted() as any[];
-      const sig = sceneSig(els);
-      if (sig === lastSigRef.current) return; // ไม่เปลี่ยนจากที่ส่ง/รับล่าสุด → ไม่ส่ง (กัน loop)
-      lastSigRef.current = sig;
-      const changed = els.filter((e) => (e.version ?? 0) > (lastVerRef.current.get(e.id) ?? -1)); // เฉพาะที่เปลี่ยน
-      if (!changed.length) return;
-      for (const e of changed) lastVerRef.current.set(e.id, e.version ?? 0);
-      const payload = { els: changed };
-      try {
-        if (JSON.stringify(payload).length > BC_MAX_BYTES) return; // ใหญ่ไป → ข้าม (save+refresh จะ sync)
-        void ch.send({ type: "broadcast", event: "scene", payload });
-      } catch { /* noop */ }
-    }, BROADCAST_MS);
-  }, [collab]);
-
-  // realtime: เอาของคนอื่นมา merge (เลือกตัว version ใหม่กว่าต่อ id — รองรับลบด้วย isDeleted)
-  const applyRemote = useCallback((remoteEls: any[]) => {
-    const api = apiRef.current; if (!api || !Array.isArray(remoteEls)) return;
-    const local = api.getSceneElementsIncludingDeleted() as any[];
-    const byId = new Map<string, any>(local.map((e) => [e.id, e]));
-    let changed = false;
-    for (const r of remoteEls) {
-      if (!r?.id) continue;
-      lastVerRef.current.set(r.id, Math.max(lastVerRef.current.get(r.id) ?? -1, r.version ?? 0)); // จำว่ารับแล้ว → ไม่ส่งกลับ
-      const cur = byId.get(r.id);
-      if (!cur || (r.version ?? 0) > (cur.version ?? 0)) { byId.set(r.id, r); changed = true; }
-    }
-    if (!changed) return;
-    const merged = [...byId.values()];
-    lastSigRef.current = sceneSig(merged); // จำลายเซ็นของที่เพิ่งรับ → onChange ที่ตามมาจะไม่ส่งซ้ำ (ตัด loop)
-    applyingRemoteRef.current = true;
-    try { api.updateScene({ elements: merged }); }
-    finally { setTimeout(() => { applyingRemoteRef.current = false; }, 0); }
-  }, []);
-
   // ย้ายรูป base64 ที่เพิ่งแปะ → เก็บเป็นไฟล์บน R2 แล้วแทน dataURL ด้วยลิงก์ (scene เล็ก โหลดไว โชว์ข้ามเครื่องได้)
   const hoistImages = useCallback((files: Record<string, any> | undefined) => {
     if (!apiRef.current || !files) return;
@@ -332,12 +254,12 @@ export function CanvasSketch({
           const j = await res.json(); if (j.error || !j.r2_key) throw new Error(j.error || "upload failed");
           const r2url = `/api/r2-image?key=${encodeURIComponent(j.r2_key)}`;
           apiRef.current?.addFiles([{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }]);
-          try { channelRef.current?.send({ type: "broadcast", event: "files", payload: { files: [{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }] } }); } catch { /* noop */ }
+          broadcastFiles([{ id: fid, dataURL: r2url, mimeType: type, created: Date.now() }]); // ให้คนอื่นเรนเดอร์รูปได้
         } catch (e) { console.error("[canvas] hoist image failed:", e); hoistedRef.current.delete(fid); } // ล้มเหลว → คงเป็น base64 (ยังใช้ได้ในเครื่อง)
         finally { uploadingRef.current = Math.max(0, uploadingRef.current - 1); if (uploadingRef.current === 0 && editable && canEditRef.current) queueSave(); }
       })();
     }
-  }, [editable, queueSave]);
+  }, [editable, queueSave, broadcastFiles]);
 
   // ให้ภายนอกถือ handle: เช็คมีแก้ค้าง / สั่งบันทึก / สั่งทิ้ง (ใช้ตอนถามก่อนปิด popup)
   useEffect(() => {
@@ -459,35 +381,6 @@ export function CanvasSketch({
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [editable, doSave]);
-
-  // realtime: ต่อห้อง Supabase Broadcast (browser ↔ Supabase ตรงๆ ไม่ผ่าน Cloudflare worker → ไม่กิน CPU)
-  // ห้องแบบ private — เฉพาะผู้ใช้ที่ล็อกอิน (RLS realtime.messages policy canvas:* / authenticated)
-  useEffect(() => {
-    if (!collab || !editable || scene === "loading") return;
-    lastVerRef.current = new Map();
-    const room = `canvas:${entityType}:${entityId}`;
-    const myKey = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    let channel: ReturnType<typeof supabaseBrowser.channel> | null = null;
-    let cancelled = false;
-    void (async () => {
-      // ส่ง token ของผู้ใช้ให้ realtime ก่อนเข้าห้อง private (กัน race ตอนเพิ่งโหลด session จาก localStorage)
-      try { const { data } = await supabaseBrowser.auth.getSession(); const tok = data.session?.access_token; if (tok) await supabaseBrowser.realtime.setAuth(tok); } catch { /* ไม่มี token ก็ลองต่อ — ถ้าไม่ผ่านจะใช้กระดานแบบเดี่ยวได้ปกติ */ }
-      if (cancelled) return;
-      const ch = supabaseBrowser.channel(room, { config: { private: true, broadcast: { self: false }, presence: { key: myKey } } });
-      ch
-        .on("broadcast", { event: "scene" }, (msg: { payload?: { els?: any[] } }) => { applyRemote(msg?.payload?.els ?? []); })
-        .on("broadcast", { event: "files" }, (msg: { payload?: { files?: any[] } }) => { const fs = msg?.payload?.files; if (fs?.length && apiRef.current) { try { apiRef.current.addFiles(fs); } catch { /* noop */ } } })
-        .on("presence", { event: "sync" }, () => { const n = Object.keys(ch.presenceState()).length; setPeers(Math.max(0, n - 1)); })
-        .subscribe((status) => { if (status === "SUBSCRIBED") void ch.track({ at: Date.now() }); });
-      channel = ch;
-      channelRef.current = ch;
-    })();
-    return () => {
-      cancelled = true;
-      if (channel) { try { void supabaseBrowser.removeChannel(channel); } catch { /* noop */ } }
-      channelRef.current = null; setPeers(0);
-    };
-  }, [collab, editable, scene, entityType, entityId, applyRemote]);
 
   // ล้อเมาส์ = ซูมเข้าหาตำแหน่งเมาส์ (shift+ล้อ = เลื่อนแนวนอนตามปกติ) + ดับเบิลคลิกการ์ด → เปิด drawer
   const wrapRef = useRef<HTMLDivElement>(null);
