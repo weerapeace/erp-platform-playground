@@ -158,6 +158,10 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       <button onClick={() => setMode("mo")} className={`h-8 px-3 border-l border-slate-200 ${mode === "mo" ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>ตามใบสั่งผลิต</button>
     </div>
   );
+  const printBtn = (
+    <a href="/print/purchase-needs" target="_blank" rel="noreferrer" title="พิมพ์รายการ (มีช่องเช็ค ซื้อแล้ว/เตรียมแล้ว)"
+      className="h-8 px-3 inline-flex items-center text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨️ พิมพ์</a>
+  );
 
   return (
     <>
@@ -179,6 +183,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
         noMatchText={(q) => `ไม่พบวัตถุดิบที่ตรงกับ “${q}”`}
         actions={<div className="flex items-center gap-2">
           {modeToggle}
+          {printBtn}
           {canEdit && rows.length > 0 && (
             <button onClick={() => setConfirmOpen(true)} disabled={saving || sel.size === 0}
               className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">{`🛒 สร้างใบขอซื้อ (${sel.size})`}</button>
@@ -190,7 +195,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       <div className="max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
         <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
           <h3 className="text-sm font-semibold text-slate-700">📦 ต้องขอซื้อ/เตรียม <span className="text-slate-400">({moGroups.length} ใบสั่งผลิต)</span></h3>
-          {modeToggle}
+          <div className="flex items-center gap-2">{modeToggle}{printBtn}</div>
         </div>
         {moGroups.length === 0 ? (
           <div className="text-center py-16 text-slate-300">ไม่มีวัตถุดิบที่ต้องขอซื้อ/เตรียม 🎉</div>
