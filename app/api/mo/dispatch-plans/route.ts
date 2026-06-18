@@ -13,7 +13,7 @@ import { writeAudit } from "@/lib/audit";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type DispatchPlan = { id: string; name: string; note: string | null; status: string; applied_at: string | null; sort_order: number | null; created_at: string; line_count?: number };
+export type DispatchPlan = { id: string; name: string; note: string | null; status: string; applied_at: string | null; sort_order: number | null; created_at: string; start_date: string | null; end_date: string | null; line_count?: number };
 export type DispatchPlanLine = {
   id: string; plan_id: string; mo_no: string | null; mo_id: string | null;
   product_sku: string | null; product_name: string | null; qty: number;
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   const { data: plans, error } = await admin.from("mo_dispatch_plans")
-    .select("id, name, note, status, applied_at, sort_order, created_at")
+    .select("id, name, note, status, applied_at, sort_order, created_at, start_date, end_date")
     .eq("is_active", true)
     .order("sort_order", { ascending: true, nullsFirst: false }).order("created_at", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("mo_dispatch_plans")
     .insert({ name, note: (b.note ?? "")?.toString().trim() || null, status: "draft", created_by: user?.id ?? null })
-    .select("id, name, note, status, applied_at, sort_order, created_at").single();
+    .select("id, name, note, status, applied_at, sort_order, created_at, start_date, end_date").single();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "create", entityType: "mo_dispatch_plan", entityId: (data as { id: string }).id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name } });
   return NextResponse.json({ data: { ...(data as DispatchPlan), line_count: 0 }, error: null });

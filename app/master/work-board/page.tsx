@@ -839,12 +839,13 @@ export default function WorkBoardPage() {
           const p = plans.find((x) => x.id === activePlan);
           if (!p) return <div className="text-center py-20 text-slate-400 text-sm">ไม่พบแผน</div>;
           return <DispatchPlanBoard
-            planId={p.id} planName={p.name} planStatus={p.status}
+            planId={p.id} planName={p.name} planStatus={p.status} startDate={p.start_date} endDate={p.end_date}
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut")}
             pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker}
             canEdit={canDispatch}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
+            onDates={(start_date, end_date) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, start_date, end_date } : x))}
             onDeleted={() => { setActivePlan("real"); void loadPlans(); }}
           />;
         })()

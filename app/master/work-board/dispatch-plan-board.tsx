@@ -21,25 +21,28 @@ type DefectMap = Record<string, { count: number } | undefined>;
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 
 export function DispatchPlanBoard({
-  planId, planName, planStatus, departments, pending, realWOs, craftsmen, defectByWorker, canEdit,
-  onApplied, onRenamed, onDeleted,
+  planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker, canEdit,
+  onApplied, onRenamed, onDates, onDeleted,
 }: {
-  planId: string; planName: string; planStatus: string;
+  planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
   defectByWorker: DefectMap; canEdit: boolean;
-  onApplied: () => void; onRenamed: (name: string) => void; onDeleted: () => void;
+  onApplied: () => void; onRenamed: (name: string) => void; onDates: (start: string | null, end: string | null) => void; onDeleted: () => void;
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
   const [name, setName] = useState(planName);
+  const [sDate, setSDate] = useState(startDate ?? "");
+  const [eDate, setEDate] = useState(endDate ?? "");
   const [applying, setApplying] = useState(false);
   const [confirmApply, setConfirmApply] = useState(false);
   const applied = planStatus === "applied";
   const editable = canEdit && !applied;
 
   useEffect(() => { setName(planName); }, [planName]);
+  useEffect(() => { setSDate(startDate ?? ""); setEDate(endDate ?? ""); }, [startDate, endDate]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +102,11 @@ export function DispatchPlanBoard({
     try { await apiFetch(`/api/mo/dispatch-plans/${planId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "rename", name: nm }) }); onRenamed(nm); }
     catch { /* ignore */ }
   };
+  const saveDates = async () => {
+    const s = sDate || null, e = eDate || null;
+    try { await apiFetch(`/api/mo/dispatch-plans/${planId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "rename", start_date: s, end_date: e }) }); onDates(s, e); }
+    catch { /* ignore */ }
+  };
   const doApply = async () => {
     setApplying(true);
     try { const r = await apiFetch(`/api/mo/dispatch-plans/${planId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "apply" }) });
@@ -121,6 +129,12 @@ export function DispatchPlanBoard({
         <span className="text-[11px] text-slate-400">ชื่อแผน</span>
         <input value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName} disabled={!editable}
           className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+        <span className="text-[11px] text-slate-400 ml-1">เริ่ม</span>
+        <input type="date" value={sDate} onChange={(e) => setSDate(e.target.value)} onBlur={saveDates} disabled={!editable}
+          className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+        <span className="text-[11px] text-slate-400">เสร็จ</span>
+        <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} onBlur={saveDates} disabled={!editable}
+          className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
         {applied && <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">ดันเป็นของจริงแล้ว</span>}
         <div className="flex-1" />
         {editable && <button onClick={() => setConfirmApply(true)} disabled={lines.length === 0}

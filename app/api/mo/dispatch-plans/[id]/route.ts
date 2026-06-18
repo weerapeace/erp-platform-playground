@@ -31,7 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   const admin = supabaseAdmin();
   const [{ data: plan }, { data: lines }] = await Promise.all([
-    admin.from("mo_dispatch_plans").select("id, name, note, status, applied_at, sort_order, created_at").eq("id", id).maybeSingle(),
+    admin.from("mo_dispatch_plans").select("id, name, note, status, applied_at, sort_order, created_at, start_date, end_date").eq("id", id).maybeSingle(),
     admin.from("mo_dispatch_plan_lines").select("*").eq("plan_id", id).order("created_at", { ascending: true }),
   ]);
   if (!plan) return NextResponse.json({ error: "ไม่พบแผน" }, { status: 404 });
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 type PatchBody = {
   action?: string;
-  name?: string; note?: string;
+  name?: string; note?: string; start_date?: string | null; end_date?: string | null;
   line?: Partial<DispatchPlanLine>;
   lineId?: string; qty?: number; assignee_id?: string | null; assignee_name?: string | null;
 };
@@ -52,7 +52,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let b: PatchBody; try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const admin = supabaseAdmin();
 
-  const { data: plan } = await admin.from("mo_dispatch_plans").select("id, status").eq("id", id).maybeSingle();
+  const { data: plan } = await admin.from("mo_dispatch_plans").select("id, status, end_date").eq("id", id).maybeSingle();
   if (!plan) return NextResponse.json({ error: "ไม่พบแผน" }, { status: 404 });
   if ((plan as { status: string }).status === "applied" && b.action !== "rename")
     return NextResponse.json({ error: "แผนนี้ดันเป็นของจริงแล้ว แก้ไม่ได้" }, { status: 400 });
@@ -61,6 +61,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (b.name !== undefined) patch.name = (b.name ?? "").trim() || "แผนไม่มีชื่อ";
     if (b.note !== undefined) patch.note = (b.note ?? "")?.toString().trim() || null;
+    if (b.start_date !== undefined) patch.start_date = b.start_date || null;
+    if (b.end_date !== undefined) patch.end_date = b.end_date || null;
     const { error } = await admin.from("mo_dispatch_plans").update(patch).eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ data: { ok: true }, error: null });
@@ -101,6 +103,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const rows = (lines ?? []) as DispatchPlanLine[];
     const valid = rows.filter((l) => l.mo_no && num(l.qty) > 0);
     if (valid.length === 0) return NextResponse.json({ error: "แผนนี้ยังไม่มีรายการที่จ่ายได้" }, { status: 400 });
+    const planDue = (plan as { end_date?: string | null }).end_date || null;   // กำหนดเสร็จของแผน → ใส่เป็นกำหนดเสร็จของใบจ่ายงาน
     let created = 0;
     for (const l of valid) {
       const woNo = await nextWoNo(admin);
@@ -110,7 +113,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         assignee_id: l.assignee_id ?? null, assignee_name: l.assignee_name ?? l.department_name ?? null,
         department_id: l.department_id ?? null, department_name: l.department_name ?? null,
         qty: num(l.qty), uom: "ชิ้น", received_qty: 0,
-        dispatch_date: new Date().toISOString().slice(0, 10), status: "dispatched",
+        dispatch_date: new Date().toISOString().slice(0, 10), due_date: planDue, status: "dispatched",
         note: `จากแผนจ่ายงาน`, created_by: user?.id ?? null, is_active: true,
       });
       if (!error) created += 1;
