@@ -41,6 +41,14 @@ function sceneSig(els: { id?: string; version?: number }[]): string {
   return `${els.length}:${h}`;
 }
 
+// รวมชิ้นงาน 2 ฝั่งต่อ id — เอาตัว version ใหม่กว่า (รองรับลบด้วย isDeleted) · เสมอกัน = เก็บฝั่ง a (ของเรา)
+function mergeById(a: any[], b: any[]): any[] {
+  const map = new Map<string, any>();
+  for (const e of a) if (e?.id) map.set(e.id, e);
+  for (const e of b) { if (!e?.id) continue; const cur = map.get(e.id); if (!cur || (e.version ?? 0) > (cur.version ?? 0)) map.set(e.id, e); }
+  return [...map.values()];
+}
+
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
 export type CanvasSketchControls = {
@@ -72,6 +80,7 @@ export function CanvasSketch({
   const [scene, setScene] = useState<Scene | "loading">("loading");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedAt, setSavedAt] = useState<string | null>(null); // เวลาเซฟล่าสุด (โชว์ให้รู้ว่าบันทึกแล้วทุกครั้ง)
+  const [lastMerged, setLastMerged] = useState(false); // เซฟล่าสุดมีการรวมงานกับคนอื่นไหม
   const [selFont, setSelFont] = useState<number | null>(null); // ขนาด font ของ text ที่เลือก (null = ไม่ได้เลือก text)
   const [peers, setPeers] = useState(0); // realtime: จำนวนคนอื่นในห้อง
 
@@ -92,6 +101,7 @@ export function CanvasSketch({
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // เซฟกันลืมระหว่างแก้ต่อเนื่อง
   const lastPngAtRef = useRef(0); // ถ่าย PNG ล่าสุดเมื่อไหร่ — ถ่ายเฉพาะทุก ~30วิ/ตอนปิด (ลด payload เซฟถี่ๆ)
+  const baseRevRef = useRef(0);   // เวอร์ชันกระดานที่โหลดมา — ใช้กันเซฟทับกันเวลาหลายคนแก้
   const dirtyCbRef = useRef(onDirtyChange); dirtyCbRef.current = onDirtyChange;
   const cardCbRef  = useRef(onCardOpen);   cardCbRef.current  = onCardOpen;
   const readyCbRef = useRef(onReady);      readyCbRef.current = onReady;
@@ -112,6 +122,7 @@ export function CanvasSketch({
           return d?.kind && el.link ? { ...el, link: null } : el;
         });
         if (els.some((e) => !(e as { isDeleted?: boolean }).isDeleted)) hadContentRef.current = true; // โหลดมามีงาน → ห้ามเซฟว่างทับ
+        baseRevRef.current = Number(j?.data?.rev) || 0; // จำเวอร์ชันที่โหลดมา
         setScene(sc && typeof sc === "object" ? { elements: els, files: (sc.files as Record<string, unknown>) ?? {} } : null);
         setTimeout(() => { readyRef.current = true; if (alive) readyCbRef.current?.(); }, 800);
       })
@@ -165,19 +176,42 @@ export function CanvasSketch({
         } catch (e) { console.error("[canvas-sketch] export PNG failed/skip:", e); }
       }
 
-      // PUT เซฟ scene — มี abort timeout 20วิ กัน fetch ค้างไม่จบ
-      const ctrl = new AbortController();
-      const abortTimer = setTimeout(() => ctrl.abort(), 20000);
-      let res: Response;
-      try {
-        res = await apiFetch("/api/canvas-sketch", {
-          method: "PUT", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
-          body: JSON.stringify({ entity_type: entityType, entity_id: entityId, scene: sceneJson, preview_png_base64: b64 }),
-        });
-      } finally { clearTimeout(abortTimer); }
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      setSaveState("saved");
-      try { setSavedAt(new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { setSavedAt("✓"); }
+      // PUT เซฟ scene แบบเช็คเวอร์ชัน — ถ้าชนกัน (มีคนเซฟแทรก) → รวมงานแล้วลองใหม่ (สูงสุด 3 ครั้ง)
+      let sceneToSave: any = sceneJson;
+      let baseRev = baseRevRef.current;
+      let merged = false;
+      for (let attempt = 0; ; attempt++) {
+        const ctrl = new AbortController();
+        const abortTimer = setTimeout(() => ctrl.abort(), 20000);
+        let res: Response;
+        try {
+          res = await apiFetch("/api/canvas-sketch", {
+            method: "PUT", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
+            body: JSON.stringify({ entity_type: entityType, entity_id: entityId, scene: sceneToSave, base_rev: baseRev, preview_png_base64: attempt === 0 ? b64 : null }),
+          });
+        } finally { clearTimeout(abortTimer); }
+        const j = await res.json(); if (j.error) throw new Error(j.error);
+
+        if (j.conflict && attempt < 3) {
+          // มีคนเซฟแทรก → รวมงาน 2 ฝั่ง (เอาชิ้นที่ใหม่กว่า) แล้วลองเซฟใหม่ด้วย rev ล่าสุด
+          const remoteEls = ((j.scene?.elements ?? []) as any[]);
+          const mine = (sceneToSave.elements ?? []) as any[];
+          const mergedEls = mergeById(mine, remoteEls);
+          sceneToSave = { ...sceneToSave, elements: mergedEls };
+          baseRev = Number(j.rev) || 0; baseRevRef.current = baseRev;
+          merged = true;
+          // อัปเดตบนจอให้เห็นงานที่รวมแล้ว (กัน onChange ที่ตามมาเซฟซ้ำด้วยการตั้ง lastChangeSig)
+          try { lastChangeSigRef.current = sceneSig(mergedEls); apiRef.current?.updateScene?.({ elements: mergedEls }); } catch { /* noop */ }
+          continue;
+        }
+        if (j.conflict) { setSaveState("error"); break; } // ชนซ้ำหลายรอบ → หยุด (ไม่ทับ)
+
+        baseRevRef.current = Number(j.rev) || baseRevRef.current + 1;
+        setLastMerged(merged);
+        setSaveState("saved");
+        try { setSavedAt(new Date().toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { setSavedAt("✓"); }
+        break;
+      }
     } catch (e) {
       console.error("[canvas-sketch] save failed:", e);
       markDirty(true);
@@ -509,7 +543,7 @@ export function CanvasSketch({
               {saveState === "saving" ? "⏳ กำลังบันทึก..."
               : saveState === "error" ? "⚠ บันทึกไม่สำเร็จ"
               : saveState === "dirty" ? "✎ มีการแก้ไข กำลังจะบันทึก..."
-              : savedAt ? `✓ บันทึกแล้ว · ${savedAt}`
+              : savedAt ? `✓ บันทึกแล้ว${lastMerged ? " (รวมงานกับคนอื่น)" : ""} · ${savedAt}`
               : "พร้อมใช้งาน"}
             </span>
           </div>

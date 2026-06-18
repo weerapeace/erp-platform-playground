@@ -34,14 +34,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, permFor(entityType).view); if (denied) return denied;
 
   const { data } = await supabaseAdmin().from("erp_canvas_sketches")
-    .select("scene, preview_r2_key, updated_at")
+    .select("scene, preview_r2_key, updated_at, rev")
     .eq("entity_type", entityType).eq("entity_id", entityId).maybeSingle();
   return NextResponse.json({
     data: data ? {
       scene: data.scene ?? null,
       preview_url: data.preview_r2_key ? `/api/r2-image?key=${encodeURIComponent(data.preview_r2_key)}` : null,
-      updated_at: data.updated_at,
-    } : null,
+      updated_at: data.updated_at, rev: (data.rev as number) ?? 0,
+    } : { scene: null, preview_url: null, rev: 0 },
     error: null,
   });
 }
@@ -50,6 +50,7 @@ type PutBody = {
   entity_type?: string; entity_id?: string;
   scene?: Record<string, unknown> | null;
   preview_png_base64?: string | null;
+  base_rev?: number;   // rev ที่ client โหลดมา — ใช้กันเซฟทับกัน (optimistic lock)
 };
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
@@ -81,18 +82,41 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   }
 
   const admin = supabaseAdmin();
-  const row: Record<string, unknown> = {
-    entity_type: entityType, entity_id: entityId,
-    scene: body.scene ?? null, updated_by: user?.id ?? null, updated_at: new Date().toISOString(),
+  const baseRev = Number.isFinite(body.base_rev) ? Number(body.base_rev) : 0;
+  const patch: Record<string, unknown> = {
+    scene: body.scene ?? null, updated_by: user?.id ?? null, updated_at: new Date().toISOString(), rev: baseRev + 1,
   };
-  if (previewKey) row.preview_r2_key = previewKey;
-  const { error } = await admin.from("erp_canvas_sketches").upsert(row, { onConflict: "entity_type,entity_id" });
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (previewKey) patch.preview_r2_key = previewKey;
+
+  // เซฟแบบเช็คเวอร์ชัน: อัปเดตเฉพาะเมื่อ rev ใน DB == base_rev ที่ client โหลดมา (กันทับงานคนอื่น)
+  const { data: updated } = await admin.from("erp_canvas_sketches").update(patch)
+    .eq("entity_type", entityType).eq("entity_id", entityId).eq("rev", baseRev)
+    .select("rev").maybeSingle();
+
+  if (!updated) {
+    // ไม่มีแถวถูกอัปเดต → ยังไม่มีกระดาน (สร้างใหม่) หรือ rev ไม่ตรง (มีคนเซฟแทรก)
+    const { data: existing } = await admin.from("erp_canvas_sketches")
+      .select("rev, scene, preview_r2_key").eq("entity_type", entityType).eq("entity_id", entityId).maybeSingle();
+    if (!existing) {
+      const { data: ins, error: insErr } = await admin.from("erp_canvas_sketches")
+        .insert({ entity_type: entityType, entity_id: entityId, scene: body.scene ?? null, updated_by: user?.id ?? null, preview_r2_key: previewKey, rev: 1 })
+        .select("rev").single();
+      if (insErr) {
+        // ชนกันตอนสร้างพร้อมกัน → ถือเป็น conflict ให้ client รวมงาน
+        const { data: cur } = await admin.from("erp_canvas_sketches").select("rev, scene, preview_r2_key").eq("entity_type", entityType).eq("entity_id", entityId).maybeSingle();
+        return NextResponse.json({ conflict: true, rev: (cur?.rev as number) ?? 0, scene: cur?.scene ?? null, error: null });
+      }
+      await writeAudit(admin, { action: "canvas_update", entityType, entityId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { size: sceneSize, has_preview: !!previewKey, rev: 1 } });
+      return NextResponse.json({ ok: true, rev: ins.rev, preview_key: previewKey, error: null });
+    }
+    // มีคนเซฟแทรก → ส่งของล่าสุดกลับให้ client รวมงานเอง (ไม่ทับ)
+    return NextResponse.json({ conflict: true, rev: (existing.rev as number) ?? 0, scene: existing.scene ?? null, error: null });
+  }
 
   await writeAudit(admin, {
     action: "canvas_update", entityType, entityId,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { size: sceneSize, has_preview: !!previewKey },
+    metadata: { size: sceneSize, has_preview: !!previewKey, rev: updated.rev },
   });
-  return NextResponse.json({ ok: true, preview_key: previewKey, error: null });
+  return NextResponse.json({ ok: true, rev: updated.rev, preview_key: previewKey, error: null });
 }
