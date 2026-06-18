@@ -763,7 +763,7 @@ export default function WorkBoardPage() {
 
       {loading ? <div className="text-center py-20 text-slate-400">กำลังโหลด…</div>
         : viewMode === "purchase" ? (
-        <PurchaseNeeds canEdit={canEdit} />
+        <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : (
