@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { SELECT, flattenContent } from "../route";
+import { SELECT, flattenContent } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;

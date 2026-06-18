@@ -10,7 +10,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { lineToRow, saveBomSizes, type BomHeader, type BomLine, type BomSize } from "../route";
+import { lineToRow, saveBomSizes } from "../shared";
+import type { BomHeader, BomLine, BomSize } from "../route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
