@@ -81,7 +81,7 @@ export default function StandaloneApp() {
     return () => clearInterval(id);
   }, [appKey, active, items]);
 
-  if (!ready) return <Center>กำลังโหลด…</Center>;
+  if (!ready) return <AppLoading />;
   if (!user) return (
     <Center>
       <div className="text-slate-500 mb-3">กรุณาเข้าสู่ระบบก่อนใช้งาน</div>
@@ -89,8 +89,11 @@ export default function StandaloneApp() {
     </Center>
   );
 
+  // ยังโหลดเมนู/สิทธิ์ไม่เสร็จ → โชว์หน้าโหลด (กัน empty state "ยังไม่มีรายการ" เด้งแว้บตอนยังโหลดไม่จบ)
+  if (!loaded || !permsReady) return <AppLoading label={app?.label} icon={app?.icon} />;
+
   // กั้นเข้าแอปตามสิทธิ์ — แอปตั้ง permission_key แล้ว user ไม่มีสิทธิ์ → เข้าไม่ได้ (กันพิมพ์ URL ตรง)
-  if (loaded && permsReady && app?.permission_key && !can(app.permission_key as Parameters<typeof can>[0])) return (
+  if (app?.permission_key && !can(app.permission_key as Parameters<typeof can>[0])) return (
     <Center>
       <div className="text-4xl mb-2">🔒</div>
       <div className="text-slate-700 font-medium mb-1">คุณไม่มีสิทธิ์เข้าแอปนี้</div>
@@ -210,4 +213,33 @@ export default function StandaloneApp() {
 
 function Center({ children }: { children: React.ReactNode }) {
   return <div className="min-h-screen flex flex-col items-center justify-center text-center p-6">{children}</div>;
+}
+
+// หน้าโหลดของแอปเดี่ยว — ใช้ธีมเดียวกับ shell (header gradient) + ไอคอนแอปเด้งเบา ๆ + วงแหวนหมุน
+// โชว์ระหว่างโหลด auth/เมนู/สิทธิ์ เพื่อไม่ให้ empty state เด้งแว้บ
+function AppLoading({ label, icon }: { label?: string | null; icon?: string | null }) {
+  return (
+    <div className="h-[100dvh] flex flex-col bg-slate-50 overflow-hidden">
+      {/* แถบหัวธีมเดียวกับแอปจริง → พอโหลดเสร็จเปลี่ยนแค่เนื้อหา (ลื่น ไม่กระพริบ) */}
+      <header className="flex-shrink-0 bg-gradient-to-r from-blue-700 to-indigo-600 px-4" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+        <div className="py-3 flex items-center gap-2.5">
+          <div className="h-9 w-9 rounded-lg bg-white/15 flex items-center justify-center text-lg">{icon ?? "🧩"}</div>
+          {label
+            ? <div className="font-semibold text-lg text-white truncate">{label}</div>
+            : <div className="h-5 w-36 rounded-md bg-white/20 animate-pulse" />}
+        </div>
+      </header>
+
+      <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6">
+        <div className="relative h-16 w-16">
+          <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-blue-100 to-indigo-100 animate-ping opacity-60" />
+          <div className="absolute inset-0 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center text-3xl">{icon ?? "🧩"}</div>
+        </div>
+        <div className="flex items-center gap-2 text-slate-400 text-sm">
+          <span className="inline-block h-4 w-4 rounded-full border-2 border-slate-200 border-t-indigo-500 animate-spin" />
+          กำลังเปิด{label ? ` ${label}` : "แอป"}…
+        </div>
+      </div>
+    </div>
+  );
 }
