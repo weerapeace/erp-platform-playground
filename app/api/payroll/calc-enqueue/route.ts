@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const denied = await guardPayroll(req); if (denied) return denied;
+  const denied = await guardPayroll(req, "payroll.calculate"); if (denied) return denied;
   let body: { period_id?: string; actor?: string };
   try { body = await req.json(); } catch { body = {}; }
   if (body.period_id) {

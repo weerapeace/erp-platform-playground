@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2PutObject, r2DeleteObject } from "@/lib/r2";
@@ -19,6 +20,9 @@ const MAX_SIZE = 10 * 1024 * 1024;  // 10 MB (รองรับ PDF บิล/�
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "files.upload");
+  if (denied) return denied;
+
   // auth check
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
@@ -48,6 +52,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     // F21: R2 binding ล้วน (ไม่มี AWS SDK)
     await r2PutObject(key, await file.arrayBuffer(), file.type);
+    await writeAudit(supabaseAdmin(), {
+      action: "upload",
+      entityType: "file",
+      entityId: null,
+      actorId: user.id,
+      actorName: user.email ?? null,
+      metadata: { r2_key: key, content_type: file.type, size: file.size },
+    });
     return NextResponse.json({
       r2_key:       key,
       content_type: file.type,
@@ -68,6 +80,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
  *   ใช้ตอนลบรูปออกจากกระดาน Canvas (และโมดูลอื่นที่ต้องลบไฟล์)
  */
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "files.delete");
+  if (denied) return denied;
+
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
 

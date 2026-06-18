@@ -10,6 +10,7 @@
  */
 import { useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { useFileUploadAccess } from "@/components/upload-permission";
 
 const isPdfKey = (k: string) => k.toLowerCase().endsWith(".pdf");
 const urlOf = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
@@ -28,8 +29,10 @@ export function FileMultiInput({
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const keys = Array.isArray(value) ? value : [];
+  const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(disabled);
 
   const handleFiles = async (files: FileList) => {
+    if (uploadDisabled) { setErr(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
     setErr(null); setUploading(true);
     const added: string[] = [];
     try {
@@ -75,7 +78,7 @@ export function FileMultiInput({
           </div>
         ))}
         {!disabled && keys.length < max && (
-          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading}
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploading || uploadDisabled}
             className={`h-24 flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-slate-200 text-slate-500 hover:border-orange-300 hover:text-orange-600 disabled:opacity-50 ${keys.length === 0 ? "col-span-3" : ""}`}>
             <span className="text-xl">📎</span>
             <span className="text-[11px]">{uploading ? "กำลังอัปโหลด..." : "เพิ่มไฟล์"}</span>
@@ -84,9 +87,10 @@ export function FileMultiInput({
       </div>
       <div className="mt-1 text-[10px] text-slate-400">รูป (JPG/PNG/WebP) หรือ PDF — สูงสุด 10MB/ไฟล์ · แนบได้หลายไฟล์</div>
       <input ref={fileRef} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
-        disabled={disabled || uploading} className="hidden"
+        disabled={uploadDisabled || uploading} className="hidden"
         onChange={(e) => { const fs = e.target.files; if (fs && fs.length) handleFiles(fs); }} />
       {err && <div className="mt-1 text-[11px] text-red-600">⚠ {err}</div>}
+      {uploadDeniedMessage && <div className="mt-1 text-[11px] text-amber-700">{uploadDeniedMessage}</div>}
     </div>
   );
 }

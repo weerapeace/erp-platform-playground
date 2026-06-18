@@ -6,9 +6,10 @@
  *   rules[sectionKey] = รายการ tag id ที่จะโชว์ section นี้ (ว่าง/ไม่มี = โชว์ทุกแท็ก)
  *
  * อ่านกฎกลับผ่าน /api/admin/field-registry-v2 (field section_tag_rules)
- * ตรวจสิทธิ์ admin.field_registry · audit ลง audit_logs
+ * ตรวจสิทธิ์ admin.module_layout.edit · audit ลง audit_logs
  */
 import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
@@ -17,10 +18,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const userClient = supabaseFromRequest(request);
-  const { data: can, error: canErr } = await userClient.rpc("erp_can", { p_permission: "admin.field_registry" });
-  if (canErr) return NextResponse.json({ error: canErr.message }, { status: 500 });
-  if (can !== true) return NextResponse.json({ error: "ไม่มีสิทธิ์ตั้งค่า (admin.field_registry)" }, { status: 403 });
+  const denied = await guardApi(request, "admin.module_layout.edit");
+  if (denied) return denied;
 
   let body: { module?: string; rules?: Record<string, string[]>; actor?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -42,6 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { error: upErr } = await admin.from("erp_modules").update({ config }).eq("id", mod.id);
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 400 });
 
+  const userClient = supabaseFromRequest(request);
   const { data: { user } } = await userClient.auth.getUser();
   await writeAudit(admin, {
     action: "module.section_tag_rules_update", entityType: "erp_modules", entityId: mod.id as string,

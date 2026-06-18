@@ -11,10 +11,10 @@ import { usePermission, AccessDenied } from "@/components/auth";
 import { CreateModuleWizard } from "@/components/create-module-wizard";
 
 export default function CreateTablePage() {
-  const canCreate = usePermission("products.create");
+  const canCreate = usePermission("admin.schema.create_table");
   const [open, setOpen] = useState(true);
 
-  if (!canCreate) return <PlaygroundShell><AccessDenied message="ต้องมีสิทธิ์ products.create" /></PlaygroundShell>;
+  if (!canCreate) return <PlaygroundShell><AccessDenied message="ต้องมีสิทธิ์ admin.schema.create_table เพื่อสร้างโมดูลใหม่" /></PlaygroundShell>;
 
   return (
     <PlaygroundShell>

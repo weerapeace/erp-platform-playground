@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied, roleLabel, roleColor } from "@/components/auth";
+import { useFileUploadAccess } from "@/components/upload-permission";
 import { ERPModal } from "@/components/modal";
 import { DataTable } from "@/components/data-table";
 import { apiFetch } from "@/lib/api";
@@ -115,6 +116,7 @@ export default function AdminUsersPage() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const prevEditId = useRef<string | null>(null);
+  const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(uploadBusy || editBusy);
 
   // สิทธิ์เฉพาะคน (เฟส 3) — เปิด/ปิดสิทธิ์ทับตำแหน่งรายคน
   const [permUser, setPermUser] = useState<AdminUser | null>(null);
@@ -170,6 +172,7 @@ export default function AdminUsersPage() {
   }, [editUser]);
 
   const uploadAvatar = async (file: File) => {
+    if (uploadDisabled) { setError(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
     if (!file.type.startsWith("image/")) { setError("ไฟล์ต้องเป็นรูปภาพ"); return; }
     setUploadBusy(true); setError(null);
     try {
@@ -566,12 +569,13 @@ export default function AdminUsersPage() {
                 )}
               </div>
               <div className="flex flex-col gap-1.5">
-                <input ref={fileRef} type="file" accept="image/*" className="hidden"
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" disabled={uploadDisabled}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadAvatar(f); e.target.value = ""; }} />
-                <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadBusy || editBusy}
+                <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadDisabled}
                   className="h-8 px-3 text-xs font-medium border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
                   {uploadBusy ? "กำลังอัปโหลด..." : avatarSrc(editAvatar) ? "เปลี่ยนรูป" : "＋ อัปโหลดรูป"}
                 </button>
+                {uploadDeniedMessage && <div className="text-[11px] text-amber-700">{uploadDeniedMessage}</div>}
                 {avatarSrc(editAvatar) && (
                   <button type="button" onClick={() => setEditAvatar(null)} disabled={uploadBusy || editBusy}
                     className="h-7 px-3 text-xs text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50">ลบรูป</button>

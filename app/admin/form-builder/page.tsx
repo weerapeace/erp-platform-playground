@@ -38,7 +38,7 @@ const genId = () => Math.random().toString(36).slice(2, 9);
 const defaultLayout = (): FormLayoutConfig => ({ sections: [{ id: genId(), title: "ข้อมูลหลัก", columns: 2, fields: [] }] });
 
 export default function FormBuilderPage() {
-  const allowed = usePermission("admin.field_registry");
+  const allowed = usePermission("admin.module_layout.edit");
   const [registry, setRegistry] = useState<FieldRegistryEntry[]>([]);
   const [config,   setConfig]   = useState<FormLayoutConfig>(defaultLayout());
   const [loaded,   setLoaded]   = useState(false);

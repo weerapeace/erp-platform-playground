@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * โปรไฟล์ของฉัน — ผู้ใช้ทุกคนแก้ชื่อ/รูป/รหัสผ่านของตัวเองได้
- * เนื้อหาแก้ไขใช้ของกลาง <ProfileEditor/> (ใช้ซ้ำในป๊อปอัป AccountMenu ด้วย)
+ * โปรไฟล์ของฉัน - ใช้ ProfileEditor กลาง
  */
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth } from "@/components/auth";

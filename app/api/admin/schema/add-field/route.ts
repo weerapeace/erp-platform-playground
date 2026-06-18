@@ -12,6 +12,7 @@
  * ปลอดภัย: DDL ทำผ่าน SECURITY DEFINER function (allowlist เฉพาะ module table + validate ชื่อ)
  */
 import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 
@@ -68,6 +69,9 @@ type Body = {
 const FIELD_RE = /^[a-z][a-z0-9_]{0,62}$/;
 
 export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "admin.schema.add_field");
+  if (denied) return denied;
+
   let b: Body;
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 

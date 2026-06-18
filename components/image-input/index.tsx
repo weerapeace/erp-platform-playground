@@ -11,6 +11,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
+import { useFileUploadAccess } from "@/components/upload-permission";
 
 interface ImageInputProps {
   value:    string | null;        // r2_key
@@ -30,6 +31,7 @@ export function ImageInput({
   const [err, setErr] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(disabled);
 
   // F15: ใช้ /api/r2-image proxy ตรงๆ (ไม่ติด CORS + เร็วขึ้น)
   useEffect(() => {
@@ -37,6 +39,7 @@ export function ImageInput({
   }, [value]);
 
   const handleFile = async (file: File) => {
+    if (uploadDisabled) { setErr(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
     setErr(null);
     setUploading(true);
     try {
@@ -59,13 +62,13 @@ export function ImageInput({
   // ลากรูปมาวาง (drag & drop)
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false);
-    if (disabled || uploading) return;
+    if (uploadDisabled || uploading) return;
     const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/"));
     if (f) void handleFile(f);
   };
   // วางรูปจากคลิปบอร์ด (Ctrl+V / print screen → วาง)
   const onPaste = (e: React.ClipboardEvent) => {
-    if (disabled || uploading) return;
+    if (uploadDisabled || uploading) return;
     const items = e.clipboardData?.items ?? [];
     for (const it of items) {
       if (it.type.startsWith("image/")) {
@@ -76,7 +79,7 @@ export function ImageInput({
   };
   // ปุ่ม "วางรูป" — อ่านรูปจากคลิปบอร์ดให้เลย (ไม่ต้องกด Ctrl+V เอง)
   const pasteFromClipboard = async () => {
-    if (disabled || uploading) return;
+    if (uploadDisabled || uploading) return;
     setErr(null);
     try {
       const clip = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItems> };
@@ -100,16 +103,16 @@ export function ImageInput({
   if (compact) {
     return (
       <div
-        tabIndex={disabled ? -1 : 0}
+        tabIndex={uploadDisabled ? -1 : 0}
         onPaste={onPaste}
-        onClick={() => { if (!disabled && !uploading) fileRef.current?.click(); }}
-        onDragOver={(e) => { if (!disabled && !uploading) { e.preventDefault(); setDragOver(true); } }}
+        onClick={() => { if (!uploadDisabled && !uploading) fileRef.current?.click(); }}
+        onDragOver={(e) => { if (!uploadDisabled && !uploading) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         title="ลากรูปมาวาง · คลิกเลือก · วาง (Ctrl+V)"
         className={`relative w-10 h-10 rounded-md border-2 border-dashed flex items-center justify-center overflow-hidden cursor-pointer outline-none transition-colors ${
           dragOver ? "border-orange-400 bg-orange-50" : hasError ? "border-red-300" : "border-slate-200 hover:border-orange-300"
-        } ${disabled ? "opacity-50" : ""}`}
+        } ${uploadDisabled ? "opacity-50" : ""}`}
       >
         {uploading ? (
           <span className="text-[9px] text-slate-400">…</span>
@@ -127,7 +130,7 @@ export function ImageInput({
           <span className="text-slate-300 text-base leading-none">＋</span>
         )}
         <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
-          disabled={disabled || uploading}
+          disabled={uploadDisabled || uploading}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
           className="hidden" />
       </div>
@@ -137,14 +140,14 @@ export function ImageInput({
   return (
     <div className="mt-0.5">
       <div
-        tabIndex={disabled ? -1 : 0}
+        tabIndex={uploadDisabled ? -1 : 0}
         onPaste={onPaste}
-        onDragOver={(e) => { if (!disabled && !uploading) { e.preventDefault(); setDragOver(true); } }}
+        onDragOver={(e) => { if (!uploadDisabled && !uploading) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         className={`relative w-full rounded-md border-2 border-dashed transition-colors outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 ${
           dragOver ? "border-orange-400 bg-orange-50" : hasError ? "border-red-300" : "border-slate-200 hover:border-orange-300"
-        } ${disabled ? "opacity-50" : ""}`}
+        } ${uploadDisabled ? "opacity-50" : ""}`}
         style={{ minHeight: previewUrl ? 120 : 80 }}
       >
         {previewUrl ? (
@@ -156,8 +159,8 @@ export function ImageInput({
               <div className="absolute top-1 right-1 flex gap-1">
                 <button
                   type="button"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={uploading}
+                  onClick={() => { if (!uploadDisabled) fileRef.current?.click(); }}
+                  disabled={uploading || uploadDisabled}
                   className="px-2 py-1 text-xs bg-white border border-slate-200 rounded shadow hover:bg-slate-50 disabled:opacity-50"
                 >
                   📷 เปลี่ยน
@@ -165,7 +168,7 @@ export function ImageInput({
                 <button
                   type="button"
                   onClick={pasteFromClipboard}
-                  disabled={uploading}
+                  disabled={uploading || uploadDisabled}
                   className="px-2 py-1 text-xs bg-white border border-slate-200 rounded shadow hover:bg-slate-50 disabled:opacity-50"
                 >
                   📋 วาง
@@ -186,7 +189,7 @@ export function ImageInput({
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            disabled={disabled || uploading}
+            disabled={uploadDisabled || uploading}
             className="w-full h-20 flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-orange-600"
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -206,7 +209,7 @@ export function ImageInput({
       {/* ปุ่มลัดวางรูปจากคลิปบอร์ด (คลิกที่กรอบ = เลือกไฟล์อยู่แล้ว ไม่ต้องมีปุ่มซ้ำ) */}
       {!disabled && (
         <div className="mt-1.5 flex items-center gap-2">
-          <button type="button" onClick={pasteFromClipboard} disabled={uploading}
+          <button type="button" onClick={pasteFromClipboard} disabled={uploading || uploadDisabled}
             className="h-8 px-3 text-xs font-medium border border-blue-200 rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">📋 วางรูป (จากคลิปบอร์ด)</button>
         </div>
       )}
@@ -215,7 +218,7 @@ export function ImageInput({
         ref={fileRef}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/gif"
-        disabled={disabled || uploading}
+        disabled={uploadDisabled || uploading}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleFile(f);
@@ -225,6 +228,9 @@ export function ImageInput({
 
       {err && (
         <div className="mt-1 text-[11px] text-red-600">⚠ {err}</div>
+      )}
+      {uploadDeniedMessage && (
+        <div className="mt-1 text-[11px] text-amber-700">{uploadDeniedMessage}</div>
       )}
     </div>
   );

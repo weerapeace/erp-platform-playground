@@ -10,7 +10,7 @@
 import { NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
-export type PayrollPerm = "employees.view" | "employees.create" | "employees.edit";
+export type PayrollPerm = "employees.view" | "employees.create" | "employees.edit" | "payroll.calculate";
 
 /** คืน NextResponse error ถ้าไม่ผ่าน, null ถ้าผ่าน */
 export async function guardPayroll(request: Request, perm: PayrollPerm = "employees.view"): Promise<NextResponse | null> {

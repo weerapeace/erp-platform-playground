@@ -63,7 +63,7 @@ function isEqualFields(a: EditableField, b: EditableField): boolean {
 }
 
 export default function FieldRegistryAdminPage() {
-  const allowed = usePermission("admin.field_registry");
+  const allowed = usePermission("admin.field_registry.edit");
   const [original, setOriginal] = useState<Record<string, EditableField>>({});
   const [draft,    setDraft]    = useState<Record<string, EditableField>>({});
   const [order,    setOrder]    = useState<string[]>([]);

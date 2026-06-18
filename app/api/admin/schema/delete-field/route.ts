@@ -8,6 +8,7 @@
  * ปลอดภัย: DDL ผ่าน RPC erp_admin_drop_column (กัน system field + allowlist module table)
  */
 import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
@@ -18,6 +19,9 @@ export const revalidate = 0;
 const SYSTEM_FIELDS = new Set(["id", "created_at", "updated_at", "is_active"]);
 
 export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "admin.schema.delete_field");
+  if (denied) return denied;
+
   // ต้อง login
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });

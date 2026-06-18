@@ -11,6 +11,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
+import { useFileUploadAccess } from "@/components/upload-permission";
 import {
   PRIORITY_META, isOverdue,
   type CreativeTask, type CreativePriority,
@@ -103,6 +104,7 @@ export function CanvasBoard({
   const [board, setBoard] = useState<Board>({ positions: {}, stickies: [], objects: [], connectors: [] });
   const [connectFrom, setConnectFrom] = useState<string | null>(null);   // ต้นทางลูกศรที่กำลังเลือก
   const [uploading, setUploading] = useState(false);   // กำลังอัปโหลดรูปที่ paste ขึ้น R2
+  const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(uploading);
   const [past, setPast] = useState<Board[]>([]);
   const [future, setFuture] = useState<Board[]>([]);
   const [tool, setTool] = useState<Tool>("select");
@@ -199,6 +201,7 @@ export function CanvasBoard({
       if (!item) return;
       const file = item.getAsFile(); if (!file) return;
       e.preventDefault();
+      if (uploadDisabled) { alert(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
       setUploading(true);
       try {
         const ext = (file.type.split("/")[1] || "png").replace("+xml", "");

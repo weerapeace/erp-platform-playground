@@ -6,6 +6,7 @@
  */
 import { useState, useEffect, useRef } from "react";
 import { useAuth, roleLabel, roleColor } from "@/components/auth";
+import { useFileUploadAccess } from "@/components/upload-permission";
 import { apiFetch } from "@/lib/api";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 
@@ -24,6 +25,7 @@ export function ProfileEditor() {
   const [error, setError]     = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const seeded = useRef(false);
+  const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(uploadBusy || busy);
 
   const isPin = !!user?.email?.endsWith("@pin.local");
   const [pw1, setPw1] = useState("");
@@ -53,6 +55,7 @@ export function ProfileEditor() {
   };
 
   const uploadAvatar = async (file: File) => {
+    if (uploadDisabled) { setError(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
     if (!file.type.startsWith("image/")) { setError("ไฟล์ต้องเป็นรูปภาพ"); return; }
     setUploadBusy(true); setError(null); setMsg(null);
     try {
@@ -101,12 +104,13 @@ export function ProfileEditor() {
             {uploadBusy && <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center text-white text-[10px]">กำลังโหลด</div>}
           </div>
           <div className="flex flex-col gap-1.5">
-            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" disabled={uploadDisabled}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadAvatar(f); e.target.value = ""; }} />
-            <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadBusy || busy}
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadDisabled}
               className="h-9 px-4 text-sm font-medium border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               {uploadBusy ? "กำลังอัปโหลด..." : src ? "เปลี่ยนรูป" : "＋ อัปโหลดรูป"}
             </button>
+            {uploadDeniedMessage && <div className="text-[11px] text-amber-700">{uploadDeniedMessage}</div>}
             {src && <button type="button" onClick={() => setAvatar(null)} disabled={uploadBusy || busy}
               className="h-7 px-4 text-xs text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50 text-left">ลบรูป</button>}
           </div>

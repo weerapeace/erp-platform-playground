@@ -17,6 +17,7 @@
 import { useState, useMemo, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { useFileUploadAccess } from "@/components/upload-permission";
 import { FieldCreatorModal } from "@/components/field-creator";
 import { TableLayoutPanel, type SummaryMap } from "@/components/table-layout-panel";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
@@ -102,7 +103,9 @@ function iconNode(icon?: string) {
 function IconPicker({ value, onChange }: { value: string; onChange: (v: string)=>void }) {
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(uploading);
   const upload = async (file: File, close: ()=>void) => {
+    if (uploadDisabled) return;
     setUploading(true);
     try {
       const fd = new FormData(); fd.append("file", file); fd.append("folder", "section-icons");
@@ -126,12 +129,13 @@ function IconPicker({ value, onChange }: { value: string; onChange: (v: string)=
           ))}
         </div>
         <div className="border-t border-slate-100 mt-2 pt-2">
-          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+          <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={uploadDisabled}
             onChange={(e)=>{ const f=e.target.files?.[0]; if(f) upload(f, close); }} />
-          <button type="button" onClick={()=>fileRef.current?.click()} disabled={uploading}
+          <button type="button" onClick={()=>fileRef.current?.click()} disabled={uploadDisabled}
             className="w-full h-8 text-xs border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-50">
             {uploading ? "กำลังอัปโหลด..." : "⬆ อัปโหลดไอคอนเอง (รูป)"}
           </button>
+          {uploadDeniedMessage && <div className="mt-1 text-[11px] text-amber-700">{uploadDeniedMessage}</div>}
         </div>
       </>)}
     </Popover>

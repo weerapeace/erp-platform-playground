@@ -4,12 +4,17 @@
  * body: { module_key, layout: { tabs: [...] } }
  */
 import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "admin.module_layout.edit");
+  if (denied) return denied;
+
   let body: { module_key?: string; layout?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.module_key) return NextResponse.json({ error: "missing module_key" }, { status: 400 });
@@ -21,6 +26,13 @@ export async function POST(request: NextRequest) {
   const config = { ...(mod.config as Record<string, unknown> ?? {}), layout: body.layout ?? null };
   const { error: e2 } = await admin.from("erp_modules").update({ config, updated_at: new Date().toISOString() }).eq("module_key", body.module_key);
   if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
+
+  await writeAudit(admin, {
+    action: "module.layout_update",
+    entityType: "erp_modules",
+    actorName: "system",
+    metadata: { module_key: body.module_key },
+  });
 
   return NextResponse.json({ ok: true });
 }

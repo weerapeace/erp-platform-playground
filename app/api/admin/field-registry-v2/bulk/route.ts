@@ -13,6 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -29,6 +30,9 @@ const ALLOWED_BULK_FIELDS = [
 ];
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "admin.field_registry.bulk_edit");
+  if (denied) return denied;
+
   let body: { ids?: unknown; patch?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -99,6 +103,9 @@ const ALLOWED_ROW_FIELDS = [
   "options",
 ];
 export async function PUT(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "admin.field_registry.bulk_edit");
+  if (denied) return denied;
+
   let body: { updates?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -137,6 +144,9 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
 // PATCH = reorder
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "admin.field_registry.bulk_edit");
+  if (denied) return denied;
+
   let body: { reorder?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 

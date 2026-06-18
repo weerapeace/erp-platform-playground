@@ -5,6 +5,7 @@
  * → ใช้งานได้ทันทีที่ /m/<table> (catch-all page) โดยไม่ต้องเขียนโค้ด
  */
 import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 
@@ -14,6 +15,9 @@ export const revalidate = 0;
 const NAME_RE = /^[a-z][a-z0-9_]{1,62}$/;
 
 export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "admin.schema.create_table");
+  if (denied) return denied;
+
   let b: { table?: string; label?: string; icon?: string };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!b.table || !b.label) return NextResponse.json({ error: "ต้องมี table + label" }, { status: 400 });

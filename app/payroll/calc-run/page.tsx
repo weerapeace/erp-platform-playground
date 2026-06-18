@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { shouldAutoRunPayrollCalc } from "@/lib/payroll-flow";
+import { usePermission } from "@/components/auth";
 import { PeriodHolidaysPanel } from "@/components/payroll/period-holidays-panel";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 
@@ -71,6 +72,7 @@ const BTN_LABEL = (from: string, to: string): { label: string; cls: string } => 
 export default function PayrollCalcRunPage() {
   const { periods, periodId, selectedPeriod: curPeriod, setPeriodId, refreshPeriods } = usePayrollPeriod();
   const autoRunDoneRef = useRef(false);
+  const canCalculate = usePermission("payroll.calculate");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(false);
@@ -121,6 +123,7 @@ export default function PayrollCalcRunPage() {
   // Phase 2 — คำนวณแบบเบื้องหลัง: สร้าง job → poll สถานะ → แสดงผลเมื่อเสร็จ (ไม่บล็อกหน้าจอ/ไม่ timeout)
   async function run(options?: { keepSaveMsg?: boolean }) {
     if (!periodId) return;
+    if (!canCalculate) { setErr("ต้องมีสิทธิ์ payroll.calculate เพื่อสั่งคำนวณเงินเดือน"); return; }
     const v = await loadValidation(periodId);
     if (v && !v.ready) { setErr("งวดยังไม่พร้อมคำนวณ กรุณาแก้รายการ error ในกล่องตรวจความพร้อมก่อน"); return; }
     setLoading(true); setErr(null); setRows(null); setSummary(null);
@@ -196,9 +199,9 @@ export default function PayrollCalcRunPage() {
             {periods.map((p) => <option key={p.id} value={p.id}>{p.period_name} ({p.status})</option>)}
           </select>
         </div>
-        <button onClick={() => void run()} disabled={loading || !periodId || validationLoading || validation?.ready === false}
+        <button onClick={() => void run()} disabled={loading || !periodId || validationLoading || validation?.ready === false || !canCalculate}
           className="h-10 px-5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-          {loading ? "กำลังคำนวณ..." : "▶ คำนวณ + เทียบ"}
+          {!canCalculate ? "ไม่มีสิทธิ์คำนวณ" : loading ? "กำลังคำนวณ..." : "▶ คำนวณ + เทียบ"}
         </button>
         {progress && (
           <span className="flex items-center gap-2 text-sm text-blue-700">

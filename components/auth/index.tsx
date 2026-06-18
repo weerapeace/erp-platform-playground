@@ -13,7 +13,9 @@ export type Permission =
   | "products.cost.view"
   | "pr.view" | "pr.create" | "pr.edit" | "pr.submit" | "pr.approve" | "pr.reject" | "pr.cancel"
   | "suppliers.view" | "suppliers.create" | "suppliers.edit"
-  | "fields.view" | "admin.field_registry"
+  | "fields.view" | "admin.field_registry.edit" | "admin.field_registry.bulk_edit"
+  | "admin.schema.view" | "admin.schema.create_table" | "admin.schema.add_field" | "admin.schema.delete_field"
+  | "admin.module_layout.edit"
   | "numbering.view" | "admin.numbering"
   | "approval.view" | "admin.approval_rules"
   | "notifications.view"
@@ -23,7 +25,7 @@ export type Permission =
   | "plugins.view" | "admin.plugins"
   | "table_layouts.view" | "admin.table_layouts"
   | "customers.view" | "customers.create" | "customers.edit"
-  | "employees.view" | "employees.create" | "employees.edit"
+  | "employees.view" | "employees.create" | "employees.edit" | "payroll.calculate"
   | "warehouses.view" | "warehouses.create" | "warehouses.edit"
   | "departments.view" | "departments.create" | "departments.edit"
   | "units.view" | "units.create"
@@ -37,6 +39,7 @@ export type Permission =
   | "stock.view" | "stock.create" | "stock.adjust"
   | "po.view" | "po.create" | "po.edit" | "po.confirm" | "po.receive" | "po.complete" | "po.cancel"
   | "attachments.view" | "attachments.upload" | "attachments.delete"
+  | "files.upload" | "files.delete"
   | "accounting.view" | "accounting.manage" | "accounting.post"
   | "work_board.dispatch" | "production.piecework"
   | "qc.view" | "qc.receive" | "qc.move" | "qc.ship" | "qc.defect" | "qc.repair"
@@ -55,7 +58,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "products.view", "products.create", "products.edit", "products.delete", "products.cost.view",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",
-    "fields.view", "admin.field_registry",
+    "fields.view", "admin.field_registry.edit", "admin.field_registry.bulk_edit",
+    "admin.schema.view", "admin.schema.create_table", "admin.schema.add_field", "admin.schema.delete_field",
+    "admin.module_layout.edit",
     "numbering.view", "admin.numbering",
     "approval.view", "admin.approval_rules",
     "notifications.view", "saved_views.share", "admin.saved_views",
@@ -64,7 +69,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "plugins.view", "admin.plugins",
     "table_layouts.view", "admin.table_layouts",
     "customers.view", "customers.create", "customers.edit",
-    "employees.view", "employees.create", "employees.edit",
+    "employees.view", "employees.create", "employees.edit", "payroll.calculate",
     "warehouses.view", "warehouses.create", "warehouses.edit",
     "departments.view", "departments.create", "departments.edit",
     "units.view", "units.create",
@@ -78,6 +83,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "stock.view", "stock.create", "stock.adjust",
     "po.view", "po.create", "po.edit", "po.confirm", "po.receive", "po.complete", "po.cancel",
     "attachments.view", "attachments.upload", "attachments.delete",
+    "files.upload", "files.delete",
     "accounting.view", "accounting.manage", "accounting.post",
     "work_board.dispatch", "production.piecework",
     "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",

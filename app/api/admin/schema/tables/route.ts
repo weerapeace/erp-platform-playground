@@ -3,13 +3,17 @@
  * คืนรายชื่อ table ใน Supabase ที่ใช้เป็น relation target ได้ (มี column id)
  * ใช้โดย Field Creator (เลือก table ปลายทางของ many2one/many2many)
  */
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "admin.schema.view");
+  if (denied) return denied;
+
   const { data, error } = await supabaseAdmin().rpc("erp_admin_list_tables");
   if (error) return NextResponse.json({ tables: [], error: error.message }, { status: 500 });
   return NextResponse.json({ tables: data ?? [], error: null });
