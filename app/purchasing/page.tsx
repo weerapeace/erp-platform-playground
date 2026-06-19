@@ -121,6 +121,9 @@ export default function PurchasingShopPage() {
 
   // cart + save
   const [cart, setCart] = useState<Line[]>([]);
+  // responsive (จอ < xl = มือถือ/แท็บเล็ต): ตัวกรองเป็นลิ้นชัก + ตะกร้าลอยกดเปิดเป็นแผ่นเลื่อนขึ้น
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
   const [partnerCountry, setPartnerCountry] = useState<Record<string, string>>({});
   // perf: mapSku อ่านประเทศร้านผ่าน ref → พอ partners โหลดเสร็จ (ช้า ~4s) ไม่ทำให้ grid โหลดใหม่
   // (partnerCountry ใช้แค่ทำ label country ไม่เกี่ยวกับสกุลเงิน — สกุลเงินดูจาก rmb_cost ในแถว)
@@ -242,6 +245,7 @@ export default function PurchasingShopPage() {
     if (s === source) return;
     prevQ.current = "";   // กันไม่ให้การล้างคำค้นไปกระตุ้น debounce → สลับโหมดดึงทันที
     setSource(s); setCards([]); setTotal(0); setQ(""); setPage(0); setLoading(true);
+    setFilterOpen(false);   // จอเล็ก: สลับโหมดแล้วหุบลิ้นชักให้เห็นผลทันที
   };
 
   // โหลด partner country (สำหรับ currency rule) + filterable fields ของ SKU
@@ -592,10 +596,13 @@ export default function PurchasingShopPage() {
 
   return (
     <PlaygroundShell>
-      <div className="flex flex-col md:flex-row md:h-[calc(100vh-3.5rem)]">
-        {/* Filter sidebar */}
-        <aside className="w-full md:w-60 flex-shrink-0 border-b md:border-b-0 md:border-r border-slate-200 p-4 md:overflow-auto">
-          <h2 className="font-semibold text-slate-800 mb-3">🛒 ขอซื้อ</h2>
+      <div className="flex flex-col xl:flex-row xl:h-[calc(100vh-3.5rem)]">
+        {/* Filter sidebar — จอ < xl เป็นลิ้นชักเลื่อนจากซ้าย (ซ่อนปกติ) · xl เป็นคอลัมน์ตายตัว */}
+        <aside className={`fixed top-14 bottom-0 left-0 z-40 w-72 max-w-[85%] bg-white overflow-auto p-4 shadow-xl transition-transform duration-300 ${filterOpen ? "translate-x-0" : "-translate-x-full"} xl:static xl:top-auto xl:bottom-auto xl:z-auto xl:w-60 xl:max-w-none xl:translate-x-0 xl:shadow-none xl:flex-shrink-0 xl:border-r xl:border-slate-200`}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold text-slate-800">🛒 ขอซื้อ</h2>
+            <button onClick={() => setFilterOpen(false)} className="xl:hidden text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="ปิดตัวกรอง">✕</button>
+          </div>
           {/* source toggle (โหมดแสดงสินค้า) */}
           <div className="grid grid-cols-2 gap-1 mb-3 text-xs">
             {([
@@ -699,8 +706,13 @@ export default function PurchasingShopPage() {
         </aside>
 
         {/* Grid */}
-        <main className="flex-1 md:overflow-auto p-5">
+        <main className="flex-1 xl:overflow-auto p-5">
           <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+            {/* จอเล็ก: ปุ่มเปิดลิ้นชักตัวกรอง (PC ไม่ต้องเพราะกรองอยู่คอลัมน์ซ้ายแล้ว) */}
+            <button onClick={() => setFilterOpen(true)}
+              className="xl:hidden flex items-center gap-1.5 h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 flex-shrink-0">
+              ⚙ ตัวกรอง
+            </button>
             <h1 className="text-xl font-semibold text-slate-800 flex-shrink-0">เลือกสินค้าที่ต้องการขอซื้อ</h1>
             {/* ช่องค้นหาด้านบน (ใช้ร่วมกับช่องค้นหาแถบซ้าย) */}
             <input value={q} onChange={e => setQ(e.target.value)} placeholder="🔍 ค้นหาสินค้า (ชื่อ/รหัส)..."
@@ -832,9 +844,12 @@ export default function PurchasingShopPage() {
           )}
         </main>
 
-        {/* Cart */}
-        <aside className="w-full md:w-80 flex-shrink-0 border-t md:border-t-0 md:border-l border-slate-200 flex flex-col">
-          <div className="p-4 border-b border-slate-100 font-semibold text-slate-800">ใบขอซื้อ ({cart.length})</div>
+        {/* Cart — จอ < xl เป็นแผ่นเลื่อนขึ้นจากล่าง (เปิดด้วยปุ่มตะกร้าลอย) · xl เป็นคอลัมน์ขวา */}
+        <aside className={`fixed inset-x-0 bottom-0 z-40 h-[82%] bg-white rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ${cartOpen ? "translate-y-0" : "translate-y-full"} xl:static xl:h-auto xl:w-80 xl:rounded-none xl:shadow-none xl:translate-y-0 xl:flex-shrink-0 xl:border-l xl:border-slate-200`}>
+          <div className="flex items-center justify-between p-4 border-b border-slate-100 font-semibold text-slate-800">
+            <span>ใบขอซื้อ ({cart.length})</span>
+            <button onClick={() => setCartOpen(false)} className="xl:hidden text-slate-400 hover:text-slate-600 text-xl leading-none" aria-label="ปิดตะกร้า">✕</button>
+          </div>
           <div className="flex-1 overflow-auto p-3 space-y-2">
             {cart.length === 0 && <div className="text-sm text-slate-300 text-center py-8">ยังไม่มีรายการ<br />กดสินค้าทางซ้ายเพื่อเพิ่ม</div>}
             {cart.map((l, i) => (
@@ -913,6 +928,26 @@ export default function PurchasingShopPage() {
           </div>
         </aside>
       </div>
+
+      {/* จอเล็ก: ฉากหลังมืดตอนเปิดลิ้นชัก/ตะกร้า — กดเพื่อปิด */}
+      {(filterOpen || cartOpen) && (
+        <div className="xl:hidden fixed inset-0 z-30 bg-black/40"
+          onClick={() => { setFilterOpen(false); setCartOpen(false); }} />
+      )}
+
+      {/* จอเล็ก: ปุ่มตะกร้าลอย (มุมขวาล่าง) โชว์จำนวน กดแล้วเปิดหน้าตะกร้า */}
+      {!cartOpen && (
+        <button onClick={() => setCartOpen(true)}
+          className="xl:hidden fixed bottom-5 right-5 z-30 h-14 pl-4 pr-5 rounded-full bg-blue-600 text-white shadow-lg flex items-center gap-2 active:scale-95 transition-transform">
+          <span className="relative flex items-center">
+            🛒
+            {cart.length > 0 && (
+              <span className="absolute -top-2.5 -right-3 min-w-[20px] h-5 px-1 rounded-full bg-red-500 text-white text-xs font-medium flex items-center justify-center">{cart.length}</span>
+            )}
+          </span>
+          <span className="text-sm font-medium">ตะกร้า</span>
+        </button>
+      )}
 
       {/* ข้อ 4: picker เลือกสินค้าปลายทางระดับตะกร้า */}
       <SkuImagePicker open={cartPickerOpen} onClose={() => setCartPickerOpen(false)}
