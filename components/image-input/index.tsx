@@ -352,6 +352,8 @@ export function HoverZoomImage({ src, alt = "", className = "", previewSize = 32
 }) {
   const [hover, setHover] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  // ซูมเฉพาะอุปกรณ์ที่มีเมาส์จริง — iPad/iPhone (สัมผัส) จะไม่เด้งรูปใหญ่ตอนแตะ (กวนเวลากดเลือกสินค้า)
+  const [canHover] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.("(hover: hover) and (pointer: fine)").matches);
 
   const flipLeft = typeof window !== "undefined" && pos.x + 24 + previewSize > window.innerWidth;
   const px = flipLeft ? pos.x - previewSize - 24 : pos.x + 24;
@@ -361,10 +363,10 @@ export function HoverZoomImage({ src, alt = "", className = "", previewSize = 32
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} className={className} loading="lazy" decoding="async"
-        onMouseEnter={(e) => { setHover(true); setPos({ x: e.clientX, y: e.clientY }); }}
-        onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
-        onMouseLeave={() => setHover(false)} />
-      {hover && createPortal(
+        onMouseEnter={canHover ? (e) => { setHover(true); setPos({ x: e.clientX, y: e.clientY }); } : undefined}
+        onMouseMove={canHover ? (e) => setPos({ x: e.clientX, y: e.clientY }) : undefined}
+        onMouseLeave={canHover ? () => setHover(false) : undefined} />
+      {canHover && hover && createPortal(
         <div className="fixed z-[120] pointer-events-none rounded-lg shadow-2xl border-2 border-white bg-white overflow-hidden"
           style={{ left: px, top: py, width: previewSize, height: previewSize }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
