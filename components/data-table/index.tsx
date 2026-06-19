@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { peekSWR, mutateSWR, invalidateSWR } from "@/lib/swr-lite";
 import { ImageThumbnail } from "@/components/image-manager";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
 import { readRelationLabel } from "@/lib/relation";
@@ -584,67 +585,77 @@ export function DataTable<T extends Record<string, unknown>>({
   useEffect(() => {
     if (!tableId || layoutAppliedRef.current) return;
     let cancelled = false;
+    type LayoutData = {
+      columns: Array<{ key: string; visible: boolean; order: number; pinned?: "left" | "right" | null; width?: number }>;
+      default_density: "normal" | "compact";
+      default_page_size: number;
+      default_view_mode: "table" | "cards";
+      settings?: TableLayoutSettings | null;
+      updated_at?: string;
+    };
+    const applyLayout = (layout: LayoutData) => {
+      // เทียบเวอร์ชัน: ถ้า updated_at ต่างจากที่เคยเก็บ = admin แก้ default ใหม่ → บังคับทับ
+      const layoutVer = String(layout.updated_at ?? "");
+      let storedVer = "";
+      try { storedVer = (layoutKey && localStorage.getItem(layoutKey)) || ""; } catch { /* ignore */ }
+      const isNewVersion = !!layoutVer && storedVer !== layoutVer;
+
+      const vis: VisibilityState = {};
+      const order: ColumnOrderState = [];
+      const pinned: ColumnPinningState = { left: [], right: [] };
+      const sizing: ColumnSizingState = {};
+      const sortedCols = [...layout.columns].sort((a, b) => a.order - b.order);
+      sortedCols.forEach(c => {
+        vis[c.key] = c.visible;
+        order.push(c.key);
+        if (c.pinned === "left")  pinned.left!.push(c.key);
+        if (c.pinned === "right") pinned.right!.push(c.key);
+        if (c.width) sizing[c.key] = c.width;
+      });
+      // ถ้า default view ตั้งคอลัมน์ไปแล้ว → admin layout ห้ามมาทับคอลัมน์ (default view เป็นแหล่งความจริง)
+      // กันอาการ "บางทีโชว์ทุก field": admin layout (โชว์ ~62) แย่งชนะ default view (โชว์ ~36) เพราะลำดับโหลดไม่แน่นอน
+      if (!viewColsAppliedRef.current) {
+        if (isNewVersion) {
+          // เวอร์ชันใหม่จาก admin → ทับของเดิมทั้งหมด เพื่อให้ default ใหม่แสดงผลจริง
+          setColumnVisibility(vis);
+          setColumnOrder(order);
+          setColumnPinning(pinned);
+          setColumnSizing(sizing);
+        } else {
+          setColumnVisibility(prev => ({ ...vis, ...prev }));
+          setColumnOrder(prev => prev.length ? prev : order);
+          setColumnPinning(prev => (prev.left?.length || prev.right?.length) ? prev : pinned);
+          setColumnSizing(prev => Object.keys(prev).length ? prev : sizing);
+        }
+      }
+      setDensity(layout.default_density);
+      setViewMode(layout.default_view_mode);
+      setPendingDefaultPageSize(layout.default_page_size);
+      // ค่าเริ่มต้นแบบขยายได้: เรียง / เรียงรอง / จัดกลุ่ม (ตั้งเฉพาะตอนยังไม่มีค่าเดิม → Saved View override ได้)
+      const s = layout.settings ?? null;
+      setLayoutSettings(s);
+      if (s?.default_sort?.column) {
+        const srt = [{ id: s.default_sort.column, desc: s.default_sort.dir === "desc" }];
+        if (s.secondary_sort?.column) srt.push({ id: s.secondary_sort.column, desc: s.secondary_sort.dir === "desc" });
+        setSorting((prev) => (prev.length ? prev : srt));
+      }
+      if (s?.group_by) setGroupBy((prev) => prev ?? s.group_by ?? null);
+      layoutAppliedRef.current = true;
+      try { if (layoutKey && layoutVer) localStorage.setItem(layoutKey, layoutVer); } catch { /* ignore */ }
+    };
+
+    // SWR: revisit → apply ของเก่าทันที (bootstrap ไม่ต้องรอ network) แล้ว revalidate เงียบ ๆ
+    const swKey = `tl:${tableId}`;
+    const cached = peekSWR<LayoutData>(swKey);
+    if (cached) { applyLayout(cached); setLayoutReady(true); }
     (async () => {
       try {
         const res = await apiFetch(`/api/table-layouts?table_id=${encodeURIComponent(tableId)}`);
         const json = await res.json();
-        const layout = json.data as {
-          columns: Array<{ key: string; visible: boolean; order: number; pinned?: "left" | "right" | null; width?: number }>;
-          default_density: "normal" | "compact";
-          default_page_size: number;
-          default_view_mode: "table" | "cards";
-          settings?: TableLayoutSettings | null;
-          updated_at?: string;
-        } | null;
+        const layout = json.data as LayoutData | null;
         if (cancelled || !layout) return;
-        // เทียบเวอร์ชัน: ถ้า updated_at ต่างจากที่เคยเก็บ = admin แก้ default ใหม่ → บังคับทับ
-        const layoutVer = String(layout.updated_at ?? "");
-        let storedVer = "";
-        try { storedVer = (layoutKey && localStorage.getItem(layoutKey)) || ""; } catch { /* ignore */ }
-        const isNewVersion = !!layoutVer && storedVer !== layoutVer;
-
-        const vis: VisibilityState = {};
-        const order: ColumnOrderState = [];
-        const pinned: ColumnPinningState = { left: [], right: [] };
-        const sizing: ColumnSizingState = {};
-        const sortedCols = [...layout.columns].sort((a, b) => a.order - b.order);
-        sortedCols.forEach(c => {
-          vis[c.key] = c.visible;
-          order.push(c.key);
-          if (c.pinned === "left")  pinned.left!.push(c.key);
-          if (c.pinned === "right") pinned.right!.push(c.key);
-          if (c.width) sizing[c.key] = c.width;
-        });
-        // ถ้า default view ตั้งคอลัมน์ไปแล้ว → admin layout ห้ามมาทับคอลัมน์ (default view เป็นแหล่งความจริง)
-        // กันอาการ "บางทีโชว์ทุก field": admin layout (โชว์ ~62) แย่งชนะ default view (โชว์ ~36) เพราะลำดับโหลดไม่แน่นอน
-        if (!viewColsAppliedRef.current) {
-          if (isNewVersion) {
-            // เวอร์ชันใหม่จาก admin → ทับของเดิมทั้งหมด เพื่อให้ default ใหม่แสดงผลจริง
-            setColumnVisibility(vis);
-            setColumnOrder(order);
-            setColumnPinning(pinned);
-            setColumnSizing(sizing);
-          } else {
-            setColumnVisibility(prev => ({ ...vis, ...prev }));
-            setColumnOrder(prev => prev.length ? prev : order);
-            setColumnPinning(prev => (prev.left?.length || prev.right?.length) ? prev : pinned);
-            setColumnSizing(prev => Object.keys(prev).length ? prev : sizing);
-          }
-        }
-        setDensity(layout.default_density);
-        setViewMode(layout.default_view_mode);
-        setPendingDefaultPageSize(layout.default_page_size);
-        // ค่าเริ่มต้นแบบขยายได้: เรียง / เรียงรอง / จัดกลุ่ม (ตั้งเฉพาะตอนยังไม่มีค่าเดิม → Saved View override ได้)
-        const s = layout.settings ?? null;
-        setLayoutSettings(s);
-        if (s?.default_sort?.column) {
-          const srt = [{ id: s.default_sort.column, desc: s.default_sort.dir === "desc" }];
-          if (s.secondary_sort?.column) srt.push({ id: s.secondary_sort.column, desc: s.secondary_sort.dir === "desc" });
-          setSorting((prev) => (prev.length ? prev : srt));
-        }
-        if (s?.group_by) setGroupBy((prev) => prev ?? s.group_by ?? null);
-        layoutAppliedRef.current = true;
-        try { if (layoutKey && layoutVer) localStorage.setItem(layoutKey, layoutVer); } catch { /* ignore */ }
+        mutateSWR(swKey, layout);
+        if (!layoutAppliedRef.current) applyLayout(layout);   // ยังไม่เคย apply (ไม่มี cache) → apply ของสด
       } catch { /* silent — fallback to component defaults */ }
       finally { if (!cancelled) setLayoutReady(true); }   // ปลดล็อก bootstrap แม้ไม่มี/โหลด layout ไม่ได้
     })();
@@ -811,26 +822,38 @@ export function DataTable<T extends Record<string, unknown>>({
   // fetch จาก server
   // F-flicker: debounce 120ms — ตอนโหลดครั้งแรก deps หลายตัว (saved-view, layout, search)
   // ทยอยเปลี่ยนติดๆ กัน ทำให้ยิง fetch 4 รอบ = ตารางกระพริบ → รวบให้เหลือรอบเดียว
+  const prevRefreshRef = useRef(serverRefreshKey);
   useEffect(() => {
     if (!isServer || !serverFetch) return;
     if (!bootstrapped) return;   // รอ layout + มุมมองเริ่มต้น มาครบก่อน → ยิง fetch รอบเดียว (กันกระพริบ)
     let active = true;
-    setSrvLoading(true);
     const sort = sorting[0];
+    const params = {
+      page: srvPage + 1, pageSize: srvPageSize, search: debouncedSearch,
+      sortBy: sort?.id ?? null, sortDir: sort ? (sort.desc ? "desc" : "asc") as "desc" | "asc" : null,
+      filters: activeServerFilters,
+    };
+    // SWR: แคชผลตามชุดพารามิเตอร์ (หน้า/เรียง/ค้นหา/กรอง) → กลับเข้าหน้าเดิมโชว์ของเก่าทันที แล้ว revalidate เงียบ ๆ
+    const cacheKey = tableId
+      ? `dt:${tableId}:${JSON.stringify([params.page, params.pageSize, params.search, params.sortBy, params.sortDir, filtersKey])}`
+      : null;
+    // หลังบันทึก/ลบ (serverRefreshKey เปลี่ยน) → บังคับโหลดสด + ล้างแคชทุกหน้าของตารางนี้ (กันเห็นของเก่าหลังแก้)
+    const forceFresh = serverRefreshKey !== prevRefreshRef.current;
+    prevRefreshRef.current = serverRefreshKey;
+    if (forceFresh && tableId) invalidateSWR(`dt:${tableId}:`);
+    const cached = (!forceFresh && cacheKey) ? peekSWR<{ rows: T[]; total: number }>(cacheKey) : undefined;
+    if (cached) { setSrvRows(cached.rows); setSrvTotal(cached.total); setSrvLoading(false); }  // โชว์ของเก่าทันที (ไม่ขึ้น skeleton)
+    else setSrvLoading(true);
     const t = setTimeout(() => {
       if (!active) return;
-      serverFetch({
-        page: srvPage + 1, pageSize: srvPageSize, search: debouncedSearch,
-        sortBy: sort?.id ?? null, sortDir: sort ? (sort.desc ? "desc" : "asc") : null,
-        filters: activeServerFilters,
-      })
-        .then(r => { if (active) { setSrvRows(r.rows); setSrvTotal(r.total); } })
-        .catch(() => { if (active) { setSrvRows([]); setSrvTotal(0); } })
+      serverFetch(params)
+        .then(r => { if (!active) return; setSrvRows(r.rows); setSrvTotal(r.total); if (cacheKey) mutateSWR(cacheKey, r); })
+        .catch(() => { if (active && !cached) { setSrvRows([]); setSrvTotal(0); } })   // มีของเก่าอยู่ → คงไว้ ไม่ล้างเป็นว่าง
         .finally(() => { if (active) setSrvLoading(false); });
-    }, 120);
+    }, cached ? 0 : 120);   // มีของเก่าแล้ว → revalidate ทันที ; ไม่มี → debounce 120ms กันยิงรัว
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, serverFetch, bootstrapped, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
+  }, [isServer, serverFetch, bootstrapped, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey, tableId]);
 
   // เฟส 4 (แบบ A): server mode + จัดกลุ่ม → ดึง batch ใหญ่ (cap) มาจัดกลุ่มในจอ
   useEffect(() => {
@@ -862,9 +885,12 @@ export function DataTable<T extends Record<string, unknown>>({
   const [saveViewDefault, setSaveViewDefault] = useState(false);   // แบบ A: ตั้งเป็นค่าเริ่มต้นเลย
   const saveInputRef = useRef<HTMLInputElement>(null);
 
-  // โหลด views จาก Supabase (ต้อง login)
+  // โหลด views จาก Supabase (ต้อง login) — SWR: revisit ใช้ของเก่าทันที (bootstrap ไม่ต้องรอ network)
   const fetchUserViews = useCallback(async () => {
     if (!tableId) return;
+    const swKey = `sv:${tableId}`;
+    const cachedViews = peekSWR<StoredView[]>(swKey);
+    if (cachedViews) { setUserViews(cachedViews); setViewsReady(true); }   // revisit: มาทันที
     try {
       const res = await apiFetch(`/api/saved-views?table_id=${encodeURIComponent(tableId)}`);
       const json = await res.json();
@@ -872,7 +898,7 @@ export function DataTable<T extends Record<string, unknown>>({
         id: string; label: string; config: Record<string, unknown>;
         visibility?: "personal" | "team" | "system"; is_default?: boolean; owner_name?: string | null;
       }[];
-      setUserViews(rows.map(r => ({
+      const mapped: StoredView[] = rows.map(r => ({
         id: r.id, label: r.label,
         baseViewId:       (r.config.baseViewId as string) ?? "all",
         colFilterValues:  (r.config.colFilterValues as Record<string, ColumnFilterValue>) ?? {},
@@ -890,7 +916,9 @@ export function DataTable<T extends Record<string, unknown>>({
         visibility:       r.visibility ?? "personal",
         is_default:       r.is_default ?? false,
         owner_name:       r.owner_name ?? null,
-      })));
+      }));
+      setUserViews(mapped);
+      mutateSWR(swKey, mapped);
     } catch { /* ignore */ }
     finally { setViewsReady(true); }   // ปลดล็อก bootstrap แม้ไม่มี/โหลด views ไม่ได้
   }, [tableId]);

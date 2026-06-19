@@ -26,6 +26,11 @@ function emit(key: string) { listeners.get(key)?.forEach((fn) => fn()); }
 /** ใส่ค่าใหม่ลง cache เอง (เช่นหลัง mutate) แล้วแจ้งทุก component ที่ใช้ key นี้ */
 export function mutateSWR<T>(key: string, data: T): void { cache.set(key, { data, at: Date.now() }); emit(key); }
 
+/** อ่านค่าจาก cache แบบ sync (ไม่ trigger fetch) — ไว้ seed ค่าทันทีในโค้ดที่ fetch เองแบบ effect */
+export function peekSWR<T>(key: string | null): T | undefined {
+  return key ? (cache.get(key) as Entry<T> | undefined)?.data : undefined;
+}
+
 /** ล้าง cache (ทั้งหมด หรือเฉพาะ prefix) — ครั้งถัดไปที่ใช้จะโหลดสด */
 export function invalidateSWR(prefix?: string): void {
   if (!prefix) { cache.clear(); for (const k of [...listeners.keys()]) emit(k); return; }
