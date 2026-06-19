@@ -5,7 +5,7 @@
  * แสดง PR ที่รอออกใบสั่งซื้อ → เลือก → สร้าง PO (แยกใบตามร้านอัตโนมัติ)
  * 2 view: ตาราง (DataTable) / การ์ด (ร้าน + การ์ดแบ่ง section + ตะกร้า)
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
@@ -101,6 +101,9 @@ export default function PurchaseOrdersPage() {
   const [cartQ, setCartQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [selectMode, setSelectMode] = useState(false);                 // โหมดเลือกหลายชิ้น (ตั้งร้าน/ราคา Mass)
+  // responsive (จอ < xl): รายชื่อร้านเป็นลิ้นชัก + ตะกร้าสั่งซื้อเป็นแผ่นเลื่อนขึ้น (กดจากปุ่มลอย)
+  const [shopDrawerOpen, setShopDrawerOpen] = useState(false);
+  const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkShop, setBulkShop] = useState<Row[] | null>(null);        // popup ตั้งร้าน/ราคา หลายชิ้น
   const [createdPOs, setCreatedPOs] = useState<CreatedPO[] | null>(null);   // การ์ดใบสั่งซื้อหลังสร้างสำเร็จ (พิมพ์/แชร์ไลน์)
@@ -379,19 +382,22 @@ export default function PurchaseOrdersPage() {
           : error ? <div className="text-center text-red-500 py-16 text-sm">⚠ {error} <button onClick={fetchRows} className="underline ml-2">ลองใหม่</button></div>
           : rows.length === 0 ? <div className="text-center text-slate-300 py-16">ไม่มีรายการรอสั่งซื้อ</div>
           : (
-            <div className="flex flex-col lg:flex-row gap-4">
-              {/* ซ้าย: ร้าน (คลิกเลือกร้าน) */}
-              <aside className="w-full lg:w-56 shrink-0">
-                <div className="text-xs font-medium text-slate-500 mb-1.5">ร้านที่มีของรอสั่ง ({shops.length})</div>
+            <div className="flex flex-col xl:flex-row gap-4">
+              {/* ซ้าย: ร้าน — จอ < xl เป็นลิ้นชักเลื่อนจากซ้าย (เปิดด้วยปุ่ม "ร้าน") · xl เป็นคอลัมน์ */}
+              <aside className={`fixed top-14 bottom-0 left-0 z-40 w-72 max-w-[85%] bg-white overflow-auto p-4 shadow-xl transition-transform duration-300 ${shopDrawerOpen ? "translate-x-0" : "-translate-x-full"} xl:static xl:top-auto xl:bottom-auto xl:z-auto xl:w-56 xl:max-w-none xl:translate-x-0 xl:shadow-none xl:p-0 xl:overflow-visible xl:shrink-0`}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="text-xs font-medium text-slate-500">ร้านที่มีของรอสั่ง ({shops.length})</div>
+                  <button onClick={() => setShopDrawerOpen(false)} className="xl:hidden text-slate-400 hover:text-slate-600 text-lg leading-none" aria-label="ปิด">✕</button>
+                </div>
                 <input value={shopQ} onChange={(e) => setShopQ(e.target.value)} placeholder="🔎 ค้นหาร้าน…" className="w-full h-8 px-2 mb-2 text-xs border border-slate-200 rounded-md" />
                 <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                  <button onClick={() => { setMainTab("shop"); setActiveShop(null); }} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "shop" && !activeShop ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({rows.length})</button>
-                  <button onClick={() => setMainTab("mo")} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "mo" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🏭 จากใบสั่งงาน ({moCount})</button>
+                  <button onClick={() => { setMainTab("shop"); setActiveShop(null); setShopDrawerOpen(false); }} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "shop" && !activeShop ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({rows.length})</button>
+                  <button onClick={() => { setMainTab("mo"); setShopDrawerOpen(false); }} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${mainTab === "mo" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🏭 จากใบสั่งงาน ({moCount})</button>
                   {([["🇹🇭 ร้านไทย", shopsByOrigin.th], ["🇨🇳 ร้านจีน", shopsByOrigin.cn]] as const).map(([label, list]) => list.length === 0 ? null : (
                     <div key={label}>
                       <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 bg-slate-50 border-b border-slate-100 uppercase tracking-wide">{label} ({list.length})</div>
                       {list.map((s) => (
-                        <button key={s.name} onClick={() => { setMainTab("shop"); setActiveShop(s.name); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${mainTab === "shop" && activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                        <button key={s.name} onClick={() => { setMainTab("shop"); setActiveShop(s.name); setShopDrawerOpen(false); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${mainTab === "shop" && activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                           <div className={`text-sm ${mainTab === "shop" && activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
                           <div className="text-[11px] text-slate-400">{s.count} รายการ · {money(s.total, s.currency)}</div>
                         </button>
@@ -403,7 +409,13 @@ export default function PurchaseOrdersPage() {
 
               {/* กลาง: การ์ด แบ่ง section ตามร้าน */}
               <main className="flex-1 min-w-0 space-y-4">
-                <input value={prodQ} onChange={(e) => setProdQ(e.target.value)} placeholder="🔎 ค้นหาสินค้า (ชื่อ / รหัส)…" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                {/* จอ < xl: ปุ่มเปิดลิ้นชักร้าน + โชว์ร้านที่เลือกอยู่ */}
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setShopDrawerOpen(true)} className="xl:hidden flex items-center gap-1.5 h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 flex-shrink-0 whitespace-nowrap">
+                    🏪 {mainTab === "mo" ? "ใบสั่งงาน" : activeShop ? activeShop : "ทุกร้าน"}
+                  </button>
+                  <input value={prodQ} onChange={(e) => setProdQ(e.target.value)} placeholder="🔎 ค้นหาสินค้า (ชื่อ / รหัส)…" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                </div>
                 {selectMode && (
                   <div className="sticky top-14 z-10 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-blue-800">เลือก {selectedIds.size} รายการ</span>
@@ -436,7 +448,7 @@ export default function PurchaseOrdersPage() {
                         <h2 className="text-sm font-semibold text-slate-800">{sec.title} {sec.sub ? <span className="text-xs font-normal text-slate-500">· ผลิต: {sec.sub}</span> : null} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
                         {sec.shopName && !sectionNoShop && <button onClick={() => setBuyAllShop({ name: sec.shopName!, rows: list })} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
                       </div>
-                      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+                      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
                         {list.map((r) => {
                           const on = inCart(r.id);
                           const blocked = noShop(r);
@@ -493,23 +505,27 @@ export default function PurchaseOrdersPage() {
                 })}
               </main>
 
-              {/* ขวา: ตะกร้า (ขยายได้) */}
-              <aside className="w-full shrink-0 relative" style={{ width: typeof window !== "undefined" && window.innerWidth >= 1024 ? cartWidth : undefined }}>
-                <div onMouseDown={startResize} title="ลากเพื่อขยาย/ย่อ" className="hidden lg:block absolute left-0 top-0 bottom-0 w-1.5 -ml-2 cursor-col-resize hover:bg-blue-200 rounded" />
+              {/* ขวา: ตะกร้า — จอ < xl เป็นแผ่นเลื่อนขึ้นจากล่าง (เปิดด้วยปุ่มตะกร้าลอย) · xl เป็นคอลัมน์ขวา (ขยายได้) */}
+              <aside className={`fixed inset-x-0 bottom-0 z-40 h-[85%] bg-white rounded-t-2xl shadow-2xl flex flex-col transition-transform duration-300 ${cartSheetOpen ? "translate-y-0" : "translate-y-full"} xl:static xl:inset-auto xl:h-auto xl:rounded-none xl:shadow-none xl:translate-y-0 xl:block xl:shrink-0 xl:relative`}
+                style={{ width: typeof window !== "undefined" && window.innerWidth >= 1280 ? cartWidth : undefined }}>
+                <div onMouseDown={startResize} title="ลากเพื่อขยาย/ย่อ" className="hidden xl:block absolute left-0 top-0 bottom-0 w-1.5 -ml-2 cursor-col-resize hover:bg-blue-200 rounded" />
                 {/* top-14 เผื่อพ้นแถบ App tabs (sticky top-0) ของ shell */}
-                <div className="bg-white border border-slate-200 rounded-lg sticky top-14">
+                <div className="bg-white border border-slate-200 rounded-lg xl:sticky xl:top-14 flex flex-col flex-1 min-h-0 xl:block">
                   <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                     <span className="font-semibold text-slate-800">ตะกร้าสั่งซื้อ ({cartRows.length})</span>
-                    <label className="flex items-center gap-1 text-[11px] text-slate-400">¥→฿
-                      <input type="number" value={rate} step="0.1" onChange={(e) => changeRate(Number(e.target.value))} className="w-14 h-6 px-1 text-xs border border-slate-200 rounded text-right" />
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1 text-[11px] text-slate-400">¥→฿
+                        <input type="number" value={rate} step="0.1" onChange={(e) => changeRate(Number(e.target.value))} className="w-14 h-6 px-1 text-xs border border-slate-200 rounded text-right" />
+                      </label>
+                      <button onClick={() => setCartSheetOpen(false)} className="xl:hidden text-slate-400 hover:text-slate-600 text-lg leading-none" aria-label="ปิดตะกร้า">✕</button>
+                    </div>
                   </div>
                   {cartRows.length > 0 && (
                     <div className="px-3 py-2 border-b border-slate-100">
                       <input value={cartQ} onChange={(e) => setCartQ(e.target.value)} placeholder="🔎 ค้นหาในตะกร้า…" className="w-full h-8 px-2 text-xs border border-slate-200 rounded-md" />
                     </div>
                   )}
-                  <div className="max-h-[55vh] overflow-auto p-3 space-y-3">
+                  <div className="flex-1 overflow-auto xl:flex-none xl:max-h-[55vh] p-3 space-y-3">
                     {cartRows.length === 0 && <div className="text-sm text-slate-300 text-center py-8">ยังไม่มีรายการ<br />คลิกการ์ดเพื่อใส่ตะกร้า</div>}
                     {cartByShop.map(([shop, items]) => {
                       const cq = cartQ.trim().toLowerCase();
@@ -574,6 +590,23 @@ export default function PurchaseOrdersPage() {
               </aside>
             </div>
           )
+        )}
+
+        {/* จอ < xl: ฉากหลังมืดตอนเปิดลิ้นชัก/ตะกร้า + ปุ่มตะกร้าลอย (เฉพาะมุมมองการ์ด) */}
+        {view === "card" && (shopDrawerOpen || cartSheetOpen) && (
+          <div className="xl:hidden fixed inset-0 z-30 bg-black/40" onClick={() => { setShopDrawerOpen(false); setCartSheetOpen(false); }} />
+        )}
+        {view === "card" && !cartSheetOpen && (
+          <button onClick={() => setCartSheetOpen(true)}
+            className="xl:hidden fixed bottom-5 right-5 z-30 h-14 pl-4 pr-5 rounded-full bg-blue-600 text-white shadow-lg flex items-center gap-2 active:scale-95 transition-transform">
+            <span className="relative flex items-center">
+              🛒
+              {cartRows.length > 0 && (
+                <span className="absolute -top-2.5 -right-3 min-w-[20px] h-5 px-1 rounded-full bg-rose-500 text-white text-xs font-medium flex items-center justify-center">{cartRows.length}</span>
+              )}
+            </span>
+            <span className="text-sm font-medium">ตะกร้า</span>
+          </button>
         )}
 
       </div>
