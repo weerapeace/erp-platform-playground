@@ -144,6 +144,10 @@ export default function WorkBoardPage() {
   const [cardPos, setCardPos] = useState<Record<string, Pos>>({});
   const [tool, setTool] = useState<"select" | "pan">("select");
   const [isMax, setIsMax] = useState(false);
+  // โหมดแท็บเล็ต (Phase 1) — ขยายขนาดทั้งบอร์ด + เต็มจอ ให้แตะง่ายบนทัช · จำต่อเครื่อง
+  const [tablet, setTablet] = useState(false);
+  useEffect(() => { try { setTablet(localStorage.getItem("wb:tablet") === "1"); } catch { /* ignore */ } }, []);
+  const toggleTablet = useCallback(() => setTablet((v) => { const nv = !v; try { localStorage.setItem("wb:tablet", nv ? "1" : "0"); } catch { /* ignore */ } if (nv) setIsMax(true); return nv; }), []);
   const [dragId, setDragId] = useState<string | null>(null);
 
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
@@ -800,7 +804,8 @@ export default function WorkBoardPage() {
   if (!canView) return <AccessDenied />;
 
   return (
-    <div className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3" : "max-w-[1700px] mx-auto px-5 py-5"}>
+    <div className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3 overflow-auto" : "max-w-[1700px] mx-auto px-5 py-5"}
+      style={tablet ? { zoom: 1.25 } : undefined}>
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">📋 บอร์ดจ่ายงาน</h1>
@@ -812,6 +817,8 @@ export default function WorkBoardPage() {
             <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
             <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ/เตรียม</button>
           </div>
+          <button onClick={toggleTablet} title="ขยายขนาดให้แตะง่ายบนแท็บเล็ต (เต็มจอ)"
+            className={`h-9 px-3 text-sm font-medium rounded-lg border ${tablet ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>📱 แท็บเล็ต</button>
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
