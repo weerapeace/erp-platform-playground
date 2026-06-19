@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const [empRes, conRes, deptRes, recRes, warnRes] = await Promise.all([
       a.from("employees").select("id, employee_code, first_name, last_name, nickname, department_id, supervisor_id, profile_photo_key, employment_status").eq("employment_status", "active"),
       a.from("employee_contracts").select("employee_id, contract_type, base_salary, payroll_register_base_salary").eq("is_current", true).eq("status", "active"),
-      a.from("departments").select("id, name, display_order").order("display_order", { ascending: true }),
+      a.from("departments").select("id, name, display_order, status").neq("status", "inactive").order("display_order", { ascending: true }),
       a.from("employee_recurring_pay_items").select("employee_id").eq("status", "active"),
       a.from("employee_warnings").select("employee_id").eq("status", "active"),
     ]);
