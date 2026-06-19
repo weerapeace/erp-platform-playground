@@ -26,6 +26,7 @@ import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
 import type { Assignee } from "@/app/api/mo/assignees/route";
+import type { LaborRate } from "@/app/api/bom/labor-rates/route";
 import type { Brand } from "@/app/api/brands/route";
 
 type Dept = { id: string; name: string; note?: string | null; show_note?: boolean };
@@ -39,7 +40,7 @@ type PendingMO = {
   prep_done: boolean; cut_done: boolean;
   // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
   has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; ready: boolean;
-  labor?: Labor;
+  labor?: Labor; bom_code?: string | null;
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
@@ -151,6 +152,8 @@ export default function WorkBoardPage() {
   const [dispCraftsman, setDispCraftsman] = useState("");
   const [dispDue, setDispDue] = useState("");
   const [dispSaving, setDispSaving] = useState(false);
+  const [dispRates, setDispRates] = useState<LaborRate[]>([]);   // ค่าแรง/ชิ้น จาก BOM (ราคากลาง + รายช่าง)
+  const [dispLaborRate, setDispLaborRate] = useState("");        // ค่าแรง/ชิ้น ที่จะใช้ (default ราคากลาง)
   const [warnDispatch, setWarnDispatch] = useState<{ mo: PendingMO; dept: Dept } | null>(null);  // Phase 3: เตือนจ่ายทั้งที่ยังไม่พร้อม
   const [colorOpen, setColorOpen] = useState(false);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -324,7 +327,22 @@ export default function WorkBoardPage() {
   // เปิด popup จ่ายงาน (ตั้งค่าเริ่มต้นจาก MO)
   const openDispatch = useCallback((mo: PendingMO, dept: Dept) => {
     setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
+    setDispRates([]); setDispLaborRate("");
+    // ดึงค่าแรง/ชิ้น จาก BOM ของสินค้านี้ (ราคากลาง + รายช่าง) → ใช้ตั้ง default
+    if (mo.bom_code) void (async () => {
+      try { const r = await apiFetch(`/api/bom/labor-rates?bom_code=${encodeURIComponent(mo.bom_code!)}`); const j = await r.json(); setDispRates((j.data ?? []) as LaborRate[]); }
+      catch { /* ignore */ }
+    })();
   }, []);
+  // ตั้งค่าแรง/ชิ้น default ตามช่างที่เลือก (มีเรตเฉพาะ → ใช้, ไม่งั้นราคากลาง)
+  useEffect(() => {
+    if (!dispMO) return;
+    const byCraft = dispCraftsman ? dispRates.find((r) => r.craftsman_id === dispCraftsman) : null;
+    const central = dispRates.find((r) => !r.craftsman_id);
+    const pick = byCraft ?? central;
+    if (pick) setDispLaborRate(String(pick.rate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispCraftsman, dispRates]);
 
   // ---- pointer ----
   const onBoardDown = (e: RPE) => {
@@ -437,7 +455,8 @@ export default function WorkBoardPage() {
         body: JSON.stringify({ mo_no: dispMO.mo_no, product_sku: dispMO.product_sku, product_name: dispMO.product_name,
           stage: stageOfDept(dispDept.name), department_id: dispDept.id, department_name: dispDept.name,
           assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? dispDept.name,
-          qty: dispQty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}` }) });
+          qty: dispQty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}`,
+          labor_cost: dispLaborRate.trim() !== "" ? (Number(dispLaborRate) || 0) * dispQty : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`จ่ายงานเข้า ${dispDept.name} แล้ว: ${j.wo_no ?? ""}`);
       setDispMO(null); setDispDept(null); await load(true);
@@ -966,6 +985,16 @@ export default function WorkBoardPage() {
               </select>
               {dispIsHire ? <span className="text-[10px] text-indigo-500">งานเหมาเลือกพนักงานได้ทุกคน</span>
                 : deptCraftsmen.length === 0 && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
+            </label>
+            {/* ค่าแรงผลิต/ชิ้น — default ราคากลางจาก BOM (เลือกช่างที่มีเรต → ใช้เรตช่างนั้น) */}
+            <label className="block">
+              <span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต / ชิ้น (บาท)</span>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                <input type="number" min={0} step="any" value={dispLaborRate} onChange={(e) => setDispLaborRate(e.target.value)} placeholder="—"
+                  className="w-28 h-9 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <span className="text-[11px] text-slate-500">× {fmt(dispQty)} = <b className="text-slate-700">฿{fmt((Number(dispLaborRate) || 0) * dispQty)}</b></span>
+                {dispRates.some((r) => !r.craftsman_id) && <span className="text-[10px] text-slate-400">ราคากลาง ฿{fmt(dispRates.find((r) => !r.craftsman_id)!.rate)}/ชิ้น</span>}
+              </div>
             </label>
             {/* กลุ่ม B: เตือนถ้าผู้รับงาน (ช่างที่เลือก หรือชื่อแผนก) เคยมีประวัติงานเสีย */}
             {(() => {

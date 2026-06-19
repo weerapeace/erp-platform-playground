@@ -58,6 +58,7 @@ type CreateBody = {
   stage?: string; assignee_type?: string; assignee_id?: string | null; assignee_name?: string | null;
   department_id?: string | null; department_name?: string | null;
   qty?: number; uom?: string | null; dispatch_date?: string | null; due_date?: string | null; note?: string | null;
+  labor_cost?: number | null;   // ค่าแรงผลิตรวม (กรอกตั้งแต่ตอนจ่ายงาน — default ราคากลาง × จำนวน)
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     assignee_id: body.assignee_id ?? null, assignee_name: body.assignee_name ?? null,
     department_id: body.department_id ?? null, department_name: body.department_name ?? null,
     qty, uom: body.uom ?? null, received_qty: 0,
+    labor_cost: body.labor_cost != null ? num(body.labor_cost) : null,
     dispatch_date: body.dispatch_date || new Date().toISOString().slice(0, 10),
     due_date: body.due_date || null, status: "dispatched", note: body.note ?? null,
     created_by: user.id, is_active: true,
