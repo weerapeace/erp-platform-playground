@@ -539,6 +539,9 @@ export function DataTable<T extends Record<string, unknown>>({
   const [layoutReady, setLayoutReady]   = useState(!tableId);   // ไม่มี tableId = ไม่มีอะไรต้องรอ
   const [viewsReady,  setViewsReady]    = useState(!tableId);
   const [bootstrapped, setBootstrapped] = useState(false);
+  // มุมมองเริ่มต้น (default view) ถือเป็นแหล่งความจริงของ "คอลัมน์ที่โชว์" — ต้องชนะ admin layout เสมอ
+  const defaultViewAppliedRef = useRef(false);  // apply default view แล้วหรือยัง (กันทำซ้ำ)
+  const viewColsAppliedRef    = useRef(false);  // default view ตั้งคอลัมน์แล้ว → layout ห้ามมาทับ
 
   // ---- Permission by field: ซ่อนคอลัมน์ที่ไม่มีสิทธิ์ ----
   const columns = useMemo(
@@ -612,17 +615,21 @@ export function DataTable<T extends Record<string, unknown>>({
           if (c.pinned === "right") pinned.right!.push(c.key);
           if (c.width) sizing[c.key] = c.width;
         });
-        if (isNewVersion) {
-          // เวอร์ชันใหม่จาก admin → ทับของเดิมทั้งหมด เพื่อให้ default ใหม่แสดงผลจริง
-          setColumnVisibility(vis);
-          setColumnOrder(order);
-          setColumnPinning(pinned);
-          setColumnSizing(sizing);
-        } else {
-          setColumnVisibility(prev => ({ ...vis, ...prev }));
-          setColumnOrder(prev => prev.length ? prev : order);
-          setColumnPinning(prev => (prev.left?.length || prev.right?.length) ? prev : pinned);
-          setColumnSizing(prev => Object.keys(prev).length ? prev : sizing);
+        // ถ้า default view ตั้งคอลัมน์ไปแล้ว → admin layout ห้ามมาทับคอลัมน์ (default view เป็นแหล่งความจริง)
+        // กันอาการ "บางทีโชว์ทุก field": admin layout (โชว์ ~62) แย่งชนะ default view (โชว์ ~36) เพราะลำดับโหลดไม่แน่นอน
+        if (!viewColsAppliedRef.current) {
+          if (isNewVersion) {
+            // เวอร์ชันใหม่จาก admin → ทับของเดิมทั้งหมด เพื่อให้ default ใหม่แสดงผลจริง
+            setColumnVisibility(vis);
+            setColumnOrder(order);
+            setColumnPinning(pinned);
+            setColumnSizing(sizing);
+          } else {
+            setColumnVisibility(prev => ({ ...vis, ...prev }));
+            setColumnOrder(prev => prev.length ? prev : order);
+            setColumnPinning(prev => (prev.left?.length || prev.right?.length) ? prev : pinned);
+            setColumnSizing(prev => Object.keys(prev).length ? prev : sizing);
+          }
         }
         setDensity(layout.default_density);
         setViewMode(layout.default_view_mode);
@@ -890,24 +897,25 @@ export function DataTable<T extends Record<string, unknown>>({
 
   useEffect(() => { fetchUserViews(); }, [fetchUserViews]);
 
-  // Bootstrap: รอ layout + views มาครบ → apply มุมมองเริ่มต้น (ถ้ามี) → ปลดล็อก fetch
-  // apply + setBootstrapped อยู่ render เดียวกัน → fetch รอบแรกได้ค่าตัวกรอง/เรียงที่ถูกต้องเลย (ยิงรอบเดียว)
+  // apply มุมมองเริ่มต้น "ทันทีที่ views โหลดเสร็จ" (ครั้งเดียว) — แยกจาก gate ของ fetch
+  // → คอลัมน์ถูกตั้งตาม default view เสมอ แม้ fetch จะถูกปลดล็อกด้วย timeout ก่อนหน้า
+  //   (กันอาการ "บางทีโชว์ทุก field" ตอน config โหลดช้า)
   useEffect(() => {
-    if (bootstrapped) return;
-    if (!layoutReady || !viewsReady) return;
+    if (defaultViewAppliedRef.current || !viewsReady) return;
+    defaultViewAppliedRef.current = true;
     const def = userViews.find(v => v.is_default);
     if (def) applyUserView(def);
-    setBootstrapped(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutReady, viewsReady, bootstrapped]);
+  }, [viewsReady]);
 
-  // กันค้าง: ถ้า config (layout/views) โหลดช้าหรือ request แขวน อย่าให้ตารางค้าง skeleton ตลอด
-  // → บังคับปลดล็อกหลัง 2.5 วิ แล้วยิง fetch ด้วยค่าที่มี (ยอมกระพริบเล็กน้อยดีกว่าค้างถาวร)
+  // Gate: รอ config ที่มีผลต่อ "คำสั่ง query" (ตัวกรอง/เรียง จาก layout+view) มาครบก่อนยิง fetch รอบเดียว
+  // + safety timeout: ถ้า config ช้า/แขวน บังคับยิงหลัง 4 วิ (ไม่ค้างถาวร) — ตอนนั้น default view มัก apply แล้ว
   useEffect(() => {
     if (bootstrapped) return;
-    const t = setTimeout(() => setBootstrapped(true), 2500);
+    if (layoutReady && viewsReady) { setBootstrapped(true); return; }
+    const t = setTimeout(() => setBootstrapped(true), 4000);
     return () => clearTimeout(t);
-  }, [bootstrapped]);
+  }, [layoutReady, viewsReady, bootstrapped]);
 
   // ---- Auto-detect fields from data not in defined columns ----
   const definedColumnKeys = useMemo(() => new Set(
@@ -1054,6 +1062,7 @@ export function DataTable<T extends Record<string, unknown>>({
     setColFilterValues(view.colFilterValues ?? {});
     setGlobalSearch(view.globalSearch ?? "");
     setColumnVisibility(view.columnVisibility ?? {});
+    if (view.columnVisibility && Object.keys(view.columnVisibility).length) viewColsAppliedRef.current = true;
     setGroupBy(view.groupBy ?? null);   // เฟส 3: คืนค่าการจัดกลุ่ม
     setCollapsedGroups(new Set());
     // แบบ A: คืนหน้าตาตารางครบ (ถ้ามีเก็บไว้)
