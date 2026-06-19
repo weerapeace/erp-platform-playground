@@ -44,6 +44,13 @@ export function DispatchPlanBoard({
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
+  // กลุ่มใบสั่งงาน (สำหรับแท็บกรองในคอลัมน์รอจ่าย)
+  const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
+  const [groupTab, setGroupTab] = useState<string>("__all__");   // __all__ | ชื่อกลุ่ม | __none__
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
+    setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
+  const groupsOf = (moNo: string) => moGroups.filter((g) => g.mo_nos.includes(moNo)).map((g) => g.name);
+  const inGroupTab = (moNo: string) => groupTab === "__all__" ? true : groupTab === "__none__" ? groupsOf(moNo).length === 0 : groupsOf(moNo).includes(groupTab);
   const [name, setName] = useState(planName);
   const [sDate, setSDate] = useState(startDate ?? "");
   const [eDate, setEDate] = useState(endDate ?? "");
@@ -135,6 +142,42 @@ export function DispatchPlanBoard({
   };
 
   const deptCraftsmen = (dept: DeptLite) => /เหมา/.test(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id);
+  const visiblePending = pending.filter((p) => availOf(p) > 0 && inGroupTab(p.mo_no));
+
+  // การ์ดร่าง 1 ใบ (แยกไว้เพื่อจัดกลุ่มตามช่างได้)
+  const draftCard = (l: DispatchPlanLine, d: DeptLite) => {
+    const opts = deptCraftsmen(d);
+    return (
+      <div key={l.id} className="rounded-lg px-2 py-1.5 mb-1.5" style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Thumb url={imageByMo[l.mo_no ?? ""]} />
+            <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[10px] px-1 rounded" style={{ color: "#0f6e56", border: "0.5px solid #5dcaa5" }}>ร่าง</span>
+            {editable && <button onClick={() => removeLine(l.id)} className="text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
+          </div>
+        </div>
+        <div className="text-[10px] mt-0.5" style={{ color: "#0f6e56" }}>ค่าแรงผลิต {baht(lineLabor(l))} ({fmt(Number(l.qty) || 0)} × {baht(laborPerUnit[l.mo_no ?? ""] ?? 0)})</div>
+        <div className="flex items-center gap-1.5 mt-1">
+          <input type="number" min={0} step="any" value={Number(l.qty) || 0} disabled={!editable}
+            onChange={(e) => updateLine(l.id, { qty: Number(e.target.value) })}
+            className="w-14 h-6 px-1 text-xs text-right border rounded" style={{ borderColor: "#9fe1cb" }} />
+          <span className="text-[10px]" style={{ color: "#0f6e56" }}>ชิ้น</span>
+          {opts.length > 0 && (
+            <select value={l.assignee_id ?? ""} disabled={!editable}
+              onChange={(e) => { const c = opts.find((x) => x.id === e.target.value); updateLine(l.id, { assignee_id: c?.id ?? null, assignee_name: c?.name ?? null }); }}
+              className="flex-1 h-6 px-1 text-[11px] border rounded min-w-0" style={{ borderColor: "#9fe1cb" }}>
+              <option value="">ทั้งโต๊ะ</option>
+              {opts.map((c) => { const df = defectOf(c.name); return <option key={c.id} value={c.id}>{df ? "⚠️ " : ""}{c.name}</option>; })}
+            </select>
+          )}
+        </div>
+        {(() => { const df = defectOf(l.assignee_name); return df ? <div className="text-[10px] text-amber-600 mt-0.5">⚠️ ช่างนี้เคยมีงานเสีย {df.count} ครั้ง</div> : null; })()}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -169,8 +212,17 @@ export function DispatchPlanBoard({
           {/* คอลัมน์รอจ่าย */}
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]">
             <div className="flex items-center justify-between mb-2"><span className="text-sm font-bold text-slate-700">📥 รอจ่าย</span>
-              <span className="text-[11px] text-slate-400">{pending.filter((p) => availOf(p) > 0).length}</span></div>
-            {pending.filter((p) => availOf(p) > 0).map((p) => {
+              <span className="text-[11px] text-slate-400">{visiblePending.length}</span></div>
+            {/* แท็บกรองตามกลุ่มใบสั่งงาน */}
+            {moGroups.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {([["__all__", "ทั้งหมด"], ...moGroups.map((g) => [g.name, g.name] as [string, string]), ["__none__", "ยังไม่จับกลุ่ม"]] as [string, string][]).map(([key, label]) => (
+                  <button key={key} type="button" onClick={() => setGroupTab(key)}
+                    className={`text-[11px] px-2 py-0.5 rounded-full border ${groupTab === key ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
+                ))}
+              </div>
+            )}
+            {visiblePending.map((p) => {
               const on = selected === p.mo_no;
               return (
                 <button key={p.id} type="button" disabled={!editable} onClick={() => setSelected(on ? null : p.mo_no)}
@@ -186,7 +238,7 @@ export function DispatchPlanBoard({
                 </button>
               );
             })}
-            {pending.filter((p) => availOf(p) > 0).length === 0 && <div className="text-center text-[11px] text-slate-300 py-3">— วางแผนครบแล้ว —</div>}
+            {visiblePending.length === 0 && <div className="text-center text-[11px] text-slate-300 py-3">— ไม่มีใบในกลุ่มนี้ —</div>}
           </div>
 
           {/* คอลัมน์แผนก */}
@@ -215,40 +267,23 @@ export function DispatchPlanBoard({
                     </div>
                   </div>
                 ))}
-                {/* รายการร่าง */}
-                {drafts.map((l) => {
-                  const opts = deptCraftsmen(d);
-                  return (
-                    <div key={l.id} className="rounded-lg px-2 py-1.5 mb-1.5" style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-between gap-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <Thumb url={imageByMo[l.mo_no ?? ""]} />
-                          <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
+                {/* รายการร่าง — จัดกลุ่มย่อยตามช่าง */}
+                {(() => {
+                  const byCraft = new Map<string, DispatchPlanLine[]>();
+                  for (const l of drafts) { const k = l.assignee_name || ""; (byCraft.get(k) ?? byCraft.set(k, []).get(k)!).push(l); }
+                  const showHeads = byCraft.size > 1 || [...byCraft.keys()].some((k) => k);   // มีหลายช่าง หรือมีระบุช่าง → โชว์หัวกลุ่มช่าง
+                  return [...byCraft.entries()].map(([craft, ls]) => (
+                    <div key={craft || "__none__"}>
+                      {showHeads && (
+                        <div className="flex items-center justify-between text-[10px] font-medium mt-1 mb-0.5 px-0.5" style={{ color: "#0f6e56" }}>
+                          <span className="truncate">👤 {craft || "ทั้งโต๊ะ (ไม่ระบุช่าง)"}</span>
+                          <span className="text-slate-400 shrink-0">{fmt(ls.reduce((a, l) => a + (Number(l.qty) || 0), 0))} ชิ้น · {baht(ls.reduce((a, l) => a + lineLabor(l), 0))}</span>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-[10px] px-1 rounded" style={{ color: "#0f6e56", border: "0.5px solid #5dcaa5" }}>ร่าง</span>
-                          {editable && <button onClick={() => removeLine(l.id)} className="text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
-                        </div>
-                      </div>
-                      <div className="text-[10px] mt-0.5" style={{ color: "#0f6e56" }}>ค่าแรงผลิต {baht(lineLabor(l))} ({fmt(Number(l.qty) || 0)} × {baht(laborPerUnit[l.mo_no ?? ""] ?? 0)})</div>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <input type="number" min={0} step="any" value={Number(l.qty) || 0} disabled={!editable}
-                          onChange={(e) => updateLine(l.id, { qty: Number(e.target.value) })}
-                          className="w-14 h-6 px-1 text-xs text-right border rounded" style={{ borderColor: "#9fe1cb" }} />
-                        <span className="text-[10px]" style={{ color: "#0f6e56" }}>ชิ้น</span>
-                        {opts.length > 0 && (
-                          <select value={l.assignee_id ?? ""} disabled={!editable}
-                            onChange={(e) => { const c = opts.find((x) => x.id === e.target.value); updateLine(l.id, { assignee_id: c?.id ?? null, assignee_name: c?.name ?? null }); }}
-                            className="flex-1 h-6 px-1 text-[11px] border rounded min-w-0" style={{ borderColor: "#9fe1cb" }}>
-                            <option value="">ทั้งโต๊ะ</option>
-                            {opts.map((c) => { const df = defectOf(c.name); return <option key={c.id} value={c.id}>{df ? "⚠️ " : ""}{c.name}</option>; })}
-                          </select>
-                        )}
-                      </div>
-                      {(() => { const df = defectOf(l.assignee_name); return df ? <div className="text-[10px] text-amber-600 mt-0.5">⚠️ ช่างนี้เคยมีงานเสีย {df.count} ครั้ง</div> : null; })()}
+                      )}
+                      {ls.map((l) => draftCard(l, d))}
                     </div>
-                  );
-                })}
+                  ));
+                })()}
                 {reals.length === 0 && drafts.length === 0 && <div className="text-center text-[11px] text-slate-300 py-3">{canDrop ? "กดเพื่อจ่าย (ร่าง)" : "—"}</div>}
               </div>
             );
