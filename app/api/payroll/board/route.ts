@@ -92,6 +92,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       sections,
+      all_departments: depts.map((d) => ({ id: String(d.id), name: String(d.name) })),   // ทุกแผนก (รวมที่ว่าง) สำหรับลากวาง
       no_department: noDept.sort((x, y) => x.employee_code.localeCompare(y.employee_code)),
       total_employees: employees.length,
       error: null,

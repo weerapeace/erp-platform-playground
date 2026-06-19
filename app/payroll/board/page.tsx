@@ -5,7 +5,7 @@
  * การ์ดพนักงานจัดกลุ่มตามแผนก · สีกรอบตามประเภทสัญญา · badge หัวหน้า/รายการประจำ/ใบเตือน
  * กดการ์ด → drawer · hover → ข้อมูลเร็ว · (ลากวางจะมาเฟส 2)
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, type DragEvent } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 
@@ -15,6 +15,8 @@ type Card = {
   is_supervisor: boolean; recurring_count: number; warning_count: number; photo_key: string | null;
 };
 type Section = { department_id: string; department_name: string; headcount: number; total_salary: number; employees: Card[] };
+type Dept = { id: string; name: string };
+const NO_DEPT = "__none__";   // คีย์โซน "ยังไม่ระบุแผนก"
 
 const baht = (v: number) => `฿${v.toLocaleString("th-TH", { minimumFractionDigits: 0 })}`;
 const COLOR_CLS: Record<string, { border: string; chip: string; dot: string }> = {
@@ -32,31 +34,51 @@ const initials = (c: Card) => (c.nickname || c.full_name || c.employee_code).sli
 
 export default function PayrollBoardPage() {
   const [sections, setSections] = useState<Section[]>([]);
+  const [allDepts, setAllDepts] = useState<Dept[]>([]);
   const [noDept, setNoDept] = useState<Card[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<Card | null>(null);
+  // ลากวาง
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
       const j = await apiFetch("/api/payroll/board").then((r) => r.json());
       if (j.error) setErr(j.error);
-      else { setSections(j.sections as Section[]); setNoDept(j.no_department as Card[]); setTotal(j.total_employees ?? 0); }
+      else { setSections(j.sections as Section[]); setAllDepts((j.all_departments ?? []) as Dept[]); setNoDept(j.no_department as Card[]); setTotal(j.total_employees ?? 0); }
     } catch { setErr("โหลดไม่ได้"); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // ย้ายแผนก (ปล่อยการ์ดในโซนแผนก)
+  const moveTo = useCallback(async (deptKey: string) => {
+    const empId = dragId; setDragId(null); setOverKey(null);
+    if (!empId) return;
+    const department_id = deptKey === NO_DEPT ? null : deptKey;
+    setMoving(true);
+    try {
+      const j = await apiFetch("/api/payroll/board/move", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employee_id: empId, department_id }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : "ย้ายไม่สำเร็จ"); }
+    finally { setMoving(false); }
+  }, [dragId, load]);
+
   const match = (c: Card) => !q.trim() || `${c.employee_code} ${c.nickname} ${c.full_name}`.toLowerCase().includes(q.trim().toLowerCase());
+  const emptyDepts = allDepts.filter((d) => !sections.some((s) => s.department_id === d.id));   // แผนกที่ยังไม่มีคน (เป็นที่วางได้)
 
   return (
     <div className="p-6 max-w-[1500px] mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800">🗂️ ผังพนักงาน (บอร์ด)</h1>
-          <p className="text-sm text-slate-500">การ์ดพนักงานจัดตามแผนก · สีกรอบ = ประเภทสัญญา · <span className="text-slate-400">ลากวางจะมาในเฟสถัดไป</span></p>
+          <p className="text-sm text-slate-500">การ์ดพนักงานจัดตามแผนก · สีกรอบ = ประเภทสัญญา · <span className="text-sky-600">ลากการ์ดไปวางแผนกอื่นเพื่อย้าย</span>{moving && <span className="text-amber-600"> · กำลังย้าย…</span>}</p>
         </div>
         <div className="flex items-center gap-2">
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา รหัส/ชื่อ"
@@ -83,13 +105,32 @@ export default function PayrollBoardPage() {
       ) : (
         <div className="space-y-4">
           {sections.map((s) => (
-            <SectionBox key={s.department_id} title={s.department_name} headcount={s.headcount} total={s.total_salary}>
-              {s.employees.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onClick={() => setSel(c)} />)}
+            <SectionBox key={s.department_id} title={s.department_name} headcount={s.headcount} total={s.total_salary}
+              isOver={overKey === s.department_id && !!dragId}
+              onDragOver={(e) => { if (dragId) { e.preventDefault(); setOverKey(s.department_id); } }}
+              onDragLeave={() => setOverKey((k) => (k === s.department_id ? null : k))}
+              onDrop={(e) => { e.preventDefault(); void moveTo(s.department_id); }}>
+              {s.employees.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onClick={() => setSel(c)} onDragStart={() => setDragId(c.id)} onDragEnd={() => setDragId(null)} dragging={dragId === c.id} />)}
             </SectionBox>
           ))}
-          {noDept.length > 0 && (
-            <SectionBox title="ยังไม่ระบุแผนก" headcount={noDept.length} total={noDept.reduce((t, c) => t + c.base_salary, 0)} muted>
-              {noDept.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onClick={() => setSel(c)} />)}
+          {/* แผนกที่ยังไม่มีคน — เป็นที่วางได้ (โผล่เฉพาะตอนกำลังลาก) */}
+          {dragId && emptyDepts.map((d) => (
+            <SectionBox key={d.id} title={d.name} headcount={0} total={0} muted
+              isOver={overKey === d.id}
+              onDragOver={(e) => { e.preventDefault(); setOverKey(d.id); }}
+              onDragLeave={() => setOverKey((k) => (k === d.id ? null : k))}
+              onDrop={(e) => { e.preventDefault(); void moveTo(d.id); }}>
+              <span className="text-xs text-slate-300">วางที่นี่เพื่อย้ายเข้าแผนกนี้</span>
+            </SectionBox>
+          ))}
+          {(noDept.length > 0 || dragId) && (
+            <SectionBox title="ยังไม่ระบุแผนก" headcount={noDept.length} total={noDept.reduce((t, c) => t + c.base_salary, 0)} muted
+              isOver={overKey === NO_DEPT && !!dragId}
+              onDragOver={(e) => { if (dragId) { e.preventDefault(); setOverKey(NO_DEPT); } }}
+              onDragLeave={() => setOverKey((k) => (k === NO_DEPT ? null : k))}
+              onDrop={(e) => { e.preventDefault(); void moveTo(NO_DEPT); }}>
+              {noDept.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onClick={() => setSel(c)} onDragStart={() => setDragId(c.id)} onDragEnd={() => setDragId(null)} dragging={dragId === c.id} />)}
+              {noDept.length === 0 && <span className="text-xs text-slate-300">วางที่นี่เพื่อเอาออกจากแผนก</span>}
             </SectionBox>
           )}
         </div>
@@ -100,9 +141,14 @@ export default function PayrollBoardPage() {
   );
 }
 
-function SectionBox({ title, headcount, total, muted, children }: { title: string; headcount: number; total: number; muted?: boolean; children: React.ReactNode }) {
+function SectionBox({ title, headcount, total, muted, isOver, onDragOver, onDragLeave, onDrop, children }: {
+  title: string; headcount: number; total: number; muted?: boolean; isOver?: boolean;
+  onDragOver?: (e: DragEvent<HTMLDivElement>) => void; onDragLeave?: () => void; onDrop?: (e: DragEvent<HTMLDivElement>) => void;
+  children: React.ReactNode;
+}) {
   return (
-    <div className={`rounded-2xl border ${muted ? "border-dashed border-slate-300 bg-slate-50/50" : "border-slate-200 bg-white"} p-4`}>
+    <div onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+      className={`rounded-2xl border p-4 transition-colors ${isOver ? "border-sky-400 ring-2 ring-sky-200 bg-sky-50/60" : muted ? "border-dashed border-slate-300 bg-slate-50/50" : "border-slate-200 bg-white"}`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
         <h2 className="font-semibold text-slate-800">{title} <span className="text-sm font-normal text-slate-400">· {headcount} คน</span></h2>
         <span className="text-sm text-slate-500">ฐานเงินเดือนรวม <b className="text-slate-700 tabular-nums">{baht(total)}</b></span>
@@ -112,11 +158,11 @@ function SectionBox({ title, headcount, total, muted, children }: { title: strin
   );
 }
 
-function EmployeeCard({ c, onClick }: { c: Card; onClick: () => void }) {
+function EmployeeCard({ c, onClick, onDragStart, onDragEnd, dragging }: { c: Card; onClick: () => void; onDragStart?: () => void; onDragEnd?: () => void; dragging?: boolean }) {
   const col = COLOR_CLS[c.color] ?? COLOR_CLS.slate;
   return (
-    <button onClick={onClick}
-      className={`group relative w-[150px] text-left rounded-xl border border-slate-200 border-l-4 ${col.border} bg-white p-2.5 hover:shadow-md hover:-translate-y-0.5 transition`}>
+    <button onClick={onClick} draggable onDragStart={onDragStart} onDragEnd={onDragEnd}
+      className={`group relative w-[150px] text-left rounded-xl border border-slate-200 border-l-4 ${col.border} bg-white p-2.5 hover:shadow-md hover:-translate-y-0.5 transition cursor-grab active:cursor-grabbing ${dragging ? "opacity-50" : ""}`}>
       <div className="flex items-center gap-2">
         <span className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${col.chip} shrink-0`}>{initials(c)}</span>
         <div className="min-w-0">

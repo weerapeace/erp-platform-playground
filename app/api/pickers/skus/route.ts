@@ -5,6 +5,7 @@ import { guardApi } from "@/lib/api-auth";
 type SkuPickerRow = {
   id: string;
   code: string | null;
+  barcode: string | null;
   parent_sku_id: string | null;
   name_th: string | null;
   color: string | null;
@@ -99,6 +100,7 @@ export async function GET(request: NextRequest) {
     .select(`
       id,
       code,
+      barcode,
       parent_sku_id,
       name_th,
       color,
@@ -151,6 +153,7 @@ export async function GET(request: NextRequest) {
     return {
       id: row.id,
       code,
+      barcode: row.barcode ?? null,
       name: row.name_th ?? code,
       uom_name: uom?.name ?? null,
       color: row.color_th ?? row.color ?? null,

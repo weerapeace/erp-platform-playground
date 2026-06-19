@@ -366,6 +366,7 @@ export function ProductPicker({ value, onChange, placeholder = "เลือก�
 export type SkuPickerValue = {
   id: string;
   code: string;
+  barcode?: string | null;
   name: string;
   uom_name?: string | null;
   color?: string | null;
