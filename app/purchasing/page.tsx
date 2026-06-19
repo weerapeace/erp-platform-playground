@@ -7,7 +7,7 @@
  * Filter ฝั่งซ้ายไม่ hardcode — ติ๊กเลือก field กรองเองจากทะเบียน field (skus-v2)
  * เลือก → ตะกร้า → สร้างใบขอซื้อ (PR + lines). currency: ร้าน CN → YUAN
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { PrHistoryButton } from "@/components/pr-history";
 import { RejectedPanel } from "./orders/approval";
@@ -754,7 +754,8 @@ export default function PurchasingShopPage() {
             </div>
           )}
 
-          <div className={`grid gap-4 transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+          {/* responsive: iPhone 2 คอลัมน์ · iPad/จอเล็ก 4 คอลัมน์ · PC (xl) ใช้ค่าที่ผู้ใช้ตั้ง (--cols) */}
+          <div className={`grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-4 xl:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))] transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ "--cols": cols } as CSSProperties}>
             {cards.map(c => (
               <div key={c.id} className="relative group">
                 {/* ปุ่มดาว ⭐ (เฉพาะการ์ด SKU จริง — favorite เก็บเป็น sku_id) */}
