@@ -141,7 +141,12 @@ export async function GET(request: NextRequest) {
     query = query.or(parts.join(","));
   }
 
-  const { data, error, count } = await query.order(orderCol, { ascending: sortAsc }).range(offset, offset + limit - 1);
+  // ตัวตัดสินรอง "id": ถ้าค่าเรียงหลัก (เช่นชื่อ/ราคา) ซ้ำกัน ลำดับจะนิ่งเสมอ
+  // → แบ่งหน้าด้วย offset แล้วไม่คาบเกี่ยว/ไม่ได้แถวซ้ำเวลากด "ดูเพิ่มเติม"
+  const { data, error, count } = await query
+    .order(orderCol, { ascending: sortAsc })
+    .order("id", { ascending: true })
+    .range(offset, offset + limit - 1);
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
 
   const rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {

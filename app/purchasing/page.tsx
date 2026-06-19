@@ -74,6 +74,12 @@ export default function PurchasingShopPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);   // ข้อ 2: error state
+  // perf: gate ยิง grid รอบแรกเมื่อค่าตั้งต้นพร้อม (แท็ก "ห้ามขอซื้อ" + ประเทศร้านสำหรับสกุลเงิน)
+  // → กัน grid ยิงซ้ำ 5 รอบตอนเปิดหน้า (เดิม sort/แท็ก/ร้าน ทยอยเสร็จ ทำให้ refetch ทีละรอบ)
+  const [tagsLoaded, setTagsLoaded] = useState(false);
+  const [partnersLoaded, setPartnersLoaded] = useState(false);
+  const gridReady = tagsLoaded && partnersLoaded;
+  const stockReqRef = useRef(false);   // perf: โหลดยอดสต๊อกครั้งเดียวตอนกดการ์ดแรก (ไม่โหลดตอนเปิดหน้า)
   const [page, setPage] = useState(0);   // หน้า (0-based)
   const [q, setQ] = useState("");
   const [cols, setCols] = useState(4);
@@ -136,11 +142,14 @@ export default function PurchasingShopPage() {
   }, []);
 
   // โหลดยอดคงเหลือในสต๊อก (sku_id → qty) — ไว้โชว์ในป๊อปเพิ่มลงใบขอซื้อ
+  // perf: เลื่อนมาโหลด "ตอนกดการ์ดเปิดป๊อปครั้งแรก" (ไม่โหลด 2,000 แถวตอนเปิดหน้า)
   useEffect(() => {
+    if (!confirmSku || stockReqRef.current) return;
+    stockReqRef.current = true;
     apiFetch("/api/inventory/sku-stock?limit=2000").then(r => r.json())
       .then(j => { const m = new Map<string, number>(); for (const r of (j.data ?? [])) m.set(String(r.sku_id), Number(r.qty_on_hand) || 0); setStockMap(m); })
-      .catch(() => {});
-  }, []);
+      .catch(() => { stockReqRef.current = false; });   // พลาด → ให้ลองใหม่รอบหน้า
+  }, [confirmSku]);
 
   // โหลดรายชื่อแท็กทั้งหมด (id→ชื่อ) + แท็กที่ตั้ง "ห้ามขอซื้อ" (กฎกลาง) — เรียกซ้ำได้หลัง admin แก้ใน ⚙
   const reloadHiddenTags = useCallback(async () => {
@@ -155,6 +164,7 @@ export default function PurchasingShopPage() {
       });
       setTagNames(names); setHiddenTagIds(hidden);
     } catch { /* ignore */ }
+    finally { setTagsLoaded(true); }   // perf: ปลด gate grid (รู้แท็กห้ามขอซื้อแล้ว)
   }, []);
   useEffect(() => { void reloadHiddenTags(); }, [reloadHiddenTags]);
   // แยกแท็กที่เลือกเป็น 2 กอง ตามโหมดของแต่ละตัวกรอง: ซ่อน (hide) / โชว์เฉพาะ (show)
@@ -227,7 +237,7 @@ export default function PurchasingShopPage() {
       const m: Record<string, string> = {};
       (j.data ?? []).forEach((p: Record<string, unknown>) => { m[String(p.id)] = String(p.country ?? "TH"); });
       setPartnerCountry(m);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setPartnersLoaded(true));   // perf: ปลด gate grid (รู้ประเทศร้านแล้ว)
     apiFetch("/api/admin/field-registry-v2?module=skus-v2").then(r => r.json()).then(j => {
       const ff: FilterField[] = (j.fields ?? [])
         .filter((f: Record<string, unknown>) => f.is_filterable)
@@ -387,6 +397,9 @@ export default function PurchasingShopPage() {
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
   // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
   useEffect(() => {
+    // perf: รอค่าตั้งต้น (แท็กห้ามขอซื้อ + ประเทศร้าน) พร้อมก่อน → ยิง grid รอบเดียวด้วยเงื่อนไขที่ถูกต้อง
+    // (favorite/group/tags ไม่พึ่งค่าพวกนี้ → ไม่ต้องรอ gate)
+    if (source === "sku" && !gridReady) { setLoading(true); return; }
     const qChanged = prevQ.current !== q;
     prevQ.current = q;
     setPage(0);
@@ -395,7 +408,7 @@ export default function PurchasingShopPage() {
       return () => clearTimeout(t);
     }
     void fetchCards(0);
-  }, [fetchCards, q]);
+  }, [fetchCards, q, gridReady, source]);
 
   // โหลดแท็ก (Product Family) ของการ์ด SKU ที่กำลังแสดง → โชว์เป็นป้ายบนการ์ด
   useEffect(() => {
@@ -1215,8 +1228,9 @@ function FilterCombobox({ column, label, values, onChange, relation, allFrom }: 
     } catch { setOpts([]); } finally { setLoading(false); }
   }, [opts, loading, relation, allFrom, column]);
 
-  // relation / m2m: โหลดทันที (เพื่อโชว์ "ชื่อ" ของค่าที่เลือกไว้) / text: โหลดตอนเปิด
-  useEffect(() => { if (relation || allFrom) void load(); }, [relation, allFrom, load]);
+  // perf: relation/m2m โหลดทันที "เฉพาะเมื่อมีค่าเลือกไว้" (ต้องดึงชื่อมาโชว์บนปุ่ม)
+  // ถ้ายังไม่เลือกอะไร → ไม่โหลด รอจนกดเปิด dropdown (openList) — กันยิง distinct/relation หนักตอนเปิดหน้า
+  useEffect(() => { if ((relation || allFrom) && values.length > 0) void load(); }, [relation, allFrom, load, values.length]);
 
   useEffect(() => {
     if (!open) return;
