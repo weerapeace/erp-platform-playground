@@ -22,8 +22,10 @@ type RF = {
   field_key: string; column_name: string | null; field_label: string; ui_field_type: string;
   is_visible: boolean; show_in_form: boolean; is_editable: boolean; is_required: boolean;
   options: { options?: string[]; currency?: string; currency_field?: string } | null;
-  relation_config: RelationConfig | null; display_order: number;
+  relation_config: RelationConfig | null; display_order: number; group_key?: string | null;
 };
+// layout ฟอร์มที่ออกแบบไว้ (Tab→Section) — peek เอามาจัดเซกชัน/ลำดับเหมือนฟอร์ม
+type PeekLayout = { tabs: { key: string; label: string; sections: { key: string; label: string }[] }[] } | null;
 
 // สกุลเงินของฟิลด์ (ทะเบียนกลาง) — ตายตัว (options.currency) หรือตามฟิลด์อื่นในรายการ (options.currency_field)
 const fieldCurrency = (f: RF, rec: Record<string, unknown> | null): unknown => {
@@ -50,6 +52,7 @@ export function RelationPeekModal({
   const { user } = useAuth();
   const canCfg = usePermission("admin.users");   // ⚙ ตั้งชุดฟิลด์ = ค่ากลางของทุก user → จำกัด admin
   const [fields, setFields] = useState<RF[]>([]);
+  const [layout, setLayout] = useState<PeekLayout>(null);
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -70,6 +73,7 @@ export function RelationPeekModal({
     try {
       const reg = await apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json());
       setFields((reg.fields ?? []).filter((f: RF) => (f.is_visible || f.show_in_form) && !["one2many", "many2many"].includes(f.ui_field_type)));
+      setLayout((reg.layout ?? null) as PeekLayout);
       setQuickFields(Array.isArray(reg.quick_edit_fields) && reg.quick_edit_fields.length > 0 ? (reg.quick_edit_fields as string[]) : null);
       if (isCreate) {
         setRow({});               // โหมดสร้าง: ไม่มี record เดิม ใช้ object ว่าง (กัน "ไม่พบข้อมูล")
@@ -192,6 +196,12 @@ export function RelationPeekModal({
     if (f.ui_field_type === "boolean") return row[f.field_key] ? "ใช่" : "ไม่ใช่";
     const v = row[f.field_key];
     if (v == null || v === "") return <span className="text-slate-300">—</span>;
+    // ค่าเป็น array/object (เช่น attribute_values jsonb) — แปลงให้อ่านได้ (กัน [object Object])
+    if (Array.isArray(v)) return v.length ? <span>{v.map((x) => String(x)).join(", ")}</span> : <span className="text-slate-300">—</span>;
+    if (typeof v === "object") {
+      const e = Object.entries(v as Record<string, unknown>).filter(([, vv]) => vv != null && vv !== "");
+      return e.length ? <span className="text-xs text-slate-600">{e.map(([k, vv]) => `${k}: ${typeof vv === "object" ? JSON.stringify(vv) : String(vv)}`).join(" · ")}</span> : <span className="text-slate-300">—</span>;
+    }
     // ฟิลด์เงิน → โชว์สกุลถูกต้องตามทะเบียน (฿1,234 / 1,234 RMB)
     const cur = fieldCurrency(f, row);
     if (cur != null && typeof v !== "boolean" && !isNaN(Number(v))) return <span className="tabular-nums">{formatAmount(Number(v), cur)}</span>;
@@ -305,14 +315,41 @@ export function RelationPeekModal({
                   <img src={img(cover)!} alt="" className="w-full h-full object-cover" />
                 </div>
               )}
-              <dl className="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 min-w-0">
-                {shownFields.filter((f) => f.ui_field_type !== "image").map((f) => (
-                  <div key={f.field_key} className="min-w-0">
-                    <dt className="text-[11px] text-slate-400">{f.field_label}</dt>
-                    <dd className="text-sm text-slate-700 truncate">{val(f)}</dd>
-                  </div>
-                ))}
-              </dl>
+              <div className="flex-1 min-w-0 space-y-3">
+                {(() => {
+                  const viewFields = shownFields.filter((f) => f.ui_field_type !== "image");
+                  const grid = (list: RF[]) => (
+                    <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                      {list.map((f) => (
+                        <div key={f.field_key} className="min-w-0">
+                          <dt className="text-[11px] text-slate-400">{f.field_label}</dt>
+                          <dd className="text-sm text-slate-700 truncate">{val(f)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  );
+                  // จัดเซกชัน/ลำดับตาม layout ฟอร์มที่ออกแบบไว้ (group_key ↔ section.key) · ไม่มี layout → แบบเดิม
+                  const secs = (layout?.tabs ?? []).flatMap((t) => t.sections);
+                  if (secs.length === 0) return grid(viewFields);
+                  const bySec = new Map<string, RF[]>();
+                  for (const f of viewFields) { const k = f.group_key || ""; (bySec.get(k) ?? bySec.set(k, []).get(k)!).push(f); }
+                  const known = new Set(secs.map((s) => s.key));
+                  const ordered = secs.filter((s) => (bySec.get(s.key)?.length ?? 0) > 0);
+                  const leftover = viewFields.filter((f) => !known.has(f.group_key || ""));
+                  if (ordered.length === 0) return grid(viewFields);
+                  return <>
+                    {ordered.map((s) => (
+                      <div key={s.key}>
+                        <div className="text-xs font-semibold text-slate-500 mb-1 pb-0.5 border-b border-slate-100">{s.label}</div>
+                        {grid(bySec.get(s.key)!)}
+                      </div>
+                    ))}
+                    {leftover.length > 0 && (
+                      <div><div className="text-xs font-semibold text-slate-400 mb-1 pb-0.5 border-b border-slate-100">อื่นๆ</div>{grid(leftover)}</div>
+                    )}
+                  </>;
+                })()}
+              </div>
             </div>
           )}
           {err && <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">⚠ {err}</div>}
