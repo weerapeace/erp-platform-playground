@@ -23,6 +23,12 @@
   // ⚠️ บรรทัดนี้ต้องอยู่บน Paid plan เท่านั้น (ถ้ากลับไป Free จะ deploy fail)
   "limits": { "cpu_ms": 300000 },
 
+  // ⚡ Smart Placement — ให้ Cloudflare ย้าย Worker ไปรัน "ใกล้ Supabase (โตเกียว)" แทนที่จะรันใกล้ผู้ใช้
+  // เหตุผล: ทุก request คุยกับ DB หลายเด้ง (เช็คสิทธิ์ + query + relation) — รันใกล้ DB ทำให้หลายเด้งนั้นเร็ว
+  // เหลือข้ามทะเลแค่รอบเดียว (ผู้ใช้↔Worker). Cloudflare วิเคราะห์ทราฟฟิกเองแล้วค่อยย้าย (ใช้เวลาสักพักหลัง deploy)
+  // ถอดออกได้ทันทีถ้าไม่ดีขึ้น (ลบบรรทัดนี้)
+  "placement": { "mode": "smart" },
+
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
