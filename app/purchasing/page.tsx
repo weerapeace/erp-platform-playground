@@ -47,6 +47,8 @@ const COLS_KEY = "pr_shop_cols";
 const FILT_KEY = "pr_shop_filter_keys";
 const CART_KEY = "pr_shop_cart";
 const SORT_KEY = "pr_shop_sort";
+const HIDE_KEY = "pr_shop_hidden_tags";       // cache แท็ก "ห้ามขอซื้อ" → ใช้ทันทีตอนเปิดหน้า (ไม่รอ network 4s)
+const PCTRY_KEY = "pr_shop_partner_country";  // cache ประเทศร้าน (id→country) → label การ์ดถูกตั้งแต่แรก
 // ตัวเลือกการเรียง (sort by) — by/dir ตรงกับคอลัมน์จริงใน skus_v2 (ส่งให้ API)
 const SORTS: { key: string; label: string; by?: string; dir?: "asc" | "desc" }[] = [
   { key: "",          label: "ล่าสุด (ค่าเริ่มต้น)" },
@@ -74,11 +76,6 @@ export default function PurchasingShopPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);   // ข้อ 2: error state
-  // perf: gate ยิง grid รอบแรกเมื่อค่าตั้งต้นพร้อม (แท็ก "ห้ามขอซื้อ" + ประเทศร้านสำหรับสกุลเงิน)
-  // → กัน grid ยิงซ้ำ 5 รอบตอนเปิดหน้า (เดิม sort/แท็ก/ร้าน ทยอยเสร็จ ทำให้ refetch ทีละรอบ)
-  const [tagsLoaded, setTagsLoaded] = useState(false);
-  const [partnersLoaded, setPartnersLoaded] = useState(false);
-  const gridReady = tagsLoaded && partnersLoaded;
   const stockReqRef = useRef(false);   // perf: โหลดยอดสต๊อกครั้งเดียวตอนกดการ์ดแรก (ไม่โหลดตอนเปิดหน้า)
   const [page, setPage] = useState(0);   // หน้า (0-based)
   const [q, setQ] = useState("");
@@ -121,6 +118,10 @@ export default function PurchasingShopPage() {
   // cart + save
   const [cart, setCart] = useState<Line[]>([]);
   const [partnerCountry, setPartnerCountry] = useState<Record<string, string>>({});
+  // perf: mapSku อ่านประเทศร้านผ่าน ref → พอ partners โหลดเสร็จ (ช้า ~4s) ไม่ทำให้ grid โหลดใหม่
+  // (partnerCountry ใช้แค่ทำ label country ไม่เกี่ยวกับสกุลเงิน — สกุลเงินดูจาก rmb_cost ในแถว)
+  const partnerCountryRef = useRef(partnerCountry);
+  useEffect(() => { partnerCountryRef.current = partnerCountry; }, [partnerCountry]);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [showReview, setShowReview] = useState(false);   // ป๊อปทวนรายการก่อนสร้าง
@@ -162,9 +163,11 @@ export default function PurchasingShopPage() {
         names[String(t.id)] = String(t.name ?? t.id);
         if (t.hide_in_purchasing === true) hidden.push(String(t.id));
       });
-      setTagNames(names); setHiddenTagIds(hidden);
+      setTagNames(names);
+      // perf: อัปเดต ref เฉพาะเมื่อค่าต่างจริง → fresh โหลดเสร็จแล้วค่าเท่าเดิม (จาก cache) จะไม่ทำให้ grid โหลดซ้ำ
+      setHiddenTagIds(prev => (prev.length === hidden.length && prev.every((v, i) => v === hidden[i])) ? prev : hidden);
+      try { localStorage.setItem(HIDE_KEY, JSON.stringify(hidden)); } catch { /* ignore */ }   // cache ไว้ใช้รอบหน้า
     } catch { /* ignore */ }
-    finally { setTagsLoaded(true); }   // perf: ปลด gate grid (รู้แท็กห้ามขอซื้อแล้ว)
   }, []);
   useEffect(() => { void reloadHiddenTags(); }, [reloadHiddenTags]);
   // แยกแท็กที่เลือกเป็น 2 กอง ตามโหมดของแต่ละตัวกรอง: ซ่อน (hide) / โชว์เฉพาะ (show)
@@ -209,6 +212,9 @@ export default function PurchasingShopPage() {
     const c = Number(localStorage.getItem(COLS_KEY)); if (c >= 2 && c <= 10) setCols(c);
     const sk = localStorage.getItem(SORT_KEY); if (sk && SORTS.some(s => s.key === sk)) setSortKey(sk);
     try { const k = JSON.parse(localStorage.getItem(FILT_KEY) ?? "[]"); if (Array.isArray(k)) setActiveKeys(k); } catch { /* ignore */ }
+    // perf: ใช้ค่าที่ cache ไว้ทันที → grid รอบแรกถูกต้อง (ซ่อนแท็กห้ามขอซื้อ + label ประเทศ) โดยไม่รอ network 4s
+    try { const h = JSON.parse(localStorage.getItem(HIDE_KEY) ?? "[]"); if (Array.isArray(h) && h.length) setHiddenTagIds(h); } catch { /* ignore */ }
+    try { const pc = JSON.parse(localStorage.getItem(PCTRY_KEY) ?? "{}"); if (pc && typeof pc === "object") { setPartnerCountry(pc); partnerCountryRef.current = pc; } } catch { /* ignore */ }
     // ข้อ 4: กู้ตะกร้าที่ค้างไว้ (กันหายเมื่อรีเฟรช) + แจ้งให้รู้ว่าของเก่ายังอยู่
     try {
       const c2 = JSON.parse(localStorage.getItem(CART_KEY) ?? "[]");
@@ -237,7 +243,8 @@ export default function PurchasingShopPage() {
       const m: Record<string, string> = {};
       (j.data ?? []).forEach((p: Record<string, unknown>) => { m[String(p.id)] = String(p.country ?? "TH"); });
       setPartnerCountry(m);
-    }).catch(() => {}).finally(() => setPartnersLoaded(true));   // perf: ปลด gate grid (รู้ประเทศร้านแล้ว)
+      try { localStorage.setItem(PCTRY_KEY, JSON.stringify(m)); } catch { /* ignore */ }   // cache ไว้ใช้รอบหน้า
+    }).catch(() => {});
     apiFetch("/api/admin/field-registry-v2?module=skus-v2").then(r => r.json()).then(j => {
       const ff: FilterField[] = (j.fields ?? [])
         .filter((f: Record<string, unknown>) => f.is_filterable)
@@ -272,6 +279,9 @@ export default function PurchasingShopPage() {
     }
     return out;
   }, [activeKeys, filterValues, filterFields]);
+  // perf: ใช้ "ค่า string" ของ filter เป็น dep แทน object → filterFields โหลดเสร็จแล้ว object สร้างใหม่
+  // (ค่าเดิม {}) จะไม่ทำให้ grid โหลดซ้ำ เพราะ string เทียบด้วยค่า ไม่ใช่ reference
+  const builtFiltersKey = useMemo(() => JSON.stringify(builtFilters), [builtFilters]);
 
   // ข้อ 6: จำนวนรวมต่อ SKU ที่อยู่ในตะกร้า (ใช้โชว์ป้ายบนการ์ด)
   const cartQtyBySku = useMemo(() => {
@@ -284,7 +294,7 @@ export default function PurchasingShopPage() {
   // แปลง 1 record SKU → Card (ใช้ซ้ำทุกโหมด)
   const mapSku = useCallback((s: Record<string, unknown>): Card => {
     const sid = String(s.seller_partner_id ?? "");
-    const country = partnerCountry[sid] ?? "TH";
+    const country = partnerCountryRef.current[sid] ?? "TH";
     // สินค้าจีน = มีราคาหยวน (rmb_cost) → ใช้ ¥ เป็นราคาสั่งจริง; ที่เหลือใช้บาท
     const rmb = num(s.rmb_cost);
     const isYuan = rmb > 0;
@@ -298,7 +308,7 @@ export default function PurchasingShopPage() {
         uom: String(s.uom_label ?? "ชิ้น"),
       },
     };
-  }, [partnerCountry]);
+  }, []);   // perf: ไม่พึ่ง partnerCountry (อ่านผ่าน ref) → grid ไม่โหลดใหม่ตอน partners โหลดเสร็จ
 
   // ดึง SKU ตามรายการ id (ใช้กับโหมด favorite/frequent) — คงลำดับ id เดิม
   const fetchSkusByIds = useCallback(async (ids: string[]): Promise<Card[]> => {
@@ -320,7 +330,7 @@ export default function PurchasingShopPage() {
       let nextCards: Card[] = [];
       let nextTotal = 0;
       if (source === "sku") {
-        const fp = Object.keys(builtFilters).length ? `&filters=${encodeURIComponent(JSON.stringify(builtFilters))}` : "";
+        const fp = builtFiltersKey !== "{}" ? `&filters=${encodeURIComponent(builtFiltersKey)}` : "";
         const sp = q ? `&search=${encodeURIComponent(q)}` : "";
         const j = await apiFetch(`/api/master-v2/skus?limit=${PAGE}&offset=${pg * PAGE}${sp}${fp}${exclParam}${sortParam}`).then(r => r.json());
         const mapped: Card[] = (j.data ?? []).map(mapSku);
@@ -382,7 +392,7 @@ export default function PurchasingShopPage() {
     } finally {
       if (myId === reqIdRef.current) setLoading(false);
     }
-  }, [source, q, builtFilters, mapSku, fetchSkusByIds, exclParam, sortParam, tagsSel, hiddenTagIds]);
+  }, [source, q, builtFiltersKey, mapSku, fetchSkusByIds, exclParam, sortParam, tagsSel, hiddenTagIds]);
 
   // เตือนสั่งซ้ำ — เช็คใบขอซื้อที่ยังค้างของสินค้าที่โชว์อยู่ (batch) → ป้ายบนการ์ด + รายการในป๊อป
   useEffect(() => {
@@ -397,18 +407,14 @@ export default function PurchasingShopPage() {
   // refetch + reset ไปหน้าแรก — หน่วงเวลา (debounce) เฉพาะตอน "พิมพ์ค้นหา" เท่านั้น
   // ส่วนการสลับโหมด / เปลี่ยน filter → ดึงทันที ไม่หน่วง (ให้กดแล้วเปลี่ยนทันที ไม่กระตุก)
   useEffect(() => {
-    // perf: รอค่าตั้งต้น (แท็กห้ามขอซื้อ + ประเทศร้าน) พร้อมก่อน → ยิง grid รอบเดียวด้วยเงื่อนไขที่ถูกต้อง
-    // (favorite/group/tags ไม่พึ่งค่าพวกนี้ → ไม่ต้องรอ gate)
-    if (source === "sku" && !gridReady) { setLoading(true); return; }
     const qChanged = prevQ.current !== q;
     prevQ.current = q;
     setPage(0);
-    if (qChanged) {
-      const t = setTimeout(() => { void fetchCards(0); }, 300);
-      return () => clearTimeout(t);
-    }
-    void fetchCards(0);
-  }, [fetchCards, q, gridReady, source]);
+    // perf: หน่วงสั้น ๆ รวบการเปลี่ยนค่าตอน mount (sort/filter settle) ให้ยิงเท่าที่จำเป็น
+    // grid "วิ่งขนาน" กับ request อื่น ไม่ต้องรอตัวที่ช้า (sort/แท็ก/ประเทศ ใช้ค่า cache ทันทีแล้ว)
+    const t = setTimeout(() => { void fetchCards(0); }, qChanged ? 300 : 150);
+    return () => clearTimeout(t);
+  }, [fetchCards, q]);
 
   // โหลดแท็ก (Product Family) ของการ์ด SKU ที่กำลังแสดง → โชว์เป็นป้ายบนการ์ด
   useEffect(() => {

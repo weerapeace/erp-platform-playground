@@ -360,7 +360,7 @@ export function HoverZoomImage({ src, alt = "", className = "", previewSize = 32
   return (
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={alt} className={className}
+      <img src={src} alt={alt} className={className} loading="lazy" decoding="async"
         onMouseEnter={(e) => { setHover(true); setPos({ x: e.clientX, y: e.clientY }); }}
         onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
         onMouseLeave={() => setHover(false)} />
