@@ -128,8 +128,36 @@ export default function PayrollBoardPage() {
     finally { setSaving(false); }
   };
 
+  const GLASS = "border border-white/60 backdrop-blur-xl shadow-[0_8px_30px_rgba(2,6,23,0.07)]";
+  const renderZone = (z: Zone, sticky: boolean) => {
+    const cards = zoneCards[z.key] ?? [];
+    const isOver = overZone === z.key && dragging;
+    return (
+      <div key={z.key} data-zone={z.key}
+        className={`w-[280px] shrink-0 self-start rounded-3xl p-4 min-h-[150px] transition ${GLASS} ${sticky ? "sticky left-0 z-20 bg-white/80" : "bg-white/55"} ${isOver ? "ring-2 ring-emerald-300 border-emerald-300/70" : ""}`}>
+        <div className="flex items-baseline gap-1 mb-1">
+          <h2 className="font-semibold text-slate-800 truncate">{z.name}</h2>
+          {sticky && <span className="text-[10px] text-slate-400" title="ปักไว้ซ้าย">📌</span>}
+          <span className="text-sm font-normal text-slate-400 shrink-0">· {cards.length} คน</span>
+        </div>
+        <div className="text-[13px] text-slate-500 mb-3">ฐานเงินเดือนรวม <b className="text-slate-700 tabular-nums">{baht(zoneSalary(z.key))}</b></div>
+        <div className="flex flex-wrap gap-2.5">
+          {cards.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onDown={(e) => onCardDown(e, c, z.key)} dragging={drag?.card.id === c.id} />)}
+          {cards.length === 0 && <span className="text-xs text-slate-300">ลากการ์ดมาวางที่นี่</span>}
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="p-6 max-w-[1500px] mx-auto select-none">
+    <div className="relative p-6 max-w-[1500px] mx-auto select-none">
+      {/* พื้นหลังไล่สี + ก้อนเบลอ ให้กล่องกระจกดูมีมิติ (liquid glass) */}
+      <div className="absolute inset-0 -z-10 overflow-hidden rounded-[2rem]">
+        <div className="absolute inset-0 bg-gradient-to-br from-sky-100/70 via-violet-100/50 to-emerald-100/50" />
+        <div className="absolute -top-10 left-10 w-80 h-80 rounded-full bg-sky-300/40 blur-3xl" />
+        <div className="absolute top-32 right-10 w-72 h-72 rounded-full bg-violet-300/40 blur-3xl" />
+        <div className="absolute bottom-0 left-1/3 w-96 h-72 rounded-full bg-emerald-200/40 blur-3xl" />
+      </div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800">🗂️ ผังพนักงาน (บอร์ด)</h1>
@@ -156,24 +184,11 @@ export default function PayrollBoardPage() {
       {loading ? (
         <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-          {zones.map((z) => {
-            const cards = zoneCards[z.key] ?? [];
-            const isOver = overZone === z.key && dragging;
-            return (
-              <div key={z.key} data-zone={z.key}
-                className={`rounded-2xl border p-4 min-h-[140px] transition-colors ${isOver ? "border-emerald-400 ring-2 ring-emerald-200 bg-emerald-50/60" : z.muted ? "border-dashed border-slate-300 bg-slate-50/50" : "border-slate-200 bg-white"}`}>
-                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-                  <h2 className="font-semibold text-slate-800">{z.name} <span className="text-sm font-normal text-slate-400">· {cards.length} คน</span></h2>
-                  <span className="text-sm text-slate-500">ฐานเงินเดือนรวม <b className="text-slate-700 tabular-nums">{baht(zoneSalary(z.key))}</b></span>
-                </div>
-                <div className="flex flex-wrap gap-2.5">
-                  {cards.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onDown={(e) => onCardDown(e, c, z.key)} dragging={drag?.card.id === c.id} />)}
-                  {cards.length === 0 && <span className="text-xs text-slate-300">ลากการ์ดมาวางที่นี่</span>}
-                </div>
-              </div>
-            );
-          })}
+        <div className="overflow-x-auto pb-4">
+          <div className="flex items-start gap-4 w-max">
+            {zones.filter((z) => z.key === NO_DEPT).map((z) => renderZone(z, true))}
+            {zones.filter((z) => z.key !== NO_DEPT).map((z) => renderZone(z, false))}
+          </div>
         </div>
       )}
 
@@ -199,7 +214,7 @@ function EmployeeCard({ c, onDown, dragging }: { c: Card; onDown: (e: RPE) => vo
   return (
     <div onPointerDown={onDown}
       style={{ touchAction: "none" }}
-      className={`group relative w-[150px] text-left rounded-xl border border-slate-200 border-l-4 ${col.border} bg-white p-2.5 hover:shadow-md transition cursor-grab active:cursor-grabbing ${dragging ? "opacity-30" : ""}`}>
+      className={`group relative w-[150px] text-left rounded-xl border border-white/70 border-l-4 ${col.border} bg-white/85 backdrop-blur-sm p-2.5 shadow-sm hover:shadow-md transition cursor-grab active:cursor-grabbing ${dragging ? "opacity-30" : ""}`}>
       <div className="flex items-center gap-2">
         <span className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${col.chip} shrink-0`}>{initials(c)}</span>
         <div className="min-w-0">
