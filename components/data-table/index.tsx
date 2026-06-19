@@ -1255,10 +1255,25 @@ export function DataTable<T extends Record<string, unknown>>({
     getSortedRowModel: isServer ? undefined : getSortedRowModel(),
     getFilteredRowModel: isServer ? undefined : getFilteredRowModel(),
     getPaginationRowModel: isServer ? undefined : getPaginationRowModel(),
+    // จำการ "ติ๊กเลือก" ด้วย id ของรายการจริง (ไม่ใช่ลำดับแถว) → เปลี่ยนหน้าแล้วการเลือกไม่เด้ง/ไม่หาย
+    getRowId: (row, index) => (row.id != null ? String(row.id) : String(index)),
     initialState: { pagination: { pageSize: initialPageSize } },
   });
 
-  const selectedRows  = table.getSelectedRowModel().rows.map(r => r.original);
+  // เก็บ "ข้อมูลแถวที่เลือก" สะสมข้ามหน้า (server mode โหลดทีละหน้า — getSelectedRowModel เห็นแค่หน้าปัจจุบัน)
+  // → ตัวเลข "เลือกแล้ว N" + ปุ่ม bulk/จัดกลุ่ม/พิมพ์/export ใช้ของที่เลือกจากทุกหน้ารวมกัน
+  const [selectedData, setSelectedData] = useState<Map<string, T>>(new Map());
+  useEffect(() => {
+    setSelectedData(prev => {
+      const next = new Map(prev);
+      for (const id of [...next.keys()]) if (!rowSelection[id]) next.delete(id);   // เอาที่ยกเลิกออก
+      for (const r of table.getCoreRowModel().rows) if (rowSelection[r.id]) next.set(r.id, r.original);  // เก็บที่เลือกในหน้านี้
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowSelection, data]);
+
+  const selectedRows  = useMemo(() => [...selectedData.values()], [selectedData]);
   const selectedCount = selectedRows.length;
 
   // จำนวนคอลัมน์ของ skeleton — ตรึงให้นิ่งระหว่างโหลด ไม่ให้เด้งตอน registry/คอลัมน์ทยอยมา (กันกระพริบ)
@@ -1330,7 +1345,7 @@ export function DataTable<T extends Record<string, unknown>>({
     try {
       const expCols = buildExportColumns(mode === "selected" ? "visible" : mode);
       const sourceRows = mode === "selected"
-        ? table.getSelectedRowModel().rows.map(r => r.original as Record<string, unknown>)
+        ? (selectedRows as Record<string, unknown>[])   // ข้ามหน้า (สะสมไว้ใน selectedData)
         : table.getFilteredRowModel().rows.map(r => r.original as Record<string, unknown>);
       if (sourceRows.length === 0) { setExportOpen(false); return; }
       const { exportTable } = await import("@/lib/export");
@@ -1723,11 +1738,11 @@ export function DataTable<T extends Record<string, unknown>>({
                   <span>📊 ที่แสดง (filter + คอลัมน์)</span>
                   <span className="text-xs text-slate-400">{filteredData.length}</span>
                 </button>
-                {table.getSelectedRowModel().rows.length > 0 && (
+                {selectedCount > 0 && (
                   <button onClick={() => handleExportMode("excel", "selected")}
                     className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center justify-between">
                     <span>✓ ที่เลือก</span>
-                    <span className="text-xs text-slate-400">{table.getSelectedRowModel().rows.length}</span>
+                    <span className="text-xs text-slate-400">{selectedCount}</span>
                   </button>
                 )}
                 <button onClick={() => handleExportMode("excel", "filtered_all")}
