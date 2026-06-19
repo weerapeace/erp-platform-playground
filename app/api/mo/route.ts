@@ -51,16 +51,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const orderCol = sortBy && SAFE.test(sortBy) ? sortBy : "updated_at";
   const orderAsc = sortBy ? searchParams.get("sort_dir") === "asc" : false;
 
-  // กลุ่มใบสั่งงาน — ชื่อกลุ่มต่อใบ + เซ็ตใบที่อยู่ในกลุ่มแล้ว (สำหรับคอลัมน์กลุ่ม + กรอง "ยังไม่จับกลุ่ม")
-  const { data: groups } = await supabaseAdmin().from("mo_groups").select("name, mo_nos").eq("is_active", true);
-  const groupNameByMo = new Map<string, string>();
-  const groupedSet = new Set<string>();
-  for (const g of (groups ?? []) as { name: string; mo_nos: unknown }[]) {
-    for (const mn of (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[]) {
-      const k = String(mn); if (!groupNameByMo.has(k)) groupNameByMo.set(k, g.name); groupedSet.add(k);
-    }
-  }
   const groupStatus = searchParams.get("group_status");   // ungrouped | grouped
+  // กลุ่มใบสั่งงาน (ชื่อกลุ่ม/เซ็ตที่จับแล้ว) — เริ่มยิงไว้ก่อน แล้วค่อยรวมผล
+  const groupsPromise = supabaseAdmin().from("mo_groups").select("name, mo_nos").eq("is_active", true);
 
   let q = supabaseFromRequest(request)
     .from("manufacturing_orders")
@@ -69,11 +62,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
   if (search) { const t = `%${search}%`; q = q.or(`mo_no.ilike.${t},product_sku.ilike.${t},product_name.ilike.${t}`); }
-  if (groupStatus === "ungrouped" && groupedSet.size > 0) q = q.not("mo_no", "in", `(${[...groupedSet].map((n) => `"${n}"`).join(",")})`);
-  else if (groupStatus === "grouped") q = q.in("mo_no", groupedSet.size > 0 ? [...groupedSet] : ["__none__"]);
 
-  const { data, error, count } = await q;
+  // ถ้ากรองตามกลุ่ม ต้องรู้กลุ่มก่อนรันรายการ · ถ้าไม่กรอง ยิงขนานกัน (เร็วกว่า 1 รอบ)
+  type GroupRow = { name: string; mo_nos: unknown };
+  let groups: GroupRow[] | null;
+  let listRes: Awaited<typeof q>;
+  if (groupStatus === "ungrouped" || groupStatus === "grouped") {
+    groups = (await groupsPromise).data as GroupRow[] | null;
+    const gset = new Set<string>();
+    for (const g of groups ?? []) for (const mn of (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[]) gset.add(String(mn));
+    if (groupStatus === "ungrouped" && gset.size > 0) q = q.not("mo_no", "in", `(${[...gset].map((n) => `"${n}"`).join(",")})`);
+    else if (groupStatus === "grouped") q = q.in("mo_no", gset.size > 0 ? [...gset] : ["__none__"]);
+    listRes = await q;
+  } else {
+    const [gp, lr] = await Promise.all([groupsPromise, q]);
+    groups = gp.data as GroupRow[] | null; listRes = lr;
+  }
+  const { data, error, count } = listRes;
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
+
+  const groupNameByMo = new Map<string, string>();
+  for (const g of groups ?? []) for (const mn of (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[]) { const k = String(mn); if (!groupNameByMo.has(k)) groupNameByMo.set(k, g.name); }
 
   // เติมรูปสินค้าต่อแถว (รูป SKU ก่อน, fallback Parent) — เพื่อโชว์ในหน้า MO list
   const rows = (data ?? []) as MoListItem[];
