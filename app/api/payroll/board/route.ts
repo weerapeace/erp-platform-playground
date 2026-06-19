@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     const a = supabaseAdmin();
     const [empRes, conRes, deptRes, recRes, warnRes] = await Promise.all([
       a.from("employees").select("id, employee_code, first_name, last_name, nickname, department_id, supervisor_id, profile_photo_key, employment_status").eq("employment_status", "active"),
-      a.from("employee_contracts").select("employee_id, contract_type, base_salary, payroll_register_base_salary").eq("is_current", true).eq("status", "active"),
+      a.from("employee_contracts").select("employee_id, contract_type, base_salary, payroll_register_base_salary, status, end_date").eq("is_current", true),
       a.from("departments").select("id, name, display_order, status").neq("status", "inactive").order("display_order", { ascending: true }),
       a.from("employee_recurring_pay_items").select("employee_id").eq("status", "active"),
       a.from("employee_warnings").select("employee_id").eq("status", "active"),
@@ -68,10 +68,13 @@ export async function GET(req: NextRequest) {
       };
     };
 
-    // จัดกลุ่มแผนก
+    // จัดกลุ่มแผนก — ข้ามคน "หมดสัญญา" (สัญญาปัจจุบันสิ้นสุด/ยกเลิก หรือเลยวันหมดอายุแล้ว)
+    const today = new Date().toISOString().slice(0, 10);
     const byDept = new Map<string, ReturnType<typeof card>[]>();
     const noDept: ReturnType<typeof card>[] = [];
     for (const e of employees) {
+      const con = conBy.get(String(e.id));
+      if (con && (con.status === "ended" || con.status === "cancelled" || (con.end_date && String(con.end_date) < today))) continue;
       const c = card(e);
       const did = e.department_id ? String(e.department_id) : "";
       if (did && deptName[did]) { if (!byDept.has(did)) byDept.set(did, []); byDept.get(did)!.push(c); }
@@ -94,7 +97,7 @@ export async function GET(req: NextRequest) {
       sections,
       all_departments: depts.map((d) => ({ id: String(d.id), name: String(d.name) })),   // ทุกแผนก (รวมที่ว่าง) สำหรับลากวาง
       no_department: noDept.sort((x, y) => x.employee_code.localeCompare(y.employee_code)),
-      total_employees: employees.length,
+      total_employees: sections.reduce((t, s) => t + s.headcount, 0) + noDept.length,   // นับเฉพาะที่โชว์ (ไม่รวมคนหมดสัญญา)
       error: null,
     });
   } catch (e) {
