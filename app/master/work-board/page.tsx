@@ -24,6 +24,7 @@ import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -840,7 +841,7 @@ export default function WorkBoardPage() {
         : viewMode === "purchase" ? (
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
-        <BoardTable pending={board.pending} workOrders={board.workOrders} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
+        <BoardTable pending={board.pending} workOrders={board.workOrders} onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : activePlan !== "real" ? (
         (() => {
           const p = plans.find((x) => x.id === activePlan);
@@ -1598,10 +1599,13 @@ const DueCell = ({ d }: { d: string | null }) => (
   <span className="text-[12px] whitespace-nowrap">📅 {dueDateText(d)} <span className={daysLeftClass(d)}>· {daysLeftText(d)}</span></span>
 );
 
-function BoardTable({ pending, workOrders, onOpenMO, onOpenWO }: {
-  pending: PendingMO[]; workOrders: WorkOrder[]; onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void;
+function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
+  pending: PendingMO[]; workOrders: WorkOrder[]; onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void; onReload?: () => void;
 }) {
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
+  const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม
+  const [assignOpen, setAssignOpen] = useState(false);
+  const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
 
   const pendCols: MiniColumn<PendingMO>[] = [
     { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (m) => <ProdCell url={m.image_url} sku={m.product_sku} name={m.product_name} /> },
@@ -1628,11 +1632,14 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO }: {
       <MiniTable
         rows={pending} rowKey={(m) => m.id} columns={pendCols} onRowClick={onOpenMO}
         title="📥 รอจ่าย" countUnit="ใบ"
+        selectable selected={sel} onSelectedChange={setSel}
+        actions={selMoNos.length > 0 ? <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จัดกลุ่ม ({selMoNos.length})</button> : undefined}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
         searchPlaceholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
         groupBy={(m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")} groupLabel="จัดกลุ่มตามความพร้อม" defaultGrouped={false}
         emptyText="ไม่มีงานรอจ่าย"
       />
+      {assignOpen && <AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); onReload?.(); }} />}
       <MiniTable
         rows={wos} rowKey={(w) => w.id} columns={woCols} onRowClick={onOpenWO}
         title="🛠 จ่ายแล้ว — กำลังผลิต" countUnit="ใบ"
