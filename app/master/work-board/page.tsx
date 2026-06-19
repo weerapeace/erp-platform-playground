@@ -25,6 +25,7 @@ import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
+import { PwaInstallButton } from "@/components/pwa-install-button";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { LaborRate } from "@/app/api/bom/labor-rates/route";
 import type { Brand } from "@/app/api/brands/route";
@@ -146,7 +147,11 @@ export default function WorkBoardPage() {
   const [isMax, setIsMax] = useState(false);
   // โหมดแท็บเล็ต (Phase 1) — ขยายขนาดทั้งบอร์ด + เต็มจอ ให้แตะง่ายบนทัช · จำต่อเครื่อง
   const [tablet, setTablet] = useState(false);
-  useEffect(() => { try { setTablet(localStorage.getItem("wb:tablet") === "1"); } catch { /* ignore */ } }, []);
+  useEffect(() => { try {
+    setTablet(localStorage.getItem("wb:tablet") === "1");
+    // เปิดจากแอปที่ติดตั้ง (PWA standalone) → ขยายบอร์ดเต็มจอให้เลย
+    if (window.matchMedia?.("(display-mode: standalone)").matches || (window.navigator as unknown as { standalone?: boolean }).standalone) setIsMax(true);
+  } catch { /* ignore */ } }, []);
   const toggleTablet = useCallback(() => setTablet((v) => { const nv = !v; try { localStorage.setItem("wb:tablet", nv ? "1" : "0"); } catch { /* ignore */ } if (nv) setIsMax(true); return nv; }), []);
   const [dragId, setDragId] = useState<string | null>(null);
 
@@ -819,6 +824,7 @@ export default function WorkBoardPage() {
           </div>
           <button onClick={toggleTablet} title="ขยายขนาดให้แตะง่ายบนแท็บเล็ต (เต็มจอ)"
             className={`h-9 px-3 text-sm font-medium rounded-lg border ${tablet ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>📱 แท็บเล็ต</button>
+          <PwaInstallButton className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1" />
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
