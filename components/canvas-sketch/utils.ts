@@ -8,8 +8,8 @@
 export type Scene = { elements?: unknown[]; files?: Record<string, unknown> } | null;
 export type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
-export const AUTOSAVE_MS = 1000;       // หยุดวาดกี่ ms แล้วค่อยบันทึก (เซฟไวขึ้น)
-export const MAX_AUTOSAVE_MS = 8000;   // เซฟกันลืม: แม้แก้ต่อเนื่องไม่หยุด ก็เซฟทุก ~8 วิ
+export const AUTOSAVE_MS = 5000;       // หยุดแก้กี่ ms แล้วค่อยบันทึก (debounce — ไม่ไล่เซฟตอนแก้นิด ๆ)
+export const MAX_AUTOSAVE_MS = 30000;  // เซฟกันลืม: เฉพาะถ้าแก้ต่อเนื่องไม่หยุดเลย ก็เซฟทุก ~30 วิ
 export const BROADCAST_MS = 200;       // realtime: ส่งให้คนอื่นทุก ~200ms (throttle)
 export const BC_MAX_BYTES = 200_000;   // กันส่งก้อนใหญ่เกินลิมิต Supabase Broadcast (ของใหญ่ปล่อยให้ save+refresh sync)
 
