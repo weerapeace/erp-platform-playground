@@ -84,10 +84,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const estByMo = new Map<string, number>();
   const moQtyByNo = new Map<string, number>();
+  const bomByMo = new Map<string, string>();
   for (const m of (mos ?? []) as Record<string, unknown>[]) {
     estByMo.set(String(m.mo_no), Number(m.est_labor_cost) || 0);
     moQtyByNo.set(String(m.mo_no), Number(m.qty) || 0);
+    if (m.bom_code) bomByMo.set(String(m.mo_no), String(m.bom_code));
   }
+  // ค่าแรงผลิต/ชิ้น "ราคากลาง" จาก BOM (craftsman_id null, is_current) → ใช้โชว์ค่าแรงในบอร์ดแผน
+  const bomCodes = [...new Set([...bomByMo.values()])];
+  const centralRateByBom = new Map<string, number>();
+  for (let i = 0; i < bomCodes.length; i += 300) {
+    const { data: lr } = await admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes.slice(i, i + 300)).is("craftsman_id", null).eq("is_current", true).eq("is_active", true);
+    for (const r of (lr ?? []) as Record<string, unknown>[]) centralRateByBom.set(String(r.bom_code), Number(r.rate) || 0);
+  }
+  const centralRateOf = (moNo: string) => centralRateByBom.get(bomByMo.get(moNo) ?? "") ?? 0;
   const allMoNos = [...new Set([...workOrders.map((w) => String(w.mo_no)), ...(mos ?? []).map((m: Record<string, unknown>) => String(m.mo_no))].filter(Boolean))];
   const piecePlanByMo = new Map<string, number>();
   const pieceActualByMo = new Map<string, number>();
@@ -116,7 +126,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prod_plan: r2(ml.prod_plan * share), prod_actual: Number(w.labor_cost) || 0,
       piece_plan: r2(ml.piece_plan * share), piece_actual: r2(ml.piece_actual * share),
     };
-    return { ...w, ...inf, mo_id: moIdByNo.get(moNo) ?? null, labor };
+    return { ...w, ...inf, mo_id: moIdByNo.get(moNo) ?? null, labor, central_rate: centralRateOf(moNo) };
   });
 
   const pending = (mos ?? []).map((m: Record<string, unknown>) => {
@@ -126,7 +136,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null };
     return { id: String(m.id), mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
       qty, dispatched: r2(dispatched), remaining, due_date: m.due_date ?? null, status: m.status,
-      prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null, ...inf, labor: laborOfMo(String(m.mo_no)) };
+      prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null, ...inf, labor: laborOfMo(String(m.mo_no)), central_rate: centralRateOf(String(m.mo_no)) };
   }).filter((m) => m.remaining > 0.0001);   // ซ่อน MO ที่จ่ายครบแล้ว
 
   // เช็กลิสต์วัตถุดิบจาก BOM ต่อใบ — เตรียม = is_ready (เดิม), ตัด = cut_done (เฉพาะชิ้นที่ต้องตัด)

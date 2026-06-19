@@ -14,7 +14,7 @@ import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
 type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null };
-type WOLite = { id: string; mo_no: string; qty: number; department_id: string | null; stage: string; assignee_name: string | null; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number } };
+type WOLite = { id: string; mo_no: string; qty: number; department_id: string | null; stage: string; assignee_name: string | null; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
 
@@ -66,7 +66,7 @@ export function DispatchPlanBoard({
   const defectOf = (nm: string | null | undefined) => nm ? defectByWorker[nm.trim().toLowerCase()] : undefined;
   // ค่าแรงผลิตของรายการร่าง = จำนวน × ค่าแรงต่อชิ้น (จากแผนกลุ่ม A)
   const lineLabor = (l: DispatchPlanLine) => (Number(l.qty) || 0) * (laborPerUnit[l.mo_no ?? ""] ?? 0);
-  const woLabor = (w: WOLite) => w.labor?.prod_plan ?? ((Number(w.qty) || 0) * (laborPerUnit[w.mo_no] ?? 0));
+  const woLabor = (w: WOLite) => (w.labor?.prod_actual || w.labor?.prod_plan || ((Number(w.qty) || 0) * (laborPerUnit[w.mo_no] ?? 0)));
 
   // จำนวนที่วางแผนไปแล้วต่อใบ (ในแผนนี้) → เหลือให้วางแผนได้อีกเท่าไร
   const draftedByMo = useMemo(() => {

@@ -26,6 +26,7 @@ export type WorkOrder = {
   // เสริมจาก board API
   image_url?: string | null; brand?: string | null; brand_color?: string | null; mo_id?: string | null;
   labor?: { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
+  central_rate?: number;   // ค่าแรงผลิต/ชิ้น ราคากลางจาก BOM (เติมในตอน board)
 };
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
