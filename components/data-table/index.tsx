@@ -1240,6 +1240,12 @@ export function DataTable<T extends Record<string, unknown>>({
   const selectedRows  = table.getSelectedRowModel().rows.map(r => r.original);
   const selectedCount = selectedRows.length;
 
+  // จำนวนคอลัมน์ของ skeleton — ตรึงให้นิ่งระหว่างโหลด ไม่ให้เด้งตอน registry/คอลัมน์ทยอยมา (กันกระพริบ)
+  // อัปเดตเฉพาะตอน "ไม่โหลด" → ครั้งแรกใช้ค่า fallback 8, โหลดหน้าถัดไปใช้จำนวนคอลัมน์จริง (ตรงกับตาราง)
+  const showSkeleton = loading || srvLoading || srvGroupLoading;
+  const skeletonColsRef = useRef(8);
+  if (!showSkeleton && tableColumns.length > 0) skeletonColsRef.current = tableColumns.length;
+
   // ---- Freeze header: ให้พื้นที่ตาราง scroll ในตัว (สูงพอดีจอ) → thead sticky ค้างได้จริง ----
   useEffect(() => {
     const el = tableScrollRef.current;
@@ -1808,8 +1814,8 @@ export function DataTable<T extends Record<string, unknown>>({
             ⚠ จัดกลุ่มจาก {srvGroupRows.length.toLocaleString()} แถวแรก (ข้อมูลมีมากกว่านี้) — กรองให้แคบลงเพื่อยอดที่ครบถ้วน
           </div>
         )}
-        {(loading || srvLoading || srvGroupLoading) ? (
-          <LoadingSkeleton columns={tableColumns.length} rows={initialPageSize} />
+        {showSkeleton ? (
+          <LoadingSkeleton columns={skeletonColsRef.current} rows={initialPageSize} />
         ) : error ? (
           <ErrorState message={error} onRetry={onRetry} />
         ) : viewMode === "cards" ? (
@@ -3159,7 +3165,8 @@ function LoadingSkeleton({ columns, rows }: { columns: number; rows: number }) {
         {Array.from({ length: rows }).map((_, ri) => (
           <tr key={ri}>
             {Array.from({ length: columns }).map((_, ci) => (
-              <td key={ci} className="px-4 py-3"><div className="h-4 bg-slate-100 rounded animate-pulse" style={{ width: `${60 + Math.random() * 40}%`, animationDelay: `${ri * 50}ms` }} /></td>
+              // ความกว้างแบบคงที่ (อิง index) — ไม่ใช้ Math.random ไม่งั้นแท่งขยับทุก re-render = เห็นเป็นกระพริบ
+              <td key={ci} className="px-4 py-3"><div className="h-4 bg-slate-100 rounded animate-pulse" style={{ width: `${65 + ((ri * 7 + ci * 13) % 30)}%`, animationDelay: `${ri * 50}ms` }} /></td>
             ))}
           </tr>
         ))}
