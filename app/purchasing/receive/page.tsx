@@ -7,7 +7,7 @@
  * บังคับแนบ "ใบรับของ + บิล" (รูป/PDF) ทุกครั้งก่อนบันทึก
  * รับไม่ครบ (แท็บ A) จะเด้งถามว่าจบงาน/รอของ · รับเกินได้
  */
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission } from "@/components/auth";
 import { useBackdropDismiss, ERPModal } from "@/components/modal";
@@ -112,6 +112,7 @@ export default function ReceiveGoodsPage() {
   const [pendLoading, setPendLoading] = useState(false);
   const [pendView, setPendView] = useState<"card" | "table">("card");
   const [activeShop, setActiveShop] = useState<string | null>(null);   // list ร้านด้านซ้าย (แท็บรอเข้า/รับครบ)
+  const [shopDrawerOpen, setShopDrawerOpen] = useState(false);          // จอ < xl: รายชื่อร้านเป็นลิ้นชัก
   const [activeMo, setActiveMo] = useState<string | null>(null);       // filter ตามใบสั่งผลิต (MO)
   const [shopQ, setShopQ] = useState("");
   const [poQ, setPoQ] = useState("");                                  // ค้นหาใบ PO (แท็บตามใบสั่งซื้อ)
@@ -509,15 +510,20 @@ export default function ReceiveGoodsPage() {
           </>
         ) : (
           /* แท็บ B/C: สินค้าที่รอเข้า / รับครบแล้ว — มี list ร้านซ้ายมือ */
-          <div className="flex flex-col lg:flex-row gap-4">
-            {/* ซ้าย: รายชื่อร้าน (กดเพื่อกรอง) */}
-            <aside className="w-full lg:w-52 shrink-0">
-              <div className="text-xs font-medium text-slate-500 mb-1.5">ร้าน ({pendShops.length})</div>
+          <div className="flex flex-col xl:flex-row gap-4">
+            {/* จอ < xl: ฉากหลังมืดตอนเปิดลิ้นชักร้าน — กดเพื่อปิด */}
+            {shopDrawerOpen && <div className="xl:hidden fixed inset-0 z-30 bg-black/40" onClick={() => setShopDrawerOpen(false)} />}
+            {/* ซ้าย: รายชื่อร้าน — จอ < xl เป็นลิ้นชักเลื่อนจากซ้าย (ปุ่ม "🏪 ร้าน") · xl เป็นคอลัมน์ */}
+            <aside className={`fixed top-14 bottom-0 left-0 z-40 w-72 max-w-[85%] bg-white overflow-auto p-4 shadow-xl transition-transform duration-300 ${shopDrawerOpen ? "translate-x-0" : "-translate-x-full"} xl:static xl:top-auto xl:bottom-auto xl:z-auto xl:w-52 xl:max-w-none xl:translate-x-0 xl:shadow-none xl:p-0 xl:overflow-visible xl:shrink-0`}>
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-xs font-medium text-slate-500">ร้าน ({pendShops.length})</div>
+                <button onClick={() => setShopDrawerOpen(false)} className="xl:hidden text-slate-400 hover:text-slate-600 text-lg leading-none" aria-label="ปิด">✕</button>
+              </div>
               <input value={shopQ} onChange={(e) => setShopQ(e.target.value)} placeholder="🔎 ค้นหาร้าน…" className="w-full h-8 px-2 mb-2 text-xs border border-slate-200 rounded-md" />
               <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-                <button onClick={() => { setActiveShop(null); setActiveMo(null); }} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${!activeShop && !activeMo ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({pend.length})</button>
+                <button onClick={() => { setActiveShop(null); setActiveMo(null); setShopDrawerOpen(false); }} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-100 ${!activeShop && !activeMo ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>🛍️ ทุกร้าน ({pend.length})</button>
                 {pendShops.filter((s) => !shopQ.trim() || s.name.toLowerCase().includes(shopQ.trim().toLowerCase())).map((s) => (
-                  <button key={s.name} onClick={() => { setActiveShop(s.name); setActiveMo(null); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                  <button key={s.name} onClick={() => { setActiveShop(s.name); setActiveMo(null); setShopDrawerOpen(false); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                     <div className={`text-sm ${activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
                     <div className="text-[11px] text-slate-400">{s.count} รายการ</div>
                   </button>
@@ -530,7 +536,7 @@ export default function ReceiveGoodsPage() {
                   <div className="text-xs font-medium text-slate-500 mb-1.5">🏭 จากใบสั่งผลิต ({pendMos.length})</div>
                   <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
                     {pendMos.map((m) => (
-                      <button key={m.mo} onClick={() => { setActiveMo(m.mo); setActiveShop(null); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${activeMo === m.mo ? "bg-indigo-50" : "hover:bg-slate-50"}`}>
+                      <button key={m.mo} onClick={() => { setActiveMo(m.mo); setActiveShop(null); setShopDrawerOpen(false); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${activeMo === m.mo ? "bg-indigo-50" : "hover:bg-slate-50"}`}>
                         <div className={`text-sm ${activeMo === m.mo ? "text-indigo-700 font-medium" : "text-slate-700"}`}>🏭 {m.mo}</div>
                         <div className="text-[11px] text-slate-400">{m.product ? `${m.product} · ` : ""}{m.count} รายการ</div>
                       </button>
@@ -544,9 +550,13 @@ export default function ReceiveGoodsPage() {
             <div className="flex-1 min-w-0">
             {/* แถบเครื่องมือ: ค้นหา / เรียงลำดับ / การ์ด-แถว / สลับมุมมอง */}
             <div className="bg-white border border-slate-200 rounded-xl p-3 mb-4 flex items-center gap-2 flex-wrap">
+              {/* จอ < xl: ปุ่มเปิดลิ้นชักร้าน + โชว์ร้าน/MO ที่เลือกอยู่ */}
+              <button onClick={() => setShopDrawerOpen(true)} className="xl:hidden flex items-center gap-1.5 h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 flex-shrink-0 whitespace-nowrap">
+                🏪 {activeMo ? activeMo : activeShop ? activeShop : "ทุกร้าน"}
+              </button>
               <span className="text-sm font-semibold text-slate-700">{doneMode ? "รายการที่ปิดแล้ว" : "สินค้าที่รอเข้า"} ({pend.length})</span>
               <input value={pendQ} onChange={(e) => setPendQ(e.target.value)} placeholder="🔎 ค้นหา ชื่อ / รหัส / PO / ร้าน..."
-                className="ml-auto w-64 h-9 px-3 text-sm border border-slate-200 rounded-md" />
+                className="w-full sm:w-64 sm:ml-auto h-9 px-3 text-sm border border-slate-200 rounded-md" />
               <label className="flex items-center gap-1.5 text-xs text-slate-500">เรียงตาม
                 <select value={pendSort} onChange={(e) => changePendSort(e.target.value as PendSort)} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
                   <option value="eta">วันคาดการณ์ของเข้า</option>
@@ -589,7 +599,7 @@ export default function ReceiveGoodsPage() {
                 {groupedPend.map((g) => (
                   <section key={g.key}>
                     {g.label && <h3 className="text-sm font-semibold text-slate-700 mb-2">{g.label} <span className="text-xs font-normal text-slate-400">({g.items.length})</span></h3>}
-                    <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${pendCols}, minmax(0, 1fr))` }}>
+                    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": pendCols } as CSSProperties}>
                       {g.items.map((it) => {
                         const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
                         const recv = num(inp.recv), def = num(inp.def);
