@@ -1603,23 +1603,39 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   ): Promise<BulkEditResult> => {
     const total = edits.length;
     if (total === 0) { flash("ไม่มีรายการที่เปลี่ยน"); return { success: 0, failed: 0 }; }
+    // 1) ลองยิง bulk-update (เร็ว — ครั้งเดียว) ถ้า surface นี้มี route
     try {
-      // ยิงครั้งเดียว — server จัดกลุ่มแถวที่ค่าเหมือนกันแล้ว UPDATE ทีละกลุ่ม (เร็วกว่ายิงทีละแถวมาก)
       const res = await apiFetch(`${apiBase}${config.apiPath}/bulk-update`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ edits: edits.map((e) => ({ id: e.row.id, changes: e.changes })), actor: user?.name }),
       });
-      const json = await res.json();
-      if (json.error) { setError(json.error); fail(json.error); return { success: 0, failed: total }; }
-      const success = (json.affected as number) ?? total;
-      await refreshData();
-      flash(`แก้ ${success} ราย`);
-      return { success, failed: total - success };
-    } catch (e) {
-      const m = e instanceof Error ? e.message : "บันทึกไม่สำเร็จ";
-      setError(m); fail(m);
-      return { success: 0, failed: total };
+      if (res.ok) {
+        const json = await res.json().catch(() => null);
+        if (json && json.error) { setError(json.error); fail(json.error); return { success: 0, failed: total }; }
+        if (json) {
+          const success = (json.affected as number) ?? total;
+          await refreshData();
+          flash(`แก้ ${success} ราย`);
+          return { success, failed: total - success };
+        }
+      }
+      // res ไม่ ok (เช่น 404/405 — surface ไม่มี route bulk-update) หรือ body ว่าง → fall back
+    } catch { /* network/parse — ลอง fallback ต่อ */ }
+    // 2) ของกลาง fallback: PATCH ราย id (ทุก surface มี [id] PATCH) → bulk edit ใช้ได้ทุกตาราง
+    let success = 0; let lastErr = "";
+    for (const e of edits) {
+      try {
+        const r = await apiFetch(`${apiBase}${config.apiPath}/${e.row.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...e.changes, actor: user?.name }),
+        });
+        const j = await r.json().catch(() => ({} as { error?: string }));
+        if (r.ok && !j.error) success++; else lastErr = j.error || `HTTP ${r.status}`;
+      } catch (err) { lastErr = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"; }
     }
+    if (success === 0 && lastErr) { setError(lastErr); fail(lastErr); }
+    else { await refreshData(); flash(`แก้ ${success} ราย`); }
+    return { success, failed: total - success };
   }, [apiBase, config.apiPath, user?.name, refreshData]);
 
   // แก้ "ทั้งหมดที่ตรงตัวกรอง" (server mode) — ยิง bulk-update ฝั่ง server
@@ -1631,7 +1647,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ changes, search: scope.search, filters: scope.filters, base_filter: config.baseFilter, actor: user?.name }),
     });
-    const j = await res.json();
+    const j = await res.json().catch(() => null);
+    if (!res.ok || !j) throw new Error("โหมด “แก้ทั้งหมดที่ตรงตัวกรอง” ยังไม่รองรับตารางนี้ — เลือกแถวที่ต้องการแล้วแก้แทน");
     if (j.error) throw new Error(j.error);
     await refreshData();
     flash(`แก้ ${j.affected ?? 0} รายการ (ทั้งหมดที่ตรง)`);
