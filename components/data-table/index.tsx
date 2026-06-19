@@ -604,7 +604,9 @@ export function DataTable<T extends Record<string, unknown>>({
       const order: ColumnOrderState = [];
       const pinned: ColumnPinningState = { left: [], right: [] };
       const sizing: ColumnSizingState = {};
-      const sortedCols = [...layout.columns].sort((a, b) => a.order - b.order);
+      // กัน layout เพี้ยน (columns ไม่ใช่ array) → ไม่งั้น [...] throw ทั้งหน้า ("columns is not iterable")
+      const cols = Array.isArray(layout.columns) ? layout.columns : [];
+      const sortedCols = [...cols].sort((a, b) => a.order - b.order);
       sortedCols.forEach(c => {
         vis[c.key] = c.visible;
         order.push(c.key);
@@ -614,7 +616,8 @@ export function DataTable<T extends Record<string, unknown>>({
       });
       // ถ้า default view ตั้งคอลัมน์ไปแล้ว → admin layout ห้ามมาทับคอลัมน์ (default view เป็นแหล่งความจริง)
       // กันอาการ "บางทีโชว์ทุก field": admin layout (โชว์ ~62) แย่งชนะ default view (โชว์ ~36) เพราะลำดับโหลดไม่แน่นอน
-      if (!viewColsAppliedRef.current) {
+      // (มีคอลัมน์จริงเท่านั้นถึงตั้ง — layout ว่าง/เพี้ยน → ปล่อยใช้ค่า default ไม่ทับเป็นว่าง)
+      if (!viewColsAppliedRef.current && sortedCols.length > 0) {
         if (isNewVersion) {
           // เวอร์ชันใหม่จาก admin → ทับของเดิมทั้งหมด เพื่อให้ default ใหม่แสดงผลจริง
           setColumnVisibility(vis);
