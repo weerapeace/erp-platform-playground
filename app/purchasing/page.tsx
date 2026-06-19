@@ -866,7 +866,7 @@ export default function PurchasingShopPage() {
                   <button onClick={() => setCart(c => c.filter((_, j) => j !== i))} className="text-slate-400 hover:text-red-500 text-xs">✕</button>
                 </div>
                 <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-                  <input type="number" value={l.qty} min={1} step="any" onChange={e => setCart(c => c.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))}
+                  <input type="number" inputMode="decimal" value={l.qty} min={1} step="any" onFocus={e => e.target.select()} onChange={e => setCart(c => c.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))}
                     className="w-16 h-6 px-1 border border-slate-200 rounded" /> {l.uom}
                   <span className="ml-auto text-right leading-tight">
                     <span className="block text-sm font-semibold text-slate-700 tabular-nums">{(l.price * (Number(l.qty) || 0)).toLocaleString()} {curLabel(l.currency)}</span>
@@ -1132,7 +1132,7 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   const [qty, setQty] = useState(1);
   return (
     <div className="flex items-center gap-1.5 flex-shrink-0">
-      <input type="number" value={qty} min={1} step="any" onChange={e => setQty(Number(e.target.value))} className="w-14 h-8 px-1 text-sm border border-slate-200 rounded" />
+      <input type="number" inputMode="decimal" value={qty} min={1} step="any" onFocus={e => e.target.select()} onChange={e => setQty(Number(e.target.value))} className="w-14 h-8 px-1 text-sm border border-slate-200 rounded" />
       <button onClick={() => onAdd(qty)} className="h-8 px-3 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700">+ เพิ่ม</button>
     </div>
   );
@@ -1190,7 +1190,16 @@ function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, o
       <div className="mt-4 space-y-3">
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">จำนวน ({s.uom})</label>
-          <input type="number" value={qty} min={1} step="any" onChange={e => setQty(Number(e.target.value))} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+          {/* ปุ่ม −/+ ตัวใหญ่ (กดง่ายบนมือถือ ไม่ต้องพิมพ์) + แป้นตัวเลขเมื่อพิมพ์ */}
+          <div className="flex items-stretch gap-2">
+            <button type="button" aria-label="ลดจำนวน" onClick={() => setQty(q => Math.max(0, Math.round(((Number(q) || 0) - 1) * 100) / 100))}
+              className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">−</button>
+            <input type="number" inputMode="decimal" value={qty} min={0} step="any"
+              onFocus={e => e.target.select()} onChange={e => setQty(Number(e.target.value))}
+              className="flex-1 min-w-0 h-11 px-2 text-center text-lg font-medium border border-slate-200 rounded-md tabular-nums" />
+            <button type="button" aria-label="เพิ่มจำนวน" onClick={() => setQty(q => Math.round(((Number(q) || 0) + 1) * 100) / 100)}
+              className="w-12 h-11 flex items-center justify-center text-2xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 select-none">+</button>
+          </div>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-600 mb-1">หมายเหตุ (ถ้ามี)</label>
