@@ -828,7 +828,8 @@ export function DataTable<T extends Record<string, unknown>>({
   const prevRefreshRef = useRef(serverRefreshKey);
   useEffect(() => {
     if (!isServer || !serverFetch) return;
-    if (!bootstrapped) return;   // รอ layout + มุมมองเริ่มต้น มาครบก่อน → ยิง fetch รอบเดียว (กันกระพริบ)
+    // ไม่รอ bootstrap แล้ว — ดึงข้อมูลทันทีขนานกับการโหลดตั้งค่า (เร็วขึ้น) ·
+    // ถ้ามุมมอง/เลย์เอาต์เริ่มต้นมาเปลี่ยนค่าเรียง/กรองทีหลัง debounce 120ms จะรวบ/ยิงใหม่ให้เอง
     let active = true;
     const sort = sorting[0];
     const params = {
@@ -856,12 +857,11 @@ export function DataTable<T extends Record<string, unknown>>({
     }, cached ? 0 : 120);   // มีของเก่าแล้ว → revalidate ทันที ; ไม่มี → debounce 120ms กันยิงรัว
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, serverFetch, bootstrapped, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey, tableId]);
+  }, [isServer, serverFetch, srvPage, srvPageSize, debouncedSearch, sorting, serverRefreshKey, filtersKey, tableId]);
 
   // เฟส 4 (แบบ A): server mode + จัดกลุ่ม → ดึง batch ใหญ่ (cap) มาจัดกลุ่มในจอ
   useEffect(() => {
     if (!isServer || !serverFetch || !groupBy) { setSrvGroupRows([]); setSrvGroupCapped(false); return; }
-    if (!bootstrapped) return;   // รอ bootstrap เหมือน fetch หลัก
     let active = true;
     setSrvGroupLoading(true);
     const sort = sorting[0];
@@ -878,7 +878,7 @@ export function DataTable<T extends Record<string, unknown>>({
     }, 120);
     return () => { active = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isServer, serverFetch, bootstrapped, groupBy, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
+  }, [isServer, serverFetch, groupBy, debouncedSearch, sorting, serverRefreshKey, filtersKey]);
 
   // ---- Saved Views (Supabase — owner-based, ข้ามเครื่อง) ----
   const [userViews, setUserViews] = useState<StoredView[]>([]);
