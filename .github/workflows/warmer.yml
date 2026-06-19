@@ -1,0 +1,21 @@
+name: Keep Worker Warm
+
+# ปลุก Cloudflare Worker เป็นระยะ ลดอาการ "เปิดครั้งแรกช้า" (cold start)
+# หมายเหตุ: GitHub cron วิ่งจาก US + ขั้นต่ำ ~5 นาที → ช่วยได้บางส่วน
+#   ถ้าอยากให้หายชัดเจน แนะนำตั้ง cron-job.org ยิงทุก 1 นาทีเพิ่ม (ครอบคลุมดีกว่า)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # ทุก ~5 นาที
+  workflow_dispatch:          # กดรันเองได้
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping worker (warm both HTML + API path)
+        run: |
+          URL="https://erp-platform-playground.weerapeace.workers.dev"
+          curl -s -o /dev/null -w "home %{http_code} %{time_starttransfer}s\n" "$URL/login" || true
+          curl -s -o /dev/null -w "api  %{http_code} %{time_starttransfer}s\n" "$URL/api/master-v2/parent-skus?limit=1" || true
