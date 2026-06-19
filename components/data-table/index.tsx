@@ -416,6 +416,7 @@ type StoredView = {
   density?: "normal" | "compact";
   pageSize?: number;
   viewMode?: "table" | "cards";
+  rowColorRules?: RowColorRule[];     // สีแถวเฉพาะมุมมองนี้ (ทับค่าระดับตาราง)
   visibility?: "personal" | "team" | "system";
   is_default?: boolean;
   owner_name?: string | null;
@@ -576,6 +577,7 @@ export function DataTable<T extends Record<string, unknown>>({
   const [pendingDefaultPageSize, setPendingDefaultPageSize] = useState<number | null>(null);
   // ค่าเริ่มต้นตารางแบบขยายได้ (settings jsonb) — ใช้ทำสรุปคอลัมน์/สีแถว ตอน render
   const [layoutSettings, setLayoutSettings] = useState<TableLayoutSettings | null>(null);
+  const [viewRowColorRules, setViewRowColorRules] = useState<RowColorRule[] | null>(null);   // สีแถวจากมุมมองที่เลือก (null = ใช้ค่าระดับตาราง)
   useEffect(() => {
     if (!tableId || layoutAppliedRef.current) return;
     let cancelled = false;
@@ -877,6 +879,7 @@ export function DataTable<T extends Record<string, unknown>>({
         density:          r.config.density as "normal" | "compact" | undefined,
         pageSize:         r.config.pageSize as number | undefined,
         viewMode:         r.config.viewMode as "table" | "cards" | undefined,
+        rowColorRules:    r.config.row_color_rules as RowColorRule[] | undefined,
         visibility:       r.visibility ?? "personal",
         is_default:       r.is_default ?? false,
         owner_name:       r.owner_name ?? null,
@@ -1053,6 +1056,7 @@ export function DataTable<T extends Record<string, unknown>>({
     if (view.density) setDensity(view.density);
     if (view.viewMode) setViewMode(view.viewMode);
     if (view.pageSize) setPendingDefaultPageSize(view.pageSize);
+    setViewRowColorRules(view.rowColorRules ?? null);   // มีกฎสีของมุมมอง → ใช้ทับ · ไม่มี → กลับไปใช้ค่าระดับตาราง
     setRowSelection({});
   };
 
@@ -1379,7 +1383,7 @@ export function DataTable<T extends Record<string, unknown>>({
           {views.map(view => {
             const isActive = activeView === view.id && userViews.every(uv => uv.id !== activeView);
             return (
-              <button key={view.id} onClick={() => { setActiveView(view.id); setRowSelection({}); }}
+              <button key={view.id} onClick={() => { setActiveView(view.id); setViewRowColorRules(null); setRowSelection({}); }}
                 className={`h-10 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors inline-flex items-center ${
                   isActive
                     ? "border-blue-600 text-blue-600"
@@ -2015,7 +2019,7 @@ export function DataTable<T extends Record<string, unknown>>({
                 </tr>
               ) : (
                 table.getRowModel().rows.map(row => {
-                  const rc = evalRowColor(layoutSettings?.row_color_rules, row.original as Record<string, unknown>);
+                  const rc = evalRowColor(viewRowColorRules ?? layoutSettings?.row_color_rules, row.original as Record<string, unknown>);
                   const rcStyle: React.CSSProperties | undefined = rc
                     ? { boxShadow: `inset 3px 0 0 0 ${ROW_COLOR_BORDER[rc] ?? "#94a3b8"}`, ...(row.getIsSelected() ? {} : { backgroundColor: ROW_COLOR_BG[rc] ?? "#f8fafc" }) }
                     : undefined;

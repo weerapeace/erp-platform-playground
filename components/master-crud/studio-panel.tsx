@@ -19,7 +19,7 @@ import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
 import { FieldCreatorModal } from "@/components/field-creator";
-import { TableLayoutPanel, type SummaryMap } from "@/components/table-layout-panel";
+import { TableLayoutPanel, type SummaryMap, type LayoutPanelState } from "@/components/table-layout-panel";
 import type { FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { Popover } from "@/components/popover";
 import { CURRENCIES, currencyLabel } from "@/lib/money";
@@ -337,6 +337,22 @@ export function StudioPanel({
   };
   // ค่าเริ่มต้นตาราง (sort/group/สี/สรุป) — ของกลาง TableLayoutPanel: รวมปุ่มบันทึก + ยกค่าสรุปมาโชว์ inline
   const tlSaveRef = useRef<(() => Promise<void>) | null>(null);
+  const tlStateRef = useRef<(() => LayoutPanelState) | null>(null);   // ดึงค่า เรียง/จัดกลุ่ม/สี/หน้า ปัจจุบันไปเซฟลงมุมมอง
+  // แปลง config ของมุมมองที่กำลังแก้ → ค่าตั้งต้นของกล่อง "ค่าตาราง" (เรียง/จัดกลุ่ม/สี/หน้า)
+  const viewSeed = useMemo<LayoutPanelState | null>(() => {
+    if (!editingViewId) return null;
+    const cfg = (views.find((v) => v.id === editingViewId)?.config ?? {}) as Record<string, unknown>;
+    const sorting = (cfg.sorting as { id: string; desc: boolean }[] | undefined) ?? [];
+    return {
+      settings: {
+        default_sort: sorting[0] ? { column: sorting[0].id, dir: sorting[0].desc ? "desc" : "asc" } : null,
+        secondary_sort: sorting[1] ? { column: sorting[1].id, dir: sorting[1].desc ? "desc" : "asc" } : null,
+        group_by: (cfg.groupBy as string | null) ?? null,
+        row_color_rules: Array.isArray(cfg.row_color_rules) ? (cfg.row_color_rules as LayoutPanelState["settings"]["row_color_rules"]) : [],
+      },
+      pageSize: Number(cfg.pageSize) || 20,
+    };
+  }, [editingViewId, views]);
   const [tlSummaries, setTlSummaries] = useState<SummaryMap>({});
   const tlSetSummaryRef = useRef<((col: string, val: string) => void) | null>(null);
   const handleTlSummaries = useCallback((s: SummaryMap, set: (col: string, val: string) => void) => {
@@ -353,9 +369,20 @@ export function StudioPanel({
       const columnOrder = tableItems.map((i) => i.key);
 
       if (editingViewId) {
-        // ── โหมดแก้มุมมองเดิม: คงค่า config อื่น (ตัวกรอง/ค้นหา) ไว้ เปลี่ยนแค่คอลัมน์+ลำดับ ──
+        // ── โหมดแก้มุมมองเดิม: คงค่า config อื่น (ตัวกรอง/ค้นหา) ไว้ · อัปเดตคอลัมน์+ลำดับ + ค่าตาราง (เรียง/จัดกลุ่ม/สี/หน้า) ของมุมมองนี้ ──
         const base = (views.find((v) => v.id === editingViewId)?.config ?? {}) as Record<string, unknown>;
-        const config = { ...base, columnVisibility, columnOrder };
+        const tl = tlStateRef.current?.();
+        const tlConfig: Record<string, unknown> = {};
+        if (tl) {
+          const srt: { id: string; desc: boolean }[] = [];
+          if (tl.settings.default_sort?.column) srt.push({ id: tl.settings.default_sort.column, desc: tl.settings.default_sort.dir === "desc" });
+          if (tl.settings.secondary_sort?.column) srt.push({ id: tl.settings.secondary_sort.column, desc: tl.settings.secondary_sort.dir === "desc" });
+          tlConfig.sorting = srt;
+          tlConfig.groupBy = tl.settings.group_by ?? null;
+          tlConfig.pageSize = tl.pageSize;
+          tlConfig.row_color_rules = tl.settings.row_color_rules ?? [];
+        }
+        const config = { ...base, columnVisibility, columnOrder, ...tlConfig };
         const res = await apiFetch(`/api/saved-views?id=${encodeURIComponent(editingViewId)}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ label: viewName.trim(), visibility: viewVis, config, is_default: viewDefault }),
@@ -388,6 +415,24 @@ export function StudioPanel({
       setViewMsg(`✓ บันทึกมุมมอง "${viewName.trim()}" แล้ว${viewDefault ? " · ตั้งเป็นค่าเริ่มต้น" : ""}`);
       setTimeout(() => setViewMsg(null), 5000);
     } catch (e) { setViewMsg("❌ " + (e instanceof Error ? e.message : "บันทึกไม่สำเร็จ")); }
+    finally { setViewSaving(false); }
+  };
+
+  // ลบมุมมองที่กำลังแก้
+  const deleteView = async () => {
+    if (!editingViewId) return;
+    const v = views.find((x) => x.id === editingViewId);
+    if (!confirm(`ลบมุมมอง "${v?.label ?? ""}" ถาวร?`)) return;
+    setViewSaving(true); setViewMsg(null);
+    try {
+      const res = await apiFetch(`/api/saved-views?id=${encodeURIComponent(editingViewId)}`, { method: "DELETE" });
+      const j = await res.json().catch(() => ({}));
+      if (j.error) { setViewMsg("❌ " + j.error); return; }
+      pickView("");          // กลับไปโหมดสร้างใหม่
+      await loadViews();
+      setViewMsg(`✓ ลบมุมมอง "${v?.label ?? ""}" แล้ว`);
+      setTimeout(() => setViewMsg(null), 5000);
+    } catch (e) { setViewMsg("❌ " + (e instanceof Error ? e.message : "ลบไม่สำเร็จ")); }
     finally { setViewSaving(false); }
   };
 
@@ -674,14 +719,22 @@ export function StudioPanel({
                       <input type="checkbox" checked={viewDefault} onChange={(e) => setViewDefault(e.target.checked)} /> ตั้งเป็นค่าเริ่มต้น ⭐
                     </label>
                   </div>
-                  <button type="button" onClick={() => void saveAsView()} disabled={viewSaving || !viewName.trim()}
-                    className="w-full h-8 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">
-                    {viewSaving ? "กำลังบันทึก..." : editingViewId ? "💾 อัปเดตมุมมองนี้" : "💾 บันทึกเป็นมุมมองใหม่"}
-                  </button>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => void saveAsView()} disabled={viewSaving || !viewName.trim()}
+                      className="flex-1 h-8 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">
+                      {viewSaving ? "กำลังบันทึก..." : editingViewId ? "💾 อัปเดตมุมมองนี้" : "💾 บันทึกเป็นมุมมองใหม่"}
+                    </button>
+                    {editingViewId && (
+                      <button type="button" onClick={() => void deleteView()} disabled={viewSaving} title="ลบมุมมองนี้"
+                        className="h-8 px-2.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40">
+                        🗑 ลบ
+                      </button>
+                    )}
+                  </div>
                   {viewMsg && <div className={`text-[11px] ${viewMsg.startsWith("✓") ? "text-emerald-600" : "text-red-600"}`}>{viewMsg}</div>}
                   <div className="text-[10px] text-slate-400">
                     {editingViewId
-                      ? "กำลังแก้มุมมองเดิม — เปลี่ยน “คอลัมน์ที่โชว์ + ลำดับ” ตามที่จัดด้านล่าง · ตัวกรองเดิม (ถ้ามี) คงไว้"
+                      ? "กำลังแก้มุมมองเดิม — อัปเดต “คอลัมน์ + ลำดับ + เรียง/จัดกลุ่ม/สีแถว/จำนวนต่อหน้า” ของมุมมองนี้ · ตัวกรอง/คำค้นเดิม (ถ้ามี) คงไว้"
                       : "บันทึกเฉพาะ “คอลัมน์ + ลำดับ” · ถ้าต้องการ view ที่มีตัวกรอง ให้สร้างจากตารางจริง (ปุ่ม + View)"}
                   </div>
                 </div>
@@ -695,9 +748,14 @@ export function StudioPanel({
               {/* ค่าเริ่มต้นตาราง (sort/จัดกลุ่ม/จำนวนต่อหน้า/สีแถว) — ของกลาง · สรุปไปโชว์ inline ในรายการคอลัมน์ · ใช้ปุ่ม "บันทึก" หลักร่วมกัน */}
               {tableId && moduleKey && (
                 <div className="mt-4 pt-4 border-t border-slate-200">
-                  <div className="text-xs font-semibold text-slate-500 mb-2">⚙ ค่าเริ่มต้นตาราง (บันทึกพร้อมปุ่ม &ldquo;บันทึก&rdquo; ด้านบน)</div>
+                  <div className="text-xs font-semibold text-slate-500 mb-2">
+                    {editingViewId
+                      ? "⚙ ค่าของมุมมองนี้ (เรียง/จัดกลุ่ม/สีแถว/จำนวนต่อหน้า) — บันทึกด้วยปุ่ม “อัปเดตมุมมองนี้” ด้านบน"
+                      : "⚙ ค่าเริ่มต้นตาราง (บันทึกพร้อมปุ่ม “บันทึก” ด้านบน)"}
+                  </div>
                   <TableLayoutPanel tableId={tableId} moduleKey={moduleKey} showColumns={false} showSummaries={false} embedded
-                    saveRef={tlSaveRef} onSummaries={handleTlSummaries} />
+                    saveRef={tlSaveRef} onSummaries={handleTlSummaries}
+                    seed={viewSeed} seedKey={editingViewId} getStateRef={tlStateRef} disableSelfSave={!!editingViewId} />
                 </div>
               )}
             </>

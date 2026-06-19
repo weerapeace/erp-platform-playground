@@ -9,7 +9,7 @@
  *  - หน้า /admin/module/[key] (showColumns=true เต็ม)
  *  - Studio "ออกแบบหน้า" แท็บตาราง (showColumns=false — Studio มี toggle คอลัมน์เองแล้ว)
  */
-import { useEffect, useState, useCallback, type MutableRefObject } from "react";
+import { useEffect, useState, useCallback, useRef, type MutableRefObject } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 
@@ -19,13 +19,15 @@ type SortDir = "asc" | "desc";
 type SortSpec = { column: string; dir: SortDir };
 type RowColorOp = "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "empty" | "not_empty";
 type RowColorRule = { column: string; op: RowColorOp; value?: string; color: string };
-type LayoutSettings = {
+export type LayoutSettings = {
   default_sort?: SortSpec | null;
   secondary_sort?: SortSpec | null;
   group_by?: string | null;
   row_color_rules?: RowColorRule[];
   summaries?: Record<string, "sum" | "count" | "avg">;
 };
+// ค่าที่ panel นี้ผลิต/รับเข้า (ใช้ตอนผูกกับ "มุมมอง" แทนการเขียนทับค่าทั้งตาราง)
+export type LayoutPanelState = { settings: LayoutSettings; pageSize: number };
 type LayoutColumn = { key: string; label: string; visible: boolean; order: number; width?: number; pinned?: "left" | "right" | null };
 type FullLayout = {
   label?: string; description?: string | null; columns?: LayoutColumn[];
@@ -44,11 +46,16 @@ const OP_OPTS: { key: RowColorOp; label: string }[] = [
   { key: "empty", label: "ว่าง" }, { key: "not_empty", label: "ไม่ว่าง" },
 ];
 
-export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embedded = false, showSummaries = true, saveRef, onSummaries }: {
+export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embedded = false, showSummaries = true, saveRef, onSummaries, seed, seedKey, getStateRef, disableSelfSave = false }: {
   tableId: string; moduleKey: string; showColumns?: boolean; embedded?: boolean;
   showSummaries?: boolean;                                                  // false = ซ่อนกล่องสรุป (ไปโชว์ inline ที่อื่น)
   saveRef?: MutableRefObject<(() => Promise<void>) | null>;                // ให้พ่อสั่ง save ได้ (รวมปุ่มบันทึก)
   onSummaries?: (summaries: SummaryMap, setSummary: (col: string, val: string) => void) => void;  // ยกค่าสรุปขึ้นไปแสดง inline
+  // ── โหมดผูกกับ "มุมมอง" (ใช้ใน Studio): อ่าน/เขียนค่าผ่านพ่อแทนการเขียน table layout ──
+  seed?: LayoutPanelState | null;                                          // ค่าตั้งต้นจาก config ของมุมมอง (null = กลับไปใช้ค่าทั้งตาราง)
+  seedKey?: string;                                                        // เปลี่ยนค่านี้ = re-seed (เช่น id มุมมองที่กำลังแก้)
+  getStateRef?: MutableRefObject<(() => LayoutPanelState) | null>;         // ให้พ่อดึงค่าปัจจุบันไปเซฟลงมุมมอง
+  disableSelfSave?: boolean;                                               // true = ไม่ให้ save() เขียน table layout (พ่อเซฟลงมุมมองเอง)
 }) {
   const [fields, setFields] = useState<{ value: string; label: string; visible: boolean }[]>([]);
   const [full, setFull] = useState<FullLayout | null>(null);
@@ -78,20 +85,54 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
       setFields(flClean);
       const layout = (lr.data as FullLayout | null) ?? null;
       setFull(layout);
-      const s = layout?.settings ?? {};
-      setSortCol(s.default_sort?.column ?? ""); setSortDir(s.default_sort?.dir ?? "asc");
-      setSort2Col(s.secondary_sort?.column ?? ""); setSort2Dir(s.secondary_sort?.dir ?? "asc");
-      setGroupBy(s.group_by ?? "");
-      setRules(Array.isArray(s.row_color_rules) ? s.row_color_rules : []);
-      setSummaries((s.summaries as Record<string, "sum" | "count" | "avg">) ?? {});
-      setPageSize(Number(layout?.default_page_size) || 20);
+      // โหมดผูกมุมมอง (seedKey มีค่า): ปล่อยให้ seed effect เป็นคนตั้งค่า sort/group/สี/หน้า — ไม่ดึงค่าทั้งตารางมาทับ
+      if (!seedKey) {
+        const s = layout?.settings ?? {};
+        setSortCol(s.default_sort?.column ?? ""); setSortDir(s.default_sort?.dir ?? "asc");
+        setSort2Col(s.secondary_sort?.column ?? ""); setSort2Dir(s.secondary_sort?.dir ?? "asc");
+        setGroupBy(s.group_by ?? "");
+        setRules(Array.isArray(s.row_color_rules) ? s.row_color_rules : []);
+        setSummaries((s.summaries as Record<string, "sum" | "count" | "avg">) ?? {});
+        setPageSize(Number(layout?.default_page_size) || 20);
+      }
       const existing = Array.isArray(layout?.columns) ? (layout!.columns as LayoutColumn[]) : [];
       const exByKey: Record<string, LayoutColumn> = Object.fromEntries(existing.map((c) => [c.key, c]));
       const vis: Record<string, boolean> = {};
       flClean.forEach((f) => { const ex = exByKey[f.value]; vis[f.value] = ex ? !!ex.visible : f.visible; });
       setColVis(vis);
     }).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId, moduleKey]);
+
+  // ── โหมดผูกมุมมอง: re-seed ค่า sort/group/สี/หน้า เมื่อสลับมุมมองที่กำลังแก้ (seedKey เปลี่ยน) ──
+  const seededRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (seedKey === undefined) return;             // ไม่ได้อยู่ในโหมดมุมมอง
+    if (seededRef.current === seedKey) return;      // seed ไปแล้วสำหรับ key นี้
+    seededRef.current = seedKey;
+    // seed=null (เช่น "สร้างมุมมองใหม่") → กลับไปใช้ค่าทั้งตารางที่โหลดไว้
+    const s = (seed ? seed.settings : full?.settings) ?? {};
+    setSortCol(s.default_sort?.column ?? ""); setSortDir(s.default_sort?.dir ?? "asc");
+    setSort2Col(s.secondary_sort?.column ?? ""); setSort2Dir(s.secondary_sort?.dir ?? "asc");
+    setGroupBy(s.group_by ?? "");
+    setRules(Array.isArray(s.row_color_rules) ? s.row_color_rules : []);
+    setSummaries((s.summaries as Record<string, "sum" | "count" | "avg">) ?? {});
+    setPageSize(Number(seed ? seed.pageSize : full?.default_page_size) || 20);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedKey, seed]);
+
+  // ให้พ่อดึงค่าปัจจุบันไปเซฟลง config ของมุมมอง
+  const currentState = useCallback((): LayoutPanelState => ({
+    settings: {
+      default_sort: sortCol ? { column: sortCol, dir: sortDir } : null,
+      secondary_sort: sort2Col ? { column: sort2Col, dir: sort2Dir } : null,
+      group_by: groupBy || null,
+      row_color_rules: rules.filter((r) => r.column && r.color),
+      summaries: Object.keys(summaries).length ? summaries : undefined,
+    },
+    pageSize,
+  }), [sortCol, sortDir, sort2Col, sort2Dir, groupBy, rules, summaries, pageSize]);
+  if (getStateRef) getStateRef.current = currentState;
 
   const persist = async (): Promise<boolean> => {
     const settings: LayoutSettings = {
@@ -121,6 +162,7 @@ export function TableLayoutPanel({ tableId, moduleKey, showColumns = true, embed
   };
 
   const save = async () => {
+    if (disableSelfSave) return;   // โหมดแก้มุมมอง: พ่อเป็นคนเซฟลง config ของมุมมองเอง
     setSaving(true); setErr(null); setMsg(null);
     try { await persist(); setMsg("บันทึกแล้ว ✓ (เปิดตารางใหม่จะใช้ค่านี้)"); setTimeout(() => setMsg(null), 4000); }
     catch (e) { setErr(String(e instanceof Error ? e.message : e)); } finally { setSaving(false); }
