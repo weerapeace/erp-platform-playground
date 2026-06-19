@@ -28,13 +28,31 @@ export async function GET(
   if (!SAFE.test(column)) return NextResponse.json({ values: [], error: "column ไม่ถูกต้อง" }, { status: 400 });
   const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get("limit") ?? "500", 10)));
 
-  const { data, error } = await supabaseAdmin().rpc("erp_distinct_values", {
+  const admin = supabaseAdmin();
+  const { data, error } = await admin.rpc("erp_distinct_values", {
     p_table: cfg.table, p_column: column, p_limit: limit,
   });
   if (error) {
     console.error("[api/master-v2/distinct] GET", error);
-    return NextResponse.json({ values: [], error: error.message }, { status: 500 });
+    return NextResponse.json({ values: [], options: [], error: error.message }, { status: 500 });
   }
   const values = ((data ?? []) as { value: string }[]).map((r) => r.value).filter(Boolean);
-  return NextResponse.json({ values, error: null });
+
+  // ถ้าเป็นคอลัมน์เชื่อมตาราง (relation) → แปลง id เป็นชื่อที่อ่านออก เพื่อทำ dropdown filter
+  const rel = (cfg.relationResolves ?? []).find((r) => r.column === column);
+  let options: { value: string; label: string }[] = values.map((v) => ({ value: v, label: v }));
+  if (rel && values.length) {
+    const sel = rel.secondaryField ? `id, ${rel.labelField}, ${rel.secondaryField}` : `id, ${rel.labelField}`;
+    const { data: td } = await admin.from(rel.targetTable).select(sel).in("id", values);
+    const labelMap = new Map<string, string>();
+    for (const row of (td ?? []) as unknown as Record<string, unknown>[]) {
+      const lbl = String(row[rel.labelField] ?? row.id ?? "");
+      const sec = rel.secondaryField ? String(row[rel.secondaryField] ?? "") : "";
+      labelMap.set(String(row.id), sec ? `${lbl} (${sec})` : lbl);
+    }
+    options = values
+      .map((v) => ({ value: v, label: labelMap.get(v) ?? v }))
+      .sort((a, b) => a.label.localeCompare(b.label, "th"));
+  }
+  return NextResponse.json({ values, options, error: null });
 }

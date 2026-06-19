@@ -372,6 +372,8 @@ export interface DataTableProps<T extends Record<string, unknown>> {
    * undefined = ไม่มีสิทธิ์/ไม่รองรับ → ซ่อนปุ่มเลือก field
    */
   onSetFilterable?: (fieldId: string, value: boolean) => Promise<void> | void;
+  /** ดึง "ตัวเลือกที่มีจริง" ของคอลัมน์ (relation/select) เพื่อทำ dropdown filter — server mode ใช้แทนการเดาจากหน้าเดียว */
+  fetchFilterOptions?: (fieldKey: string) => Promise<{ value: string; label: string }[]>;
 }
 
 // ---- Pinned column style (เฉพาะ pin ซ้าย) ----
@@ -528,6 +530,7 @@ export function DataTable<T extends Record<string, unknown>>({
   defaultViewMode = "table",
   filterFieldOptions,
   onSetFilterable,
+  fetchFilterOptions,
 }: DataTableProps<T>) {
 
   const isServer = !!serverFetch;
@@ -1804,9 +1807,10 @@ export function DataTable<T extends Record<string, unknown>>({
           onSetFilter={setColFilter}
           onClear={clearColFilters}
           onClose={() => setShowFilterPanel(false)}
-          resultCount={filteredData.length}
+          resultCount={isServer ? srvTotal : filteredData.length}
           filterFieldOptions={filterFieldOptions}
           onSetFilterable={onSetFilterable}
+          fetchFilterOptions={fetchFilterOptions}
         />
       )}
 
@@ -2330,7 +2334,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
 function ColumnFilterPanel({
   filterableFields, colFilterValues, data, onSetFilter, onClear, onClose, resultCount,
-  filterFieldOptions, onSetFilterable,
+  filterFieldOptions, onSetFilterable, fetchFilterOptions,
 }: {
   filterableFields: FilterableField[];
   colFilterValues: Record<string, ColumnFilterValue>;
@@ -2339,6 +2343,7 @@ function ColumnFilterPanel({
   onClear: () => void;
   onClose: () => void;
   resultCount: number;
+  fetchFilterOptions?: (fieldKey: string) => Promise<{ value: string; label: string }[]>;
   filterFieldOptions?: FilterFieldOption[];
   onSetFilterable?: (fieldId: string, value: boolean) => Promise<void> | void;
 }) {
@@ -2459,7 +2464,7 @@ function ColumnFilterPanel({
           // field เชื่อมตาราง → dropdown เลือกชื่อ (PickUP) แทนช่องพิมพ์ id
           const relOpts = relOptsByField[field.key];
           if (relOpts) {
-            return <SelectFilterCard key={field.key} field={field} opts={relOpts} selected={fv?.type === "select" ? fv.selected : []} onChange={sel => onSetFilter(field.key, { type: "select", selected: sel })} />;
+            return <SelectFilterCard key={field.key} field={field} opts={relOpts} fetchOptions={fetchFilterOptions} selected={fv?.type === "select" ? fv.selected : []} onChange={sel => onSetFilter(field.key, { type: "select", selected: sel })} />;
           }
           if (field.type === "text") {
             const val = fv?.type === "text" ? fv.value : "";
@@ -2526,7 +2531,7 @@ function ColumnFilterPanel({
             );
           }
           if (field.type === "select") {
-            return <SelectFilterCard key={field.key} field={field} opts={getOpts(field)} selected={fv?.type === "select" ? fv.selected : []} onChange={sel => onSetFilter(field.key, { type: "select", selected: sel })} />;
+            return <SelectFilterCard key={field.key} field={field} opts={getOpts(field)} fetchOptions={fetchFilterOptions} selected={fv?.type === "select" ? fv.selected : []} onChange={sel => onSetFilter(field.key, { type: "select", selected: sel })} />;
           }
           return null;
         })}
@@ -2536,18 +2541,36 @@ function ColumnFilterPanel({
   );
 }
 
-function SelectFilterCard({ field, opts, selected, onChange }: {
+function SelectFilterCard({ field, opts, selected, onChange, fetchOptions }: {
   field: FilterableField; opts: { value: string; label: string }[]; selected: string[]; onChange: (s: string[]) => void;
+  fetchOptions?: (fieldKey: string) => Promise<{ value: string; label: string }[]>;
 }) {
   const [search, setSearch] = useState("");
-  const filtered = opts.filter(o => !search || o.label.toLowerCase().includes(search.toLowerCase()));
+  // server mode / relation: ดึงตัวเลือกที่มีจริงจาก /distinct (ครบทุกค่า ไม่ใช่แค่หน้าเดียว)
+  const [fetched, setFetched] = useState<{ value: string; label: string }[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!fetchOptions) return;
+    let active = true;
+    setLoading(true);
+    fetchOptions(field.key)
+      .then(o => { if (active) setFetched(o); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [fetchOptions, field.key]);
+  // ใช้รายการจาก server เป็นหลัก · ถ้าดึงไม่ได้/ว่าง กลับไปใช้ค่าที่ได้จากหน้าปัจจุบัน · ค่าที่ติ๊กไว้แต่ไม่อยู่ในรายการ ก็ยังโชว์ (กันหาย)
+  const effectiveOpts = (fetched && fetched.length) ? fetched : opts;
+  const merged = effectiveOpts.length || !selected.length
+    ? effectiveOpts
+    : selected.map(v => ({ value: v, label: v }));
+  const filtered = merged.filter(o => !search || o.label.toLowerCase().includes(search.toLowerCase()));
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-3 min-w-[160px] max-w-[220px] shadow-sm">
       <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center justify-between">
         <span>{field.label}</span>
         {selected.length > 0 && <span className="text-blue-600 font-bold normal-case">({selected.length})</span>}
       </p>
-      {opts.length > 5 && (
+      {merged.length > 5 && (
         <div className="relative mb-2">
           <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><IconSearchSm /></span>
           <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา..." className="w-full h-6 pl-6 pr-2 text-xs border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" />
@@ -2562,7 +2585,8 @@ function SelectFilterCard({ field, opts, selected, onChange }: {
             <span className="text-xs text-slate-700 truncate">{opt.label}</span>
           </label>
         ))}
-        {filtered.length === 0 && <p className="text-xs text-slate-400 py-2 text-center">ไม่พบ</p>}
+        {loading && merged.length === 0 && <p className="text-xs text-slate-400 py-2 text-center">กำลังโหลดตัวเลือก…</p>}
+        {!loading && filtered.length === 0 && <p className="text-xs text-slate-400 py-2 text-center">ไม่พบ</p>}
       </div>
       {selected.length > 0 && <button onClick={() => onChange([])} className="mt-2 text-xs text-red-500 hover:text-red-700">ล้าง</button>}
     </div>

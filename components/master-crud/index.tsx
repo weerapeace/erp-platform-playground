@@ -988,6 +988,16 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     return { rows: enrichRelated(raw, vis), total: (json.total as number) ?? 0 };
   }, [apiBase, config.apiPath, config.baseFilter, config.extraQuery, urlFilter, enrichRelated, ensureRelatedMaps]);
 
+  // ของกลาง: ดึง "ตัวเลือกที่มีจริง" ของคอลัมน์ (พร้อมชื่อ relation) เพื่อทำ dropdown filter — ไม่ต้อง hardcode
+  const fetchFilterOptions = useCallback(async (fieldKey: string): Promise<{ value: string; label: string }[]> => {
+    try {
+      const j = await apiFetch(`${apiBase}${config.apiPath}/distinct?column=${encodeURIComponent(fieldKey)}&limit=1000`).then((r) => r.json());
+      if (Array.isArray(j.options)) return j.options as { value: string; label: string }[];
+      if (Array.isArray(j.values)) return (j.values as string[]).map((v) => ({ value: v, label: v }));
+      return [];
+    } catch { return []; }
+  }, [apiBase, config.apiPath]);
+
   // ⚠ ห้าม early return ที่นี่ — จะทำให้ hooks ด้านล่าง (useMemo/useCallback อีก 8+ ตัว)
   // ไม่ถูกเรียก → React error #310 'Rendered fewer hooks than expected'
   // → ย้ายเช็ค canView ไปก่อน return JSX หลัก
@@ -1281,7 +1291,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       enableSorting: f.type === "many2many" ? false : f.sortable !== false,
       meta: {
         filterable: f.type === "many2many" ? false : (f.filterable ?? false),
-        filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "boolean" ? "boolean" : f.type === "select" ? "select" : "text"),
+        // relation → select (ติ๊กเลือกชื่อจริง) · ตัวเลือกดึงจาก /distinct แบบ lazy · ไม่ hardcode เป็น text อีกต่อไป
+        filterType: f.filterType ?? (f.type === "number" ? "number" : f.type === "boolean" ? "boolean" : (f.type === "select" || f.type === "relation") ? "select" : "text"),
         ...(f.type === "select" && f.options ? { filterOptions: f.options.map(o => ({ value: o, label: o })) } : {}),
         // computed + ตั้ง "แสดงผลรวมท้ายตาราง" → sum สูตรทุกแถวในหน้านี้
         ...(f.type === "computed" && f.summarize
@@ -2077,6 +2088,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           bulkRowLabel={(r) => { const rec = r as Record<string, unknown>; return pickRowLabel(rec) || String(rec.id ?? ""); }}
           filterFieldOptions={config.moduleKey ? filterFieldOptions : undefined}
           onSetFilterable={config.moduleKey && canEdit ? handleSetFilterable : undefined}
+          fetchFilterOptions={fetchFilterOptions}
         />
 
       </div>
