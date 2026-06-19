@@ -54,7 +54,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const { data: curRows } = await admin.from("bom_labor_rates").select("id, craftsman_id, craftsman_name, rate").eq("bom_code", bomCode).eq("is_active", true).eq("is_current", true);
   const cur = new Map((curRows ?? []).map((r: Record<string, unknown>) => [keyOf((r.craftsman_id as string) ?? null, (r.craftsman_name as string) ?? null), r]));
 
-  const incoming = (b.rates ?? []).filter((r) => (r.craftsman_name ?? "").trim() || r.craftsman_id);
+  // เก็บบรรทัดที่ "มีช่าง" หรือ "มีราคา > 0" (ราคากลางที่ไม่ได้เลือกช่างก็ต้องบันทึก — เดิมโดนกรองทิ้งเงียบ ๆ)
+  const incoming = (b.rates ?? []).filter((r) => (r.craftsman_name ?? "").trim() || r.craftsman_id || num(r.rate) > 0);
   const seen = new Set<string>();
   const archiveIds: string[] = [];
   const insertRows: Record<string, unknown>[] = [];

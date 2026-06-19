@@ -295,11 +295,15 @@ export default function BomWorkspacePage() {
         : await apiFetch("/api/bom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      // บันทึกงานเหมารายชิ้น (ตารางที่ 2) แทนที่ทั้งชุดของสูตรนี้
+      // บันทึกงานเหมารายชิ้น (ตารางที่ 2) + ค่าแรงผลิต — ไม่ให้พังทั้งการบันทึก BOM แต่ต้องเตือนถ้าล้มเหลว
       try {
-        await apiFetch("/api/bom/piecework", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bom_code: form.bom_code.trim(), lines: form.piecework }) });
-        await apiFetch("/api/bom/labor-rates", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bom_code: form.bom_code.trim(), rates: form.labor }) });
-      } catch { /* ไม่ให้พังทั้งการบันทึก BOM */ }
+        const pw = await apiFetch("/api/bom/piecework", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bom_code: form.bom_code.trim(), lines: form.piecework }) });
+        const pwj = await pw.json().catch(() => ({}));
+        if (pwj?.error) throw new Error("งานเหมา: " + pwj.error);
+        const lb = await apiFetch("/api/bom/labor-rates", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bom_code: form.bom_code.trim(), rates: form.labor }) });
+        const lbj = await lb.json().catch(() => ({}));
+        if (lbj?.error) throw new Error("ค่าแรงผลิต: " + lbj.error);
+      } catch (e) { toast.error("บันทึก BOM แล้ว แต่บันทึกค่าแรง/งานเหมาไม่สำเร็จ — " + (e instanceof Error ? e.message : "")); }
       toast.success(form.id ? "บันทึกสูตรแล้ว" : "สร้างสูตรใหม่แล้ว");
       setDirty(false);
       refresh();
