@@ -78,8 +78,8 @@ export async function GET(req: NextRequest) {
       else noDept.push(c);
     }
 
+    // โชว์ทุกแผนกในระบบ (รวมแผนกที่ยังไม่มีคน) ตามลำดับ display_order
     const sections = depts
-      .filter((d) => byDept.has(String(d.id)))
       .map((d) => {
         const emps = (byDept.get(String(d.id)) ?? []).sort((x, y) => x.employee_code.localeCompare(y.employee_code));
         return {

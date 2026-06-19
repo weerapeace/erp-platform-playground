@@ -8,6 +8,7 @@
 import { useEffect, useState, useCallback, type DragEvent } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import type { DeptHistory } from "@/app/api/payroll/board/history/route";
 
 type Card = {
   id: string; employee_code: string; nickname: string; full_name: string;
@@ -15,7 +16,6 @@ type Card = {
   is_supervisor: boolean; recurring_count: number; warning_count: number; photo_key: string | null;
 };
 type Section = { department_id: string; department_name: string; headcount: number; total_salary: number; employees: Card[] };
-type Dept = { id: string; name: string };
 const NO_DEPT = "__none__";   // คีย์โซน "ยังไม่ระบุแผนก"
 
 const baht = (v: number) => `฿${v.toLocaleString("th-TH", { minimumFractionDigits: 0 })}`;
@@ -34,7 +34,6 @@ const initials = (c: Card) => (c.nickname || c.full_name || c.employee_code).sli
 
 export default function PayrollBoardPage() {
   const [sections, setSections] = useState<Section[]>([]);
-  const [allDepts, setAllDepts] = useState<Dept[]>([]);
   const [noDept, setNoDept] = useState<Card[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -51,7 +50,7 @@ export default function PayrollBoardPage() {
     try {
       const j = await apiFetch("/api/payroll/board").then((r) => r.json());
       if (j.error) setErr(j.error);
-      else { setSections(j.sections as Section[]); setAllDepts((j.all_departments ?? []) as Dept[]); setNoDept(j.no_department as Card[]); setTotal(j.total_employees ?? 0); }
+      else { setSections(j.sections as Section[]); setNoDept(j.no_department as Card[]); setTotal(j.total_employees ?? 0); }
     } catch { setErr("โหลดไม่ได้"); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -71,7 +70,6 @@ export default function PayrollBoardPage() {
   }, [dragId, load]);
 
   const match = (c: Card) => !q.trim() || `${c.employee_code} ${c.nickname} ${c.full_name}`.toLowerCase().includes(q.trim().toLowerCase());
-  const emptyDepts = allDepts.filter((d) => !sections.some((s) => s.department_id === d.id));   // แผนกที่ยังไม่มีคน (เป็นที่วางได้)
 
   return (
     <div className="p-6 max-w-[1500px] mx-auto">
@@ -111,16 +109,7 @@ export default function PayrollBoardPage() {
               onDragLeave={() => setOverKey((k) => (k === s.department_id ? null : k))}
               onDrop={(e) => { e.preventDefault(); void moveTo(s.department_id); }}>
               {s.employees.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onClick={() => setSel(c)} onDragStart={() => setDragId(c.id)} onDragEnd={() => setDragId(null)} dragging={dragId === c.id} />)}
-            </SectionBox>
-          ))}
-          {/* แผนกที่ยังไม่มีคน — เป็นที่วางได้ (โผล่เฉพาะตอนกำลังลาก) */}
-          {dragId && emptyDepts.map((d) => (
-            <SectionBox key={d.id} title={d.name} headcount={0} total={0} muted
-              isOver={overKey === d.id}
-              onDragOver={(e) => { e.preventDefault(); setOverKey(d.id); }}
-              onDragLeave={() => setOverKey((k) => (k === d.id ? null : k))}
-              onDrop={(e) => { e.preventDefault(); void moveTo(d.id); }}>
-              <span className="text-xs text-slate-300">วางที่นี่เพื่อย้ายเข้าแผนกนี้</span>
+              {s.employees.length === 0 && <span className="text-xs text-slate-300">ยังไม่มีพนักงาน · ลากการ์ดมาวางที่นี่</span>}
             </SectionBox>
           ))}
           {(noDept.length > 0 || dragId) && (
@@ -186,6 +175,13 @@ function EmployeeCard({ c, onClick, onDragStart, onDragEnd, dragging }: { c: Car
 
 function CardDrawer({ c, onClose }: { c: Card; onClose: () => void }) {
   const col = COLOR_CLS[c.color] ?? COLOR_CLS.slate;
+  const [hist, setHist] = useState<DeptHistory[]>([]);
+  useEffect(() => {
+    let cancel = false;
+    apiFetch(`/api/payroll/board/history?employee_id=${c.id}`).then((r) => r.json()).then((j) => { if (!cancel) setHist(j.data ?? []); }).catch(() => {});
+    return () => { cancel = true; };
+  }, [c.id]);
+  const dts = (s: string) => { try { return new Date(s).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }); } catch { return s; } };
   return (
     <div className="fixed inset-0 z-50 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30" />
@@ -206,6 +202,19 @@ function CardDrawer({ c, onClose }: { c: Card; onClose: () => void }) {
           <Info label="หัวหน้า" value={c.is_supervisor ? "⭐ ใช่" : "—"} />
           <Info label="รายการประจำ" value={`${c.recurring_count} รายการ`} />
           <Info label="ใบเตือน (active)" value={c.warning_count > 0 ? <span className="text-red-600 font-medium">⚠️ {c.warning_count} ใบ</span> : "—"} />
+          {hist.length > 0 && (
+            <div className="pt-2 border-t border-slate-100">
+              <div className="text-xs font-medium text-slate-500 mb-1.5">🔀 ประวัติย้ายแผนก</div>
+              <div className="space-y-1">
+                {hist.map((h) => (
+                  <div key={h.id} className="text-[12px] flex items-center justify-between gap-2">
+                    <span className="text-slate-600">{h.from_department_name ?? "ไม่ระบุ"} → <b className="text-slate-800">{h.to_department_name ?? "ไม่ระบุ"}</b></span>
+                    <span className="text-slate-400 whitespace-nowrap">{dts(h.moved_at)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="pt-3 flex gap-2">
             <Link href="/payroll/employees" className="flex-1 h-10 inline-flex items-center justify-center text-sm bg-slate-900 text-white rounded-lg hover:bg-slate-800">📋 แก้ในตาราง</Link>
             <Link href="/payroll/warnings" className="flex-1 h-10 inline-flex items-center justify-center text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">⚠️ ใบเตือน</Link>
