@@ -92,6 +92,10 @@ export default function MoWorkspacePage() {
   const [archiving, setArchiving] = useState(false);
   const [matTab, setMatTab] = useState<"sum" | "block">("sum");
   const [editBuy, setEditBuy] = useState<Set<string>>(new Set());
+  // ปุ่ม "อัพเดตวัตถุดิบตาม BOM" — กางสูตรใหม่ (เลือกเวอร์ชันได้ + เก็บค่าที่กรอกของชิ้นเดิม)
+  const [bomRefreshOpen, setBomRefreshOpen] = useState(false);
+  const [bomRefreshVer, setBomRefreshVer] = useState("");
+  const [bomRefreshing, setBomRefreshing] = useState(false);
   // popup สร้างใบขอซื้อ
   type PrItem = { key: string; sku: string | null; name: string | null; uom: string | null; qty: number; include: boolean };
   const [prOpen, setPrOpen] = useState(false);
@@ -270,6 +274,27 @@ export default function MoWorkspacePage() {
       setForm(null); refresh();
     } catch (e) { setFormErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
+  };
+
+  // กางสูตรใหม่จาก BOM ที่เลือก (เก็บค่าที่กรอกของชิ้นเดิมไว้) แล้วโหลดวัตถุดิบใหม่
+  const openBomRefresh = () => { if (!form) return; setBomRefreshVer(form.bom_id ?? (versions[0]?.id ?? "")); setBomRefreshOpen(true); };
+  const doBomRefresh = async () => {
+    if (!form?.id) return;
+    const ver = versions.find((v) => v.id === bomRefreshVer);
+    const bomCode = ver?.bom_code ?? form.bom_code;
+    const bomVersion = ver?.version ?? form.bom_version;
+    if (!bomCode) { toast.error("สินค้านี้ยังไม่มีสูตร BOM"); return; }
+    setBomRefreshing(true);
+    try {
+      const payload: Record<string, unknown> = { reexplode: true, preserve: true, bom_code: bomCode, bom_version: bomVersion };
+      if (form.sizes.length > 0) payload.size_breakdown = form.sizes.map((s) => ({ label: s.label, qty: form.size_qty[s.label] || 0 }));
+      const res = await apiFetch(`/api/mo/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("อัพเดตวัตถุดิบตาม BOM แล้ว");
+      setBomRefreshOpen(false);
+      await openEdit({ id: form.id, product_sku: form.product_sku } as MoListItem);   // โหลดวัตถุดิบใหม่
+    } catch (e) { toast.error(e instanceof Error ? e.message : "อัพเดตไม่สำเร็จ"); }
+    finally { setBomRefreshing(false); }
   };
 
   const doArchive = async () => {
@@ -621,9 +646,15 @@ export default function MoWorkspacePage() {
                       <button type="button" onClick={() => setMatTab("sum")} className={`h-7 px-3 ${matTab === "sum" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>วัตถุดิบที่ต้องใช้</button>
                       <button type="button" onClick={() => setMatTab("block")} className={`h-7 px-3 border-l border-slate-200 ${matTab === "block" ? "bg-blue-600 text-white" : "bg-white text-slate-600"}`}>รายละเอียด (บล็อก)</button>
                     </div>
-                    {editable && matTab === "sum" && needCount > 0 && canEdit && (
-                      <button type="button" onClick={openPR} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {editable && canEdit && form.bom_code && (
+                        <button type="button" onClick={openBomRefresh} title="ดึงวัตถุดิบใหม่จากสูตร BOM ปัจจุบัน (เลือกเวอร์ชันได้ + เก็บค่าที่กรอกของชิ้นเดิม)"
+                          className="h-7 px-3 text-xs font-medium border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50">🔄 อัพเดตวัตถุดิบตาม BOM</button>
+                      )}
+                      {editable && matTab === "sum" && needCount > 0 && canEdit && (
+                        <button type="button" onClick={openPR} className="h-7 px-3 text-xs font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700">🛒 สร้างใบขอซื้อ ({needCount})</button>
+                      )}
+                    </div>
                   </div>
                   {form.materials.length === 0 ? (
                     <div className="text-center py-4 text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg">
@@ -715,6 +746,29 @@ export default function MoWorkspacePage() {
       <ConfirmDialog open={archiveTarget !== null} onClose={() => !archiving && setArchiveTarget(null)} onConfirm={doArchive}
         loading={archiving} variant="danger" title="ย้ายใบสั่งผลิตเข้าคลังเก็บ?"
         message={`ใบสั่งผลิต "${archiveTarget?.mo_no ?? ""}" จะถูกซ่อน (กู้คืนได้)`} confirmText="ย้ายเข้าคลังเก็บ" />
+
+      {/* popup อัพเดตวัตถุดิบตาม BOM */}
+      <ERPModal open={bomRefreshOpen} onClose={() => !bomRefreshing && setBomRefreshOpen(false)} size="sm" title="🔄 อัพเดตวัตถุดิบตาม BOM"
+        footer={<>
+          <button onClick={() => setBomRefreshOpen(false)} disabled={bomRefreshing} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={doBomRefresh} disabled={bomRefreshing} className="h-9 px-4 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">{bomRefreshing ? "กำลังอัพเดต..." : "อัพเดตวัตถุดิบ"}</button>
+        </>}>
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">ระบบจะดึงรายการวัตถุดิบใหม่จากสูตร BOM ที่เลือก (ใช้ตอนแก้สูตรให้ถูกต้องแล้วอยากให้ใบนี้ตามสูตรล่าสุด)</p>
+          <label className="block">
+            <span className="text-[11px] text-slate-500">เลือกเวอร์ชันสูตร (BOM)</span>
+            <select value={bomRefreshVer} onChange={(e) => setBomRefreshVer(e.target.value)}
+              className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500">
+              {versions.length === 0 && <option value="">— ไม่มีสูตร —</option>}
+              {versions.map((v) => <option key={v.id} value={v.id}>{v.version}{v.is_default ? " ★" : ""}{v.bom_code === form?.bom_code ? " (ปัจจุบัน)" : ""}</option>)}
+            </select>
+          </label>
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            ✅ ค่าที่เคยกรอกของวัตถุดิบ <b>ชิ้นเดิมที่ยังอยู่ในสูตร</b> (จำนวนที่มี / เตรียมครบ / ตัดครบ / ขอซื้อ) จะถูกเก็บไว้ให้<br />
+            ⚠️ วัตถุดิบที่ถูกเอาออกจากสูตรจะหายไป · ชิ้นใหม่จะเริ่มที่ค่าว่าง
+          </div>
+        </div>
+      </ERPModal>
 
       {/* popup สร้างใบขอซื้อ (ลงระบบจัดซื้อ v2) */}
       <ERPModal open={prOpen} onClose={() => !prSaving && setPrOpen(false)} size="lg" title={`🛒 สร้างใบขอซื้อ — ${form?.mo_no ?? ""}`}

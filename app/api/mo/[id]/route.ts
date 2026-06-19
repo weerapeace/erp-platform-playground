@@ -62,6 +62,7 @@ type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase
 type SaveBody = {
   product_sku?: string; product_name?: string; qty?: number; due_date?: string | null;
   bom_code?: string | null; bom_version?: string | null; status?: string; note?: string; reexplode?: boolean;
+  preserve?: boolean;      // กางสูตรใหม่แบบเก็บค่าที่เคยกรอก (ปุ่ม "อัพเดตวัตถุดิบตาม BOM")
   materials?: MatEdit[];   // แก้ checklist เตรียม/จำนวนที่มี/ขอซื้อ (เฟส B)
   size_breakdown?: { label: string; qty: number }[] | null;   // กลุ่ม C: แบ่งจำนวนตามไซส์
 };
@@ -105,7 +106,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const bomChanged = newBom !== (existing as { bom_code: string | null }).bom_code;
   const reexploded = body.reexplode || qtyChanged || bomChanged || sizesProvided;
   if (reexploded) {
-    await explodeBom(admin, newBom ?? null, moNo, newQty, effSizes);
+    await explodeBom(admin, newBom ?? null, moNo, newQty, effSizes, body.preserve === true);
   } else if (Array.isArray(body.materials)) {
     // อัปเดต checklist เตรียม/จำนวนที่มี/ขอซื้อ ที่ "สรุปต่อวัตถุดิบ" (เฉพาะเมื่อไม่ได้กางสูตรใหม่)
     for (const m of body.materials) {

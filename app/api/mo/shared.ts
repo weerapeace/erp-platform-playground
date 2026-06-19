@@ -12,7 +12,16 @@ export type SizeQty = { label: string; qty: number };
  *   ใช้ค่ามิติของไซส์นั้น (size_values[label] ตาม size_dim) · required = qty_per(ของไซส์) × จำนวนไซส์นั้น
  *   บรรทัดที่ไม่ผันตามไซส์ → แถวเดียว required = qty_per × moQty(รวมทุกไซส์)
  */
-export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCode: string | null, moNo: string, moQty: number, sizeBreakdown: SizeQty[] | null = null) {
+export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCode: string | null, moNo: string, moQty: number, sizeBreakdown: SizeQty[] | null = null, preserve = false) {
+  // preserve = พยายามเก็บค่าที่เคยกรอก (จำนวนที่มี/เตรียม/ขอซื้อ + ตัดครบ) ของวัตถุดิบชิ้นเดิมที่ยังอยู่ในสูตรใหม่
+  const prevSum = new Map<string, { on_hand: number; ready: boolean; to_purchase: number | null }>();
+  const prevCut = new Map<string, boolean>();
+  if (preserve) {
+    const { data: oldSum } = await admin.from("mo_material_summary").select("component_sku, on_hand_qty, is_ready, to_purchase_qty").eq("mo_no", moNo);
+    for (const s of (oldSum ?? []) as Record<string, unknown>[]) { const k = s.component_sku ? String(s.component_sku) : null; if (k) prevSum.set(k, { on_hand: Number(s.on_hand_qty) || 0, ready: !!s.is_ready, to_purchase: s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null }); }
+    const { data: oldMat } = await admin.from("mo_materials").select("component_sku, cut_block_code, cut_done").eq("mo_no", moNo);
+    for (const m of (oldMat ?? []) as Record<string, unknown>[]) { if (m.cut_done) prevCut.set(`${m.component_sku ?? ""}|${m.cut_block_code ?? ""}`, true); }
+  }
   await admin.from("mo_materials").delete().eq("mo_no", moNo);
   await admin.from("mo_material_summary").delete().eq("mo_no", moNo);
   if (!bomCode) return;
@@ -51,6 +60,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       cut_width:      l.cut_width != null ? Number(l.cut_width) : null,
       cut_length:     l.cut_length != null ? Number(l.cut_length) : null,
       pieces:         l.pieces != null ? Number(l.pieces) : null,
+      cut_done:       preserve ? (prevCut.get(`${sku ?? ""}|${(l.cut_block_code as string) ?? ""}`) ?? false) : false,
       is_active:      true,
     };
     if (useSize && l.size_variant) {
@@ -81,10 +91,16 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
     if (e) e.required += (m.required_qty as number) || 0;
     else byKey.set(k, { sku: (m.component_sku as string) ?? null, name: (m.component_name as string) ?? null, type: (m.material_type as string) ?? null, uom: (m.uom as string) ?? null, required: (m.required_qty as number) || 0 });
   }
-  const sumRows = [...byKey.values()].map((e, i) => ({
-    mo_no: moNo, component_sku: e.sku, component_name: e.name, material_type: e.type, uom: e.uom,
-    qty_per: moQty > 0 ? r4(e.required / moQty) : 0, required_qty: r4(e.required),
-    on_hand_qty: 0, to_purchase_qty: r4(e.required), is_ready: false, sequence: i + 1, is_active: true,
-  }));
+  const sumRows = [...byKey.values()].map((e, i) => {
+    const prev = preserve && e.sku ? prevSum.get(e.sku) : undefined;   // เก็บค่าเดิมถ้าวัตถุดิบชิ้นนี้ยังอยู่
+    const required = r4(e.required);
+    return {
+      mo_no: moNo, component_sku: e.sku, component_name: e.name, material_type: e.type, uom: e.uom,
+      qty_per: moQty > 0 ? r4(e.required / moQty) : 0, required_qty: required,
+      on_hand_qty: prev ? prev.on_hand : 0,
+      to_purchase_qty: prev && prev.to_purchase != null ? prev.to_purchase : required,
+      is_ready: prev ? prev.ready : false, sequence: i + 1, is_active: true,
+    };
+  });
   if (sumRows.length > 0) await admin.from("mo_material_summary").insert(sumRows);
 }
