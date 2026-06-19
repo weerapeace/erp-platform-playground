@@ -134,16 +134,20 @@ export default function PayrollBoardPage() {
     const isOver = overZone === z.key && dragging;
     return (
       <div key={z.key} data-zone={z.key}
-        className={`w-[280px] shrink-0 self-start rounded-3xl p-4 min-h-[150px] transition ${GLASS} ${sticky ? "sticky left-0 z-20 bg-white/80" : "bg-white/55"} ${isOver ? "ring-2 ring-emerald-300 border-emerald-300/70" : ""}`}>
-        <div className="flex items-baseline gap-1 mb-1">
-          <h2 className="font-semibold text-slate-800 truncate">{z.name}</h2>
-          {sticky && <span className="text-[10px] text-slate-400" title="ปักไว้ซ้าย">📌</span>}
-          <span className="text-sm font-normal text-slate-400 shrink-0">· {cards.length} คน</span>
+        className={`w-[280px] shrink-0 flex flex-col rounded-3xl transition ${GLASS} ${sticky ? "sticky left-0 z-20 bg-white/85" : "bg-white/55"} ${isOver ? "ring-2 ring-emerald-300 border-emerald-300/70" : ""}`}>
+        <div className="p-4 pb-2 shrink-0">
+          <div className="flex items-baseline gap-1">
+            <h2 className="font-semibold text-slate-800 truncate">{z.name}</h2>
+            {sticky && <span className="text-[10px] text-slate-400" title="ปักไว้ซ้าย">📌</span>}
+            <span className="text-sm font-normal text-slate-400 shrink-0">· {cards.length} คน</span>
+          </div>
+          <div className="text-[13px] text-slate-500">ฐานเงินเดือนรวม <b className="text-slate-700 tabular-nums">{baht(zoneSalary(z.key))}</b></div>
         </div>
-        <div className="text-[13px] text-slate-500 mb-3">ฐานเงินเดือนรวม <b className="text-slate-700 tabular-nums">{baht(zoneSalary(z.key))}</b></div>
-        <div className="flex flex-wrap gap-2.5">
-          {cards.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onDown={(e) => onCardDown(e, c, z.key)} dragging={drag?.card.id === c.id} />)}
-          {cards.length === 0 && <span className="text-xs text-slate-300">ลากการ์ดมาวางที่นี่</span>}
+        <div className="flex-1 overflow-y-auto px-4 pb-4 min-h-0">
+          <div className="flex flex-wrap gap-2.5">
+            {cards.filter(match).map((c) => <EmployeeCard key={c.id} c={c} onDown={(e) => onCardDown(e, c, z.key)} dragging={drag?.card.id === c.id} />)}
+            {cards.length === 0 && <span className="text-xs text-slate-300">ลากการ์ดมาวางที่นี่</span>}
+          </div>
         </div>
       </div>
     );
@@ -184,8 +188,8 @@ export default function PayrollBoardPage() {
       {loading ? (
         <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด...</div>
       ) : (
-        <div className="overflow-x-auto pb-4">
-          <div className="flex items-start gap-4 w-max">
+        <div className="overflow-x-auto pb-2">
+          <div className="flex items-stretch gap-4 w-max h-[calc(100vh-240px)] min-h-[440px]">
             {zones.filter((z) => z.key === NO_DEPT).map((z) => renderZone(z, true))}
             {zones.filter((z) => z.key !== NO_DEPT).map((z) => renderZone(z, false))}
           </div>
