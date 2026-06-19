@@ -594,13 +594,20 @@ export default function WorkBoardPage() {
         if (!cancel) setClPieceRows((pj?.data ?? []) as MoPieceRow[]);
       } catch { if (!cancel) setClPieceRows([]); }
     })();
-    // เฟส 4: ของที่ซื้อ / ปัญหา / ประวัติ (โหลดแยก)
+    // ปัญหา (โหลดเลย — ใช้เลขบนแท็บ) · ของซื้อ/ประวัติ เลื่อนไปโหลดตอนกดแท็บนั้น (ลดของที่ยิงตอนเปิด = เร็วขึ้น)
     const moNo = checklistMO.mo_no;
-    void (async () => { try { const r = await apiFetch(`/api/mo/purchase-status?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClPurch((j?.data ?? []) as PurchaseStatusRow[]); } catch { if (!cancel) setClPurch([]); } })();
     void (async () => { try { const r = await apiFetch(`/api/mo/issues?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClIssues((j?.data ?? []) as MoIssue[]); } catch { if (!cancel) setClIssues([]); } })();
-    void (async () => { try { const r = await apiFetch(`/api/mo/dispatch-history?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClHist((j?.data ?? []) as DispatchHistRow[]); } catch { if (!cancel) setClHist([]); } })();
     return () => { cancel = true; };
   }, [checklistMO]);
+
+  // เลื่อนโหลด: ของซื้อ/ประวัติ ดึงเฉพาะตอนกดเข้าแท็บนั้น (ยังไม่เคยโหลด = null)
+  useEffect(() => {
+    if (!checklistMO) return;
+    const moNo = checklistMO.mo_no; let cancel = false;
+    if (clTab === "purch" && clPurch === null) void (async () => { try { const r = await apiFetch(`/api/mo/purchase-status?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClPurch((j?.data ?? []) as PurchaseStatusRow[]); } catch { if (!cancel) setClPurch([]); } })();
+    if (clTab === "hist" && clHist === null) void (async () => { try { const r = await apiFetch(`/api/mo/dispatch-history?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClHist((j?.data ?? []) as DispatchHistRow[]); } catch { if (!cancel) setClHist([]); } })();
+    return () => { cancel = true; };
+  }, [clTab, checklistMO, clPurch, clHist]);
 
   // ติ๊กเตรียม/ตัด รายวัตถุดิบในป๊อปอัป (optimistic + audit)
   const toggleMat = useCallback(async (rowId: string, field: "is_ready" | "cut_done") => {

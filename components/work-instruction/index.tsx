@@ -9,6 +9,7 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
+import { cachedJson, invalidateCache } from "@/lib/client-cache";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { RelationPeekModal } from "@/components/relation-peek";
@@ -53,8 +54,11 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
   const loadSpec = useCallback(() => {
     if (!sku) { setSpec(null); return; }
     setLoading(true);
-    apiFetch(`/api/product-spec?sku=${encodeURIComponent(sku)}`).then((r) => r.json()).then((j) => setSpec(j as ProductSpec)).catch(() => setSpec(null)).finally(() => setLoading(false));
-  }, [sku, refreshKey]);   // refreshKey เปลี่ยน → โหลดสเปกใหม่ (เช่น หลังบันทึก BOM)
+    const url = `/api/product-spec?sku=${encodeURIComponent(sku)}`;
+    // อ่านอย่างเดียว (เช่นป๊อปอัปเช็กลิสต์) → ใช้แคช เปิดซ้ำเร็วมาก · โหมดแก้ไข → ดึงสดเสมอ
+    const p = editable ? apiFetch(url).then((r) => r.json()) : cachedJson<ProductSpec>(url);
+    Promise.resolve(p).then((j) => setSpec(j as ProductSpec)).catch(() => setSpec(null)).finally(() => setLoading(false));
+  }, [sku, refreshKey, editable]);   // refreshKey เปลี่ยน → โหลดสเปกใหม่ (เช่น หลังบันทึก BOM)
   useEffect(() => { loadSpec(); }, [loadSpec]);
   useEffect(() => { setEditData(null); setEditField(null); }, [sku, refreshKey]);
 
@@ -94,6 +98,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
     try {
       const r = await apiFetch("/api/product-attributes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
+      if (sku) invalidateCache(`/api/product-spec?sku=${encodeURIComponent(sku)}`);   // ล้างแคชให้วิวอ่านอย่างเดียวเห็นค่าใหม่
       toast.success("บันทึกแล้ว"); setEditField(null); setEditData(null); loadSpec();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSavingField(false); }
