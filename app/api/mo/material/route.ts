@@ -13,7 +13,7 @@ import { friendlyDbError } from "../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Body = { id?: string; is_ready?: boolean; cut_done?: boolean; on_hand_qty?: number; purchase_override?: number | null };
+type Body = { id?: string; ids?: string[]; is_ready?: boolean; cut_done?: boolean; on_hand_qty?: number; purchase_override?: number | null };
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -22,7 +22,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   let body: Body;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
-  if (!body.id) return NextResponse.json({ error: "ต้องระบุ id วัตถุดิบ" }, { status: 400 });
+  const batchIds = Array.isArray(body.ids) ? body.ids.filter(Boolean).map(String) : null;
+  if (!body.id && !(batchIds && batchIds.length)) return NextResponse.json({ error: "ต้องระบุ id วัตถุดิบ" }, { status: 400 });
 
   const patch: Record<string, unknown> = {};
   if (typeof body.is_ready === "boolean") patch.is_ready = body.is_ready;
@@ -32,6 +33,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีสถานะให้อัปเดต" }, { status: 400 });
 
   const admin = supabaseAdmin();
+
+  // โหมดหลายรายการ (เช่น "ทำเป็นเตรียมแล้ว" จากหน้าขอซื้อ/เตรียม — เตรียมทุกใบที่ใช้วัตถุดิบนั้น)
+  if (batchIds && batchIds.length) {
+    const { error } = await admin.from("mo_material_summary").update(patch).in("id", batchIds);
+    if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+    await admin.from("audit_logs").insert({ actor_user_id: user?.id ?? null, action: "update", entity_type: "mo_material", entity_id: null, metadata: { count: batchIds.length, ...patch } }).then(() => {}, () => {});
+    return NextResponse.json({ count: batchIds.length, ...patch, error: null });
+  }
   const { data: row } = await admin.from("mo_material_summary").select("mo_no, component_name").eq("id", body.id).maybeSingle();
   if (!row) return NextResponse.json({ error: "ไม่พบวัตถุดิบนี้" }, { status: 404 });
 

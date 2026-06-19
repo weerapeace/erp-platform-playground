@@ -98,6 +98,24 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
     finally { setBusy(null); }
   };
 
+  // ✓ ทำเป็นเตรียมแล้ว — เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก (อัพเดต is_ready ทุก summary_id)
+  const markPreparedSelected = async () => {
+    if (!rows) return;
+    const chosenRows = rows.filter((r) => sel.has(keyOf(r)));
+    const ids = chosenRows.flatMap((r) => r.mos.map((m) => m.summary_id).filter(Boolean)) as string[];
+    if (ids.length === 0) { toast.error("ยังไม่ได้เลือกวัตถุดิบ"); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/mo/material", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, is_ready: true }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      const idSet = new Set(ids);
+      setRows((prev) => prev ? prev.map((r) => ({ ...r, mos: r.mos.map((m) => m.summary_id && idSet.has(m.summary_id) ? { ...m, is_ready: true } : m) })) : prev);
+      setSel(new Set());
+      toast.success(`ทำเป็นเตรียมแล้ว ${ids.length} รายการ (ทุกใบที่ใช้วัตถุดิบที่เลือก)`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
   // popup ยืนยัน
   const chosen = (rows ?? []).filter((r) => sel.has(keyOf(r)));
   const prCount = chosen.reduce((n, r) => n + r.mos.length, 0);
@@ -215,6 +233,10 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
         actions={<div className="flex items-center gap-2">
           {modeToggle}
           {printBtn}
+          {canEdit && rows.length > 0 && (
+            <button onClick={() => void markPreparedSelected()} disabled={saving || sel.size === 0} title="เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก"
+              className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">✓ ทำเป็นเตรียมแล้ว ({sel.size})</button>
+          )}
           {canEdit && rows.length > 0 && (
             <button onClick={() => setConfirmOpen(true)} disabled={saving || sel.size === 0}
               className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">{`🛒 สร้างใบขอซื้อ (${sel.size})`}</button>

@@ -21,6 +21,7 @@ export type MoListItem = {
   qty: number; status: string | null; due_date: string | null;
   bom_code: string | null; bom_version: string | null; is_active: boolean;
   product_image?: string | null;   // รูปสินค้า (เติมในตอน list)
+  group_name?: string | null;      // ชื่อกลุ่มใบสั่งงานที่ใบนี้อยู่ (เติมในตอน list)
 };
 
 export type MoMaterial = {
@@ -50,6 +51,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const orderCol = sortBy && SAFE.test(sortBy) ? sortBy : "updated_at";
   const orderAsc = sortBy ? searchParams.get("sort_dir") === "asc" : false;
 
+  // กลุ่มใบสั่งงาน — ชื่อกลุ่มต่อใบ + เซ็ตใบที่อยู่ในกลุ่มแล้ว (สำหรับคอลัมน์กลุ่ม + กรอง "ยังไม่จับกลุ่ม")
+  const { data: groups } = await supabaseAdmin().from("mo_groups").select("name, mo_nos").eq("is_active", true);
+  const groupNameByMo = new Map<string, string>();
+  const groupedSet = new Set<string>();
+  for (const g of (groups ?? []) as { name: string; mo_nos: unknown }[]) {
+    for (const mn of (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[]) {
+      const k = String(mn); if (!groupNameByMo.has(k)) groupNameByMo.set(k, g.name); groupedSet.add(k);
+    }
+  }
+  const groupStatus = searchParams.get("group_status");   // ungrouped | grouped
+
   let q = supabaseFromRequest(request)
     .from("manufacturing_orders")
     .select("id, mo_no, product_sku, product_name, qty, status, due_date, bom_code, bom_version, is_active", { count: "exact" })
@@ -57,6 +69,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
   if (search) { const t = `%${search}%`; q = q.or(`mo_no.ilike.${t},product_sku.ilike.${t},product_name.ilike.${t}`); }
+  if (groupStatus === "ungrouped" && groupedSet.size > 0) q = q.not("mo_no", "in", `(${[...groupedSet].map((n) => `"${n}"`).join(",")})`);
+  else if (groupStatus === "grouped") q = q.in("mo_no", groupedSet.size > 0 ? [...groupedSet] : ["__none__"]);
 
   const { data, error, count } = await q;
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
@@ -75,7 +89,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       if (key) imgMap.set(String(s.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
     }
   }
-  const withImg = rows.map((r) => ({ ...r, product_image: r.product_sku ? (imgMap.get(r.product_sku) ?? null) : null }));
+  const withImg = rows.map((r) => ({ ...r, product_image: r.product_sku ? (imgMap.get(r.product_sku) ?? null) : null, group_name: groupNameByMo.get(String(r.mo_no)) ?? null }));
   return NextResponse.json({ data: withImg, total: count ?? 0, error: null });
 }
 

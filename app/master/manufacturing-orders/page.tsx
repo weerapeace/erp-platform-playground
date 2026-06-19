@@ -119,15 +119,17 @@ export default function MoWorkspacePage() {
   const [recvQty, setRecvQty] = useState(0);
   const [recvSaving, setRecvSaving] = useState(false);
 
+  const [ungroupedOnly, setUngroupedOnly] = useState(false);   // กรองเฉพาะใบที่ยังไม่จับกลุ่ม
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
     const params = new URLSearchParams({ limit: String(p.pageSize), offset: String((p.page - 1) * p.pageSize) });
     if (p.search) params.set("search", p.search);
     if (p.sortBy) { params.set("sort_by", p.sortBy); params.set("sort_dir", p.sortDir ?? "asc"); }
+    if (ungroupedOnly) params.set("group_status", "ungrouped");
     const res = await apiFetch(`/api/mo?${params}`);
     const json = await res.json();
     if (json.error) throw new Error(json.error);
     return { rows: json.data as MoListItem[], total: json.total as number };
-  }, []);
+  }, [ungroupedOnly]);
 
   const patch = (p: Partial<FormState>) => setForm((f) => (f ? { ...f, ...p } : f));
 
@@ -445,6 +447,7 @@ export default function MoWorkspacePage() {
     { id: "bom_version", accessorKey: "bom_version", header: "สูตร", size: 90 },
     { id: "due_date", accessorKey: "due_date", header: "กำหนดส่ง", size: 110 },
     { id: "status", accessorKey: "status", header: "สถานะ", size: 110, cell: ({ getValue }) => { const s = STATUS[(getValue() as string) ?? "draft"] ?? STATUS.draft; return <span className={`text-xs px-2 py-0.5 rounded ${s.cls}`}>{s.label}</span>; } },
+    { id: "group_name", accessorKey: "group_name", header: "กลุ่ม", size: 130, cell: ({ getValue }) => { const g = getValue() as string | null; return g ? <span className="text-xs px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">🗂 {g}</span> : <span className="text-xs text-slate-300">—</span>; } },
   ], []);
 
   if (!canView) return <AccessDenied />;
@@ -459,6 +462,8 @@ export default function MoWorkspacePage() {
           </div>
           <div className="flex items-center gap-2">
             <a href="/master/work-board" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 บอร์ดจ่ายงาน</a>
+            <button onClick={() => setUngroupedOnly((v) => !v)} title="แสดงเฉพาะใบที่ยังไม่อยู่ในกลุ่มใด"
+              className={`h-9 px-3 text-sm font-medium rounded-lg inline-flex items-center border ${ungroupedOnly ? "bg-violet-600 text-white border-violet-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>เฉพาะยังไม่จับกลุ่ม</button>
             <button onClick={() => setManageGroups(true)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🗂 กลุ่มใบสั่งงาน</button>
             {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบสั่งผลิต</button>}
           </div>
