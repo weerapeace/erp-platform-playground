@@ -529,19 +529,17 @@ export function CanvasSketch({
         {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)</span>}
       </div>
       <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
-        {/* ป้ายสถานะบันทึก — ลอยกลางล่าง เห็นชัดทุกครั้งที่เซฟ (กดลองใหม่ได้ตอน error) */}
-        {editable && serverCanEdit && (
+        {/* ป้ายสถานะบันทึก — ลอยกลางล่าง โชว์เฉพาะ "กำลังบันทึก/บันทึกแล้ว/ผิดพลาด" (ไม่โชว์ตอนแก้ไขเฉย ๆ) */}
+        {editable && serverCanEdit && saveState !== "dirty" && (saveState !== "idle" || savedAt) && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5">
             <span className={`px-2.5 py-1 rounded-full text-[11px] font-medium shadow-sm border bg-white/95 backdrop-blur ${
               saveState === "error" ? "text-rose-600 border-rose-200"
               : saveState === "saving" ? "text-blue-600 border-blue-200"
-              : saveState === "dirty" ? "text-amber-600 border-amber-200"
               : "text-emerald-600 border-emerald-200"}`}>
               {saveState === "saving" ? "⏳ กำลังบันทึก..."
               : saveState === "error" ? "⚠ บันทึกไม่สำเร็จ"
-              : saveState === "dirty" ? "✎ มีการแก้ไข กำลังจะบันทึก..."
               : savedAt ? `✓ บันทึกแล้ว${lastMerged ? " (รวมงานกับคนอื่น)" : ""} · ${savedAt}`
-              : "พร้อมใช้งาน"}
+              : ""}
             </span>
             {saveState === "error" && <button onClick={() => void doSave(true)} className="h-6 px-2 text-[11px] bg-blue-600 text-white rounded-md hover:bg-blue-700 shadow-sm">ลองใหม่</button>}
           </div>
