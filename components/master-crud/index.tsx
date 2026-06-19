@@ -655,20 +655,22 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       }
       return out;
     };
-    for (const f of (fields ?? relatedFieldsRef.current)) {
+    // แปลงทุกคอลัมน์ relation "พร้อมกัน" (parallel) — เดิมทำทีละตัวเรียงกัน ทำให้รอ Tokyo
+    // หลายรอบบวกกัน (หน้าที่มี relation หลายคอลัมน์ค้าง ~5 วิ) · แต่ละคอลัมน์เขียน cache คนละ key → ปลอดภัย
+    await Promise.all((fields ?? relatedFieldsRef.current).map(async (f) => {
       const rc = (f.relation_config ?? {}) as Record<string, unknown>;
       const targetTable = String(rc.target_table ?? "");
       const tmk = String(rc.target_module_key ?? rc.target_table ?? "");
       const tf  = String(rc.target_field ?? "");
       const viaCol = String(rc.via_column ?? rc.via_field ?? "");
-      if (!targetTable || !tf || !viaCol) continue;
+      if (!targetTable || !tf || !viaCol) return;
       const ck = `${tmk}.${tf}`;
       const cache = (relatedMapsRef.current[ck] ??= {} as Record<string, unknown>);
       // id ที่ต้องการ (เฉพาะแถวหน้านี้) ที่ยังไม่มีใน cache
       const need = Array.from(new Set(
         rowsToResolve.map((r) => r[viaCol]).filter((v) => v != null && v !== "").map((v) => String(v)),
       )).filter((id) => !(id in cache));
-      if (need.length === 0) continue;
+      if (need.length === 0) return;
       try {
         // hop 1: parent id → ค่า target_field (เช่น brand_id)
         const parentMap = await resolveInChunks({ target_table: targetTable, target_label_field: tf }, need);
@@ -684,7 +686,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         }
         Object.assign(cache, idToVal);
       } catch { /* related จะว่างไว้ */ }
-    }
+    }));
   }, []);
 
   // เติมค่า related ลงใน row (ใช้ทั้ง list + detail) จาก map ที่โหลดไว้
