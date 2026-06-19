@@ -21,9 +21,13 @@ export function LangSync() {
   useEffect(() => {
     if (!ready || !user || loaded.current) return;
     loaded.current = true;
-    apiFetch("/api/me/language").then((r) => r.json()).then((j) => {
-      if (j.language === "en" || j.language === "th") setLang(j.language);
-    }).catch(() => {}).finally(() => { skipSave.current = false; });
+    // perf: ภาษามีค่า default อยู่แล้ว → เลื่อนซิงก์จากบัญชีไปหลังเนื้อหาหลักโหลด (กันแย่ง resource)
+    const t = setTimeout(() => {
+      apiFetch("/api/me/language").then((r) => r.json()).then((j) => {
+        if (j.language === "en" || j.language === "th") setLang(j.language);
+      }).catch(() => {}).finally(() => { skipSave.current = false; });
+    }, 1200);
+    return () => clearTimeout(t);
   }, [ready, user, setLang]);
 
   // บันทึกเมื่อสลับภาษา (ข้ามตอนโหลดครั้งแรก)

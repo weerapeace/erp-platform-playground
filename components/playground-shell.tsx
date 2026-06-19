@@ -429,11 +429,14 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         setActiveAppState(saved && apps.some((a) => a.key === saved) ? saved : (apps[0]?.key ?? null));
       } catch { setActiveAppState(apps[0]?.key ?? null); }
     }).catch(() => { if (alive) setAppGroups([]); });
-    // รายชื่อโมดูล (key+label) สำหรับหมวด "⚙ ตั้งค่า" — จับคู่กับเมนูของแอป
-    apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
-      if (alive && Array.isArray(j.data)) setModules(j.data as { key: string; label: string }[]);
-    }).catch(() => {});
-    return () => { alive = false; };
+    // รายชื่อโมดูล (key+label) สำหรับหมวด "⚙ ตั้งค่า" — ไม่จำเป็นตอนเปิดหน้า
+    // perf: เลื่อนไปโหลดหลังเนื้อหาหลัก กันแย่ง resource (Worker↔Supabase รับ concurrent ได้น้อย)
+    const modTimer = window.setTimeout(() => {
+      apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
+        if (alive && Array.isArray(j.data)) setModules(j.data as { key: string; label: string }[]);
+      }).catch(() => {});
+    }, 1200);
+    return () => { alive = false; window.clearTimeout(modTimer); };
   }, []);
 
   // หมวด "⚙ ตั้งค่า" — โมดูลย่อยของแอปปัจจุบัน (resolve module_key จาก href ของเมนู)

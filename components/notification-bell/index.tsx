@@ -52,9 +52,10 @@ export function NotificationBell() {
   // ---- Poll ----
   useEffect(() => {
     if (!user) return;
-    fetch_();
+    // perf: เลื่อน fetch แรก ไม่ให้แย่ง resource กับเนื้อหาหลักตอนเปิดหน้า (poll ตามรอบปกติหลังจากนั้น)
+    const first = setTimeout(fetch_, 1500);
     const t = setInterval(fetch_, POLL_MS);
-    return () => clearInterval(t);
+    return () => { clearTimeout(first); clearInterval(t); };
   }, [user, fetch_]);
 
   // refresh เมื่อ user คลิกเปิด dropdown
