@@ -77,6 +77,10 @@ export default function PurchasingShopPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);   // ข้อ 2: error state
   const stockReqRef = useRef(false);   // perf: โหลดยอดสต๊อกครั้งเดียวตอนกดการ์ดแรก (ไม่โหลดตอนเปิดหน้า)
+  // perf: Worker↔Supabase รับ request พร้อมกันได้น้อย (ยิงพร้อมกัน 7 อัน → แต่ละอันช้า 4-9s ทั้งที่เดี่ยวๆ ~0.4s)
+  // → ให้ grid ยิง "เดี่ยว" ก่อน แล้วค่อยโหลดของรอง (โปรด/เรต/ร้าน/แท็ก/ตัวกรอง) หลัง grid เสร็จ
+  const bootedRef = useRef(false);
+  const [bootDone, setBootDone] = useState(false);
   const [page, setPage] = useState(0);   // หน้า (0-based)
   const [q, setQ] = useState("");
   const [cols, setCols] = useState(4);
@@ -135,12 +139,13 @@ export default function PurchasingShopPage() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const favoritesRef = useRef(favorites);
   useEffect(() => { favoritesRef.current = favorites; }, [favorites]);
-  // โหลดรายการโปรดครั้งแรก
+  // โหลดรายการโปรดครั้งแรก — หลัง grid เสร็จ (ของรอง ไม่ให้แย่ง resource ตอนเปิดหน้า)
   useEffect(() => {
+    if (!bootDone) return;
     apiFetch("/api/purchasing/favorites").then(r => r.json())
       .then(j => { if (Array.isArray(j.ids)) setFavorites(new Set(j.ids as string[])); })
       .catch(() => {});
-  }, []);
+  }, [bootDone]);
 
   // โหลดยอดคงเหลือในสต๊อก (sku_id → qty) — ไว้โชว์ในป๊อปเพิ่มลงใบขอซื้อ
   // perf: เลื่อนมาโหลด "ตอนกดการ์ดเปิดป๊อปครั้งแรก" (ไม่โหลด 2,000 แถวตอนเปิดหน้า)
@@ -169,7 +174,8 @@ export default function PurchasingShopPage() {
       try { localStorage.setItem(HIDE_KEY, JSON.stringify(hidden)); } catch { /* ignore */ }   // cache ไว้ใช้รอบหน้า
     } catch { /* ignore */ }
   }, []);
-  useEffect(() => { void reloadHiddenTags(); }, [reloadHiddenTags]);
+  // โหลดแท็กสด หลัง grid เสร็จ (grid ใช้ค่า cache ไปก่อนแล้ว — นี่แค่รีเฟรช/อัปเดต cache)
+  useEffect(() => { if (bootDone) void reloadHiddenTags(); }, [reloadHiddenTags, bootDone]);
   // แยกแท็กที่เลือกเป็น 2 กอง ตามโหมดของแต่ละตัวกรอง: ซ่อน (hide) / โชว์เฉพาะ (show)
   // ซ่อน = กฎกลาง (ห้ามขอซื้อ) + ที่ผู้ใช้เลือกโหมดซ่อน ; โชว์เฉพาะ = ที่ผู้ใช้เลือกโหมดโชว์
   const { exclTagIds, inclTagIds } = useMemo(() => {
@@ -201,10 +207,11 @@ export default function PurchasingShopPage() {
   // เรตหยวน→บาท ล่าสุด (ใช้โชว์ราคาบาทประมาณ คู่กับ ¥)
   const [cnyRate, setCnyRate] = useState(0);
   useEffect(() => {
+    if (!bootDone) return;   // perf: เรตหยวน (ใช้ในป๊อป) โหลดหลัง grid
     apiFetch("/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc").then(r => r.json())
       .then(j => { const rt = num((j.data ?? [])[0]?.rate); if (rt > 0) setCnyRate(rt); })
       .catch(() => {});
-  }, []);
+  }, [bootDone]);
 
   // โหลด preference (จำนวนคอลัมน์ + filter ที่เคยเลือก)
   useEffect(() => {
@@ -239,6 +246,7 @@ export default function PurchasingShopPage() {
 
   // โหลด partner country (สำหรับ currency rule) + filterable fields ของ SKU
   useEffect(() => {
+    if (!bootDone) return;   // perf: ร้าน + ตัวกรอง โหลดหลัง grid (grid ใช้ค่า cache ไปก่อนแล้ว)
     apiFetch("/api/master-v2/partners?limit=500").then(r => r.json()).then(j => {
       const m: Record<string, string> = {};
       (j.data ?? []).forEach((p: Record<string, unknown>) => { m[String(p.id)] = String(p.country ?? "TH"); });
@@ -262,7 +270,7 @@ export default function PurchasingShopPage() {
         });
       setFilterFields(ff);
     }).catch(() => {});
-  }, []);
+  }, [bootDone]);
 
   // แปลง activeKeys + filterValues → filters object ที่ส่งให้ API
   const builtFilters = useMemo(() => {
@@ -391,6 +399,8 @@ export default function PurchasingShopPage() {
       setCards([]); setTotal(0);
     } finally {
       if (myId === reqIdRef.current) setLoading(false);
+      // perf: grid เสร็จรอบแรกแล้ว → ปลดให้ของรองเริ่มโหลด (ไม่แย่ง resource กับ grid)
+      if (!bootedRef.current) { bootedRef.current = true; setBootDone(true); }
     }
   }, [source, q, builtFiltersKey, mapSku, fetchSkusByIds, exclParam, sortParam, tagsSel, hiddenTagIds]);
 
