@@ -901,6 +901,14 @@ export function DataTable<T extends Record<string, unknown>>({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layoutReady, viewsReady, bootstrapped]);
 
+  // กันค้าง: ถ้า config (layout/views) โหลดช้าหรือ request แขวน อย่าให้ตารางค้าง skeleton ตลอด
+  // → บังคับปลดล็อกหลัง 2.5 วิ แล้วยิง fetch ด้วยค่าที่มี (ยอมกระพริบเล็กน้อยดีกว่าค้างถาวร)
+  useEffect(() => {
+    if (bootstrapped) return;
+    const t = setTimeout(() => setBootstrapped(true), 2500);
+    return () => clearTimeout(t);
+  }, [bootstrapped]);
+
   // ---- Auto-detect fields from data not in defined columns ----
   const definedColumnKeys = useMemo(() => new Set(
     columns.map(c => String(
