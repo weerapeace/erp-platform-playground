@@ -11,12 +11,9 @@ const nextConfig: NextConfig = {
   },
   eslint:     { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors:  true },
-  // เก็บ "หน้า" ที่เคยเข้าไว้ในแคชฝั่ง browser นานขึ้น (ค่าเดิม dynamic ~0-30 วิ)
-  // → สลับไปแอปอื่นแล้วกลับเข้าหน้าเดิมภายใน 5 นาที = ไม่ต้องวิ่งไปดึงโครงหน้าจาก server ใหม่
-  //   (เลี่ยง worker cold start ตอนเปลี่ยนหน้า) · ข้อมูลในตารางยังสดเพราะมี SWR revalidate เอง
-  experimental: {
-    staleTimes: { dynamic: 300, static: 300 },
-  },
+  // NOTE: เคยลอง experimental.staleTimes (เก็บแคชหน้า 5 นาที) เพื่อเลี่ยง cold start ตอนข้ามแอป
+  // แต่บน OpenNext/Cloudflare ทำให้เกิด version skew หลัง deploy (เบราว์เซอร์ปนโค้ดเก่า+ใหม่ → หน้าพัง)
+  // → ถอดออก. แก้ cold start ด้วย warmer (cron-job.org) แทน
 };
 
 export default nextConfig;
