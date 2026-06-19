@@ -7,7 +7,7 @@
  *   DataTable / ERPModal / ConfirmDialog / SkuPicker(/api/admin/picker) / useToast / useAuth
  *   ไม่ query Supabase ตรง — ผ่าน /api/bom (อ่าน auth, เขียน admin, audit)
  */
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import type { SizeTemplate } from "@/app/api/admin/size-templates/route";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
@@ -85,9 +85,11 @@ export default function BomWorkspacePage() {
 
   const [form, setForm]       = useState<FormState | null>(null);
   const [dirty, setDirty]     = useState(false);
+  const dirtyRef = useRef(false); dirtyRef.current = dirty;   // อ่านค่า dirty ล่าสุดใน async (กัน merge ทับสิ่งที่ผู้ใช้พิมพ์)
   const [saving, setSaving]   = useState(false);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [loadingForm, setLoadingForm] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);   // optimistic: โชว์หัวฟอร์มก่อน แล้วโหลดวัตถุดิบ/ค่าแรงเบื้องหลัง
 
   const [archiveTarget, setArchiveTarget] = useState<BomListItem | null>(null);
   const [archiving, setArchiving] = useState(false);
@@ -122,35 +124,32 @@ export default function BomWorkspacePage() {
     size_variant: !!l.size_variant, size_dim: l.size_dim ?? "cut_length", size_values: (l.size_values ?? {}) as Record<string, number>,
   }));
 
-  const loadFormById = async (id: string): Promise<FormState> => {
-    const res = await apiFetch(`/api/bom/${id}`);
-    const json = await res.json();
+  const loadFormById = async (id: string, bomCode?: string): Promise<FormState> => {
+    // ยิง 3 ตัวขนานกัน (เดิมเรียงต่อกัน = ช้า) — piecework/labor ใช้ bom_code จากแถวได้เลยถ้ามี
+    const enc = encodeURIComponent;
+    const detailP = apiFetch(`/api/bom/${id}`).then((r) => r.json());
+    const pieceP = bomCode ? apiFetch(`/api/bom/piecework?bom_code=${enc(bomCode)}`).then((r) => r.json()).catch(() => ({})) : null;
+    const laborP = bomCode ? apiFetch(`/api/bom/labor-rates?bom_code=${enc(bomCode)}`).then((r) => r.json()).catch(() => ({})) : null;
+
+    const json = await detailP;
     if (json.error) throw new Error(json.error);
     const d = json.data as BomListItem & { lines: BomLineRow[]; note?: string; sizes?: BomSizeRow[] };
-    // งานเหมารายชิ้นของสูตรนี้ (ตารางที่ 2)
+    const code = d.bom_code || bomCode || "";
+    const mapPiece = (pj: { data?: Array<Record<string, unknown>> }): PieceLine[] =>
+      ((pj.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+        id: String(r.id), job_id: (r.job_id as string) ?? null, job_name: String(r.job_name ?? ""),
+        rate: Number(r.rate) || 0, note: (r.note as string) ?? "", is_detail: !!r.is_detail, qty_per: Number(r.qty_per) || 1,
+      }));
+    const mapLabor = (lj: { data?: Array<Record<string, unknown>> }): LaborLine[] =>
+      ((lj.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+        id: String(r.id), craftsman_id: (r.craftsman_id as string) ?? null, craftsman_name: (r.craftsman_name as string) ?? "",
+        rate: Number(r.rate) || 0, note: (r.note as string) ?? "",
+      }));
+    // ถ้ายังไม่ได้ยิง (ไม่รู้ code ตั้งแต่ต้น) ค่อยยิงตอนนี้ ; ถ้ายิงไปแล้วก็แค่รอผล (ขนานกับ detail ไปแล้ว)
     let piecework: PieceLine[] = [];
-    if (d.bom_code) {
-      try {
-        const pr = await apiFetch(`/api/bom/piecework?bom_code=${encodeURIComponent(d.bom_code)}`);
-        const pj = await pr.json();
-        piecework = ((pj.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-          id: String(r.id), job_id: (r.job_id as string) ?? null, job_name: String(r.job_name ?? ""),
-          rate: Number(r.rate) || 0, note: (r.note as string) ?? "", is_detail: !!r.is_detail, qty_per: Number(r.qty_per) || 1,
-        }));
-      } catch { /* ignore */ }
-    }
-    // ค่าแรงผลิต (ราคาปัจจุบันต่อช่าง)
     let labor: LaborLine[] = [];
-    if (d.bom_code) {
-      try {
-        const lr = await apiFetch(`/api/bom/labor-rates?bom_code=${encodeURIComponent(d.bom_code)}`);
-        const lj = await lr.json();
-        labor = ((lj.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
-          id: String(r.id), craftsman_id: (r.craftsman_id as string) ?? null, craftsman_name: (r.craftsman_name as string) ?? "",
-          rate: Number(r.rate) || 0, note: (r.note as string) ?? "",
-        }));
-      } catch { /* ignore */ }
-    }
+    try { piecework = mapPiece(pieceP ? await pieceP : (code ? await apiFetch(`/api/bom/piecework?bom_code=${enc(code)}`).then((r) => r.json()) : {})); } catch { /* ignore */ }
+    try { labor = mapLabor(laborP ? await laborP : (code ? await apiFetch(`/api/bom/labor-rates?bom_code=${enc(code)}`).then((r) => r.json()) : {})); } catch { /* ignore */ }
     return {
       id: d.id, bom_code: d.bom_code ?? "", product_sku: d.product_sku ?? "", product_name: d.product_name ?? "", product_image: null,
       version: d.version ?? "v1", bom_type: d.bom_type ?? "normal", status: d.status ?? "draft", note: d.note ?? "",
@@ -173,14 +172,26 @@ export default function BomWorkspacePage() {
 
   // ---- open edit (โหลด header + lines) ----
   const openEdit = async (row: BomListItem) => {
-    setLoadingForm(true); setFormErr(null);
-    setForm(emptyForm()); setVersions([]);
+    setFormErr(null);
+    // optimistic: โชว์หัวฟอร์มทันทีจากข้อมูลในแถว (ไม่ต้องรอโหลด) → modal เปิดเร็วทันที
+    setForm({
+      ...emptyForm(),
+      id: row.id, bom_code: row.bom_code ?? "", product_sku: row.product_sku ?? "", product_name: row.product_name ?? "",
+      product_image: row.product_image ?? null, version: row.version ?? "v1", bom_type: row.bom_type ?? "normal",
+      status: row.status ?? "draft",
+    });
+    setVersions([]); setDirty(false); setLoadingDetails(true);
+    void fetchVersions(row.product_sku ?? "");
     try {
-      const f = await loadFormById(row.id);
-      setForm(f); setDirty(false);
-      fetchVersions(f.product_sku);
+      const f = await loadFormById(row.id, row.bom_code ?? undefined);
+      // เติมรายละเอียดที่โหลดมา — ถ้าผู้ใช้พิมพ์แก้หัวระหว่างโหลด (dirty) คงค่าหัวไว้ เติมเฉพาะวัตถุดิบ/ค่าแรง
+      setForm((cur) => {
+        if (!cur || cur.id !== row.id) return cur;   // ปิด/เปลี่ยนสูตรไปแล้ว
+        if (dirtyRef.current) return { ...cur, lines: f.lines, sizes: f.sizes, piecework: f.piecework, labor: f.labor, note: cur.note || f.note };
+        return f;
+      });
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดสูตรไม่ได้"); }
-    finally { setLoadingForm(false); }
+    finally { setLoadingDetails(false); }
   };
 
   // เปิดสูตรของ SKU อัตโนมัติ (ใช้ตอนเปิดหน้านี้ใน popup จากแผงรายละเอียดสั่งงาน: ?open=<sku>)
@@ -425,6 +436,7 @@ export default function BomWorkspacePage() {
         ) : form && (
           <div className="space-y-2">
             {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
+            {loadingDetails && <div className="px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-600">⏳ กำลังโหลดวัตถุดิบ/ค่าแรง…</div>}
 
             {/* header fields (compact) */}
             <div>
