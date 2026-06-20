@@ -24,6 +24,7 @@ import { PurchaseNeeds } from "./purchase-needs";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { HoverImage } from "@/components/hover-image";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
 import { PwaInstallButton } from "@/components/pwa-install-button";
 import type { Assignee } from "@/app/api/mo/assignees/route";
@@ -1670,9 +1671,7 @@ function WOBody({ w }: { w: WorkOrder }) {
 
 // ---- รูปย่อในตาราง ----
 function BoardImg({ url }: { url: string | null | undefined }) {
-  if (!url) return <span className="w-9 h-9 shrink-0 rounded bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-300">📦</span>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="" className="w-9 h-9 shrink-0 rounded object-contain bg-slate-50 border border-slate-100" />;
+  return <HoverImage url={url} size={36} previewSize={256} />;
 }
 
 // ---- มุมมองตาราง (สลับจากบอร์ด) — รอจ่าย + จ่ายแล้ว ----

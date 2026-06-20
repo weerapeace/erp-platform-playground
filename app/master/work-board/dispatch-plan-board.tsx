@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { HoverImage } from "@/components/hover-image";
 import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
@@ -22,18 +23,7 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const baht = (n: number) => "฿" + fmt(n);
 
 function Thumb({ url }: { url?: string | null }) {
-  if (!url) return <span className="w-7 h-7 shrink-0 rounded bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-300 text-[11px]">📦</span>;
-  return (
-    <span className="relative shrink-0 group/thumb">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt="" className="w-7 h-7 rounded object-cover border border-slate-200" />
-      {/* ชี้เมาส์เพื่อดูรูปใหญ่ (เฉพาะ PC/เมาส์ · แท็บเล็ตใช้ปุ่ม 🔍) */}
-      <span className="pointer-events-none hidden group-hover/thumb:block absolute z-[70] left-0 top-8 bg-white border border-slate-200 rounded-lg shadow-xl p-1">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt="" className="w-44 h-44 object-contain rounded" />
-      </span>
-    </span>
-  );
+  return <HoverImage url={url} size={28} previewSize={224} />;
 }
 
 export function DispatchPlanBoard({
