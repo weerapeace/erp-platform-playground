@@ -128,6 +128,7 @@ export default function WorkBoardPage() {
   useEffect(() => { try { const v = localStorage.getItem("wb:pendingCols"); if (v) setPendingCols(Number(v) || null); } catch { /* ignore */ } }, []);
   const setPendCols = useCallback((n: number | null) => { setPendingCols(n); try { if (n) localStorage.setItem("wb:pendingCols", String(n)); else localStorage.removeItem("wb:pendingCols"); } catch { /* ignore */ } }, []);
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
+  const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
   // กลุ่ม B: ประวัติงานเสียต่อช่าง (จับด้วยชื่อ) → เตือนตอนจ่ายงาน
   const [defectByWorker, setDefectByWorker] = useState<Record<string, { worker: string; count: number; last_at: string | null; types: string[] }>>({});
   // กลุ่ม D: แผนจ่ายงาน (ร่าง) — แท็บบนบอร์ด ("real" = บอร์ดจริง · id = แผนร่าง)
@@ -208,7 +209,7 @@ export default function WorkBoardPage() {
     } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); } catch { /* ignore */ } })(); }, []);
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } catch { /* ignore */ } })(); }, []);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/craftsman-defects"); const j = await r.json();
     const m: Record<string, { worker: string; count: number; last_at: string | null; types: string[] }> = {};
     for (const d of (j.data ?? []) as { worker: string; count: number; last_at: string | null; types: string[] }[]) m[(d.worker ?? "").trim().toLowerCase()] = d;
@@ -887,7 +888,7 @@ export default function WorkBoardPage() {
           return <DispatchPlanBoard
             planId={p.id} planName={p.name} planStatus={p.status} startDate={p.start_date} endDate={p.end_date}
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut")}
-            pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker}
+            pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}

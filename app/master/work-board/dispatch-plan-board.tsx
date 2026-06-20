@@ -29,12 +29,12 @@ function Thumb({ url }: { url?: string | null }) {
 
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
-  laborPerUnit, imageByMo, canEdit,
+  laborPerUnit, imageByMo, deptWages, canEdit,
   onApplied, onRenamed, onDates, onDeleted,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
-  defectByWorker: DefectMap;
+  defectByWorker: DefectMap; deptWages: Record<string, number>;
   laborPerUnit: Record<string, number>;   // mo_no → ค่าแรงผลิตต่อชิ้น (จากแผนกลุ่ม A)
   imageByMo: Record<string, string | null>;
   canEdit: boolean;
@@ -253,7 +253,10 @@ export function DispatchPlanBoard({
                 className={`rounded-xl border p-2 min-h-[140px] ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}>
                 <div className="flex items-center justify-between gap-1 mb-2">
                   <span className="text-sm font-bold text-slate-700 truncate">{d.name}</span>
-                  {totQty > 0 && <span className="text-[10px] text-slate-500 text-right shrink-0 leading-tight">{fmt(totQty)} ชิ้น<br />ค่าแรง {baht(totLabor)}</span>}
+                  <span className="text-[10px] text-right shrink-0 leading-tight">
+                    {(deptWages[d.id] ?? 0) > 0 && <span className="block text-violet-600" title="เงินเดือนรวมพนักงานในแผนก">👥 {baht(deptWages[d.id])}</span>}
+                    {totQty > 0 && <span className="block text-slate-500" title="งานที่จ่ายในโต๊ะนี้ (จำนวน · ค่าแรง)">{fmt(totQty)} ชิ้น · {baht(totLabor)}</span>}
+                  </span>
                 </div>
                 {/* ใบจ่ายจริง (ล็อก) */}
                 {reals.map((w) => (

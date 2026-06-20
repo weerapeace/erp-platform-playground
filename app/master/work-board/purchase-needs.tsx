@@ -38,7 +38,12 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);   // popup ยืนยันก่อนสร้างจริง
-  const [mode, setMode] = useState<"type" | "mo">("type");  // จัดกลุ่มตามประเภท / ตามใบสั่งผลิต
+  const [mode, setMode] = useState<"type" | "mo" | "group">("type");  // ตามประเภท / ตามใบสั่งผลิต / ตามกลุ่ม
+  const [confirmPrepOpen, setConfirmPrepOpen] = useState(false);   // ยืนยันก่อน "ทำเป็นเตรียมแล้ว"
+  const [moGroupList, setMoGroupList] = useState<{ name: string; mo_nos: string[] }[]>([]);
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
+    setMoGroupList(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
+  const groupNameOf = useCallback((moNo: string) => moGroupList.find((g) => g.mo_nos.includes(moNo))?.name ?? null, [moGroupList]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});  // จำนวนที่มี (กำลังพิมพ์) ต่อ summary_id
   const [busy, setBusy] = useState<string | null>(null);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
@@ -110,7 +115,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       const j = await res.json(); if (j.error) throw new Error(j.error);
       const idSet = new Set(ids);
       setRows((prev) => prev ? prev.map((r) => ({ ...r, mos: r.mos.map((m) => m.summary_id && idSet.has(m.summary_id) ? { ...m, is_ready: true } : m) })) : prev);
-      setSel(new Set());
+      setSel(new Set()); setConfirmPrepOpen(false);
       toast.success(`ทำเป็นเตรียมแล้ว ${ids.length} รายการ (ทุกใบที่ใช้วัตถุดิบที่เลือก)`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
@@ -176,6 +181,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
     <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
       <button onClick={() => setMode("type")} className={`h-8 px-3 ${mode === "type" ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>ตามประเภท</button>
       <button onClick={() => setMode("mo")} className={`h-8 px-3 border-l border-slate-200 ${mode === "mo" ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>ตามใบสั่งผลิต</button>
+      <button onClick={() => setMode("group")} className={`h-8 px-3 border-l border-slate-200 ${mode === "group" ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>ตามกลุ่ม</button>
     </div>
   );
   const allTypes = [...new Set((rows ?? []).map((r) => r.material_type || "ไม่ระบุประเภท"))].sort((a, b) => a.localeCompare(b, "th"));
@@ -212,6 +218,52 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
     </div>
   );
 
+  // การ์ดวัตถุดิบต่อ 1 ใบสั่งผลิต (ใช้ทั้งโหมด "ตามใบสั่งผลิต" และ "ตามกลุ่ม")
+  const renderMoSection = (g: typeof moGroups[number]) => (
+    <div key={g.mo_no} className="border border-slate-200 rounded-xl overflow-hidden">
+      <button type="button" onClick={() => onOpenMo?.(g.mo_id)} title="คลิกเปิดใบสั่งผลิต"
+        className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-blue-50 border-b border-slate-100 text-left">
+        <Thumb url={g.product_image} size="md" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-slate-800 truncate">{g.product_label}</div>
+          <div className="text-[11px] text-slate-400 font-mono">{g.mo_no} · {g.lines.length} วัตถุดิบ</div>
+        </div>
+        <span className="text-[11px] text-blue-600 shrink-0">เปิด →</span>
+      </button>
+      <div className="grid grid-cols-[1.6fr_5rem_4rem_7rem_5rem] gap-2 px-3 py-1.5 bg-slate-100/60 text-[11px] font-semibold text-slate-500">
+        <span>วัตถุดิบ</span><span className="text-right">ต้องซื้อ</span><span>หน่วย</span><span className="text-center">จำนวนที่มี</span><span className="text-center">เตรียมแล้ว</span>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {g.lines.map((l) => {
+          const sid = l.summary_id ?? "";
+          const draft = drafts[sid];
+          return (
+            <div key={`${l.mo_no}:${l.component_sku ?? l.component_name}`} className={`grid grid-cols-[1.6fr_5rem_4rem_7rem_5rem] gap-2 px-3 py-1.5 items-center ${l.is_ready ? "bg-emerald-50/40" : ""}`}>
+              <div className="flex items-center gap-2 min-w-0">
+                <Thumb url={l.component_image} />
+                <div className="min-w-0"><p className="text-sm text-slate-800 truncate"><code className="text-[10px] text-slate-400">{l.component_sku}</code> {l.component_name}</p>
+                  {l.material_type && <p className="text-[10px] text-slate-400">{l.material_type}</p>}</div>
+              </div>
+              <span className="text-right text-sm font-bold text-rose-600 tabular-nums">{fmt(l.needed)}</span>
+              <span className="text-xs text-slate-500">{l.uom ?? ""}</span>
+              <div className="flex justify-center">
+                <input type="number" min={0} disabled={!canEdit || !l.summary_id || busy === sid}
+                  value={draft ?? String(l.on_hand)}
+                  onChange={(e) => setDrafts((d) => ({ ...d, [sid]: e.target.value }))}
+                  onBlur={(e) => void saveOnHand(l.summary_id, e.target.value, l.on_hand)}
+                  className="w-24 h-7 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-rose-300 disabled:bg-slate-50 disabled:text-slate-400" />
+              </div>
+              <div className="flex justify-center">
+                <input type="checkbox" disabled={!canEdit || !l.summary_id || busy === sid} checked={l.is_ready}
+                  onChange={(e) => void toggleReady(l.summary_id, e.target.checked)} className="w-4 h-4 accent-emerald-600" />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <>
     {mode === "type" ? (
@@ -234,7 +286,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
           {modeToggle}
           {printBtn}
           {canEdit && rows.length > 0 && (
-            <button onClick={() => void markPreparedSelected()} disabled={saving || sel.size === 0} title="เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก"
+            <button onClick={() => setConfirmPrepOpen(true)} disabled={saving || sel.size === 0} title="เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก"
               className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">✓ ทำเป็นเตรียมแล้ว ({sel.size})</button>
           )}
           {canEdit && rows.length > 0 && (
@@ -254,55 +306,40 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
           <div className="text-center py-16 text-slate-300">ไม่มีวัตถุดิบที่ต้องขอซื้อ/เตรียม 🎉</div>
         ) : (
           <div className="space-y-3">
-            {moGroups.map((g) => (
-              <div key={g.mo_no} className="border border-slate-200 rounded-xl overflow-hidden">
-                <button type="button" onClick={() => onOpenMo?.(g.mo_id)} title="คลิกเปิดใบสั่งผลิต"
-                  className="w-full flex items-center gap-2 px-3 py-2 bg-slate-50 hover:bg-blue-50 border-b border-slate-100 text-left">
-                  <Thumb url={g.product_image} size="md" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-slate-800 truncate">{g.product_label}</div>
-                    <div className="text-[11px] text-slate-400 font-mono">{g.mo_no} · {g.lines.length} วัตถุดิบ</div>
-                  </div>
-                  <span className="text-[11px] text-blue-600 shrink-0">เปิด →</span>
-                </button>
-                <div className="grid grid-cols-[1.6fr_5rem_4rem_7rem_5rem] gap-2 px-3 py-1.5 bg-slate-100/60 text-[11px] font-semibold text-slate-500">
-                  <span>วัตถุดิบ</span><span className="text-right">ต้องซื้อ</span><span>หน่วย</span><span className="text-center">จำนวนที่มี</span><span className="text-center">เตรียมแล้ว</span>
+            {mode === "group" ? (() => {
+              const buckets = new Map<string, typeof moGroups>();
+              for (const g of moGroups) { const k = groupNameOf(g.mo_no) ?? "— ยังไม่จับกลุ่ม —"; (buckets.get(k) ?? buckets.set(k, []).get(k)!).push(g); }
+              return [...buckets.entries()].map(([gname, gs]) => (
+                <div key={gname}>
+                  <div className="text-xs font-bold text-violet-700 bg-violet-50 border border-violet-100 rounded-lg px-3 py-1.5 mb-2">🗂 {gname} <span className="text-violet-400 font-normal">({gs.length} ใบ)</span></div>
+                  <div className="space-y-3">{gs.map(renderMoSection)}</div>
                 </div>
-                <div className="divide-y divide-slate-50">
-                  {g.lines.map((l) => {
-                    const sid = l.summary_id ?? "";
-                    const draft = drafts[sid];
-                    return (
-                      <div key={`${l.mo_no}:${l.component_sku ?? l.component_name}`} className={`grid grid-cols-[1.6fr_5rem_4rem_7rem_5rem] gap-2 px-3 py-1.5 items-center ${l.is_ready ? "bg-emerald-50/40" : ""}`}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Thumb url={l.component_image} />
-                          <div className="min-w-0"><p className="text-sm text-slate-800 truncate"><code className="text-[10px] text-slate-400">{l.component_sku}</code> {l.component_name}</p>
-                            {l.material_type && <p className="text-[10px] text-slate-400">{l.material_type}</p>}</div>
-                        </div>
-                        <span className="text-right text-sm font-bold text-rose-600 tabular-nums">{fmt(l.needed)}</span>
-                        <span className="text-xs text-slate-500">{l.uom ?? ""}</span>
-                        <div className="flex justify-center">
-                          <input type="number" min={0} disabled={!canEdit || !l.summary_id || busy === sid}
-                            value={draft ?? String(l.on_hand)}
-                            onChange={(e) => setDrafts((d) => ({ ...d, [sid]: e.target.value }))}
-                            onBlur={(e) => void saveOnHand(l.summary_id, e.target.value, l.on_hand)}
-                            className="w-24 h-7 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-rose-300 disabled:bg-slate-50 disabled:text-slate-400" />
-                        </div>
-                        <div className="flex justify-center">
-                          <input type="checkbox" disabled={!canEdit || !l.summary_id || busy === sid} checked={l.is_ready}
-                            onChange={(e) => void toggleReady(l.summary_id, e.target.checked)} className="w-4 h-4 accent-emerald-600" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+              ));
+            })() : moGroups.map(renderMoSection)}
           </div>
         )}
         <p className="text-[11px] text-slate-400 mt-2">ใส่ &ldquo;จำนวนที่มี&rdquo; แล้วคลิกออกจากช่อง = บันทึก (sync กับบอร์ด) · ติ๊ก &ldquo;เตรียมแล้ว&rdquo; = ทำเครื่องหมายเตรียมเสร็จ · คลิกหัวใบสั่งผลิต = เปิดป๊อปอัป</p>
       </div>
     )}
+
+    <ERPModal open={confirmPrepOpen} onClose={() => !saving && setConfirmPrepOpen(false)} size="sm" title="ยืนยันทำเป็นเตรียมแล้ว"
+      footer={<>
+        <button onClick={() => setConfirmPrepOpen(false)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+        <button onClick={() => void markPreparedSelected()} disabled={saving} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "ยืนยัน เตรียมแล้ว"}</button>
+      </>}>
+      {(() => {
+        const chosenRows = (rows ?? []).filter((r) => sel.has(keyOf(r)));
+        const ids = chosenRows.flatMap((r) => r.mos.map((m) => m.summary_id).filter(Boolean));
+        const moCnt = new Set(chosenRows.flatMap((r) => r.mos.map((m) => m.mo_no))).size;
+        return (
+          <div className="space-y-2 text-sm text-slate-600">
+            <p>จะทำเครื่องหมาย <b>เตรียมแล้ว</b> ให้วัตถุดิบที่เลือก <b className="text-emerald-700">{chosenRows.length}</b> ชนิด</p>
+            <p>กระทบ <b>{ids.length}</b> รายการ ใน <b>{moCnt}</b> ใบสั่งผลิต (ทุกใบที่ใช้วัตถุดิบนั้น)</p>
+            <p className="text-[11px] text-slate-400">การ์ดบนบอร์ดจะอัปเดตความพร้อมตาม</p>
+          </div>
+        );
+      })()}
+    </ERPModal>
 
     <ERPModal open={confirmOpen} onClose={() => !saving && setConfirmOpen(false)} size="md"
       title="ยืนยันสร้างใบขอซื้อ"

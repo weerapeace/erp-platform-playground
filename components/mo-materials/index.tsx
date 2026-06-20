@@ -22,8 +22,9 @@ type MatRow = MoMatPreview & { required: number; to_purchase: number };
 
 const fmt = (n: number) => (Math.round(n * 10000) / 10000).toLocaleString("th-TH");
 const numCls = "w-full h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
-const needsCutLine = (m: { cut_block_code: string | null; cut_length: number | null; pieces: number | null }) =>
-  m.cut_block_code != null || m.cut_length != null || m.pieces != null;
+const isAccessory = (m: { material_type: string | null }) => /อะไหล่/.test(m.material_type ?? "");   // อะไหล่ไม่ต้องตัด
+const needsCutLine = (m: { cut_block_code: string | null; cut_length: number | null; pieces: number | null; material_type: string | null }) =>
+  !isAccessory(m) && (m.cut_block_code != null || m.cut_length != null || m.pieces != null);
 
 export function MoMaterialsTable({
   summary, materials, qty, requested = {}, editable, canEdit,
