@@ -98,6 +98,7 @@ export function DispatchPlanBoard({
     return m;
   }, [lines]);
 
+  const addBusyRef = useRef(false);   // กันคลิกโต๊ะรัวๆ สร้างการ์ดร่างซ้ำระหว่างรอเน็ต
   const addLineFor = async (moNo: string, dept: DeptLite) => {
     if (!editable) return;
     const p = pending.find((x) => x.mo_no === moNo); if (!p) return;
@@ -107,10 +108,15 @@ export function DispatchPlanBoard({
       const r = await apiFetch(`/api/mo/dispatch-plans/${planId}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "add_line", line: { mo_no: p.mo_no, mo_id: p.id, product_sku: p.product_sku, product_name: p.product_name, qty, department_id: dept.id, department_name: dept.name } }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      setLines((ls) => [...ls, j.data as DispatchPlanLine]); setSelected(null);
+      setLines((ls) => [...ls, j.data as DispatchPlanLine]);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
   };
-  const addLine = (dept: DeptLite) => { if (selected) void addLineFor(selected, dept); };
+  const addLine = (dept: DeptLite) => {
+    if (!selected || addBusyRef.current) return;
+    addBusyRef.current = true;
+    const mo = selected; setSelected(null);   // ล้างทันที กันคลิกซ้ำก่อน re-render
+    void addLineFor(mo, dept).finally(() => { addBusyRef.current = false; });
+  };
   // ลากการ์ดร่างย้ายโต๊ะ
   const moveLine = async (lineId: string, dept: DeptLite) => {
     if (!editable) return;
