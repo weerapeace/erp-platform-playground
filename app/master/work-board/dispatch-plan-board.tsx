@@ -177,10 +177,11 @@ export function DispatchPlanBoard({
   const draftCard = (l: DispatchPlanLine, d: DeptLite) => {
     const opts = deptCraftsmen(d);
     return (
-      <div key={l.id} draggable={editable} onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }}
-        className={`rounded-lg px-2 py-1.5 mb-1.5 ${editable ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
+      <div key={l.id}
+        className="rounded-lg px-2 py-1.5 mb-1.5" style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
+            {editable && <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }} title="ลากย้ายโต๊ะ" className="shrink-0 cursor-move text-emerald-400 hover:text-emerald-600 select-none">⠿</span>}
             <Thumb url={imageByMo[l.mo_no ?? ""]} />
             <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
           </div>
