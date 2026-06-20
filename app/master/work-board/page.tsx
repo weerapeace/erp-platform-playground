@@ -146,14 +146,19 @@ export default function WorkBoardPage() {
   const [cardPos, setCardPos] = useState<Record<string, Pos>>({});
   const [tool, setTool] = useState<"select" | "pan">("select");
   const [isMax, setIsMax] = useState(false);
-  // โหมดแท็บเล็ต (Phase 1) — ขยายขนาดทั้งบอร์ด + เต็มจอ ให้แตะง่ายบนทัช · จำต่อเครื่อง
+  // โหมดแท็บเล็ต — สลับอัตโนมัติตามจอ/การสัมผัส (จอแคบ ≤1024px หรือนิ้วสัมผัส) → โฟกัสทีละโต๊ะ, ขยายแตะง่าย
   const [tablet, setTablet] = useState(false);
-  useEffect(() => { try {
-    setTablet(localStorage.getItem("wb:tablet") === "1");
-    // เปิดจากแอปที่ติดตั้ง (PWA standalone) → ขยายบอร์ดเต็มจอให้เลย
-    if (window.matchMedia?.("(display-mode: standalone)").matches || (window.navigator as unknown as { standalone?: boolean }).standalone) setIsMax(true);
-  } catch { /* ignore */ } }, []);
-  const toggleTablet = useCallback(() => setTablet((v) => { const nv = !v; try { localStorage.setItem("wb:tablet", nv ? "1" : "0"); } catch { /* ignore */ } if (nv) setIsMax(true); return nv; }), []);
+  useEffect(() => {
+    try {
+      const mq = window.matchMedia("(max-width: 1024px), (pointer: coarse)");
+      const update = () => { setTablet(mq.matches); if (mq.matches) setIsMax(true); };
+      update();
+      mq.addEventListener("change", update);
+      // เปิดจากแอปที่ติดตั้ง (PWA standalone) → ขยายบอร์ดเต็มจอให้เลย
+      if (window.matchMedia?.("(display-mode: standalone)").matches || (window.navigator as unknown as { standalone?: boolean }).standalone) setIsMax(true);
+      return () => mq.removeEventListener("change", update);
+    } catch { /* ignore */ }
+  }, []);
   const [dragId, setDragId] = useState<string | null>(null);
 
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
@@ -835,8 +840,6 @@ export default function WorkBoardPage() {
             <button onClick={() => setViewMode("table")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "table" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>▦ ตาราง</button>
             <button onClick={() => setViewMode("purchase")} className={`h-9 px-3 font-medium border-l border-slate-200 ${viewMode === "purchase" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 ขอซื้อ/เตรียม</button>
           </div>
-          <button onClick={toggleTablet} title="ขยายขนาดให้แตะง่ายบนแท็บเล็ต (เต็มจอ)"
-            className={`h-9 px-3 text-sm font-medium rounded-lg border ${tablet ? "bg-emerald-600 text-white border-emerald-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>📱 แท็บเล็ต</button>
           <PwaInstallButton className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 inline-flex items-center gap-1" />
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
