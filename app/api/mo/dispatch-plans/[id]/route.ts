@@ -43,6 +43,7 @@ type PatchBody = {
   name?: string; note?: string; start_date?: string | null; end_date?: string | null;
   line?: Partial<DispatchPlanLine>;
   lineId?: string; qty?: number; assignee_id?: string | null; assignee_name?: string | null;
+  department_id?: string | null; department_name?: string | null;   // ย้ายโต๊ะ (drag ร่าง)
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -86,6 +87,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (b.qty !== undefined) patch.qty = num(b.qty);
     if (b.assignee_id !== undefined) patch.assignee_id = b.assignee_id ?? null;
     if (b.assignee_name !== undefined) patch.assignee_name = b.assignee_name ?? null;
+    if (b.department_id !== undefined) patch.department_id = b.department_id ?? null;
+    if (b.department_name !== undefined) { patch.department_name = b.department_name ?? null; patch.assignee_id = null; patch.assignee_name = null; }   // ย้ายโต๊ะ → ล้างช่างเดิม
     const { error } = await admin.from("mo_dispatch_plan_lines").update(patch).eq("id", b.lineId).eq("plan_id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     return NextResponse.json({ data: { ok: true }, error: null });

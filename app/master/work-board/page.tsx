@@ -899,6 +899,25 @@ export default function WorkBoardPage() {
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
             onDates={(start_date, end_date) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, start_date, end_date } : x))}
             onDeleted={() => { setActivePlan("real"); void loadPlans(); }}
+            onOpenWork={(info) => {
+              const mo = info.moId ? board.pending.find((x) => x.id === info.moId) : null;
+              setClWO(null);
+              if (mo) { setChecklistMO(mo); return; }
+              setChecklistMO({
+                id: info.moId ?? "", mo_no: info.moNo ?? "", product_sku: info.productSku, product_name: info.productName,
+                qty: info.qty || 0, dispatched: 0, remaining: 0, due_date: null, status: "",
+                image_url: null, brand: null, brand_color: null,
+                prep_done: false, cut_done: false, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: false,
+              });
+            }}
+            onReorderDepts={(orderedIds) => {
+              void (async () => {
+                try {
+                  await Promise.all(orderedIds.map((id, i) => apiFetch("/api/mo/departments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, display_order: i }) })));
+                  await load(true);
+                } catch { /* ignore */ }
+              })();
+            }}
           />;
         })()
       ) : (

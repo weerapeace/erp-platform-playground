@@ -7,14 +7,14 @@
  * - กด "ดันเป็นของจริง" → สร้างใบจ่ายงานจริงตามร่างทั้งแผน
  * แยกจากบอร์ด canvas เดิม เพื่อไม่ให้กระทบของจริง
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
 type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null };
-type WOLite = { id: string; mo_no: string; qty: number; department_id: string | null; stage: string; assignee_name: string | null; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
+type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_name: string | null; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
 
@@ -30,7 +30,7 @@ function Thumb({ url }: { url?: string | null }) {
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit,
-  onApplied, onRenamed, onDates, onDeleted,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -39,6 +39,8 @@ export function DispatchPlanBoard({
   imageByMo: Record<string, string | null>;
   canEdit: boolean;
   onApplied: () => void; onRenamed: (name: string) => void; onDates: (start: string | null, end: string | null) => void; onDeleted: () => void;
+  onOpenWork: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
+  onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
@@ -96,9 +98,9 @@ export function DispatchPlanBoard({
     return m;
   }, [lines]);
 
-  const addLine = async (dept: DeptLite) => {
-    if (!editable || !selected) return;
-    const p = pending.find((x) => x.mo_no === selected); if (!p) return;
+  const addLineFor = async (moNo: string, dept: DeptLite) => {
+    if (!editable) return;
+    const p = pending.find((x) => x.mo_no === moNo); if (!p) return;
     const qty = availOf(p);
     if (qty <= 0) { toast.info("ใบนี้วางแผนครบจำนวนแล้ว"); return; }
     try {
@@ -107,6 +109,32 @@ export function DispatchPlanBoard({
       const j = await r.json(); if (j.error) throw new Error(j.error);
       setLines((ls) => [...ls, j.data as DispatchPlanLine]); setSelected(null);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
+  };
+  const addLine = (dept: DeptLite) => { if (selected) void addLineFor(selected, dept); };
+  // ลากการ์ดร่างย้ายโต๊ะ
+  const moveLine = async (lineId: string, dept: DeptLite) => {
+    if (!editable) return;
+    setLines((ls) => ls.map((l) => l.id === lineId ? { ...l, department_id: dept.id, department_name: dept.name, assignee_id: null, assignee_name: null } as DispatchPlanLine : l));
+    try { await apiFetch(`/api/mo/dispatch-plans/${planId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "update_line", lineId, department_id: dept.id, department_name: dept.name }) }); }
+    catch { void load(); }
+  };
+  // ลากการ์ด (HTML5) — เก็บข้อมูลว่ากำลังลากอะไร
+  const dragRef = useRef<{ kind: "pending" | "draft"; moNo: string; lineId?: string } | null>(null);
+  const dropToDept = (dept: DeptLite) => {
+    const d = dragRef.current; dragRef.current = null; if (!d) return;
+    if (d.kind === "pending") void addLineFor(d.moNo, dept);
+    else if (d.kind === "draft" && d.lineId) void moveLine(d.lineId, dept);
+  };
+  // ลากสลับคอลัมน์แผนก (C4)
+  const deptDragRef = useRef<string | null>(null);
+  const reorderDept = (targetId: string) => {
+    const src = deptDragRef.current; deptDragRef.current = null;
+    if (!src || src === targetId || !onReorderDepts) return;
+    const ids = departments.map((d) => d.id);
+    const from = ids.indexOf(src), to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    onReorderDepts(ids);
   };
   const removeLine = async (lineId: string) => {
     if (!editable) return;
@@ -149,13 +177,15 @@ export function DispatchPlanBoard({
   const draftCard = (l: DispatchPlanLine, d: DeptLite) => {
     const opts = deptCraftsmen(d);
     return (
-      <div key={l.id} className="rounded-lg px-2 py-1.5 mb-1.5" style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
+      <div key={l.id} draggable={editable} onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }}
+        className={`rounded-lg px-2 py-1.5 mb-1.5 ${editable ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <Thumb url={imageByMo[l.mo_no ?? ""]} />
             <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <button onClick={() => onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
             <span className="text-[10px] px-1 rounded" style={{ color: "#0f6e56", border: "0.5px solid #5dcaa5" }}>ร่าง</span>
             {editable && <button onClick={() => removeLine(l.id)} className="text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
           </div>
@@ -211,7 +241,9 @@ export function DispatchPlanBoard({
       {loading ? <div className="text-center py-10 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
         <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
           {/* คอลัมน์รอจ่าย */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]"
+            onDragOver={(e) => { if (editable && dragRef.current?.kind === "draft") e.preventDefault(); }}
+            onDrop={() => { if (!editable) return; const d = dragRef.current; dragRef.current = null; if (d?.kind === "draft" && d.lineId) void removeLine(d.lineId); }}>
             <div className="flex items-center justify-between mb-2"><span className="text-sm font-bold text-slate-700">📥 รอจ่าย</span>
               <span className="text-[11px] text-slate-400">{visiblePending.length}</span></div>
             {/* แท็บกรองตามกลุ่มใบสั่งงาน */}
@@ -226,8 +258,9 @@ export function DispatchPlanBoard({
             {visiblePending.map((p) => {
               const on = selected === p.mo_no;
               return (
-                <button key={p.id} type="button" disabled={!editable} onClick={() => setSelected(on ? null : p.mo_no)}
-                  className={`w-full text-left rounded-lg px-2 py-1.5 mb-1.5 bg-white ${on ? "ring-2 ring-indigo-400 border-indigo-300" : "border border-slate-200"} ${editable ? "cursor-pointer hover:bg-slate-50" : ""}`}>
+                <div key={p.id} draggable={editable} onDragStart={() => { dragRef.current = { kind: "pending", moNo: p.mo_no }; }}
+                  onClick={() => editable && setSelected(on ? null : p.mo_no)}
+                  className={`rounded-lg px-2 py-1.5 mb-1.5 bg-white ${on ? "ring-2 ring-indigo-400 border-indigo-300" : "border border-slate-200"} ${editable ? "cursor-grab active:cursor-grabbing hover:bg-slate-50" : ""}`}>
                   <div className="flex items-center gap-2">
                     <Thumb url={p.image_url} />
                     <div className="min-w-0 flex-1">
@@ -235,8 +268,9 @@ export function DispatchPlanBoard({
                       <div className="text-[11px] text-slate-500 truncate">{p.mo_no} · เหลือวางแผน {fmt(availOf(p))}/{fmt(p.remaining)}</div>
                       <div className="text-[10px] text-slate-400">ค่าแรงผลิต {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</div>
                     </div>
+                    <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }} title="ดูรายละเอียดงาน" className="shrink-0 text-slate-300 hover:text-blue-600">🔍</button>
                   </div>
-                </button>
+                </div>
               );
             })}
             {visiblePending.length === 0 && <div className="text-center text-[11px] text-slate-300 py-3">— ไม่มีใบในกลุ่มนี้ —</div>}
@@ -251,9 +285,13 @@ export function DispatchPlanBoard({
             const canDrop = editable && !!selected;
             return (
               <div key={d.id} onClick={() => canDrop && addLine(d)}
+                onDragOver={(e) => { if (editable) e.preventDefault(); }} onDrop={() => editable && dropToDept(d)}
                 className={`rounded-xl border p-2 min-h-[140px] ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}>
-                <div className="flex items-center justify-between gap-1 mb-2">
+                <div className="flex items-center justify-between gap-1 mb-2"
+                  onDragOver={(e) => { if (onReorderDepts && deptDragRef.current) e.preventDefault(); }}
+                  onDrop={(e) => { if (deptDragRef.current) { e.stopPropagation(); reorderDept(d.id); } }}>
                   <div className="flex items-center gap-1 min-w-0">
+                    {onReorderDepts && <span draggable onDragStart={(e) => { e.stopPropagation(); deptDragRef.current = d.id; dragRef.current = null; }} title="ลากสลับตำแหน่งโต๊ะ" className="shrink-0 cursor-move text-slate-300 hover:text-slate-500 select-none">⠿</span>}
                     <span className="text-sm font-bold text-slate-700 truncate">{d.name}</span>
                     <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="ดูพนักงานในแผนก" className="shrink-0 text-slate-300 hover:text-violet-600 text-[11px]">👥</button>
                   </div>
@@ -269,7 +307,13 @@ export function DispatchPlanBoard({
                     <div className="flex items-center gap-2">
                       <Thumb url={w.image_url} />
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between"><span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span><span className="text-slate-400">🔒</span></div>
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span>
+                          <span className="flex items-center gap-1 shrink-0">
+                            <button onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+                            <span className="text-slate-400">🔒</span>
+                          </span>
+                        </div>
                         <div className="text-[11px] text-slate-400 truncate">{w.assignee_name ?? "—"} · {fmt(w.qty)} ชิ้น · {baht(woLabor(w))}</div>
                       </div>
                     </div>
