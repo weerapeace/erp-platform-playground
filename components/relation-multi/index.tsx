@@ -428,6 +428,99 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
   );
 }
 
+// ---- เลือกรายการที่ "มีอยู่แล้ว" มาผูกเป็นลูก (ตั้งค่า FK) — ของกลาง ใช้ได้ทุก one2many ----
+function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, labels, alreadyIds, title, onAttached, onClose }: {
+  moduleKey: string; fk: string; matchValue: string | number; titleField: string;
+  labels: Record<string, string>; alreadyIds: Set<string>; title?: string;
+  onAttached: () => void; onClose: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  // ฟิลด์ชื่อรอง (โชว์ใต้รหัส) — เลือกตัวแรกที่มีจริง
+  const secField = ["name_th", "name", "color_th", "color"].find((k) => k !== titleField && rows.some((r) => r[k] != null && r[k] !== ""));
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    const t = setTimeout(() => {
+      const sp = q.trim() ? `&search=${encodeURIComponent(q.trim())}` : "";
+      apiFetch(`/api/master-v2/${moduleKey}?limit=30&offset=0${sp}`).then((r) => r.json())
+        .then((j) => { if (alive) setRows((j.data ?? j.rows ?? []) as Record<string, unknown>[]); })
+        .catch(() => { if (alive) setRows([]); })
+        .finally(() => { if (alive) setLoading(false); });
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q, moduleKey]);
+
+  const candidates = rows.filter((r) => !alreadyIds.has(String(r.id)));   // ตัดตัวที่เป็นลูกใบนี้อยู่แล้วออก
+  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const attach = async () => {
+    if (picked.size === 0) return;
+    setSaving(true);
+    try {
+      const edits = [...picked].map((id) => ({ id, changes: { [fk]: matchValue } }));
+      const res = await apiFetch(`/api/master-v2/${moduleKey}/bulk-update`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) { alert("แนบไม่สำเร็จ: " + (j.error ?? `HTTP ${res.status}`)); return; }
+      onAttached(); onClose();
+    } catch (e) { alert("แนบไม่สำเร็จ: " + (e instanceof Error ? e.message : "network")); }
+    finally { setSaving(false); }
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">เลือก{title ? ` ${title}` : "รายการ"}ที่มีอยู่แล้ว</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg">✕</button>
+        </div>
+        <div className="p-3 border-b border-slate-100">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหารหัส/ชื่อ…" autoFocus
+            className="w-full h-8 px-3 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-400" />
+        </div>
+        <div className="flex-1 overflow-y-auto py-1">
+          {loading && <div className="px-3 py-4 text-xs text-slate-400 text-center">กำลังโหลด…</div>}
+          {!loading && candidates.length === 0 && <div className="px-3 py-6 text-xs text-slate-400 text-center">— ไม่พบรายการให้เลือก —</div>}
+          {!loading && candidates.map((r) => {
+            const id = String(r.id);
+            const checked = picked.has(id);
+            const fkVal = r[fk];
+            const linkedElsewhere = fkVal != null && fkVal !== "" && String(fkVal) !== String(matchValue);
+            return (
+              <button key={id} type="button" onClick={() => toggle(id)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50">
+                <span className={`flex items-center justify-center w-4 h-4 rounded border flex-shrink-0 ${checked ? "bg-emerald-600 border-emerald-600 text-white" : "border-slate-300 bg-white"}`}>{checked && <span className="text-[10px] leading-none">✓</span>}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm text-slate-800 truncate">{String(r[titleField] ?? r.name ?? id)}</span>
+                  {secField && r[secField] != null && r[secField] !== "" && <span className="block text-[11px] text-slate-400 truncate">{String(r[secField])}</span>}
+                </span>
+                {linkedElsewhere && <span className="flex-shrink-0 text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded px-1">อยู่ใบอื่น</span>}
+              </button>
+            );
+          })}
+        </div>
+        <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">{picked.size > 0 ? `เลือก ${picked.size} รายการ` : "เลือกรายการที่จะผูก"}</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="h-8 px-3 text-sm text-slate-600 hover:bg-slate-100 rounded-md">ยกเลิก</button>
+            <button onClick={attach} disabled={saving || picked.size === 0}
+              className="h-8 px-4 text-sm font-medium text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-40">
+              {saving ? "กำลังผูก…" : `ผูกเป็นลูก (${picked.size})`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function RelationOne2Many({ config, recordId, title, fieldId, configurable, parentCode, parentValues }: { config: RelConfig; recordId?: string | null; title?: string; fieldId?: string; configurable?: boolean; parentCode?: string; parentValues?: Record<string, unknown> }) {
   const moduleKey = config.target_module_key ?? config.target_table ?? "";
   const fk = config.target_fk_column ?? "";
@@ -676,12 +769,25 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       onChanged={load} onClose={() => setCreating(false)} />
   ) : null;
 
+  // เลือก "ที่มีอยู่แล้ว" มาผูกเป็นลูก (ตั้งค่า FK ให้ชี้มาหาใบนี้) — ของกลาง ใช้ได้ทุก one2many
+  const [attaching, setAttaching] = useState(false);
+  const attachBtn = (canAdd && matchValue != null && matchValue !== "") ? (
+    <button type="button" onClick={() => setAttaching(true)} title="เลือกรายการที่มีอยู่แล้วมาผูกเป็นลูก"
+      className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-emerald-200 text-emerald-600 hover:bg-emerald-50 inline-flex items-center gap-1">+ เลือกที่มีอยู่</button>
+  ) : null;
+  const attachModal = attaching ? (
+    <O2MAttachPicker moduleKey={moduleKey} fk={fk} matchValue={matchValue as string | number}
+      titleField={titleField} labels={labels} alreadyIds={new Set(rows.map((r) => String(r.id)))}
+      title={title} onAttached={load} onClose={() => setAttaching(false)} />
+  ) : null;
+
   // หัวข้อ + จำนวน (สำหรับ 360 view)
   const header = (title || gearBtn || addBtn) ? (
     <div className="flex items-center gap-1.5 mb-1.5">
       {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
       {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />
+      {attachBtn}
       {addBtn}
       {gearBtn}
     </div>
@@ -720,7 +826,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         {peek && moduleKey && (
           <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
-        {pickerModal}{createModal}
+        {pickerModal}{createModal}{attachModal}
       </>
     );
   }
@@ -759,7 +865,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         {peek && moduleKey && (
           <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
-        {pickerModal}{createModal}
+        {pickerModal}{createModal}{attachModal}
       </>
     );
   }
@@ -936,6 +1042,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       )}
       {pickerModal}
       {createModal}
+      {attachModal}
     </>
   );
 }
