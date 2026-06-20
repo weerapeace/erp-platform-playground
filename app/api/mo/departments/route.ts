@@ -21,7 +21,7 @@ const audit = (admin: ReturnType<typeof supabaseAdmin>, uid: string | null, acti
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { data, error } = await supabaseAdmin()
-    .from("departments").select("id, name, status, note, show_note, display_order")
+    .from("departments").select("id, name, status, note, show_note, display_order, show_on_board")
     .order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   return NextResponse.json({ data: data ?? [], error: null });
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { id?: string; name?: string; note?: string | null; status?: string; show_note?: boolean; display_order?: number };
+  let body: { id?: string; name?: string; note?: string | null; status?: string; show_note?: boolean; display_order?: number; show_on_board?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
 
@@ -56,6 +56,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (typeof body.status === "string") patch.status = body.status;
   if (typeof body.show_note === "boolean") patch.show_note = body.show_note;
   if (typeof body.display_order === "number") patch.display_order = body.display_order;
+  if (typeof body.show_on_board === "boolean") patch.show_on_board = body.show_on_board;
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });
 
   const admin = supabaseAdmin();

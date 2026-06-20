@@ -23,14 +23,23 @@ const baht = (n: number) => "฿" + fmt(n);
 
 function Thumb({ url }: { url?: string | null }) {
   if (!url) return <span className="w-7 h-7 shrink-0 rounded bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-300 text-[11px]">📦</span>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="" className="w-7 h-7 shrink-0 rounded object-cover border border-slate-200" />;
+  return (
+    <span className="relative shrink-0 group/thumb">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt="" className="w-7 h-7 rounded object-cover border border-slate-200" />
+      {/* ชี้เมาส์เพื่อดูรูปใหญ่ (เฉพาะ PC/เมาส์ · แท็บเล็ตใช้ปุ่ม 🔍) */}
+      <span className="pointer-events-none hidden group-hover/thumb:block absolute z-[70] left-0 top-8 bg-white border border-slate-200 rounded-lg shadow-xl p-1">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt="" className="w-44 h-44 object-contain rounded" />
+      </span>
+    </span>
+  );
 }
 
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit, tablet,
-  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -42,6 +51,7 @@ export function DispatchPlanBoard({
   onApplied: () => void; onRenamed: (name: string) => void; onDates: (start: string | null, end: string | null) => void; onDeleted: () => void;
   onOpenWork: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
+  onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
@@ -195,7 +205,7 @@ export function DispatchPlanBoard({
           <div className="flex items-center gap-1.5 min-w-0">
             {editable && <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }} title="ลากย้ายโต๊ะ" className="shrink-0 cursor-move text-emerald-400 hover:text-emerald-600 select-none">⠿</span>}
             <Thumb url={imageByMo[l.mo_no ?? ""]} />
-            <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
+            <span className="text-sm font-semibold break-words" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button onClick={() => onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
@@ -238,6 +248,7 @@ export function DispatchPlanBoard({
           className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
         {applied && <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">ดันเป็นของจริงแล้ว</span>}
         <div className="flex-1" />
+        {onManageDepts && <button onClick={onManageDepts} className="h-8 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50">⚙️ จัดการโต๊ะ</button>}
         {editable && <button onClick={() => setConfirmApply(true)} disabled={lines.length === 0}
           className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">🚀 ดันเป็นของจริง</button>}
         <button onClick={deletePlan} className="h-8 px-2.5 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">ลบแผน</button>
@@ -268,7 +279,7 @@ export function DispatchPlanBoard({
       )}
 
       {loading ? <div className="text-center py-10 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
-        <div className="grid gap-2.5" style={{ gridTemplateColumns: tablet ? "1fr 1fr" : "repeat(auto-fill, minmax(180px, 1fr))" }}>
+        <div className="grid gap-2.5" style={{ gridTemplateColumns: tablet ? "1fr 1fr" : "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {/* คอลัมน์รอจ่าย */}
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]"
             onDragOver={(e) => { if (editable && dragRef.current?.kind === "draft") e.preventDefault(); }}
@@ -293,7 +304,7 @@ export function DispatchPlanBoard({
                   <div className="flex items-center gap-2">
                     <Thumb url={p.image_url} />
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-slate-800 truncate">{p.product_sku}</div>
+                      <div className="text-sm font-semibold text-slate-800 break-words">{p.product_sku}</div>
                       <div className="text-[11px] text-slate-500 truncate">{p.mo_no} · เหลือวางแผน {fmt(availOf(p))}/{fmt(p.remaining)}</div>
                       <div className="text-[10px] text-slate-400">ค่าแรงผลิต {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</div>
                     </div>
@@ -337,7 +348,7 @@ export function DispatchPlanBoard({
                       <Thumb url={w.image_url} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span>
+                          <span className="text-sm font-medium text-slate-600 break-words">{w.product_sku}</span>
                           <span className="flex items-center gap-1 shrink-0">
                             <button onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
                             <span className="text-slate-400">🔒</span>

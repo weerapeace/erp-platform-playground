@@ -30,8 +30,8 @@ import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { LaborRate } from "@/app/api/bom/labor-rates/route";
 import type { Brand } from "@/app/api/brands/route";
 
-type Dept = { id: string; name: string; note?: string | null; show_note?: boolean };
-type DeptFull = { id: string; name: string; status: string | null; note: string | null; show_note: boolean; display_order: number | null };
+type Dept = { id: string; name: string; note?: string | null; show_note?: boolean; show_on_board?: boolean };
+type DeptFull = { id: string; name: string; status: string | null; note: string | null; show_note: boolean; display_order: number | null; show_on_board?: boolean };
 // สรุปค่าแรง (กลุ่ม A) — ผลิต/งานเหมา × แผน/จริง
 type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
 type PendingMO = {
@@ -256,7 +256,7 @@ export default function WorkBoardPage() {
   const zones: Zone[] = useMemo(() => {
     const arr: Zone[] = [{ key: "pending", label: "📥 รอจ่าย", kind: "pending", accent: ACCENT[0], moCards: board.pending, woCards: [] }];
     // เอาแผนก "ตัด/เตรียม" ออกจากบอร์ด — งานตัด/เตรียมย้ายไปเป็นเช็กลิสต์ในตัวการ์ดรอจ่าย
-    board.departments.filter((d) => stageOfDept(d.name) !== "cut").forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
+    board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
     return arr;
   }, [board, wosByDept]);
 
@@ -902,10 +902,10 @@ export default function WorkBoardPage() {
           for (const w of board.workOrders) { const k = String(w.mo_no); if (!laborPerUnit[k]) laborPerUnit[k] = (w.central_rate && w.central_rate > 0) ? w.central_rate : ((w.qty || 0) > 0 && w.labor ? w.labor.prod_plan / (w.qty || 1) : 0); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
           return <DispatchPlanBoard
             planId={p.id} planName={p.name} planStatus={p.status} startDate={p.start_date} endDate={p.end_date}
-            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut")}
+            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
             pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
-            canEdit={canDispatch} tablet={tablet}
+            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
             onDates={(start_date, end_date) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, start_date, end_date } : x))}
@@ -1394,7 +1394,6 @@ export default function WorkBoardPage() {
               : (
                 <div className="border border-slate-100 rounded-lg divide-y divide-slate-50 max-h-[54vh] overflow-y-auto">
                   {deptList.map((d, i) => {
-                    const shown = (d.status ?? "active") === "active";
                     const isCut = d.name.includes("ตัด") || d.name.includes("เตรียม");
                     return (
                       <div key={d.id} className="p-2.5 space-y-2">
@@ -1415,7 +1414,7 @@ export default function WorkBoardPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-4 pl-7">
-                          <Toggle label="โชว์ในบอร์ด" on={shown} onClick={() => void patchDept(d.id, { status: shown ? "inactive" : "active" })} />
+                          <Toggle label="โชว์ในบอร์ด" on={d.show_on_board !== false} onClick={() => void patchDept(d.id, { show_on_board: d.show_on_board === false })} />
                           <Toggle label="โชว์หมายเหตุ" on={d.show_note} onClick={() => void patchDept(d.id, { show_note: !d.show_note })} />
                           {isCut && <span className="text-[10px] text-amber-600">ℹ️ แผนกตัด/เตรียม จะไม่ขึ้นบอร์ด (อยู่ในตัวการ์ด)</span>}
                         </div>
