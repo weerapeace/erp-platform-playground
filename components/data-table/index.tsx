@@ -569,7 +569,10 @@ export function DataTable<T extends Record<string, unknown>>({
   const [tableMaxH, setTableMaxH] = useState<number | null>(null);
 
   // ---- View mode (table / cards) ----
-  const showCardToggle = !!enableCards || !!cardConfig;
+  // มือถือ (จอ < 768px) เปิดโหมดการ์ดให้ทุกหน้า list อัตโนมัติ (ตารางอัด/UUID ยาว อ่านยากบนจอแคบ)
+  // → ใช้ autoCardConfig (เลือกฟิลด์ชื่อ/รหัสเป็นหัวการ์ด) · PC ยังเป็นตารางเหมือนเดิม · สลับกลับได้
+  const isNarrow = typeof window !== "undefined" && window.innerWidth < 768;
+  const showCardToggle = !!enableCards || !!cardConfig || isNarrow;
   // มือถือ (จอ < 768px) + มีการ์ด → เริ่มต้นเป็น "การ์ด" อัตโนมัติ (ไม่ต้องเลื่อนตารางซ้าย-ขวา)
   const [viewMode, setViewMode] = useState<"table" | "cards">(() =>
     (showCardToggle && typeof window !== "undefined" && window.innerWidth < 768) ? "cards" : defaultViewMode
