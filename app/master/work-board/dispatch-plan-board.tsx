@@ -49,6 +49,9 @@ export function DispatchPlanBoard({
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
   const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup ดูพนักงานในแผนก
   const [focusDept, setFocusDept] = useState<string | null>(null);   // โหมดแท็บเล็ต: โต๊ะที่กำลังโฟกัส
+  const [colW, setColW] = useState(240);   // ความกว้างคอลัมน์/โต๊ะ (px) — ปรับได้ จำที่เครื่อง
+  useEffect(() => { try { const v = Number(localStorage.getItem("wb:planColW")); if (v >= 180 && v <= 480) setColW(v); } catch { /* ignore */ } }, []);
+  const setColWidth = (w: number) => { const v = Math.max(180, Math.min(480, Math.round(w))); setColW(v); try { localStorage.setItem("wb:planColW", String(v)); } catch { /* ignore */ } };
   // กลุ่มใบสั่งงาน (สำหรับแท็บกรองในคอลัมน์รอจ่าย)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   const [groupTab, setGroupTab] = useState<string>("__all__");   // __all__ | ชื่อกลุ่ม | __none__
@@ -195,7 +198,7 @@ export function DispatchPlanBoard({
           <div className="flex items-center gap-1.5 min-w-0">
             {editable && <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }} title="ลากย้ายโต๊ะ" className="shrink-0 cursor-move text-emerald-400 hover:text-emerald-600 select-none">⠿</span>}
             <Thumb url={imageByMo[l.mo_no ?? ""]} />
-            <span className="text-sm font-semibold break-words" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
+            <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <button onClick={() => onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
@@ -238,6 +241,12 @@ export function DispatchPlanBoard({
           className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
         {applied && <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">ดันเป็นของจริงแล้ว</span>}
         <div className="flex-1" />
+        {!tablet && (
+          <div className="flex items-center gap-1.5" title="ปรับความกว้างของโต๊ะ — กว้างขึ้นรหัสจะอยู่บรรทัดเดียว">
+            <span className="text-[11px] text-slate-400">↔ กว้างโต๊ะ</span>
+            <input type="range" min={180} max={480} step={10} value={colW} onChange={(e) => setColWidth(Number(e.target.value))} className="w-28 accent-indigo-600" />
+          </div>
+        )}
         {onManageDepts && <button onClick={onManageDepts} className="h-8 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50">⚙️ จัดการโต๊ะ</button>}
         {editable && <button onClick={() => setConfirmApply(true)} disabled={lines.length === 0}
           className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">🚀 ดันเป็นของจริง</button>}
@@ -269,7 +278,7 @@ export function DispatchPlanBoard({
       )}
 
       {loading ? <div className="text-center py-10 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
-        <div className="grid gap-2.5" style={{ gridTemplateColumns: tablet ? "1fr 1fr" : "repeat(auto-fill, minmax(220px, 1fr))" }}>
+        <div className="grid gap-2.5" style={{ gridTemplateColumns: tablet ? "1fr 1fr" : `repeat(auto-fill, minmax(${colW}px, 1fr))` }}>
           {/* คอลัมน์รอจ่าย */}
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]"
             onDragOver={(e) => { if (editable && dragRef.current?.kind === "draft") e.preventDefault(); }}
@@ -294,7 +303,7 @@ export function DispatchPlanBoard({
                   <div className="flex items-center gap-2">
                     <Thumb url={p.image_url} />
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold text-slate-800 break-words">{p.product_sku}</div>
+                      <div className="text-sm font-semibold text-slate-800 truncate">{p.product_sku}</div>
                       <div className="text-[11px] text-slate-500 truncate">{p.mo_no} · เหลือวางแผน {fmt(availOf(p))}/{fmt(p.remaining)}</div>
                       <div className="text-[10px] text-slate-400">ค่าแรงผลิต {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</div>
                     </div>
@@ -338,7 +347,7 @@ export function DispatchPlanBoard({
                       <Thumb url={w.image_url} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1">
-                          <span className="text-sm font-medium text-slate-600 break-words">{w.product_sku}</span>
+                          <span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span>
                           <span className="flex items-center gap-1 shrink-0">
                             <button onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
                             <span className="text-slate-400">🔒</span>
