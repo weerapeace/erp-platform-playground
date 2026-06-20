@@ -182,8 +182,9 @@ export default function WorkBoardPage() {
   const [clWO, setClWO] = useState<WorkOrder | null>(null);   // เปิดเช็กลิสต์จากใบจ่ายงาน → มีแท็บ "รับงานคืน"
   const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
   const [saveLaborBom, setSaveLaborBom] = useState(false);    // บันทึกค่าแรงกลับเข้า BOM
-  const [estLabor, setEstLabor] = useState("");               // ค่าแรงผลิตที่วางแผน (ต่อใบสั่งผลิต)
+  const [estLabor, setEstLabor] = useState("");               // ค่าแรงผลิตที่วางแผน — กรอกเป็นราคา/ชิ้น
   const [estSaving, setEstSaving] = useState(false);
+  const [estSaveBom, setEstSaveBom] = useState(false);        // บันทึกค่าแรง/ชิ้น กลับเข้า BOM (ราคากลาง)
   const [clPieceRows, setClPieceRows] = useState<MoPieceRow[]>([]);
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clSummary, setClSummary] = useState<MoMatSummary[]>([]);   // ตารางวัตถุดิบกลาง (สรุป)
@@ -539,10 +540,16 @@ export default function WorkBoardPage() {
     if (!checklistMO) return;
     setEstSaving(true);
     try {
+      const perPiece = estLabor.trim() === "" ? null : Number(estLabor) || 0;   // ราคา/ชิ้น ที่กรอก
+      const total = perPiece == null ? null : Math.round(perPiece * (checklistMO.qty || 0) * 100) / 100;   // ยอดรวม → เก็บใน est_labor_cost (ระบบเดิมใช้ยอดรวม)
       const res = await apiFetch("/api/mo/est-labor", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mo_id: checklistMO.id, est_labor_cost: estLabor.trim() === "" ? null : Number(estLabor) || 0 }) });
+        body: JSON.stringify({ mo_id: checklistMO.id, est_labor_cost: total }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("บันทึกค่าแรงผลิต (วางแผน) แล้ว"); await load(true);
+      if (estSaveBom && perPiece != null && checklistMO.product_sku) {   // บันทึกราคา/ชิ้น กลับเข้า BOM (ราคากลาง — craftsman_id null)
+        await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bom_code: checklistMO.bom_code ?? undefined, product_sku: checklistMO.product_sku, craftsman_id: null, craftsman_name: "ราคากลาง", rate: perPiece }) }).catch(() => {});
+      }
+      toast.success(`บันทึกค่าแรงผลิต/ชิ้นแล้ว${estSaveBom ? " + เข้า BOM" : ""}`); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setEstSaving(false); }
   };
@@ -566,11 +573,12 @@ export default function WorkBoardPage() {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
     setClPurch(null); setClIssues(null); setClHist(null); setIssType(""); setIssSev("medium"); setIssQty("");
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); return; }
-    // ค่าแรงผลิตที่วางแผนไว้ (จาก board) — กรอก/แก้ในป๊อปอัปได้
-    // ค่าแรงผลิตวางแผน: ถ้าเคยตั้งไว้ใช้ค่านั้น · ไม่งั้น default = ราคากลาง/ชิ้น × จำนวน (ดึงจาก BOM)
+    // ค่าแรงผลิตวางแผน — กรอกเป็น "ราคา/ชิ้น"
+    // default: ราคากลาง/ชิ้น จาก BOM ก่อน · ไม่มีค่อยถอดจากยอดรวมที่เคยตั้งไว้ (prod_plan ÷ จำนวน)
+    setEstSaveBom(false);
     setEstLabor(
-      checklistMO.labor?.prod_plan ? String(checklistMO.labor.prod_plan)
-      : (checklistMO.central_rate && checklistMO.central_rate > 0 ? String(Math.round(checklistMO.central_rate * (checklistMO.qty || 0) * 100) / 100) : "")
+      checklistMO.central_rate && checklistMO.central_rate > 0 ? String(checklistMO.central_rate)
+      : (checklistMO.labor?.prod_plan && (checklistMO.qty || 0) > 0 ? String(Math.round((checklistMO.labor.prod_plan / (checklistMO.qty || 1)) * 100) / 100) : "")
     );
     let cancel = false; setClLoading(true);
     void (async () => {
@@ -1177,12 +1185,22 @@ export default function WorkBoardPage() {
                           </span>
                         </div>
                         {canEdit && (
-                          <div className="flex items-center gap-2">
-                            <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต (วางแผน)</label>
-                            <input type="number" min={0} step="any" value={estLabor} onChange={(e) => setEstLabor(e.target.value)} placeholder="—"
-                              className="w-28 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-                            <button onClick={() => void saveEstLabor()} disabled={estSaving} className="h-8 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">{estSaving ? "บันทึก…" : "💾 บันทึก"}</button>
-                            <span className="text-[10px] text-slate-400 ml-auto">เหมา-จริง = กด “เสร็จ” ในแท็บ 🧵</span>
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <label className="text-[11px] text-slate-500 whitespace-nowrap">ค่าแรงผลิต/ชิ้น (วางแผน)</label>
+                              <input type="number" min={0} step="any" value={estLabor} onChange={(e) => setEstLabor(e.target.value)} placeholder="—"
+                                className="w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                              <span className="text-[10px] text-slate-400">บาท/ชิ้น</span>
+                              {estLabor.trim() !== "" && (checklistMO.qty || 0) > 0 && (
+                                <span className="text-[10px] text-slate-400">= รวม ฿{fmt((Number(estLabor) || 0) * (checklistMO.qty || 0))} ({fmt(checklistMO.qty || 0)} ชิ้น)</span>
+                              )}
+                              <button onClick={() => void saveEstLabor()} disabled={estSaving} className="h-8 px-3 text-sm border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">{estSaving ? "บันทึก…" : "💾 บันทึก"}</button>
+                            </div>
+                            <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer w-fit">
+                              <input type="checkbox" checked={estSaveBom} onChange={(e) => setEstSaveBom(e.target.checked)} className="w-3.5 h-3.5 accent-indigo-600" />
+                              💾 บันทึกกลับเข้า BOM ด้วย (เป็นราคากลาง/ชิ้น)
+                            </label>
+                            <span className="block text-[10px] text-slate-400">เหมา-จริง = กด “เสร็จ” ในแท็บ 🧵</span>
                           </div>
                         )}
                       </div>
