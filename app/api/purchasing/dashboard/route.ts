@@ -23,16 +23,18 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   // เรตหยวน→บาท ล่าสุด (ไว้แปลง PO สกุลหยวนเป็นบาท)
-  const { data: rateRow } = await admin.from("daily_rates").select("rate").order("rate_date", { ascending: false }).limit(1).maybeSingle();
-  const rmbRate = num((rateRow as { rate?: number } | null)?.rate) || 5;
+  // perf: ยิง query ทั้งหมดพร้อมกัน (Promise.all) → เวลา = query ช้าสุด ไม่ใช่ผลรวม (กันเด้งไป Tokyo ทีละตัว)
+  const [rateRes, prRes, poRes, lineRes] = await Promise.all([
+    admin.from("daily_rates").select("rate").order("rate_date", { ascending: false }).limit(1).maybeSingle(),
+    admin.from("purchase_requests_v2").select("id, status, requester, price_est, currency, seller_name, created_at, order_date").limit(5000),
+    admin.from("purchase_orders_v2").select("status, payment_status, currency, grand_total, seller_name, order_date").limit(5000),
+    admin.from("purchase_order_lines_v2").select("qty, qty_received, line_status").limit(20000),
+  ]);
+  const rmbRate = num((rateRes.data as { rate?: number } | null)?.rate) || 5;
   const toThb = (amount: number, currency: unknown) => amount * (isCNY(currency) ? rmbRate : 1);
 
   // ── ใบขอซื้อ (PR): สถานะ + รายการรออนุมัติ ──
-  const { data: prs } = await admin
-    .from("purchase_requests_v2")
-    .select("id, status, requester, price_est, currency, seller_name, created_at, order_date")
-    .limit(5000);
-  const prRows = (prs ?? []) as Record<string, unknown>[];
+  const prRows = (prRes.data ?? []) as Record<string, unknown>[];
 
   const prStatusCounts: Record<string, number> = {};
   for (const p of prRows) { const s = String(p.status ?? "unknown"); prStatusCounts[s] = (prStatusCounts[s] ?? 0) + 1; }
@@ -50,11 +52,7 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
     }));
 
   // ── ใบสั่งซื้อ (PO): ยอดซื้อ / รอจ่าย / รายเดือน / ร้านค้า ──
-  const { data: pos } = await admin
-    .from("purchase_orders_v2")
-    .select("status, payment_status, currency, grand_total, seller_name, order_date")
-    .limit(5000);
-  const poRows = (pos ?? []) as Record<string, unknown>[];
+  const poRows = (poRes.data ?? []) as Record<string, unknown>[];
   const committed = poRows.filter((p) => p.status !== "draft" && p.status !== "cancelled");
 
   const now = new Date();
@@ -85,21 +83,13 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
     .sort((a, b) => b.thb - a.thb)
     .slice(0, 5);
 
-  // ── ค้างรับเข้า: บรรทัด PO ที่ยังรับไม่ครบ + ยังไม่ปิด (เฉพาะ PO ที่ไม่ถูกยกเลิก) ──
-  const activePoIds = poRows.length ? undefined : undefined; // (PO ทั้งหมดถือว่า active ยกเว้น cancelled ด้านล่าง)
+  // ── ค้างรับเข้า: บรรทัด PO ที่ยังรับไม่ครบ + ยังไม่ปิด (lines ดึงมาพร้อมกันแล้วด้านบน) ──
   let pendingReceive = 0;
-  {
-    const { data: lines } = await admin
-      .from("purchase_order_lines_v2")
-      .select("qty, qty_received, line_status")
-      .limit(20000);
-    for (const l of (lines ?? []) as Record<string, unknown>[]) {
-      const st = l.line_status as string | null;
-      if (st === "received" || st === "short_closed") continue;
-      if (Math.max(0, num(l.qty) - num(l.qty_received)) > 0) pendingReceive++;
-    }
+  for (const l of (lineRes.data ?? []) as Record<string, unknown>[]) {
+    const st = l.line_status as string | null;
+    if (st === "received" || st === "short_closed") continue;
+    if (Math.max(0, num(l.qty) - num(l.qty_received)) > 0) pendingReceive++;
   }
-  void activePoIds;
 
   return NextResponse.json({
     error: null,

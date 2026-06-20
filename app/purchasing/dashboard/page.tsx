@@ -86,15 +86,16 @@ export default function PurchasingDashboardPage() {
       .then(j => { if (!j.error) setD(j as Dash); })
       .catch(() => {}).finally(() => setLoading(false));
   }, []);
-  // ของใกล้เข้า/เลยกำหนด — ใช้ API รับของเดิม (มีวันคาดเข้าแล้ว) แล้วเรียงตามใกล้สุด
+  // ของใกล้เข้า/เลยกำหนด — API รับของเป็นตัวหนัก → โหลด "หลัง" แดชบอร์ดเสร็จ (ไม่แย่ง resource, เนื้อหาหลักขึ้นก่อน)
   useEffect(() => {
+    if (!d) return;
     apiFetch("/api/purchasing/receivable").then(r => r.json())
       .then(j => setIncoming(((j.data ?? []) as Incoming[])
         .filter(r => r.expected_date != null)
         .sort((a, b) => (a.days_remaining ?? 9999) - (b.days_remaining ?? 9999))
         .slice(0, 6)))
       .catch(() => {});
-  }, []);
+  }, [d]);
 
   const maxMonth = Math.max(1, ...(d?.monthly.map(m => m.thb) ?? [1]));
   const maxSup = Math.max(1, ...(d?.top_suppliers.map(s => s.thb) ?? [1]));
