@@ -16,7 +16,9 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import type { PurchaseNeedRow, PurchaseNeedMo } from "@/app/api/mo/purchase-needs/route";
 
 const fmt = (n: number) => (Math.round(n * 10000) / 10000).toLocaleString("th-TH");
+const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const keyOf = (r: PurchaseNeedRow) => r.component_sku ?? `nm:${r.component_name ?? ""}`;
+const EMPTY: Set<string> = new Set();
 
 // รูปเล็ก (วัตถุดิบ/สินค้า) + fallback
 function Thumb({ url, size = "sm" }: { url: string | null | undefined; size?: "xs" | "sm" | "md" }) {
@@ -48,17 +50,22 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
   const [busy, setBusy] = useState<string | null>(null);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const [printSel, setPrintSel] = useState<Set<string>>(new Set());  // ประเภทที่เลือกพิมพ์
+  // โหมด "ตามกลุ่ม": หัวกลุ่มพับ/กางได้ (default พับหมด) + เลือกติ๊กแยกต่อกลุ่ม
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const [groupSel, setGroupSel] = useState<Record<string, Set<string>>>({});
+  const [prRows, setPrRows] = useState<PurchaseNeedRow[]>([]);     // วัตถุดิบที่กำลังจะสร้างใบขอซื้อ (จาก type หรือ group)
+  const [prepRows, setPrepRows] = useState<PurchaseNeedRow[]>([]); // วัตถุดิบที่กำลังจะทำเป็นเตรียมแล้ว
+  const toggleGroup = (name: string) => setOpenGroups((s) => { const n = new Set(s); n.has(name) ? n.delete(name) : n.add(name); return n; });
 
   const load = useCallback(async () => {
-    setRows(null); setSel(new Set()); setDrafts({});
+    setRows(null); setSel(new Set()); setGroupSel({}); setDrafts({});
     try { const res = await apiFetch("/api/mo/purchase-needs"); const j = await res.json(); setRows((j.data ?? []) as PurchaseNeedRow[]); }
     catch { setRows([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
   const createPR = async () => {
-    if (!rows) return;
-    const chosen = rows.filter((r) => sel.has(keyOf(r)));
+    const chosen = prRows;
     if (chosen.length === 0) { toast.error("ยังไม่ได้เลือกวัตถุดิบ"); return; }
     const items = chosen.flatMap((r) => r.mos.map((m) => ({
       item_name: r.component_sku ? `[${r.component_sku}] ${r.component_name ?? ""}` : (r.component_name ?? ""),
@@ -105,8 +112,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
 
   // ✓ ทำเป็นเตรียมแล้ว — เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก (อัพเดต is_ready ทุก summary_id)
   const markPreparedSelected = async () => {
-    if (!rows) return;
-    const chosenRows = rows.filter((r) => sel.has(keyOf(r)));
+    const chosenRows = prepRows;
     const ids = chosenRows.flatMap((r) => r.mos.map((m) => m.summary_id).filter(Boolean)) as string[];
     if (ids.length === 0) { toast.error("ยังไม่ได้เลือกวัตถุดิบ"); return; }
     setSaving(true);
@@ -115,14 +121,14 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       const j = await res.json(); if (j.error) throw new Error(j.error);
       const idSet = new Set(ids);
       setRows((prev) => prev ? prev.map((r) => ({ ...r, mos: r.mos.map((m) => m.summary_id && idSet.has(m.summary_id) ? { ...m, is_ready: true } : m) })) : prev);
-      setSel(new Set()); setConfirmPrepOpen(false);
+      setSel(new Set()); setGroupSel({}); setConfirmPrepOpen(false);
       toast.success(`ทำเป็นเตรียมแล้ว ${ids.length} รายการ (ทุกใบที่ใช้วัตถุดิบที่เลือก)`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setSaving(false); }
   };
 
-  // popup ยืนยัน
-  const chosen = (rows ?? []).filter((r) => sel.has(keyOf(r)));
+  // popup ยืนยัน (สรุปจากชุดที่กดสร้าง — type หรือ group)
+  const chosen = prRows;
   const prCount = chosen.reduce((n, r) => n + r.mos.length, 0);
   const moCount = new Set(chosen.flatMap((r) => r.mos.map((m) => m.mo_no))).size;
 
@@ -138,6 +144,22 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       g.lines.push(l);
     }
     return [...map.values()].sort((a, b) => a.mo_no.localeCompare(b.mo_no));
+  }, [rows]);
+
+  // โหมด "ตามกลุ่ม": แบ่ง MO เป็นถังตามชื่อกลุ่ม → mo_no ของแต่ละถัง
+  const buckets = useMemo<{ name: string; moNos: string[] }[]>(() => {
+    const map = new Map<string, string[]>();
+    for (const g of moGroups) { const k = groupNameOf(g.mo_no) ?? "— ยังไม่จับกลุ่ม —"; (map.get(k) ?? map.set(k, []).get(k)!).push(g.mo_no); }
+    return [...map.entries()].map(([name, moNos]) => ({ name, moNos }));
+  }, [moGroups, groupNameOf]);
+  // รวมวัตถุดิบ "ตามประเภท" เฉพาะ MO ในกลุ่มที่ระบุ (ตัด mos เหลือเฉพาะของกลุ่ม + คิดยอดใหม่)
+  const rowsOfBucket = useCallback((moNos: string[]): PurchaseNeedRow[] => {
+    const set = new Set(moNos);
+    return (rows ?? []).map((r) => {
+      const mos = r.mos.filter((m) => set.has(m.mo_no));
+      if (mos.length === 0) return null;
+      return { ...r, mos, total_remaining: r4(mos.reduce((n, m) => n + m.needed, 0)), total_requested: 0 };
+    }).filter((x): x is PurchaseNeedRow => x !== null);
   }, [rows]);
 
   const columns = useMemo<MiniColumn<PurchaseNeedRow>[]>(() => [
@@ -286,11 +308,11 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
           {modeToggle}
           {printBtn}
           {canEdit && rows.length > 0 && (
-            <button onClick={() => setConfirmPrepOpen(true)} disabled={saving || sel.size === 0} title="เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก"
+            <button onClick={() => { setPrepRows((rows ?? []).filter((r) => sel.has(keyOf(r)))); setConfirmPrepOpen(true); }} disabled={saving || sel.size === 0} title="เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก"
               className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">✓ ทำเป็นเตรียมแล้ว ({sel.size})</button>
           )}
           {canEdit && rows.length > 0 && (
-            <button onClick={() => setConfirmOpen(true)} disabled={saving || sel.size === 0}
+            <button onClick={() => { setPrRows((rows ?? []).filter((r) => sel.has(keyOf(r)))); setConfirmOpen(true); }} disabled={saving || sel.size === 0}
               className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">{`🛒 สร้างใบขอซื้อ (${sel.size})`}</button>
           )}
         </div>}
@@ -300,22 +322,62 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       <div className="max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
         <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
           <h3 className="text-sm font-semibold text-slate-700">📦 ต้องขอซื้อ/เตรียม <span className="text-slate-400">({moGroups.length} ใบสั่งผลิต)</span></h3>
-          <div className="flex items-center gap-2">{modeToggle}{printBtn}</div>
+          <div className="flex items-center gap-2">
+            {mode === "group" && buckets.length > 0 && (
+              <button type="button" onClick={() => setOpenGroups((s) => s.size >= buckets.length ? new Set() : new Set(buckets.map((b) => b.name)))}
+                className="h-8 px-3 text-sm border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50">
+                {openGroups.size >= buckets.length ? "▸ พับทั้งหมด" : "▾ กางทั้งหมด"}
+              </button>
+            )}
+            {modeToggle}{printBtn}
+          </div>
         </div>
         {moGroups.length === 0 ? (
           <div className="text-center py-16 text-slate-300">ไม่มีวัตถุดิบที่ต้องขอซื้อ/เตรียม 🎉</div>
         ) : (
           <div className="space-y-3">
-            {mode === "group" ? (() => {
-              const buckets = new Map<string, typeof moGroups>();
-              for (const g of moGroups) { const k = groupNameOf(g.mo_no) ?? "— ยังไม่จับกลุ่ม —"; (buckets.get(k) ?? buckets.set(k, []).get(k)!).push(g); }
-              return [...buckets.entries()].map(([gname, gs]) => (
-                <div key={gname}>
-                  <div className="text-xs font-bold text-violet-700 bg-violet-50 border border-violet-100 rounded-lg px-3 py-1.5 mb-2">🗂 {gname} <span className="text-violet-400 font-normal">({gs.length} ใบ)</span></div>
-                  <div className="space-y-3">{gs.map(renderMoSection)}</div>
+            {mode === "group" ? buckets.map(({ name, moNos }) => {
+              const open = openGroups.has(name);
+              const grows = open ? rowsOfBucket(moNos) : [];
+              const gsel = groupSel[name] ?? EMPTY;
+              const gchosen = grows.filter((r) => gsel.has(keyOf(r)));
+              return (
+                <div key={name}>
+                  <button type="button" onClick={() => toggleGroup(name)}
+                    className="w-full flex items-center gap-2 text-xs font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-100 rounded-lg px-3 py-2 text-left">
+                    <span className="text-[10px] w-3 shrink-0">{open ? "▾" : "▸"}</span>
+                    <span className="truncate">🗂 {name}</span>
+                    <span className="text-violet-400 font-normal shrink-0">({moNos.length} ใบ)</span>
+                  </button>
+                  {open && (
+                    <div className="mt-2 pl-2">
+                      <MiniTable
+                        rows={grows}
+                        rowKey={keyOf}
+                        columns={columns}
+                        searchText={(r) => `${r.component_sku ?? ""} ${r.component_name ?? ""} ${r.material_type ?? ""}`}
+                        searchPlaceholder="ค้นหา รหัส / ชื่อ / ประเภท"
+                        groupBy={(r) => r.material_type || "ไม่ระบุประเภท"}
+                        groupLabel="จัดกลุ่มตามประเภท"
+                        selectable={canEdit}
+                        selected={gsel}
+                        onSelectedChange={(s) => setGroupSel((p) => ({ ...p, [name]: s }))}
+                        emptyText="ไม่มีวัตถุดิบที่ต้องขอซื้อ/เตรียมในกลุ่มนี้ 🎉"
+                        noMatchText={(q) => `ไม่พบวัตถุดิบที่ตรงกับ “${q}”`}
+                        actions={canEdit && grows.length > 0 ? (
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => { setPrepRows(gchosen); setConfirmPrepOpen(true); }} disabled={saving || gchosen.length === 0} title="เตรียมครบทุกใบสั่งผลิตที่ใช้วัตถุดิบที่เลือก (เฉพาะกลุ่มนี้)"
+                              className="h-9 px-3 text-sm font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">✓ ทำเป็นเตรียมแล้ว ({gchosen.length})</button>
+                            <button onClick={() => { setPrRows(gchosen); setConfirmOpen(true); }} disabled={saving || gchosen.length === 0}
+                              className="h-9 px-4 text-sm font-medium bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50">🛒 สร้างใบขอซื้อ ({gchosen.length})</button>
+                          </div>
+                        ) : undefined}
+                      />
+                    </div>
+                  )}
                 </div>
-              ));
-            })() : moGroups.map(renderMoSection)}
+              );
+            }) : moGroups.map(renderMoSection)}
           </div>
         )}
         <p className="text-[11px] text-slate-400 mt-2">ใส่ &ldquo;จำนวนที่มี&rdquo; แล้วคลิกออกจากช่อง = บันทึก (sync กับบอร์ด) · ติ๊ก &ldquo;เตรียมแล้ว&rdquo; = ทำเครื่องหมายเตรียมเสร็จ · คลิกหัวใบสั่งผลิต = เปิดป๊อปอัป</p>
@@ -328,7 +390,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
         <button onClick={() => void markPreparedSelected()} disabled={saving} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "ยืนยัน เตรียมแล้ว"}</button>
       </>}>
       {(() => {
-        const chosenRows = (rows ?? []).filter((r) => sel.has(keyOf(r)));
+        const chosenRows = prepRows;
         const ids = chosenRows.flatMap((r) => r.mos.map((m) => m.summary_id).filter(Boolean));
         const moCnt = new Set(chosenRows.flatMap((r) => r.mos.map((m) => m.mo_no))).size;
         return (
