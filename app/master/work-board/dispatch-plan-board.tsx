@@ -44,6 +44,7 @@ export function DispatchPlanBoard({
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
+  const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup ดูพนักงานในแผนก
   // กลุ่มใบสั่งงาน (สำหรับแท็บกรองในคอลัมน์รอจ่าย)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   const [groupTab, setGroupTab] = useState<string>("__all__");   // __all__ | ชื่อกลุ่ม | __none__
@@ -252,10 +253,14 @@ export function DispatchPlanBoard({
               <div key={d.id} onClick={() => canDrop && addLine(d)}
                 className={`rounded-xl border p-2 min-h-[140px] ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}>
                 <div className="flex items-center justify-between gap-1 mb-2">
-                  <span className="text-sm font-bold text-slate-700 truncate">{d.name}</span>
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-sm font-bold text-slate-700 truncate">{d.name}</span>
+                    <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="ดูพนักงานในแผนก" className="shrink-0 text-slate-300 hover:text-violet-600 text-[11px]">👥</button>
+                  </div>
                   <span className="text-[10px] text-right shrink-0 leading-tight">
-                    {(deptWages[d.id] ?? 0) > 0 && <span className="block text-violet-600" title="เงินเดือนรวมพนักงานในแผนก">👥 {baht(deptWages[d.id])}</span>}
-                    {totQty > 0 && <span className="block text-slate-500" title="งานที่จ่ายในโต๊ะนี้ (จำนวน · ค่าแรง)">{fmt(totQty)} ชิ้น · {baht(totLabor)}</span>}
+                    {(deptWages[d.id] ?? 0) > 0 && <span className="block text-violet-600" title="เงินเดือนรวมพนักงานในแผนก">คน {baht(deptWages[d.id])}</span>}
+                    {totQty > 0 && <span className="block text-slate-500" title="ค่าแรงงานที่จ่ายในโต๊ะนี้">งาน {fmt(totQty)} ชิ้น · {baht(totLabor)}</span>}
+                    {(deptWages[d.id] ?? 0) > 0 && totLabor > 0 && (() => { const diff = (deptWages[d.id] ?? 0) - totLabor; return <span className={`block ${diff >= 0 ? "text-amber-600" : "text-rose-600"}`} title="เงินเดือนพนักงาน − ค่าแรงงานที่จ่าย">ต่าง {baht(diff)}</span>; })()}
                   </span>
                 </div>
                 {/* ใบจ่ายจริง (ล็อก) */}
@@ -295,6 +300,24 @@ export function DispatchPlanBoard({
       )}
 
       {/* ยืนยันดันเป็นของจริง */}
+      {staffPopup && (
+        <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => setStaffPopup(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold text-slate-800 truncate">👥 พนักงาน — {staffPopup.name}</h3>
+              <button onClick={() => setStaffPopup(null)} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
+            </div>
+            {(() => {
+              const list = craftsmen.filter((c) => c.department_id === staffPopup.id);
+              return list.length === 0
+                ? <p className="text-xs text-slate-400 py-3 text-center">แผนกนี้ยังไม่มีพนักงานผูกไว้</p>
+                : <div className="divide-y divide-slate-50 max-h-72 overflow-y-auto">{list.map((c) => <div key={c.id} className="py-1.5 text-sm text-slate-700">{c.code ? <code className="text-[10px] text-slate-400 mr-1">[{c.code}]</code> : null}{c.name}</div>)}</div>;
+            })()}
+            {(deptWages[staffPopup.id] ?? 0) > 0 && <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-violet-700">เงินเดือนรวมในแผนก {baht(deptWages[staffPopup.id])}</div>}
+          </div>
+        </div>
+      )}
+
       {confirmApply && (
         <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => setConfirmApply(false)}>
           <div className="bg-white rounded-xl shadow-xl max-w-sm w-full p-5" onClick={(e) => e.stopPropagation()}>
