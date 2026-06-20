@@ -82,5 +82,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     actorId: user.id, actorName: actor, metadata: { pr_no: r.pr_no, item_name: r.item_name },
   })));
 
+  // ---- แจ้งเตือนเมื่อมีคนขอซื้อ: ① ในแอป (ผู้มีสิทธิ์อนุมัติ) ② LINE (กลุ่มขอซื้อ) ----
+  // ห่อ try/catch — แจ้งเตือนพลาดต้องไม่ทำให้สร้างใบขอซื้อล้มเหลว
+  try {
+    const created = inserted ?? [];
+    const n = created.length;
+    const first = String(created[0]?.item_name ?? "สินค้า");
+    const summary = n <= 1 ? first : `${first} +${n - 1} รายการ`;
+    const urgent = items.some((i) => i.is_urgent === true);
+    const title = `🛒 ใบขอซื้อใหม่ ${n} ใบ`;
+    const bodyText = `${actor} ขอซื้อ: ${summary}`;
+
+    // ① ในแอป → user ที่มีสิทธิ์ pr.approve (+ admin) · ไม่เตือนตัวคนขอเอง
+    const { data: roleRows } = await admin.from("erp_role_permissions").select("role_key").eq("permission_key", "pr.approve");
+    const roleKeys = [...new Set([...(roleRows ?? []).map((r) => String(r.role_key)), "admin"])];
+    const { data: approvers } = await admin.from("user_profiles").select("id").eq("active", true).in("role", roleKeys);
+    const notifRows = (approvers ?? [])
+      .filter((a) => a.id && a.id !== user.id)
+      .map((a) => ({
+        user_id: a.id as string, event_type: "pr_created", title, body: bodyText,
+        link_url: "/purchasing/orders", entity_type: "purchase_requests_v2",
+        entity_id: (created[0]?.id as string) ?? null, priority: urgent ? "high" : "normal",
+      }));
+    if (notifRows.length) await admin.from("erp_notifications").insert(notifRows);
+
+    // ② LINE → กลุ่ม "ขอซื้อ" (groups.purchase_request → fallback กลุ่มหลัก) · ใช้บอท/โทเคนเดิม
+    const { data: lc } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
+    const cfg = (lc?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
+    const target = cfg.groups?.purchase_request || "";   // เฉพาะกลุ่มขอซื้อที่ตั้งไว้ (ไม่ fallback กลุ่มอื่น)
+    if (cfg.token && target) {
+      const lineText = `🛒 ใบขอซื้อใหม่ ${n} ใบ\nผู้ขอ: ${actor}\nรายการ: ${summary}${urgent ? "\n⚡ มีรายการด่วน" : ""}\n→ เปิดแอปจัดซื้อเพื่ออนุมัติ`;
+      await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
+        body: JSON.stringify({ to: target, messages: [{ type: "text", text: lineText.slice(0, 4900) }] }),
+      });
+    }
+  } catch (e) { console.warn("[create-pr] notify failed:", e); }
+
   return NextResponse.json({ ok: true, created: (inserted ?? []).length, pr_nos: (inserted ?? []).map((r) => r.pr_no), error: null });
 }
