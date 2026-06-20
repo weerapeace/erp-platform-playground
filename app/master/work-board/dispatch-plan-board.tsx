@@ -29,7 +29,7 @@ function Thumb({ url }: { url?: string | null }) {
 
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
-  laborPerUnit, imageByMo, deptWages, canEdit,
+  laborPerUnit, imageByMo, deptWages, canEdit, tablet,
   onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
@@ -38,6 +38,7 @@ export function DispatchPlanBoard({
   laborPerUnit: Record<string, number>;   // mo_no → ค่าแรงผลิตต่อชิ้น (จากแผนกลุ่ม A)
   imageByMo: Record<string, string | null>;
   canEdit: boolean;
+  tablet?: boolean;   // โหมดแท็บเล็ต → โฟกัสทีละโต๊ะ (แตะชิปเลือกโต๊ะ + เห็น 2 ช่อง รอจ่าย/โต๊ะที่เลือก)
   onApplied: () => void; onRenamed: (name: string) => void; onDates: (start: string | null, end: string | null) => void; onDeleted: () => void;
   onOpenWork: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
@@ -47,6 +48,7 @@ export function DispatchPlanBoard({
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
   const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup ดูพนักงานในแผนก
+  const [focusDept, setFocusDept] = useState<string | null>(null);   // โหมดแท็บเล็ต: โต๊ะที่กำลังโฟกัส
   // กลุ่มใบสั่งงาน (สำหรับแท็บกรองในคอลัมน์รอจ่าย)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   const [groupTab, setGroupTab] = useState<string>("__all__");   // __all__ | ชื่อกลุ่ม | __none__
@@ -178,6 +180,10 @@ export function DispatchPlanBoard({
 
   const deptCraftsmen = (dept: DeptLite) => /เหมา/.test(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id);
   const visiblePending = pending.filter((p) => availOf(p) > 0 && inGroupTab(p.mo_no));
+  // โหมดแท็บเล็ต: โฟกัสทีละโต๊ะ → เห็น 2 ช่อง (รอจ่าย + โต๊ะที่เลือก) ลดการเลื่อนหาคอลัมน์
+  const focusedId = tablet ? (departments.some((d) => d.id === focusDept) ? focusDept : departments[0]?.id ?? null) : null;
+  const shownDepts = tablet ? departments.filter((d) => d.id === focusedId) : departments;
+  const draftCountOf = (id: string) => (draftByDept.get(id) ?? []).length;
 
   // การ์ดร่าง 1 ใบ (แยกไว้เพื่อจัดกลุ่มตามช่างได้)
   const draftCard = (l: DispatchPlanLine, d: DeptLite) => {
@@ -242,11 +248,27 @@ export function DispatchPlanBoard({
         <span><span className="inline-block w-2.5 h-2.5 rounded-sm border border-slate-300 align-[-1px]" /> รอจ่าย</span>
         <span><span className="inline-block w-2.5 h-2.5 rounded-sm align-[-1px]" style={{ border: "1.5px dashed #1d9e75" }} /> ร่าง (ทดลอง)</span>
         <span>🔒 จ่ายจริง (ล็อก)</span>
-        {editable && <span className="text-indigo-500">กดการ์ดรอจ่าย → กดที่โต๊ะเพื่อจ่ายแบบร่าง</span>}
+        {editable && <span className="text-indigo-500">{tablet ? "แตะการ์ดรอจ่าย → แตะที่โต๊ะเพื่อจ่าย (ไม่ต้องลาก)" : "กดการ์ดรอจ่าย → กดที่โต๊ะเพื่อจ่ายแบบร่าง"}</span>}
       </div>
 
+      {/* แท็บเล็ต: แถบชิปเลือกโต๊ะที่จะโฟกัส */}
+      {tablet && departments.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+          <span className="text-sm text-slate-400 shrink-0">โต๊ะ:</span>
+          {departments.map((d) => {
+            const on = d.id === focusedId; const n = draftCountOf(d.id);
+            return (
+              <button key={d.id} type="button" onClick={() => setFocusDept(d.id)}
+                className={`shrink-0 px-4 py-2 rounded-full text-sm font-medium border ${on ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                {d.name}{n > 0 && <span className={`ml-1.5 text-[11px] ${on ? "text-indigo-100" : "text-slate-400"}`}>({n})</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {loading ? <div className="text-center py-10 text-slate-400 text-sm">กำลังโหลดแผน…</div> : (
-        <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))" }}>
+        <div className="grid gap-2.5" style={{ gridTemplateColumns: tablet ? "1fr 1fr" : "repeat(auto-fill, minmax(180px, 1fr))" }}>
           {/* คอลัมน์รอจ่าย */}
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]"
             onDragOver={(e) => { if (editable && dragRef.current?.kind === "draft") e.preventDefault(); }}
@@ -283,8 +305,8 @@ export function DispatchPlanBoard({
             {visiblePending.length === 0 && <div className="text-center text-[11px] text-slate-300 py-3">— ไม่มีใบในกลุ่มนี้ —</div>}
           </div>
 
-          {/* คอลัมน์แผนก */}
-          {departments.map((d) => {
+          {/* คอลัมน์แผนก (แท็บเล็ต = เฉพาะโต๊ะที่โฟกัส) */}
+          {shownDepts.map((d) => {
             const reals = realByDept.get(d.id) ?? [];
             const drafts = draftByDept.get(d.id) ?? [];
             const totQty = drafts.reduce((a, l) => a + (Number(l.qty) || 0), 0) + reals.reduce((a, w) => a + (Number(w.qty) || 0), 0);

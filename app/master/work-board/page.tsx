@@ -902,7 +902,7 @@ export default function WorkBoardPage() {
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut")}
             pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
-            canEdit={canDispatch}
+            canEdit={canDispatch} tablet={tablet}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
             onDates={(start_date, end_date) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, start_date, end_date } : x))}
