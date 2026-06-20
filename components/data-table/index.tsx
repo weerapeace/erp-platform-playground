@@ -712,6 +712,9 @@ export function DataTable<T extends Record<string, unknown>>({
     setCardCfg(c);
     if (cardCfgKey) { try { localStorage.setItem(cardCfgKey, JSON.stringify(c)); } catch { /* ignore */ } }
   };
+  // config ที่ใช้ render จริง — ถ้า cardCfg ไม่มี primary (เช่น auto ตอนคอลัมน์ยังโหลดไม่เสร็จ → ค้างว่าง)
+  // ให้ fallback ไป autoCardConfig สด (useMemo ตามคอลัมน์) → การ์ดมีหัวข้อ/ข้อมูลเสมอ ไม่ว่างเปล่า
+  const effCardCfg: CardConfig = cardCfg && cardCfg.primary ? cardCfg : autoCardConfig;
 
   // ---- Core state ----
   const [sorting,          setSorting]         = useState<SortingState>([]);
@@ -1900,7 +1903,7 @@ export function DataTable<T extends Record<string, unknown>>({
               // F28: card ใช้ rows ที่ paginate แล้ว (เหมือน table) — ไม่ render ทั้ง 1,471
               rows={isServer ? filteredData : table.getRowModel().rows.map(r => r.original as T)}
               columns={columns}
-              config={cardCfg}
+              config={effCardCfg}
               onRowClick={isRowClickable ? handleRowClick : undefined}
             />
           )
@@ -2314,7 +2317,7 @@ export function DataTable<T extends Record<string, unknown>>({
       {showCardCfg && (
         <CardConfigDialog
           columns={columns}
-          config={cardCfg}
+          config={effCardCfg}
           onClose={() => setShowCardCfg(false)}
           onSave={(c) => { persistCardCfg(c); setShowCardCfg(false); }}
         />

@@ -744,11 +744,11 @@ export default function ReceiveGoodsPage() {
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">{it.remaining.toLocaleString()} {it.uom}</td>
                             <td className="px-3 py-2">
-                              <input type="number" step="any" min={0} value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })}
+                              <input type="number" inputMode="decimal" step="any" min={0} value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })}
                                 className={`w-20 h-8 px-2 text-sm text-right border rounded ${short ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
                             </td>
                             <td className="px-3 py-2">
-                              <input type="number" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })}
+                              <input type="number" inputMode="decimal" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })}
                                 className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded" />
                             </td>
                               </>
@@ -822,11 +822,11 @@ export default function ReceiveGoodsPage() {
                           <td className="px-3 py-2 text-right tabular-nums text-slate-500">{num(l.qty_received).toLocaleString()}</td>
                           <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">{remaining.toLocaleString()}</td>
                           <td className="px-3 py-2">
-                            <input type="number" step="any" min={0} value={inp.recv} onChange={(e) => setInput(l.id, { recv: e.target.value })}
+                            <input type="number" inputMode="decimal" step="any" min={0} value={inp.recv} onChange={(e) => setInput(l.id, { recv: e.target.value })}
                               className={`w-20 h-8 px-2 text-sm text-right border rounded ${short ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
                           </td>
                           <td className="px-3 py-2">
-                            <input type="number" step="any" min={0} value={inp.def} onChange={(e) => setInput(l.id, { def: e.target.value })}
+                            <input type="number" inputMode="decimal" step="any" min={0} value={inp.def} onChange={(e) => setInput(l.id, { def: e.target.value })}
                               className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded" />
                           </td>
                         </tr>
@@ -962,13 +962,22 @@ export default function ReceiveGoodsPage() {
             <div className="grid grid-cols-2 gap-3 mt-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">รับครั้งนี้ ({it.uom})</label>
-                <input type="number" step="any" min={0} autoFocus value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })} onFocus={(e) => e.target.select()}
-                  className={`w-full h-11 px-3 text-lg text-right border rounded-md ${short || over ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
+                {/* ปุ่ม −/+ ตัวใหญ่ + แป้นตัวเลข (กดง่ายบนมือถือ ไม่ต้องพิมพ์) */}
+                <div className="flex items-stretch gap-1.5">
+                  <button type="button" aria-label="ลด" onClick={() => setPendInput(it.id, { recv: String(Math.max(0, Math.round((num(inp.recv) - 1) * 100) / 100)) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">−</button>
+                  <input type="number" inputMode="decimal" step="any" min={0} autoFocus value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })} onFocus={(e) => e.target.select()}
+                    className={`flex-1 min-w-0 h-11 px-2 text-lg text-center border rounded-md ${short || over ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
+                  <button type="button" aria-label="เพิ่ม" onClick={() => setPendInput(it.id, { recv: String(Math.round((num(inp.recv) + 1) * 100) / 100) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">+</button>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">เสีย / ผิด ({it.uom})</label>
-                <input type="number" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })}
-                  className="w-full h-11 px-3 text-lg text-right border border-slate-200 rounded-md" />
+                <div className="flex items-stretch gap-1.5">
+                  <button type="button" aria-label="ลด" onClick={() => setPendInput(it.id, { def: String(Math.max(0, Math.round((num(inp.def) - 1) * 100) / 100)) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">−</button>
+                  <input type="number" inputMode="decimal" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })} onFocus={(e) => e.target.select()}
+                    className="flex-1 min-w-0 h-11 px-2 text-lg text-center border border-slate-200 rounded-md" />
+                  <button type="button" aria-label="เพิ่ม" onClick={() => setPendInput(it.id, { def: String(Math.round((num(inp.def) + 1) * 100) / 100) })} className="w-9 h-11 flex items-center justify-center text-xl text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50 active:scale-95 shrink-0">+</button>
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
