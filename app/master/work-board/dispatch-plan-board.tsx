@@ -47,6 +47,7 @@ export function DispatchPlanBoard({
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
+  const [dispQty, setDispQty] = useState<Record<string, string>>({});   // จำนวนที่จะจ่าย (แบ่งจ่าย) ต่อ mo_no
   const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup ดูพนักงานในแผนก
   const [focusDept, setFocusDept] = useState<string | null>(null);   // โหมดแท็บเล็ต: โต๊ะที่กำลังโฟกัส
   const [colW, setColW] = useState(240);   // ความกว้างคอลัมน์/โต๊ะ (px) — ปรับได้ จำที่เครื่อง
@@ -90,6 +91,12 @@ export function DispatchPlanBoard({
     return m;
   }, [lines]);
   const availOf = (p: PendingLite) => Math.max(0, Math.round((p.remaining - (draftedByMo.get(p.mo_no) ?? 0)) * 100) / 100);
+  // จำนวนที่จะจ่ายครั้งนี้ (แบ่งจ่าย) — ว่าง = จ่ายเต็มที่เหลือ · ไม่เกินที่เหลือ
+  const dispQtyOf = (p: PendingLite) => {
+    const raw = dispQty[p.mo_no]; const av = availOf(p);
+    const n = raw === undefined || raw === "" ? av : Number(raw);
+    return Math.max(0, Math.min(av, Number.isFinite(n) ? n : 0));
+  };
 
   // ใบจ่ายงานจริง จัดกลุ่มตามแผนก (โชว์ล็อก)
   const realByDept = useMemo(() => {
@@ -107,20 +114,21 @@ export function DispatchPlanBoard({
   const addLineFor = async (moNo: string, dept: DeptLite) => {
     if (!editable) return;
     const p = pending.find((x) => x.mo_no === moNo); if (!p) return;
-    const qty = availOf(p);
-    if (qty <= 0) { toast.info("ใบนี้วางแผนครบจำนวนแล้ว"); return; }
+    const qty = dispQtyOf(p);
+    if (qty <= 0) { toast.info("ใส่จำนวนที่จะจ่ายก่อน (หรือใบนี้วางแผนครบแล้ว)"); return; }
     try {
       const r = await apiFetch(`/api/mo/dispatch-plans/${planId}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "add_line", line: { mo_no: p.mo_no, mo_id: p.id, product_sku: p.product_sku, product_name: p.product_name, qty, department_id: dept.id, department_name: dept.name } }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
       setLines((ls) => [...ls, j.data as DispatchPlanLine]);
+      setDispQty((d) => { const n = { ...d }; delete n[moNo]; return n; });   // จ่ายแล้ว → รีเซ็ตช่อง (default = ที่เหลือใหม่)
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
   };
   const addLine = (dept: DeptLite) => {
-    if (!selected || addBusyRef.current) return;
+    if (!selected || addBusyRef.current) return;   // addBusyRef กันแตะรัวซ้ำระหว่างรอเน็ต
     addBusyRef.current = true;
-    const mo = selected; setSelected(null);   // ล้างทันที กันคลิกซ้ำก่อน re-render
-    void addLineFor(mo, dept).finally(() => { addBusyRef.current = false; });
+    // ไม่ล้าง selected → จ่ายแล้วการ์ดยังเลือกอยู่ จ่ายส่วนที่เหลือไปโต๊ะอื่นต่อได้ (แบ่งจ่าย)
+    void addLineFor(selected, dept).finally(() => { addBusyRef.current = false; });
   };
   // ลากการ์ดร่างย้ายโต๊ะ
   const moveLine = async (lineId: string, dept: DeptLite) => {
@@ -297,18 +305,35 @@ export function DispatchPlanBoard({
             {visiblePending.map((p) => {
               const on = selected === p.mo_no;
               return (
-                <div key={p.id} draggable={editable} onDragStart={() => { dragRef.current = { kind: "pending", moNo: p.mo_no }; }}
+                <div key={p.id}
                   onClick={() => editable && setSelected(on ? null : p.mo_no)}
-                  className={`rounded-lg px-2 py-1.5 mb-1.5 bg-white ${on ? "ring-2 ring-indigo-400 border-indigo-300" : "border border-slate-200"} ${editable ? "cursor-grab active:cursor-grabbing hover:bg-slate-50" : ""}`}>
-                  <div className="flex items-center gap-2">
+                  className={`rounded-lg px-2 py-1.5 mb-1.5 bg-white ${on ? "ring-2 ring-indigo-400 border-indigo-300" : "border border-slate-200"} ${editable ? "cursor-pointer hover:bg-slate-50" : ""}`}>
+                  <div className="flex items-center gap-1.5">
+                    {editable && <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "pending", moNo: p.mo_no }; }} onClick={(e) => e.stopPropagation()} title="ลากไปวางที่โต๊ะ" className="shrink-0 cursor-move text-slate-300 hover:text-slate-500 select-none">⠿</span>}
                     <Thumb url={p.image_url} />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-slate-800 truncate">{p.product_sku}</div>
-                      <div className="text-[11px] text-slate-500 truncate">{p.mo_no} · เหลือวางแผน {fmt(availOf(p))}/{fmt(p.remaining)}</div>
-                      <div className="text-[10px] text-slate-400">ค่าแรงผลิต {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</div>
+                      <div className="text-[10px] text-slate-400 truncate">{p.mo_no} · ค่าแรง {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</div>
                     </div>
                     <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }} title="ดูรายละเอียดงาน" className="shrink-0 text-slate-300 hover:text-blue-600">🔍</button>
                   </div>
+                  {/* จำนวนที่เหลือต้องจ่าย — เด่น ๆ */}
+                  <div className="mt-1 flex items-center justify-between gap-2">
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700">เหลือจ่าย <b className="text-base font-bold tabular-nums">{fmt(availOf(p))}</b> ชิ้น</span>
+                    {!on && editable && <span className="text-[10px] text-slate-300">แตะเพื่อจ่าย</span>}
+                  </div>
+                  {/* แบ่งจ่าย — ระบุจำนวนแล้วแตะโต๊ะ (จ่ายส่วนที่เหลือไปโต๊ะอื่นต่อได้) */}
+                  {on && editable && (
+                    <div className="mt-1.5 flex items-center gap-1.5 bg-indigo-50/70 border border-indigo-100 rounded-lg px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-[11px] font-medium text-indigo-700 shrink-0">✂️ แบ่งจ่าย</span>
+                      <input type="number" min={0} max={availOf(p)} step="any"
+                        value={dispQty[p.mo_no] ?? String(availOf(p))}
+                        onChange={(e) => setDispQty((d) => ({ ...d, [p.mo_no]: e.target.value }))}
+                        className="w-16 h-7 px-1.5 text-sm text-right border border-indigo-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                      <span className="text-[11px] text-slate-500 shrink-0">ชิ้น</span>
+                      <span className="text-[10px] text-indigo-500 ml-auto shrink-0">→ แตะโต๊ะ</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
