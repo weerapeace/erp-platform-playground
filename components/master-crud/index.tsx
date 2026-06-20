@@ -46,6 +46,33 @@ const StudioPanel = dynamic(
 
 // ---- Helper: map FormField (Registry) → FieldDef (MasterCRUDPage internal) ----
 
+// ของกลาง: แสดงชื่อ relation ที่ "หาเองได้" เมื่อ row ไม่มี {base}_label มาให้
+// (กันอาการค้าง skeleton "กำลังโหลดชื่อ…" ถาวร เช่นตอน full-fetch ติด RLS หรือ field ไม่ได้ join ใน list)
+function RelationLabelValue({ id, config, style }: { id: string; config?: RelationConfig; style?: React.CSSProperties }) {
+  const [label, setLabel] = useState<string | null>(null);
+  const [done, setDone]   = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const cfg = (config ?? {}) as RelationConfig;
+    const url = cfg.lookup_type
+      ? `/api/lookups?type=${encodeURIComponent(cfg.lookup_type)}&include_ids=${encodeURIComponent(id)}&limit=1`
+      : cfg.target_table
+        ? `/api/admin/picker?table=${encodeURIComponent(cfg.target_table)}&label=${encodeURIComponent(cfg.target_label_field ?? "name")}&include_ids=${encodeURIComponent(id)}&limit=1`
+        : null;
+    if (!url) { setDone(true); return; }
+    apiFetch(url).then((r) => r.json()).then((j) => {
+      if (!alive) return;
+      const row = ((j.data ?? []) as Array<Record<string, unknown>>).find((o) => String(o.id) === String(id));
+      setLabel(row ? String(row.label ?? row.name ?? "") || null : null);
+    }).catch(() => {}).finally(() => { if (alive) setDone(true); });
+    return () => { alive = false; };
+  }, [id, config]);
+  if (label) return <span className="text-sm text-slate-800" style={style}>{label}</span>;
+  if (!done)  return <span className="inline-block h-3.5 w-24 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" />;
+  // โหลดแล้วไม่พบชื่อ (เช่น record ถูกลบ) → โชว์รหัสสั้น ๆ ไม่ค้าง skeleton
+  return <span className="text-sm text-slate-400" style={style} title={id}>{String(id).slice(0, 8)}…</span>;
+}
+
 // Default render สำหรับ relation field — อ่าน label จาก row[`{key}_label`] หรือ row[`{key}_name`]
 function defaultRelationCellRender(key: string) {
   // strip _id suffix สำหรับหา key ของ label
@@ -1038,6 +1065,12 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       if (field.type === "many2many" || field.type === "one2many") return;
       const v = r[field.key];
       partial[field.key] = v == null ? (field.type === "boolean" ? false : "") : v;
+      // relation: ยกชื่อ (label) จากแถวใน list มาด้วย — list มี {base}_label อยู่แล้ว
+      // ไม่งั้น detail จะค้าง "กำลังโหลดชื่อ…" จนกว่า full fetch จะกลับมา (และพังถ้า full fetch ติด RLS/ช้า)
+      if (field.type === "relation") {
+        const base = field.key.endsWith("_id") ? field.key.slice(0, -3) : field.key;
+        for (const suf of ["_label", "_name"]) { const lk = base + suf; if (lk in r) partial[lk] = r[lk]; }
+      }
     });
     setForm(partial);
 
@@ -1914,7 +1947,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       const label = form[`${base}_label`] ?? form[`${base}_name`];
       const content: React.ReactNode = f.cellRender ? f.cellRender(v, form)
         : label ? <span className="text-sm text-slate-800" style={vs}>{String(label)}</span>
-        : v ? <span className="inline-block h-3.5 w-24 rounded bg-slate-100 animate-pulse align-middle" title="กำลังโหลดชื่อ…" />
+        : v ? <RelationLabelValue id={String(v)} config={f.relationConfig as RelationConfig | undefined} style={vs} />
         : <span className="text-slate-300">—</span>;
       const tgt = (f.relationConfig as RelationConfig | undefined)?.target_module_key
         ?? (f.relationConfig as RelationConfig | undefined)?.target_table;
