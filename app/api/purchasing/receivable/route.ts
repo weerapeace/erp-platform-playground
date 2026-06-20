@@ -32,6 +32,7 @@ const dayDiff = (from: string, to: string): number => {
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  try {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   const mode = request.nextUrl.searchParams.get("mode") === "done" ? "done" : "pending";
@@ -113,7 +114,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const t = today();
   const rows = lines.map((l) => {
-    const po = poMap.get(String(l.po_id))!;
+    const po = poMap.get(String(l.po_id)); if (!po) return null;
     const sk = l.item_sku_id ? skuMap.get(String(l.item_sku_id)) : null;
     const cover = sk?.cover ?? null;
     const orderDate = (po.order_date as string) || null;
@@ -169,7 +170,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ship_before_pay: shipBefore,
       duration_days: shipStart ? dayDiff(shipStart, t) : null,   // ค้างมากี่วัน (ตั้งแต่เริ่มนับ)
     };
-  });
+  }).filter(Boolean);
 
   return NextResponse.json({ data: rows, error: null });
+  } catch (e) {
+    // คืน error message จริง (กันหน้าค้างเพราะ 500 body ว่าง) — ไว้ debug
+    return NextResponse.json({ data: [], error: "receivable error: " + String((e as { message?: string })?.message ?? e) }, { status: 500 });
+  }
 }
