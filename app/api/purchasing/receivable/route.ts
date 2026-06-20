@@ -8,7 +8,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { timeRoute, withTimingHeaders } from "@/lib/api-timing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,7 +31,7 @@ const dayDiff = (from: string, to: string): number => {
   return Math.round((b - a) / 86400000);
 };
 
-async function _GET(request: NextRequest): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   const mode = request.nextUrl.searchParams.get("mode") === "done" ? "done" : "pending";
@@ -70,55 +69,47 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
   }
   if (lines.length === 0) return NextResponse.json({ data: [], error: null });
 
-  // 3-7) ดึงข้อมูลประกอบทั้งหมด "พร้อมกัน" (Promise.all) — แต่ละก้อนไม่พึ่งกัน
-  // เดิมยิงเรียงทีละก้อนไป Supabase(โตเกียว) → ~4 วิ · ทำขนานแล้วเหลือ ~ก้อนช้าสุด (แก้หน้ารับของค้าง)
+  // 3) รหัส + รูปปก จาก SKU (batch)
   const skuIds = [...new Set(lines.map((l) => l.item_sku_id).filter(Boolean) as string[])];
-  const prIds = [...new Set(lines.map((l) => l.pr_id).filter(Boolean) as string[])];
-  const lineIds = lines.map((l) => String(l.id));
-
   const skuMap = new Map<string, { code: string | null; cover: string | null }>();
-  const leadMap = new Map<string, number | null>();
-  const prMap = new Map<string, { mo: string | null; usedFor: string | null }>();
-  const recvCount = new Map<string, number>();
-  const shipBeforePay = new Set<string>();
+  for (let i = 0; i < skuIds.length; i += 300) {
+    const chunk = skuIds.slice(i, i + 300);
+    const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", chunk);
+    for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
+  }
 
-  await Promise.all([
-    // 3) รหัส + รูปปก จาก SKU
-    (async () => {
-      for (let i = 0; i < skuIds.length; i += 300) {
-        const { data: sk } = await admin.from("skus_v2").select("id, code, cover_image_r2_key").in("id", skuIds.slice(i, i + 300));
-        for (const s of (sk ?? []) as Record<string, unknown>[]) skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: (s.cover_image_r2_key as string) ?? null });
-      }
-    })(),
-    // 4) ลีดไทม์ร้านหลัก (is_default)
-    (async () => {
-      for (let i = 0; i < skuIds.length; i += 300) {
-        const { data: si } = await admin.from("supplier_items").select("item_sku_id, lead_time_days").eq("is_default", true).in("item_sku_id", skuIds.slice(i, i + 300));
-        for (const s of (si ?? []) as Record<string, unknown>[]) leadMap.set(String(s.item_sku_id), s.lead_time_days == null ? null : Number(s.lead_time_days));
-      }
-    })(),
-    // 5) ใบสั่งผลิต (MO) ต้นทาง ผ่าน pr_id → source_mo_no + used_for_label
-    (async () => {
-      for (let i = 0; i < prIds.length; i += 300) {
-        const { data: pr } = await admin.from("purchase_requests_v2").select("id, source_mo_no, used_for_label").in("id", prIds.slice(i, i + 300));
-        for (const p of (pr ?? []) as Record<string, unknown>[]) prMap.set(String(p.id), { mo: (p.source_mo_no as string) ?? null, usedFor: (p.used_for_label as string) ?? null });
-      }
-    })(),
-    // 6) จำนวนครั้งที่รับ (นับใบรับ GR ต่อบรรทัด)
-    (async () => {
-      for (let i = 0; i < lineIds.length; i += 300) {
-        const { data: grl } = await admin.from("goods_receipt_lines_v2").select("po_line_id").in("po_line_id", lineIds.slice(i, i + 300));
-        for (const g of (grl ?? []) as Record<string, unknown>[]) { const k = String(g.po_line_id); recvCount.set(k, (recvCount.get(k) ?? 0) + 1); }
-      }
-    })(),
-    // 7) ร้านที่ตั้งว่า "ส่งก่อนจ่าย" (match ด้วยชื่อ — PO เก็บร้านเป็นชื่อ)
-    (async () => {
-      const { data: sup } = await admin.from("partners_v2").select("name_th, display_name, code, ship_before_pay").eq("ship_before_pay", true).limit(2000);
-      for (const s of (sup ?? []) as Record<string, unknown>[]) {
-        for (const nm of [s.name_th, s.display_name, s.code]) { const v = String(nm ?? "").trim(); if (v) shipBeforePay.add(v); }
-      }
-    })(),
-  ]);
+  // 4) ลีดไทม์ร้านหลัก (is_default) — ไว้คำนวณวันคาดเมื่อ PO ไม่ได้ระบุ
+  const leadMap = new Map<string, number | null>();
+  for (let i = 0; i < skuIds.length; i += 300) {
+    const chunk = skuIds.slice(i, i + 300);
+    const { data: si } = await admin.from("supplier_items").select("item_sku_id, lead_time_days").eq("is_default", true).in("item_sku_id", chunk);
+    for (const s of (si ?? []) as Record<string, unknown>[]) leadMap.set(String(s.item_sku_id), s.lead_time_days == null ? null : Number(s.lead_time_days));
+  }
+
+  // 5) ใบสั่งผลิต (MO) ต้นทาง — ผ่าน บรรทัด PO → pr_id → ใบขอซื้อ.source_mo_no + used_for_label
+  const prIds = [...new Set(lines.map((l) => l.pr_id).filter(Boolean) as string[])];
+  const prMap = new Map<string, { mo: string | null; usedFor: string | null }>();
+  for (let i = 0; i < prIds.length; i += 300) {
+    const chunk = prIds.slice(i, i + 300);
+    const { data: pr } = await admin.from("purchase_requests_v2").select("id, source_mo_no, used_for_label").in("id", chunk);
+    for (const p of (pr ?? []) as Record<string, unknown>[]) prMap.set(String(p.id), { mo: (p.source_mo_no as string) ?? null, usedFor: (p.used_for_label as string) ?? null });
+  }
+
+  // 6) จำนวนครั้งที่รับ (นับใบรับ GR ต่อบรรทัด) — โชว์บนการ์ดติดตาม
+  const lineIds = lines.map((l) => String(l.id));
+  const recvCount = new Map<string, number>();
+  for (let i = 0; i < lineIds.length; i += 300) {
+    const chunk = lineIds.slice(i, i + 300);
+    const { data: grl } = await admin.from("goods_receipt_lines_v2").select("po_line_id").in("po_line_id", chunk);
+    for (const g of (grl ?? []) as Record<string, unknown>[]) { const k = String(g.po_line_id); recvCount.set(k, (recvCount.get(k) ?? 0) + 1); }
+  }
+
+  // 7) ร้านที่ตั้งว่า "ส่งก่อนจ่าย" (match ด้วยชื่อ — PO เก็บร้านเป็นชื่อ) → เริ่มนับวันส่งจากวันสั่ง
+  const shipBeforePay = new Set<string>();
+  const { data: sup } = await admin.from("partners_v2").select("name_th, display_name, code, ship_before_pay").eq("ship_before_pay", true).limit(2000);
+  for (const s of (sup ?? []) as Record<string, unknown>[]) {
+    for (const nm of [s.name_th, s.display_name, s.code]) { const v = String(nm ?? "").trim(); if (v) shipBeforePay.add(v); }
+  }
 
   const t = today();
   const rows = lines.map((l) => {
@@ -180,7 +171,5 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
     };
   });
 
-  return withTimingHeaders(NextResponse.json({ data: rows, error: null }), { rowCount: rows.length });
+  return NextResponse.json({ data: rows, error: null });
 }
-
-export const GET = timeRoute("purchasing:receivable", _GET as any) as any;
