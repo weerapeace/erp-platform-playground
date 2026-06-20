@@ -23,6 +23,8 @@ export function LaborRates({ value, onChange, readonly, bomCode }: {
   const [crafts, setCrafts] = useState<Assignee[]>([]);
   const [histOpen, setHistOpen] = useState(false);
   const [hist, setHist] = useState<LaborRate[] | null>(null);
+  const [editing, setEditing] = useState<Set<number>>(new Set());   // แถวที่กำลังแก้ไข (แถวใหม่/กดปุ่มแก้)
+  const isEdit = (i: number, l: LaborLine) => !l.id || editing.has(i);   // ยังไม่บันทึก(ไม่มี id) หรือกดแก้ → โชว์ช่องกรอก
 
   useEffect(() => {
     let cancel = false;
@@ -36,7 +38,7 @@ export function LaborRates({ value, onChange, readonly, bomCode }: {
     const c = crafts.find((x) => x.id === id);
     patch(i, { craftsman_id: id, craftsman_name: c?.name ?? "" });
   };
-  const add = () => onChange([...value, emptyLabor()]);
+  const add = () => { setEditing((s) => new Set(s).add(value.length)); onChange([...value, emptyLabor()]); };
   const remove = (i: number) => onChange(value.filter((_, idx) => idx !== i));
 
   const openHist = async () => {
@@ -61,12 +63,12 @@ export function LaborRates({ value, onChange, readonly, bomCode }: {
         <div className="text-center py-5 border border-dashed border-slate-200 rounded-lg text-[12px] text-slate-300">ยังไม่มีค่าแรงผลิต</div>
       ) : (
         <div className="border border-slate-100 rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[1fr_6rem_1fr_2rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500">
+          <div className="grid grid-cols-[1fr_6rem_1fr_4rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500">
             <span>ช่าง</span><span className="text-right">ค่าแรง (บาท)</span><span>หมายเหตุ</span><span></span>
           </div>
           <div className="divide-y divide-slate-50">
-            {value.map((l, i) => (
-              <div key={l.id ?? i} className="grid grid-cols-[1fr_6rem_1fr_2rem] gap-2 px-3 py-2 items-center">
+            {value.map((l, i) => isEdit(i, l) ? (
+              <div key={l.id ?? `new${i}`} className="grid grid-cols-[1fr_6rem_1fr_4rem] gap-2 px-3 py-2 items-center">
                 <select value={l.craftsman_id ?? ""} disabled={readonly} onChange={(e) => pick(i, e.target.value)}
                   className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 bg-white">
                   <option value="">ราคากลาง (ไม่ระบุช่าง)</option>
@@ -77,7 +79,20 @@ export function LaborRates({ value, onChange, readonly, bomCode }: {
                   className="h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
                 <input value={l.note} disabled={readonly} placeholder="—" onChange={(e) => patch(i, { note: e.target.value })}
                   className="h-8 px-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
-                {!readonly ? <button onClick={() => remove(i)} className="h-8 w-7 flex items-center justify-center text-slate-300 hover:text-rose-600 rounded-lg hover:bg-rose-50">🗑</button> : <span />}
+                <div className="flex items-center gap-0.5 justify-end">
+                  {l.id && !readonly && <button onClick={() => setEditing((s) => { const n = new Set(s); n.delete(i); return n; })} title="เสร็จ" className="h-8 w-7 flex items-center justify-center text-emerald-600 hover:bg-emerald-50 rounded-lg">✓</button>}
+                  {!readonly && <button onClick={() => remove(i)} title="ลบ" className="h-8 w-7 flex items-center justify-center text-slate-300 hover:text-rose-600 rounded-lg hover:bg-rose-50">🗑</button>}
+                </div>
+              </div>
+            ) : (
+              <div key={l.id ?? i} className="grid grid-cols-[1fr_6rem_1fr_4rem] gap-2 px-3 py-2 items-center">
+                <span className="text-sm text-slate-700 truncate">{l.craftsman_name || "ราคากลาง (ไม่ระบุช่าง)"}</span>
+                <span className="text-sm text-right font-medium text-slate-800 tabular-nums">{fmtMoney(l.rate)}</span>
+                <span className="text-xs text-slate-500 truncate">{l.note || "—"}</span>
+                <div className="flex items-center gap-0.5 justify-end">
+                  {!readonly && <button onClick={() => setEditing((s) => new Set(s).add(i))} title="แก้ไข" className="h-8 w-7 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg">✎</button>}
+                  {!readonly && <button onClick={() => remove(i)} title="ลบ" className="h-8 w-7 flex items-center justify-center text-slate-300 hover:text-rose-600 rounded-lg hover:bg-rose-50">🗑</button>}
+                </div>
               </div>
             ))}
           </div>

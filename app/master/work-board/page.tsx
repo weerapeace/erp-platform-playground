@@ -567,7 +567,11 @@ export default function WorkBoardPage() {
     setClPurch(null); setClIssues(null); setClHist(null); setIssType(""); setIssSev("medium"); setIssQty("");
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); return; }
     // ค่าแรงผลิตที่วางแผนไว้ (จาก board) — กรอก/แก้ในป๊อปอัปได้
-    setEstLabor(checklistMO.labor?.prod_plan ? String(checklistMO.labor.prod_plan) : "");
+    // ค่าแรงผลิตวางแผน: ถ้าเคยตั้งไว้ใช้ค่านั้น · ไม่งั้น default = ราคากลาง/ชิ้น × จำนวน (ดึงจาก BOM)
+    setEstLabor(
+      checklistMO.labor?.prod_plan ? String(checklistMO.labor.prod_plan)
+      : (checklistMO.central_rate && checklistMO.central_rate > 0 ? String(Math.round(checklistMO.central_rate * (checklistMO.qty || 0) * 100) / 100) : "")
+    );
     let cancel = false; setClLoading(true);
     void (async () => {
       try {
