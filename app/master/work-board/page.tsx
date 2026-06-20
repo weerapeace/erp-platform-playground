@@ -1693,10 +1693,21 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม
   const [assignOpen, setAssignOpen] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
+  // กลุ่มใบสั่งผลิต (สำหรับคอลัมน์ "กลุ่ม" + จัดกลุ่มตามกลุ่ม)
+  const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
+    setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
+  const groupNameOf = useCallback((moNo: string) => moGroups.find((g) => g.mo_nos.includes(moNo))?.name ?? null, [moGroups]);
+  const GroupCell = ({ moNo }: { moNo: string }) => { const g = groupNameOf(moNo); return g ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{g}</span> : <span className="text-slate-300">—</span>; };
+  // โหมดจัดกลุ่ม (เลือกได้): ไม่จัด / ตามกลุ่ม / ตามความพร้อม(รอจ่าย) หรือ ตามสถานะ(จ่ายแล้ว)
+  const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready">("none");
+  const [woGroup, setWoGroup] = useState<"none" | "group" | "status">("none");
+  const grpSelectCls = "h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600";
 
   const pendCols: MiniColumn<PendingMO>[] = [
     { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (m) => <ProdCell url={m.image_url} sku={m.product_sku} name={m.product_name} /> },
     { key: "mo", header: "ใบสั่งผลิต", width: "9rem", sortValue: (m) => m.mo_no, sortLabel: "เลขใบสั่งผลิต", cell: (m) => <span className="font-mono text-[11px] text-slate-500">{m.mo_no}</span> },
+    { key: "group", header: "กลุ่ม", width: "minmax(7rem,1fr)", sortValue: (m) => groupNameOf(m.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (m) => <GroupCell moNo={m.mo_no} /> },
     { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (m) => m.qty, sortLabel: "จำนวน", cell: (m) => <span className="tabular-nums">{fmt(m.qty)}</span> },
     { key: "disp", header: "จ่ายแล้ว", width: "5rem", align: "right", cell: (m) => <span className="tabular-nums text-slate-500">{fmt(m.dispatched)}</span> },
     { key: "rem", header: "เหลือ", width: "4.5rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "เหลือ", cell: (m) => <span className="tabular-nums font-semibold text-rose-600">{fmt(m.remaining)}</span> },
@@ -1707,6 +1718,7 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
   const woCols: MiniColumn<WorkOrder>[] = [
     { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (w) => w.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (w) => <ProdCell url={w.image_url} sku={w.product_sku} name={w.product_name} /> },
     { key: "wo", header: "ใบจ่ายงาน", width: "9rem", sortValue: (w) => w.wo_no, sortLabel: "เลขใบจ่ายงาน", cell: (w) => <span className="font-mono text-[11px] text-slate-500">{w.wo_no}</span> },
+    { key: "group", header: "กลุ่ม", width: "minmax(7rem,1fr)", sortValue: (w) => groupNameOf(w.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (w) => <GroupCell moNo={w.mo_no} /> },
     { key: "dept", header: "แผนก/ช่าง", width: "minmax(8rem,1fr)", sortValue: (w) => w.department_name ?? "", sortLabel: "แผนก", cell: (w) => <span className="text-[12px] text-slate-600">{w.department_name ?? "—"}{w.assignee_name ? ` · ${w.assignee_name}` : ""}</span> },
     { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (w) => w.qty, sortLabel: "จำนวน", cell: (w) => <span className="tabular-nums">{fmt(w.qty)}</span> },
     { key: "recv", header: "รับคืน", width: "5rem", align: "right", cell: (w) => <span className="tabular-nums text-slate-500">{fmt(w.received_qty)}</span> },
@@ -1717,22 +1729,38 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
   return (
     <div className="space-y-5 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
       <MiniTable
+        key={`pend-${pendGroup}`}
         rows={pending} rowKey={(m) => m.id} columns={pendCols} onRowClick={onOpenMO}
         title="📥 รอจ่าย" countUnit="ใบ"
         selectable selected={sel} onSelectedChange={setSel}
-        actions={selMoNos.length > 0 ? <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จัดกลุ่ม ({selMoNos.length})</button> : undefined}
+        actions={<div className="flex items-center gap-2">
+          <select value={pendGroup} onChange={(e) => setPendGroup(e.target.value as "none" | "group" | "ready")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+            <option value="none">ไม่จัดกลุ่ม</option>
+            <option value="group">จัดกลุ่มตามกลุ่ม</option>
+            <option value="ready">จัดกลุ่มตามความพร้อม</option>
+          </select>
+          {selMoNos.length > 0 && <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>}
+        </div>}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
         searchPlaceholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
-        groupBy={(m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")} groupLabel="จัดกลุ่มตามความพร้อม" defaultGrouped={false}
+        groupBy={pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —" : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม") : undefined}
+        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามความพร้อม"} defaultGrouped={pendGroup !== "none"}
         emptyText="ไม่มีงานรอจ่าย"
       />
       {assignOpen && <AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); onReload?.(); }} />}
       <MiniTable
+        key={`wo-${woGroup}`}
         rows={wos} rowKey={(w) => w.id} columns={woCols} onRowClick={onOpenWO}
         title="🛠 จ่ายแล้ว — กำลังผลิต" countUnit="ใบ"
+        actions={<select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+          <option value="none">ไม่จัดกลุ่ม</option>
+          <option value="group">จัดกลุ่มตามกลุ่ม</option>
+          <option value="status">จัดกลุ่มตามสถานะ</option>
+        </select>}
         searchText={(w) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`}
         searchPlaceholder="ค้นหา สินค้า / ใบจ่ายงาน / แผนก"
-        groupBy={(w) => (WO_STATUS[w.status]?.label ?? w.status)} groupLabel="จัดกลุ่มตามสถานะ" defaultGrouped={false}
+        groupBy={woGroup === "group" ? (w) => groupNameOf(w.mo_no) ?? "— ยังไม่จับกลุ่ม —" : woGroup === "status" ? (w) => (WO_STATUS[w.status]?.label ?? w.status) : undefined}
+        groupLabel={woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามสถานะ"} defaultGrouped={woGroup !== "none"}
         emptyText="ยังไม่มีงานที่จ่าย"
       />
     </div>
