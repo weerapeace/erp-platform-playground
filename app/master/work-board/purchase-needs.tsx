@@ -50,6 +50,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
   const [busy, setBusy] = useState<string | null>(null);
   const [printMenuOpen, setPrintMenuOpen] = useState(false);
   const [printSel, setPrintSel] = useState<Set<string>>(new Set());  // ประเภทที่เลือกพิมพ์
+  const [printGroupSel, setPrintGroupSel] = useState<Set<string>>(new Set());  // กลุ่ม MO ที่เลือกพิมพ์
   // โหมด "ตามกลุ่ม": หัวกลุ่มพับ/กางได้ (default พับหมด) + เลือกติ๊กแยกต่อกลุ่ม
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [groupSel, setGroupSel] = useState<Record<string, Set<string>>>({});
@@ -212,28 +213,55 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
     const qs = types.length ? `?types=${encodeURIComponent(types.join(","))}` : "";
     window.open(`/print/purchase-needs${qs}`, "_blank", "noopener");
   };
+  const openPrintGroup = (names: string[]) => {
+    setPrintMenuOpen(false);
+    const qs = names.length ? `?mode=group&groups=${encodeURIComponent(names.join(","))}` : "?mode=group";
+    window.open(`/print/purchase-needs${qs}`, "_blank", "noopener");
+  };
+  const byGroup = mode === "group";
   const printBtn = (
     <div className="relative">
-      <button type="button" onClick={() => setPrintMenuOpen((o) => !o)} title="พิมพ์รายการ (เลือกพิมพ์ทั้งหมด/เฉพาะประเภท)"
+      <button type="button" onClick={() => setPrintMenuOpen((o) => !o)} title={byGroup ? "พิมพ์ตามกลุ่ม (จับกลุ่มวัตถุดิบตามประเภทในแต่ละกลุ่ม)" : "พิมพ์รายการ (เลือกพิมพ์ทั้งหมด/เฉพาะประเภท)"}
         className="h-8 px-3 inline-flex items-center gap-1 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨️ พิมพ์ <span className="text-[9px] text-slate-400">▾</span></button>
       {printMenuOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setPrintMenuOpen(false)} />
-          <div className="absolute right-0 top-9 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2 min-w-[230px]">
-            <button type="button" onClick={() => openPrint([])} className="w-full text-left px-2 py-1.5 text-sm rounded-md hover:bg-slate-50 text-slate-700">🖨️ พิมพ์ทั้งหมด</button>
-            <div className="border-t border-slate-100 my-1.5" />
-            <div className="text-[11px] text-slate-400 px-1 mb-1">เลือกพิมพ์เฉพาะประเภท</div>
-            <div className="max-h-56 overflow-y-auto">
-              {allTypes.map((t) => (
-                <label key={t} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-slate-50 rounded cursor-pointer">
-                  <input type="checkbox" checked={printSel.has(t)} onChange={() => setPrintSel((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; })} className="w-4 h-4 accent-rose-600" />
-                  <span className="truncate">{t}</span>
-                </label>
-              ))}
-              {allTypes.length === 0 && <div className="px-1 py-2 text-xs text-slate-300">ไม่มีข้อมูล</div>}
-            </div>
-            <button type="button" disabled={printSel.size === 0} onClick={() => openPrint([...printSel])}
-              className="mt-1.5 w-full h-8 text-sm font-medium bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-40">🖨️ พิมพ์ที่เลือก ({printSel.size})</button>
+          <div className="absolute right-0 top-9 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-2 min-w-[240px]">
+            {byGroup ? (
+              <>
+                <button type="button" onClick={() => openPrintGroup([])} className="w-full text-left px-2 py-1.5 text-sm rounded-md hover:bg-slate-50 text-slate-700">🖨️ พิมพ์ทุกกลุ่ม (แยกตามประเภทในกลุ่ม)</button>
+                <div className="border-t border-slate-100 my-1.5" />
+                <div className="text-[11px] text-slate-400 px-1 mb-1">เลือกพิมพ์เฉพาะกลุ่ม</div>
+                <div className="max-h-56 overflow-y-auto">
+                  {buckets.map((b) => (
+                    <label key={b.name} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-slate-50 rounded cursor-pointer">
+                      <input type="checkbox" checked={printGroupSel.has(b.name)} onChange={() => setPrintGroupSel((s) => { const n = new Set(s); n.has(b.name) ? n.delete(b.name) : n.add(b.name); return n; })} className="w-4 h-4 accent-rose-600" />
+                      <span className="truncate">🗂 {b.name} <span className="text-slate-400">({b.moNos.length})</span></span>
+                    </label>
+                  ))}
+                  {buckets.length === 0 && <div className="px-1 py-2 text-xs text-slate-300">ไม่มีข้อมูล</div>}
+                </div>
+                <button type="button" disabled={printGroupSel.size === 0} onClick={() => openPrintGroup([...printGroupSel])}
+                  className="mt-1.5 w-full h-8 text-sm font-medium bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-40">🖨️ พิมพ์ที่เลือก ({printGroupSel.size})</button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => openPrint([])} className="w-full text-left px-2 py-1.5 text-sm rounded-md hover:bg-slate-50 text-slate-700">🖨️ พิมพ์ทั้งหมด</button>
+                <div className="border-t border-slate-100 my-1.5" />
+                <div className="text-[11px] text-slate-400 px-1 mb-1">เลือกพิมพ์เฉพาะประเภท</div>
+                <div className="max-h-56 overflow-y-auto">
+                  {allTypes.map((t) => (
+                    <label key={t} className="flex items-center gap-2 px-1 py-1 text-sm hover:bg-slate-50 rounded cursor-pointer">
+                      <input type="checkbox" checked={printSel.has(t)} onChange={() => setPrintSel((s) => { const n = new Set(s); n.has(t) ? n.delete(t) : n.add(t); return n; })} className="w-4 h-4 accent-rose-600" />
+                      <span className="truncate">{t}</span>
+                    </label>
+                  ))}
+                  {allTypes.length === 0 && <div className="px-1 py-2 text-xs text-slate-300">ไม่มีข้อมูล</div>}
+                </div>
+                <button type="button" disabled={printSel.size === 0} onClick={() => openPrint([...printSel])}
+                  className="mt-1.5 w-full h-8 text-sm font-medium bg-rose-600 text-white rounded-md hover:bg-rose-700 disabled:opacity-40">🖨️ พิมพ์ที่เลือก ({printSel.size})</button>
+              </>
+            )}
           </div>
         </>
       )}
