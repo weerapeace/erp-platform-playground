@@ -8,7 +8,7 @@
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
+import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
@@ -187,7 +187,7 @@ function PurchaseNeedsPrintInner() {
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🖨️ พิมพ์รายการขอซื้อ/เตรียม{subtitle ? ` · ${subtitle}` : ""}</span>
         <div className="flex-1" />
-        <button onClick={printReportFrameOrWindow} disabled={!html} className="h-9 rounded-lg bg-rose-600 px-5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
+        <button onClick={() => printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-rose-600 px-5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>

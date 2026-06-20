@@ -140,6 +140,26 @@ export function printReportFrameOrWindow() {
   window.print();
 }
 
+/**
+ * พิมพ์เอกสารหลายหน้าให้ถูกต้อง — เปิด HTML เอกสารจริงในแท็บใหม่ แล้วสั่งพิมพ์ที่นั่น
+ * แก้ปัญหา "พรีวิวเต็มแต่พิมพ์ตัด" เพราะ iframe ในหน้าเพจไม่ไหลข้ามหน้า (พิมพ์ Ctrl+P จะตัดทิ้ง)
+ * ใช้ Blob URL เพื่อให้รูป/ลิงก์แบบ /api/... resolve ถูก (มี origin จริง) · มี fallback ไป iframe ถ้าป๊อปอัปถูกบล็อก
+ */
+export function printReportHtmlInNewWindow(html: string) {
+  try {
+    const withAutoPrint = html.includes("</body>")
+      ? html.replace("</body>", `<script>window.onload=function(){setTimeout(function(){window.focus();window.print();},350);};</script></body>`)
+      : html;
+    const blob = new Blob([withAutoPrint], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const w = window.open(url, "_blank");
+    if (!w) { URL.revokeObjectURL(url); printReportFrameOrWindow(); return; }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch {
+    printReportFrameOrWindow();
+  }
+}
+
 export function PrintToolbar({ onBack, onPrint }: { onBack?: () => void; onPrint?: () => void }) {
   return (
     <div className="no-print sticky top-0 z-10 bg-slate-100 border-b border-slate-200 px-6 py-3 flex items-center gap-3">
