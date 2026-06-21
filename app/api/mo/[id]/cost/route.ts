@@ -15,6 +15,13 @@ const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; }
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export type MoCostMaterial = { sku: string | null; name: string | null; material_type: string | null; uom: string | null; qty_per: number; unit_cost: number; line_pp: number; has_price: boolean };
+// ค่าทดลองคำนวณต้นทุน (บันทึกต่อใบ) — ค่าแรงทดลอง "แทน" ค่าแรงระบบ · ค่าอื่นๆ "บวกเพิ่ม"
+export type CostScenario = {
+  labor_mode: "system" | "piece" | "table";          // ใช้ค่าแรงแบบไหน
+  piece_rate: number;                                 // งานเหมา/ชิ้น (ทดลอง)
+  table: { salary: number; workdays: number; capacity: number };   // เงินเดือน · วันทำงาน/เดือน · กำลังผลิต/วัน
+  extras: { label: string; amount: number; per: "piece" | "mo" }[];   // ค่าส่ง/ค่าจิปาถะ ฯลฯ
+};
 export type MoCost = {
   product_sku: string | null; product_name: string | null; qty: number;
   sell_price: number;                 // ราคาขาย/ชิ้น (list_price)
@@ -22,6 +29,7 @@ export type MoCost = {
   materials: MoCostMaterial[]; missing_price: number;
   central_rate: number;               // ค่าแรงกลาง/ชิ้น (เพดานห้ามเกิน)
   est_labor_total: number; est_labor_pp: number;   // ค่าแรงผลิตที่ตั้งจริง (รวม/ต่อชิ้น)
+  scenario: CostScenario | null;      // ค่าทดลองที่บันทึกไว้
 };
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -30,7 +38,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const admin = supabaseAdmin();
 
   const { data: mo } = await admin.from("manufacturing_orders")
-    .select("id, mo_no, product_sku, product_name, qty, bom_code, est_labor_cost").eq("id", id).maybeSingle();
+    .select("id, mo_no, product_sku, product_name, qty, bom_code, est_labor_cost, cost_scenario").eq("id", id).maybeSingle();
   if (!mo) return NextResponse.json({ error: "ไม่พบใบสั่งผลิต" }, { status: 404 });
   const m = mo as Record<string, unknown>;
   const qty = num(m.qty);
@@ -67,6 +75,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const data: MoCost = {
     product_sku: (m.product_sku as string) ?? null, product_name: (m.product_name as string) ?? null, qty,
     sell_price, material_cost_pp, materials, missing_price, central_rate, est_labor_total, est_labor_pp,
+    scenario: (m.cost_scenario as CostScenario) ?? null,
   };
   return NextResponse.json({ data, error: null });
+}
+
+// บันทึกค่าทดลองคำนวณต้นทุน (cost_scenario) ต่อใบ
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const { id } = await params;
+  let body: { scenario?: CostScenario | null };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const { error } = await supabaseAdmin().from("manufacturing_orders").update({ cost_scenario: body.scenario ?? null }).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ data: { ok: true }, error: null });
 }

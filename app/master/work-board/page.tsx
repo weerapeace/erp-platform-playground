@@ -14,7 +14,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
-import type { MoCost } from "@/app/api/mo/[id]/cost/route";
+import type { MoCost, CostScenario } from "@/app/api/mo/[id]/cost/route";
 import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
@@ -1443,7 +1443,7 @@ export default function WorkBoardPage() {
                         </div>
                       )
                     ) : clTab === "cost" ? (
-                      <CostTab cost={clCost} pieceRows={clPieceRows} />
+                      <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} canEdit={canEdit} />
                     ) : clTab === "purch" ? (
                       <PurchTab rows={clPurch} />
                     ) : clTab === "issue" ? (
@@ -1586,20 +1586,44 @@ const PO_BADGE: Record<string, { t: string; c: string }> = {
   draft: { t: "ร่าง", c: "bg-slate-100 text-slate-600" }, confirmed: { t: "สั่งแล้ว", c: "bg-blue-50 text-blue-700" },
   partially_received: { t: "รับบางส่วน", c: "bg-amber-50 text-amber-700" }, received: { t: "รับครบ", c: "bg-emerald-50 text-emerald-700" }, closed: { t: "ปิดแล้ว", c: "bg-slate-100 text-slate-500" },
 };
-function CostTab({ cost, pieceRows }: { cost: MoCost | null; pieceRows: MoPieceRow[] }) {
+const DEFAULT_SC: CostScenario = { labor_mode: "system", piece_rate: 0, table: { salary: 0, workdays: 26, capacity: 0 }, extras: [] };
+
+function CostTab({ cost, pieceRows, moId, canEdit }: { cost: MoCost | null; pieceRows: MoPieceRow[]; moId: string; canEdit: boolean }) {
+  const toast = useToast();
+  const [sc, setSc] = useState<CostScenario>(DEFAULT_SC);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!cost) return;
+    const s = cost.scenario;
+    setSc(s ? { labor_mode: s.labor_mode ?? "system", piece_rate: Number(s.piece_rate) || 0, table: { salary: Number(s.table?.salary) || 0, workdays: Number(s.table?.workdays) || 26, capacity: Number(s.table?.capacity) || 0 }, extras: Array.isArray(s.extras) ? s.extras : [] } : DEFAULT_SC);
+  }, [cost]);
+
   if (cost === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังคิดต้นทุน…</div>;
   const qty = cost.qty || 0;
   const sell = cost.sell_price;
   const matPP = cost.material_cost_pp;
-  const central = cost.central_rate;                    // เพดานค่าแรงผลิต (ค่าแรงกลาง)
-  const estPP = cost.est_labor_pp;                      // ค่าแรงผลิตที่ตั้งจริง/ชิ้น
-  const prodPP = estPP > 0 ? estPP : central;           // ใช้คิดต้นทุน (ไม่ตั้ง → ใช้ค่าแรงกลาง)
+  const central = cost.central_rate;
+  const estPP = cost.est_labor_pp;
   const overCeiling = central > 0 && estPP > central + 0.0001;
-  const piecePP = pieceRows.reduce((a, r) => a + (Number(r.rate) || 0) * (Number(r.qty_per) || 0), 0);
-  const pieceTotal = pieceRows.reduce((a, r) => a + (Number(r.rate) || 0) * (Number(r.total_qty) || 0), 0);
-  const costPP = matPP + prodPP + piecePP;
+  const sysPiecePP = pieceRows.reduce((a, r) => a + (Number(r.rate) || 0) * (Number(r.qty_per) || 0), 0);
+  const systemLaborPP = (estPP > 0 ? estPP : central) + sysPiecePP;            // ค่าแรงตามระบบ
+  const tablePP = sc.table.salary > 0 && sc.table.workdays > 0 && sc.table.capacity > 0 ? (sc.table.salary / sc.table.workdays) / sc.table.capacity : 0;   // จ่ายโต๊ะ (เงินเดือน)
+  const daysNeeded = sc.table.capacity > 0 ? qty / sc.table.capacity : 0;
+  const laborPP = sc.labor_mode === "piece" ? sc.piece_rate : sc.labor_mode === "table" ? tablePP : systemLaborPP;   // ทดลอง = แทนค่าแรงระบบ
+  const laborLabel = sc.labor_mode === "piece" ? "ค่าแรงเหมา (ทดลอง) / ชิ้น" : sc.labor_mode === "table" ? "ค่าแรงจ่ายโต๊ะ / ชิ้น" : "ค่าแรง (ตามระบบ) / ชิ้น";
+  const extrasPP = sc.extras.reduce((a, e) => a + (e.per === "mo" ? (qty > 0 ? (Number(e.amount) || 0) / qty : 0) : (Number(e.amount) || 0)), 0);
+  const costPP = matPP + laborPP + extrasPP;
   const profitPP = sell - costPP;
   const marginPct = sell > 0 ? Math.round((profitPP / sell) * 1000) / 10 : 0;
+
+  const save = async () => {
+    setSaving(true);
+    try { const r = await apiFetch(`/api/mo/${encodeURIComponent(moId)}/cost`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scenario: sc }) }); const j = await r.json(); if (j.error) throw new Error(j.error); toast.success("บันทึกการคำนวณแล้ว"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+  const setTable = (p: Partial<CostScenario["table"]>) => setSc((s) => ({ ...s, table: { ...s.table, ...p } }));
+  const setExtra = (i: number, p: Partial<CostScenario["extras"][number]>) => setSc((s) => ({ ...s, extras: s.extras.map((e, idx) => idx === i ? { ...e, ...p } : e) }));
 
   const Row = ({ label, amount, neg, strong, cls = "text-slate-700", sub, subCls = "text-slate-400" }: { label: string; amount: number; neg?: boolean; strong?: boolean; cls?: string; sub?: string; subCls?: string }) => (
     <div className="flex items-center justify-between gap-2 px-3 py-1.5">
@@ -1613,6 +1637,11 @@ function CostTab({ cost, pieceRows }: { cost: MoCost | null; pieceRows: MoPieceR
       <div className={`text-sm font-bold tabular-nums ${cls}`}>฿{fmt(amount)}</div>
     </div>
   );
+  const modeBtn = (id: CostScenario["labor_mode"], label: string) => (
+    <button type="button" onClick={() => setSc((s) => ({ ...s, labor_mode: id }))} disabled={!canEdit}
+      className={`h-7 px-2.5 text-xs rounded-lg border ${sc.labor_mode === id ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
+  );
+  const numIn = "w-24 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50";
 
   return (
     <div className="space-y-3">
@@ -1621,8 +1650,8 @@ function CostTab({ cost, pieceRows }: { cost: MoCost | null; pieceRows: MoPieceR
         <div className="divide-y divide-slate-50 text-sm">
           <Row label="💵 ราคาขาย / ชิ้น" amount={sell} strong cls="text-slate-800" />
           <Row label="วัตถุดิบ / ชิ้น" amount={matPP} neg sub={cost.missing_price > 0 ? `⚠️ ${cost.missing_price} รายการยังไม่มีราคา` : undefined} subCls={cost.missing_price > 0 ? "text-amber-600" : "text-slate-400"} />
-          <Row label="ค่าแรงผลิต / ชิ้น" amount={prodPP} neg sub={central > 0 ? `เพดาน ฿${fmt(central)}${overCeiling ? " · เกินเพดาน!" : ""}` : (estPP === 0 ? "ยังไม่ตั้งค่าแรง" : undefined)} subCls={overCeiling ? "text-rose-600 font-medium" : "text-slate-400"} />
-          {piecePP > 0 && <Row label="ค่าแรงเหมา / ชิ้น" amount={piecePP} neg />}
+          <Row label={laborLabel} amount={laborPP} neg sub={sc.labor_mode === "system" && central > 0 ? `เพดาน ฿${fmt(central)}${overCeiling ? " · เกินเพดาน!" : ""}` : sc.labor_mode === "table" && daysNeeded > 0 ? `ต้องทำ ≈ ${fmt(Math.ceil(daysNeeded))} วัน` : undefined} subCls={overCeiling ? "text-rose-600 font-medium" : "text-slate-400"} />
+          {extrasPP > 0 && <Row label="ค่าอื่นๆ / ชิ้น" amount={extrasPP} neg />}
           <Row label="= กำไร / ชิ้น" amount={profitPP} neg={profitPP < 0} strong cls={profitPP >= 0 ? "text-emerald-700" : "text-rose-600"} sub={`${marginPct}% ของราคาขาย`} subCls={profitPP >= 0 ? "text-emerald-600" : "text-rose-500"} />
         </div>
       </div>
@@ -1632,11 +1661,54 @@ function CostTab({ cost, pieceRows }: { cost: MoCost | null; pieceRows: MoPieceR
         <Metric label="ต้นทุนรวม" amount={costPP * qty} />
         <Metric label="กำไรรวม" amount={profitPP * qty} cls={profitPP >= 0 ? "text-emerald-700" : "text-rose-600"} />
       </div>
-      {pieceTotal > 0 && <div className="text-[12px] text-slate-500">🧵 ค่าแรงงานเหมารวมทั้งใบ: <b className="text-slate-700">฿{fmt(pieceTotal)}</b></div>}
+
+      {/* 🧮 ทดลองคำนวณ (บันทึกได้) */}
+      <div className="border border-indigo-100 bg-indigo-50/40 rounded-xl p-3 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-slate-700">🧮 ทดลองคำนวณ</span>
+          {canEdit && <button onClick={() => void save()} disabled={saving} className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{saving ? "บันทึก…" : "💾 บันทึก"}</button>}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[11px] text-slate-500">ใช้ค่าแรง:</span>
+          {modeBtn("system", "ตามระบบ")}{modeBtn("piece", "งานเหมา/ชิ้น")}{modeBtn("table", "จ่ายโต๊ะ (เงินเดือน)")}
+        </div>
+        {sc.labor_mode === "piece" && (
+          <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">ค่าแรงเหมา / ชิ้น</span>
+            <input type="number" min={0} step="any" value={sc.piece_rate || ""} disabled={!canEdit} onChange={(e) => setSc((s) => ({ ...s, piece_rate: Number(e.target.value) || 0 }))} className={numIn} /><span className="text-slate-400">บาท</span></label>
+        )}
+        {sc.labor_mode === "table" && (
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">เงินเดือน (โต๊ะ)</span>
+              <input type="number" min={0} step="any" value={sc.table.salary || ""} disabled={!canEdit} onChange={(e) => setTable({ salary: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">บาท/เดือน</span></label>
+            <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">วันทำงาน / เดือน</span>
+              <input type="number" min={0} step="any" value={sc.table.workdays || ""} disabled={!canEdit} onChange={(e) => setTable({ workdays: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">วัน</span></label>
+            <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">กำลังผลิต / วัน</span>
+              <input type="number" min={0} step="any" value={sc.table.capacity || ""} disabled={!canEdit} onChange={(e) => setTable({ capacity: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">ชิ้น/วัน</span></label>
+            <div className="text-[11px] text-indigo-700 bg-white border border-indigo-100 rounded-lg px-2.5 py-1.5">
+              📅 ต้องทำ ≈ <b>{daysNeeded > 0 ? fmt(Math.ceil(daysNeeded)) : "—"}</b> วัน · ค่าแรง <b>฿{fmt(tablePP)}</b>/ชิ้น · รวม <b>฿{fmt(tablePP * qty)}</b>
+            </div>
+          </div>
+        )}
+        {/* ค่าอื่นๆ */}
+        <div className="space-y-1.5">
+          <div className="text-[11px] text-slate-500">ค่าอื่นๆ (ค่าส่ง / ค่าจิปาถะ ฯลฯ)</div>
+          {sc.extras.map((e, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <input value={e.label} disabled={!canEdit} placeholder="ชื่อค่าใช้จ่าย" onChange={(ev) => setExtra(i, { label: ev.target.value })} className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+              <input type="number" min={0} step="any" value={e.amount || ""} disabled={!canEdit} placeholder="0" onChange={(ev) => setExtra(i, { amount: Number(ev.target.value) || 0 })} className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+              <select value={e.per} disabled={!canEdit} onChange={(ev) => setExtra(i, { per: ev.target.value as "piece" | "mo" })} className="h-8 px-1 text-xs border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
+                <option value="piece">/ชิ้น</option><option value="mo">/ทั้งใบ</option>
+              </select>
+              {canEdit && <button onClick={() => setSc((s) => ({ ...s, extras: s.extras.filter((_, idx) => idx !== i) }))} className="text-slate-300 hover:text-rose-600 text-sm">🗑</button>}
+            </div>
+          ))}
+          {canEdit && <button onClick={() => setSc((s) => ({ ...s, extras: [...s.extras, { label: "", amount: 0, per: "piece" }] }))} className="h-7 px-2.5 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50">＋ เพิ่มค่าใช้จ่าย</button>}
+        </div>
+      </div>
 
       <div className="border border-slate-100 rounded-lg overflow-hidden">
         <div className="grid grid-cols-[1fr_4.5rem_5rem_5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>วัตถุดิบ</span><span className="text-right">ใช้/ชิ้น</span><span className="text-right">ราคา/หน่วย</span><span className="text-right">รวม/ชิ้น</span></div>
-        <div className="divide-y divide-slate-50 max-h-[32vh] overflow-y-auto">
+        <div className="divide-y divide-slate-50 max-h-[28vh] overflow-y-auto">
           {cost.materials.map((m, i) => (
             <div key={i} className="grid grid-cols-[1fr_4.5rem_5rem_5rem] gap-2 px-3 py-1.5 items-center text-[12px]">
               <div className="min-w-0"><div className="truncate text-slate-700">{m.name}</div><div className="text-[10px] text-slate-400 truncate">{m.sku}</div></div>
