@@ -160,8 +160,21 @@ export default function WorkBoardPage() {
   }, []);
   const [dragId, setDragId] = useState<string | null>(null);
 
-  const [pendPopupOpen, setPendPopupOpen] = useState(false);   // ป๊อปอัปรายการรอจ่าย (แทนโซนบนแคนวาส)
+  const [pendPopupOpen, setPendPopupOpen] = useState(false);   // widget รอจ่าย ลอยบนบอร์ด (แทนโซน)
   const [pendSearch, setPendSearch] = useState("");
+  const [pendPos, setPendPos] = useState<{ x: number; y: number }>({ x: 80, y: 140 });   // ตำแหน่ง widget
+  useEffect(() => { try { const v = localStorage.getItem("wb:pendWidgetPos"); if (v) { const p = JSON.parse(v); if (typeof p?.x === "number" && typeof p?.y === "number") setPendPos(p); } } catch { /* ignore */ } }, []);
+  const pendPosRef = useRef(pendPos); pendPosRef.current = pendPos;   // อ่านตำแหน่งล่าสุดตอนเริ่มลาก
+  const pendDragRef = useRef<PendingMO | null>(null);   // รายการที่กำลังลากจาก widget → วางที่โต๊ะ
+  const [dropDeptId, setDropDeptId] = useState<string | null>(null);   // โต๊ะที่กำลังลากค้างอยู่ (ไฮไลต์)
+  const startPendMove = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY, ox = pendPosRef.current.x, oy = pendPosRef.current.y;
+    let last = { x: ox, y: oy };
+    const onMove = (ev: PointerEvent) => { last = { x: Math.max(0, ox + ev.clientX - sx), y: Math.max(0, oy + ev.clientY - sy) }; setPendPos(last); };
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); try { localStorage.setItem("wb:pendWidgetPos", JSON.stringify(last)); } catch { /* ignore */ } };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+  }, []);
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
   const [dispDept, setDispDept] = useState<Dept | null>(null);
   const [dispQty, setDispQty] = useState(0);
@@ -876,8 +889,8 @@ export default function WorkBoardPage() {
         <ToolBtn onClick={() => void load()} title="โหลดใหม่">⟳</ToolBtn>
         <Sep />
         {/* รอจ่าย — เปิดเป็นป๊อปอัป (ไม่กินที่บนแคนวาส) */}
-        <button type="button" onClick={() => setPendPopupOpen(true)} title="ดูรายการที่รอจ่าย แล้วจ่ายงาน"
-          className="h-7 px-2.5 text-xs font-medium rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 inline-flex items-center gap-1">📥 รอจ่าย ({board.pending.length})</button>
+        <button type="button" onClick={() => setPendPopupOpen((o) => !o)} title="แผงรอจ่าย — ลากรายการไปวางที่โต๊ะเพื่อจ่าย"
+          className={`h-7 px-2.5 text-xs font-medium rounded-lg border inline-flex items-center gap-1 ${pendPopupOpen ? "bg-blue-600 text-white border-blue-600" : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"}`}>📥 รอจ่าย ({board.pending.length})</button>
         <Sep />
         <ToolBtn onClick={openDeptMgr} title="ตั้งค่าแผนก (เพิ่ม/แก้/ลบ/ซ่อน/หมายเหตุ)">⚙️</ToolBtn>
         <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
@@ -939,7 +952,9 @@ export default function WorkBoardPage() {
             {zones.map((z) => {
               const p = posOfZone(z.key); const count = countOf(z); const zw = zoneWof(z.key);
               return (
-                <div key={z.key} className="absolute rounded-2xl border-2 border-dashed bg-white/40" style={{ left: p.x, top: p.y, width: zw, height: zoneH(z), borderColor: `${z.accent}88` }}>
+                <div key={z.key} className="absolute rounded-2xl border-2 bg-white/40" style={{ left: p.x, top: p.y, width: zw, height: zoneH(z), borderStyle: dropDeptId === z.dept?.id ? "solid" : "dashed", borderColor: dropDeptId === z.dept?.id ? z.accent : `${z.accent}88`, boxShadow: dropDeptId === z.dept?.id ? `0 0 0 3px ${z.accent}55` : undefined }}
+                  onDragOver={(e) => { if (z.kind === "dept" && z.dept && pendDragRef.current) { e.preventDefault(); if (dropDeptId !== z.dept.id) setDropDeptId(z.dept.id); } }}
+                  onDrop={() => { setDropDeptId(null); if (z.kind === "dept" && z.dept && pendDragRef.current) { const mo = pendDragRef.current; pendDragRef.current = null; openDispatch(mo, z.dept); } }}>
                   <div onPointerDown={(e) => onZoneDown(e, z.key)} title="ลากเพื่อย้ายตำแหน่งแผนก"
                     className="flex items-center justify-between px-3 rounded-t-2xl cursor-move select-none" style={{ height: HEADER_H, background: `${z.accent}1f`, borderBottom: `2px solid ${z.accent}55` }}>
                     <div className="flex items-center gap-2 min-w-0"><span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: z.accent }} /><span className="text-base font-bold text-slate-700 truncate">{z.label}</span></div>
@@ -1009,31 +1024,39 @@ export default function WorkBoardPage() {
         )}
       </ERPModal>
 
-      {/* ป๊อปอัป "รอจ่าย" — แทนโซนบนแคนวาส · ค้นหา + ดูรายละเอียด + จ่ายงาน(เลือกโต๊ะ) */}
-      <ERPModal open={pendPopupOpen} onClose={() => setPendPopupOpen(false)} size="md" title={`📥 รอจ่าย (${board.pending.length})`}>
-        <div className="space-y-2">
-          <input value={pendSearch} onChange={(e) => setPendSearch(e.target.value)} placeholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
-            className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-          <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-50 border border-slate-100 rounded-lg">
+      {/* widget "รอจ่าย" — ลอยบนบอร์ด · ลากย้ายตำแหน่งได้ · ลากรายการไปวางที่โต๊ะ = จ่ายงาน */}
+      {pendPopupOpen && (
+        <div className="fixed z-[55] w-[360px] bg-white rounded-xl border border-slate-200 shadow-2xl flex flex-col" style={{ left: pendPos.x, top: pendPos.y, maxHeight: "72vh" }}>
+          <div onPointerDown={startPendMove} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100 cursor-move select-none rounded-t-xl bg-slate-50">
+            <span className="text-sm font-bold text-slate-700">📥 รอจ่าย ({board.pending.length})</span>
+            <button onClick={() => setPendPopupOpen(false)} title="ปิด" className="text-slate-400 hover:text-slate-700 text-lg leading-none">✕</button>
+          </div>
+          <div className="p-2 border-b border-slate-100">
+            <input value={pendSearch} onChange={(e) => setPendSearch(e.target.value)} placeholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
+              className="w-full h-8 px-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </div>
+          <div className="overflow-y-auto p-1.5 space-y-1">
             {board.pending.filter((m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`.toLowerCase().includes(pendSearch.trim().toLowerCase())).map((m) => (
-              <div key={m.id} className="flex items-center gap-2.5 px-3 py-2">
-                <HoverImage url={m.image_url} size={40} />
+              <div key={m.id} draggable onDragStart={(e) => { pendDragRef.current = m; e.dataTransfer.setData("text/plain", m.mo_no); e.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { pendDragRef.current = null; setDropDeptId(null); }}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-grab active:cursor-grabbing">
+                <HoverImage url={m.image_url} size={36} />
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</div>
-                  <div className="text-[11px] text-slate-400 truncate">{m.mo_no}{m.product_name && m.product_name !== m.product_sku ? ` · ${m.product_name}` : ""}</div>
+                  <div className="text-[10px] text-slate-400 truncate">{m.mo_no}</div>
                 </div>
                 <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">เหลือ <b className="text-sm">{fmt(m.remaining)}</b></span>
                 {m.ready
-                  ? <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
-                  : <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}
+                  ? <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
+                  : <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}
                 <button onClick={() => { setClWO(null); setChecklistMO(m); }} title="ดูรายละเอียด/เช็กลิสต์" className="shrink-0 text-slate-300 hover:text-blue-600">🔍</button>
-                {canDispatch && <button onClick={() => { setPendPopupOpen(false); openDispatch(m, null); }} className="shrink-0 h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">จ่ายงาน</button>}
+                {canDispatch && <button onClick={() => openDispatch(m, null)} title="เลือกโต๊ะแล้วจ่าย" className="shrink-0 h-7 px-2.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">จ่ายงาน</button>}
               </div>
             ))}
             {board.pending.length === 0 && <div className="text-center text-sm text-slate-300 py-8">ไม่มีงานรอจ่าย 🎉</div>}
           </div>
+          <div className="px-3 py-1.5 border-t border-slate-100 text-[10px] text-slate-400 rounded-b-xl">💡 ลากรายการไปวางที่โต๊ะ = จ่ายงาน · หรือกดปุ่ม “จ่ายงาน”</div>
         </div>
-      </ERPModal>
+      )}
 
       {/* popup จ่ายงาน */}
       <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
