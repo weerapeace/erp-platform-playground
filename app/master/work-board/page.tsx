@@ -14,6 +14,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
+import type { MoCost } from "@/app/api/mo/[id]/cost/route";
 import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
@@ -218,7 +219,8 @@ export default function WorkBoardPage() {
   const [clCutRows, setClCutRows] = useState<CutRow[]>([]);
   const [clLoading, setClLoading] = useState(false);
   const [delArmed, setDelArmed] = useState(false);   // ยืนยันลบงานใน popup
-  const [clTab, setClTab] = useState<"recv" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist">("prep");
+  const [clTab, setClTab] = useState<"recv" | "prep" | "cut" | "piece" | "purch" | "issue" | "hist" | "cost">("prep");
+  const [clCost, setClCost] = useState<MoCost | null>(null);   // ต้นทุน/กำไรของใบ (lazy)
   const [clWO, setClWO] = useState<WorkOrder | null>(null);   // เปิดเช็กลิสต์จากใบจ่ายงาน → มีแท็บ "รับงานคืน"
   const [recvLabor, setRecvLabor] = useState("");             // ค่าแรงผลิตของใบจ่ายงานนี้
   const [saveLaborBom, setSaveLaborBom] = useState(false);    // บันทึกค่าแรงกลับเข้า BOM
@@ -612,7 +614,7 @@ export default function WorkBoardPage() {
   // โหลดเช็กลิสต์วัตถุดิบเมื่อเปิดป๊อปอัป (เตรียม=is_ready, ตัด=cut_done; needs_cut จากข้อมูลบล็อกตัด)
   useEffect(() => {
     setDelArmed(false); setClTab(clWO ? "recv" : "prep");
-    setClPurch(null); setClIssues(null); setClHist(null); setIssType(""); setIssSev("medium"); setIssQty("");
+    setClPurch(null); setClIssues(null); setClHist(null); setClCost(null); setIssType(""); setIssSev("medium"); setIssQty("");
     if (!checklistMO) { setClRows([]); setClCutRows([]); setClPieceRows([]); setEstLabor(""); return; }
     // ค่าแรงผลิตวางแผน — กรอกเป็น "ราคา/ชิ้น"
     // default: ราคากลาง/ชิ้น จาก BOM ก่อน · ไม่มีค่อยถอดจากยอดรวมที่เคยตั้งไว้ (prod_plan ÷ จำนวน)
@@ -689,8 +691,9 @@ export default function WorkBoardPage() {
     const moNo = checklistMO.mo_no; let cancel = false;
     if (clTab === "purch" && clPurch === null) void (async () => { try { const r = await apiFetch(`/api/mo/purchase-status?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClPurch((j?.data ?? []) as PurchaseStatusRow[]); } catch { if (!cancel) setClPurch([]); } })();
     if (clTab === "hist" && clHist === null) void (async () => { try { const r = await apiFetch(`/api/mo/dispatch-history?mo_no=${encodeURIComponent(moNo)}`); const j = await r.json(); if (!cancel) setClHist((j?.data ?? []) as DispatchHistRow[]); } catch { if (!cancel) setClHist([]); } })();
+    if (clTab === "cost" && clCost === null && checklistMO) void (async () => { try { const r = await apiFetch(`/api/mo/${encodeURIComponent(checklistMO.id)}/cost`); const j = await r.json(); if (!cancel) setClCost((j?.data ?? null) as MoCost | null); } catch { /* ignore */ } })();
     return () => { cancel = true; };
-  }, [clTab, checklistMO, clPurch, clHist]);
+  }, [clTab, checklistMO, clPurch, clHist, clCost]);
 
   // ติ๊กเตรียม/ตัด รายวัตถุดิบในป๊อปอัป (optimistic + audit)
   const toggleMat = useCallback(async (rowId: string, field: "is_ready" | "cut_done") => {
@@ -1260,6 +1263,7 @@ export default function WorkBoardPage() {
                       {clWO && tabBtn("recv", "📤 ส่งงาน")}
                       {tabBtn("prep", `📋 วัตถุดิบ · เตรียม ${prepDone}/${prepTotal} · ตัด ${cutDone}/${cutTotal}`)}
                       {tabBtn("piece", `🧵 งานเหมา ${clPieceRows.filter((r) => r.selected_id).length}/${clPieceRows.length}`)}
+                      {tabBtn("cost", "💰 ต้นทุน")}
                       {tabBtn("purch", "📦 ของซื้อ")}
                       {tabBtn("issue", `⚠️ ปัญหา${issN ? ` ${issN}` : ""}`)}
                       {tabBtn("hist", "🕑 ประวัติ")}
@@ -1438,6 +1442,8 @@ export default function WorkBoardPage() {
                           </div>
                         </div>
                       )
+                    ) : clTab === "cost" ? (
+                      <CostTab cost={clCost} pieceRows={clPieceRows} />
                     ) : clTab === "purch" ? (
                       <PurchTab rows={clPurch} />
                     ) : clTab === "issue" ? (
@@ -1449,6 +1455,7 @@ export default function WorkBoardPage() {
                       : clTab === "cut" ? "ติ๊ก ✓ ตัดครบรายบล็อก — ตัดครบทุกบล็อกของวัตถุดิบใด ระบบติ๊กเตรียมครบให้อัตโนมัติ"
                       : clTab === "piece" ? "ติ๊กเลือกงานเหมาที่จะจ่ายในใบนี้ · จำนวนรวม = จำนวนต่อใบ × จำนวนที่สั่ง"
                       : clTab === "purch" ? "สถานะและวันของจะถึง ดึงจากใบขอซื้อ/ใบสั่งซื้อที่ผูกกับงานนี้"
+                      : clTab === "cost" ? "ต้นทุนวัตถุดิบ = Σ(ใช้/ชิ้น × Standard Price) · ราคาขาย = Sale Price · เพดานค่าแรง = ค่าแรงกลาง"
                       : clTab === "issue" ? "ลงปัญหาที่เจอ (เชื่อมระบบ QC) — ใช้ติดตามของเสีย/แก้ไข"
                       : "ใบจ่ายงานทั้งหมดของงานนี้ (รวมที่ยกเลิกแล้ว)"}</p>}
                   </div>
@@ -1579,6 +1586,72 @@ const PO_BADGE: Record<string, { t: string; c: string }> = {
   draft: { t: "ร่าง", c: "bg-slate-100 text-slate-600" }, confirmed: { t: "สั่งแล้ว", c: "bg-blue-50 text-blue-700" },
   partially_received: { t: "รับบางส่วน", c: "bg-amber-50 text-amber-700" }, received: { t: "รับครบ", c: "bg-emerald-50 text-emerald-700" }, closed: { t: "ปิดแล้ว", c: "bg-slate-100 text-slate-500" },
 };
+function CostTab({ cost, pieceRows }: { cost: MoCost | null; pieceRows: MoPieceRow[] }) {
+  if (cost === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังคิดต้นทุน…</div>;
+  const qty = cost.qty || 0;
+  const sell = cost.sell_price;
+  const matPP = cost.material_cost_pp;
+  const central = cost.central_rate;                    // เพดานค่าแรงผลิต (ค่าแรงกลาง)
+  const estPP = cost.est_labor_pp;                      // ค่าแรงผลิตที่ตั้งจริง/ชิ้น
+  const prodPP = estPP > 0 ? estPP : central;           // ใช้คิดต้นทุน (ไม่ตั้ง → ใช้ค่าแรงกลาง)
+  const overCeiling = central > 0 && estPP > central + 0.0001;
+  const piecePP = pieceRows.reduce((a, r) => a + (Number(r.rate) || 0) * (Number(r.qty_per) || 0), 0);
+  const pieceTotal = pieceRows.reduce((a, r) => a + (Number(r.rate) || 0) * (Number(r.total_qty) || 0), 0);
+  const costPP = matPP + prodPP + piecePP;
+  const profitPP = sell - costPP;
+  const marginPct = sell > 0 ? Math.round((profitPP / sell) * 1000) / 10 : 0;
+
+  const Row = ({ label, amount, neg, strong, cls = "text-slate-700", sub, subCls = "text-slate-400" }: { label: string; amount: number; neg?: boolean; strong?: boolean; cls?: string; sub?: string; subCls?: string }) => (
+    <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+      <div className="min-w-0"><span className={strong ? "font-semibold text-slate-700" : "text-slate-600"}>{label}</span>{sub && <span className={`ml-2 text-[10px] ${subCls}`}>{sub}</span>}</div>
+      <span className={`tabular-nums shrink-0 ${strong ? "font-bold text-base" : ""} ${cls}`}>{neg ? "− " : ""}฿{fmt(Math.abs(amount))}</span>
+    </div>
+  );
+  const Metric = ({ label, amount, cls = "text-slate-800" }: { label: string; amount: number; cls?: string }) => (
+    <div className="rounded-lg bg-slate-50 px-2 py-1.5 text-center">
+      <div className="text-[10px] text-slate-400">{label}</div>
+      <div className={`text-sm font-bold tabular-nums ${cls}`}>฿{fmt(amount)}</div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="border border-slate-200 rounded-xl overflow-hidden">
+        <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 flex items-center justify-between"><span>สรุปต่อชิ้น</span><span>จำนวน {fmt(qty)} ชิ้น</span></div>
+        <div className="divide-y divide-slate-50 text-sm">
+          <Row label="💵 ราคาขาย / ชิ้น" amount={sell} strong cls="text-slate-800" />
+          <Row label="วัตถุดิบ / ชิ้น" amount={matPP} neg sub={cost.missing_price > 0 ? `⚠️ ${cost.missing_price} รายการยังไม่มีราคา` : undefined} subCls={cost.missing_price > 0 ? "text-amber-600" : "text-slate-400"} />
+          <Row label="ค่าแรงผลิต / ชิ้น" amount={prodPP} neg sub={central > 0 ? `เพดาน ฿${fmt(central)}${overCeiling ? " · เกินเพดาน!" : ""}` : (estPP === 0 ? "ยังไม่ตั้งค่าแรง" : undefined)} subCls={overCeiling ? "text-rose-600 font-medium" : "text-slate-400"} />
+          {piecePP > 0 && <Row label="ค่าแรงเหมา / ชิ้น" amount={piecePP} neg />}
+          <Row label="= กำไร / ชิ้น" amount={profitPP} neg={profitPP < 0} strong cls={profitPP >= 0 ? "text-emerald-700" : "text-rose-600"} sub={`${marginPct}% ของราคาขาย`} subCls={profitPP >= 0 ? "text-emerald-600" : "text-rose-500"} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        <Metric label="ยอดขายรวม" amount={sell * qty} />
+        <Metric label="ต้นทุนรวม" amount={costPP * qty} />
+        <Metric label="กำไรรวม" amount={profitPP * qty} cls={profitPP >= 0 ? "text-emerald-700" : "text-rose-600"} />
+      </div>
+      {pieceTotal > 0 && <div className="text-[12px] text-slate-500">🧵 ค่าแรงงานเหมารวมทั้งใบ: <b className="text-slate-700">฿{fmt(pieceTotal)}</b></div>}
+
+      <div className="border border-slate-100 rounded-lg overflow-hidden">
+        <div className="grid grid-cols-[1fr_4.5rem_5rem_5rem] gap-2 px-3 py-1.5 bg-slate-50 text-[11px] font-medium text-slate-500"><span>วัตถุดิบ</span><span className="text-right">ใช้/ชิ้น</span><span className="text-right">ราคา/หน่วย</span><span className="text-right">รวม/ชิ้น</span></div>
+        <div className="divide-y divide-slate-50 max-h-[32vh] overflow-y-auto">
+          {cost.materials.map((m, i) => (
+            <div key={i} className="grid grid-cols-[1fr_4.5rem_5rem_5rem] gap-2 px-3 py-1.5 items-center text-[12px]">
+              <div className="min-w-0"><div className="truncate text-slate-700">{m.name}</div><div className="text-[10px] text-slate-400 truncate">{m.sku}</div></div>
+              <span className="text-right tabular-nums text-slate-500">{fmt(m.qty_per)} {m.uom ?? ""}</span>
+              <span className={`text-right tabular-nums ${m.has_price ? "text-slate-600" : "text-rose-500"}`}>{m.has_price ? `฿${fmt(m.unit_cost)}` : "ไม่มีราคา"}</span>
+              <span className="text-right tabular-nums font-medium text-slate-700">฿{fmt(m.line_pp)}</span>
+            </div>
+          ))}
+          {cost.materials.length === 0 && <div className="text-center py-4 text-slate-300 text-sm">ไม่มีวัตถุดิบใน BOM</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PurchTab({ rows }: { rows: PurchaseStatusRow[] | null }) {
   if (rows === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>;
   if (rows.length === 0) return <div className="text-center py-8 text-slate-300 text-sm">ยังไม่มีรายการสั่งซื้อสำหรับงานนี้</div>;
