@@ -25,6 +25,7 @@ import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { HoverImage } from "@/components/hover-image";
+import { SearchableSelect } from "@/components/searchable-select";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
 import { PwaInstallButton } from "@/components/pwa-install-button";
 import type { Assignee } from "@/app/api/mo/assignees/route";
@@ -173,6 +174,8 @@ export default function WorkBoardPage() {
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
     setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
   const pendGroupOf = useCallback((moNo: string) => moGroups.find((g) => g.mo_nos.includes(moNo))?.name ?? null, [moGroups]);
+  // ค่าแรงผลิต/ชิ้น ของใบ (ราคากลางจาก BOM ก่อน · ไม่มีค่อยถอดจากค่าแรงวางแผน ÷ จำนวน)
+  const pendLaborPP = useCallback((m: PendingMO) => (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0), []);
   // ขนาด widget (ปรับได้ จำที่เครื่อง)
   const [pendSize, setPendSize] = useState<{ w: number; h: number }>({ w: 360, h: 480 });
   useEffect(() => { try { const v = localStorage.getItem("wb:pendWidgetSize"); if (v) { const s = JSON.parse(v); if (s?.w && s?.h) setPendSize({ w: s.w, h: s.h }); } } catch { /* ignore */ } }, []);
@@ -1069,6 +1072,7 @@ export default function WorkBoardPage() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</div>
                   <div className="text-[10px] text-slate-400 truncate">{m.mo_no}</div>
+                  {(() => { const pp = pendLaborPP(m); return pp > 0 ? <div className="text-[10px] text-amber-600 truncate">💰 ฿{fmt(pp)}/ชิ้น · รวม ฿{fmt(pp * m.remaining)}</div> : null; })()}
                 </div>
                 <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">เหลือ <b className="text-sm">{fmt(m.remaining)}</b></span>
                 {m.ready
@@ -1110,13 +1114,12 @@ export default function WorkBoardPage() {
               <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
                 <input type="date" value={dispDue} onChange={(e) => setDispDue(e.target.value)} className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
             </div>
-            <label className="block"><span className="text-[11px] text-slate-500">{dispIsHire ? "เลือกช่าง (งานเหมา — เลือกได้ทุกคน)" : `ช่างในแผนก ${dispDept?.name}`}</span>
-              <select value={dispCraftsman} onChange={(e) => setDispCraftsman(e.target.value)}
-                className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <option value="">— ทั้งแผนก (ไม่ระบุช่าง) —</option>
-                {deptCraftsmen.map((c) => { const d = defectOf(c.name); return <option key={c.id} value={c.id}>{d ? "⚠️ " : ""}{c.code ? `[${c.code}] ` : ""}{c.name}{d ? ` — งานเสีย ${d.count}` : ""}</option>; })}
-              </select>
-              {dispIsHire ? <span className="text-[10px] text-indigo-500">งานเหมาเลือกพนักงานได้ทุกคน</span>
+            <label className="block"><span className="text-[11px] text-slate-500">{dispIsHire ? "เลือกช่าง (งานเหมา — เลือกได้ทุกคน)" : `ช่างในแผนก ${dispDept?.name ?? ""}`}</span>
+              <div className="mt-0.5">
+                <SearchableSelect value={dispCraftsman} onChange={setDispCraftsman} placeholder="— ทั้งแผนก (ไม่ระบุช่าง) —"
+                  options={[{ value: "", label: "— ทั้งแผนก (ไม่ระบุช่าง) —" }, ...deptCraftsmen.map((c) => { const d = defectOf(c.name); return { value: c.id, label: `${d ? "⚠️ " : ""}${c.code ? `[${c.code}] ` : ""}${c.name}`, sub: d ? `เคยมีงานเสีย ${d.count} ครั้ง` : undefined, searchText: `${c.code ?? ""} ${c.name}` }; })]} />
+              </div>
+              {dispIsHire ? <span className="text-[10px] text-indigo-500">งานเหมาเลือกพนักงานได้ทุกคน · พิมพ์ชื่อ/รหัสเพื่อค้นหา</span>
                 : deptCraftsmen.length === 0 && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
             </label>
             {/* ค่าแรงผลิต/ชิ้น — default ราคากลางจาก BOM (เลือกช่างที่มีเรต → ใช้เรตช่างนั้น) */}
