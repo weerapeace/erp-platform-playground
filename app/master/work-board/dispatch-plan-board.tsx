@@ -291,7 +291,7 @@ export function DispatchPlanBoard({
           <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2 min-h-[140px]"
             onDragOver={(e) => { if (editable && dragRef.current?.kind === "draft") e.preventDefault(); }}
             onDrop={() => { if (!editable) return; const d = dragRef.current; dragRef.current = null; if (d?.kind === "draft" && d.lineId) void removeLine(d.lineId); }}>
-            <div className="flex items-center justify-between mb-2"><span className="text-sm font-bold text-slate-700">📥 รอจ่าย</span>
+            <div className="sticky top-0 z-20 flex items-center justify-between -mx-2 -mt-2 px-2 pt-2 pb-2 mb-2 bg-slate-100 rounded-t-xl border-b border-slate-200"><span className="text-sm font-bold text-slate-700">📥 รอจ่าย</span>
               <span className="text-[11px] text-slate-400">{visiblePending.length}</span></div>
             {/* แท็บกรองตามกลุ่มใบสั่งงาน */}
             {moGroups.length > 0 && (
@@ -351,7 +351,7 @@ export function DispatchPlanBoard({
               <div key={d.id} onClick={() => canDrop && addLine(d)}
                 onDragOver={(e) => { if (editable) e.preventDefault(); }} onDrop={() => editable && dropToDept(d)}
                 className={`rounded-xl border p-2 min-h-[140px] ${canDrop ? "border-dashed border-indigo-300 bg-indigo-50/30 cursor-pointer" : "border-slate-200 bg-white"}`}>
-                <div className="flex items-center justify-between gap-1 mb-2"
+                <div className="sticky top-0 z-20 flex items-center justify-between gap-1 -mx-2 -mt-2 px-2 pt-2 pb-2 mb-1.5 bg-white rounded-t-xl border-b border-slate-100"
                   onDragOver={(e) => { if (onReorderDepts && deptDragRef.current) e.preventDefault(); }}
                   onDrop={(e) => { if (deptDragRef.current) { e.stopPropagation(); reorderDept(d.id); } }}>
                   <div className="flex items-center gap-1 min-w-0">
