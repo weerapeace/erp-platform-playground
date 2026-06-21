@@ -125,9 +125,7 @@ export default function WorkBoardPage() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"board" | "table" | "purchase">("board");   // สลับ บอร์ด/ตาราง/ขอซื้อ
-  const [pendingCols, setPendingCols] = useState<number | null>(null);     // คอลัมน์โซนรอจ่าย (null=อัตโนมัติ)
-  useEffect(() => { try { const v = localStorage.getItem("wb:pendingCols"); if (v) setPendingCols(Number(v) || null); } catch { /* ignore */ } }, []);
-  const setPendCols = useCallback((n: number | null) => { setPendingCols(n); try { if (n) localStorage.setItem("wb:pendingCols", String(n)); else localStorage.removeItem("wb:pendingCols"); } catch { /* ignore */ } }, []);
+  const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
   // กลุ่ม B: ประวัติงานเสียต่อช่าง (จับด้วยชื่อ) → เตือนตอนจ่ายงาน
@@ -162,6 +160,8 @@ export default function WorkBoardPage() {
   }, []);
   const [dragId, setDragId] = useState<string | null>(null);
 
+  const [pendPopupOpen, setPendPopupOpen] = useState(false);   // ป๊อปอัปรายการรอจ่าย (แทนโซนบนแคนวาส)
+  const [pendSearch, setPendSearch] = useState("");
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
   const [dispDept, setDispDept] = useState<Dept | null>(null);
   const [dispQty, setDispQty] = useState(0);
@@ -255,7 +255,8 @@ export default function WorkBoardPage() {
   }, [board]);
 
   const zones: Zone[] = useMemo(() => {
-    const arr: Zone[] = [{ key: "pending", label: "📥 รอจ่าย", kind: "pending", accent: ACCENT[0], moCards: board.pending, woCards: [] }];
+    // รอจ่ายไม่อยู่บนแคนวาสแล้ว — ย้ายไปปุ่ม "📥 รอจ่าย" → ป๊อปอัป (ใช้พื้นที่น้อยลง) · เหลือแต่โซนโต๊ะ
+    const arr: Zone[] = [];
     // เอาแผนก "ตัด/เตรียม" ออกจากบอร์ด — งานตัด/เตรียมย้ายไปเป็นเช็กลิสต์ในตัวการ์ดรอจ่าย
     board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
     return arr;
@@ -342,7 +343,7 @@ export default function WorkBoardPage() {
   const resetZones = () => { setZonePos({}); setZoneSize({}); };
 
   // เปิด popup จ่ายงาน (ตั้งค่าเริ่มต้นจาก MO)
-  const openDispatch = useCallback((mo: PendingMO, dept: Dept) => {
+  const openDispatch = useCallback((mo: PendingMO, dept: Dept | null) => {
     setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
     setDispRates([]); setDispLaborRate("");
     // ดึงค่าแรง/ชิ้น จาก BOM ของสินค้านี้ (ราคากลาง + รายช่าง) → ใช้ตั้ง default
@@ -820,7 +821,7 @@ export default function WorkBoardPage() {
   // ซ่อนใบจ่ายงานสเตจ "ตัด" (ของเดิม) — งานตัดย้ายไปเป็นเช็กลิสต์ในการ์ดรอจ่าย
   const cards = useMemo(() => {
     const arr: { cid: string; kind: "mo" | "wo"; node: React.ReactNode }[] = [];
-    for (const m of board.pending) arr.push({ cid: `mo:${m.id}`, kind: "mo", node: <PendingBody mo={m} /> });
+    // รอจ่ายย้ายไปป๊อปอัปแล้ว — แคนวาสวาดเฉพาะใบจ่ายงานในโต๊ะ
     for (const w of board.workOrders) if (w.status !== "done" && w.stage !== "cut") arr.push({ cid: `wo:${w.id}`, kind: "wo", node: <WOBody w={w} /> });
     return arr;
   }, [board, canEdit, togglePrep]);
@@ -874,12 +875,9 @@ export default function WorkBoardPage() {
         <ToolBtn onClick={resetZones} title="รีเซ็ตตำแหน่ง/ขนาดโซน">↺</ToolBtn>
         <ToolBtn onClick={() => void load()} title="โหลดใหม่">⟳</ToolBtn>
         <Sep />
-        {/* จำนวนคอลัมน์โซนรอจ่าย */}
-        <span className="text-[11px] text-slate-400 pl-1" title="จำนวนคอลัมน์การ์ดในโซนรอจ่าย">รอจ่าย:</span>
-        {([["auto", null], ["1", 1], ["2", 2], ["3", 3], ["4", 4]] as const).map(([lbl, n]) => (
-          <button key={lbl} type="button" onClick={() => setPendCols(n)} title={`โชว์ ${lbl} คอลัมน์`}
-            className={`h-7 px-2 text-xs rounded ${pendingCols === n ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-100"}`}>{lbl}</button>
-        ))}
+        {/* รอจ่าย — เปิดเป็นป๊อปอัป (ไม่กินที่บนแคนวาส) */}
+        <button type="button" onClick={() => setPendPopupOpen(true)} title="ดูรายการที่รอจ่าย แล้วจ่ายงาน"
+          className="h-7 px-2.5 text-xs font-medium rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 inline-flex items-center gap-1">📥 รอจ่าย ({board.pending.length})</button>
         <Sep />
         <ToolBtn onClick={openDeptMgr} title="ตั้งค่าแผนก (เพิ่ม/แก้/ลบ/ซ่อน/หมายเหตุ)">⚙️</ToolBtn>
         <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
@@ -1011,15 +1009,48 @@ export default function WorkBoardPage() {
         )}
       </ERPModal>
 
+      {/* ป๊อปอัป "รอจ่าย" — แทนโซนบนแคนวาส · ค้นหา + ดูรายละเอียด + จ่ายงาน(เลือกโต๊ะ) */}
+      <ERPModal open={pendPopupOpen} onClose={() => setPendPopupOpen(false)} size="md" title={`📥 รอจ่าย (${board.pending.length})`}>
+        <div className="space-y-2">
+          <input value={pendSearch} onChange={(e) => setPendSearch(e.target.value)} placeholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
+            className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <div className="max-h-[60vh] overflow-y-auto divide-y divide-slate-50 border border-slate-100 rounded-lg">
+            {board.pending.filter((m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`.toLowerCase().includes(pendSearch.trim().toLowerCase())).map((m) => (
+              <div key={m.id} className="flex items-center gap-2.5 px-3 py-2">
+                <HoverImage url={m.image_url} size={40} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold text-slate-800 truncate">{m.product_sku}</div>
+                  <div className="text-[11px] text-slate-400 truncate">{m.mo_no}{m.product_name && m.product_name !== m.product_sku ? ` · ${m.product_name}` : ""}</div>
+                </div>
+                <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">เหลือ <b className="text-sm">{fmt(m.remaining)}</b></span>
+                {m.ready
+                  ? <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
+                  : <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}
+                <button onClick={() => { setClWO(null); setChecklistMO(m); }} title="ดูรายละเอียด/เช็กลิสต์" className="shrink-0 text-slate-300 hover:text-blue-600">🔍</button>
+                {canDispatch && <button onClick={() => { setPendPopupOpen(false); openDispatch(m, null); }} className="shrink-0 h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">จ่ายงาน</button>}
+              </div>
+            ))}
+            {board.pending.length === 0 && <div className="text-center text-sm text-slate-300 py-8">ไม่มีงานรอจ่าย 🎉</div>}
+          </div>
+        </div>
+      </ERPModal>
+
       {/* popup จ่ายงาน */}
       <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
         footer={<>
           <button onClick={() => setDispMO(null)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={submitDispatch} disabled={dispSaving} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
+          <button onClick={submitDispatch} disabled={dispSaving || !dispDept} title={!dispDept ? "เลือกโต๊ะก่อน" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
         </>}>
         {dispMO && (
           <div className="space-y-3">
             <p className="text-[11px] text-slate-400">ใบสั่งผลิต <b>{dispMO.mo_no}</b> · {dispMO.product_name ?? dispMO.product_sku} · เหลือจ่าย {fmt(dispMO.remaining)} ชิ้น</p>
+            <label className="block"><span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่าย</span>
+              <select value={dispDept?.id ?? ""} onChange={(e) => setDispDept(board.departments.find((d) => d.id === e.target.value) ?? null)}
+                className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                <option value="">— เลือกโต๊ะ —</option>
+                {board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่จ่าย</span>
                 <input type="number" min={0} step="any" max={dispMO.remaining} value={dispQty} onChange={(e) => setDispQty(Number(e.target.value))}
