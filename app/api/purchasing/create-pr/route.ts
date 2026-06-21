@@ -90,8 +90,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const first = String(created[0]?.item_name ?? "สินค้า");
     const summary = n <= 1 ? first : `${first} +${n - 1} รายการ`;
     const urgent = items.some((i) => i.is_urgent === true);
+    // จำนวนรวม + ยอดรวม (แยกตามสกุลเงิน เผื่อมีทั้งบาท/หยวน) + รายการพร้อมจำนวน
+    const totalQty = items.reduce((s, i) => s + num(i.qty), 0);
+    const byCur: Record<string, number> = {};
+    for (const i of items) { const c = String(i.currency || "THB").toUpperCase().replace("YUAN", "RMB"); byCur[c] = (byCur[c] ?? 0) + num(i.qty) * num(i.price_est); }
+    const fmtCur = (v: number, c: string) => c === "THB" ? `฿${Math.round(v).toLocaleString("th-TH")}` : `${Math.round(v).toLocaleString("th-TH")} ${c}`;
+    const totalStr = Object.entries(byCur).filter(([, v]) => v > 0).map(([c, v]) => fmtCur(v, c)).join(" + ") || "—";
+    const itemLines = items.slice(0, 8).map((i) => `• ${String(i.item_name ?? "สินค้า")} ×${num(i.qty).toLocaleString()}${i.uom ? ` ${i.uom}` : ""}`);
+    if (items.length > 8) itemLines.push(`• …อีก ${items.length - 8} รายการ`);
     const title = `🛒 ใบขอซื้อใหม่ ${n} ใบ`;
-    const bodyText = `${actor} ขอซื้อ: ${summary}`;
+    const bodyText = `${actor} · ${totalQty.toLocaleString()} ชิ้น · ${totalStr} — ${summary}`;
 
     // ① ในแอป → user ที่มีสิทธิ์ pr.approve (+ admin) · ไม่เตือนตัวคนขอเอง
     const { data: roleRows } = await admin.from("erp_role_permissions").select("role_key").eq("permission_key", "pr.approve");
@@ -111,7 +119,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const cfg = (lc?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
     const target = cfg.groups?.purchase_request || "";   // เฉพาะกลุ่มขอซื้อที่ตั้งไว้ (ไม่ fallback กลุ่มอื่น)
     if (cfg.token && target) {
-      const lineText = `🛒 ใบขอซื้อใหม่ ${n} ใบ\nผู้ขอ: ${actor}\nรายการ: ${summary}${urgent ? "\n⚡ มีรายการด่วน" : ""}\n→ เปิดแอปจัดซื้อเพื่ออนุมัติ`;
+      const lineText = `🛒 ใบขอซื้อใหม่ ${n} ใบ\nผู้ขอ: ${actor}\n${itemLines.join("\n")}\nจำนวนรวม: ${totalQty.toLocaleString()} ชิ้น\nยอดรวม: ${totalStr}${urgent ? "\n⚡ มีรายการด่วน" : ""}\n→ เปิดแอปจัดซื้อเพื่ออนุมัติ`;
       await fetch("https://api.line.me/v2/bot/message/push", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
