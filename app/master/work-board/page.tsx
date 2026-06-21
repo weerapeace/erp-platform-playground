@@ -167,6 +167,24 @@ export default function WorkBoardPage() {
   const pendPosRef = useRef(pendPos); pendPosRef.current = pendPos;   // อ่านตำแหน่งล่าสุดตอนเริ่มลาก
   const pendDragRef = useRef<PendingMO | null>(null);   // รายการที่กำลังลากจาก widget → วางที่โต๊ะ
   const [dropDeptId, setDropDeptId] = useState<string | null>(null);   // โต๊ะที่กำลังลากค้างอยู่ (ไฮไลต์)
+  // ตัวกรองกลุ่มใน widget รอจ่าย
+  const [pendGroupFilter, setPendGroupFilter] = useState("__all__");
+  const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
+  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
+    setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
+  const pendGroupOf = useCallback((moNo: string) => moGroups.find((g) => g.mo_nos.includes(moNo))?.name ?? null, [moGroups]);
+  // ขนาด widget (ปรับได้ จำที่เครื่อง)
+  const [pendSize, setPendSize] = useState<{ w: number; h: number }>({ w: 360, h: 480 });
+  useEffect(() => { try { const v = localStorage.getItem("wb:pendWidgetSize"); if (v) { const s = JSON.parse(v); if (s?.w && s?.h) setPendSize({ w: s.w, h: s.h }); } } catch { /* ignore */ } }, []);
+  const pendSizeRef = useRef(pendSize); pendSizeRef.current = pendSize;
+  const startPendResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const sx = e.clientX, sy = e.clientY, ow = pendSizeRef.current.w, oh = pendSizeRef.current.h;
+    let last = { w: ow, h: oh };
+    const onMove = (ev: PointerEvent) => { last = { w: Math.max(280, Math.min(760, ow + ev.clientX - sx)), h: Math.max(240, Math.min(900, oh + ev.clientY - sy)) }; setPendSize(last); };
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); try { localStorage.setItem("wb:pendWidgetSize", JSON.stringify(last)); } catch { /* ignore */ } };
+    window.addEventListener("pointermove", onMove); window.addEventListener("pointerup", onUp);
+  }, []);
   const startPendMove = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     const sx = e.clientX, sy = e.clientY, ox = pendPosRef.current.x, oy = pendPosRef.current.y;
@@ -1026,17 +1044,25 @@ export default function WorkBoardPage() {
 
       {/* widget "รอจ่าย" — ลอยบนบอร์ด · ลากย้ายตำแหน่งได้ · ลากรายการไปวางที่โต๊ะ = จ่ายงาน */}
       {pendPopupOpen && (
-        <div className="fixed z-[55] w-[360px] bg-white rounded-xl border border-slate-200 shadow-2xl flex flex-col" style={{ left: pendPos.x, top: pendPos.y, maxHeight: "72vh" }}>
+        <div className="fixed z-[55] bg-white rounded-xl border border-slate-200 shadow-2xl flex flex-col" style={{ left: pendPos.x, top: pendPos.y, width: pendSize.w, height: pendSize.h }}>
           <div onPointerDown={startPendMove} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-slate-100 cursor-move select-none rounded-t-xl bg-slate-50">
             <span className="text-sm font-bold text-slate-700">📥 รอจ่าย ({board.pending.length})</span>
             <button onClick={() => setPendPopupOpen(false)} title="ปิด" className="text-slate-400 hover:text-slate-700 text-lg leading-none">✕</button>
           </div>
-          <div className="p-2 border-b border-slate-100">
+          <div className="p-2 border-b border-slate-100 space-y-1.5">
             <input value={pendSearch} onChange={(e) => setPendSearch(e.target.value)} placeholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
               className="w-full h-8 px-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <select value={pendGroupFilter} onChange={(e) => setPendGroupFilter(e.target.value)} title="กรองตามกลุ่มใบสั่งผลิต"
+              className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="__all__">🗂 ทุกกลุ่ม</option>
+              {moGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
+              <option value="__none__">— ยังไม่จับกลุ่ม —</option>
+            </select>
           </div>
-          <div className="overflow-y-auto p-1.5 space-y-1">
-            {board.pending.filter((m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`.toLowerCase().includes(pendSearch.trim().toLowerCase())).map((m) => (
+          <div className="overflow-y-auto p-1.5 space-y-1 flex-1 min-h-0">
+            {board.pending
+              .filter((m) => pendGroupFilter === "__all__" ? true : pendGroupFilter === "__none__" ? pendGroupOf(m.mo_no) === null : pendGroupOf(m.mo_no) === pendGroupFilter)
+              .filter((m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`.toLowerCase().includes(pendSearch.trim().toLowerCase())).map((m) => (
               <div key={m.id} draggable onDragStart={(e) => { pendDragRef.current = m; e.dataTransfer.setData("text/plain", m.mo_no); e.dataTransfer.effectAllowed = "move"; }} onDragEnd={() => { pendDragRef.current = null; setDropDeptId(null); }}
                 className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-grab active:cursor-grabbing">
                 <HoverImage url={m.image_url} size={36} />
@@ -1055,6 +1081,9 @@ export default function WorkBoardPage() {
             {board.pending.length === 0 && <div className="text-center text-sm text-slate-300 py-8">ไม่มีงานรอจ่าย 🎉</div>}
           </div>
           <div className="px-3 py-1.5 border-t border-slate-100 text-[10px] text-slate-400 rounded-b-xl">💡 ลากรายการไปวางที่โต๊ะ = จ่ายงาน · หรือกดปุ่ม “จ่ายงาน”</div>
+          {/* ที่จับปรับขนาด (มุมขวาล่าง) */}
+          <div onPointerDown={startPendResize} title="ลากเพื่อปรับขนาดแผง" className="absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize"
+            style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)", borderBottomRightRadius: 12 }} />
         </div>
       )}
 
