@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
+import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 
 type Dash = {
@@ -78,6 +79,7 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 
 export default function PurchasingDashboardPage() {
   const [d, setD] = useState<Dash | null>(null);
+  const [lineOpen, setLineOpen] = useState(false);   // โมดอลตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ
   const [incoming, setIncoming] = useState<Incoming[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -109,7 +111,10 @@ export default function PurchasingDashboardPage() {
         {/* Header */}
         <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
           <h1 className="text-xl font-semibold text-slate-800 flex items-center gap-2">📊 แดชบอร์ดจัดซื้อ</h1>
-          <Link href="/purchasing" className="h-9 px-4 leading-9 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ ขอซื้อสินค้า →</Link>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setLineOpen(true)} className="h-9 px-3 leading-9 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50" title="ตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ">💬 ตั้งค่า LINE</button>
+            <Link href="/purchasing" className="h-9 px-4 leading-9 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">+ ขอซื้อสินค้า →</Link>
+          </div>
         </div>
 
         {loading && <div className="text-center text-slate-300 py-16 text-sm">กำลังโหลด...</div>}
@@ -214,6 +219,82 @@ export default function PurchasingDashboardPage() {
           </div>
         )}
       </div>
+      <LineGroupModal open={lineOpen} onClose={() => setLineOpen(false)} />
     </PlaygroundShell>
+  );
+}
+
+// โมดอลตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ — จับ group id (เหมือน china-pay) + บันทึก + ทดสอบ
+function LineGroupModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [captured, setCaptured] = useState("");      // group id ล่าสุดที่บอทจับได้
+  const [current, setCurrent] = useState("");        // กลุ่มขอซื้อที่ตั้งไว้
+  const [input, setInput] = useState("");            // ช่องกรอก/แก้ group id
+  const [hasToken, setHasToken] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = () => {
+    apiFetch("/api/purchasing/line-group").then(r => r.json()).then(j => {
+      if (j.error) return;
+      setCaptured(j.captured ?? ""); setCurrent(j.current ?? ""); setHasToken(!!j.has_token);
+      setInput(j.current || "");
+    }).catch(() => {});
+  };
+  useEffect(() => { if (open) { setMsg(null); load(); } }, [open]);
+
+  const pull = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const j = await apiFetch("/api/purchasing/line-group").then(r => r.json());
+      setCaptured(j.captured ?? "");
+      if (j.captured) { setInput(j.captured); setMsg({ ok: true, text: `ได้ Group ID ล่าสุด: ${j.captured}` }); }
+      else setMsg({ ok: false, text: "ยังไม่พบ group id — เพิ่มบอทเข้ากลุ่มแล้วพิมพ์อะไรก็ได้ในกลุ่ม 1 ครั้ง แล้วกดดึงอีกที" });
+    } finally { setBusy(false); }
+  };
+  const save = async () => {
+    const gid = input.trim(); if (!gid) { setMsg({ ok: false, text: "ยังไม่มี group id" }); return; }
+    setBusy(true); setMsg(null);
+    try {
+      const j = await apiFetch("/api/purchasing/line-group", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group_id: gid }) }).then(r => r.json());
+      if (j.error) setMsg({ ok: false, text: j.error });
+      else { setCurrent(gid); setMsg({ ok: true, text: "บันทึกกลุ่มขอซื้อแล้ว ✅ ทุกใบขอซื้อจะเด้งเข้ากลุ่มนี้" }); }
+    } finally { setBusy(false); }
+  };
+  const test = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const j = await apiFetch("/api/purchasing/line-group", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ test: true }) }).then(r => r.json());
+      setMsg(j.error ? { ok: false, text: j.error } : { ok: true, text: "ส่งข้อความทดสอบเข้ากลุ่มแล้ว ✅ ไปเช็คใน LINE" });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <ERPModal open={open} onClose={onClose} size="md" title="💬 ตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ">
+      <div className="space-y-3 text-sm">
+        {!hasToken && <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">⚠ ยังไม่ได้ตั้งค่าบอท LINE (โทเคน) — ตั้งที่แอปโอนเงินจีนก่อน</div>}
+        <ol className="list-decimal pl-5 space-y-1 text-xs text-slate-600">
+          <li>สร้างกลุ่ม LINE (เช่น "แจ้งขอซื้อ") แล้ว<b>เพิ่มบอท</b>เข้ากลุ่ม</li>
+          <li>พิมพ์อะไรก็ได้ในกลุ่ม 1 ครั้ง → กดปุ่ม <b>"ดึง Group ID ล่าสุด"</b></li>
+          <li>กด <b>บันทึก</b> → เสร็จ! (กด <b>ทดสอบส่ง</b> เพื่อเช็ก)</li>
+        </ol>
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs font-medium text-slate-600">Group ID กลุ่มขอซื้อ</label>
+            {current && <span className="text-[11px] text-emerald-600">● ตั้งไว้แล้ว</span>}
+          </div>
+          <div className="flex gap-2">
+            <input value={input} onChange={e => setInput(e.target.value)} placeholder="กดดึง group id ล่าสุด หรือวางเอง"
+              className="flex-1 h-9 px-2 text-xs font-mono border border-slate-200 rounded-md" />
+            <button onClick={pull} disabled={busy} className="h-9 px-3 text-xs font-medium border border-blue-200 text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100 disabled:opacity-50 whitespace-nowrap">↻ ดึง Group ID ล่าสุด</button>
+          </div>
+          {captured && captured !== input && <p className="text-[11px] text-slate-400 mt-1">ล่าสุดที่จับได้: <button onClick={() => setInput(captured)} className="font-mono text-blue-600 underline">{captured}</button></p>}
+        </div>
+        {msg && <div className={`text-xs p-2 rounded-lg ${msg.ok ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-rose-50 text-rose-700 border border-rose-200"}`}>{msg.text}</div>}
+        <div className="flex gap-2 pt-1">
+          <button onClick={save} disabled={busy || !input.trim()} className="flex-1 h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">บันทึกกลุ่มขอซื้อ</button>
+          <button onClick={test} disabled={busy || !current} className="h-10 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">ทดสอบส่ง</button>
+        </div>
+      </div>
+    </ERPModal>
   );
 }
