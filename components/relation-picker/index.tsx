@@ -20,6 +20,11 @@ import { apiFetch } from "@/lib/api";
 import { buildRelationFilter, type RelationConfig } from "@/lib/relation";
 import type { PickerOption } from "@/app/api/admin/picker/route";
 
+// cache ผลตัวเลือก dropdown ใน session (per URL) อายุสั้น ~60วิ
+// → เปิด dropdown เดิมซ้ำ/พิมพ์ค้นคำเดิม = แสดงทันที ไม่ต้องยิง worker (~2วิ) ใหม่
+const PICKER_CACHE = new Map<string, { at: number; opts: PickerOption[] }>();
+const PICKER_TTL = 60000;
+
 /** ตัวเลือกพิเศษปักบนสุดของ dropdown (เช่น "ค่าส่ง" / "VAT") — ไม่ใช่ record จาก DB */
 export type PinnedOption = PickerOption & {
   /** สี tailwind classes เช่น "text-purple-700" สำหรับทำให้เด่น */
@@ -83,38 +88,34 @@ export function RelationPicker({
   // F9: ถ้า config.lookup_type → ใช้ /api/lookups (generic) | ไม่งั้น /api/admin/picker (table จริง)
   const loadOptions = useCallback(async (query: string, includeCurrent: string | null) => {
     if (isBlocked) { setOptions([]); return; }   // พ่อยังไม่เลือก → ไม่ต้องโหลด
+    // สร้าง URL ของคำขอ (ใช้เป็น cache key ด้วย)
+    let url: string;
+    if (config.lookup_type) {
+      const params = new URLSearchParams({ type: config.lookup_type, limit: "100" });
+      if (query) params.set("search", query);
+      if (includeCurrent) params.set("include_ids", includeCurrent);
+      url = `/api/lookups?${params}`;
+    } else {
+      const params = new URLSearchParams({ table: config.target_table, label: config.target_label_field, limit: "100" });
+      if (query) params.set("search", query);
+      if (config.target_search_fields?.length) params.set("search_in", config.target_search_fields.join(","));
+      if (config.secondary_label_field) params.set("secondary", config.secondary_label_field);
+      if (activeFilter) { params.set("filter_col", activeFilter.column); params.set("filter_val", activeFilter.value); }
+      if (includeCurrent) params.set("include_ids", includeCurrent);
+      url = `/api/admin/picker?${params}`;
+    }
+    // cache hit → แสดงทันที (ไม่ยิง worker)
+    const hit = PICKER_CACHE.get(url);
+    if (hit && Date.now() - hit.at < PICKER_TTL) { setOptions(hit.opts); return; }
     setLoading(true);
     try {
-      let opts: PickerOption[] = [];
-      if (config.lookup_type) {
-        const params = new URLSearchParams({ type: config.lookup_type, limit: "100" });
-        if (query)           params.set("search", query);
-        if (includeCurrent)  params.set("include_ids", includeCurrent);
-        const res = await apiFetch(`/api/lookups?${params}`);
-        const json = await res.json();
-        opts = ((json.data ?? []) as Array<{ id: string; name: string; code: string | null; is_active: boolean }>)
-          .map((r) => ({
-            id:        r.id,
-            label:     r.name,
-            secondary: r.code ?? undefined,
-            active:    r.is_active,
-          }));
-      } else {
-        const params = new URLSearchParams({
-          table: config.target_table,
-          label: config.target_label_field,
-          limit: "100",                 // โชว์ได้มากขึ้น (เดิม 20 → เห็นไม่ครบ) ที่เหลือใช้ค้นหา
-        });
-        if (query) params.set("search", query);
-        if (config.target_search_fields?.length) params.set("search_in", config.target_search_fields.join(","));
-        if (config.secondary_label_field)        params.set("secondary", config.secondary_label_field);
-        // R3: ใช้ activeFilter (dependent มาก่อน static) แทน config.filter ตรงๆ
-        if (activeFilter)                         { params.set("filter_col", activeFilter.column); params.set("filter_val", activeFilter.value); }
-        if (includeCurrent)                       params.set("include_ids", includeCurrent);
-        const res = await apiFetch(`/api/admin/picker?${params}`);
-        const json = await res.json();
-        opts = (json.data ?? []) as PickerOption[];
-      }
+      const res = await apiFetch(url);
+      const json = await res.json();
+      const opts: PickerOption[] = config.lookup_type
+        ? ((json.data ?? []) as Array<{ id: string; name: string; code: string | null; is_active: boolean }>).map((r) => ({ id: r.id, label: r.name, secondary: r.code ?? undefined, active: r.is_active }))
+        : ((json.data ?? []) as PickerOption[]);
+      PICKER_CACHE.set(url, { at: Date.now(), opts });
+      if (PICKER_CACHE.size > 300) { const now = Date.now(); for (const [k, v] of PICKER_CACHE) if (now - v.at > PICKER_TTL) PICKER_CACHE.delete(k); }
       setOptions(opts);
     } finally {
       setLoading(false);

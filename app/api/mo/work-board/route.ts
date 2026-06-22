@@ -52,63 +52,52 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .map((d: Record<string, unknown>) => ({ id: String(d.id), name: (d.name as string) ?? "—", note: (d.note as string) ?? null, show_note: !!d.show_note, show_on_board: d.show_on_board !== false }));
 
   const workOrders = (wos ?? []) as Record<string, unknown>[];
+  const moList = (mos ?? []) as Record<string, unknown>[];
 
-  // ยอดจ่ายแล้วต่อ MO (ไม่นับยกเลิก) → คำนวณ "เหลือจ่าย"
-  const dispatchedByMo = new Map<string, number>();
+  // ── คำนวณชุดข้อมูลนำเข้า (sync) ก่อนยิง query รอบสอง ──
+  const dispatchedByMo = new Map<string, number>();          // ยอดจ่ายแล้วต่อ MO (ไม่นับยกเลิก)
+  const prodActualByMo = new Map<string, number>();          // ผลิต-จริง = ผลรวม labor_cost ใบจ่ายงาน
   for (const w of workOrders) {
     if (w.status === "cancelled") continue;
     const k = String(w.mo_no);
     dispatchedByMo.set(k, (dispatchedByMo.get(k) ?? 0) + (Number(w.qty) || 0));
+    prodActualByMo.set(k, (prodActualByMo.get(k) ?? 0) + (Number(w.labor_cost) || 0));
   }
-
-  // เสริม แบรนด์/สี/รูป
-  const allSkus = [...workOrders.map((w) => w.product_sku as string), ...(mos ?? []).map((m: Record<string, unknown>) => m.product_sku as string)];
-  const info = await skuInfoMap(admin, allSkus.filter(Boolean) as string[]);
-
-  // map mo_no → manufacturing_orders.id (สำหรับเปิดป๊อปอัปเช็กลิสต์จากใบจ่ายงาน)
+  const allSkus = [...workOrders.map((w) => w.product_sku as string), ...moList.map((m) => m.product_sku as string)].filter(Boolean) as string[];
   const moIdByNo = new Map<string, string>();
-  for (const m of (mos ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));
-  const missingMoNos = [...new Set(workOrders.map((w) => String(w.mo_no)).filter(Boolean))].filter((n) => !moIdByNo.has(n));
-  if (missingMoNos.length > 0) {
-    const { data: extra } = await admin.from("manufacturing_orders").select("id, mo_no").in("mo_no", missingMoNos);
-    for (const m of (extra ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));
-  }
-
-  // ───── สรุปค่าแรง (กลุ่ม A) — ผลิต/งานเหมา × แผน/จริง ─────
-  // ผลิต-จริง = ผลรวม labor_cost ของใบจ่ายงาน · ผลิต-แผน = est_labor_cost ต่อใบสั่งผลิต
-  // เหมา-แผน = ผลรวม(จำนวนรวม×เรต) · เหมา-จริง = เฉพาะที่กด "งานเหมาเสร็จ" (status=done)
-  const prodActualByMo = new Map<string, number>();
-  for (const w of workOrders) {
-    if (w.status === "cancelled") continue;
-    prodActualByMo.set(String(w.mo_no), (prodActualByMo.get(String(w.mo_no)) ?? 0) + (Number(w.labor_cost) || 0));
-  }
-  const estByMo = new Map<string, number>();
-  const moQtyByNo = new Map<string, number>();
-  const bomByMo = new Map<string, string>();
-  for (const m of (mos ?? []) as Record<string, unknown>[]) {
+  const estByMo = new Map<string, number>(); const moQtyByNo = new Map<string, number>(); const bomByMo = new Map<string, string>();
+  for (const m of moList) {
+    moIdByNo.set(String(m.mo_no), String(m.id));
     estByMo.set(String(m.mo_no), Number(m.est_labor_cost) || 0);
     moQtyByNo.set(String(m.mo_no), Number(m.qty) || 0);
     if (m.bom_code) bomByMo.set(String(m.mo_no), String(m.bom_code));
   }
-  // ค่าแรงผลิต/ชิ้น "ราคากลาง" จาก BOM (craftsman_id null, is_current) → ใช้โชว์ค่าแรงในบอร์ดแผน
+  const missingMoNos = [...new Set(workOrders.map((w) => String(w.mo_no)).filter(Boolean))].filter((n) => !moIdByNo.has(n));
   const bomCodes = [...new Set([...bomByMo.values()])];
+  const allMoNos = [...new Set([...workOrders.map((w) => String(w.mo_no)), ...moList.map((m) => String(m.mo_no))].filter(Boolean))];
+  // MO ที่ยังเหลือต้องจ่าย (remaining>0) → ใช้ดึงเช็กลิสต์วัตถุดิบ
+  const pendingMoNos = moList.filter((m) => Math.max(0, (Number(m.qty) || 0) - (dispatchedByMo.get(String(m.mo_no)) ?? 0)) > 0.0001).map((m) => String(m.mo_no));
+  const noData = { data: [] as Record<string, unknown>[] };
+
+  // ── ยิง query รอบสองพร้อมกัน (เดิมยิงทีละตัว 5-6 รอบ = waterfall) ──
+  const [info, extraMoRes, lrRes, pcsRes, sumsRes, matsRes] = await Promise.all([
+    skuInfoMap(admin, allSkus),
+    missingMoNos.length ? admin.from("manufacturing_orders").select("id, mo_no").in("mo_no", missingMoNos) : Promise.resolve(noData),
+    bomCodes.length ? admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true) : Promise.resolve(noData),
+    allMoNos.length ? admin.from("mo_piecework").select("mo_no, total_qty, rate, status").in("mo_no", allMoNos).eq("is_active", true) : Promise.resolve(noData),
+    pendingMoNos.length ? admin.from("mo_material_summary").select("mo_no, is_ready").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
+    pendingMoNos.length ? admin.from("mo_materials").select("mo_no, cut_block_code, cut_length, pieces, cut_done").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
+  ]);
+
+  for (const m of (extraMoRes.data ?? []) as Record<string, unknown>[]) moIdByNo.set(String(m.mo_no), String(m.id));
   const centralRateByBom = new Map<string, number>();
-  for (let i = 0; i < bomCodes.length; i += 300) {
-    const { data: lr } = await admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes.slice(i, i + 300)).is("craftsman_id", null).eq("is_current", true).eq("is_active", true);
-    for (const r of (lr ?? []) as Record<string, unknown>[]) centralRateByBom.set(String(r.bom_code), Number(r.rate) || 0);
-  }
+  for (const r of (lrRes.data ?? []) as Record<string, unknown>[]) centralRateByBom.set(String(r.bom_code), Number(r.rate) || 0);
   const centralRateOf = (moNo: string) => centralRateByBom.get(bomByMo.get(moNo) ?? "") ?? 0;
-  const allMoNos = [...new Set([...workOrders.map((w) => String(w.mo_no)), ...(mos ?? []).map((m: Record<string, unknown>) => String(m.mo_no))].filter(Boolean))];
-  const piecePlanByMo = new Map<string, number>();
-  const pieceActualByMo = new Map<string, number>();
-  for (let i = 0; i < allMoNos.length; i += 300) {
-    const chunk = allMoNos.slice(i, i + 300);
-    const { data: pcs } = await admin.from("mo_piecework").select("mo_no, total_qty, rate, status").in("mo_no", chunk).eq("is_active", true);
-    for (const p of (pcs ?? []) as Record<string, unknown>[]) {
-      const k = String(p.mo_no); const amt = (Number(p.total_qty) || 0) * (Number(p.rate) || 0);
-      piecePlanByMo.set(k, (piecePlanByMo.get(k) ?? 0) + amt);
-      if (p.status === "done") pieceActualByMo.set(k, (pieceActualByMo.get(k) ?? 0) + amt);
-    }
+  const piecePlanByMo = new Map<string, number>(); const pieceActualByMo = new Map<string, number>();
+  for (const p of (pcsRes.data ?? []) as Record<string, unknown>[]) {
+    const k = String(p.mo_no); const amt = (Number(p.total_qty) || 0) * (Number(p.rate) || 0);
+    piecePlanByMo.set(k, (piecePlanByMo.get(k) ?? 0) + amt);
+    if (p.status === "done") pieceActualByMo.set(k, (pieceActualByMo.get(k) ?? 0) + amt);
   }
   const laborOfMo = (moNo: string) => ({
     prod_plan: r2(estByMo.get(moNo) ?? 0), prod_actual: r2(prodActualByMo.get(moNo) ?? 0),
@@ -139,29 +128,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prep_done: !!m.prep_done, cut_done: !!m.cut_done, bom_code: (m.bom_code as string) ?? null, ...inf, labor: laborOfMo(String(m.mo_no)), central_rate: centralRateOf(String(m.mo_no)) };
   }).filter((m) => m.remaining > 0.0001);   // ซ่อน MO ที่จ่ายครบแล้ว
 
-  // เช็กลิสต์วัตถุดิบจาก BOM ต่อใบ — เตรียม = is_ready (เดิม), ตัด = cut_done (เฉพาะชิ้นที่ต้องตัด)
-  const moNos = pending.map((p) => String(p.mo_no));
+  // เช็กลิสต์วัตถุดิบจาก BOM ต่อใบ (ดึงมาแล้วในรอบ parallel ข้างบน: sumsRes/matsRes) — เตรียม=is_ready, ตัด=cut_done
   const prog = new Map<string, { prepTotal: number; prepDone: number; cutTotal: number; cutDone: number }>();
-  if (moNos.length > 0) {
-    const [{ data: sums }, { data: mats }] = await Promise.all([
-      admin.from("mo_material_summary").select("mo_no, is_ready").in("mo_no", moNos).eq("is_active", true),
-      admin.from("mo_materials").select("mo_no, cut_block_code, cut_length, pieces, cut_done").in("mo_no", moNos).eq("is_active", true),
-    ]);
-    // เตรียม = สรุปต่อวัตถุดิบ (is_ready)
-    for (const s of (sums ?? []) as Record<string, unknown>[]) {
-      const k = String(s.mo_no);
-      const p = prog.get(k) ?? { prepTotal: 0, prepDone: 0, cutTotal: 0, cutDone: 0 };
-      p.prepTotal += 1; if (s.is_ready) p.prepDone += 1;
-      prog.set(k, p);
-    }
-    // ตัด = บล็อกที่ต้องตัด (มีข้อมูลบล็อก/ความยาว/จำนวนชิ้น)
-    for (const x of (mats ?? []) as Record<string, unknown>[]) {
-      if (!(x.cut_block_code != null || x.cut_length != null || x.pieces != null)) continue;
-      const k = String(x.mo_no);
-      const p = prog.get(k) ?? { prepTotal: 0, prepDone: 0, cutTotal: 0, cutDone: 0 };
-      p.cutTotal += 1; if (x.cut_done) p.cutDone += 1;
-      prog.set(k, p);
-    }
+  for (const s of (sumsRes.data ?? []) as Record<string, unknown>[]) {
+    const k = String(s.mo_no);
+    const p = prog.get(k) ?? { prepTotal: 0, prepDone: 0, cutTotal: 0, cutDone: 0 };
+    p.prepTotal += 1; if (s.is_ready) p.prepDone += 1;
+    prog.set(k, p);
+  }
+  for (const x of (matsRes.data ?? []) as Record<string, unknown>[]) {
+    if (!(x.cut_block_code != null || x.cut_length != null || x.pieces != null)) continue;
+    const k = String(x.mo_no);
+    const p = prog.get(k) ?? { prepTotal: 0, prepDone: 0, cutTotal: 0, cutDone: 0 };
+    p.cutTotal += 1; if (x.cut_done) p.cutDone += 1;
+    prog.set(k, p);
   }
   const pendingEnriched = pending.map((p) => {
     const pr = prog.get(String(p.mo_no));
