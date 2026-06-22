@@ -10,6 +10,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { r2GetObject } from "@/lib/r2";
+import { getAi } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -18,20 +19,6 @@ const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 const MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// ดึง binding AI จาก Cloudflare runtime (เลียนแบบ getR2Binding)
-async function getAiBinding(): Promise<any | null> {
-  try {
-    const wk: any = await import(/* webpackIgnore: true */ ("cloudflare:workers" as string));
-    if (wk?.env?.AI) return wk.env.AI;
-  } catch { /* ไม่ใช่ runtime CF */ }
-  try {
-    const mod: any = await import(/* webpackIgnore: true */ ("@opennextjs/cloudflare" as string));
-    const ctx = mod.getCloudflareContext ? mod.getCloudflareContext() : null;
-    if (ctx?.env?.AI) return ctx.env.AI;
-  } catch { /* noop */ }
-  return null;
-}
-
 // ดึงตัวเลขเงินก้อนใหญ่สุดจากข้อความที่ AI ตอบ (รองรับคอมมา/ทศนิยม)
 function parseAmount(text: string): number | null {
   const matches = text.match(/[0-9][0-9,]*(?:\.[0-9]+)?/g);
@@ -48,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!key || !SAFE_KEY.test(key)) return NextResponse.json({ error: "key ไม่ถูกต้อง" }, { status: 400 });
   if (key.toLowerCase().endsWith(".pdf")) return NextResponse.json({ error: "ไฟล์ PDF อ่านอัตโนมัติไม่ได้ — กรอกยอดเอง" }, { status: 400 });
 
-  const ai = await getAiBinding();
+  const ai = await getAi();
   if (!ai) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ AI (binding)" }, { status: 503 });
 
   try {

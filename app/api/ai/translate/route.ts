@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { getAi } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -13,11 +14,6 @@ export const revalidate = 0;
 const MODEL = "@cf/meta/llama-3.1-8b-instruct";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-async function getAiBinding(): Promise<any | null> {
-  try { const wk: any = await import(/* webpackIgnore: true */ ("cloudflare:workers" as string)); if (wk?.env?.AI) return wk.env.AI; } catch { /* not CF runtime */ }
-  try { const mod: any = await import(/* webpackIgnore: true */ ("@opennextjs/cloudflare" as string)); const ctx = mod.getCloudflareContext ? mod.getCloudflareContext() : null; if (ctx?.env?.AI) return ctx.env.AI; } catch { /* noop */ }
-  return null;
-}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -27,7 +23,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!text) return NextResponse.json({ error: "no text" }, { status: 400 });
   if (text.length > 4000) return NextResponse.json({ error: "ข้อความยาวเกินไป (จำกัด 4000 ตัวอักษร)" }, { status: 400 });
 
-  const ai = await getAiBinding();
+  const ai = await getAi();
   if (!ai) return NextResponse.json({ error: "AI ใช้งานไม่ได้ในขณะนี้" }, { status: 503 });
 
   const hasThai = /[฀-๿]/.test(text);
