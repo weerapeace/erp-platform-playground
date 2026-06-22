@@ -48,5 +48,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .map((d: Record<string, unknown>) => ({ id: String(d.id), name: (d.name as string) ?? "—", code: (d.code as string) ?? null }))
     .sort((a, b) => a.name.localeCompare(b.name, "th"));
 
-  return NextResponse.json({ craftsmen, departments, dept_wages, error: null });
+  return NextResponse.json({ craftsmen, departments, dept_wages, error: null }, { headers: { "Cache-Control": "private, max-age=30" } });
 }

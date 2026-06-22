@@ -24,7 +24,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .from("departments").select("id, name, status, note, show_note, display_order, show_on_board")
     .order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  return NextResponse.json({ data: data ?? [], error: null });
+  return NextResponse.json({ data: data ?? [], error: null }, { headers: { "Cache-Control": "private, max-age=30" } });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
