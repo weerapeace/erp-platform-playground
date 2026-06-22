@@ -252,16 +252,26 @@ export default function WorkBoardPage() {
     } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } catch { /* ignore */ } })(); }, []);
-  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/craftsman-defects"); const j = await r.json();
-    const m: Record<string, { worker: string; count: number; last_at: string | null; types: string[] }> = {};
-    for (const d of (j.data ?? []) as { worker: string; count: number; last_at: string | null; types: string[] }[]) m[(d.worker ?? "").trim().toLowerCase()] = d;
-    setDefectByWorker(m); } catch { /* ignore */ } })(); }, []);
   // กลุ่ม D: โหลดรายการแผนจ่ายงาน
   const loadPlans = useCallback(async () => {
     try { const r = await apiFetch("/api/mo/dispatch-plans"); const j = await r.json(); setPlans((j.data ?? []) as DispatchPlan[]); } catch { /* ignore */ }
   }, []);
-  useEffect(() => { void loadPlans(); }, [loadPlans]);
+  // ของรอง (ช่าง/งานเสีย/แผน) — เลื่อนให้บอร์ดหลักโหลด+แสดงก่อน แล้วค่อยดึงทีละตัว
+  // (กันยิงพร้อมกัน 4 ตัวแย่ง Cloudflare Worker↔Supabase ทำให้หน้าค้าง)
+  useEffect(() => {
+    let alive = true;
+    const t = setTimeout(() => { void (async () => {
+      try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); if (alive) { setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } } catch { /* ignore */ }
+      if (!alive) return;
+      try { const r = await apiFetch("/api/mo/craftsman-defects"); const j = await r.json();
+        const m: Record<string, { worker: string; count: number; last_at: string | null; types: string[] }> = {};
+        for (const d of (j.data ?? []) as { worker: string; count: number; last_at: string | null; types: string[] }[]) m[(d.worker ?? "").trim().toLowerCase()] = d;
+        if (alive) setDefectByWorker(m); } catch { /* ignore */ }
+      if (!alive) return;
+      await loadPlans();
+    })(); }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [loadPlans]);
   const createPlan = useCallback(async () => {
     try {
       const r = await apiFetch("/api/mo/dispatch-plans", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: `แผน ${plans.length + 1}` }) });

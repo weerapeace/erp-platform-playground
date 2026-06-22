@@ -30,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .eq("is_active", true).order("sort_order", { ascending: true }).order("created_at", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   const rows = (data ?? []).map((g) => ({ ...g, mo_nos: asMoNos((g as Record<string, unknown>).mo_nos) })) as MoGroup[];
-  return NextResponse.json({ data: rows, error: null });
+  return NextResponse.json({ data: rows, error: null }, { headers: { "Cache-Control": "private, max-age=30" } });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
