@@ -110,7 +110,11 @@ export default function ReceiveGoodsPage() {
   const [pendInputs, setPendInputs] = useState<Record<string, Input>>({});
   const [pendQ, setPendQ] = useState("");
   const [pendLoading, setPendLoading] = useState(false);
-  const [pendView, setPendView] = useState<"card" | "table">("card");
+  const [pendView, setPendView] = useState<"card" | "table">("table");
+  // ฟอร์มตะกร้ารับของ — วันที่รับ + ผู้รับ + แนบเอกสาร (ย้ายมาจากด้านบน)
+  const [recvDate, setRecvDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recvBy, setRecvBy] = useState("");
+  const [cartFormOpen, setCartFormOpen] = useState(false);
   const [activeShop, setActiveShop] = useState<string | null>(null);   // list ร้านด้านซ้าย (แท็บรอเข้า/รับครบ)
   const [shopDrawerOpen, setShopDrawerOpen] = useState(false);          // จอ < xl: รายชื่อร้านเป็นลิ้นชัก
   const [activeMo, setActiveMo] = useState<string | null>(null);       // filter ตามใบสั่งผลิต (MO)
@@ -333,6 +337,13 @@ export default function ReceiveGoodsPage() {
     return groups;
   }, [shownPend, pendGroup, tab]);
 
+  // ตะกร้ารับของ = รายการที่ใส่จำนวนแล้ว (recv/เสีย > 0) จากทั้งหมด (ไม่ขึ้นกับตัวกรอง)
+  const cartItems = useMemo(
+    () => pend.filter((it) => { const inp = pendInputs[it.id]; return num(inp?.recv) > 0 || num(inp?.def) > 0; }),
+    [pend, pendInputs],
+  );
+  const cartCount = cartItems.length;
+
   // บันทึกวันคาดการณ์ของเข้าลงใบ PO (ผ่าน API กลาง — มี audit/guard) → ใช้กับทุกบรรทัดของใบนั้น
   const saveEta = async () => {
     if (!etaEdit) return;
@@ -355,7 +366,7 @@ export default function ReceiveGoodsPage() {
   const postReceive = async (poIdArg: string, payloadLines: PayloadLine[]) => {
     const res = await apiFetch("/api/purchasing/receive", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ po_id: poIdArg, warehouse_id: recvWh?.id ?? null, receiver: user?.name, lines: payloadLines, receipt_doc_r2_key: receiptKey, bill_doc_r2_key: billKey }),
+      body: JSON.stringify({ po_id: poIdArg, warehouse_id: recvWh?.id ?? null, receive_date: recvDate, receiver: recvBy.trim() || user?.name, lines: payloadLines, receipt_doc_r2_key: receiptKey, bill_doc_r2_key: billKey }),
     });
     return res.json();
   };
@@ -408,7 +419,7 @@ export default function ReceiveGoodsPage() {
     setErr(null);
     if (!attachReady) { setErr("ต้องแนบ ใบรับของ + บิล ให้ครบก่อนบันทึก"); return; }
     const byPo = new Map<string, PayloadLine[]>();
-    for (const it of shownPend) {
+    for (const it of cartItems) {
       const inp = pendInputs[it.id];
       const recv = num(inp?.recv);
       const def = num(inp?.def);
@@ -429,8 +440,9 @@ export default function ReceiveGoodsPage() {
         results.push(j.gr_no);
       }
       setDone(`✅ รับสินค้าสำเร็จ ${results.length} ใบรับ (${byPo.size} ใบสั่งซื้อ): ${results.join(", ")}`);
+      setCartFormOpen(false);
       resetAfterSave();
-      await loadPending("pending");
+      await loadPending(doneMode ? "done" : "pending");
     } catch (e) { setErr(String(e)); }
     finally { setSaving(false); }
   };
@@ -472,7 +484,6 @@ export default function ReceiveGoodsPage() {
         {done && <div className="mb-4 px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">{done} — <a href="/m/goods-receipts-v2" className="underline">ดูใบรับสินค้า</a></div>}
         {err && <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠ {err}</div>}
 
-        {tab === "pending" && attachBox}
 
         {tab === "po" ? (
           <>
@@ -718,7 +729,7 @@ export default function ReceiveGoodsPage() {
                         const short = num(inp.recv) > 0 && num(inp.recv) < it.remaining;
                         const b = etaBadge(it.days_remaining);
                         return (
-                          <tr key={it.id}>
+                          <tr key={it.id} onClick={() => setQtyEdit(it)} className="cursor-pointer hover:bg-slate-50">
                             <td className="px-3 py-2">
                               <div className="w-10 h-10 rounded bg-slate-50 flex items-center justify-center overflow-hidden border border-slate-100">
                                 {it.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={it.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-sm">📦</span>}
@@ -743,19 +754,17 @@ export default function ReceiveGoodsPage() {
                               <div className="text-xs text-slate-500">{it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}{it.expected_source === "lead" && <span className="text-[10px] text-indigo-500 ml-1">~ลีดไทม์</span>}{it.expected_source === "china" && <span className="text-[10px] text-orange-500 ml-1">~จีน 14 วัน</span>}</div>
                               <div className="flex items-center gap-1">
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
-                                <button onClick={() => setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" })}
+                                <button onClick={(e) => { e.stopPropagation(); setEtaEdit({ po_id: it.po_id, po_no: it.po_no, seller_name: it.seller_name, value: it.expected_source === "po" ? (it.expected_date ?? "") : "" }); }}
                                   title="แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO)" className="text-slate-400 hover:text-blue-600 text-xs">✎</button>
                               </div>
                             </td>
                             <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">{it.remaining.toLocaleString()} {it.uom}</td>
-                            <td className="px-3 py-2">
-                              <input type="number" inputMode="decimal" step="any" min={0} value={inp.recv} onChange={(e) => setPendInput(it.id, { recv: e.target.value })}
-                                className={`w-20 h-8 px-2 text-sm text-right border rounded ${short ? "border-amber-300 bg-amber-50" : "border-slate-200"}`} />
+                            <td className="px-3 py-2 text-center">
+                              {num(inp.recv) > 0
+                                ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium tabular-nums ${short ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>{num(inp.recv).toLocaleString()}{short ? " · ไม่ครบ" : ""}</span>
+                                : <span className="text-xs text-blue-500">＋ แตะเพื่อรับ</span>}
                             </td>
-                            <td className="px-3 py-2">
-                              <input type="number" inputMode="decimal" step="any" min={0} value={inp.def} onChange={(e) => setPendInput(it.id, { def: e.target.value })}
-                                className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded" />
-                            </td>
+                            <td className="px-3 py-2 text-center tabular-nums text-xs">{num(inp.def) > 0 ? <span className="text-red-600">{num(inp.def).toLocaleString()}</span> : <span className="text-slate-300">-</span>}</td>
                               </>
                             )}
                           </tr>
@@ -769,13 +778,13 @@ export default function ReceiveGoodsPage() {
               </div>
             )}
 
-            {/* แถบบันทึก — รับได้ทั้งโหมดการ์ด (กรอกในป๊อป) และตาราง (กรอก inline) */}
-            {!doneMode && shownPend.length > 0 && (
-              <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 mt-4 flex items-center justify-between gap-3 flex-wrap">
-                <span className="text-xs text-slate-400">รับไม่ครบ = &quot;รอรับเพิ่ม&quot; (เปลี่ยนเป็นปิดบิลได้ในแต่ละรายการ)</span>
-                <button onClick={savePending} disabled={saving || !attachReady} title={!attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
+            {/* แถบตะกร้า — แตะรายการเพื่อใส่จำนวน แล้วกดยืนยัน (เปิดฟอร์ม: วันที่+แนบเอกสาร+ผู้รับ) */}
+            {!doneMode && cartCount > 0 && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mt-4 flex items-center justify-between gap-3 flex-wrap sticky bottom-2 shadow-sm">
+                <span className="text-sm text-blue-800 font-medium">🧺 เลือกรับ {cartCount} รายการ</span>
+                <button onClick={() => setCartFormOpen(true)} disabled={saving}
                   className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                  {saving ? "กำลังบันทึก…" : "บันทึกรับสินค้า →"}
+                  ✓ ยืนยันรับของ ({cartCount}) →
                 </button>
               </div>
             )}
@@ -783,6 +792,47 @@ export default function ReceiveGoodsPage() {
           </div>
         )}
       </div>
+
+      {/* ฟอร์มตะกร้ารับของ — รายการที่เลือก + วันที่ + ผู้รับ + แนบใบรับ/บิล แล้วบันทึก */}
+      {cartFormOpen && (
+        <ERPModal open onClose={() => !saving && setCartFormOpen(false)} size="md" storageKey="recv-cart"
+          title="✓ ยืนยันรับสินค้า" description={`รับ ${cartCount} รายการ — ใส่วันที่ + แนบเอกสาร + ผู้รับ`}
+          footer={<>
+            <button onClick={() => setCartFormOpen(false)} disabled={saving} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button onClick={savePending} disabled={saving || !attachReady || cartCount === 0} title={!attachReady ? "แนบใบรับของ + บิลก่อน" : ""}
+              className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
+              {saving ? "กำลังบันทึก…" : `บันทึกรับสินค้า (${cartCount}) →`}
+            </button>
+          </>}>
+          {/* รายการที่จะรับ */}
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-44 overflow-auto mb-3">
+            {cartItems.map((it) => {
+              const inp = pendInputs[it.id]; const recv = num(inp?.recv); const def = num(inp?.def);
+              const short = recv > 0 && recv < it.remaining;
+              return (
+                <div key={it.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+                  <span className="flex-1 min-w-0 truncate text-slate-700">{stripCode(it.item_name)} {it.code && <span className="text-[11px] font-mono text-slate-400">{it.code}</span>}</span>
+                  <span className="tabular-nums text-blue-700 font-medium whitespace-nowrap">{recv.toLocaleString()} {it.uom}{short ? <span className="text-amber-600 text-[11px]"> ·ไม่ครบ</span> : ""}</span>
+                  {def > 0 && <span className="text-red-600 text-[11px] whitespace-nowrap">เสีย {def.toLocaleString()}</span>}
+                  <button onClick={() => setPendInput(it.id, { recv: "0", def: "0" })} className="text-slate-300 hover:text-red-500 text-xs" title="เอาออก">✕</button>
+                </div>
+              );
+            })}
+          </div>
+          {/* วันที่รับ + ผู้รับ */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">📅 วันที่รับ</label>
+              <input type="date" value={recvDate} onChange={(e) => setRecvDate(e.target.value)} className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">👤 ผู้รับ</label>
+              <input value={recvBy} onChange={(e) => setRecvBy(e.target.value)} placeholder={user?.name ?? "ชื่อผู้รับ"} className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
+            </div>
+          </div>
+          {attachBox}
+        </ERPModal>
+      )}
 
       {/* popup รับของตามใบ PO — กดการ์ดใบ PO แล้วกรอกจำนวน + แนบเอกสาร + บันทึกในป๊อปเดียว */}
       {poId && (
@@ -1002,7 +1052,7 @@ export default function ReceiveGoodsPage() {
                 </div>
               </div>
             )}
-            <div className="mt-2 text-[11px] text-slate-400">กรอกแล้วกด <b>บันทึกรับสินค้า</b> ด้านล่าง (แนบใบรับ/บิลก่อน) — หรือกรอกหลายรายการที่โหมดตาราง ▤</div>
+            <div className="mt-2 text-[11px] text-slate-400">ใส่จำนวนแล้วกด <b>ปิด</b> → เลือกรายการอื่นต่อได้ → กด <b>✓ ยืนยันรับของ</b> ด้านล่าง (ใส่วันที่ + แนบใบรับ/บิล + ผู้รับ)</div>
             {historyBlock}
           </ERPModal>
         );
