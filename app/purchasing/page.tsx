@@ -82,6 +82,7 @@ export default function PurchasingShopPage() {
   const [dupMap, setDupMap] = useState<Record<string, OpenOrder[]>>({});       // sku_id → ใบขอซื้อที่ยังค้าง (เตือนสั่งซ้ำ)
   const [stockMap, setStockMap] = useState<Map<string, number>>(new Map());   // sku_id → คงเหลือในสต๊อก
   const [rejectedOpen, setRejectedOpen] = useState(false);                     // ป๊อปรายการไม่อนุมัติ
+  const [rejectedCount, setRejectedCount] = useState(0);                       // จำนวนใบที่ไม่อนุมัติ (โชว์บนปุ่ม)
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);   // ข้อ 2: error state
@@ -165,6 +166,14 @@ export default function PurchasingShopPage() {
       .then(j => { if (Array.isArray(j.ids)) setFavorites(new Set(j.ids as string[])); })
       .catch(() => {});
   }, [bootDone]);
+
+  // ข้อ 2: จำนวนใบที่ไม่อนุมัติ — นับแบบเบา (?count=1) โหลดหลังตารางเสร็จ + อัปเดตเมื่อมีการเปลี่ยนในป๊อป
+  const fetchRejectedCount = useCallback(() => {
+    apiFetch("/api/purchasing/rejected?count=1").then(r => r.json())
+      .then(j => { if (typeof j.count === "number") setRejectedCount(j.count); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { if (bootDone) fetchRejectedCount(); }, [bootDone, fetchRejectedCount]);
 
   // โหลดยอดคงเหลือในสต๊อก (sku_id → qty) — ไว้โชว์ในป๊อปเพิ่มลงใบขอซื้อ
   // perf: เลื่อนมาโหลด "ตอนกดการ์ดเปิดป๊อปครั้งแรก" (ไม่โหลด 2,000 แถวตอนเปิดหน้า)
@@ -810,7 +819,12 @@ export default function PurchasingShopPage() {
               </label>
             )}
             <PrHistoryButton />
-            <button onClick={() => setRejectedOpen(true)} className="h-10 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1 flex-shrink-0">🚫 รายการไม่อนุมัติ</button>
+            <button onClick={() => setRejectedOpen(true)} className="h-10 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1.5 flex-shrink-0">
+              🚫 รายการไม่อนุมัติ
+              {rejectedCount > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full bg-rose-600 text-white text-[11px] font-semibold tabular-nums">{rejectedCount}</span>
+              )}
+            </button>
             {source === "sku" && (
               <button onClick={() => { setCopyQuery(""); setCopyPickerOpen(true); }}
                 className="h-9 px-3 text-xs font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 flex-shrink-0">📋 คัดลอกสินค้า</button>
@@ -1295,7 +1309,7 @@ export default function PurchasingShopPage() {
         />
       )}
 
-      <RejectedPanel open={rejectedOpen} onClose={() => setRejectedOpen(false)} onChanged={() => {}} />
+      <RejectedPanel open={rejectedOpen} onClose={() => setRejectedOpen(false)} onChanged={fetchRejectedCount} />
 
     </PlaygroundShell>
   );
