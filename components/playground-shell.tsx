@@ -518,6 +518,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       .filter((g) => g.items.length > 0);
   })();
 
+  // เมนูของแอปปัจจุบัน (flatten) → ใช้ทำแถบล่างบนมือถือ/แท็บเล็ต (< xl) แทน side rail
+  const bottomItems = navGroupsToShow.flatMap((g) => g.items).slice(0, 4);
+
   // ---- App access guard (เฟส 2) — กันเข้าตรง URL เข้า app ที่ไม่มีสิทธิ์ ----
   // หา "app ของหน้าที่เปิดอยู่" จาก pathname (เมนู → ROUTE_APP_FALLBACK)
   const currentAppKey: string | null = (() => {
@@ -606,7 +609,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Mobile topbar */}
-      <header className="md:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 h-12 flex items-center justify-between px-3">
+      <header className="xl:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 h-12 flex items-center justify-between px-3">
         <button onClick={() => setMobileNavOpen(true)} aria-label="เปิดเมนู"
           className="p-2 -ml-1 rounded hover:bg-slate-100">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -627,7 +630,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       {/* Backdrop (mobile only when nav open) */}
       {mobileNavOpen && (
         <div onClick={() => setMobileNavOpen(false)}
-          className="md:hidden fixed inset-0 z-40 bg-slate-900/40"
+          className="xl:hidden fixed inset-0 z-40 bg-slate-900/40"
           aria-hidden="true" />
       )}
 
@@ -638,11 +641,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         className={`
         ${focus ? "!hidden" : ""}
         bg-white border-r border-slate-200 flex flex-col
-        w-64 ${navExpanded ? "md:w-56" : "md:w-16"} flex-shrink-0
-        fixed md:sticky top-0 h-screen z-50 md:z-auto
+        w-64 ${navExpanded ? "xl:w-56" : "xl:w-16"} flex-shrink-0
+        fixed xl:sticky top-0 h-screen z-50 xl:z-auto
         overflow-y-auto overflow-x-hidden
         transition-[width,transform] duration-200 ease-out
-        ${mobileNavOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+        ${mobileNavOpen ? "translate-x-0" : "-translate-x-full xl:translate-x-0"}
       `} aria-label="เมนูหลัก">
         <div className="p-4 border-b border-slate-100 flex items-center gap-2">
           <Link href="/" className="flex items-center gap-2.5 text-slate-600 hover:text-slate-900 transition-colors group min-w-0 flex-1">
@@ -753,10 +756,10 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       {/* Content */}
       {/* หมายเหตุ: ห้ามใส่ overflow-y-auto ที่ main — root เป็น min-h-screen (เลื่อนที่ body)
           overflow บน main จะกลายเป็น scrollport ปลอมที่ไม่เคยเลื่อน ทำให้ sticky ทุกตัวข้างในตาย */}
-      <main id="main-content" className="flex-1 min-w-0 pt-12 md:pt-0 flex flex-col" tabIndex={-1}>
+      <main id="main-content" className="flex-1 min-w-0 pt-12 xl:pt-0 pb-16 xl:pb-0 flex flex-col" tabIndex={-1}>
         {/* โมดูลใหญ่ (App) tabs — ข้างบนสุด (โชว์เมื่อมีทะเบียนเมนูแล้ว · ซ่อนตอน focus mode) */}
         {!focus && appGroups.length > 0 && menuRows && menuRows.length > 0 && (
-          <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-3 flex items-center gap-1 overflow-x-auto">
+          <div className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-3 hidden xl:flex items-center gap-1 overflow-x-auto">
             {appGroups
               .filter((a) => !a.permission_key || can(a.permission_key as Parameters<typeof can>[0]))
               .map((a) => {
@@ -787,6 +790,25 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
           </ShellPresentContext.Provider>
         </div>
       </main>
+
+      {/* แถบเมนูล่าง (< xl: มือถือ/แท็บเล็ต) — เมนูของแอปปัจจุบันเป็นแท็บล่าง แทน side rail (เลือกหน้าได้ง่าย) */}
+      {!focus && bottomItems.length > 0 && (
+        <nav className="xl:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-slate-200 flex" style={{ paddingBottom: "env(safe-area-inset-bottom)" }} aria-label="เมนูล่าง">
+          {bottomItems.map((it) => {
+            const on = pathname === it.href || pathname.startsWith(it.href + "/");
+            return (
+              <Link key={it.href} href={it.href} className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 py-1.5 ${on ? "text-blue-600" : "text-slate-500"}`}>
+                <span className="text-lg leading-none">{it.icon}</span>
+                <span className="text-[10px] truncate max-w-full px-1">{it.labelTH}</span>
+              </Link>
+            );
+          })}
+          <button onClick={() => setMobileNavOpen(true)} className="flex-1 flex flex-col items-center justify-center gap-0.5 py-1.5 text-slate-500" aria-label="เมนูทั้งหมด">
+            <span className="text-lg leading-none">☰</span>
+            <span className="text-[10px]">เพิ่มเติม</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 }
