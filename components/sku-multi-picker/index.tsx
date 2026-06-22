@@ -191,7 +191,7 @@ export function SkuMultiPickerModal({
             : <div className="w-9 h-9 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200 text-sm flex-shrink-0">🖼️</div>}
           <div className="min-w-0 flex-1">
             <div className="font-medium text-slate-700 truncate">{sku.name}</div>
-            <div className="font-mono text-xs text-slate-400">{sku.code}{isExcluded ? " · เพิ่มแล้ว" : ""}</div>
+            <div className="font-mono text-xs text-slate-400">{sku.code}{sku.barcode ? ` · ⌗${sku.barcode}` : ""}{isExcluded ? " · เพิ่มแล้ว" : ""}</div>
           </div>
           <div className="text-right flex-shrink-0">
             <div className="text-sm font-semibold text-rose-600">฿{money(sku.list_price)}</div>

@@ -43,6 +43,7 @@ export type SOListItem = {
 };
 
 export type SODetail = SOListItem & {
+  tax_invoice_no:          string | null;
   exchange_rate:           number;
   header_discount_type:    "percent" | "amount";
   header_discount_value:   number;

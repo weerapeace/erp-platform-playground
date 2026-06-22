@@ -536,6 +536,7 @@ export default function SalesOrdersPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-4 gap-3 text-sm">
               <Info label="ลูกค้า" value={detail.customer_name} />
+              <Info label="เลขที่ใบกำกับภาษี" value={detail.tax_invoice_no} />
               <Info label="คลังต้นทาง" value={(detail as unknown as { from_warehouse_code?: string; from_warehouse_name?: string }).from_warehouse_name ?? "—"} />
               <Info label="เซลส์" value={detail.sale_person_name} />
               <Info label="วันที่สั่ง" value={formatDate(detail.order_date)} />
@@ -699,6 +700,12 @@ export default function SalesOrdersPage() {
                 <input value={form.payment_terms} onChange={e => setForm({ ...form, payment_terms: e.target.value })}
                   placeholder="เช่น เงินสด, เครดิต 30 วัน"
                   className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
+              </div>
+              <div>
+                <FieldLabel hint="ออกอัตโนมัติ">เลขที่ใบกำกับภาษี</FieldLabel>
+                <div className="mt-0.5 flex h-9 items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-400">
+                  ออกให้อัตโนมัติเมื่อบันทึก (ISG{`{พ.ศ.}`}-{`{เดือน}`}-NNN)
+                </div>
               </div>
             </div>
           </SectionCard>

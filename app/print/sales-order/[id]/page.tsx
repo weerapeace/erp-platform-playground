@@ -33,6 +33,7 @@ function buildSoData(so: SODetailExt): Record<string, unknown> {
   const isoDate = (iso: string | null | undefined) => (iso ? String(iso).slice(0, 10) : "—");
   return {
     so_number:        so.so_number ?? "(ยังไม่ออกเลข)",
+    tax_invoice_no:   so.tax_invoice_no ?? so.so_number ?? "",
     status_label:     STATUS_LABELS[so.status] ?? so.status,
     customer_name:    so.customer_name ?? "—",
     customer_code:    so.customer_code ?? "",
