@@ -69,6 +69,7 @@ type FormState = {
   note: string;
   payment_terms: string;
   customer_po_no: string;
+  tax_invoice_no: string;
   lines: EditorLine[];
 };
 
@@ -77,7 +78,7 @@ const EMPTY: FormState = {
   order_date: new Date().toISOString().slice(0, 10), expected_ship_date: "",
   vat_rate: 7, vat_included: false, wht_rate: 0,
   header_discount_type: "percent", header_discount_value: 0, shipping_fee: 0,
-  note: "", payment_terms: "", customer_po_no: "", lines: [emptyLine()],
+  note: "", payment_terms: "", customer_po_no: "", tax_invoice_no: "", lines: [emptyLine()],
 };
 
 const formSnapshot = (form: FormState) => JSON.stringify({
@@ -193,6 +194,7 @@ export default function SalesOrdersPage() {
       note: so.note ?? "",
       payment_terms: (so as unknown as { payment_terms?: string }).payment_terms ?? "",
       customer_po_no: (so as unknown as { customer_po_no?: string }).customer_po_no ?? "",
+      tax_invoice_no: so.tax_invoice_no ?? "",
       lines: so.lines.map(l => ({
         tempId: l.id ?? String(Math.random()),
         product_id: l.product_id ?? null, sku: l.sku ?? null, product_name: l.product_name,
@@ -308,6 +310,7 @@ export default function SalesOrdersPage() {
         note: form.note || null,
         payment_terms: form.payment_terms || null,
         customer_po_no: form.customer_po_no || null,
+        tax_invoice_no: form.tax_invoice_no.trim() || null,
       };
       const lines = form.lines.map(l => ({
         product_id: l.product_id, sku: l.sku, product_name: l.product_name,
@@ -702,10 +705,10 @@ export default function SalesOrdersPage() {
                   className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
               </div>
               <div>
-                <FieldLabel hint="ออกอัตโนมัติ">เลขที่ใบกำกับภาษี</FieldLabel>
-                <div className="mt-0.5 flex h-9 items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 text-sm text-slate-400">
-                  ออกให้อัตโนมัติเมื่อบันทึก (ISG{`{พ.ศ.}`}-{`{เดือน}`}-NNN)
-                </div>
+                <FieldLabel hint="เว้นว่าง = ออกอัตโนมัติ">เลขที่ใบกำกับภาษี</FieldLabel>
+                <input value={form.tax_invoice_no} onChange={e => setForm({ ...form, tax_invoice_no: e.target.value })}
+                  placeholder="เว้นว่างให้ระบบออกให้ (ISG{พ.ศ.}-{เดือน}-NNN)"
+                  className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
               </div>
             </div>
           </SectionCard>
