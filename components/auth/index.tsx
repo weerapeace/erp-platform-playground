@@ -48,7 +48,8 @@ export type Permission =
   | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory" | "app.production"
   | "app.sales" | "app.china_pay" | "app.payroll" | "app.settings"
   | "app.design" | "app.misc"
-  | "offers.view" | "offers.edit";
+  | "offers.view" | "offers.edit"
+  | "report.create" | "report.manage";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
 

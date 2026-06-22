@@ -17,7 +17,7 @@ import { IconPicker } from "@/components/icon-picker";
 
 type MenuItem = {
   id: string; label: string; href: string; icon: string | null; icon_url: string | null;
-  sort_order: number; is_active: boolean; app_keys: string[];
+  sort_order: number; is_active: boolean; app_keys: string[]; permission_key: string | null;
 };
 type FormState = { id: string | null; label: string; icon: string; icon_url: string | null };
 
@@ -49,8 +49,10 @@ export default function MiscPortalPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // แสดงเฉพาะที่เปิดใช้งาน (โหมดปกติ) · โหมดจัดการเห็นที่ซ่อนด้วย
-  const shown = manage ? items : items.filter((m) => m.is_active);
+  // แสดงเฉพาะที่เปิดใช้งาน + มีสิทธิ์ (โหมดปกติ) · โหมดจัดการเห็นทั้งหมด
+  const shown = manage
+    ? items
+    : items.filter((m) => m.is_active && (!m.permission_key || can(m.permission_key as Parameters<typeof can>[0])));
 
   const openTile = (m: MenuItem) => { if (manage) setForm({ id: m.id, label: m.label, icon: m.icon ?? "🧩", icon_url: m.icon_url }); else router.push(m.href); };
 
