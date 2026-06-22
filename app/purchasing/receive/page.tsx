@@ -88,7 +88,7 @@ const TRACK_CARD_FIELDS: CardField[] = [
 export default function ReceiveGoodsPage() {
   const { user } = useAuth();
   const toast = useToast();
-  const [tab, setTab] = useState<"po" | "pending" | "done">("pending");
+  const [tab, setTab] = useState<"po" | "pending" | "done" | "mo">("pending");
   const [pos, setPos] = useState<PO[]>([]);
   const [poId, setPoId] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
@@ -265,6 +265,7 @@ export default function ReceiveGoodsPage() {
       it.po_no.toLowerCase().includes(ql) || it.seller_name.toLowerCase().includes(ql));
     if (activeShop) filtered = filtered.filter((it) => it.seller_name === activeShop);
     if (activeMo) filtered = filtered.filter((it) => it.source_mo_no === activeMo);
+    if (tab === "mo") filtered = filtered.filter((it) => !!it.source_mo_no);   // แท็บตามใบสั่งงาน = เฉพาะของที่มาจาก MO
     const byName = (a: PendItem, b: PendItem) => a.item_name.localeCompare(b.item_name, "th");
     const byDate = (ka: keyof PendItem) => (a: PendItem, b: PendItem) => {
       const va = (a[ka] as string) || "9999-12-31", vb = (b[ka] as string) || "9999-12-31";
@@ -272,7 +273,7 @@ export default function ReceiveGoodsPage() {
     };
     const cmp = pendSort === "name" ? byName : pendSort === "order" ? byDate("order_date") : byDate("expected_date");
     return [...filtered].sort(cmp);
-  }, [pend, pendQ, pendSort, activeShop, activeMo]);
+  }, [pend, pendQ, pendSort, activeShop, activeMo, tab]);
 
   // รายชื่อร้าน (list ซ้ายมือ) — นับจากข้อมูลแท็บปัจจุบัน
   const pendShops = useMemo(() => {
@@ -306,16 +307,17 @@ export default function ReceiveGoodsPage() {
 
   // จัดกลุ่ม (ร้าน / วันคาดเข้า / PO) — คงลำดับ sort ภายในกลุ่ม
   const groupedPend = useMemo<{ key: string; label: string; items: PendItem[] }[]>(() => {
-    if (pendGroup === "none") return [{ key: "_all", label: "", items: shownPend }];
+    const grp: PendGroup = tab === "mo" ? "mo" : pendGroup;   // แท็บตามใบสั่งงาน = บังคับจัดกลุ่มตาม MO
+    if (grp === "none") return [{ key: "_all", label: "", items: shownPend }];
     const keyOf = (it: PendItem) =>
-      pendGroup === "shop" ? (it.seller_name || "—")
-      : pendGroup === "po" ? (it.po_no || "—")
-      : pendGroup === "mo" ? (it.source_mo_no || "—")
+      grp === "shop" ? (it.seller_name || "—")
+      : grp === "po" ? (it.po_no || "—")
+      : grp === "mo" ? (it.source_mo_no || "—")
       : (it.expected_date || "");   // eta
     const labelOf = (it: PendItem) =>
-      pendGroup === "shop" ? `🏪 ${it.seller_name || "—"}`
-      : pendGroup === "po" ? `📋 ${it.po_no || "—"} · ${it.seller_name || "—"}`
-      : pendGroup === "mo" ? (it.source_mo_no ? `🏭 ${it.source_mo_no}${it.used_for_label ? ` · ${it.used_for_label}` : ""}` : "🏭 ไม่ได้มาจากใบสั่งผลิต")
+      grp === "shop" ? `🏪 ${it.seller_name || "—"}`
+      : grp === "po" ? `📋 ${it.po_no || "—"} · ${it.seller_name || "—"}`
+      : grp === "mo" ? (it.source_mo_no ? `🏭 ${it.source_mo_no}${it.used_for_label ? ` · ${it.used_for_label}` : ""}` : "🏭 ไม่ได้มาจากใบสั่งผลิต")
       : (it.expected_date ? `🚚 คาดเข้า ${formatDate(it.expected_date)}` : "🚚 ยังไม่ระบุวันคาด");
     const m = new Map<string, { key: string; label: string; items: PendItem[] }>();
     for (const it of shownPend) {
@@ -325,11 +327,11 @@ export default function ReceiveGoodsPage() {
     }
     const groups = [...m.values()];
     // เรียงหัวกลุ่ม: eta ตามวันที่ (ว่าง=ท้าย), อื่นๆ ตามชื่อ
-    groups.sort((a, b) => pendGroup === "eta"
+    groups.sort((a, b) => grp === "eta"
       ? ((a.key || "9999-12-31") < (b.key || "9999-12-31") ? -1 : 1)
       : a.label.localeCompare(b.label, "th"));
     return groups;
-  }, [shownPend, pendGroup]);
+  }, [shownPend, pendGroup, tab]);
 
   // บันทึกวันคาดการณ์ของเข้าลงใบ PO (ผ่าน API กลาง — มี audit/guard) → ใช้กับทุกบรรทัดของใบนั้น
   const saveEta = async () => {
@@ -462,6 +464,7 @@ export default function ReceiveGoodsPage() {
         {/* แท็บเลือกมุมมอง */}
         <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden mb-4 text-sm">
           <button onClick={() => { setTab("pending"); setDone(null); }} className={`px-4 py-2 transition-colors ${tab === "pending" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>📦 สินค้าที่รอเข้า</button>
+          <button onClick={() => { setTab("mo"); setDone(null); }} className={`px-4 py-2 transition-colors ${tab === "mo" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>🏭 ตามใบสั่งงาน</button>
           <button onClick={() => { setTab("po"); setDone(null); }} className={`px-4 py-2 transition-colors ${tab === "po" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>📋 ตามใบสั่งซื้อ</button>
           <button onClick={() => { setTab("done"); setDone(null); }} className={`px-4 py-2 transition-colors ${tab === "done" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>✅ รับครบแล้ว</button>
         </div>
@@ -554,7 +557,7 @@ export default function ReceiveGoodsPage() {
               <button onClick={() => setShopDrawerOpen(true)} className="xl:hidden flex items-center gap-1.5 h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 flex-shrink-0 whitespace-nowrap">
                 🏪 {activeMo ? activeMo : activeShop ? activeShop : "ทุกร้าน"}
               </button>
-              <span className="text-sm font-semibold text-slate-700">{doneMode ? "รายการที่ปิดแล้ว" : "สินค้าที่รอเข้า"} ({pend.length})</span>
+              <span className="text-sm font-semibold text-slate-700">{tab === "mo" ? `🏭 ตามใบสั่งงาน (${shownPend.length})` : `${doneMode ? "รายการที่ปิดแล้ว" : "สินค้าที่รอเข้า"} (${pend.length})`}</span>
               <input value={pendQ} onChange={(e) => setPendQ(e.target.value)} placeholder="🔎 ค้นหา ชื่อ / รหัส / PO / ร้าน..."
                 className="w-full sm:w-64 sm:ml-auto h-9 px-3 text-sm border border-slate-200 rounded-md" />
               <label className="flex items-center gap-1.5 text-xs text-slate-500">เรียงตาม
@@ -564,15 +567,17 @@ export default function ReceiveGoodsPage() {
                   <option value="name">ชื่อสินค้า</option>
                 </select>
               </label>
-              <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดกลุ่ม
-                <select value={pendGroup} onChange={(e) => changePendGroup(e.target.value as PendGroup)} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
-                  <option value="none">ไม่จัดกลุ่ม</option>
-                  <option value="shop">ร้าน</option>
-                  <option value="eta">วันคาดการณ์ของเข้า</option>
-                  <option value="po">ใบสั่งซื้อ (PO)</option>
-                  <option value="mo">ใบสั่งผลิต (MO)</option>
-                </select>
-              </label>
+              {tab !== "mo" && (
+                <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดกลุ่ม
+                  <select value={pendGroup} onChange={(e) => changePendGroup(e.target.value as PendGroup)} className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                    <option value="none">ไม่จัดกลุ่ม</option>
+                    <option value="shop">ร้าน</option>
+                    <option value="eta">วันคาดการณ์ของเข้า</option>
+                    <option value="po">ใบสั่งซื้อ (PO)</option>
+                    <option value="mo">ใบสั่งผลิต (MO)</option>
+                  </select>
+                </label>
+              )}
               {pendView === "card" && !doneMode && (
                 <button onClick={() => setDesignOpen(true)} title="เลือกข้อมูลที่โชว์บนการ์ด" className="h-9 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">🎨 ออกแบบการ์ด</button>
               )}
