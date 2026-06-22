@@ -62,15 +62,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6)
     : [];
 
+  const SELECT = "id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )";
+  const mapRow = (r: Record<string, unknown>): BomComponent => {
+    const g = (Array.isArray(r.grp) ? r.grp[0] : r.grp) as GroupEmbed;
+    const u = (Array.isArray(r.uom) ? r.uom[0] : r.uom) as UomEmbed;
+    return {
+      id: String(r.id), code: String(r.code ?? ""), name: String(r.name_th ?? ""),
+      material_group_id: (r.material_group_id as string) ?? null,
+      material_type: g?.name ?? null, loss_percent: g?.loss_percent != null ? Number(g.loss_percent) : null,
+      fabric_width_cm: r.fabric_width_cm != null ? Number(r.fabric_width_cm) : null,
+      uom_id: (r.uom_id as string) ?? null, uom_name: u?.name ?? null, image_key: (r.cover_image_r2_key as string) ?? null,
+    };
+  };
+
   const searching = tokens.length > 0;
-  let q = supabase
-    .from("skus_v2")
-    .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
-    .eq("is_active", true);
+  let q = supabase.from("skus_v2").select(SELECT).eq("is_active", true);
   if (tagSkuIds) q = q.in("id", tagSkuIds);
   if (searching) {
-    // ทุก token ต้องเจอ (AND) — แต่ละ token จะอยู่ใน code หรือชื่อก็ได้
-    // ตอนค้นหา "ไม่กรองกลุ่มที่ SQL" → ค่อยกรองใน JS เพื่อให้ "รหัสตรง" ที่อยู่นอกกลุ่มยังโผล่มาได้
+    // กว้าง: token อยู่ใน code หรือชื่อก็ได้ (ไว้จับชื่อไทย)
     for (const t of tokens) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`);
     q = q.limit(300);
   } else {
@@ -79,24 +88,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  let out: BomComponent[] = (data ?? []).map((r) => mapRow(r as Record<string, unknown>));
 
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
-  let out: BomComponent[] = rows.map((r) => {
-    const g = (Array.isArray(r.grp) ? r.grp[0] : r.grp) as GroupEmbed;
-    const u = (Array.isArray(r.uom) ? r.uom[0] : r.uom) as UomEmbed;
-    return {
-      id:                String(r.id),
-      code:              String(r.code ?? ""),
-      name:              String(r.name_th ?? ""),
-      material_group_id: (r.material_group_id as string) ?? null,
-      material_type:     g?.name ?? null,
-      loss_percent:      g?.loss_percent != null ? Number(g.loss_percent) : null,
-      fabric_width_cm:   r.fabric_width_cm != null ? Number(r.fabric_width_cm) : null,
-      uom_id:            (r.uom_id as string) ?? null,
-      uom_name:          u?.name ?? null,
-      image_key:         (r.cover_image_r2_key as string) ?? null,
-    };
-  });
+  // เสริม: รหัสที่มีครบทุก token บน "code" (AND อย่างเชื่อถือได้ผ่าน .ilike ซ้อนคอลัมน์เดียว)
+  //   → กันชุด 300 ตัว (จากแบบกว้าง) ตัด "ตัวที่รหัสตรง" ทิ้ง → พิมพ์รหัสตรงๆ เจอเสมอ + จัดอันดับขึ้นบน
+  if (searching) {
+    let cq = supabase.from("skus_v2").select(SELECT).eq("is_active", true);
+    if (tagSkuIds) cq = cq.in("id", tagSkuIds);
+    for (const t of tokens) cq = cq.ilike("code", `%${t}%`);
+    const { data: cData } = await cq.limit(80);
+    const seen = new Set(out.map((c) => c.id));
+    for (const r of (cData ?? []) as Array<Record<string, unknown>>) { const c = mapRow(r); if (!seen.has(c.id)) { out.push(c); seen.add(c.id); } }
+  }
 
   // จัดอันดับ "ตัวที่เหมือนที่สุด" ขึ้นก่อน + ดึงรหัสตรงที่อยู่นอกกลุ่มมาด้วย (พิมพ์รหัสตรงๆ เจอเสมอ)
   if (searching) {
