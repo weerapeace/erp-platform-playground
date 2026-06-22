@@ -17,11 +17,12 @@ import { SkuFormModal } from "@/components/sku-form-modal";
 import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { SkuImagePicker, type PickedSku } from "@/components/sku-image-picker";
+import { RelationPicker } from "@/components/relation-picker";
 import { ImageGallery, HoverZoomImage, ImageInput } from "@/components/image-input";
 import { TagGroupFilter } from "@/components/tag-filter";
 import { DupOrderBadge, DupOrderList, type OpenOrder } from "./dup-order";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
+import type { MoListItem } from "@/app/api/mo/route";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
@@ -29,7 +30,9 @@ const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
 type SkuInfo = { code: string | null; seller: string; country: string; price: number; currency: string; uom: string };
 type Card = { id: string; name: string; sub: string | null; image_key: string | null; sku?: SkuInfo };
 type Variation = { key: string; label: string; color: string | null; seller: string; country: string; price: number; currency: string; uom: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null };
-type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; usedForId?: string | null; usedForLabel?: string | null; urgent?: boolean; useDate?: string | null; sourceMoNo?: string | null };
+type Line = { label: string; qty: number; uom: string; seller: string; price: number; currency: string; image: string | null; variationId: string | null; skuRef: string | null; skuId: string | null; note: string; reason?: string | null; usedForId?: string | null; usedForLabel?: string | null; urgent?: boolean; useDate?: string | null; sourceMoNo?: string | null };
+// เหตุผลที่ขอซื้อ (บังคับในป๊อป "เพิ่มลงใบขอซื้อ") — 2 โหมด: เลือกเหตุผล (ข้อความ) หรือ อ้างใบสั่งผลิต
+type ReasonPick = { text: string; moNo: string | null; moLabel: string | null };
 type Source = "sku" | "group" | "favorite" | "frequent" | "tags" | "mo";
 
 // แท็บ "ใบสั่งผลิต": วัตถุดิบที่ต้องซื้อ 1 ตัว (ของใบใดใบหนึ่ง)
@@ -150,9 +153,6 @@ export default function PurchasingShopPage() {
   const [showReview, setShowReview] = useState(false);   // ป๊อปทวนรายการก่อนสร้าง
   // วันที่สั่ง — ใส่ครั้งเดียวตอนกดสร้าง ใช้กับทุกใบ (default = วันนี้)
   const [orderDate, setOrderDate] = useState(() => new Date().toISOString().slice(0, 10));
-  // ข้อ 4: ใช้กับสินค้า (ปลายทาง) ระดับตะกร้า — เติมเฉพาะใบที่ยังไม่ได้ตั้งรายชิ้น
-  const [cartUsedFor, setCartUsedFor] = useState<PickedSku | null>(null);
-  const [cartPickerOpen, setCartPickerOpen] = useState(false);
 
   // ⭐ favorite (รายการโปรด) — แบบรวมทั้งบริษัท
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -293,6 +293,7 @@ export default function PurchasingShopPage() {
     setCart(p => [...p, {
       label, qty, uom: mat.uom ?? "", seller: "—", price: 0, currency: "THB",
       image: null, variationId: null, skuRef: mat.code, skuId: null, note: `จากใบสั่งผลิต ${moSel.mo_no}`,
+      reason: `ใบสั่งผลิต ${moSel.mo_no}`,
       usedForId: null, usedForLabel: moSel.product_label, urgent: false, useDate: moSel.due_date || null,
       sourceMoNo: moSel.mo_no,
     }]);
@@ -605,9 +606,9 @@ export default function PurchasingShopPage() {
     setCart(p => [...p, { label: `${c.name} — ${v.label}`, qty, uom: v.uom, seller: v.seller, price: v.price, currency: v.currency, image: v.image, variationId: v.variationId, skuRef: v.skuRef, skuId: v.skuId, note: "" }]);
     setSel(null); setVars([]);
   };
-  const addSku = (c: Card, qty: number, note: string, usedFor?: PickedSku | null, urgent?: boolean, useDate?: string | null) => {
+  const addSku = (c: Card, qty: number, note: string, reason: ReasonPick, urgent?: boolean, useDate?: string | null) => {
     const s = c.sku!;
-    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note, usedForId: usedFor?.id ?? null, usedForLabel: usedFor?.name ?? null, urgent: !!urgent, useDate: useDate || null }]);
+    setCart(p => [...p, { label: c.name, qty, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note, reason: reason.text || null, usedForId: null, usedForLabel: reason.moLabel ?? null, urgent: !!urgent, useDate: useDate || null, sourceMoNo: reason.moNo ?? null }]);
     setConfirmSku(null);
   };
 
@@ -639,8 +640,9 @@ export default function PurchasingShopPage() {
             sku_id: l.skuId, item_name: l.label, qty: l.qty, uom: l.uom,
             seller_name: l.seller, price_est: l.price, currency: l.currency,
             image_key: l.image, note: l.note || null,
-            used_for_sku_id: l.usedForId ?? cartUsedFor?.id ?? null,        // รายชิ้นก่อน → ไม่มีค่อยใช้ระดับตะกร้า
-            used_for_label:  l.usedForLabel ?? cartUsedFor?.name ?? null,
+            reason: l.reason ?? null,                                       // เหตุผลที่ขอซื้อ (ข้อความ)
+            used_for_sku_id: null,                                          // เลิกใช้ "ใช้กับสินค้า (ปลายทาง)" แล้ว
+            used_for_label:  l.usedForLabel ?? null,                        // คงไว้สำหรับ label ใบสั่งผลิต (ถ้ามาจาก MO)
             is_urgent: l.urgent === true, needed_date: l.useDate || null,
             source_mo_no: l.sourceMoNo ?? null,                              // ผูกใบสั่งผลิต → บอร์ดเด้ง "ขอแล้ว"
           })),
@@ -1026,6 +1028,7 @@ export default function PurchasingShopPage() {
                     <span className="block text-[10px] text-slate-400">@ {l.price.toLocaleString()} / {l.uom}</span>
                   </span>
                 </div>
+                {l.reason && <div className="text-[11px] text-indigo-600 mt-0.5">🔖 {l.reason}{l.sourceMoNo && l.usedForLabel ? ` · ${l.usedForLabel}` : ""}</div>}
                 {l.note && <div className="text-[11px] text-amber-600 mt-0.5">📝 {l.note}</div>}
                 {l.urgent && <div className="text-[11px] text-rose-600 mt-0.5 font-medium">⚡ ส่งด่วน{l.useDate ? ` · ใช้ ${l.useDate}` : ""}</div>}
                 <div className="text-[11px] text-slate-400 mt-0.5">🏪 {l.seller}</div>
@@ -1057,22 +1060,6 @@ export default function PurchasingShopPage() {
               <input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)}
                 className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
             </div>
-            {/* ข้อ 4: ใช้กับสินค้า (ปลายทาง) — ใช้กับทุกใบ (เติมเฉพาะใบที่ยังไม่ได้ตั้งรายชิ้น) */}
-            <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">🎯 ใช้กับสินค้า (ทุกใบ)</label>
-              {cartUsedFor ? (
-                <div className="flex items-center gap-2 h-9 px-2 border border-slate-200 rounded-md bg-slate-50">
-                  <span className="text-sm text-slate-700 truncate flex-1">{cartUsedFor.name}{cartUsedFor.code ? ` (${cartUsedFor.code})` : ""}</span>
-                  <button type="button" onClick={() => setCartPickerOpen(true)} className="text-xs text-blue-600 hover:underline shrink-0">เปลี่ยน</button>
-                  <button type="button" onClick={() => setCartUsedFor(null)} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
-                </div>
-              ) : (
-                <button type="button" onClick={() => setCartPickerOpen(true)}
-                  className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
-                  + เลือกสินค้าปลายทาง (ใช้กับใบที่ยังไม่ได้ตั้ง)
-                </button>
-              )}
-            </div>
             <button onClick={() => setShowReview(true)} disabled={saving || cart.length === 0}
               className="w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
               {saving ? "กำลังสร้าง..." : `สร้างใบขอซื้อ (${cart.length} ใบ) →`}
@@ -1101,11 +1088,6 @@ export default function PurchasingShopPage() {
         </button>
       )}
 
-      {/* ข้อ 4: picker เลือกสินค้าปลายทางระดับตะกร้า */}
-      <SkuImagePicker open={cartPickerOpen} onClose={() => setCartPickerOpen(false)}
-        title="เลือกสินค้าปลายทาง (ใช้กับทุกใบในตะกร้า)"
-        onPick={(sku) => { setCartUsedFor(sku); setCartPickerOpen(false); }} />
-
       {/* ป๊อปทวนรายการก่อนสร้างใบขอซื้อ (recheck) — ของกลาง ERPModal */}
       {showReview && (
         <ERPModal open onClose={() => !saving && setShowReview(false)} size="lg" storageKey="pr-review"
@@ -1124,6 +1106,7 @@ export default function PurchasingShopPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-slate-800 truncate">{l.label}</div>
+                  {l.reason && <div className="text-[11px] text-indigo-600 truncate">🔖 {l.reason}{l.sourceMoNo && l.usedForLabel ? ` · ${l.usedForLabel}` : ""}</div>}
                   <div className="text-[11px] text-slate-400">🏪 {l.seller}{l.urgent ? <span className="text-rose-600 font-medium"> · ⚡ ส่งด่วน{l.useDate ? ` (ใช้ ${l.useDate})` : ""}</span> : ""}{l.note ? ` · 📝 ${l.note}` : ""}</div>
                 </div>
                 <div className="text-right shrink-0">
@@ -1170,7 +1153,7 @@ export default function PurchasingShopPage() {
       {/* SKU confirm popup */}
       {confirmSku && confirmSku.sku && (
         <ConfirmSku card={confirmSku} rate={cnyRate} stockQty={stockMap.has(confirmSku.id) ? stockMap.get(confirmSku.id)! : null} dupOrders={dupMap[confirmSku.id]} onClose={() => setConfirmSku(null)}
-          onAdd={(qty, note, usedFor, urgent, useDate) => addSku(confirmSku, qty, note, usedFor, urgent, useDate)}
+          onAdd={(qty, note, reason, urgent, useDate) => addSku(confirmSku, qty, note, reason, urgent, useDate)}
           onSaveImage={saveSkuImage}
           onEdit={() => setSkuForm({ mode: "edit", id: confirmSku.id })} />
       )}
@@ -1365,22 +1348,92 @@ function AddBtn({ onAdd }: { onAdd: (qty: number) => void }) {
   );
 }
 
-function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; stockQty?: number | null; dupOrders?: OpenOrder[]; onClose: () => void; onAdd: (qty: number, note: string, usedFor: PickedSku | null, urgent: boolean, useDate: string | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
+// สถานะใบสั่งผลิตที่ถือว่า "ปิดแล้ว" → ไม่ให้เลือกเป็นเหตุผลขอซื้อ
+const MO_CLOSED = new Set(["completed", "done", "closed", "cancelled", "canceled"]);
+
+// MoReasonPicker — เลือกใบสั่งผลิตที่ "ยังเปิดอยู่" เป็นเหตุผลขอซื้อ (ดึงจาก /api/mo, กรองสถานะปิดฝั่ง client)
+function MoReasonPicker({ value, onPick }: { value: { no: string; label: string } | null; onPick: (v: { no: string; label: string } | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<MoListItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    const t = setTimeout(() => {
+      apiFetch(`/api/mo?limit=50${q ? `&search=${encodeURIComponent(q)}` : ""}`).then(r => r.json())
+        .then(j => setRows(((j.data ?? []) as MoListItem[]).filter(m => !MO_CLOSED.has(String(m.status ?? "").toLowerCase()))))
+        .catch(() => setRows([]))
+        .finally(() => setLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [open, q]);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div className="relative" ref={ref}>
+      {value ? (
+        <div className="flex items-center gap-2 h-9 px-2 border border-slate-200 rounded-md bg-slate-50">
+          <span className="text-sm text-slate-700 truncate flex-1">🏭 {value.label}</span>
+          <button type="button" onClick={() => setOpen(o => !o)} className="text-xs text-blue-600 hover:underline shrink-0">เปลี่ยน</button>
+          <button type="button" onClick={() => onPick(null)} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setOpen(o => !o)}
+          className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
+          + เลือกใบสั่งผลิต (ที่ยังเปิดอยู่)
+        </button>
+      )}
+      {open && (
+        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-72 overflow-auto">
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาเลขใบ / รหัส / ชื่อสินค้า..."
+            className="w-full h-9 px-3 text-sm border-b border-slate-100 outline-none sticky top-0 bg-white" />
+          {loading && <div className="px-3 py-3 text-xs text-slate-400">กำลังโหลด…</div>}
+          {!loading && rows && rows.length === 0 && <div className="px-3 py-3 text-xs text-slate-300">— ไม่พบใบสั่งผลิตที่ยังเปิด —</div>}
+          {!loading && (rows ?? []).map(m => (
+            <button key={m.id} type="button"
+              onClick={() => { onPick({ no: m.mo_no, label: `${m.mo_no}${m.product_sku ? ` · ${m.product_sku}` : ""}${m.product_name ? ` (${m.product_name})` : ""}` }); setOpen(false); }}
+              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-50 last:border-0">
+              <div className="text-sm font-medium text-slate-700">{m.mo_no}</div>
+              <div className="text-xs text-slate-500 truncate">{m.product_sku ?? ""}{m.product_name ? ` · ${m.product_name}` : ""}{m.status ? ` · ${m.status}` : ""}</div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, onSaveImage }: { card: Card; rate: number; stockQty?: number | null; dupOrders?: OpenOrder[]; onClose: () => void; onAdd: (qty: number, note: string, reason: ReasonPick, urgent: boolean, useDate: string | null) => void; onEdit: () => void; onSaveImage: (skuId: string, key: string | null) => void | Promise<void> }) {
   const [qty, setQty] = useState(1);
   const [note, setNote] = useState("");
-  const [usedFor, setUsedFor] = useState<PickedSku | null>(null);   // 🎯 ใช้กับสินค้า (ปลายทาง)
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // เหตุผลที่ขอซื้อ (บังคับ) — 2 โหมด: 📋 เลือกเหตุผล / 🏭 อ้างใบสั่งผลิต
+  const [reasonMode, setReasonMode] = useState<"reason" | "mo">("reason");
+  const [reasonId, setReasonId] = useState<string | null>(null);    // id ของ lookup (ให้ RelationPicker แสดงผล)
+  const [reasonText, setReasonText] = useState("");                 // ข้อความเหตุผล (เก็บลงใบ ไม่ใช่ id)
+  const [moPick, setMoPick] = useState<{ no: string; label: string } | null>(null);
   const [editImg, setEditImg] = useState(false);   // เปิดโหมดแก้รูปในป๊อปนี้
   const [urgent, setUrgent] = useState(false);     // ⚡ ส่งด่วน
   const [useDate, setUseDate] = useState("");       // วันที่ใช้งาน (ไม่บังคับ)
   const s = card.sku!;
+  // บังคับเลือกเหตุผลก่อนเพิ่มลงตะกร้า
+  const reasonValid = reasonMode === "reason" ? !!reasonText : !!moPick;
+  const buildReason = (): ReasonPick =>
+    reasonMode === "mo" && moPick
+      ? { text: `ใบสั่งผลิต ${moPick.no}`, moNo: moPick.no, moLabel: moPick.label }
+      : { text: reasonText, moNo: null, moLabel: null };
   return (
     <ERPModal open onClose={onClose} size="md" storageKey="pr-add-item" title="เพิ่มลงใบขอซื้อ"
       footer={
         <>
           <button onClick={onEdit} className="mr-auto h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">✎ แก้ไขสินค้า</button>
           <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={() => onAdd(qty, note, usedFor, urgent, useDate || null)} disabled={qty <= 0} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
+          <button onClick={() => onAdd(qty, note, buildReason(), urgent, useDate || null)} disabled={qty <= 0 || !reasonValid} title={!reasonValid ? "กรุณาเลือกเหตุผลที่ขอซื้อก่อน" : undefined} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">+ เพิ่มลงตะกร้า</button>
         </>
       }>
       {/* เตือนสั่งซ้ำ — สินค้านี้มีใบขอซื้อค้างอยู่ (ไม่บล็อก ยังกดเพิ่มได้) */}
@@ -1445,26 +1498,27 @@ function ConfirmSku({ card, rate, stockQty, dupOrders, onClose, onAdd, onEdit, o
             </div>
           )}
         </div>
-        {/* 🎯 ใช้กับสินค้า (ปลายทาง) — เลือกจาก SKU แบบมีรูป */}
+        {/* เหตุผลที่ขอซื้อ * (บังคับ) — สลับ 2 โหมด: เลือกเหตุผล / อ้างใบสั่งผลิต */}
         <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">🎯 ใช้กับสินค้า (ปลายทาง) — ถ้ามี</label>
-          {usedFor ? (
-            <div className="flex items-center gap-2 h-9 px-2 border border-slate-200 rounded-md bg-slate-50">
-              <span className="text-sm text-slate-700 truncate flex-1">{usedFor.name}{usedFor.code ? ` (${usedFor.code})` : ""}</span>
-              <button type="button" onClick={() => setPickerOpen(true)} className="text-xs text-blue-600 hover:underline shrink-0">เปลี่ยน</button>
-              <button type="button" onClick={() => setUsedFor(null)} className="text-slate-400 hover:text-red-500 shrink-0">✕</button>
-            </div>
+          <label className="block text-xs font-medium text-slate-600 mb-1">เหตุผลที่ขอซื้อ <span className="text-rose-500">*</span></label>
+          <div className="grid grid-cols-2 gap-1 mb-2 text-xs">
+            <button type="button" onClick={() => setReasonMode("reason")}
+              className={`py-1.5 rounded-md border transition-colors ${reasonMode === "reason" ? "bg-blue-600 text-white border-blue-600" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>📋 เหตุผล</button>
+            <button type="button" onClick={() => setReasonMode("mo")}
+              className={`py-1.5 rounded-md border transition-colors ${reasonMode === "mo" ? "bg-blue-600 text-white border-blue-600" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>🏭 ใบสั่งผลิต</button>
+          </div>
+          {reasonMode === "reason" ? (
+            // ของกลาง RelationPicker (lookup_type=pr_reason) — มี "+ สร้างใหม่" ในตัว · เก็บเป็นข้อความ (name)
+            <RelationPicker value={reasonId}
+              onChange={(id, opt) => { setReasonId(id); setReasonText(opt?.label ?? ""); }}
+              config={{ target_table: "erp_lookups", target_label_field: "name", lookup_type: "pr_reason" }}
+              placeholder="เลือกเหตุผล (พิมพ์เพื่อเพิ่มใหม่)" required hasError={!reasonText} />
           ) : (
-            <button type="button" onClick={() => setPickerOpen(true)}
-              className="w-full h-9 px-3 text-sm text-left text-slate-400 border border-dashed border-slate-300 rounded-md hover:border-blue-300 hover:text-blue-600">
-              + เลือกสินค้าปลายทาง (เช่น PIX10)
-            </button>
+            <MoReasonPicker value={moPick} onPick={setMoPick} />
           )}
+          {!reasonValid && <p className="mt-1 text-[11px] text-rose-500">* ต้องเลือกเหตุผลก่อนจึงเพิ่มลงตะกร้าได้</p>}
         </div>
       </div>
-      <SkuImagePicker open={pickerOpen} onClose={() => setPickerOpen(false)}
-        title="เลือกสินค้าปลายทาง (ที่จะเอาของนี้ไปใช้)"
-        onPick={(sku) => { setUsedFor(sku); setPickerOpen(false); }} />
     </ERPModal>
   );
 }

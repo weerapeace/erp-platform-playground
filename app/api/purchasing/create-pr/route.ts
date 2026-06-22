@@ -20,6 +20,7 @@ type Item = {
   sku_id?: string | null; item_name?: string; qty?: number; uom?: string | null;
   seller_name?: string | null; price_est?: number; currency?: string | null;
   image_key?: string | null; note?: string | null;
+  reason?: string | null;          // เหตุผลที่ขอซื้อ (ข้อความ — เลือกจาก lookup หรือ "ใบสั่งผลิต MO-xxx")
   used_for_sku_id?: string | null; used_for_label?: string | null;
   is_urgent?: boolean; needed_date?: string | null;
   source_mo_no?: string | null;   // เลขใบสั่งผลิตต้นทาง (ถ้ามาจาก MO)
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       qty: num(it.qty), uom: it.uom ?? null,
       seller_name: it.seller_name ?? null, price_est: num(it.price_est), currency: it.currency ?? "THB",
       image_key: it.image_key ?? null, note: it.note ?? null,
+      reason: it.reason ?? null,
       used_for_sku_id: it.used_for_sku_id ?? null, used_for_label: it.used_for_label ?? null,
       is_urgent: it.is_urgent === true, needed_date: it.needed_date || null,
       source_mo_no: it.source_mo_no ?? null,
