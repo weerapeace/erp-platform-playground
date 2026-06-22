@@ -579,6 +579,10 @@ export default function SalesOrdersPage() {
 
             {/* Totals */}
             <div className="bg-gradient-to-br from-slate-50 to-white border border-slate-200 rounded-xl p-4 grid grid-cols-2 gap-x-6">
+              <Row label="จำนวนรวมสินค้า"
+                value={`${detail.lines.reduce((s, l) => s + Number(l.qty || 0), 0).toLocaleString("th-TH")}${
+                  new Set(detail.lines.map(l => l.unit)).size === 1 && detail.lines[0]?.unit ? ` ${detail.lines[0].unit}` : ""
+                } · ${detail.lines.length} รายการ`} bold />
               <Row label="Subtotal"               value={baht(detail.subtotal)} />
               <Row label="ลด line"                value={baht(detail.total_line_discount)} />
               <Row label="ลดท้ายบิล"             value={baht(detail.total_header_discount)} />
