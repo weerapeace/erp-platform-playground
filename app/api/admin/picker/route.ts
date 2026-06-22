@@ -44,52 +44,59 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const supabase = supabaseFromRequest(request);
 
-  // build select
-  const selectCols = ["id", label];
-  if (secondary && secondary !== label) selectCols.push(secondary);
-  // try is_active (best effort — fail silently if not exist)
-  selectCols.push("is_active");
+  // ฟิลด์ที่ใช้ค้น + แตกคำค้นเป็น token (ค้นกลางคำ/ข้ามตัวคั่นได้)
+  const searchFields = (searchIn && searchIn.length > 0 ? searchIn : [label]).filter((f) => SAFE_FIELD.test(f));
+  const tokens = search ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6) : [];
+  const searching = tokens.length > 0 && searchFields.length > 0;
 
-  let query = supabase.from(table).select(selectCols.join(", ")).limit(limit);
-  if (hasFilter) query = query.eq(filterCol, filterVal);
+  // build select (รวมฟิลด์ค้นไว้ให้คะแนน "ตัวเป๊ะ")
+  const selectSet = new Set<string>(["id", label, ...searchFields]);
+  if (secondary && secondary !== label) selectSet.add(secondary);
+  const selectCols = [...selectSet];
 
-  // search filter
-  if (search) {
-    const fields = (searchIn && searchIn.length > 0 ? searchIn : [label])
-      .filter((f) => SAFE_FIELD.test(f));
-    if (fields.length > 0) {
-      const orFilter = fields.map((f) => `${f}.ilike.%${search}%`).join(",");
-      query = query.or(orFilter);
-    }
-  }
+  // ตอนค้น: ดึงผู้สมัครมากกว่า limit แล้วค่อยจัดอันดับ/ตัด · token ทุกตัวต้องเจอ (AND) อยู่ฟิลด์ใดก็ได้ (OR)
+  const cap = searching ? Math.max(limit, 60) : limit;
+  const buildQuery = (withActive: boolean) => {
+    let q = supabase.from(table).select([...(withActive ? [...selectCols, "is_active"] : selectCols)].join(", ")).limit(cap);
+    if (hasFilter) q = q.eq(filterCol, filterVal);
+    if (searching) for (const t of tokens) q = q.or(searchFields.map((f) => `${f}.ilike.%${t}%`).join(","));
+    return q;
+  };
 
-  // include extra ids (current value of relation) — append as separate query
-  let { data, error } = await query;
-
-  // retry without is_active if column doesn't exist
-  if (error && error.message.includes("is_active")) {
-    let fb = supabase.from(table)
-      .select(selectCols.filter((c) => c !== "is_active").join(", "))
-      .limit(limit);
-    if (hasFilter) fb = fb.eq(filterCol, filterVal);
-    if (search) {
-      const fields = (searchIn && searchIn.length > 0 ? searchIn : [label]).filter((f) => SAFE_FIELD.test(f));
-      if (fields.length > 0) fb = fb.or(fields.map((f) => `${f}.ilike.%${search}%`).join(","));
-    }
-    const fallback = await fb;
-    data = fallback.data;
-    error = fallback.error;
+  let { data, error } = await buildQuery(true);
+  if (error && error.message.includes("is_active")) {   // ตารางไม่มี is_active → ลองใหม่ไม่เอา
+    const fallback = await buildQuery(false);
+    data = fallback.data; error = fallback.error;
   }
 
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
   let rows = (data ?? []) as unknown as Record<string, unknown>[];
 
+  // จัดอันดับ "ตัวที่เหมือนที่สุด" ขึ้นก่อน (ตรงเป๊ะ → ขึ้นต้น → มีคำตรง) แล้วตัดเหลือ limit
+  if (searching) {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ก-๙]/gi, "");
+    const S = norm(search);
+    const nTokens = tokens.map(norm).filter(Boolean);
+    const scoreOf = (r: Record<string, unknown>): number => {
+      let best = 0;
+      for (const f of searchFields) {
+        const v = norm(String(r[f] ?? "")); if (!v) continue;
+        if (S && v === S) best = Math.max(best, 1_000_000);
+        else if (S && v.startsWith(S)) best = Math.max(best, 900_000 - v.length);
+        else if (S && v.includes(S)) best = Math.max(best, 800_000 - v.length);
+        else { let s = 0; nTokens.forEach((t, i) => { if (v.startsWith(t)) s += 200 - i * 5; else if (v.includes(t)) s += 100 - i * 5; }); best = Math.max(best, s); }
+      }
+      return best;
+    };
+    rows = rows.map((r) => ({ r, s: scoreOf(r) })).sort((a, b) => b.s - a.s || String(a.r[label] ?? "").localeCompare(String(b.r[label] ?? ""), "th")).slice(0, limit).map((x) => x.r);
+  }
+
   // เติม "include_ids" — load extra records ที่ไม่ match search แต่ต้องการโชว์เป็น current value
   if (includeIds && includeIds.length > 0) {
     const missingIds = includeIds.filter((id) => !rows.some((r) => r.id === id));
     if (missingIds.length > 0) {
-      const sel = selectCols.filter((c) => c !== "is_active").join(", ");
+      const sel = selectCols.join(", ");
       const extra = await supabase.from(table).select(sel).in("id", missingIds);
       if (extra.data) rows = [...((extra.data as unknown) as Record<string, unknown>[]), ...rows];
     }

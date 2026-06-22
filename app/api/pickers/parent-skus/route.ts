@@ -12,21 +12,34 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const search = (searchParams.get("search") ?? "").trim();
   const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") ?? "24", 10)));
+  const tokens = search ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6) : [];
+  const searching = tokens.length > 0;
 
   let query = supabaseFromRequest(request)
     .from("parent_skus_v2")
     .select("id, code, name_th, cover_image_r2_key")
     .eq("is_active", true);
-  if (search) { const t = search.replace(/[%_,()*]/g, " ").trim(); if (t) query = query.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
+  if (searching) for (const t of tokens) query = query.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`);
 
-  const { data, error } = await query.order("code", { ascending: true }).limit(limit);
+  const { data, error } = searching ? await query.limit(80) : await query.order("code", { ascending: true }).limit(limit);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
-  const rows = ((data ?? []) as Row[]).map((r) => ({
-    id: r.id,
-    code: r.code ?? "",
-    name: r.name_th ?? r.code ?? "",
-    image_key: r.cover_image_r2_key ?? null,
+  let rows = ((data ?? []) as Row[]).map((r) => ({
+    id: r.id, code: r.code ?? "", name: r.name_th ?? r.code ?? "", image_key: r.cover_image_r2_key ?? null,
   }));
+  // ค้นหา → จัดอันดับ "ตัวที่เหมือนที่สุด" ขึ้นก่อน (เป๊ะ-first) แล้วตัดเหลือ limit
+  if (searching) {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ก-๙]/gi, "");
+    const S = norm(search); const nTokens = tokens.map(norm).filter(Boolean);
+    const scoreOf = (r: { code: string; name: string }) => {
+      const code = norm(r.code), name = norm(r.name);
+      if (S && code === S) return 1_000_000;
+      if (S && code.startsWith(S)) return 900_000 - code.length;
+      if (S && code.includes(S)) return 800_000 - code.length;
+      let s = 0; nTokens.forEach((t, i) => { if (code.startsWith(t)) s += 200 - i * 5; else if (code.includes(t)) s += 120 - i * 5; else if (name.includes(t)) s += 40; });
+      return s;
+    };
+    rows = rows.map((r) => ({ r, s: scoreOf(r) })).sort((a, b) => b.s - a.s || a.r.code.localeCompare(b.r.code, "th")).slice(0, limit).map((x) => x.r);
+  }
   return NextResponse.json({ data: rows, error: null });
 }

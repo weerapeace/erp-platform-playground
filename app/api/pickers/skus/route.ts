@@ -141,15 +141,15 @@ export async function GET(request: NextRequest) {
     query = query.or(parts.join(","));
   }
 
-  // ตัวตัดสินรอง "id": ถ้าค่าเรียงหลัก (เช่นชื่อ/ราคา) ซ้ำกัน ลำดับจะนิ่งเสมอ
-  // → แบ่งหน้าด้วย offset แล้วไม่คาบเกี่ยว/ไม่ได้แถวซ้ำเวลากด "ดูเพิ่มเติม"
-  const { data, error, count } = await query
-    .order(orderCol, { ascending: sortAsc })
-    .order("id", { ascending: true })
-    .range(offset, offset + limit - 1);
+  // ตอนค้นหา: ดึงผู้สมัครชุดหนึ่ง (120) แล้วจัดอันดับ "ตัวที่เหมือนที่สุด" ขึ้นก่อน (เป๊ะ-first) แทนเรียง code
+  // ตอนไม่ค้น (ไล่ดู/กรอง): แบ่งหน้าที่ DB ตามปกติ (order + range) + id เป็นตัวตัดสินรองให้ลำดับนิ่ง
+  const searching = tokens.length > 0;
+  const { data, error, count } = searching
+    ? await query.limit(120)
+    : await query.order(orderCol, { ascending: sortAsc }).order("id", { ascending: true }).range(offset, offset + limit - 1);
   if (error) return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
 
-  const rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {
+  let rows = ((data ?? []) as unknown as SkuPickerRow[]).map((row) => {
     const uom = Array.isArray(row.uom) ? row.uom[0] : row.uom;
     const parent = Array.isArray(row.parent_skus_v2) ? row.parent_skus_v2[0] : row.parent_skus_v2;
     const cat = parent ? (Array.isArray(parent.product_categories) ? parent.product_categories[0] : parent.product_categories) : null;
@@ -168,6 +168,22 @@ export async function GET(request: NextRequest) {
       sale_ok: row.sale_ok,
     };
   });
+
+  if (searching) {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ก-๙]/gi, "");
+    const S = norm(search);
+    const nTokens = tokens.map(norm).filter(Boolean);
+    const scoreOf = (r: { code: string; name: string }): number => {
+      const code = norm(r.code), name = norm(r.name);
+      if (S && code === S) return 1_000_000;
+      if (S && code.startsWith(S)) return 900_000 - code.length;
+      if (S && code.includes(S)) return 800_000 - code.length;
+      let s = 0; nTokens.forEach((t, i) => { if (code.startsWith(t)) s += 200 - i * 5; else if (code.includes(t)) s += 120 - i * 5; else if (name.includes(t)) s += 40; });
+      return s;
+    };
+    const ranked = rows.map((r) => ({ r, s: scoreOf(r) })).sort((a, b) => b.s - a.s || a.r.code.localeCompare(b.r.code, "th")).map((x) => x.r);
+    return NextResponse.json({ data: ranked.slice(offset, offset + limit), total: ranked.length, error: null });
+  }
 
   return NextResponse.json({ data: rows, total: count ?? rows.length, error: null });
 }
