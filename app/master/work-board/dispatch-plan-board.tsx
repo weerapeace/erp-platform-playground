@@ -28,7 +28,7 @@ function Thumb({ url }: { url?: string | null }) {
 
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
-  laborPerUnit, imageByMo, deptWages, canEdit, tablet,
+  laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch,
   onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
@@ -38,6 +38,8 @@ export function DispatchPlanBoard({
   imageByMo: Record<string, string | null>;
   canEdit: boolean;
   tablet?: boolean;   // โหมดแท็บเล็ต → โฟกัสทีละโต๊ะ (แตะชิปเลือกโต๊ะ + เห็น 2 ช่อง รอจ่าย/โต๊ะที่เลือก)
+  realMode?: boolean;   // มุมมอง "ของจริง" — คอลัมน์เหมือนหน้าแผน แต่จ่ายจริงทันที (ไม่ใช่ร่าง)
+  onDispatch?: (info: { moId: string; deptId: string; qty: number }) => void;   // จ่ายจริง → เปิดหน้ายืนยัน
   onApplied: () => void; onRenamed: (name: string) => void; onDates: (start: string | null, end: string | null) => void; onDeleted: () => void;
   onOpenWork: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
@@ -72,11 +74,12 @@ export function DispatchPlanBoard({
   useEffect(() => { setSDate(startDate ?? ""); setEDate(endDate ?? ""); }, [startDate, endDate]);
 
   const load = useCallback(async () => {
+    if (realMode) { setLines([]); setLoading(false); return; }   // ของจริง: ไม่มีร่าง — โต๊ะโชว์ใบจ่ายงานจริง
     setLoading(true);
     try { const r = await apiFetch(`/api/mo/dispatch-plans/${planId}`); const j = await r.json();
       setLines((j?.data?.lines ?? []) as DispatchPlanLine[]);
     } catch { /* ignore */ } finally { setLoading(false); }
-  }, [planId]);
+  }, [planId, realMode]);
   useEffect(() => { setSelected(null); void load(); }, [load]);
 
   const defectOf = (nm: string | null | undefined) => nm ? defectByWorker[nm.trim().toLowerCase()] : undefined;
@@ -116,6 +119,7 @@ export function DispatchPlanBoard({
     const p = pending.find((x) => x.mo_no === moNo); if (!p) return;
     const qty = dispQtyOf(p);
     if (qty <= 0) { toast.info("ใส่จำนวนที่จะจ่ายก่อน (หรือใบนี้วางแผนครบแล้ว)"); return; }
+    if (realMode) { onDispatch?.({ moId: p.id, deptId: dept.id, qty }); setDispQty((d) => { const n = { ...d }; delete n[moNo]; return n; }); setSelected(null); return; }   // ของจริง → เปิดหน้ายืนยันจ่าย
     try {
       const r = await apiFetch(`/api/mo/dispatch-plans/${planId}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "add_line", line: { mo_no: p.mo_no, mo_id: p.id, product_sku: p.product_sku, product_name: p.product_name, qty, department_id: dept.id, department_name: dept.name } }) });
@@ -238,16 +242,18 @@ export function DispatchPlanBoard({
     <div className="space-y-3">
       {/* แถบเครื่องมือของแผน */}
       <div className="flex items-center gap-2 flex-wrap bg-white border border-slate-200 rounded-xl px-3 py-2">
-        <span className="text-[11px] text-slate-400">ชื่อแผน</span>
-        <input value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName} disabled={!editable}
-          className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
-        <span className="text-[11px] text-slate-400 ml-1">เริ่ม</span>
-        <input type="date" value={sDate} onChange={(e) => setSDate(e.target.value)} onBlur={saveDates} disabled={!editable}
-          className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
-        <span className="text-[11px] text-slate-400">เสร็จ</span>
-        <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} onBlur={saveDates} disabled={!editable}
-          className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
-        {applied && <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">ดันเป็นของจริงแล้ว</span>}
+        {realMode ? <span className="text-sm font-semibold text-slate-700">📋 จ่ายงานจริง</span> : <>
+          <span className="text-[11px] text-slate-400">ชื่อแผน</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} onBlur={saveName} disabled={!editable}
+            className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-44 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+          <span className="text-[11px] text-slate-400 ml-1">เริ่ม</span>
+          <input type="date" value={sDate} onChange={(e) => setSDate(e.target.value)} onBlur={saveDates} disabled={!editable}
+            className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+          <span className="text-[11px] text-slate-400">เสร็จ</span>
+          <input type="date" value={eDate} onChange={(e) => setEDate(e.target.value)} onBlur={saveDates} disabled={!editable}
+            className="h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+          {applied && <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">ดันเป็นของจริงแล้ว</span>}
+        </>}
         <div className="flex-1" />
         {!tablet && (
           <div className="flex items-center gap-1.5" title="ปรับความกว้างของโต๊ะ — กว้างขึ้นรหัสจะอยู่บรรทัดเดียว">
@@ -256,17 +262,17 @@ export function DispatchPlanBoard({
           </div>
         )}
         {onManageDepts && <button onClick={onManageDepts} className="h-8 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50">⚙️ จัดการโต๊ะ</button>}
-        {editable && <button onClick={() => setConfirmApply(true)} disabled={lines.length === 0}
+        {!realMode && editable && <button onClick={() => setConfirmApply(true)} disabled={lines.length === 0}
           className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">🚀 ดันเป็นของจริง</button>}
-        <button onClick={deletePlan} className="h-8 px-2.5 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">ลบแผน</button>
+        {!realMode && <button onClick={deletePlan} className="h-8 px-2.5 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">ลบแผน</button>}
       </div>
 
       {/* คำอธิบายสัญลักษณ์ */}
       <div className="flex gap-4 flex-wrap text-[11px] text-slate-500">
         <span><span className="inline-block w-2.5 h-2.5 rounded-sm border border-slate-300 align-[-1px]" /> รอจ่าย</span>
-        <span><span className="inline-block w-2.5 h-2.5 rounded-sm align-[-1px]" style={{ border: "1.5px dashed #1d9e75" }} /> ร่าง (ทดลอง)</span>
-        <span>🔒 จ่ายจริง (ล็อก)</span>
-        {editable && <span className="text-indigo-500">{tablet ? "แตะการ์ดรอจ่าย → แตะที่โต๊ะเพื่อจ่าย (ไม่ต้องลาก)" : "กดการ์ดรอจ่าย → กดที่โต๊ะเพื่อจ่ายแบบร่าง"}</span>}
+        {!realMode && <span><span className="inline-block w-2.5 h-2.5 rounded-sm align-[-1px]" style={{ border: "1.5px dashed #1d9e75" }} /> ร่าง (ทดลอง)</span>}
+        <span>{realMode ? "📋 จ่ายจริงแล้ว" : "🔒 จ่ายจริง (ล็อก)"}</span>
+        {editable && <span className="text-indigo-500">{realMode ? "แตะการ์ดรอจ่าย → แตะที่โต๊ะ → ยืนยันจ่ายจริง" : tablet ? "แตะการ์ดรอจ่าย → แตะที่โต๊ะเพื่อจ่าย (ไม่ต้องลาก)" : "กดการ์ดรอจ่าย → กดที่โต๊ะเพื่อจ่ายแบบร่าง"}</span>}
       </div>
 
       {/* แท็บเล็ต: แถบชิปเลือกโต๊ะที่จะโฟกัส */}
@@ -367,7 +373,7 @@ export function DispatchPlanBoard({
                 </div>
                 {/* ใบจ่ายจริง (ล็อก) */}
                 {reals.map((w) => (
-                  <div key={w.id} className="rounded-lg px-2 py-1.5 mb-1.5 bg-slate-50 border border-slate-200 opacity-70">
+                  <div key={w.id} className={`rounded-lg px-2 py-1.5 mb-1.5 bg-slate-50 border border-slate-200 ${realMode ? "" : "opacity-70"}`}>
                     <div className="flex items-center gap-2">
                       <Thumb url={w.image_url} />
                       <div className="min-w-0 flex-1">

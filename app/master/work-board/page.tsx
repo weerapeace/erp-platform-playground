@@ -900,23 +900,7 @@ export default function WorkBoardPage() {
 
       {viewMode === "board" && activePlan === "real" && (
       <div className="z-20 flex items-center gap-1 bg-white rounded-lg border border-slate-200 shadow-sm p-1 w-fit mb-2">
-        <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="เลือก/ลาก">🖱️</ToolBtn>
-        <ToolBtn active={tool === "pan"} onClick={() => setTool("pan")} title="เลื่อนกระดาน">✋</ToolBtn>
-        <Sep />
-        <ToolBtn onClick={() => zoomBtn(1 / 1.2)} title="ซูมออก">➖</ToolBtn>
-        <span className="text-xs text-slate-500 tabular-nums w-10 text-center">{Math.round(vp.scale * 100)}%</span>
-        <ToolBtn onClick={() => zoomBtn(1.2)} title="ซูมเข้า">➕</ToolBtn>
-        <Sep />
-        <ToolBtn onClick={tidy} title="จัดเรียงการ์ดให้สวย">▦</ToolBtn>
-        <ToolBtn onClick={resetView} title="จัดมุมมองกลับ">🎯</ToolBtn>
-        <ToolBtn onClick={resetZones} title="รีเซ็ตตำแหน่ง/ขนาดโซน">↺</ToolBtn>
         <ToolBtn onClick={() => void load()} title="โหลดใหม่">⟳</ToolBtn>
-        <Sep />
-        {/* รอจ่าย — เปิดเป็นป๊อปอัป (ไม่กินที่บนแคนวาส) */}
-        <button type="button" onClick={() => setPendPopupOpen((o) => !o)} title="แผงรอจ่าย — ลากรายการไปวางที่โต๊ะเพื่อจ่าย"
-          className={`h-7 px-2.5 text-xs font-medium rounded-lg border inline-flex items-center gap-1 ${pendPopupOpen ? "bg-blue-600 text-white border-blue-600" : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"}`}>📥 รอจ่าย ({board.pending.length})</button>
-        <Sep />
-        <ToolBtn onClick={openDeptMgr} title="ตั้งค่าแผนก (เพิ่ม/แก้/ลบ/ซ่อน/หมายเหตุ)">⚙️</ToolBtn>
         <ToolBtn onClick={() => setIsMax((m) => !m)} title={isMax ? "ย่อกลับ" : "ขยายเต็มจอ"}>{isMax ? "🗗" : "⛶"}</ToolBtn>
       </div>
       )}
@@ -968,60 +952,38 @@ export default function WorkBoardPage() {
           />;
         })()
       ) : (
-        <div ref={boardRef} onPointerDown={onBoardDown} onPointerMove={onMove} onPointerUp={onUp}
-          className={`relative overflow-hidden rounded-xl border border-slate-200 bg-white ${isMax ? "flex-1" : "h-[calc(100vh-230px)] min-h-[520px]"} ${tool === "pan" ? "cursor-grab" : "cursor-default"}`}
-          style={{ backgroundImage: "radial-gradient(#e2e8f0 1px, transparent 1px)", backgroundSize: `${24 * vp.scale}px ${24 * vp.scale}px`, backgroundPosition: `${vp.x}px ${vp.y}px`, touchAction: "none" }}>
-          <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${vp.x}px,${vp.y}px) scale(${vp.scale})` }}>
-            {/* โซน (กล่องพื้นหลัง + drop target) */}
-            {zones.map((z) => {
-              const p = posOfZone(z.key); const count = countOf(z); const zw = zoneWof(z.key);
-              return (
-                <div key={z.key} className="absolute rounded-2xl border-2 bg-white/40" style={{ left: p.x, top: p.y, width: zw, height: zoneH(z), borderStyle: dropDeptId === z.dept?.id ? "solid" : "dashed", borderColor: dropDeptId === z.dept?.id ? z.accent : `${z.accent}88`, boxShadow: dropDeptId === z.dept?.id ? `0 0 0 3px ${z.accent}55` : undefined }}
-                  onDragOver={(e) => { if (z.kind === "dept" && z.dept && pendDragRef.current) { e.preventDefault(); if (dropDeptId !== z.dept.id) setDropDeptId(z.dept.id); } }}
-                  onDrop={() => { setDropDeptId(null); if (z.kind === "dept" && z.dept && pendDragRef.current) { const mo = pendDragRef.current; pendDragRef.current = null; openDispatch(mo, z.dept); } }}>
-                  <div onPointerDown={(e) => onZoneDown(e, z.key)} title="ลากเพื่อย้ายตำแหน่งแผนก"
-                    className="flex items-center justify-between px-3 rounded-t-2xl cursor-move select-none" style={{ height: HEADER_H, background: `${z.accent}1f`, borderBottom: `2px solid ${z.accent}55` }}>
-                    <div className="flex items-center gap-2 min-w-0"><span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: z.accent }} /><span className="text-base font-bold text-slate-700 truncate">{z.label}</span></div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {z.kind === "dept" && z.dept && (() => {
-                        const staff = craftsmen.filter((c) => c.department_id === z.dept!.id);
-                        // ยอดรวมค่าแรงในแผนก (กลุ่ม A) — รวมจากการ์ดในแผนก: ผลิต/เหมา × แผน/จริง
-                        const L = z.woCards.reduce((a, w) => { const l = w.labor; if (l) { a.pp += l.prod_plan; a.pa += l.prod_actual; a.qp += l.piece_plan; a.qa += l.piece_actual; } return a; }, { pp: 0, pa: 0, qp: 0, qa: 0 });
-                        const hasLabor = !!(L.pp || L.pa || L.qp || L.qa);
-                        return <>
-                          <StaffAvatars staff={staff} />
-                          {hasLabor && (
-                            <div className="flex flex-col items-end leading-tight text-[9px] tabular-nums" title="ยอดรวมค่าแรงในแผนก — แผน/จริง (จริง = สีเขียว)">
-                              <span className="text-slate-500">ผลิต ฿{fmt(L.pp)}/<span className="text-emerald-600 font-medium">{fmt(L.pa)}</span></span>
-                              <span className="text-slate-500">เหมา ฿{fmt(L.qp)}/<span className="text-emerald-600 font-medium">{fmt(L.qa)}</span></span>
-                            </div>
-                          )}
-                        </>;
-                      })()}
-                      <span className="text-xs font-medium text-slate-500 bg-white/70 rounded-full px-2 py-0.5">{count}</span>
-                    </div>
-                  </div>
-                  {noteOf(z) && <div className="flex items-center gap-1 px-3 text-[11px] text-amber-700 bg-amber-50/70 border-b border-amber-100 truncate" style={{ height: NOTE_H }} title={noteOf(z) ?? ""}>📝 <span className="truncate">{noteOf(z)}</span></div>}
-                  {count === 0 && <div className="flex items-center justify-center text-xs text-slate-300 mt-6">{z.kind === "pending" ? "ไม่มีงานรอจ่าย" : "ลากงานมาที่นี่"}</div>}
-                  <div onPointerDown={(e) => onZoneResizeDown(e, z)} title="ลากเพื่อขยาย/ย่อโซน"
-                    className="absolute bottom-0 right-0 h-5 w-5 cursor-nwse-resize rounded-br-2xl" style={{ background: `linear-gradient(135deg, transparent 50%, ${z.accent}99 50%)` }} />
-                </div>
-              );
-            })}
-
-            {/* การ์ด (วางอิสระทับโซน) */}
-            {cards.map((c) => {
-              const p = posOfCard(c.cid);
-              return (
-                <div key={c.cid} onPointerDown={(e) => onCardDown(e, c.kind, c.cid.slice(3))}
-                  className={`absolute ${canEdit ? "cursor-grab active:cursor-grabbing" : ""} ${dragId === c.cid ? "z-50 rotate-1" : "z-10"}`}
-                  style={{ left: p.x, top: p.y, width: CARD_W }}>
-                  {c.node}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        (() => {
+          // มุมมอง "ของจริง" — ใช้คอลัมน์เหมือนหน้าแผน (ของกลาง) แต่จ่ายจริงทันที (ไม่ใช่ร่าง)
+          const laborPerUnit: Record<string, number> = {};
+          const imageByMo: Record<string, string | null> = {};
+          for (const m of board.pending) { laborPerUnit[m.mo_no] = (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0); if (m.image_url) imageByMo[m.mo_no] = m.image_url; }
+          for (const w of board.workOrders) { const k = String(w.mo_no); if (!laborPerUnit[k]) laborPerUnit[k] = (w.central_rate && w.central_rate > 0) ? w.central_rate : ((w.qty || 0) > 0 && w.labor ? w.labor.prod_plan / (w.qty || 1) : 0); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
+          return <DispatchPlanBoard
+            realMode planId="real" planName="" planStatus="" startDate={null} endDate={null}
+            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+            pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
+            laborPerUnit={laborPerUnit} imageByMo={imageByMo}
+            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
+            onApplied={() => {}} onRenamed={() => {}} onDates={() => {}} onDeleted={() => {}}
+            onDispatch={({ moId, deptId, qty }) => {
+              const mo = board.pending.find((x) => x.id === moId);
+              const dept = board.departments.find((x) => x.id === deptId) ?? null;
+              if (mo) { openDispatch(mo, dept); setDispQty(qty); }
+            }}
+            onOpenWork={(info) => {
+              const mo = info.moId ? board.pending.find((x) => x.id === info.moId) : null;
+              setClWO(null);
+              if (mo) { setChecklistMO(mo); return; }
+              setChecklistMO({
+                id: info.moId ?? "", mo_no: info.moNo ?? "", product_sku: info.productSku, product_name: info.productName,
+                qty: info.qty || 0, dispatched: 0, remaining: 0, due_date: null, status: "",
+                image_url: null, brand: null, brand_color: null,
+                prep_done: false, cut_done: false, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: false,
+              });
+            }}
+            onReorderDepts={(orderedIds) => { void (async () => { try { await Promise.all(orderedIds.map((id, i) => apiFetch("/api/mo/departments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, display_order: i }) }))); await load(true); } catch { /* ignore */ } })(); }}
+          />;
+        })()
       )}
 
       {/* Phase 3: เตือนเมื่อจ่ายทั้งที่ยังเตรียม/ตัดไม่ครบ (เตือนแต่จ่ายได้) */}
