@@ -12,7 +12,7 @@
  */
 import { useState, useEffect, useRef, useLayoutEffect, useCallback, type RefObject, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, safeSearch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import type { BomComponent } from "@/app/api/bom/components/route";
 
@@ -67,7 +67,7 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: "50" });
-      if (q) params.set("search", q);
+      if (q) params.set("search", safeSearch(q));
       if (grps && grps.length) params.set("groups", grps.join(","));
       if (tagList && tagList.length) params.set("tags", tagList.join(","));
       const res = await apiFetch(`/api/bom/components?${params}`, { cache: "no-store" });
@@ -143,7 +143,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
     setLoading(true);
     try {
       const params = new URLSearchParams({ limit: String(PAGE), offset: String(off) });
-      if (q) params.set("search", q);
+      if (q) params.set("search", safeSearch(q));
       if (allowedGroupCodes && allowedGroupCodes.length) params.set("groups", allowedGroupCodes.join(","));
       if (allowedTags && allowedTags.length) params.set("tags", allowedTags.join(","));
       const res = await apiFetch(`/api/bom/components?${params}`, { cache: "no-store" }); const j = await res.json();
