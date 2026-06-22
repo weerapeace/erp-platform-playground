@@ -252,6 +252,7 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
                 <Thumb k={c.image_key} size={26} />
                 <code className="text-xs text-slate-500 shrink-0">{c.code}</code>
                 <span className="text-sm text-slate-700 line-clamp-2 leading-tight flex-1">{c.name}</span>
+                {c.out_of_group && <span className="text-[10px] px-1.5 rounded bg-amber-100 text-amber-700 shrink-0" title="รหัสตรง แต่อยู่นอกกลุ่มที่กรอง">นอกกลุ่ม</span>}
                 {c.material_type && <span className="text-[10px] px-1.5 rounded bg-slate-100 text-slate-500 shrink-0">{c.material_type}</span>}
               </button>
             ))}

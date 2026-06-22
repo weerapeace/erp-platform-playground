@@ -23,6 +23,7 @@ export type BomComponent = {
   uom_id: string | null;
   uom_name: string | null;
   image_key: string | null;         // cover_image_r2_key (โชว์ thumbnail)
+  out_of_group?: boolean;           // รหัสตรงแต่อยู่นอกกลุ่มที่กรอง (โชว์ป้าย "นอกกลุ่ม")
 };
 
 type GroupEmbed = { name: string | null; loss_percent: number | null } | null;
@@ -61,19 +62,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ? search.split(/[\s\-_#/.,()]+/).map((t) => t.replace(/[%_()*,]/g, "")).filter(Boolean).slice(0, 6)
     : [];
 
+  const searching = tokens.length > 0;
   let q = supabase
     .from("skus_v2")
     .select("id, code, name_th, fabric_width_cm, cover_image_r2_key, material_group_id, uom_id, grp:material_groups!material_group_id ( name, loss_percent ), uom:uoms!uom_id ( name )")
     .eq("is_active", true);
-  if (groupIds) q = q.in("material_group_id", groupIds);
   if (tagSkuIds) q = q.in("id", tagSkuIds);
-  if (tokens.length) {
+  if (searching) {
     // ทุก token ต้องเจอ (AND) — แต่ละ token จะอยู่ใน code หรือชื่อก็ได้
-    // (เดิมเป็น OR: token กว้างๆ เช่น "06" ดึงสินค้าเป็นพัน ทำให้ตัวที่ตรงเป๊ะหลุดออกจากชุดผู้สมัคร 300 ตัว)
-    // supabase-js: เรียก .or() หลายครั้ง = AND กันระหว่างกลุ่ม
+    // ตอนค้นหา "ไม่กรองกลุ่มที่ SQL" → ค่อยกรองใน JS เพื่อให้ "รหัสตรง" ที่อยู่นอกกลุ่มยังโผล่มาได้
     for (const t of tokens) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`);
     q = q.limit(300);
   } else {
+    if (groupIds) q = q.in("material_group_id", groupIds);
     q = q.order("code", { ascending: true }).range(offset, offset + limit - 1);
   }
   const { data, error } = await q;
@@ -97,8 +98,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
   });
 
-  // จัดอันดับ "ตัวที่เหมือนที่สุด" ขึ้นก่อน (เหมือนค้นหน้าขอซื้อ)
-  if (tokens.length) {
+  // จัดอันดับ "ตัวที่เหมือนที่สุด" ขึ้นก่อน + ดึงรหัสตรงที่อยู่นอกกลุ่มมาด้วย (พิมพ์รหัสตรงๆ เจอเสมอ)
+  if (searching) {
     const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ก-๙]/gi, "");
     const S = norm(search);
     const nTokens = tokens.map(norm).filter(Boolean);
@@ -115,8 +116,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       });
       return s;
     };
+    const groupSet = groupIds ? new Set(groupIds) : null;
+    const codeMatch = (c: BomComponent) => { const code = norm(c.code); return !!S && (code === S || code.startsWith(S) || code.includes(S)); };
     out = out
-      .map((c) => ({ c, s: scoreOf(c) }))
+      .map((c) => { const inGroup = !groupSet || (c.material_group_id != null && groupSet.has(c.material_group_id)); return { c: { ...c, out_of_group: !inGroup }, s: scoreOf(c), inGroup }; })
+      .filter((x) => x.inGroup || codeMatch(x.c))               // นอกกลุ่ม → เก็บเฉพาะตัวที่ "รหัสตรง"
       .sort((a, b) => b.s - a.s || a.c.code.localeCompare(b.c.code, "th"))
       .slice(offset, offset + limit)
       .map((x) => x.c);
