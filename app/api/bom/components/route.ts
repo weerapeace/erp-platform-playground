@@ -128,7 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .slice(offset, offset + limit)
       .map((x) => x.c);
   }
-  return NextResponse.json({ data: out, error: null });
+  return NextResponse.json({ data: out, error: null }, { headers: { "Cache-Control": "no-store" } });
 }
 
 // ---- PATCH: ติดกลุ่มวัตถุดิบ / เขียนหน้ากว้างกลับ SKU ----

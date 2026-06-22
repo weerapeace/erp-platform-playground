@@ -70,7 +70,7 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
       if (q) params.set("search", q);
       if (grps && grps.length) params.set("groups", grps.join(","));
       if (tagList && tagList.length) params.set("tags", tagList.join(","));
-      const res = await apiFetch(`/api/bom/components?${params}`);
+      const res = await apiFetch(`/api/bom/components?${params}`, { cache: "no-store" });
       const json = await res.json(); setOptions((json.data ?? []) as BomComponent[]);
     } finally { setLoading(false); }
   }, []);
@@ -146,7 +146,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
       if (q) params.set("search", q);
       if (allowedGroupCodes && allowedGroupCodes.length) params.set("groups", allowedGroupCodes.join(","));
       if (allowedTags && allowedTags.length) params.set("tags", allowedTags.join(","));
-      const res = await apiFetch(`/api/bom/components?${params}`); const j = await res.json();
+      const res = await apiFetch(`/api/bom/components?${params}`, { cache: "no-store" }); const j = await res.json();
       const data = (j.data ?? []) as BomComponent[];
       setItems((prev) => append ? [...prev, ...data] : data);
       setHasMore(data.length === PAGE);
