@@ -14,12 +14,15 @@ import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ShellPresentContext } from "@/components/playground-shell";
 import { PwaInstallButton } from "@/components/pwa-install-button";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 const MasterPage = dynamic(() => import("@/components/master-page").then((m) => m.MasterPage), {
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
 });
 
-type MenuItem = { label: string; href: string; icon: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null };
+type MenuItem = { id: string; label: string; href: string; icon: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null };
 type AppGroup = { key: string; label: string; icon: string | null; permission_key: string | null; default_href: string | null };
 
 export default function StandaloneApp() {
@@ -30,10 +33,14 @@ export default function StandaloneApp() {
   const [active, setActive] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);   // มือถือ: sheet "เพิ่มเติม" (เมนูเกิน 5)
+  const [drawerView, setDrawerView] = useState<"menu" | "settings" | "arrange">("menu");   // มุมมองใน drawer
+  const [savingOrder, setSavingOrder] = useState(false);   // กำลังบันทึกลำดับเมนู
   const initedRef = useRef(false);   // ตั้งหน้าเริ่มต้น (default landing) แค่ครั้งแรก
   const [deepSrc, setDeepSrc] = useState<string | null>(null);   // หน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก)
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const lastSavedRef = useRef<string>("");
+  // ลากจัดลำดับเมนู: PointerSensor + ระยะกันลากพลาด (แตะธรรมดายังกดได้)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const stripEmbed = (p: string) => p.replace(/([?&])embed=1(&?)/, (_m, p1, p2) => (p2 ? p1 : "")).replace(/[?&]$/, "");
 
   useEffect(() => {
@@ -121,6 +128,34 @@ export default function StandaloneApp() {
   const startHref = (deepSrc && cur && deepSrc.split("?")[0].startsWith(baseHref)) ? deepSrc : (cur?.href ?? "");
   const embedSrc = cur ? `${startHref}${startHref.includes("?") ? "&" : "?"}embed=1` : "";
 
+  const isAdmin = can("admin.users" as Parameters<typeof can>[0]);
+  const closeDrawer = () => { setMoreOpen(false); setDrawerView("menu"); };
+
+  // บันทึกลำดับ: PATCH เฉพาะเมนูที่ค่า sort_order เปลี่ยน (เทียบด้วย id) — ต้องสิทธิ์ admin.users
+  const persistOrder = async (prev: MenuItem[], next: MenuItem[]) => {
+    setSavingOrder(true);
+    try {
+      const changed = next.filter((it) => { const b = prev.find((p) => p.id === it.id); return b && b.sort_order !== it.sort_order; });
+      await Promise.all(changed.map((it) =>
+        apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: it.id, patch: { sort_order: it.sort_order } }) })));
+    } catch { /* เงียบไว้ — ลำดับยังอัปเดตบนจอแล้ว */ } finally { setSavingOrder(false); }
+  };
+
+  // ลากเสร็จ: สลับตำแหน่ง แล้วแจกค่า sort_order เดิม (ของแอปนี้) ตามลำดับใหม่ → ไม่กระทบเมนูแอปอื่น
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active: a, over } = e;
+    if (!over || a.id === over.id) return;
+    const oldIdx = items.findIndex((it) => it.id === a.id);
+    const newIdx = items.findIndex((it) => it.id === over.id);
+    if (oldIdx < 0 || newIdx < 0) return;
+    const slots = items.map((it) => it.sort_order);            // ค่า sort_order เดิม (เรียงจากน้อยไปมากอยู่แล้ว)
+    const reassigned = arrayMove(items, oldIdx, newIdx).map((it, k) => ({ ...it, sort_order: slots[k] }));
+    const curHref = items[active]?.href;
+    setItems(reassigned);
+    if (curHref) { const ni = reassigned.findIndex((it) => it.href === curHref); if (ni >= 0) setActive(ni); }
+    void persistOrder(items, reassigned);
+  };
+
   return (
     // h-dvh + flex column: header บน · เนื้อหาเต็มกว้าง · เมนูแบบพับ-ขยาย (iPad: ☰ drawer ซ้าย · มือถือ: แถบล่าง)
     <div className="h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
@@ -186,24 +221,84 @@ export default function StandaloneApp() {
 
       {/* เมนูพับ-ขยาย (drawer) — มือถือ: sheet ขึ้นจากล่าง · iPad/จอกว้าง: แผงเลื่อนจากซ้าย */}
       {moreOpen && (
-        <div className="fixed inset-0 z-40 flex flex-col justify-end md:flex-row md:justify-start" onClick={() => setMoreOpen(false)}>
+        <div className="fixed inset-0 z-40 flex flex-col justify-end md:flex-row md:justify-start" onClick={closeDrawer}>
           <div className="absolute inset-0 bg-black/40" />
           <div onClick={(e) => e.stopPropagation()}
-            className="relative bg-white overflow-y-auto rounded-t-2xl max-h-[70vh] md:rounded-none md:max-h-none md:h-full md:w-72 md:shadow-xl"
+            className="relative bg-white flex flex-col rounded-t-2xl max-h-[80vh] md:rounded-none md:max-h-none md:h-full md:w-72 md:shadow-xl"
             style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-            <div className="sticky top-0 bg-white px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-              <div className="font-semibold text-slate-800">{app?.icon ?? "🧩"} {app?.label ?? "เมนูทั้งหมด"}</div>
-              <button onClick={() => setMoreOpen(false)} aria-label="ปิด" className="text-slate-400 text-xl leading-none px-2">✕</button>
+            {/* หัว — เปลี่ยนตามมุมมอง (เมนู / ตั้งค่า / จัดลำดับ) */}
+            <div className="flex-shrink-0 bg-white px-3 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+              {drawerView === "menu" ? (
+                <div className="font-semibold text-slate-800 truncate px-1">{app?.icon ?? "🧩"} {app?.label ?? "เมนูทั้งหมด"}</div>
+              ) : (
+                <button onClick={() => setDrawerView(drawerView === "arrange" ? "settings" : "menu")}
+                  className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1 px-1">‹ กลับ</button>
+              )}
+              <div className="flex items-center gap-1">
+                {drawerView !== "menu" && <span className="font-semibold text-slate-800 text-sm">{drawerView === "arrange" ? "↕ จัดลำดับเมนู" : "⚙️ ตั้งค่า"}</span>}
+                <button onClick={closeDrawer} aria-label="ปิด" className="text-slate-400 text-xl leading-none px-2">✕</button>
+              </div>
             </div>
-            <div className="p-2">
-              {items.map((it, i) => (
+
+            {/* เนื้อหา */}
+            <div className="flex-1 overflow-y-auto p-2">
+              {/* --- มุมมอง: รายการเมนู --- */}
+              {drawerView === "menu" && items.map((it, i) => (
                 <button key={it.href} onClick={() => goto(i)}
                   className={`w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 ${active === i ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
                   <span className="text-xl flex-shrink-0">{it.icon ?? "•"}</span>
                   <span className="truncate">{it.label}</span>
                 </button>
               ))}
+
+              {/* --- มุมมอง: ตั้งค่า --- */}
+              {drawerView === "settings" && (
+                <div className="space-y-1">
+                  {isAdmin ? (
+                    <>
+                      <button onClick={() => setDrawerView("arrange")}
+                        className="w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 text-slate-700 hover:bg-slate-50">
+                        <span className="text-xl flex-shrink-0">↕</span><span className="flex-1">จัดลำดับเมนู</span><span className="text-slate-300">›</span>
+                      </button>
+                      <a href="/admin/menu" className="w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 text-slate-700 hover:bg-slate-50">
+                        <span className="text-xl flex-shrink-0">🗂️</span><span className="flex-1">จัดการเมนู (เพิ่ม/ซ่อน/เลือกแอป)</span><span className="text-slate-300">↗</span>
+                      </a>
+                    </>
+                  ) : (
+                    <p className="px-3 py-3 text-xs text-slate-400">การจัดลำดับ/จัดการเมนูเปิดให้เฉพาะผู้ดูแลระบบ</p>
+                  )}
+                  <a href="/apps" className="w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 text-slate-700 hover:bg-slate-50">
+                    <span className="text-xl flex-shrink-0">🏠</span><span className="flex-1">หน้ารวมแอปทั้งหมด</span><span className="text-slate-300">↗</span>
+                  </a>
+                </div>
+              )}
+
+              {/* --- มุมมอง: จัดลำดับเมนู (ลากวาง) --- */}
+              {drawerView === "arrange" && (
+                <>
+                  <p className="px-2 pb-2 text-xs text-slate-400">ลากจุด ⠿ เพื่อสลับลำดับ — บันทึกอัตโนมัติ{savingOrder ? " · กำลังบันทึก…" : ""}</p>
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+                    <SortableContext items={items.map((it) => it.id)} strategy={verticalListSortingStrategy}>
+                      <div className="space-y-1">
+                        {items.map((it) => <SortableMenuRow key={it.id} it={it} isActive={items[active]?.href === it.href} />)}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
+                  <button onClick={() => setDrawerView("settings")}
+                    className="mt-3 w-full h-10 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">เสร็จ</button>
+                </>
+              )}
             </div>
+
+            {/* ท้าย — ปุ่มตั้งค่า (เฉพาะมุมมองเมนู) ปักอยู่ล่างสุดเสมอ */}
+            {drawerView === "menu" && (
+              <div className="flex-shrink-0 border-t border-slate-100 p-2">
+                <button onClick={() => setDrawerView("settings")}
+                  className="w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 text-slate-600 hover:bg-slate-50">
+                  <span className="text-xl flex-shrink-0">⚙️</span><span>ตั้งค่า</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -213,6 +308,20 @@ export default function StandaloneApp() {
 
 function Center({ children }: { children: React.ReactNode }) {
   return <div className="min-h-screen flex flex-col items-center justify-center text-center p-6">{children}</div>;
+}
+
+// แถวเมนูแบบลากได้ (โหมดจัดลำดับ) — touch-none ให้ลากด้วยนิ้วบน iPad/มือถือได้
+function SortableMenuRow({ it, isActive }: { it: MenuItem; isActive: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: it.id });
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}
+      className={`w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 border touch-none select-none cursor-grab active:cursor-grabbing ${isDragging ? "border-blue-300 bg-blue-50 shadow" : "border-transparent bg-slate-50"} ${isActive ? "text-blue-700 font-semibold" : "text-slate-700"}`}>
+      <span className="text-slate-300 text-lg flex-shrink-0 leading-none">⠿</span>
+      <span className="text-xl flex-shrink-0">{it.icon ?? "•"}</span>
+      <span className="truncate flex-1">{it.label}</span>
+    </div>
+  );
 }
 
 // หน้าโหลดของแอปเดี่ยว — ใช้ธีมเดียวกับ shell (header gradient) + ไอคอนแอปเด้งเบา ๆ + วงแหวนหมุน
