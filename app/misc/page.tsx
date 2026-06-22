@@ -35,6 +35,14 @@ export default function MiscPortalPage() {
   const [manage, setManage] = useState(false);
   const [form, setForm] = useState<FormState | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
+  // standalone: เปิด /misc ในเชลล์เต็ม → เด้งไปแอปเดี่ยว /app/misc (เข้า ERP อื่นไม่ได้)
+  // ถ้าอยู่ใน /app/misc แล้ว (โหลดผ่าน iframe ด้วย embed=1) → ไม่เด้ง แสดงพอร์ทัลตามปกติ
+  const [embed, setEmbed] = useState<boolean | null>(null);
+  useEffect(() => {
+    const e = new URLSearchParams(window.location.search).get("embed") === "1";
+    if (!e) router.replace("/app/misc");
+    setEmbed(e);
+  }, [router]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,7 +62,11 @@ export default function MiscPortalPage() {
     ? items
     : items.filter((m) => m.is_active && (!m.permission_key || can(m.permission_key as Parameters<typeof can>[0])));
 
-  const openTile = (m: MenuItem) => { if (manage) setForm({ id: m.id, label: m.label, icon: m.icon ?? "🧩", icon_url: m.icon_url }); else router.push(m.href); };
+  // เปิดแอปแบบ embed (อยู่ใน standalone shell — เนื้อหาไม่โผล่ ERP nav)
+  const openTile = (m: MenuItem) => {
+    if (manage) { setForm({ id: m.id, label: m.label, icon: m.icon ?? "🧩", icon_url: m.icon_url }); return; }
+    router.push(`${m.href}${m.href.includes("?") ? "&" : "?"}embed=1`);
+  };
 
   const uploadIcon = async (file: File) => {
     const fd = new FormData(); fd.append("file", file); fd.append("folder", "app-icons");
@@ -104,6 +116,11 @@ export default function MiscPortalPage() {
     await Promise.all(arr.map((x, k) => apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: x.id, patch: { sort_order: k + 1 } }) })));
   };
+
+  // ระหว่างเช็ค/เด้งไป standalone — โชว์ loader เปล่า (ไม่ครอบ PlaygroundShell กันแถบ ERP แวบ)
+  if (embed !== true) {
+    return <div className="h-[100dvh] flex items-center justify-center bg-gradient-to-b from-pink-50 to-rose-50/40 text-pink-300 text-sm">กำลังเปิดงานอื่นๆ…</div>;
+  }
 
   if (!canView) {
     return <PlaygroundShell><div className="p-10 text-center text-slate-500"><div className="text-4xl mb-2">🔒</div>คุณไม่มีสิทธิ์เข้าแอปนี้</div></PlaygroundShell>;
