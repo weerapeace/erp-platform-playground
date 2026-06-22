@@ -339,6 +339,18 @@ export default function SalesOrdersPage() {
     finally { setSaving(false); }
   };
 
+  // เปลี่ยนชื่อสินค้า "ตัวจริง" (skus_v2) จากปุ่มแก้ชื่อในรายการ — แล้ว sync ทุกแถวที่ใช้สินค้านี้
+  const saveMasterName = async (productId: string, name: string) => {
+    const res = await apiFetch("/api/skus/rename", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku_id: productId, name_th: name, actor: user?.name }),
+    });
+    const json = await res.json();
+    if (json.error) { flash(json.error); throw new Error(json.error); }
+    setForm(f => ({ ...f, lines: f.lines.map(l => l.product_id === productId ? { ...l, product_name: name } : l) }));
+    flash("เปลี่ยนชื่อสินค้าตัวจริงแล้ว");
+  };
+
   // ---- Transition ----
   const transition = async (id: string, action: string, reason?: string) => {
     setWfLoading(true);
@@ -714,7 +726,7 @@ export default function SalesOrdersPage() {
           </SectionCard>
 
           {/* 2) รายการสินค้า (ของกลาง — โหมดตาราง) */}
-          <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="table" />
+          <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="table" onSaveMasterName={saveMasterName} />
 
           {/* 3) ภาษีและส่วนลด */}
           <SectionCard step={3} title="ภาษีและส่วนลด" subtitle="ตั้งค่า VAT, หัก ณ ที่จ่าย, ค่าจัดส่ง และส่วนลดท้ายบิล">

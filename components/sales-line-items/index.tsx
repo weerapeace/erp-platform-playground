@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { SkuPicker, UnitPicker } from "@/components/pickers";
 import type { SkuPickerValue, UnitPickerValue } from "@/components/pickers";
 import { ImageThumbnail } from "@/components/image-manager";
@@ -83,18 +83,69 @@ export function SOLineEditor({
   onChange,
   readonly,
   layout = "card",
+  onSaveMasterName,
 }: {
   lines: EditorLine[];
   onChange: (lines: EditorLine[]) => void;
   readonly?: boolean;
   /** "card" (default) = การ์ดต่อรายการ · "table" = ตารางแก้ไขในแถว */
   layout?: "card" | "table";
+  /** ถ้าส่งมา = เปิดตัวเลือก "บันทึกเป็นชื่อสินค้าตัวจริงด้วย" (อัปเดต name_th ใน master) */
+  onSaveMasterName?: (productId: string, name: string) => Promise<void>;
 }) {
   const update = (i: number, patch: Partial<EditorLine>) => {
     onChange(lines.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   };
   const add = () => onChange([...lines, emptyLine()]);
   const remove = (i: number) => onChange(lines.filter((_, idx) => idx !== i));
+
+  // ---- แก้ชื่อสินค้าในแถว (เฉพาะใบนี้ + ตัวเลือกบันทึกเป็นชื่อตัวจริง) ----
+  const [nameEdit, setNameEdit] = useState<{ id: string; text: string; saveMaster: boolean; saving: boolean } | null>(null);
+
+  const startNameEdit = (l: EditorLine) =>
+    setNameEdit({ id: l.tempId, text: l.product_name, saveMaster: false, saving: false });
+
+  const commitNameEdit = async (i: number, l: EditorLine) => {
+    if (!nameEdit) return;
+    const newName = nameEdit.text.trim();
+    if (!newName) return;
+    if (nameEdit.saveMaster && onSaveMasterName && l.product_id) {
+      setNameEdit({ ...nameEdit, saving: true });
+      try { await onSaveMasterName(l.product_id, newName); }
+      catch { setNameEdit({ ...nameEdit, saving: false }); return; }
+    }
+    update(i, { product_name: newName });
+    setNameEdit(null);
+  };
+
+  const renderNameEditor = (l: EditorLine, i: number) => {
+    if (nameEdit?.id !== l.tempId) return null;
+    return (
+      <div className="mt-1.5 rounded-lg border border-blue-200 bg-blue-50/60 p-2">
+        <input value={nameEdit.text} autoFocus disabled={nameEdit.saving}
+          onChange={(e) => setNameEdit({ ...nameEdit, text: e.target.value })}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void commitNameEdit(i, l); } if (e.key === "Escape") setNameEdit(null); }}
+          placeholder="พิมพ์ชื่อสินค้า..."
+          className="h-8 w-full rounded-md border border-slate-200 px-2 text-sm outline-none focus:border-blue-400" />
+        {onSaveMasterName && l.product_id && (
+          <label className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-600">
+            <input type="checkbox" checked={nameEdit.saveMaster} disabled={nameEdit.saving}
+              onChange={(e) => setNameEdit({ ...nameEdit, saveMaster: e.target.checked })}
+              className="rounded border-slate-300" />
+            บันทึกเป็นชื่อสินค้าตัวจริงด้วย <span className="text-slate-400">(มีผลทุกที่ที่ใช้สินค้านี้)</span>
+          </label>
+        )}
+        <div className="mt-1.5 flex justify-end gap-1.5">
+          <button type="button" onClick={() => setNameEdit(null)} disabled={nameEdit.saving}
+            className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+          <button type="button" onClick={() => void commitNameEdit(i, l)} disabled={nameEdit.saving || !nameEdit.text.trim()}
+            className="h-7 rounded-md bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            {nameEdit.saving ? "กำลังบันทึก..." : "ใช้ชื่อนี้"}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const lineTotal = (l: EditorLine) => {
     const sub = l.qty * l.unit_price;
@@ -163,12 +214,17 @@ export function SOLineEditor({
                       <div className="pt-0.5"><ImageThumbnail url={lineImageUrl(l)} size={36} alt={l.product_name || "สินค้า"} /></div>
                       <div className="min-w-0 flex-1">
                         <SkuPicker value={pickerValueOf(l)} onChange={(p) => applyPick(i, p, l)} disabled={readonly} placeholder="เลือก SKU / ชื่อสินค้า..." />
-                        {l.sku && (
-                          <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                            <code className="rounded bg-orange-50 px-1.5 py-0.5 font-mono text-orange-700">{l.sku}</code>
-                            <span className="truncate">{l.product_name}</span>
+                        {(l.sku || l.product_name) && (
+                          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
+                            {l.sku && <code className="shrink-0 rounded bg-orange-50 px-1.5 py-0.5 font-mono text-orange-700">{l.sku}</code>}
+                            <span className="truncate flex-1">{l.product_name}</span>
+                            {!readonly && (
+                              <button type="button" onClick={() => startNameEdit(l)} title="แก้ชื่อสินค้า"
+                                className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600">✏️</button>
+                            )}
                           </div>
                         )}
+                        {renderNameEditor(l, i)}
                       </div>
                     </div>
                   </td>
@@ -296,12 +352,17 @@ export function SOLineEditor({
                     disabled={readonly}
                     placeholder="เลือก SKU / ชื่อสินค้า..."
                   />
-                  {l.sku && (
-                    <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
-                      <code className="rounded bg-orange-50 px-1.5 py-0.5 font-mono text-orange-700">{l.sku}</code>
-                      <span className="truncate">{l.product_name}</span>
+                  {(l.sku || l.product_name) && (
+                    <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
+                      {l.sku && <code className="shrink-0 rounded bg-orange-50 px-1.5 py-0.5 font-mono text-orange-700">{l.sku}</code>}
+                      <span className="truncate flex-1">{l.product_name}</span>
+                      {!readonly && (
+                        <button type="button" onClick={() => startNameEdit(l)} title="แก้ชื่อสินค้า"
+                          className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600">✏️</button>
+                      )}
                     </div>
                   )}
+                  {renderNameEditor(l, i)}
                 </div>
                 {!readonly && (
                   <button
