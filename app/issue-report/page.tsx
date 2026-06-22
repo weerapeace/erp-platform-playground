@@ -46,6 +46,7 @@ export default function IssueReportPage() {
   const { can } = useAuth();
   const canView = can("report.create");
   const canManage = can("report.manage");
+  const [tab, setTab] = useState<"manage" | "form">("manage");
 
   if (!canView) {
     return <PlaygroundShell><div className="p-10 text-center text-slate-500"><div className="text-4xl mb-2">🔒</div>คุณไม่มีสิทธิ์ใช้งานหน้านี้</div></PlaygroundShell>;
@@ -54,7 +55,18 @@ export default function IssueReportPage() {
   return (
     <PlaygroundShell>
       <div className="min-h-full bg-gradient-to-b from-pink-50 to-rose-50/40">
-        {canManage ? <ManageView /> : <ReportForm />}
+        {/* แอดมิน: สลับระหว่างตารางจัดการ กับ ฟอร์มแจ้งปัญหา */}
+        {canManage && (
+          <div className="max-w-6xl mx-auto px-5 sm:px-8 pt-5 sm:pt-8">
+            <div className="inline-flex bg-white rounded-full border border-pink-200 p-1 shadow-sm">
+              <button onClick={() => setTab("manage")}
+                className={`h-9 px-5 rounded-full text-sm font-medium transition ${tab === "manage" ? "bg-rose-500 text-white" : "text-rose-500 hover:bg-pink-50"}`}>📋 รายการปัญหา</button>
+              <button onClick={() => setTab("form")}
+                className={`h-9 px-5 rounded-full text-sm font-medium transition ${tab === "form" ? "bg-rose-500 text-white" : "text-rose-500 hover:bg-pink-50"}`}>🛟 แจ้งปัญหา</button>
+            </div>
+          </div>
+        )}
+        {canManage && tab === "manage" ? <ManageView /> : <ReportForm />}
       </div>
     </PlaygroundShell>
   );
