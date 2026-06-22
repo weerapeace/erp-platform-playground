@@ -29,12 +29,16 @@ type RF = {
 };
 
 export function SkuFormModal({
-  mode, skuId, onClose, onSaved,
+  mode, skuId, onClose, onSaved, initial, copyFromCode,
 }: {
   mode: "create" | "edit";
   skuId?: string | null;
   onClose: () => void;
   onSaved: (id: string) => void;
+  /** ค่าเริ่มต้น (ใช้ตอน "คัดลอกสินค้า" — กรอกค่ามาให้ล่วงหน้า) */
+  initial?: Record<string, unknown> | null;
+  /** รหัสของสินค้าต้นฉบับที่คัดลอกมา — โชว์เป็นป้ายอ้างอิง ให้รู้ว่าต้องตั้งรหัสแนวไหน */
+  copyFromCode?: string | null;
 }) {
   const { user } = useAuth();
   const [fields, setFields] = useState<RF[]>([]);
@@ -62,13 +66,17 @@ export function SkuFormModal({
         ff.forEach((fd) => { const v = full[fd.field_key]; f[fd.field_key] = v == null ? (fd.ui_field_type === "boolean" ? false : "") : v; });
         setForm(f);
       } else {
+        // create — เริ่มจากค่าว่าง แล้วทับด้วย initial (กรณีคัดลอกสินค้า)
         const f: Record<string, unknown> = {};
-        ff.forEach((fd) => { f[fd.field_key] = fd.ui_field_type === "boolean" ? false : ""; });
+        ff.forEach((fd) => {
+          const iv = initial ? initial[fd.field_key] : undefined;
+          f[fd.field_key] = iv != null ? iv : (fd.ui_field_type === "boolean" ? false : "");
+        });
         setForm(f);
       }
     } catch (e) { setErr(String((e as Error).message ?? e)); }
     finally { setLoading(false); }
-  }, [mode, skuId]);
+  }, [mode, skuId, initial]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -151,6 +159,12 @@ export function SkuFormModal({
             <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลดฟอร์ม…</div>
           ) : (
             <>
+              {/* คัดลอกสินค้า — ป้ายอ้างอิงรหัสเดิม (ให้ตั้งรหัสใหม่ไม่ให้ซ้ำ) */}
+              {mode === "create" && copyFromCode && (
+                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
+                  📋 คัดลอกจากสินค้า <span className="font-mono font-semibold">{copyFromCode}</span> — ⚠ แก้ <b>รหัส</b> ให้เป็นรหัสใหม่ (ห้ามซ้ำ) ก่อนบันทึก
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 {fields.map((fd) => <div key={fd.field_key}>{renderField(fd)}</div>)}
               </div>

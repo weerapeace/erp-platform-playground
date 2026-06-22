@@ -116,8 +116,12 @@ export default function PurchasingShopPage() {
 
   // sku-mode confirm popup
   const [confirmSku, setConfirmSku] = useState<Card | null>(null);
-  // ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) แบบ popup
-  const [skuForm, setSkuForm] = useState<{ mode: "create" | "edit"; id?: string } | null>(null);
+  // ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) แบบ popup — initial/copyFromCode ใช้ตอน "คัดลอกสินค้า"
+  const [skuForm, setSkuForm] = useState<{ mode: "create" | "edit"; id?: string; initial?: Record<string, unknown>; copyFromCode?: string } | null>(null);
+  // ตัวเลือกสินค้าที่จะคัดลอก (เลือกจากรายการในหน้านี้)
+  const [copyPickerOpen, setCopyPickerOpen] = useState(false);
+  const [copyQuery, setCopyQuery] = useState("");
+  const [copyLoadingId, setCopyLoadingId] = useState<string | null>(null);
 
   // cart + save
   const [cart, setCart] = useState<Line[]>([]);
@@ -496,6 +500,21 @@ export default function PurchasingShopPage() {
   // การ์ดที่มี c.sku = SKU จริง (โหมด sku/favorite/frequent) → popup ยืนยัน; ไม่มี = กลุ่มสินค้า → drill-in
   const onCardClick = (c: Card) => { if (c.sku) setConfirmSku(c); else void openGroup(c); };
 
+  // คัดลอกสินค้า: ดึงข้อมูลเต็มของ SKU ต้นฉบับ → เปิดฟอร์มเพิ่มสินค้าโดยกรอกค่ามาให้ล่วงหน้า (รหัสเดิมไว้ให้แก้)
+  const openCopyFrom = async (skuId: string) => {
+    setCopyLoadingId(skuId);
+    try {
+      const j = await apiFetch(`/api/master-v2/skus/${skuId}`).then(r => r.json());
+      const data = (j.data ?? {}) as Record<string, unknown>;
+      const { id: _id, created_at: _c, updated_at: _u, ...initial } = data;   // ตัดฟิลด์ระบบ ไม่ก๊อป
+      void _id; void _c; void _u;
+      setCopyPickerOpen(false);
+      setSkuForm({ mode: "create", initial, copyFromCode: (data.code as string) ?? "" });
+    } catch (e) {
+      alert("ดึงข้อมูลสินค้าไม่สำเร็จ: " + String((e as Error).message ?? e));
+    } finally { setCopyLoadingId(null); }
+  };
+
   // ค้นหา SKU ทั้งคลังเพื่อผูกเข้ากลุ่ม (debounce) — แสดงเฉพาะตัวที่ยังไม่อยู่ในกลุ่มนี้
   useEffect(() => {
     if (!addMode) return;
@@ -738,6 +757,10 @@ export default function PurchasingShopPage() {
             <PrHistoryButton />
             <button onClick={() => setRejectedOpen(true)} className="h-10 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1 flex-shrink-0">🚫 รายการไม่อนุมัติ</button>
             {source === "sku" && (
+              <button onClick={() => { setCopyQuery(""); setCopyPickerOpen(true); }}
+                className="h-9 px-3 text-xs font-medium border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 flex-shrink-0">📋 คัดลอกสินค้า</button>
+            )}
+            {source === "sku" && (
               <button onClick={() => setSkuForm({ mode: "create" })}
                 className="h-9 px-3 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex-shrink-0">＋ เพิ่มสินค้า</button>
             )}
@@ -773,6 +796,15 @@ export default function PurchasingShopPage() {
                     onClick={(e) => { e.stopPropagation(); void toggleFavorite(c.id); }}
                     className="absolute top-2 right-2 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-amber-50">
                     <span className={`text-base leading-none ${favorites.has(c.id) ? "text-amber-400" : "text-slate-300"}`}>{favorites.has(c.id) ? "★" : "☆"}</span>
+                  </button>
+                )}
+                {/* ปุ่มคัดลอกสินค้านี้ 📋 — โผล่ตอนชี้เมาส์ (เดสก์ท็อป) / โชว์เสมอบนจอเล็ก */}
+                {c.sku && (
+                  <button type="button" title="คัดลอกสินค้านี้เป็นสินค้าใหม่"
+                    onClick={(e) => { e.stopPropagation(); void openCopyFrom(c.id); }}
+                    disabled={copyLoadingId === c.id}
+                    className="absolute top-2 right-10 z-10 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-slate-200 shadow-sm hover:bg-emerald-50 text-emerald-600 text-sm opacity-100 xl:opacity-0 xl:group-hover:opacity-100 transition-opacity disabled:opacity-50">
+                    {copyLoadingId === c.id ? "…" : "📋"}
                   </button>
                 )}
                 {/* ข้อ 6: ป้ายบอกว่าอยู่ในตะกร้าแล้ว + จำนวน */}
@@ -1026,9 +1058,41 @@ export default function PurchasingShopPage() {
 
       {/* ฟอร์มเพิ่ม/แก้ไขสินค้า (SKU) */}
       {skuForm && (
-        <SkuFormModal mode={skuForm.mode} skuId={skuForm.id} onClose={() => setSkuForm(null)}
+        <SkuFormModal mode={skuForm.mode} skuId={skuForm.id} initial={skuForm.initial} copyFromCode={skuForm.copyFromCode}
+          onClose={() => setSkuForm(null)}
           onSaved={() => { setSkuForm(null); setConfirmSku(null); setPage(0); void fetchCards(0); }} />
       )}
+
+      {/* คัดลอกสินค้า — เลือกตัวที่จะคัดลอกจากรายการในหน้านี้ */}
+      <ERPModal open={copyPickerOpen} onClose={() => setCopyPickerOpen(false)} size="md"
+        title="📋 คัดลอกสินค้า"
+        description="เลือกสินค้าที่อยากใช้เป็นต้นแบบ — ระบบจะกรอกค่าทุกช่องให้ เหลือแค่ตั้งรหัสใหม่">
+        <div className="space-y-2">
+          <input value={copyQuery} onChange={e => setCopyQuery(e.target.value)} autoFocus
+            placeholder="ค้นหาในรายการที่โชว์อยู่ (ชื่อ / รหัส)…"
+            className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" />
+          <div className="max-h-[55vh] overflow-auto space-y-1">
+            {(() => {
+              const ql = copyQuery.trim().toLowerCase();
+              const list = cards.filter(c => c.sku && (!ql || c.name.toLowerCase().includes(ql) || (c.sub ?? "").toLowerCase().includes(ql)));
+              if (list.length === 0) return <p className="text-sm text-slate-300 py-6 text-center">— ไม่พบสินค้าในหน้านี้ —</p>;
+              return list.map(c => (
+                <button key={c.id} type="button" onClick={() => void openCopyFrom(c.id)} disabled={copyLoadingId === c.id}
+                  className="w-full flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-emerald-50 text-left disabled:opacity-50">
+                  <div className="w-10 h-10 flex-shrink-0 rounded-md bg-slate-50 border border-slate-100 flex items-center justify-center overflow-hidden">
+                    {img(c.image_key) ? <img src={img(c.image_key)!} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-lg">📦</span>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-slate-800 truncate">{c.name}</div>
+                    {c.sub && <div className="text-[11px] font-mono text-slate-400 truncate">{c.sub}</div>}
+                  </div>
+                  <span className="text-xs text-emerald-600 flex-shrink-0">{copyLoadingId === c.id ? "กำลังเปิด…" : "คัดลอก →"}</span>
+                </button>
+              ));
+            })()}
+          </div>
+        </div>
+      </ERPModal>
 
       {/* Group variation modal — ดึง SKU ของกลุ่มมาเลือก + ค้นหา + จัดการกลุ่ม */}
       {sel && (() => {
