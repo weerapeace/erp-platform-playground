@@ -80,7 +80,7 @@ export default function PurchaseOrdersPage() {
 
   const [view, setView] = useState<"table" | "card">("card");
   const [mainTab, setMainTab] = useState<"shop" | "mo">("shop");
-  const [cols, setCols] = useState(5);
+  const [cols, setCols] = useState(4);
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [activeShop, setActiveShop] = useState<string | null>(null);
   const [orderDate, setOrderDate] = useState(today);
@@ -448,7 +448,7 @@ export default function PurchaseOrdersPage() {
                         <h2 className="text-sm font-semibold text-slate-800">{sec.title} {sec.sub ? <span className="text-xs font-normal text-slate-500">· ผลิต: {sec.sub}</span> : null} <span className="text-xs font-normal text-slate-400">({list.length})</span></h2>
                         {sec.shopName && !sectionNoShop && <button onClick={() => setBuyAllShop({ name: sec.shopName!, rows: list })} disabled={busy} className="h-7 px-2.5 text-xs font-medium rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">🛒 ซื้อทั้งร้าน</button>}
                       </div>
-                      <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                      <div className="grid gap-3 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
                         {list.map((r) => {
                           const on = inCart(r.id);
                           const blocked = noShop(r);

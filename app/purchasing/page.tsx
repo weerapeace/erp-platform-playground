@@ -726,6 +726,15 @@ export default function PurchasingShopPage() {
                 </select>
               </label>
             )}
+            {source === "sku" && (
+              <label className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 flex-shrink-0">
+                <span className="whitespace-nowrap">▦ การ์ด/แถว</span>
+                <select value={cols} onChange={e => changeCols(Number(e.target.value))}
+                  className="h-9 px-2 text-sm border border-slate-200 rounded-md bg-white text-slate-700">
+                  {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+            )}
             <PrHistoryButton />
             <button onClick={() => setRejectedOpen(true)} className="h-10 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1 flex-shrink-0">🚫 รายการไม่อนุมัติ</button>
             {source === "sku" && (
@@ -754,8 +763,8 @@ export default function PurchasingShopPage() {
             </div>
           )}
 
-          {/* responsive: iPhone 2 คอลัมน์ · iPad/จอเล็ก 4 คอลัมน์ · PC (xl) ใช้ค่าที่ผู้ใช้ตั้ง (--cols) */}
-          <div className={`grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-4 xl:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))] transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ "--cols": cols } as CSSProperties}>
+          {/* responsive: iPhone (<sm) 2 คอลัมน์ตายตัว · iPad+ ใช้ค่าที่ตั้ง (--cols, default 4 ปรับได้บนหัว) */}
+          <div className={`grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))] transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ "--cols": cols } as CSSProperties}>
             {cards.map(c => (
               <div key={c.id} className="relative group">
                 {/* ปุ่มดาว ⭐ (เฉพาะการ์ด SKU จริง — favorite เก็บเป็น sku_id) */}
@@ -830,17 +839,8 @@ export default function PurchasingShopPage() {
                     className="h-10 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">หน้าถัดไป ▶</button>
                 </div>
               )}
-              {/* จำนวน + ขนาดการ์ด/แถว (ตัวเลือกรอง) */}
-              <div className="flex items-center gap-3 text-slate-400">
-                <span className="text-sm">{total.toLocaleString()} รายการ</span>
-                <label className="flex items-center gap-1.5 text-xs">
-                  <span>การ์ด/แถว</span>
-                  <select value={cols} onChange={e => changeCols(Number(e.target.value))}
-                    className="h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600">
-                    {[2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </label>
-              </div>
+              {/* จำนวนรายการ (ตัวปรับการ์ด/แถว ย้ายไปบนหัวแล้ว) */}
+              <span className="text-sm text-slate-400">{total.toLocaleString()} รายการ</span>
             </div>
           )}
         </main>

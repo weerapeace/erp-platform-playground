@@ -116,7 +116,7 @@ export default function ReceiveGoodsPage() {
   const [activeMo, setActiveMo] = useState<string | null>(null);       // filter ตามใบสั่งผลิต (MO)
   const [shopQ, setShopQ] = useState("");
   const [poQ, setPoQ] = useState("");                                  // ค้นหาใบ PO (แท็บตามใบสั่งซื้อ)
-  const [pendCols, setPendCols] = useState(6);
+  const [pendCols, setPendCols] = useState(4);
   const [pendSort, setPendSort] = useState<PendSort>("eta");
   const [pendGroup, setPendGroup] = useState<PendGroup>("none");
   const canDesign = usePermission("products.edit");                    // ตั้งค่าเริ่มต้นการ์ดทุกคน (admin)
@@ -599,7 +599,7 @@ export default function ReceiveGoodsPage() {
                 {groupedPend.map((g) => (
                   <section key={g.key}>
                     {g.label && <h3 className="text-sm font-semibold text-slate-700 mb-2">{g.label} <span className="text-xs font-normal text-slate-400">({g.items.length})</span></h3>}
-                    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 xl:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": pendCols } as CSSProperties}>
+                    <div className="grid gap-3 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": pendCols } as CSSProperties}>
                       {g.items.map((it) => {
                         const inp = pendInputs[it.id] ?? { recv: "0", def: "0" };
                         const recv = num(inp.recv), def = num(inp.def);
