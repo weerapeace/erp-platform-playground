@@ -197,7 +197,7 @@ export default function ReceiveGoodsPage() {
       const items = (j.data ?? []) as PendItem[];
       setPend(items);
       const init: Record<string, Input> = {};
-      items.forEach((it) => { init[it.id] = { recv: String(it.remaining), def: "0" }; });
+      items.forEach((it) => { init[it.id] = { recv: "0", def: "0" }; });   // เริ่มตะกร้าว่าง — แตะรายการเพื่อเลือกรับ
       setPendInputs(init);
     } catch (e) { setErr(String(e)); }
     finally { setPendLoading(false); }
