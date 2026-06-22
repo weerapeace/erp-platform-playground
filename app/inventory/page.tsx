@@ -49,6 +49,11 @@ export default function InventoryPage() {
   const [reorderVal, setReorderVal] = useState("0");
   const [minSaving, setMinSaving] = useState(false);
 
+  // ตั้งชั้นวาง modal
+  const [locModal, setLocModal] = useState<StockBalance | null>(null);
+  const [locVal, setLocVal]     = useState("");
+  const [locSaving, setLocSaving] = useState(false);
+
   // create modal
   const [modalOpen, setModalOpen] = useState(false);
   const [movType, setMovType] = useState<"in"|"out"|"transfer"|"adjust">("in");
@@ -125,6 +130,30 @@ export default function InventoryPage() {
       await fetchData();
     } catch (err) { setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
     finally { setMinSaving(false); }
+  };
+
+  // ตั้งชั้นวาง
+  const openLocModal = (b: StockBalance) => { setLocModal(b); setLocVal(b.location_code ?? ""); };
+  const saveLoc = async () => {
+    if (!locModal) return;
+    setLocSaving(true);
+    try {
+      const res = await apiFetch("/api/inventory/location", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_id: locModal.product_id,
+          warehouse_id: locModal.warehouse_id,
+          location_code: locVal,
+          actor: user?.name,
+        }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      flash("บันทึกชั้นวางแล้ว");
+      setLocModal(null);
+      await fetchData();
+    } catch (err) { setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"); }
+    finally { setLocSaving(false); }
   };
 
   useEffect(() => { if (canView) fetchData(); }, [canView, fetchData]);
@@ -266,6 +295,15 @@ export default function InventoryPage() {
       id: "total_value", accessorKey: "total_value", header: "มูลค่ารวม", size: 130,
       cell: ({ getValue }) => <span className="tabular-nums font-mono text-xs font-semibold">{fmtMoney(getValue() as number)}</span>,
     },
+    {
+      id: "location_code", accessorKey: "location_code", header: "ชั้นวาง", size: 110,
+      cell: ({ getValue }) => {
+        const v = getValue() as string | null;
+        return v
+          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-xs font-mono">📍 {v}</span>
+          : <span className="text-slate-300 text-xs">—</span>;
+      },
+    },
   ], []);
 
   // ---- Columns: reorder (จุดสั่งซื้อ) ----
@@ -401,6 +439,7 @@ export default function InventoryPage() {
             exportEntityType="erp_playground_stock_balance"
             canCheck={(p) => can(p as Parameters<typeof can>[0])}
             rowActions={canAdjust ? [
+              { label: "ตั้งชั้นวาง", icon: "📍", onClick: (b) => openLocModal(b) },
               { label: "ตั้งจุดสั่งซื้อ", icon: "⚙", onClick: (b) => openMinFromBalance(b) },
             ] : []}
             pageSize={30}
@@ -534,6 +573,38 @@ export default function InventoryPage() {
             </label>
             <div className="text-[10px] text-slate-400 bg-amber-50 p-2 rounded">
               💡 ตั้ง min stock = 0 เพื่อหยุดเฝ้าระวังสินค้านี้
+            </div>
+          </div>
+        )}
+      </ERPModal>
+
+      {/* Set location modal (ตั้งชั้นวาง) */}
+      <ERPModal open={locModal !== null} onClose={() => !locSaving && setLocModal(null)} size="sm"
+        title="📍 ตั้งชั้นวาง / ตำแหน่ง"
+        footer={
+          <>
+            <button onClick={() => setLocModal(null)} disabled={locSaving}
+              className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+            <button onClick={saveLoc} disabled={locSaving}
+              className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {locSaving ? "..." : "บันทึก"}
+            </button>
+          </>
+        }>
+        {locModal && (
+          <div className="space-y-3">
+            <div className="text-sm text-slate-700">
+              <span className="font-mono text-xs text-slate-400">{locModal.product_sku}</span> {locModal.product_name}
+              <div className="text-xs text-slate-400 mt-0.5">คลัง: {locModal.warehouse_name}</div>
+            </div>
+            <label className="block">
+              <span className="text-xs font-medium text-slate-600">รหัสชั้นวาง / ตำแหน่ง</span>
+              <input value={locVal} onChange={e => setLocVal(e.target.value)} autoFocus
+                placeholder="เช่น A-01-03, ชั้น 2 โซน B"
+                className="w-full h-9 mt-0.5 px-3 text-sm border border-slate-200 rounded" />
+            </label>
+            <div className="text-[10px] text-slate-400 bg-slate-50 p-2 rounded">
+              💡 ตำแหน่งหลักของสินค้านี้ในคลังนี้ — เว้นว่างเพื่อลบชั้นวาง
             </div>
           </div>
         )}

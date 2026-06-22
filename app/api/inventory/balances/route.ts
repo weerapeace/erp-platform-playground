@@ -13,6 +13,7 @@ export type StockBalance = {
   qty_available:    number;
   avg_cost:         number;
   total_value:      number;
+  location_code:    string | null;
   last_movement_at: string | null;
 };
 
