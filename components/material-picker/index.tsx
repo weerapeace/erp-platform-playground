@@ -18,6 +18,10 @@ import type { BomComponent } from "@/app/api/bom/components/route";
 
 export type { BomComponent };
 
+// cache ผลค้นวัตถุดิบใน session (per URL) ~45วิ → เปิด dropdown/ค้นคำเดิมซ้ำ = ทันที (ไม่โดน worker ~2วิ)
+const MAT_CACHE = new Map<string, { at: number; opts: BomComponent[] }>();
+const MAT_TTL = 45000;
+
 // dropdown ลอยผ่าน portal — ไม่โดนตาราง scroll บัง + เด้งขึ้นบนเมื่อพื้นที่ล่างไม่พอ
 function FloatingPanel({ anchorRef, open, children, minWidth = 340 }: { anchorRef: RefObject<HTMLDivElement | null>; open: boolean; children: ReactNode; minWidth?: number }) {
   const [style, setStyle] = useState<CSSProperties | null>(null);
@@ -64,14 +68,20 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
   useEffect(() => { if (open) setRecent(loadRecentMat()); }, [open]);
   const pick = (c: BomComponent) => { pushRecentMat(c); onPick(c); setOpen(false); setFullOpen(false); };
   const load = useCallback(async (q: string, grps: string[] | undefined, tagList: string[] | undefined) => {
+    const params = new URLSearchParams({ limit: "50" });
+    if (q) params.set("search", safeSearch(q));
+    if (grps && grps.length) params.set("groups", grps.join(","));
+    if (tagList && tagList.length) params.set("tags", tagList.join(","));
+    const url = `/api/bom/components?${params}`;
+    const hit = MAT_CACHE.get(url);
+    if (hit && Date.now() - hit.at < MAT_TTL) { setOptions(hit.opts); return; }   // เปิดซ้ำ/ค้นเดิม = ทันที
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "50" });
-      if (q) params.set("search", safeSearch(q));
-      if (grps && grps.length) params.set("groups", grps.join(","));
-      if (tagList && tagList.length) params.set("tags", tagList.join(","));
-      const res = await apiFetch(`/api/bom/components?${params}`, { cache: "no-store" });
-      const json = await res.json(); setOptions((json.data ?? []) as BomComponent[]);
+      const res = await apiFetch(url, { cache: "no-store" });
+      const json = await res.json(); const opts = (json.data ?? []) as BomComponent[];
+      MAT_CACHE.set(url, { at: Date.now(), opts });
+      if (MAT_CACHE.size > 200) { const now = Date.now(); for (const [k, v] of MAT_CACHE) if (now - v.at > MAT_TTL) MAT_CACHE.delete(k); }
+      setOptions(opts);
     } finally { setLoading(false); }
   }, []);
   useEffect(() => { if (!open) return; const t = setTimeout(() => load(search, filtered ? allowedGroupCodes : undefined, allowedTags), 250); return () => clearTimeout(t); }, [open, search, load, filtered, allowedGroupCodes, allowedTags]);
