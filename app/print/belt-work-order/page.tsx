@@ -12,6 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import type { BeltWorkOrder } from "@/app/api/mo/belt-work-order/route";
 import type { ProductSpec } from "@/app/api/product-spec/route";
+import { buildBeltDiagramSvg } from "@/lib/belt-diagram";
 
 const TEMPLATE: ReportTemplate = {
   paper_size: "A4",
@@ -42,7 +43,8 @@ const TEMPLATE: ReportTemplate = {
   </table>
   {{#has_spec}}<div class="bw-section">สเปก</div>
   <table class="bw-spec">{{#specs}}<tr><td class="k">{{label}}</td><td class="v">{{value}}</td></tr>{{/specs}}</table>{{/has_spec}}
-  <div class="bw-imgbox">รูปเข็มขัดประกอบจากสเปก (เฟส 3)</div>`,
+  <div class="bw-section">รูปประกอบ (จากสเปก)</div>
+  <div class="bw-belt">{{{belt_svg}}}</div>`,
   footer_html: "",
   custom_css: `
 .doc { font-size: 11px; color: #111827; }
@@ -67,7 +69,8 @@ const TEMPLATE: ReportTemplate = {
 .bw-spec { width: 100%; border-collapse: collapse; }
 .bw-spec td { padding: 1mm 2mm; border-bottom: 1px solid #e5e7eb; }
 .bw-spec td.k { width: 35mm; white-space: nowrap; }
-.bw-imgbox { margin-top: 4mm; border: 1px dashed #cbd5e1; border-radius: 4px; padding: 8mm; text-align: center; color: #9ca3af; font-size: 10px; }
+.bw-belt { margin-top: 2mm; border: 1px solid #e5e7eb; border-radius: 4px; padding: 3mm; }
+.bw-belt svg { width: 100%; height: auto; }
 @media print { .doc { padding: 12mm 12mm !important; } }`,
 };
 
@@ -128,6 +131,8 @@ function BeltWorkOrderInner() {
       grand: bw.grand_total,
       has_spec: specFields.length > 0,
       specs: specFields.map((f) => ({ label: f.label, value: f.value })),
+      // เฟส 3a: รูปวาดจากพารามิเตอร์ (ค่า default มาตรฐาน + แบรนด์) — เฟส 3b จะป้อนตัวเลขจริงจากช่องสเปก
+      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", tailShape: "duckbill" }),
     };
     return buildReportHtml(TEMPLATE, data);
   }, [bw, spec]);
