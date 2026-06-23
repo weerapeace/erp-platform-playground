@@ -151,7 +151,7 @@ export function NotificationBell() {
                         {n.title}
                       </div>
                       {n.body && (
-                        <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.body}</div>
+                        <div className="text-xs text-slate-500 mt-0.5 whitespace-pre-line line-clamp-6">{n.body}</div>
                       )}
                       <div className="text-[10px] text-slate-400 mt-1">{relTime(n.created_at)}</div>
                     </div>
