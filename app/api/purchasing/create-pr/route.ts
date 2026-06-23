@@ -98,7 +98,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     for (const i of items) { const c = String(i.currency || "THB").toUpperCase().replace("YUAN", "RMB"); byCur[c] = (byCur[c] ?? 0) + num(i.qty) * num(i.price_est); }
     const fmtCur = (v: number, c: string) => c === "THB" ? `฿${Math.round(v).toLocaleString("th-TH")}` : `${Math.round(v).toLocaleString("th-TH")} ${c}`;
     const totalStr = Object.entries(byCur).filter(([, v]) => v > 0).map(([c, v]) => fmtCur(v, c)).join(" + ") || "—";
-    const itemLines = items.slice(0, 8).map((i) => `• ${String(i.item_name ?? "สินค้า")} ×${num(i.qty).toLocaleString()}${i.uom ? ` ${i.uom}` : ""}`);
+    // เหตุผลของแต่ละรายการ — ถ้าเป็นใบสั่งผลิต ดึงรหัส SKU ของ MO มาโชว์ด้วย
+    const moNos = [...new Set(items.map((i) => i.source_mo_no).filter(Boolean))] as string[];
+    const skuByMo = new Map<string, string>();
+    if (moNos.length) {
+      const { data: moRows } = await admin.from("manufacturing_orders").select("mo_no, product_sku").in("mo_no", moNos);
+      for (const m of moRows ?? []) if (m.product_sku) skuByMo.set(String(m.mo_no), String(m.product_sku));
+    }
+    const reasonOf = (i: Item): string => {
+      if (i.source_mo_no) { const sku = skuByMo.get(String(i.source_mo_no)); return `🏭 ใบสั่งผลิต ${i.source_mo_no}${sku ? ` (${sku})` : ""}`; }
+      if (i.reason) return `📋 ${i.reason}`;
+      return "";
+    };
+    const itemLines = items.slice(0, 8).map((i) => {
+      const head = `• ${String(i.item_name ?? "สินค้า")} ×${num(i.qty).toLocaleString()}${i.uom ? ` ${i.uom}` : ""}`;
+      const r = reasonOf(i);
+      return r ? `${head}\n   ↳ ${r}` : head;
+    });
     if (items.length > 8) itemLines.push(`• …อีก ${items.length - 8} รายการ`);
     const title = `🛒 ใบขอซื้อใหม่ ${n} ใบ`;
     const bodyText = `${actor} · ${totalQty.toLocaleString()} ชิ้น · ${totalStr} — ${summary}`;
