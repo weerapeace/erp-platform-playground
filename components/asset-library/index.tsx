@@ -120,7 +120,7 @@ export function AssetLibrary() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
   };
   const bulkTag = (tag: string) => { setBulkTagOpen(false); void bulkApi({ action: "tag", asset_ids: Array.from(selected), tag }, `ติดแท็ก “${tag}” ให้ ${selected.size} ไฟล์แล้ว`); };
-  const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `ย้าย ${selected.size} ไฟล์แล้ว`); };
+  const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `อัปเดตอัลบั้ม ${selected.size} ไฟล์แล้ว`); };
 
   const selCount = selected.size;
 
@@ -226,7 +226,7 @@ export function AssetLibrary() {
         <div className="sticky bottom-4 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto">
           <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
           {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
-          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 ย้ายอัลบั้ม</button>}
+          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 จัดอัลบั้ม</button>}
           <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
           <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
         </div>
@@ -443,7 +443,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
   const [d, setD] = useState<AssetDetail | null>(null);
   const [title, setTitle] = useState("");
   const [tagsStr, setTagsStr] = useState("");
-  const [collectionId, setCollectionId] = useState("");
+  const [collectionIds, setCollectionIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
   const [replacing, setReplacing] = useState(false);
@@ -454,7 +454,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
       const res = await apiFetch(`/api/assets/${id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
       const det = j.data as AssetDetail;
-      setD(det); setTitle(det.title); setTagsStr(det.tags.join(", ")); setCollectionId(det.collection_id ?? "");
+      setD(det); setTitle(det.title); setTagsStr(det.tags.join(", ")); setCollectionIds(det.collection_ids ?? []);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
@@ -464,7 +464,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
     try {
       const res = await apiFetch(`/api/assets/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, tags: tagsStr.split(",").map((s) => s.trim()).filter(Boolean), collection_id: collectionId || null }),
+        body: JSON.stringify({ title, tags: tagsStr.split(",").map((s) => s.trim()).filter(Boolean), collection_ids: collectionIds }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
@@ -561,13 +561,23 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
             </label>
 
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <label className="text-[12px] text-slate-500">อัลบั้ม
-                <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)} disabled={trashed}
-                  className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
-                  <option value="">— ไม่ระบุ —</option>
-                  {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </label>
+              <div className="text-[12px] text-slate-500">อัลบั้ม <span className="text-[10px] text-slate-400">(เลือกได้หลายอัน)</span>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {collections.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่มีอัลบั้ม</span>}
+                  {collections.map((c) => {
+                    const on = collectionIds.includes(c.id);
+                    return (
+                      <button key={c.id} type="button" disabled={trashed}
+                        onClick={() => setCollectionIds((s) => on ? s.filter((x) => x !== c.id) : [...s, c.id])}
+                        className={`text-[11px] px-2.5 py-1 rounded-full border disabled:opacity-50 ${on
+                          ? "bg-indigo-600 border-indigo-600 text-white"
+                          : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"}`}>
+                        {on ? "✓ " : ""}{c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <label className="text-[12px] text-slate-500">แท็ก (คั่นด้วย ,)
                 <input value={tagsStr} onChange={(e) => setTagsStr(e.target.value)} disabled={trashed}
                   className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
@@ -692,17 +702,17 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
 }) {
   const [col, setCol] = useState("");
   return (
-    <ERPModal open onClose={onClose} title={`ย้าย ${count} ไฟล์ไปอัลบั้ม`} size="sm"
+    <ERPModal open onClose={onClose} title={`เพิ่ม ${count} ไฟล์เข้าอัลบั้ม`} size="sm"
       footer={
         <div className="flex justify-end gap-2 w-full">
           <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
-          <button onClick={() => onApply(col)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ย้าย</button>
+          <button onClick={() => onApply(col)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ตกลง</button>
         </div>
       }>
-      <label className="text-[12px] text-slate-500">เลือกอัลบั้มปลายทาง
+      <label className="text-[12px] text-slate-500">เลือกอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)
         <select value={col} onChange={(e) => setCol(e.target.value)}
           className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          <option value="">— เอาออกจากอัลบั้ม —</option>
+          <option value="">— เอาออกจากทุกอัลบั้ม —</option>
           {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>

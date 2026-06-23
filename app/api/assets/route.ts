@@ -46,10 +46,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ data: [], total: 0, error: null } satisfies AssetListResponse);
   }
 
+  // ฟิลเตอร์ตามอัลบั้ม → asset อยู่ได้หลายอัลบั้ม (ผ่าน asset_collection_map)
+  let collAssetIds: string[] | null = null;
+  if (collectionId && collectionId !== "none") {
+    const { data: cm } = await admin.from("asset_collection_map").select("asset_id").eq("collection_id", collectionId);
+    collAssetIds = (cm ?? []).map((m) => (m as { asset_id: string }).asset_id);
+    if (collAssetIds.length === 0)
+      return NextResponse.json({ data: [], total: 0, error: null } satisfies AssetListResponse);
+  }
+
   let q = admin.from("assets").select("*", { count: "exact" }).eq("status", status);
   if (type) q = q.eq("asset_type", type);
   if (collectionId === "none") q = q.is("collection_id", null);
-  else if (collectionId)       q = q.eq("collection_id", collectionId);
+  if (collAssetIds) q = q.in("id", collAssetIds);
   if (tagAssetIds) q = q.in("id", tagAssetIds);
   if (search) {
     for (const raw of search.split(/\s+/)) {
@@ -105,6 +114,7 @@ export async function POST(request: NextRequest) {
     .eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
   if (dup) {
     if (tagNames.length) await attachTags(admin, dup.id as string, tagNames);
+    if (collectionId) await admin.from("asset_collection_map").upsert({ asset_id: dup.id as string, collection_id: collectionId }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
     return NextResponse.json({ data: await rowOf(admin, dup as Parameters<typeof rowOf>[1]), duplicate: true, error: null });
   }
 
@@ -131,6 +141,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
 
   if (tagNames.length) await attachTags(admin, ins.id as string, tagNames);
+  if (collectionId) await admin.from("asset_collection_map").upsert({ asset_id: ins.id as string, collection_id: collectionId }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
 
   await writeAudit(admin, {
     action: "create", entityType: "asset", entityId: ins.id as string,
