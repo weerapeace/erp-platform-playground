@@ -13,12 +13,13 @@ import { writeAudit } from "@/lib/audit";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean };
+// หมายเหตุ: logo_url เก็บ "R2 key" ของรูปโลโก้ (แสดงผ่าน /api/r2-image?key=...) ไม่ใช่ URL เต็ม
+export type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean; logo_url?: string | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ data: [], error: "ต้อง login" }, { status: 401 });
-  const { data, error } = await supabaseAdmin().from("brands").select("id, name, color, is_customer_job").eq("is_active", true).order("name", { ascending: true });
+  const { data, error } = await supabaseAdmin().from("brands").select("id, name, color, is_customer_job, logo_url").eq("is_active", true).order("name", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   return NextResponse.json({ data: (data ?? []) as Brand[], error: null });
 }
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
-  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean };
+  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean; logo_url?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ไม่พบแบรนด์" }, { status: 400 });
 
@@ -59,6 +60,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const patch: Record<string, unknown> = {};
   if ("color" in body) patch.color = body.color && /^#[0-9a-fA-F]{6}$/.test(body.color) ? body.color : null;
   if ("is_customer_job" in body) patch.is_customer_job = !!body.is_customer_job;
+  if ("logo_url" in body) patch.logo_url = body.logo_url || null;   // R2 key ของโลโก้ (หรือ null = เอาออก)
   if ("name" in body) {
     const nm = (body.name ?? "").trim();
     if (!nm) return NextResponse.json({ error: "ชื่อแบรนด์ห้ามว่าง" }, { status: 400 });

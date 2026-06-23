@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/components/toast";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { ImageInput } from "@/components/image-input";
 import type { Brand } from "@/app/api/brands/route";
 import type { Subcontractor } from "@/app/api/qc-warehouse/subcontractors/route";
 
@@ -84,6 +85,10 @@ export default function BrandsPage() {
           <div className="divide-y divide-slate-50">
             {brands.map((b) => (
               <div key={b.id} className="flex items-center gap-3 px-3 py-2 group">
+                {/* โลโก้แบรนด์ (ของกลาง ImageInput — อัป/ลากวาง/วาง/เลือกจากคลัง, เก็บ R2 key ใน logo_url) */}
+                <div className="shrink-0" title="โลโก้แบรนด์">
+                  <ImageInput compact value={b.logo_url ?? null} onChange={(key) => patchBrand(b.id, { logo_url: key })} folder="brands" />
+                </div>
                 <span className="w-6 h-6 rounded border border-slate-200 shrink-0" style={{ background: b.color ?? "transparent" }} />
                 <input type="color" value={b.color ?? "#94a3b8"} onChange={(e) => patchBrand(b.id, { color: e.target.value })} className="h-7 w-9 cursor-pointer rounded shrink-0" title="ตั้งสีแบรนด์" />
                 {editingId === b.id ? (
