@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
+import { withImageWidth } from "@/lib/r2-image";
 import { type AssetRow, type AssetDetail, type AssetUsage } from "@/app/api/assets/shared";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
@@ -51,6 +52,8 @@ export function AssetLibrary() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
 
   useEffect(() => {
     supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {});
@@ -107,6 +110,17 @@ export function AssetLibrary() {
     if (blocked) toast.error(`ลบ ${ok} ไฟล์ · ข้าม ${blocked} ไฟล์ (ยังถูกใช้อยู่)`);
     else toast.success(`ย้าย ${ok} ไฟล์ลงถังขยะแล้ว`);
   };
+
+  // ── ติดแท็ก / ย้ายอัลบั้ม หลายไฟล์พร้อมกัน ──
+  const bulkApi = async (body: Record<string, unknown>, okMsg: string) => {
+    try {
+      const res = await apiFetch("/api/assets/bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(okMsg); clearSel(); await load(); await loadMeta();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
+  };
+  const bulkTag = (tag: string) => { setBulkTagOpen(false); void bulkApi({ action: "tag", asset_ids: Array.from(selected), tag }, `ติดแท็ก “${tag}” ให้ ${selected.size} ไฟล์แล้ว`); };
+  const bulkMove = (collectionId: string) => { setBulkMoveOpen(false); void bulkApi({ action: "move", asset_ids: Array.from(selected), collection_id: collectionId || null }, `ย้าย ${selected.size} ไฟล์แล้ว`); };
 
   const selCount = selected.size;
 
@@ -211,6 +225,8 @@ export function AssetLibrary() {
       {selCount > 0 && (
         <div className="sticky bottom-4 mt-4 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto">
           <span className="text-sm font-medium">เลือก {selCount} ไฟล์</span>
+          {!trash && <button onClick={() => setBulkTagOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🏷️ ติดแท็ก</button>}
+          {!trash && <button onClick={() => setBulkMoveOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">📁 ย้ายอัลบั้ม</button>}
           <button onClick={() => setBulkTrashOpen(true)} className="text-sm px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25">🗑️ ลบ</button>
           <button onClick={clearSel} className="text-sm px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
         </div>
@@ -240,6 +256,8 @@ export function AssetLibrary() {
         title="ย้ายไฟล์ลงถังขยะ?" message={`จะย้าย ${selCount} ไฟล์ลงถังขยะ (กู้คืนได้ 30 วัน) — ไฟล์ที่ยังถูกใช้อยู่จะถูกข้าม`}
         confirmText="ย้ายลงถังขยะ" variant="danger"
       />
+      {bulkTagOpen && <BulkTagModal count={selCount} tags={tags} onClose={() => setBulkTagOpen(false)} onApply={bulkTag} />}
+      {bulkMoveOpen && <BulkMoveModal count={selCount} collections={collections} onClose={() => setBulkMoveOpen(false)} onApply={bulkMove} />}
     </div>
   );
 }
@@ -274,7 +292,7 @@ function AssetCard({ a, selected, onToggle, onOpen }: {
       <button onClick={onOpen} className="block w-full text-left">
         <div className="h-28 bg-slate-100 flex items-center justify-center overflow-hidden">
           {isImage(a) && !broken ? (
-            <img src={a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)}
+            <img src={withImageWidth(a.url, 320) ?? a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)}
               className="w-full h-full object-cover" />
           ) : (
             <span className="text-3xl">{TYPE_ICON[a.asset_type]}</span>
@@ -500,7 +518,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
       ) : (
         <div className="flex gap-4 flex-wrap">
           <div className="flex-1 min-w-[200px] bg-slate-100 rounded-xl flex items-center justify-center min-h-[240px] overflow-hidden">
-            {isImage(d) ? <img src={d.url} alt={d.title} className="max-w-full max-h-[360px] object-contain" />
+            {isImage(d) ? <img src={withImageWidth(d.url, 768) ?? d.url} alt={d.title} className="max-w-full max-h-[360px] object-contain" />
               : <div className="text-center"><div className="text-5xl">{TYPE_ICON[d.asset_type]}</div><p className="text-[11px] text-slate-400 mt-2">{(d.ext ?? "").toUpperCase()}</p></div>}
           </div>
 
@@ -600,6 +618,61 @@ function NewCollectionModal({ onClose, onDone }: { onClose: () => void; onDone: 
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus onKeyDown={(e) => e.key === "Enter" && create()}
           placeholder="เช่น รูปสินค้าใหม่ Q2"
           className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      </label>
+    </ERPModal>
+  );
+}
+
+// ── ติดแท็กหลายไฟล์ ──
+function BulkTagModal({ count, tags, onClose, onApply }: {
+  count: number; tags: AssetTag[]; onClose: () => void; onApply: (tag: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const apply = () => { if (name.trim()) onApply(name.trim()); };
+  return (
+    <ERPModal open onClose={onClose} title={`ติดแท็กให้ ${count} ไฟล์`} size="sm"
+      footer={
+        <div className="flex justify-end gap-2 w-full">
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={apply} disabled={!name.trim()} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">ติดแท็ก</button>
+        </div>
+      }>
+      <label className="text-[12px] text-slate-500">ชื่อแท็ก (มีอยู่แล้วหรือพิมพ์ใหม่)
+        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus onKeyDown={(e) => e.key === "Enter" && apply()}
+          placeholder="เช่น โปรโมชั่น"
+          className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      </label>
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-3">
+          {tags.map((t) => (
+            <button key={t.id} onClick={() => setName(t.name)}
+              className="text-[11px] px-2.5 py-1 rounded-full border border-slate-200 text-slate-600 hover:bg-slate-100">{t.name}</button>
+          ))}
+        </div>
+      )}
+    </ERPModal>
+  );
+}
+
+// ── ย้ายหลายไฟล์ไปอัลบั้ม ──
+function BulkMoveModal({ count, collections, onClose, onApply }: {
+  count: number; collections: AssetCollection[]; onClose: () => void; onApply: (collectionId: string) => void;
+}) {
+  const [col, setCol] = useState("");
+  return (
+    <ERPModal open onClose={onClose} title={`ย้าย ${count} ไฟล์ไปอัลบั้ม`} size="sm"
+      footer={
+        <div className="flex justify-end gap-2 w-full">
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={() => onApply(col)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">ย้าย</button>
+        </div>
+      }>
+      <label className="text-[12px] text-slate-500">เลือกอัลบั้มปลายทาง
+        <select value={col} onChange={(e) => setCol(e.target.value)}
+          className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          <option value="">— เอาออกจากอัลบั้ม —</option>
+          {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
       </label>
     </ERPModal>
   );

@@ -17,6 +17,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { type AssetType } from "@/lib/assets";
+import { withImageWidth } from "@/lib/r2-image";
 import { type AssetRow } from "@/app/api/assets/shared";
 
 const TYPE_ICON: Record<AssetType, string> = { image: "🖼️", design: "🎨", document: "📄", video: "🎬", other: "📦" };
@@ -122,7 +123,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
                     className={`relative rounded-lg border overflow-hidden text-left ${on ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-slate-300"}`}>
                     {on && <span className="absolute top-1 right-1 z-10 w-4 h-4 rounded-full bg-indigo-600 text-white text-[10px] flex items-center justify-center">✓</span>}
                     <div className="h-20 bg-slate-100 flex items-center justify-center overflow-hidden">
-                      {a.asset_type === "image" ? <img src={a.url} alt={a.title} loading="lazy" className="w-full h-full object-cover" />
+                      {a.asset_type === "image" ? <img src={withImageWidth(a.url, 240) ?? a.url} alt={a.title} loading="lazy" className="w-full h-full object-cover" />
                         : <span className="text-2xl">{TYPE_ICON[a.asset_type]}</span>}
                     </div>
                     <p className="text-[10px] px-1.5 py-1 truncate">{a.title}</p>
