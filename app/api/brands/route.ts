@@ -51,17 +51,39 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
-  let body: { id?: string; color?: string | null; is_customer_job?: boolean };
+  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ไม่พบแบรนด์" }, { status: 400 });
 
+  const admin = supabaseAdmin();
   const patch: Record<string, unknown> = {};
   if ("color" in body) patch.color = body.color && /^#[0-9a-fA-F]{6}$/.test(body.color) ? body.color : null;
   if ("is_customer_job" in body) patch.is_customer_job = !!body.is_customer_job;
+  if ("name" in body) {
+    const nm = (body.name ?? "").trim();
+    if (!nm) return NextResponse.json({ error: "ชื่อแบรนด์ห้ามว่าง" }, { status: 400 });
+    const { data: dup } = await admin.from("brands").select("id").ilike("name", nm).neq("id", body.id).limit(1);
+    if ((dup ?? []).length > 0) return NextResponse.json({ error: `มีแบรนด์ชื่อ "${nm}" อยู่แล้ว` }, { status: 400 });
+    patch.name = nm;
+  }
+  if (Object.keys(patch).length === 0) return NextResponse.json({ id: body.id, error: null });
 
-  const admin = supabaseAdmin();
   const { error } = await admin.from("brands").update(patch).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "update", entityType: "brand", entityId: body.id, actorId: user.id, actorName: user.email ?? null, metadata: patch });
   return NextResponse.json({ id: body.id, ...patch, error: null });
+}
+
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+  const id = new URL(request.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "ไม่พบแบรนด์" }, { status: 400 });
+
+  // soft delete — ซ่อนจากรายการ (is_active=false) แต่ข้อมูลเดิมที่อ้างถึงแบรนด์นี้ยังอยู่ ไม่พัง
+  const admin = supabaseAdmin();
+  const { error } = await admin.from("brands").update({ is_active: false }).eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAudit(admin, { action: "delete", entityType: "brand", entityId: id, actorId: user.id, actorName: user.email ?? null, metadata: { soft: true } });
+  return NextResponse.json({ ok: true, error: null });
 }
