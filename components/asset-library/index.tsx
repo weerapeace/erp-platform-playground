@@ -643,17 +643,17 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
             </table>
 
             <div className="mt-3 pt-3 border-t border-slate-100">
-              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📁 ไฟล์ต้นฉบับ (NAS) <span className="text-[10px] text-slate-400 font-normal">— คลังเก็บแค่ “ที่อยู่” ไม่ได้เก็บไฟล์ใหญ่</span></p>
+              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📁 ไฟล์ต้นฉบับ <span className="text-[10px] text-slate-400 font-normal">— คลังเก็บแค่ “ที่อยู่/ลิงก์” ไม่ได้เก็บไฟล์ใหญ่ (อยู่ NAS หรือ Drive ก็ได้)</span></p>
               <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)} disabled={trashed}
                 placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
                 className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg font-mono disabled:bg-slate-50" />
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
                 <button onClick={copyPath} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40">📋 คัดลอก path</button>
                 <button onClick={openFolder} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100 disabled:opacity-40">📂 เปิดโฟลเดอร์</button>
-                {masterUrl && <a href={masterUrl} target="_blank" rel="noreferrer" className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 flex items-center">🌐 เปิดบนเว็บ NAS</a>}
+                {masterUrl && <a href={masterUrl} target="_blank" rel="noreferrer" className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 flex items-center">🌐 เปิดต้นฉบับ</a>}
               </div>
               <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} disabled={trashed}
-                placeholder="ลิงก์ Synology Drive (เปิดจากนอกออฟฟิศ) — ไม่ใส่ก็ได้"
+                placeholder="ลิงก์ Google Drive / Synology (เปิดได้ทุกที่) — ไม่ใส่ก็ได้"
                 className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg mt-1.5 disabled:bg-slate-50" />
             </div>
 
@@ -805,7 +805,7 @@ function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onC
 
   const save = async () => {
     if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
-    if (!masterPath.trim()) { toast.error("ใส่ path ไฟล์ต้นฉบับบน NAS ก่อน"); return; }
+    if (!masterPath.trim() && !masterUrl.trim()) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์ Google Drive)"); return; }
     setBusy(true);
     try {
       const fd = new FormData();
@@ -871,12 +871,13 @@ function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onC
               className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
         </div>
       </div>
-      <label className="block text-[12px] text-slate-500 mt-3">ที่อยู่ไฟล์ต้นฉบับ (NAS) *
+      <p className="text-[11px] text-slate-400 mt-3 mb-1">ที่อยู่ไฟล์ต้นฉบับ — ใส่อย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์ Google Drive)</p>
+      <label className="block text-[12px] text-slate-500">path NAS
         <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)}
           placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
           className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
-      <label className="block text-[12px] text-slate-500 mt-2">ลิงก์เว็บ NAS (เปิดจากนอกออฟฟิศ — ไม่ใส่ก็ได้)
-        <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="ลิงก์ Synology Drive"
+      <label className="block text-[12px] text-slate-500 mt-2">ลิงก์ Google Drive / Synology (เปิดได้ทุกที่)
+        <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="https://drive.google.com/…  หรือ  ลิงก์ Synology Drive"
           className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
     </ERPModal>
   );
