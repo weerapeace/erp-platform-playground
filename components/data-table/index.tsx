@@ -382,24 +382,7 @@ function pinnedStyle<T>(column: Column<T, unknown>): { position?: "sticky"; left
   return { position: "sticky", left: column.getStart("left") };
 }
 
-// ---- CSV export helper (legacy — ตอนนี้ใช้ lib/export.ts) ----
-
-function downloadCsv(filename: string, headers: string[], rows: string[][]) {
-  const escape = (v: string) => {
-    const s = String(v ?? "");
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = [headers.map(escape).join(","), ...rows.map(r => r.map(escape).join(","))];
-  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${filename}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
+// (ลบ downloadCsv ที่ไม่ถูกเรียกใช้แล้ว — การ export ทั้งหมดใช้ lib/export.ts)
 
 // ---- Internal: saved view type ----
 
@@ -731,6 +714,7 @@ export function DataTable<T extends Record<string, unknown>>({
   const [actionSettings,   setActionSettings]   = useState<Record<string, RowActionSetting>>({});
   const [copiedField,      setCopiedField]      = useState<string | null>(null);  // F1: คัดลอกชื่อ field จริง
   const [exportOpen,       setExportOpen]       = useState(false);
+  const [exporting,        setExporting]        = useState(false);  // กำลังดึงข้อมูลทุกหน้าเพื่อ export (server mode)
   const [rowMenu,          setRowMenu]          = useState<{ row: T; x: number; y: number } | null>(null);
   const [mounted,          setMounted]          = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -1381,12 +1365,34 @@ export function DataTable<T extends Record<string, unknown>>({
     if (!mapped.some(m => m.key === "id")) mapped.unshift({ key: "id", header: "ID", permission: undefined });
     return mapped;
   };
+  // server mode: ดึง "ทุกแถวที่ตรงตัวกรอง" ข้ามหน้า (ไล่ทีละ batch) — ไม่งั้น export ได้แค่หน้าปัจจุบัน
+  const fetchAllMatchingRows = async (): Promise<Record<string, unknown>[]> => {
+    if (!serverFetch) return [];
+    const PAGE = 1000, MAX_ROWS = 50000;   // กันดึงไม่จบ/หน่วงจอ
+    const sort = sorting[0];
+    const out: Record<string, unknown>[] = [];
+    let page = 1;
+    while (out.length < MAX_ROWS) {
+      const r = await serverFetch({
+        page, pageSize: PAGE, search: debouncedSearch,
+        sortBy: sort?.id ?? null, sortDir: sort ? (sort.desc ? "desc" : "asc") : null,
+        filters: activeServerFilters,
+      });
+      out.push(...(r.rows as Record<string, unknown>[]));
+      if (r.rows.length < PAGE || out.length >= r.total) break;
+      page++;
+    }
+    return out;
+  };
   const handleExportMode = async (format: "csv" | "excel", mode: "visible" | "selected" | "filtered_all") => {
     try {
+      setExporting(true);
       const expCols = buildExportColumns(mode === "selected" ? "visible" : mode);
       const sourceRows = mode === "selected"
         ? (selectedRows as Record<string, unknown>[])   // ข้ามหน้า (สะสมไว้ใน selectedData)
-        : table.getFilteredRowModel().rows.map(r => r.original as Record<string, unknown>);
+        : isServer
+          ? await fetchAllMatchingRows()                // server: ดึงครบทุกแถวที่ตรงตัวกรองก่อน
+          : table.getFilteredRowModel().rows.map(r => r.original as Record<string, unknown>);
       if (sourceRows.length === 0) { setExportOpen(false); return; }
       const { exportTable } = await import("@/lib/export");
       const res = await exportTable({
@@ -1404,6 +1410,7 @@ export function DataTable<T extends Record<string, unknown>>({
     } catch (err) {
       alert(err instanceof Error ? err.message : "export ไม่สำเร็จ");
     } finally {
+      setExporting(false);
       setExportOpen(false);
     }
   };
@@ -1759,11 +1766,11 @@ export function DataTable<T extends Record<string, unknown>>({
         <div className="relative">
           <button
             onClick={() => setExportOpen(o => !o)}
-            disabled={filteredData.length === 0}
+            disabled={filteredData.length === 0 || exporting}
             title={`Export ${filteredData.length} รายการ`}
             className="flex items-center gap-1.5 h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-md bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
             <IconDownload />
-            <span className="hidden sm:inline">Export</span>
+            <span className="hidden sm:inline">{exporting ? "กำลังดึง…" : "Export"}</span>
             <span className="text-slate-400">▾</span>
           </button>
           {exportOpen && (
@@ -2037,22 +2044,22 @@ export function DataTable<T extends Record<string, unknown>>({
                             <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
                               <span className="text-slate-400 text-xs">{collapsed ? "▶" : "▼"}</span>
                               {gFieldLabel && <span className="text-slate-400 font-normal">{gFieldLabel}:</span>}
-                              {headerCell ? flexRender(headerCell.column.columnDef.cell, headerCell.getContext()) : (key || "—")}
+                              {key === "" ? <span className="text-slate-400 font-normal">ไม่ระบุ</span> : (headerCell ? flexRender(headerCell.column.columnDef.cell, headerCell.getContext()) : key)}
                               <span className="text-xs font-normal text-slate-500">({grp.length})</span>
                             </span>
                           );
                         } else if (col.id !== "__actions__") {
+                          // รวมยอดต่อกลุ่ม — เฉพาะคอลัมน์ที่ตั้งค่า summary ไว้ (ให้ตรงกับแถว "รวม" ท้ายตาราง)
+                          // (เดิมรวมทุกคอลัมน์ตัวเลข → โชว์ยอดมั่ว เช่น รวม min_stock/รหัสตัวเลข)
                           const s = col.columnDef.meta?.summary;
                           if (typeof s === "function") {
-                            // คอลัมน์ computed (มีสูตรรวม) → ใช้ตัวรวมเดียวกับแถวรวมท้ายตาราง (ยอดเงินรวมกลุ่ม)
                             content = <span className="font-semibold text-slate-700 tabular-nums">{s(grp.map(r => r.original))}</span>;
-                          } else {
-                            let sum = 0, has = false;
-                            for (const r of grp) {
-                              const v = r.getValue(col.id); const n = Number(v);
-                              if (v !== null && v !== "" && typeof v !== "boolean" && isFinite(n)) { sum += n; has = true; }
-                            }
-                            if (has) content = <span className="font-semibold text-slate-700 tabular-nums">{sum.toLocaleString("th-TH")}</span>;
+                          } else if (s === "sum") {
+                            const sum = grp.reduce((a, r) => a + (Number(r.getValue(col.id)) || 0), 0);
+                            content = <span className="font-semibold text-slate-700 tabular-nums">{sum.toLocaleString("th-TH")}</span>;
+                          } else if (s === "count") {
+                            const cnt = grp.filter(r => r.getValue(col.id) != null).length;
+                            content = <span className="font-semibold text-slate-700 tabular-nums">{cnt.toLocaleString("th-TH")}</span>;
                           }
                         }
                         return <td key={col.id} className={`${cellPad} text-sm`}>{content}</td>;
