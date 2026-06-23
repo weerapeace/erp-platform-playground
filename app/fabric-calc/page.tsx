@@ -8,33 +8,55 @@
  * → ผ้าต่อ 1 ตัว × จำนวนผลิต = ผ้ารวม (ไม่บันทึก)
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { fabricQty, type FabricCalcMethod } from "@/lib/bom-calc";
 
 type Group = { id: string; code: string; name: string; calc_method: string; loss_percent: number; divisor: number | null; uom_default: string | null };
-type Block = { id: string; code: string; width: number | null; length: number | null };
 type Row = {
   key: string;
   group_id: string; group_name: string;
   calc_method: string; divisor: number; uom: string;
-  block_code: string;
   pieces: number; cut_width: number; cut_length: number; face_width_cm: number; waste_percent: number;
 };
 
 const METHOD_LABEL: Record<string, string> = {
   area_face: "ผ้า (พื้นที่ ÷ หน้ากว้าง)", area_100: "พื้นที่", length: "ความยาว", count: "นับชิ้น", manual: "พิมพ์เอง",
 };
+// อธิบายวิธีคิดของแต่ละชนิด — โชว์ให้ผู้ใช้เข้าใจว่าทำไมต้องกรอกช่องไหน
+const METHOD_HELP: Record<string, string> = {
+  area_face: "ผ้าหน้ากว้าง: (กว้าง×ยาว×ชิ้น) ÷ หน้ากว้างผ้า ÷ ตัวหาร แล้วบวกเผื่อเสีย",
+  area_100:  "คิดตามพื้นที่: (กว้าง×ยาว×ชิ้น) ÷ ตัวหาร แล้วบวกเผื่อเสีย",
+  length:    "คิดตามความยาว: ยาว ÷ ตัวหาร แล้วบวกเผื่อเสีย",
+  count:     "นับเป็นชิ้น: ใช้ตามจำนวนชิ้น",
+  manual:    "กรอกปริมาณเอง",
+};
 const usesWidth = (m: string) => m === "area_100" || m === "area_face";
 const usesLength = (m: string) => m === "length" || m === "area_100" || m === "area_face";
 const usesFace = (m: string) => m === "area_face";
 const r2 = (n: number) => Math.round(n * 100) / 100;
+const r4 = (n: number) => Math.round(n * 10000) / 10000;
+const toMeter = (yard: number) => r2(yard * 0.9144);
+
+// อธิบายการคำนวณพร้อมตัวเลขจริง (ว่าคำนวณจากอะไร)
+function explainCalc(r: Row, pu: number | null): string {
+  if (pu == null) return "กรอกข้อมูลให้ครบก่อน";
+  const k = `(1+${r.waste_percent || 0}%)`;
+  const res = `= ${r4(pu)} ${r.uom}`;
+  switch (r.calc_method) {
+    case "count":     return `จำนวนชิ้น ${r.pieces} ${res}`;
+    case "length":    return `ยาว ${r.cut_length} × ${k} ÷ ${r.divisor} ${res}`;
+    case "area_100":  return `(กว้าง ${r.cut_width} × ยาว ${r.cut_length} × ชิ้น ${r.pieces}) × ${k} ÷ ${r.divisor} ${res}`;
+    case "area_face": return `(กว้าง ${r.cut_width} × ยาว ${r.cut_length} × ชิ้น ${r.pieces}) × ${k} ÷ หน้ากว้าง ${r.face_width_cm} ÷ ${r.divisor} ${res}`;
+    default:          return "กรอกปริมาณเอง";
+  }
+}
 
 let _k = 0;
 const newRow = (): Row => ({
   key: `r${_k++}`, group_id: "", group_name: "", calc_method: "area_face", divisor: 90, uom: "หลา",
-  block_code: "", pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, waste_percent: 0,
+  pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, waste_percent: 0,
 });
 
 export default function FabricCalcPage() {
@@ -48,6 +70,13 @@ export default function FabricCalcPage() {
 
   const patch = (key: string, p: Partial<Row>) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...p } : r)));
   const removeRow = (key: string) => setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.key !== key) : prev));
+  const duplicateRow = (key: string) => setRows((prev) => {
+    const i = prev.findIndex((r) => r.key === key);
+    if (i < 0) return prev;
+    const next = [...prev];
+    next.splice(i + 1, 0, { ...prev[i], key: `r${_k++}` });
+    return next;
+  });
 
   const pickGroup = (key: string, gid: string) => {
     const g = groups.find((x) => x.id === gid);
@@ -99,28 +128,36 @@ export default function FabricCalcPage() {
               const pu = perUnit(r);
               return (
                 <div key={r.key} className="bg-white rounded-2xl border border-indigo-100 shadow-sm p-4">
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-2 mb-2">
                     <select value={r.group_id} onChange={(e) => pickGroup(r.key, e.target.value)}
                       className="flex-1 h-10 px-3 rounded-lg border border-indigo-200 bg-white text-sm outline-none focus:border-indigo-400">
                       <option value="">— เลือกชนิดวัตถุดิบ —</option>
                       {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
                     <span className="text-xs text-indigo-400 whitespace-nowrap">{METHOD_LABEL[r.calc_method] ?? r.calc_method}</span>
+                    <button onClick={() => duplicateRow(r.key)} className="text-slate-300 hover:text-indigo-500 text-base px-1" title="ก๊อปแถวนี้">⧉</button>
                     <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 text-lg px-1" title="ลบแถว">✕</button>
                   </div>
+                  {/* อธิบายวิธีคิดของชนิดนี้ */}
+                  <p className="text-[11px] text-slate-400 mb-3">💡 {METHOD_HELP[r.calc_method] ?? ""}</p>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    <BlockSearch onPick={(b) => patch(r.key, { block_code: b.code, cut_width: b.width ?? r.cut_width, cut_length: b.length ?? r.cut_length })} current={r.block_code} />
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <Num label="จำนวนชิ้น" value={r.pieces} onChange={(v) => patch(r.key, { pieces: v })} />
                     {usesWidth(r.calc_method) && <Num label="กว้าง (ซม.)" value={r.cut_width} onChange={(v) => patch(r.key, { cut_width: v })} />}
                     {usesLength(r.calc_method) && <Num label="ยาว (ซม.)" value={r.cut_length} onChange={(v) => patch(r.key, { cut_length: v })} />}
                     {usesFace(r.calc_method) && <Num label="หน้ากว้างผ้า (ซม.)" value={r.face_width_cm} onChange={(v) => patch(r.key, { face_width_cm: v })} />}
-                    <Num label="เผื่อเสีย %" value={r.waste_percent} onChange={(v) => patch(r.key, { waste_percent: v })} />
+                    {r.calc_method !== "count" && <Num label="เผื่อเสีย %" value={r.waste_percent} onChange={(v) => patch(r.key, { waste_percent: v })} />}
                   </div>
 
-                  <div className="mt-3 pt-3 border-t border-indigo-50 flex items-center justify-between text-sm">
+                  {/* วิธีคำนวณ (โชว์สูตรพร้อมตัวเลขจริง) */}
+                  <div className="mt-3 px-3 py-2 rounded-lg bg-indigo-50/60 text-xs text-indigo-700 font-mono break-all">
+                    🧮 {explainCalc(r, pu)}
+                  </div>
+
+                  <div className="mt-2 pt-2 border-t border-indigo-50 flex items-center justify-between text-sm flex-wrap gap-1">
                     <span className="text-slate-400">
-                      ต่อ 1 ตัว: <span className="font-semibold text-indigo-600">{pu == null ? "— (กรอกไม่ครบ)" : `${r2(pu)} ${r.uom}`}</span>
+                      ต่อ 1 ตัว: <span className="font-semibold text-indigo-600">{pu == null ? "— (กรอกไม่ครบ)" : `${r4(pu)} ${r.uom}`}</span>
+                      {pu != null && r.uom === "หลา" && <span className="text-slate-300"> (≈ {toMeter(pu)} ม.)</span>}
                     </span>
                     <span className="text-slate-500">
                       × {qtyProduce || 0} = <span className="font-bold text-indigo-700">{pu == null ? "—" : `${r2(pu * (qtyProduce || 0))} ${r.uom}`}</span>
@@ -143,8 +180,8 @@ export default function FabricCalcPage() {
               <div className="space-y-1.5">
                 {totals.map(([label, t]) => (
                   <div key={label} className="flex items-center justify-between text-sm border-b border-white/15 pb-1.5">
-                    <span>{label} <span className="text-indigo-200 text-xs">({r2(t.perUnit)} {t.uom}/ตัว)</span></span>
-                    <span className="font-bold text-lg">{r2(t.total)} {t.uom}</span>
+                    <span>{label} <span className="text-indigo-200 text-xs">({r4(t.perUnit)} {t.uom}/ตัว)</span></span>
+                    <span className="font-bold text-lg">{r2(t.total)} {t.uom}{t.uom === "หลา" && <span className="text-indigo-200 text-xs font-normal"> (≈ {toMeter(t.total)} ม.)</span>}</span>
                   </div>
                 ))}
               </div>
@@ -162,38 +199,6 @@ function Num({ label, value, onChange }: { label: string; value: number; onChang
       <span className="block text-[11px] font-medium text-slate-400 mb-0.5">{label}</span>
       <input type="number" min={0} step="any" value={value} onChange={(e) => onChange(Number(e.target.value))}
         className="w-full h-9 px-2 rounded-lg border border-indigo-200 text-right outline-none focus:border-indigo-400 text-sm" />
-    </label>
-  );
-}
-
-// ค้นบล็อกตัด (เลือกแล้วเติม กว้าง/ยาว) — ของกลาง /api/bom/cutting-blocks
-function BlockSearch({ current, onPick }: { current: string; onPick: (b: Block) => void }) {
-  const [q, setQ] = useState("");
-  const [open, setOpen] = useState(false);
-  const [res, setRes] = useState<Block[]>([]);
-  const load = useCallback(async (s: string) => {
-    const j = await apiFetch(`/api/bom/cutting-blocks?search=${encodeURIComponent(s)}`).then((r) => r.json());
-    setRes((j.data ?? []) as Block[]);
-  }, []);
-  useEffect(() => { if (!open) return; const t = setTimeout(() => load(q), 250); return () => clearTimeout(t); }, [open, q, load]);
-
-  return (
-    <label className="block relative">
-      <span className="block text-[11px] font-medium text-slate-400 mb-0.5">บล็อกตัด (ถ้ามี)</span>
-      <input value={open ? q : current} placeholder="🔍 ค้น/พิมพ์" onFocus={() => { setOpen(true); setQ(""); }}
-        onChange={(e) => setQ(e.target.value)} onBlur={() => setTimeout(() => setOpen(false), 200)}
-        className="w-full h-9 px-2 rounded-lg border border-indigo-200 text-sm outline-none focus:border-indigo-400" />
-      {open && res.length > 0 && (
-        <div className="absolute z-20 mt-1 w-56 max-h-56 overflow-auto bg-white rounded-lg border border-indigo-100 shadow-xl">
-          {res.map((b) => (
-            <button key={b.id} type="button" onMouseDown={(e) => { e.preventDefault(); onPick(b); setOpen(false); }}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-indigo-50 flex justify-between">
-              <span className="font-mono text-xs">{b.code}</span>
-              <span className="text-slate-400 text-xs">{b.width ?? "?"}×{b.length ?? "?"}</span>
-            </button>
-          ))}
-        </div>
-      )}
     </label>
   );
 }
