@@ -17,6 +17,7 @@ import { RelationPicker, type RelationConfig } from "@/components/relation-picke
 import { ImageInput } from "@/components/image-input";
 import { invalidateCache } from "@/lib/client-cache";
 import { formatAmount, currencyLabel } from "@/lib/money";
+import { StudioLauncher } from "@/components/studio-launcher";
 
 type RF = {
   field_key: string; column_name: string | null; field_label: string; ui_field_type: string;
@@ -65,6 +66,7 @@ export function RelationPeekModal({
   const [cfgSel, setCfgSel] = useState<string[]>([]);
   const [cfgQ, setCfgQ] = useState("");
   const [cfgSaving, setCfgSaving] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(false);   // เปิดตัวออกแบบ layout กลาง (StudioPanel)
 
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -269,6 +271,10 @@ export function RelationPeekModal({
                 title="เลือกฟิลด์ที่จะโชว์/แก้ไขในป๊อปนี้ (เป็นค่าเริ่มต้นของทุกคน)"
                 className="h-7 w-7 text-sm border border-slate-200 rounded-md text-slate-500 hover:bg-slate-50">⚙</button>
             )}
+            {canCfg && !editing && !cfgOpen && !loading && !isCreate && row && (
+              <button onClick={() => setStudioOpen(true)} title="ออกแบบ layout ของป๊อปนี้ (ใช้ตัวกลางชุดเดียวกับฟอร์มหน้าเต็ม — แก้ที่นี่มีผลทุกที่)"
+                className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50">🎨 Layout</button>
+            )}
             {!editing && !cfgOpen && !loading && row && editableFields.length > 0 && (
               <button onClick={enterEdit} className="h-7 px-2.5 text-xs font-medium border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50">✎ แก้ไข</button>
             )}
@@ -375,6 +381,16 @@ export function RelationPeekModal({
           </div>
         )}
       </div>
+
+      {studioOpen && (
+        <StudioLauncher
+          moduleKey={moduleKey}
+          moduleLabel={moduleKey}
+          sampleRow={row}
+          onClose={() => setStudioOpen(false)}
+          onSaved={() => void load()}
+        />
+      )}
     </div>,
     document.body,
   );
