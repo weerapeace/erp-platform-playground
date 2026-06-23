@@ -117,7 +117,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
     if (items.length > 8) itemLines.push(`• …อีก ${items.length - 8} รายการ`);
     const title = `🛒 ใบขอซื้อใหม่ ${n} ใบ`;
-    const bodyText = `${actor} · ${totalQty.toLocaleString()} ชิ้น · ${totalStr} — ${summary}`;
+    // ในแอป (กระดิ่ง): สรุป + เหตุผลกระชับ 1 บรรทัด/รายการ (ใบสั่งผลิตโชว์ SKU เหมือน LINE)
+    const appItemLines = items.slice(0, 6).map((i) => {
+      const r = reasonOf(i);
+      return `• ${String(i.item_name ?? "สินค้า")} ×${num(i.qty).toLocaleString()}${i.uom ? ` ${i.uom}` : ""}${r ? ` — ${r}` : ""}`;
+    });
+    if (items.length > 6) appItemLines.push(`• …อีก ${items.length - 6} รายการ`);
+    const bodyText = `${actor} · ${totalQty.toLocaleString()} ชิ้น · ${totalStr}\n${appItemLines.join("\n")}`;
 
     // ① ในแอป → user ที่มีสิทธิ์ pr.approve (+ admin) · ไม่เตือนตัวคนขอเอง
     const { data: roleRows } = await admin.from("erp_role_permissions").select("role_key").eq("permission_key", "pr.approve");
