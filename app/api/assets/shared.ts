@@ -29,6 +29,8 @@ export type AssetRow = {
   trashed_at: string | null;
   uploaded_by: string | null;
   created_at: string;
+  master_path: string | null;   // path ไฟล์ต้นฉบับบน NAS (\\nas\... หรือ Z:\...)
+  master_url: string | null;    // ลิงก์เว็บ NAS (Synology) เปิดจากนอกออฟฟิศ
   tags: string[];
   usage_count: number;
 };
@@ -50,6 +52,7 @@ type AssetDbRow = {
   width: number | null; height: number | null; description: string | null;
   collection_id: string | null; status: string; trashed_at: string | null;
   uploaded_by: string | null; created_at: string;
+  master_path: string | null; master_url: string | null;
 };
 
 export const urlFor = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -77,6 +80,8 @@ export function buildRow(r: AssetDbRow, tags: string[], usageCount: number): Ass
     trashed_at: r.trashed_at,
     uploaded_by: r.uploaded_by,
     created_at: r.created_at,
+    master_path: r.master_path,
+    master_url: r.master_url,
     tags,
     usage_count: usageCount,
   };
