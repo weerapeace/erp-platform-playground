@@ -26,6 +26,7 @@ type PreviewMat = {
   key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null;
   qty_per: number; uom: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null;
   on_hand_qty: number; is_ready: boolean; purchase_override: number | null; cut_done: boolean;
+  size_label?: string | null;   // ไซส์ของบล็อกนี้ (กลุ่ม C) — null = ทุกไซส์
 };
 type MatRow = PreviewMat & { required: number; to_purchase: number };
 type SummaryMat = { key: string; id: string | null; component_sku: string | null; component_name: string | null; material_type: string | null; uom: string | null; qty_per: number; on_hand_qty: number; is_ready: boolean; purchase_override: number | null };
@@ -219,7 +220,7 @@ export default function MoWorkspacePage() {
           material_type: (m.material_type as string) ?? null, qty_per: qtyPer, uom: (m.uom as string) ?? null,
           cut_block_code: (m.cut_block_code as string) ?? null,
           cut_width: m.cut_width != null ? Number(m.cut_width) : null, cut_length: m.cut_length != null ? Number(m.cut_length) : null,
-          pieces: m.pieces != null ? Number(m.pieces) : null,
+          pieces: m.pieces != null ? Number(m.pieces) : null, size_label: (m.size_label as string) ?? null,
           on_hand_qty: onHand, is_ready: !!m.is_ready, purchase_override: override, cut_done: !!m.cut_done,
         };
       });
@@ -592,7 +593,8 @@ export default function MoWorkspacePage() {
                   on_hand_qty: s.on_hand_qty, is_ready: s.is_ready, purchase_override: s.purchase_override, cut_done: false,
                   required, to_purchase: s.purchase_override != null ? s.purchase_override : base };
               });
-              const blockRows: MatRow[] = form.materials.map((m) => ({ ...m, required: Math.round(m.qty_per * (form.qty || 0) * 10000) / 10000, to_purchase: 0 }));
+              const rowQty = (sl: string | null | undefined) => (sl != null && form.size_qty[sl] != null) ? form.size_qty[sl] : (form.qty || 0);
+              const blockRows: MatRow[] = form.materials.map((m) => ({ ...m, required: Math.round(m.qty_per * rowQty(m.size_label) * 10000) / 10000, to_purchase: 0 }));
               const codeCol: LineColumn<MatRow> = {
                 key: "component", header: "วัตถุดิบ", minWidth: 220, sortable: true,
                 getValue: (r) => r.component_name || r.component_sku, groupLabel: (r) => r.component_sku ? `${r.component_sku} ${r.component_name}` : "— ไม่ระบุ —",
@@ -631,14 +633,15 @@ export default function MoWorkspacePage() {
                 : [codeCol, typeCol, { key: "qty_per", header: "ต่อชิ้น", width: 76, align: "right", getValue: (r) => r.qty_per }, reqCol, uomCol];
               // ยอดรวมชิ้น = ชิ้นต่อชุด × จำนวนที่สั่ง
               const totalPcsCol: LineColumn<MatRow> = { key: "total_pieces", header: "ยอดรวมชิ้น", width: 92, align: "right", summable: true,
-                getValue: (r) => (r.pieces ?? 0) * (form.qty || 0),
-                render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-slate-700">{r.pieces ? fmt((r.pieces ?? 0) * (form.qty || 0)) : "—"}</span> };
+                getValue: (r) => (r.pieces ?? 0) * rowQty(r.size_label),
+                render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-slate-700">{r.pieces ? fmt((r.pieces ?? 0) * rowQty(r.size_label)) : "—"}</span> };
               const cutDoneCol: LineColumn<MatRow> = { key: "cut_done", header: "ตัดครบแล้ว", width: 84, align: "center",
                 getValue: (r) => (r.cut_done ? 1 : 0),
                 render: (r) => needsCutLine(r)
                   ? <input type="checkbox" checked={r.cut_done} disabled={!editable || !canEdit} onChange={() => toggleCutLine(r)} className="rounded border-slate-300 cursor-pointer disabled:cursor-not-allowed" />
                   : <span className="text-slate-300 text-xs">—</span> };
               const blockCols: LineColumn<MatRow>[] = [codeCol, typeCol,
+                { key: "size_label", header: "ไซส์", width: 64, sortable: true, getValue: (r) => r.size_label ?? "", render: (r) => r.size_label ? <span className="inline-block px-1.5 py-0.5 text-[11px] font-semibold bg-indigo-50 text-indigo-700 rounded">{r.size_label}</span> : <span className="text-slate-300 text-xs">ทุกไซส์</span> },
                 { key: "cut_block_code", header: "บล็อกตัด", width: 130, getValue: (r) => r.cut_block_code },
                 { key: "cut_width", header: "กว้าง", width: 60, align: "right", getValue: (r) => r.cut_width ?? "" },
                 { key: "cut_length", header: "ยาว", width: 60, align: "right", getValue: (r) => r.cut_length ?? "" },
