@@ -297,19 +297,27 @@ function CutBlockPicker({ code, disabled, width, length, onPick }: { code: strin
   );
 }
 
-// ตัวช่วย "สูตร" ค่าต่อไซส์ — ใส่ค่าฐาน + เพิ่มต่อไซส์ → เติมให้ทุกไซส์
-function SizeFormula({ onApply }: { onApply: (base: number, step: number) => void }) {
-  const [base, setBase] = useState("");
-  const [step, setStep] = useState("");
-  const apply = () => { if (base.trim() === "") return; onApply(Number(base) || 0, Number(step) || 0); };
+// ตัวช่วย "สูตร" ค่าต่อไซส์ — ฐาน(ซม.) + เพิ่ม/ไซส์ (กรอกเป็นนิ้วได้ ระบบ ×2.54 → ซม.) → เติมทุกไซส์
+// default: ฐาน = ค่าไซส์เล็กสุดของบรรทัด · /ไซส์ = +4 นิ้ว (= 10.16 ซม.)
+const IN_TO_CM = 2.54;
+function SizeFormula({ base0, onApply }: { base0?: number; onApply: (base: number, step: number) => void }) {
+  const round4 = (n: number) => Math.round(n * 10000) / 10000;
+  const [base, setBase] = useState(base0 != null && base0 > 0 ? String(base0) : "");
+  const [unit, setUnit] = useState<"in" | "cm">("in");   // /ไซส์ คิดเป็นนิ้วก่อน (ตามมาตรฐานเข็มขัด)
+  const [step, setStep] = useState("4");                  // default +4 นิ้ว = 10.16 ซม.
+  const stepCm = unit === "in" ? round4((Number(step) || 0) * IN_TO_CM) : (Number(step) || 0);
+  const apply = () => { if (base.trim() === "") return; onApply(Number(base) || 0, stepCm); };
   return (
     <div className="flex items-center gap-0.5">
-      <input type="number" step="any" value={base} onChange={(e) => setBase(e.target.value)} title="ค่าที่ไซส์เล็กสุด" placeholder="ฐาน"
+      <input type="number" step="any" value={base} onChange={(e) => setBase(e.target.value)} title="ค่าที่ไซส์เล็กสุด (ซม.)" placeholder="ฐาน"
         className="w-12 h-7 px-1 text-right border border-slate-200 rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-400" />
       <span className="text-slate-300 text-[10px]">+</span>
       <input type="number" step="any" value={step} onChange={(e) => setStep(e.target.value)} title="เพิ่ม/ลด ต่อ 1 ไซส์" placeholder="/ไซส์"
         className="w-12 h-7 px-1 text-right border border-slate-200 rounded text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-400" />
-      <button type="button" onClick={apply} title="เติมค่าให้ทุกไซส์ตามสูตร" className="h-7 px-1.5 text-[11px] bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100">เติม</button>
+      <button type="button" onClick={() => setUnit((u) => (u === "in" ? "cm" : "in"))}
+        title={unit === "in" ? `กำลังคิดเป็นนิ้ว (×2.54 → ${round4(stepCm)} ซม.) — กดสลับเป็น ซม.` : "กำลังคิดเป็น ซม. — กดสลับเป็นนิ้ว"}
+        className="h-7 w-9 text-[10px] border border-slate-200 rounded text-slate-500 hover:bg-slate-50">{unit === "in" ? "นิ้ว" : "ซม."}</button>
+      <button type="button" onClick={apply} title={`เติมทุกไซส์: ฐาน + ลำดับ × ${round4(stepCm)} ซม.`} className="h-7 px-1.5 text-[11px] bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100">เติม</button>
     </div>
   );
 }
@@ -644,7 +652,9 @@ export function BomLineEditor({
                 <tr key={l.key} className="border-b border-slate-50 last:border-0">
                   <td className="px-3 py-1 text-slate-700"><code className="text-[10px] text-slate-400">{l.component_sku}</code> {l.component_name}</td>
                   <td className="px-2 py-1 text-center text-slate-500">{SIZE_DIMS.find((d) => d[0] === l.size_dim)?.[1] ?? l.size_dim}</td>
-                  {!readonly && <td className="px-2 py-1"><SizeFormula onApply={(base, step) => onChange(lines.map((x) => x.key === l.key ? { ...x, size_values: Object.fromEntries(sizes.map((sz, i) => [sz, r4(base + i * step)])) } : x))} /></td>}
+                  {!readonly && <td className="px-2 py-1"><SizeFormula
+                    base0={l.size_values?.[sizes[0]] || (l.size_dim === "cut_width" ? l.cut_width : l.size_dim === "pieces" ? l.pieces : l.size_dim === "qty" ? l.qty : l.cut_length) || undefined}
+                    onApply={(base, step) => onChange(lines.map((x) => x.key === l.key ? { ...x, size_values: Object.fromEntries(sizes.map((sz, i) => [sz, r4(base + i * step)])) } : x))} /></td>}
                   {sizes.map((s) => (
                     <td key={s} className="px-2 py-1">
                       <input type="number" step="any" disabled={readonly} value={l.size_values?.[s] ?? ""}
