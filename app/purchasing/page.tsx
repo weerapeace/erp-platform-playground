@@ -8,6 +8,7 @@
  * เลือก → ตะกร้า → สร้างใบขอซื้อ (PR + lines). currency: ร้าน CN → YUAN
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { PrHistoryButton } from "@/components/pr-history";
 import { RejectedPanel } from "./orders/approval";
@@ -1372,6 +1373,8 @@ function MoReasonPicker({ value, onPick }: { value: { no: string; label: string 
   const [rows, setRows] = useState<MoListItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState<{ left: number; top: number; bottom: number; width: number } | null>(null);
   useEffect(() => {
     if (!open) return;
     setLoading(true);
@@ -1383,11 +1386,16 @@ function MoReasonPicker({ value, onPick }: { value: { no: string; label: string 
     }, 250);
     return () => clearTimeout(t);
   }, [open, q]);
+  // วัดตำแหน่งปุ่ม + ปิดเมื่อคลิกนอก (รวม panel ที่ลอยออกไป) + ตามเมื่อ scroll/resize
   useEffect(() => {
     if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const measure = () => { const r = ref.current?.getBoundingClientRect(); if (r) setRect({ left: r.left, top: r.top, bottom: r.bottom, width: r.width }); };
+    measure();
+    const h = (e: MouseEvent) => { const t = e.target as Node; if (ref.current && !ref.current.contains(t) && !panelRef.current?.contains(t)) setOpen(false); };
     document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => { document.removeEventListener("mousedown", h); window.removeEventListener("scroll", measure, true); window.removeEventListener("resize", measure); };
   }, [open]);
   return (
     <div className="relative" ref={ref}>
@@ -1403,21 +1411,32 @@ function MoReasonPicker({ value, onPick }: { value: { no: string; label: string 
           + เลือกใบสั่งผลิต (ที่ยังเปิดอยู่)
         </button>
       )}
-      {open && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg max-h-72 overflow-auto">
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาเลขใบ / รหัส / ชื่อสินค้า..."
-            className="w-full h-9 px-3 text-sm border-b border-slate-100 outline-none sticky top-0 bg-white" />
-          {loading && <div className="px-3 py-3 text-xs text-slate-400">กำลังโหลด…</div>}
-          {!loading && rows && rows.length === 0 && <div className="px-3 py-3 text-xs text-slate-300">— ไม่พบใบสั่งผลิตที่ยังเปิด —</div>}
-          {!loading && (rows ?? []).map(m => (
-            <button key={m.id} type="button"
-              onClick={() => { onPick({ no: m.mo_no, label: `${m.mo_no}${m.product_sku ? ` · ${m.product_sku}` : ""}${m.product_name ? ` (${m.product_name})` : ""}` }); setOpen(false); }}
-              className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-50 last:border-0">
-              <div className="text-sm font-medium text-slate-700">{m.mo_no}</div>
-              <div className="text-xs text-slate-500 truncate">{m.product_sku ?? ""}{m.product_name ? ` · ${m.product_name}` : ""}{m.status ? ` · ${m.status}` : ""}</div>
-            </button>
-          ))}
-        </div>
+      {open && rect && typeof document !== "undefined" && createPortal(
+        (() => {
+          // ลอยแบบ fixed (portal) ทับโมดอล → ไม่โดน overflow ตัด ไม่ต้องเลื่อนดู
+          const spaceBelow = window.innerHeight - rect.bottom;
+          const openUp = spaceBelow < 300 && rect.top > spaceBelow;
+          const style = openUp
+            ? { position: "fixed" as const, left: rect.left, width: rect.width, bottom: window.innerHeight - rect.top + 4 }
+            : { position: "fixed" as const, left: rect.left, width: rect.width, top: rect.bottom + 4 };
+          return (
+            <div ref={panelRef} style={style} className="z-[9999] bg-white border border-slate-200 rounded-md shadow-xl max-h-72 overflow-auto">
+              <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="ค้นหาเลขใบ / รหัส / ชื่อสินค้า..."
+                className="w-full h-9 px-3 text-sm border-b border-slate-100 outline-none sticky top-0 bg-white" />
+              {loading && <div className="px-3 py-3 text-xs text-slate-400">กำลังโหลด…</div>}
+              {!loading && rows && rows.length === 0 && <div className="px-3 py-3 text-xs text-slate-300">— ไม่พบใบสั่งผลิตที่ยังเปิด —</div>}
+              {!loading && (rows ?? []).map(m => (
+                <button key={m.id} type="button"
+                  onClick={() => { onPick({ no: m.mo_no, label: `${m.mo_no}${m.product_sku ? ` · ${m.product_sku}` : ""}${m.product_name ? ` (${m.product_name})` : ""}` }); setOpen(false); }}
+                  className="w-full text-left px-3 py-2 hover:bg-blue-50 border-b border-slate-50 last:border-0">
+                  <div className="text-sm font-medium text-slate-700">{m.mo_no}</div>
+                  <div className="text-xs text-slate-500 truncate">{m.product_sku ?? ""}{m.product_name ? ` · ${m.product_name}` : ""}{m.status ? ` · ${m.status}` : ""}</div>
+                </button>
+              ))}
+            </div>
+          );
+        })(),
+        document.body
       )}
     </div>
   );
