@@ -22,6 +22,7 @@ import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { ERPModal } from "@/components/modal";
 import { ComponentPicker } from "@/components/material-picker";
+import { fabricQty } from "@/lib/bom-calc";
 
 export type EditorLine = {
   key:            string;
@@ -90,14 +91,16 @@ const dash = <span className="text-slate-300 text-xs">—</span>;
 type GroupInfo = { calc_method: string; divisor: number };
 /** คิดปริมาณ — คืน null ถ้าข้อมูลไม่พอ (เก็บปริมาณเดิมไว้ ไม่ทับด้วย 0) */
 function calcLine(l: EditorLine, g: GroupInfo | undefined): number | null {
-  const m = g?.calc_method ?? "manual";
-  const d = g?.divisor || 90;
-  const k = 1 + (l.waste_percent || 0) / 100;
-  if (m === "count")     return l.pieces || 0;
-  if (m === "length")    return l.cut_length ? r4(l.cut_length * k / d) : null;
-  if (m === "area_100")  return (l.cut_width && l.cut_length) ? r4(lineArea(l) * k / d) : null;
-  if (m === "area_face") return (l.cut_width && l.cut_length && l.face_width_cm) ? r4(lineArea(l) * k / l.face_width_cm / d) : null;
-  return null; // manual → พิมพ์เอง
+  // กฎคำนวณกลาง (lib/bom-calc) — ใช้ร่วมกับเครื่องคิดเลขผ้า /fabric-calc
+  return fabricQty({
+    calc_method:   g?.calc_method ?? "manual",
+    divisor:       g?.divisor,
+    waste_percent: l.waste_percent,
+    pieces:        l.pieces,
+    cut_width:     l.cut_width,
+    cut_length:    l.cut_length,
+    face_width_cm: l.face_width_cm,
+  });
 }
 
 const inputCls = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400";
