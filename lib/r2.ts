@@ -62,8 +62,13 @@ function makeS3Bucket(bucketName: string): R2BucketLike | null {
     },
     async put(key: string, value: ArrayBuffer | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown> {
       const bodyAb: ArrayBuffer = value instanceof ArrayBuffer ? value : await new Response(value).arrayBuffer();
+      const bytes = new Uint8Array(bodyAb);
       const ct = opts?.httpMetadata?.contentType;
-      const res = await client.fetch(urlFor(key), { method: "PUT", body: bodyAb, headers: ct ? { "content-type": ct } : {} });
+      // ต้องระบุ Content-Length เอง: aws4fetch + undici (บน Vercel/Node) จะส่ง body แบบ chunked
+      // เมื่อไม่ทราบความยาว → R2 (S3 API) ปฏิเสธ PUT ด้วย 411 Length Required
+      const headers: Record<string, string> = { "content-length": String(bytes.byteLength) };
+      if (ct) headers["content-type"] = ct;
+      const res = await client.fetch(urlFor(key), { method: "PUT", body: bytes, headers });
       if (!res.ok) throw new Error(`R2(S3) put ${res.status}`);
       return undefined;
     },
