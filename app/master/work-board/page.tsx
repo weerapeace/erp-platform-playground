@@ -231,6 +231,7 @@ export default function WorkBoardPage() {
   const [clCutGroup, setClCutGroup] = useState<"none" | "type" | "material">("none");   // จัดกลุ่มหน้าตัด
   const [clSummary, setClSummary] = useState<MoMatSummary[]>([]);   // ตารางวัตถุดิบกลาง (สรุป)
   const [clMaterials, setClMaterials] = useState<MoMatPreview[]>([]); // ตารางวัตถุดิบกลาง (รายบล็อก)
+  const [clSizeQty, setClSizeQty] = useState<Record<string, number>>({}); // จำนวนต่อไซส์ของใบนี้ (ให้ตารางบล็อกคิดยอดต่อไซส์)
   const [clRequested, setClRequested] = useState<Record<string, number>>({});
   const [clPurch, setClPurch] = useState<PurchaseStatusRow[] | null>(null);   // ของที่ซื้อ/ETA
   const [clIssues, setClIssues] = useState<MoIssue[] | null>(null);           // ปัญหา QC
@@ -674,10 +675,14 @@ export default function WorkBoardPage() {
           material_type: (m.material_type as string) ?? null, qty_per: n2(m.qty_per), uom: (m.uom as string) ?? null,
           cut_block_code: (m.cut_block_code as string) ?? null, cut_width: num(m.cut_width), cut_length: num(m.cut_length), pieces: num(m.pieces),
           on_hand_qty: n2(m.on_hand_qty), is_ready: !!m.is_ready, purchase_override: null, cut_done: !!m.cut_done,
+          size_label: (m.size_label as string) ?? null,
         }));
         const requested = (j?.data?.requested ?? {}) as Record<string, number>;
         savedSumRef.current = new Map(moSummary.filter((s) => s.id).map((s) => [s.id as string, { on: s.on_hand_qty, rd: s.is_ready, po: s.purchase_override }]));
-        if (!cancel) { setClRows(rows); setClCutRows(cutRows); setClSummary(moSummary); setClMaterials(moMaterials); setClRequested(requested); }
+        const sb = (j?.data?.size_breakdown ?? []) as { label?: unknown; qty?: unknown }[];
+        const sizeQtyMap: Record<string, number> = {};
+        for (const s of sb) { const lb = s?.label != null ? String(s.label) : ""; if (lb) sizeQtyMap[lb] = Number(s.qty) || 0; }
+        if (!cancel) { setClRows(rows); setClCutRows(cutRows); setClSummary(moSummary); setClMaterials(moMaterials); setClRequested(requested); setClSizeQty(sizeQtyMap); }
       } catch { if (!cancel) { setClRows([]); setClCutRows([]); setClSummary([]); setClMaterials([]); } }
       finally { if (!cancel) setClLoading(false); }
     })();
@@ -1316,7 +1321,7 @@ export default function WorkBoardPage() {
                         </div>
                       ) : (
                         <MoMaterialsTable
-                          summary={clSummary} materials={clMaterials} qty={checklistMO.qty || 0} requested={clRequested}
+                          summary={clSummary} materials={clMaterials} qty={checklistMO.qty || 0} sizeQty={clSizeQty} requested={clRequested}
                           editable={canEdit} canEdit={canEdit}
                           onChangeSummary={(rows) => void onMatSummaryChange(rows)}
                           onToggleCut={(line, next) => void onMatToggleCut(line, next)}
