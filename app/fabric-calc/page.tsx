@@ -127,41 +127,30 @@ export default function FabricCalcPage() {
             {rows.map((r) => {
               const pu = perUnit(r);
               return (
-                <div key={r.key} className="bg-white rounded-2xl border border-indigo-100 shadow-sm p-4">
+                <div key={r.key} className="bg-white rounded-xl border border-indigo-100 shadow-sm p-3">
                   <div className="flex items-center gap-2 mb-2">
                     <select value={r.group_id} onChange={(e) => pickGroup(r.key, e.target.value)}
-                      className="flex-1 h-10 px-3 rounded-lg border border-indigo-200 bg-white text-sm outline-none focus:border-indigo-400">
+                      className="flex-1 h-9 px-2 rounded-lg border border-indigo-200 bg-white text-sm outline-none focus:border-indigo-400">
                       <option value="">— เลือกชนิดวัตถุดิบ —</option>
                       {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                     </select>
-                    <span className="text-xs text-indigo-400 whitespace-nowrap">{METHOD_LABEL[r.calc_method] ?? r.calc_method}</span>
-                    <button onClick={() => duplicateRow(r.key)} className="text-slate-300 hover:text-indigo-500 text-base px-1" title="ก๊อปแถวนี้">⧉</button>
-                    <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 text-lg px-1" title="ลบแถว">✕</button>
-                  </div>
-                  {/* อธิบายวิธีคิดของชนิดนี้ */}
-                  <p className="text-[11px] text-slate-400 mb-3">💡 {METHOD_HELP[r.calc_method] ?? ""}</p>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <Num label="จำนวนชิ้น" value={r.pieces} onChange={(v) => patch(r.key, { pieces: v })} />
-                    {usesWidth(r.calc_method) && <Num label="กว้าง (ซม.)" value={r.cut_width} onChange={(v) => patch(r.key, { cut_width: v })} />}
-                    {usesLength(r.calc_method) && <Num label="ยาว (ซม.)" value={r.cut_length} onChange={(v) => patch(r.key, { cut_length: v })} />}
-                    {usesFace(r.calc_method) && <Num label="หน้ากว้างผ้า (ซม.)" value={r.face_width_cm} onChange={(v) => patch(r.key, { face_width_cm: v })} />}
-                    {r.calc_method !== "count" && <Num label="เผื่อเสีย %" value={r.waste_percent} onChange={(v) => patch(r.key, { waste_percent: v })} />}
+                    <span className="text-[11px] text-indigo-400 whitespace-nowrap cursor-help" title={METHOD_HELP[r.calc_method] ?? ""}>{METHOD_LABEL[r.calc_method] ?? r.calc_method} ⓘ</span>
+                    <button onClick={() => duplicateRow(r.key)} className="text-slate-300 hover:text-indigo-500 text-base px-0.5" title="ก๊อปแถวนี้">⧉</button>
+                    <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 text-lg px-0.5" title="ลบแถว">✕</button>
                   </div>
 
-                  {/* วิธีคำนวณ (โชว์สูตรพร้อมตัวเลขจริง) */}
-                  <div className="mt-3 px-3 py-2 rounded-lg bg-indigo-50/60 text-xs text-indigo-700 font-mono break-all">
-                    🧮 {explainCalc(r, pu)}
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    <Num label="ชิ้น" value={r.pieces} onChange={(v) => patch(r.key, { pieces: v })} />
+                    {usesWidth(r.calc_method) && <Num label="กว้าง(ซม.)" value={r.cut_width} onChange={(v) => patch(r.key, { cut_width: v })} />}
+                    {usesLength(r.calc_method) && <Num label="ยาว(ซม.)" value={r.cut_length} onChange={(v) => patch(r.key, { cut_length: v })} />}
+                    {usesFace(r.calc_method) && <Num label="หน้ากว้าง(ซม.)" value={r.face_width_cm} onChange={(v) => patch(r.key, { face_width_cm: v })} />}
+                    {r.calc_method !== "count" && <Num label="เผื่อเสีย%" value={r.waste_percent} onChange={(v) => patch(r.key, { waste_percent: v })} />}
                   </div>
 
-                  <div className="mt-2 pt-2 border-t border-indigo-50 flex items-center justify-between text-sm flex-wrap gap-1">
-                    <span className="text-slate-400">
-                      ต่อ 1 ตัว: <span className="font-semibold text-indigo-600">{pu == null ? "— (กรอกไม่ครบ)" : `${r4(pu)} ${r.uom}`}</span>
-                      {pu != null && r.uom === "หลา" && <span className="text-slate-300"> (≈ {toMeter(pu)} ม.)</span>}
-                    </span>
-                    <span className="text-slate-500">
-                      × {qtyProduce || 0} = <span className="font-bold text-indigo-700">{pu == null ? "—" : `${r2(pu * (qtyProduce || 0))} ${r.uom}`}</span>
-                    </span>
+                  {/* สูตร + ผล (บรรทัดเดียว compact) */}
+                  <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-mono text-indigo-600/70 break-all flex-1 min-w-0">🧮 {explainCalc(r, pu)}</span>
+                    <span className="whitespace-nowrap text-slate-400">×{qtyProduce || 0} = <span className="font-bold text-indigo-700 text-sm">{pu == null ? "—" : `${r2(pu * (qtyProduce || 0))} ${r.uom}`}</span></span>
                   </div>
                 </div>
               );
@@ -178,12 +167,21 @@ export default function FabricCalcPage() {
             <div className="mt-6 bg-indigo-600 text-white rounded-2xl shadow-lg p-5">
               <h2 className="font-bold mb-3 flex items-center gap-2">📦 ผ้าที่ต้องใช้ทั้งหมด ({qtyProduce || 0} ตัว)</h2>
               <div className="space-y-1.5">
-                {totals.map(([label, t]) => (
-                  <div key={label} className="flex items-center justify-between text-sm border-b border-white/15 pb-1.5">
-                    <span>{label} <span className="text-indigo-200 text-xs">({r4(t.perUnit)} {t.uom}/ตัว)</span></span>
-                    <span className="font-bold text-lg">{r2(t.total)} {t.uom}{t.uom === "หลา" && <span className="text-indigo-200 text-xs font-normal"> (≈ {toMeter(t.total)} ม.)</span>}</span>
-                  </div>
-                ))}
+                {totals.map(([label, t]) => {
+                  const yieldPer = t.perUnit > 0 ? Math.floor(1 / t.perUnit) : 0;
+                  return (
+                    <div key={label} className="border-b border-white/15 pb-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{label}</span>
+                        <span className="font-bold text-lg">{r2(t.total)} {t.uom}{t.uom === "หลา" && <span className="text-indigo-200 text-xs font-normal"> (≈ {toMeter(t.total)} ม.)</span>}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-indigo-200 mt-0.5">
+                        <span>ใช้ {r4(t.perUnit)} {t.uom}/ตัว</span>
+                        <span>📐 1 {t.uom} ทำได้ ~{yieldPer.toLocaleString()} ตัว</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -196,9 +194,11 @@ export default function FabricCalcPage() {
 function Num({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
   return (
     <label className="block">
-      <span className="block text-[11px] font-medium text-slate-400 mb-0.5">{label}</span>
-      <input type="number" min={0} step="any" value={value} onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full h-9 px-2 rounded-lg border border-indigo-200 text-right outline-none focus:border-indigo-400 text-sm" />
+      <span className="block text-[10px] font-medium text-slate-400 mb-0.5 truncate">{label}</span>
+      <input type="number" min={0} step="any" value={value === 0 ? "" : value} placeholder="0"
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
+        className="w-full h-8 px-2 rounded-lg border border-indigo-200 text-right outline-none focus:border-indigo-400 text-sm" />
     </label>
   );
 }
