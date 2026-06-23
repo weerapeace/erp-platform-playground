@@ -55,6 +55,7 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       const p = new URLSearchParams({ status: "active", limit: "120" });
       if (search) p.set("search", search);
       if (type) p.set("type", type);
+      p.set("source", search ? "all" : "upload");   // ค้นหา → รวมรูปสินค้าด้วย / ไม่ค้น → เฉพาะรูปอัปเอง
       const res = await apiFetch(`/api/assets?${p.toString()}`);
       const j = await res.json();
       setRows(j.data ?? []);
