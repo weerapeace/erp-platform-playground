@@ -12,7 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import type { BeltWorkOrder } from "@/app/api/mo/belt-work-order/route";
 import type { ProductSpec } from "@/app/api/product-spec/route";
-import { buildBeltDiagramSvg } from "@/lib/belt-diagram";
+import { buildBeltDiagramSvg, type BeltTailShape } from "@/lib/belt-diagram";
 
 const TEMPLATE: ReportTemplate = {
   paper_size: "A4",
@@ -110,6 +110,11 @@ function BeltWorkOrderInner() {
     const sizes = bw.sizes;
     const specFields = spec ? [...spec.model_attrs, ...spec.legacy] : [];
     const detail = spec?.parent?.work_instruction_notes || spec?.parent?.size_summary || "";
+    // เฟส 3b: ดึงตัวเลขวาดรูปจากช่องสเปก (จับด้วยป้ายชื่อ) — ไม่เจอ → ใช้ค่า default ในตัววาด
+    const bf = spec ? [...spec.model_attrs, ...spec.legacy, ...spec.sku_attrs] : [];
+    const bnum = (re: RegExp) => { const f = bf.find((x) => re.test(x.label)); const m = f && String(f.value).match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : undefined; };
+    const tailTxt = bf.find((x) => /ปลายหาง/.test(x.label))?.value ?? "";
+    const tailShape: BeltTailShape = /ปากเป|ปากเปิด/.test(tailTxt) ? "duckbill" : /แหลม/.test(tailTxt) ? "pointed" : /ตรง/.test(tailTxt) ? "straight" : "duckbill";
     const data = {
       mo_count: bw.mos.length,
       mos_text: bw.mos.join(", "),
@@ -131,8 +136,8 @@ function BeltWorkOrderInner() {
       grand: bw.grand_total,
       has_spec: specFields.length > 0,
       specs: specFields.map((f) => ({ label: f.label, value: f.value })),
-      // เฟส 3a: รูปวาดจากพารามิเตอร์ (ค่า default มาตรฐาน + แบรนด์) — เฟส 3b จะป้อนตัวเลขจริงจากช่องสเปก
-      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", tailShape: "duckbill" }),
+      // เฟส 3b: รูปวาดจากตัวเลขจริงในช่องสเปก (จำนวนรู/ระยะ/ห่างโลโก้/ปลายหาง) — ไม่กรอก → ใช้ค่า default
+      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape }),
     };
     return buildReportHtml(TEMPLATE, data);
   }, [bw, spec]);
