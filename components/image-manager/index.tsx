@@ -6,6 +6,7 @@ import type { Attachment, AttachmentsResponse } from "@/app/api/attachments/rout
 import { ImageMarkupButton } from "@/components/image-markup-editor";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
+import { AssetPicker } from "@/components/asset-picker";
 
 // ============================================================
 // ImageThumbnail — รูปเล็กในตาราง + hover ขยาย (component กลาง)
@@ -89,6 +90,7 @@ export function ImageManager({
   const fileRef = useRef<HTMLInputElement>(null);
   const maxSizeMb = Math.round((maxSizeBytes / 1024 / 1024) * 10) / 10;
   const atMaxItems = maxItems > 0 && items.length >= maxItems;
+  const [pickerOpen, setPickerOpen] = useState(false);   // เลือกไฟล์จากคลังกลาง
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -177,6 +179,23 @@ export function ImageManager({
       await apiFetch(`/api/attachments/${id}`, { method: "PATCH" });
       await fetchList();
     } catch { /* ignore */ }
+  };
+
+  // แนบไฟล์เดิมจากคลังกลาง (ไม่อัปซ้ำ)
+  const attachFromLibrary = async (assets: { id: string }[]) => {
+    if (assets.length === 0) return;
+    if (maxItems > 0 && items.length + assets.length > maxItems) { setError(`เพิ่มได้สูงสุด ${maxItems} รูป`); return; }
+    setUploading(true); setError(null);
+    try {
+      const res = await apiFetch("/api/attachments/from-library", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entity_type: entityType, entity_id: entityId, asset_ids: assets.map((a) => a.id), actor }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+      await fetchList();
+    } catch (err) { setError(err instanceof Error ? err.message : "แนบจากคลังไม่สำเร็จ"); }
+    finally { setUploading(false); }
   };
 
   return (
@@ -273,6 +292,17 @@ export function ImageManager({
             </>
           )}
         </div>
+      )}
+
+      {!readonly && !atMaxItems && (
+        <button type="button" onClick={() => setPickerOpen(true)} disabled={uploading}
+          className="mt-2 h-8 px-3 text-xs font-medium border border-indigo-200 rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">📁 เลือกจากคลังไฟล์กลาง</button>
+      )}
+      {!readonly && (
+        <AssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} multiple
+          typeFilter={imageOnly ? "image" : undefined}
+          title="เลือกไฟล์จากคลังกลาง"
+          onSelect={(assets) => { setPickerOpen(false); void attachFromLibrary(assets); }} />
       )}
 
       {readonly && items.length === 0 && <p className="text-sm text-slate-400 text-center py-3">ไม่มีไฟล์แนบ</p>}

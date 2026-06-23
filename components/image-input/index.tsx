@@ -13,6 +13,7 @@ import { createPortal } from "react-dom";
 import { withImageWidth } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
+import { AssetPicker } from "@/components/asset-picker";
 
 interface ImageInputProps {
   value:    string | null;        // r2_key
@@ -33,6 +34,7 @@ export function ImageInput({
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(disabled);
+  const [pickerOpen, setPickerOpen] = useState(false);   // เลือกรูปจากคลังไฟล์กลาง
 
   // F15: ใช้ /api/r2-image proxy ตรงๆ (ไม่ติด CORS + เร็วขึ้น)
   useEffect(() => {
@@ -212,6 +214,8 @@ export function ImageInput({
         <div className="mt-1.5 flex items-center gap-2">
           <button type="button" onClick={pasteFromClipboard} disabled={uploading || uploadDisabled}
             className="h-8 px-3 text-xs font-medium border border-blue-200 rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-50">📋 วางรูป (จากคลิปบอร์ด)</button>
+          <button type="button" onClick={() => setPickerOpen(true)} disabled={uploading}
+            className="h-8 px-3 text-xs font-medium border border-indigo-200 rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">📁 เลือกจากคลัง</button>
         </div>
       )}
 
@@ -233,6 +237,11 @@ export function ImageInput({
       {uploadDeniedMessage && (
         <div className="mt-1 text-[11px] text-amber-700">{uploadDeniedMessage}</div>
       )}
+
+      {/* เลือกรูปจากคลังไฟล์กลาง (ของกลาง) — ได้ทุกฟอร์มที่มีช่องรูป */}
+      <AssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} typeFilter="image"
+        title="เลือกรูปจากคลังไฟล์กลาง"
+        onSelect={(assets) => { if (assets[0]) onChange(assets[0].r2_key); setPickerOpen(false); }} />
     </div>
   );
 }
