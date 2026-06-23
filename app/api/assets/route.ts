@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
   const collectionId = sp.get("collection_id");
   const tag          = sp.get("tag");
   const status       = sp.get("status") ?? "active";
+  const source       = sp.get("source") ?? "upload";   // upload | odoo_product | all
   const limit  = Math.min(Number(sp.get("limit") ?? 60) || 60, 200);
   const offset = Number(sp.get("offset") ?? 0) || 0;
 
@@ -56,6 +57,7 @@ export async function GET(request: NextRequest) {
   }
 
   let q = admin.from("assets").select("*", { count: "exact" }).eq("status", status);
+  if (source !== "all") q = q.eq("source", source);
   if (type) q = q.eq("asset_type", type);
   if (collectionId === "none") q = q.is("collection_id", null);
   if (collAssetIds) q = q.in("id", collAssetIds);

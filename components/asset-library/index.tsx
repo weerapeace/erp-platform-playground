@@ -43,6 +43,7 @@ export function AssetLibrary() {
   const [collectionId, setCollectionId] = useState<string | null>(null); // null=ทั้งหมด, "none"=ไม่อยู่อัลบั้ม
   const [tag, setTag] = useState<string | null>(null);
   const [trash, setTrash] = useState(false);
+  const [source, setSource] = useState("upload");   // upload = อัปเอง · odoo_product = รูปสินค้านำเข้า
 
   const [collections, setCollections] = useState<AssetCollection[]>([]);
   const [tags, setTags] = useState<AssetTag[]>([]);
@@ -69,6 +70,7 @@ export function AssetLibrary() {
       if (collectionId) p.set("collection_id", collectionId);
       if (tag) p.set("tag", tag);
       p.set("status", trash ? "trashed" : "active");
+      p.set("source", source);
       const res = await apiFetch(`/api/assets?${p.toString()}`);
       const j = await res.json();
       if (j.error) throw new Error(j.error);
@@ -76,7 +78,7 @@ export function AssetLibrary() {
       setTotal(j.total ?? 0);
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [search, type, collectionId, tag, trash, toast]);
+  }, [search, type, collectionId, tag, trash, source, toast]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -88,7 +90,7 @@ export function AssetLibrary() {
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void loadMeta(); }, [loadMeta]);
-  useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash]);
+  useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
 
   // ── เลือกไฟล์ ──
   const toggleSel = (id: string) =>
@@ -174,6 +176,11 @@ export function AssetLibrary() {
       <div className="flex gap-4 items-start">
         {/* sidebar */}
         <aside className="w-44 shrink-0 hidden md:block">
+          <p className="text-[11px] font-medium text-slate-400 mb-1.5">ที่มา</p>
+          <div className="flex flex-col gap-0.5 mb-4">
+            <SideItem active={source === "upload"} onClick={() => setSource("upload")} label="รูปที่อัปเอง" icon="📤" />
+            <SideItem active={source === "odoo_product"} onClick={() => setSource("odoo_product")} label="รูปสินค้า (Odoo)" icon="🛍️" />
+          </div>
           <div className="flex items-center justify-between mb-1.5">
             <p className="text-[11px] font-medium text-slate-400">อัลบั้ม</p>
             <button onClick={() => setNewColOpen(true)} className="text-[11px] text-indigo-600 hover:underline">＋ ใหม่</button>
