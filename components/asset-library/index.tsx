@@ -28,6 +28,8 @@ const TYPE_FILTERS: { key: string; label: string }[] = [
   { key: "video", label: "🎬 วิดีโอ" },
 ];
 
+const ARTWORK_TYPES = ["โลโก้", "ลายพิมพ์", "แพทเทิร์น", "ม็อกอัป", "ภาพประกอบ", "อื่นๆ"];
+
 const isImage = (a: { asset_type: AssetType }) => a.asset_type === "image";
 
 export function AssetLibrary() {
@@ -43,7 +45,8 @@ export function AssetLibrary() {
   const [collectionId, setCollectionId] = useState<string | null>(null); // null=ทั้งหมด, "none"=ไม่อยู่อัลบั้ม
   const [tag, setTag] = useState<string | null>(null);
   const [trash, setTrash] = useState(false);
-  const [source, setSource] = useState("upload");   // upload = อัปเอง · odoo_product = รูปสินค้านำเข้า
+  const [source, setSource] = useState("upload");   // upload = อัปเอง · artwork · odoo_product
+  const [artworkType, setArtworkType] = useState("");   // ฟิลเตอร์ชนิด artwork
 
   const [collections, setCollections] = useState<AssetCollection[]>([]);
   const [tags, setTags] = useState<AssetTag[]>([]);
@@ -52,6 +55,7 @@ export function AssetLibrary() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
+  const [artworkAddOpen, setArtworkAddOpen] = useState(false);
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
@@ -71,6 +75,7 @@ export function AssetLibrary() {
       if (tag) p.set("tag", tag);
       p.set("status", trash ? "trashed" : "active");
       p.set("source", source);
+      if (artworkType) p.set("artwork_type", artworkType);
       const res = await apiFetch(`/api/assets?${p.toString()}`);
       const j = await res.json();
       if (j.error) throw new Error(j.error);
@@ -78,7 +83,7 @@ export function AssetLibrary() {
       setTotal(j.total ?? 0);
     } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดคลังไม่สำเร็จ"); }
     finally { setLoading(false); }
-  }, [search, type, collectionId, tag, trash, source, toast]);
+  }, [search, type, collectionId, tag, trash, source, artworkType, toast]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -91,6 +96,7 @@ export function AssetLibrary() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void loadMeta(); }, [loadMeta]);
   useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
+  useEffect(() => { setArtworkType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด artwork
 
   // ── เลือกไฟล์ ──
   const toggleSel = (id: string) =>
@@ -147,23 +153,27 @@ export function AssetLibrary() {
             />
           </div>
           <button
-            onClick={() => setUploadOpen(true)}
+            onClick={() => source === "artwork" ? setArtworkAddOpen(true) : setUploadOpen(true)}
             className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 whitespace-nowrap"
-          >⬆ อัปโหลด</button>
+          >{source === "artwork" ? "🎨 เพิ่ม Artwork" : "⬆ อัปโหลด"}</button>
         </div>
       </div>
 
       {/* type filter + trash toggle */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
-        {TYPE_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setType(f.key)}
-            className={`h-8 px-3 text-[13px] rounded-lg border ${type === f.key
-              ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
-              : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
-          >{f.label}</button>
-        ))}
+        {source === "artwork"
+          ? [{ key: "", label: "ทั้งหมด" }, ...ARTWORK_TYPES.map((t) => ({ key: t, label: t }))].map((f) => (
+              <button key={f.key || "all"} onClick={() => setArtworkType(f.key)}
+                className={`h-8 px-3 text-[13px] rounded-lg border ${artworkType === f.key
+                  ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
+                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
+            ))
+          : TYPE_FILTERS.map((f) => (
+              <button key={f.key} onClick={() => setType(f.key)}
+                className={`h-8 px-3 text-[13px] rounded-lg border ${type === f.key
+                  ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
+                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
+            ))}
         <div className="flex-1" />
         <button
           onClick={() => setTrash((v) => !v)}
@@ -179,6 +189,7 @@ export function AssetLibrary() {
           <p className="text-[11px] font-medium text-slate-400 mb-1.5">ที่มา</p>
           <div className="flex flex-col gap-0.5 mb-4">
             <SideItem active={source === "upload"} onClick={() => setSource("upload")} label="รูปที่อัปเอง" icon="📤" />
+            <SideItem active={source === "artwork"} onClick={() => setSource("artwork")} label="Artwork" icon="🎨" />
             <SideItem active={source === "odoo_product"} onClick={() => setSource("odoo_product")} label="รูปสินค้า (Odoo)" icon="🛍️" />
           </div>
           <div className="flex items-center justify-between mb-1.5">
@@ -215,7 +226,10 @@ export function AssetLibrary() {
             <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
           ) : rows.length === 0 ? (
             <div className="text-center py-16 text-slate-400 text-sm">
-              {trash ? "ถังขยะว่าง" : "ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์"}
+              {trash ? "ถังขยะว่าง"
+                : source === "artwork" ? "ยังไม่มี Artwork — กด “เพิ่ม Artwork” เพื่อลงบัตรงานออกแบบ (รูปตัวอย่าง + path ไฟล์ต้นฉบับ)"
+                : source === "odoo_product" ? "ยังไม่มีรูปสินค้านำเข้า"
+                : "ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์"}
             </div>
           ) : (
             <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
@@ -246,6 +260,11 @@ export function AssetLibrary() {
           onClose={() => setUploadOpen(false)}
           onDone={async () => { setUploadOpen(false); await load(); await loadMeta(); }}
         />
+      )}
+      {artworkAddOpen && (
+        <ArtworkAddModal actor={actor}
+          onClose={() => setArtworkAddOpen(false)}
+          onDone={async () => { setArtworkAddOpen(false); await load(); await loadMeta(); }} />
       )}
       {detailId && (
         <DetailModal
@@ -453,6 +472,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
   const [collectionIds, setCollectionIds] = useState<string[]>([]);
   const [masterPath, setMasterPath] = useState("");
   const [masterUrl, setMasterUrl] = useState("");
+  const [artType, setArtType] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
   const [replacing, setReplacing] = useState(false);
@@ -464,7 +484,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
       if (j.error) throw new Error(j.error);
       const det = j.data as AssetDetail;
       setD(det); setTitle(det.title); setTagsStr(det.tags.join(", ")); setCollectionIds(det.collection_ids ?? []);
-      setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? "");
+      setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setArtType(det.artwork_type ?? "");
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
@@ -474,7 +494,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
     try {
       const res = await apiFetch(`/api/assets/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, tags: tagsStr.split(",").map((s) => s.trim()).filter(Boolean), collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl }),
+        body: JSON.stringify({ title, tags: tagsStr.split(",").map((s) => s.trim()).filter(Boolean), collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_type: artType }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
@@ -577,6 +597,16 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
               <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={trashed}
                 className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
             </label>
+
+            {d.source === "artwork" && (
+              <label className="block text-[12px] text-slate-500 mt-2">ชนิด artwork
+                <select value={artType} onChange={(e) => setArtType(e.target.value)} disabled={trashed}
+                  className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
+                  {artType && !ARTWORK_TYPES.includes(artType) && <option value={artType}>{artType}</option>}
+                  {ARTWORK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </label>
+            )}
 
             <div className="grid grid-cols-2 gap-3 mt-3">
               <div className="text-[12px] text-slate-500">อัลบั้ม <span className="text-[10px] text-slate-400">(เลือกได้หลายอัน)</span>
@@ -749,6 +779,105 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
           {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
+    </ERPModal>
+  );
+}
+
+// ── เพิ่ม Artwork ลงบัตร (รูปตัวอย่าง + path ต้นฉบับ + ชนิด + แท็ก จบในป๊อปอัปเดียว) ──
+function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [title, setTitle] = useState("");
+  const [artType, setArtType] = useState(ARTWORK_TYPES[0]);
+  const [masterPath, setMasterPath] = useState("");
+  const [masterUrl, setMasterUrl] = useState("");
+  const [tagsStr, setTagsStr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const pick = (f: File | null) => {
+    setFile(f);
+    setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
+    if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, ""));
+  };
+
+  const save = async () => {
+    if (!file) { toast.error("แนบรูปตัวอย่างก่อน (export JPG/PNG จากงานออกแบบ)"); return; }
+    if (!masterPath.trim()) { toast.error("ใส่ path ไฟล์ต้นฉบับบน NAS ก่อน"); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("source", "artwork");
+      fd.append("artwork_type", artType);
+      if (title.trim()) fd.append("title", title.trim());
+      fd.append("master_path", masterPath.trim());
+      if (masterUrl.trim()) fd.append("master_url", masterUrl.trim());
+      if (tagsStr.trim()) fd.append("tags", tagsStr.trim());
+      if (actor) fd.append("actor", actor);
+      if (file.type.startsWith("image/")) {
+        const dim = await new Promise<{ w: number; h: number } | null>((res) => {
+          const img = new Image(); const u = URL.createObjectURL(file);
+          img.onload = () => { res({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(u); };
+          img.onerror = () => { res(null); URL.revokeObjectURL(u); };
+          img.src = u;
+        });
+        if (dim) { fd.append("width", String(dim.w)); fd.append("height", String(dim.h)); }
+      }
+      const res = await apiFetch("/api/assets", { method: "POST", body: fd });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      toast.success("เพิ่ม Artwork ลงคลังแล้ว"); onDone();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} title="เพิ่ม Artwork ลงคลัง" size="lg"
+      footer={
+        <div className="flex items-center justify-between w-full">
+          <span className="text-[12px] text-slate-400">รูปตัวอย่างเล็กพอ — ไฟล์ใหญ่ .ai/.psd เก็บที่ NAS</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : "บันทึก"}</button>
+          </div>
+        </div>
+      }>
+      <div className="grid grid-cols-2 gap-3">
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pick(f); }}
+          onClick={() => inputRef.current?.click()}
+          className={`cursor-pointer rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}
+          style={{ minHeight: 150 }}>
+          {preview
+            ? <img src={preview} alt="" className="max-w-full max-h-44 object-contain" />
+            : <div className="text-center py-6"><div className="text-3xl">🎨</div><p className="text-[12px] text-slate-500 mt-1">วางรูปตัวอย่าง / คลิกเลือก</p></div>}
+          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); }} />
+        </div>
+        <div className="flex flex-col gap-2">
+          <label className="text-[12px] text-slate-500">ชื่อ
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ลายดอกไม้ PIX32"
+              className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
+          <label className="text-[12px] text-slate-500">ชนิด
+            <select value={artType} onChange={(e) => setArtType(e.target.value)}
+              className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+              {ARTWORK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select></label>
+          <label className="text-[12px] text-slate-500">แท็ก (คั่นด้วย ,)
+            <input value={tagsStr} onChange={(e) => setTagsStr(e.target.value)} placeholder="แบรนด์, แคมเปญ"
+              className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
+        </div>
+      </div>
+      <label className="block text-[12px] text-slate-500 mt-3">ที่อยู่ไฟล์ต้นฉบับ (NAS) *
+        <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)}
+          placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
+          className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
+      <label className="block text-[12px] text-slate-500 mt-2">ลิงก์เว็บ NAS (เปิดจากนอกออฟฟิศ — ไม่ใส่ก็ได้)
+        <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="ลิงก์ Synology Drive"
+          className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
     </ERPModal>
   );
 }
