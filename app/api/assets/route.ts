@@ -30,7 +30,8 @@ export async function GET(request: NextRequest) {
   const collectionId = sp.get("collection_id");
   const tag          = sp.get("tag");
   const status       = sp.get("status") ?? "active";
-  const source       = sp.get("source") ?? "upload";   // upload | odoo_product | all
+  const source       = sp.get("source") ?? "upload";   // upload | odoo_product | artwork | all
+  const artworkType  = sp.get("artwork_type");
   const limit  = Math.min(Number(sp.get("limit") ?? 60) || 60, 200);
   const offset = Number(sp.get("offset") ?? 0) || 0;
 
@@ -58,6 +59,7 @@ export async function GET(request: NextRequest) {
 
   let q = admin.from("assets").select("*", { count: "exact" }).eq("status", status);
   if (source !== "all") q = q.eq("source", source);
+  if (artworkType) q = q.eq("artwork_type", artworkType);
   if (type) q = q.eq("asset_type", type);
   if (collectionId === "none") q = q.is("collection_id", null);
   if (collAssetIds) q = q.in("id", collAssetIds);
@@ -106,14 +108,21 @@ export async function POST(request: NextRequest) {
   const heightRaw    = form.get("height") ? Number(form.get("height")) : NaN;
   const tagsRaw      = String(form.get("tags") ?? "").trim();
   const tagNames     = tagsRaw ? tagsRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  const source       = String(form.get("source") ?? "upload").trim() || "upload";
+  const artworkType  = form.get("artwork_type") ? String(form.get("artwork_type")) : null;
+  const masterPath   = form.get("master_path") ? String(form.get("master_path")) : null;
+  const masterUrl    = form.get("master_url")  ? String(form.get("master_url"))  : null;
 
   const admin  = supabaseAdmin();
   const buffer = await file.arrayBuffer();
   const checksum = await sha256Hex(buffer);
 
   // กันไฟล์ซ้ำ — ถ้าไฟล์เดิม (เนื้อหาเดียวกัน) ยังอยู่ในคลัง ใช้ตัวเดิม ไม่เก็บซ้ำ
-  const { data: dup } = await admin.from("assets").select("*")
-    .eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
+  // (ยกเว้น artwork = บัตรแยกเสมอ แม้รูปตัวอย่างซ้ำ เพราะ path/ชนิดต่างกัน)
+  const dupRes = source === "artwork"
+    ? { data: null as Record<string, unknown> | null }
+    : await admin.from("assets").select("*").eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
+  const dup = dupRes.data;
   if (dup) {
     if (tagNames.length) await attachTags(admin, dup.id as string, tagNames);
     if (collectionId) await admin.from("asset_collection_map").upsert({ asset_id: dup.id as string, collection_id: collectionId }, { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
@@ -138,6 +147,7 @@ export async function POST(request: NextRequest) {
     width:  Number.isFinite(widthRaw)  ? widthRaw  : null,
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
+    source, artwork_type: artworkType, master_path: masterPath, master_url: masterUrl,
   }).select("*").single();
   if (error || !ins)
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
