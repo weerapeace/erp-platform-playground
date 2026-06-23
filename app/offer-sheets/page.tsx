@@ -19,6 +19,7 @@ import {
   CustomerPicker, type CustomerPickerValue,
 } from "@/components/pickers";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
+import { AssetPicker } from "@/components/asset-picker";
 import { LineColumnsManager, visibleColumns, type LineColumnConfig } from "@/components/line-item-columns";
 import { OFFER_ITEM_COLUMNS, DEFAULT_OFFER_COLS, offerColAlign, offerGroupValue } from "@/lib/offer-columns";
 import { resolveOfferLayoutConfig } from "@/lib/offer-layout";
@@ -217,6 +218,7 @@ function OfferEditor({ id, canEdit, onBack }: {
   const [status, setStatus] = useState("draft");
   const [items, setItems] = useState<OfferItem[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [assetPickerFor, setAssetPickerFor] = useState<number | null>(null);  // เลือกรูปจากคลังกลางให้รายการที่ i
   const [shareToken, setShareToken] = useState<string | null>(null);
   const [offerNo, setOfferNo] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -342,11 +344,19 @@ function OfferEditor({ id, canEdit, onBack }: {
   // เนื้อหาในแต่ละช่องตามคอลัมน์
   const cellContent = (key: string, it: OfferItem, i: number) => {
     switch (key) {
-      case "image":
-        return imgUrl(it.image_r2_key)
+      case "image": {
+        const imgEl = imgUrl(it.image_r2_key)
           ? <img src={imgUrl(it.image_r2_key)!} alt="" className="w-10 h-10 rounded-lg object-cover border border-pink-100"
               onError={(e) => { const t = e.currentTarget as HTMLImageElement; t.onerror = null; t.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='40'><rect width='40' height='40' rx='8' fill='%23fce7f3'/><text x='20' y='26' font-size='18' text-anchor='middle'>🖼️</text></svg>"; }} />
           : <div className="w-10 h-10 rounded-lg bg-pink-50 flex items-center justify-center text-pink-200">🖼️</div>;
+        return canEdit
+          ? <button type="button" onClick={() => setAssetPickerFor(i)} title="เปลี่ยนรูปจากคลังไฟล์กลาง"
+              className="relative block rounded-lg overflow-hidden group/img">
+              {imgEl}
+              <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover/img:bg-black/35 text-white opacity-0 group-hover/img:opacity-100 transition text-xs">📁</span>
+            </button>
+          : imgEl;
+      }
       case "product":
         return (
           <div className="min-w-0">
@@ -405,6 +415,19 @@ function OfferEditor({ id, canEdit, onBack }: {
     const j = await res.json();
     setSaving(false);
     if (j.error) { alert("บันทึกไม่สำเร็จ: " + j.error); return; }
+
+    // บันทึก "ใบนี้ใช้รูปจากคลังกลางตัวไหนบ้าง" (กันลบรูปที่ยังถูกใช้) — best-effort ไม่กระทบการบันทึกหลัก
+    try {
+      const savedId = id ?? j.data?.id ?? j.id ?? null;
+      if (savedId) {
+        const r2keys = items.map((it) => it.image_r2_key).filter((k): k is string => !!k && k.startsWith("library/"));
+        await apiFetch("/api/assets/usages", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ module: "offer_sheet", record_id: savedId, record_label: title || offerNo || "ใบเสนอสินค้า", field: "item_image", asset_ids: [], r2_keys: r2keys }),
+        });
+      }
+    } catch { /* ignore */ }
+
     onBack();
   };
 
@@ -518,6 +541,19 @@ function OfferEditor({ id, canEdit, onBack }: {
           onConfirm={addSkus}
           salesOnly
           excludeIds={items.map((it) => it.sku_id).filter((x): x is string => !!x)}
+        />
+
+        {/* เลือกรูปจากคลังไฟล์กลางให้รายการ */}
+        <AssetPicker
+          open={assetPickerFor !== null}
+          onClose={() => setAssetPickerFor(null)}
+          typeFilter="image"
+          title="เลือกรูปจากคลังไฟล์กลาง"
+          contextLabel={title || "ใบเสนอสินค้า"}
+          onSelect={(assets) => {
+            if (assets[0] && assetPickerFor !== null) patchItem(assetPickerFor, { image_r2_key: assets[0].r2_key });
+            setAssetPickerFor(null);
+          }}
         />
 
         {items.length === 0 ? (
