@@ -451,6 +451,8 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
   const [title, setTitle] = useState("");
   const [tagsStr, setTagsStr] = useState("");
   const [collectionIds, setCollectionIds] = useState<string[]>([]);
+  const [masterPath, setMasterPath] = useState("");
+  const [masterUrl, setMasterUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
   const [replacing, setReplacing] = useState(false);
@@ -462,6 +464,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
       if (j.error) throw new Error(j.error);
       const det = j.data as AssetDetail;
       setD(det); setTitle(det.title); setTagsStr(det.tags.join(", ")); setCollectionIds(det.collection_ids ?? []);
+      setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? "");
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
@@ -471,7 +474,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
     try {
       const res = await apiFetch(`/api/assets/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, tags: tagsStr.split(",").map((s) => s.trim()).filter(Boolean), collection_ids: collectionIds }),
+        body: JSON.stringify({ title, tags: tagsStr.split(",").map((s) => s.trim()).filter(Boolean), collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
@@ -503,6 +506,14 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
     navigator.clipboard?.writeText(window.location.origin + d.url).then(
       () => toast.success("คัดลอกลิงก์แล้ว"), () => toast.error("คัดลอกไม่สำเร็จ"));
   };
+  const copyPath = () => {
+    if (!masterPath) return;
+    navigator.clipboard?.writeText(masterPath).then(
+      () => toast.success("คัดลอก path แล้ว — เปิด File Explorer แล้ววาง (Ctrl+V) ที่ช่องที่อยู่"),
+      () => toast.error("คัดลอกไม่สำเร็จ"));
+  };
+  // เปิดโฟลเดอร์ผ่าน custom protocol (ต้องติดตั้ง "ตัวเปิดโฟลเดอร์" ครั้งเดียว/เครื่อง) — ถ้ายังไม่ติดตั้งจะไม่เกิดอะไร ใช้ปุ่มคัดลอกแทน
+  const openFolder = () => { if (masterPath) window.location.href = "erpfolder:" + encodeURIComponent(masterPath); };
 
   // แทนที่ไฟล์ — เขียนทับ key เดิม → ทุกที่ที่ใช้รูปนี้เห็นรูปใหม่ทันที
   const doReplace = async (file: File) => {
@@ -600,6 +611,21 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
                 <Meta label="วันที่อัป" value={new Date(d.created_at).toLocaleString("th-TH")} />
               </tbody>
             </table>
+
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📁 ไฟล์ต้นฉบับ (NAS) <span className="text-[10px] text-slate-400 font-normal">— คลังเก็บแค่ “ที่อยู่” ไม่ได้เก็บไฟล์ใหญ่</span></p>
+              <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)} disabled={trashed}
+                placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
+                className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg font-mono disabled:bg-slate-50" />
+              <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                <button onClick={copyPath} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40">📋 คัดลอก path</button>
+                <button onClick={openFolder} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100 disabled:opacity-40">📂 เปิดโฟลเดอร์</button>
+                {masterUrl && <a href={masterUrl} target="_blank" rel="noreferrer" className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 flex items-center">🌐 เปิดบนเว็บ NAS</a>}
+              </div>
+              <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} disabled={trashed}
+                placeholder="ลิงก์ Synology Drive (เปิดจากนอกออฟฟิศ) — ไม่ใส่ก็ได้"
+                className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg mt-1.5 disabled:bg-slate-50" />
+            </div>
 
             <UsageList usages={d.usages} />
           </div>

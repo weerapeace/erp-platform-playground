@@ -42,6 +42,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   let body: {
     title?: string; description?: string | null; collection_id?: string | null;
     collection_ids?: string[]; tags?: string[]; restore?: boolean;
+    master_path?: string | null; master_url?: string | null;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -60,6 +61,8 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   if (body.title !== undefined)         patch.title = String(body.title).trim();
   if (body.description !== undefined)   patch.description = body.description;
   if (body.collection_id !== undefined) patch.collection_id = body.collection_id || null;
+  if (body.master_path !== undefined)   patch.master_path = body.master_path || null;
+  if (body.master_url !== undefined)    patch.master_url = body.master_url || null;
 
   const { error } = await admin.from("assets").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
