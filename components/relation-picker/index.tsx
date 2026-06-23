@@ -67,6 +67,9 @@ export function RelationPicker({
   const [isMobile, setIsMobile] = useState(false);  // <640px → dropdown เต็มจอ (Portal)
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef     = useRef<HTMLInputElement>(null);
+  const panelRef     = useRef<HTMLDivElement>(null);   // dropdown ที่ลอยออกไป (portal) — ใช้เช็คคลิกนอก
+  // ตำแหน่ง dropdown เดสก์ท็อป (วัดจากปุ่ม) — ลอยแบบ fixed ทับโมดอล กันโดน overflow ตัด
+  const [menuRect, setMenuRect] = useState<{ left: number; top: number; bottom: number; width: number } | null>(null);
   useEffect(() => {
     setMounted(true);
     const mq = window.matchMedia("(max-width: 639px)");
@@ -171,11 +174,27 @@ export function RelationPicker({
     if (open) loadOptions(search, value);
   }, [open, search, value, loadOptions]);
 
+  // ---- วัดตำแหน่งปุ่มเพื่อวาง dropdown แบบลอย (fixed) บนเดสก์ท็อป + ตามเมื่อ scroll/resize ----
+  const measureMenu = useCallback(() => {
+    const r = containerRef.current?.getBoundingClientRect();
+    if (r) setMenuRect({ left: r.left, top: r.top, bottom: r.bottom, width: r.width });
+  }, []);
+  useEffect(() => {
+    if (!open || isMobile) return;
+    measureMenu();
+    const on = () => measureMenu();
+    window.addEventListener("scroll", on, true);   // capture: จับ scroll ของกรอบ/โมดอลด้วย
+    window.addEventListener("resize", on);
+    return () => { window.removeEventListener("scroll", on, true); window.removeEventListener("resize", on); };
+  }, [open, isMobile, measureMenu]);
+
   // ---- click outside (เฉพาะ desktop dropdown — มือถือเต็มจอใช้ backdrop ปิด) ----
+  // dropdown ลอยออกไปนอก container (portal) → ต้องเช็ค panelRef ด้วย ไม่งั้นคลิกในรายการจะปิดทันที
   useEffect(() => {
     if (!open || isMobile) return;
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const t = e.target as Node;
+      if (containerRef.current && !containerRef.current.contains(t) && !panelRef.current?.contains(t)) {
         setOpen(false);
         setSearch("");
       }
@@ -353,12 +372,24 @@ export function RelationPicker({
             </div>,
             document.body
           )
-        : (
-            // desktop: dropdown ลอยใต้ช่อง
-            <div className="absolute left-0 right-0 top-full mt-1 max-h-80 z-50 bg-white rounded-lg border border-slate-200 shadow-lg flex flex-col overflow-hidden">
-              {panelBody}
-            </div>
-          )
+        : mounted && menuRect
+          ? createPortal(
+              // desktop: dropdown "ลอยแบบ fixed" (portal) ทับโมดอล → ไม่โดน overflow ตัด ไม่ต้องเลื่อนดู
+              (() => {
+                const spaceBelow = window.innerHeight - menuRect.bottom;
+                const openUp = spaceBelow < 300 && menuRect.top > spaceBelow;   // ที่ว่างด้านล่างน้อย → กางขึ้น
+                const style = openUp
+                  ? { position: "fixed" as const, left: menuRect.left, width: menuRect.width, bottom: window.innerHeight - menuRect.top + 4 }
+                  : { position: "fixed" as const, left: menuRect.left, width: menuRect.width, top: menuRect.bottom + 4 };
+                return (
+                  <div ref={panelRef} style={style} className="max-h-80 z-[9999] bg-white rounded-lg border border-slate-200 shadow-xl flex flex-col overflow-hidden">
+                    {panelBody}
+                  </div>
+                );
+              })(),
+              document.body
+            )
+          : null
       )}
 
       {/* ฟอร์มสร้างใหม่เต็ม (popup) — เมื่อ relation ชี้ไป module จริง */}
