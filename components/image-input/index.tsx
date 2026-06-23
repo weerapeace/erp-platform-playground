@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { withImageWidth } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
 
@@ -362,7 +363,7 @@ export function HoverZoomImage({ src, alt = "", className = "", previewSize = 32
   return (
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={alt} className={className} loading="lazy" decoding="async"
+      <img src={withImageWidth(src, 512) ?? src} alt={alt} className={className} loading="lazy" decoding="async"
         onMouseEnter={canHover ? (e) => { setHover(true); setPos({ x: e.clientX, y: e.clientY }); } : undefined}
         onMouseMove={canHover ? (e) => setPos({ x: e.clientX, y: e.clientY }) : undefined}
         onMouseLeave={canHover ? () => setHover(false) : undefined} />
@@ -370,7 +371,7 @@ export function HoverZoomImage({ src, alt = "", className = "", previewSize = 32
         <div className="fixed z-[120] pointer-events-none rounded-lg shadow-2xl border-2 border-white bg-white overflow-hidden"
           style={{ left: px, top: py, width: previewSize, height: previewSize }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={src} alt="" className="w-full h-full object-contain bg-slate-50" />
+          <img src={withImageWidth(src, previewSize * 2) ?? src} alt="" className="w-full h-full object-contain bg-slate-50" />
         </div>,
         document.body,
       )}
