@@ -446,6 +446,8 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
   const [collectionId, setCollectionId] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
+  const [replacing, setReplacing] = useState(false);
+  const replaceRef = useRef<HTMLInputElement>(null);
 
   const loadDetail = useCallback(async () => {
     try {
@@ -495,6 +497,29 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
       () => toast.success("คัดลอกลิงก์แล้ว"), () => toast.error("คัดลอกไม่สำเร็จ"));
   };
 
+  // แทนที่ไฟล์ — เขียนทับ key เดิม → ทุกที่ที่ใช้รูปนี้เห็นรูปใหม่ทันที
+  const doReplace = async (file: File) => {
+    setReplacing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (actor) fd.append("actor", actor);
+      if (file.type.startsWith("image/")) {
+        const dim = await new Promise<{ w: number; h: number } | null>((res) => {
+          const img = new Image(); const u = URL.createObjectURL(file);
+          img.onload = () => { res({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(u); };
+          img.onerror = () => { res(null); URL.revokeObjectURL(u); };
+          img.src = u;
+        });
+        if (dim) { fd.append("width", String(dim.w)); fd.append("height", String(dim.h)); }
+      }
+      const res = await apiFetch(`/api/assets/${id}/replace`, { method: "POST", body: fd });
+      const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "แทนที่ไม่สำเร็จ");
+      toast.success("แทนที่ไฟล์แล้ว"); await loadDetail(); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แทนที่ไม่สำเร็จ"); }
+    finally { setReplacing(false); }
+  };
+
   const trashed = d?.status === "trashed";
 
   return (
@@ -504,6 +529,13 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
           <div className="flex gap-2">
             {d && <a href={d.url} target="_blank" rel="noreferrer" className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 flex items-center">⬇ ดาวน์โหลด</a>}
             <button onClick={copyLink} className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">🔗 คัดลอกลิงก์</button>
+            {!trashed && (
+              <button onClick={() => replaceRef.current?.click()} disabled={replacing}
+                className="h-9 px-3 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">
+                {replacing ? "กำลังแทนที่…" : "🔄 แทนที่ไฟล์"}</button>
+            )}
+            <input ref={replaceRef} type="file" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void doReplace(f); e.currentTarget.value = ""; }} />
           </div>
           <div className="flex gap-2">
             {trashed
