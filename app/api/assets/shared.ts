@@ -33,6 +33,7 @@ export type AssetRow = {
   master_url: string | null;    // ลิงก์เว็บ NAS (Synology) เปิดจากนอกออฟฟิศ
   source: string;               // upload | odoo_product | artwork
   artwork_type: string | null;  // โลโก้/ลายพิมพ์/แพทเทิร์น/ม็อกอัป/... (เฉพาะ artwork)
+  keywords: string | null;      // คำค้นเพิ่มเติม (คำพ้อง/ชื่ออื่น) — รวมเข้า search
   tags: string[];
   usage_count: number;
 };
@@ -55,7 +56,7 @@ type AssetDbRow = {
   collection_id: string | null; status: string; trashed_at: string | null;
   uploaded_by: string | null; created_at: string;
   master_path: string | null; master_url: string | null;
-  source: string; artwork_type: string | null;
+  source: string; artwork_type: string | null; keywords: string | null;
 };
 
 export const urlFor = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -87,6 +88,7 @@ export function buildRow(r: AssetDbRow, tags: string[], usageCount: number): Ass
     master_url: r.master_url,
     source: r.source,
     artwork_type: r.artwork_type,
+    keywords: r.keywords,
     tags,
     usage_count: usageCount,
   };

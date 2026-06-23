@@ -28,7 +28,7 @@ const TYPE_FILTERS: { key: string; label: string }[] = [
   { key: "video", label: "🎬 วิดีโอ" },
 ];
 
-const ARTWORK_TYPES = ["โลโก้", "ลายพิมพ์", "แพทเทิร์น", "ม็อกอัป", "ภาพประกอบ", "อื่นๆ"];
+type LookupItem = { id: string; name: string };   // ชนิด artwork จาก lookup กลาง (erp_lookups type=artwork_type)
 
 const isImage = (a: { asset_type: AssetType }) => a.asset_type === "image";
 
@@ -47,6 +47,7 @@ export function AssetLibrary() {
   const [trash, setTrash] = useState(false);
   const [source, setSource] = useState("upload");   // upload = อัปเอง · artwork · odoo_product
   const [artworkType, setArtworkType] = useState("");   // ฟิลเตอร์ชนิด artwork
+  const [artTypes, setArtTypes] = useState<LookupItem[]>([]);   // รายการชนิด (lookup)
 
   const [collections, setCollections] = useState<AssetCollection[]>([]);
   const [tags, setTags] = useState<AssetTag[]>([]);
@@ -56,6 +57,7 @@ export function AssetLibrary() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
   const [artworkAddOpen, setArtworkAddOpen] = useState(false);
+  const [manageTypesOpen, setManageTypesOpen] = useState(false);
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
@@ -87,9 +89,12 @@ export function AssetLibrary() {
 
   const loadMeta = useCallback(async () => {
     try {
-      const [c, t] = await Promise.all([apiFetch("/api/assets/collections"), apiFetch("/api/assets/tags")]);
+      const [c, t, a] = await Promise.all([
+        apiFetch("/api/assets/collections"), apiFetch("/api/assets/tags"), apiFetch("/api/lookups?type=artwork_type"),
+      ]);
       setCollections((await c.json()).data ?? []);
       setTags((await t.json()).data ?? []);
+      setArtTypes(((await a.json()).data ?? []).map((r: { id: string; name: string }) => ({ id: r.id, name: r.name })));
     } catch { /* ignore */ }
   }, []);
 
@@ -162,12 +167,16 @@ export function AssetLibrary() {
       {/* type filter + trash toggle */}
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {source === "artwork"
-          ? [{ key: "", label: "ทั้งหมด" }, ...ARTWORK_TYPES.map((t) => ({ key: t, label: t }))].map((f) => (
-              <button key={f.key || "all"} onClick={() => setArtworkType(f.key)}
-                className={`h-8 px-3 text-[13px] rounded-lg border ${artworkType === f.key
-                  ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
-                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
-            ))
+          ? <>
+              {[{ key: "", label: "ทั้งหมด" }, ...artTypes.map((t) => ({ key: t.name, label: t.name }))].map((f) => (
+                <button key={f.key || "all"} onClick={() => setArtworkType(f.key)}
+                  className={`h-8 px-3 text-[13px] rounded-lg border ${artworkType === f.key
+                    ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium"
+                    : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
+              ))}
+              <button onClick={() => setManageTypesOpen(true)}
+                className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">⚙️ จัดการชนิด</button>
+            </>
           : TYPE_FILTERS.map((f) => (
               <button key={f.key} onClick={() => setType(f.key)}
                 className={`h-8 px-3 text-[13px] rounded-lg border ${type === f.key
@@ -262,13 +271,17 @@ export function AssetLibrary() {
         />
       )}
       {artworkAddOpen && (
-        <ArtworkAddModal actor={actor}
+        <ArtworkAddModal actor={actor} artTypes={artTypes}
           onClose={() => setArtworkAddOpen(false)}
           onDone={async () => { setArtworkAddOpen(false); await load(); await loadMeta(); }} />
       )}
+      {manageTypesOpen && (
+        <ManageTypesModal types={artTypes} onClose={() => setManageTypesOpen(false)}
+          onChanged={async () => { await loadMeta(); }} />
+      )}
       {detailId && (
         <DetailModal
-          id={detailId} actor={actor} collections={collections}
+          id={detailId} actor={actor} collections={collections} artTypes={artTypes}
           onClose={() => setDetailId(null)}
           onChanged={async () => { await load(); await loadMeta(); }}
         />
@@ -462,13 +475,14 @@ function UploadModal({ actor, collections, onClose, onDone }: {
 }
 
 // ── รายละเอียดไฟล์ ──
-function DetailModal({ id, actor, collections, onClose, onChanged }: {
-  id: string; actor: string | null; collections: AssetCollection[]; onClose: () => void; onChanged: () => void;
+function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
+  id: string; actor: string | null; collections: AssetCollection[]; artTypes: LookupItem[]; onClose: () => void; onChanged: () => void;
 }) {
   const toast = useToast();
   const [d, setD] = useState<AssetDetail | null>(null);
   const [title, setTitle] = useState("");
-  const [tagsStr, setTagsStr] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState("");
   const [collectionIds, setCollectionIds] = useState<string[]>([]);
   const [masterPath, setMasterPath] = useState("");
   const [masterUrl, setMasterUrl] = useState("");
@@ -483,8 +497,8 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
       const res = await apiFetch(`/api/assets/${id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
       const det = j.data as AssetDetail;
-      setD(det); setTitle(det.title); setTagsStr(det.tags.join(", ")); setCollectionIds(det.collection_ids ?? []);
-      setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setArtType(det.artwork_type ?? "");
+      setD(det); setTitle(det.title); setTags(det.tags ?? []); setCollectionIds(det.collection_ids ?? []);
+      setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setArtType(det.artwork_type ?? ""); setKeywords(det.keywords ?? "");
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
@@ -494,7 +508,7 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
     try {
       const res = await apiFetch(`/api/assets/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, tags: tagsStr.split(",").map((s) => s.trim()).filter(Boolean), collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_type: artType }),
+        body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_type: artType, keywords }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
@@ -602,8 +616,8 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
               <label className="block text-[12px] text-slate-500 mt-2">ชนิด artwork
                 <select value={artType} onChange={(e) => setArtType(e.target.value)} disabled={trashed}
                   className="mt-1 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
-                  {artType && !ARTWORK_TYPES.includes(artType) && <option value={artType}>{artType}</option>}
-                  {ARTWORK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  {artType && !artTypes.some((t) => t.name === artType) && <option value={artType}>{artType}</option>}
+                  {artTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
                 </select>
               </label>
             )}
@@ -626,11 +640,15 @@ function DetailModal({ id, actor, collections, onClose, onChanged }: {
                   })}
                 </div>
               </div>
-              <label className="text-[12px] text-slate-500">แท็ก (คั่นด้วย ,)
-                <input value={tagsStr} onChange={(e) => setTagsStr(e.target.value)} disabled={trashed}
-                  className="mt-1 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
-              </label>
+              <div className="text-[12px] text-slate-500">แท็ก
+                <div className="mt-1">{trashed ? <span className="text-[11px] text-slate-400">{tags.join(", ") || "—"}</span> : <TagChips value={tags} onChange={setTags} />}</div>
+              </div>
             </div>
+
+            <label className="block text-[12px] text-slate-500 mt-3">คำค้นเพิ่มเติม (keyword)
+              <input value={keywords} onChange={(e) => setKeywords(e.target.value)} disabled={trashed}
+                placeholder="คำพ้อง/ชื่ออื่น เช่น flower ดอกไม้ summer"
+                className="mt-1 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" /></label>
 
             <table className="w-full text-[12px] mt-3">
               <tbody>
@@ -784,15 +802,16 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
 }
 
 // ── เพิ่ม Artwork ลงบัตร (รูปตัวอย่าง + path ต้นฉบับ + ชนิด + แท็ก จบในป๊อปอัปเดียว) ──
-function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onClose: () => void; onDone: () => void }) {
+function ArtworkAddModal({ actor, artTypes, onClose, onDone }: { actor: string | null; artTypes: LookupItem[]; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [title, setTitle] = useState("");
-  const [artType, setArtType] = useState(ARTWORK_TYPES[0]);
+  const [artType, setArtType] = useState(artTypes[0]?.name ?? "");
   const [masterPath, setMasterPath] = useState("");
   const [masterUrl, setMasterUrl] = useState("");
-  const [tagsStr, setTagsStr] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -813,9 +832,10 @@ function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onC
       fd.append("source", "artwork");
       fd.append("artwork_type", artType);
       if (title.trim()) fd.append("title", title.trim());
-      fd.append("master_path", masterPath.trim());
+      if (masterPath.trim()) fd.append("master_path", masterPath.trim());
       if (masterUrl.trim()) fd.append("master_url", masterUrl.trim());
-      if (tagsStr.trim()) fd.append("tags", tagsStr.trim());
+      if (keywords.trim()) fd.append("keywords", keywords.trim());
+      if (tags.length) fd.append("tags", tags.join(","));
       if (actor) fd.append("actor", actor);
       if (file.type.startsWith("image/")) {
         const dim = await new Promise<{ w: number; h: number } | null>((res) => {
@@ -846,11 +866,13 @@ function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onC
       }>
       <div className="grid grid-cols-2 gap-3">
         <div
+          tabIndex={0}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f) pick(f); }}
+          onPaste={(e) => { const f = Array.from(e.clipboardData?.items ?? []).map((i) => i.type.startsWith("image/") ? i.getAsFile() : null).find(Boolean); if (f) { e.preventDefault(); pick(f); } }}
           onClick={() => inputRef.current?.click()}
-          className={`cursor-pointer rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}
+          className={`cursor-pointer rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden outline-none focus:border-indigo-400 ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}
           style={{ minHeight: 150 }}>
           {preview
             ? <img src={preview} alt="" className="max-w-full max-h-44 object-contain" />
@@ -864,11 +886,11 @@ function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onC
           <label className="text-[12px] text-slate-500">ชนิด
             <select value={artType} onChange={(e) => setArtType(e.target.value)}
               className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-              {ARTWORK_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {artType && !artTypes.some((t) => t.name === artType) && <option value={artType}>{artType}</option>}
+              {artTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
             </select></label>
-          <label className="text-[12px] text-slate-500">แท็ก (คั่นด้วย ,)
-            <input value={tagsStr} onChange={(e) => setTagsStr(e.target.value)} placeholder="แบรนด์, แคมเปญ"
-              className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
+          <div className="text-[12px] text-slate-500">แท็ก
+            <div className="mt-0.5"><TagChips value={tags} onChange={setTags} /></div></div>
         </div>
       </div>
       <p className="text-[11px] text-slate-400 mt-3 mb-1">ที่อยู่ไฟล์ต้นฉบับ — ใส่อย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์ Google Drive)</p>
@@ -879,6 +901,108 @@ function ArtworkAddModal({ actor, onClose, onDone }: { actor: string | null; onC
       <label className="block text-[12px] text-slate-500 mt-2">ลิงก์ Google Drive / Synology (เปิดได้ทุกที่)
         <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="https://drive.google.com/…  หรือ  ลิงก์ Synology Drive"
           className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
+      <label className="block text-[12px] text-slate-500 mt-2">คำค้นเพิ่มเติม (keyword) <span className="text-[10px] text-slate-400">— คำพ้อง/ชื่ออื่น พิมพ์แล้วเจอ</span>
+        <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="เช่น flower ดอกไม้ summer ฤดูร้อน"
+          className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
+    </ERPModal>
+  );
+}
+
+// ── ตัวเลือกแท็กแบบ chips (m2m) — เลือกของเดิม + เพิ่มใหม่ ──
+function TagChips({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [all, setAll] = useState<string[]>([]);
+  const [input, setInput] = useState("");
+  useEffect(() => {
+    apiFetch("/api/assets/tags").then((r) => r.json())
+      .then((j) => setAll(((j.data ?? []) as { name: string }[]).map((t) => t.name))).catch(() => {});
+  }, []);
+  const add = (name: string) => { const n = name.trim(); if (n && !value.includes(n)) onChange([...value, n]); setInput(""); };
+  const remove = (name: string) => onChange(value.filter((x) => x !== name));
+  const suggest = all.filter((t) => !value.includes(t) && (!input || t.toLowerCase().includes(input.toLowerCase()))).slice(0, 12);
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5 mb-1">
+        {value.map((t) => (
+          <span key={t} className="text-[11px] pl-2 pr-1 py-0.5 rounded-full bg-indigo-600 text-white inline-flex items-center gap-1">
+            {t}<button type="button" onClick={() => remove(t)} className="hover:bg-white/25 rounded-full w-4 h-4 leading-none flex items-center justify-center">✕</button>
+          </span>
+        ))}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่มีแท็ก</span>}
+      </div>
+      <input value={input} onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(input); } }}
+        placeholder="พิมพ์แท็ก + Enter / เลือกจากด้านล่าง"
+        className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg" />
+      {suggest.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {suggest.map((t) => (
+            <button key={t} type="button" onClick={() => add(t)}
+              className="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-600 hover:bg-slate-100">+ {t}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── จัดการชนิด Artwork (lookup กลาง: เพิ่ม/แก้/ลบ) ──
+function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; onClose: () => void; onChanged: () => void }) {
+  const toast = useToast();
+  const [items, setItems] = useState<LookupItem[]>(types);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const reload = async () => {
+    try {
+      const r = await apiFetch("/api/lookups?type=artwork_type"); const j = await r.json();
+      setItems(((j.data ?? []) as { id: string; name: string }[]).map((x) => ({ id: x.id, name: x.name })));
+    } catch { /* ignore */ }
+    onChanged();
+  };
+  const add = async () => {
+    const n = newName.trim(); if (!n) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch("/api/lookups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lookup_type: "artwork_type", name: n }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setNewName(""); await reload(); toast.success("เพิ่มชนิดแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); } finally { setBusy(false); }
+  };
+  const rename = async (id: string, name: string) => {
+    const n = name.trim(); if (!n) return;
+    try {
+      const r = await apiFetch(`/api/lookups/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: n }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error); await reload();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ไม่สำเร็จ"); }
+  };
+  const del = async (id: string) => {
+    try {
+      const r = await apiFetch(`/api/lookups/${id}`, { method: "DELETE" });
+      const j = await r.json().catch(() => ({})); if (j.error) throw new Error(j.error);
+      await reload(); toast.success("ลบแล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} title="จัดการชนิด Artwork" size="sm"
+      footer={<div className="flex justify-end w-full"><button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button></div>}>
+      <div className="flex flex-col gap-1.5 mb-3">
+        {items.map((it) => (
+          <div key={it.id} className="flex items-center gap-2">
+            <input defaultValue={it.name}
+              onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.name) void rename(it.id, v); }}
+              className="flex-1 h-8 px-2 text-[13px] border border-slate-200 rounded-lg" />
+            <button onClick={() => del(it.id)} className="h-8 px-2.5 text-[12px] text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50">ลบ</button>
+          </div>
+        ))}
+        {items.length === 0 && <p className="text-[12px] text-slate-400">ยังไม่มีชนิด — เพิ่มด้านล่าง</p>}
+      </div>
+      <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder="ชนิดใหม่ เช่น แบนเนอร์"
+          className="flex-1 h-8 px-2 text-[13px] border border-slate-200 rounded-lg" />
+        <button onClick={add} disabled={busy || !newName.trim()} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">＋ เพิ่ม</button>
+      </div>
+      <p className="text-[10px] text-slate-400 mt-2">แก้ชื่อ: พิมพ์ทับในช่องแล้วคลิกที่อื่นเพื่อบันทึก · ลบแล้วงานเดิมยังเก็บชื่อชนิดไว้</p>
     </ERPModal>
   );
 }

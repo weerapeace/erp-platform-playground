@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
   if (search) {
     for (const raw of search.split(/\s+/)) {
       const t = sanitizeToken(raw);
-      if (t) q = q.or(`title.ilike.%${t}%,file_name.ilike.%${t}%,description.ilike.%${t}%`);
+      if (t) q = q.or(`title.ilike.%${t}%,file_name.ilike.%${t}%,description.ilike.%${t}%,keywords.ilike.%${t}%`);
     }
   }
   q = q.order("created_at", { ascending: false }).range(offset, offset + limit - 1);
@@ -112,6 +112,7 @@ export async function POST(request: NextRequest) {
   const artworkType  = form.get("artwork_type") ? String(form.get("artwork_type")) : null;
   const masterPath   = form.get("master_path") ? String(form.get("master_path")) : null;
   const masterUrl    = form.get("master_url")  ? String(form.get("master_url"))  : null;
+  const keywords     = form.get("keywords")    ? String(form.get("keywords"))    : null;
 
   const admin  = supabaseAdmin();
   const buffer = await file.arrayBuffer();
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
     width:  Number.isFinite(widthRaw)  ? widthRaw  : null,
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
-    source, artwork_type: artworkType, master_path: masterPath, master_url: masterUrl,
+    source, artwork_type: artworkType, master_path: masterPath, master_url: masterUrl, keywords,
   }).select("*").single();
   if (error || !ins)
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
