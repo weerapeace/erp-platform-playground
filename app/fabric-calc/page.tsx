@@ -19,22 +19,28 @@ type Row = {
   group_id: string; group_name: string;
   calc_method: string; divisor: number; uom: string;
   pieces: number; cut_width: number; cut_length: number; face_width_cm: number; waste_percent: number;
+  sheet_width: number; sheet_length: number;   // ขนาดผืนเต็ม (area_sheet)
 };
 
+// กลุ่มที่คิดแบบ "พื้นที่ตัด ÷ พื้นที่ผืนเต็ม = กี่ผืน" (ผ้าชิ้น/ตัวเสริม/ลายพิมพ์)
+const SHEET_CODES = new Set(["fabric_piece", "print", "reinforce"]);
+
 const METHOD_LABEL: Record<string, string> = {
-  area_face: "ผ้า (พื้นที่ ÷ หน้ากว้าง)", area_100: "พื้นที่", length: "ความยาว", count: "นับชิ้น", manual: "พิมพ์เอง",
+  area_face: "ผ้าม้วน (พื้นที่ ÷ หน้ากว้าง)", area_sheet: "ผ้าชิ้น (พื้นที่ ÷ ผืนเต็ม)", area_100: "พื้นที่", length: "ความยาว", count: "นับชิ้น", manual: "พิมพ์เอง",
 };
 // อธิบายวิธีคิดของแต่ละชนิด — โชว์ให้ผู้ใช้เข้าใจว่าทำไมต้องกรอกช่องไหน
 const METHOD_HELP: Record<string, string> = {
-  area_face: "ผ้าหน้ากว้าง: (กว้าง×ยาว×ชิ้น) ÷ หน้ากว้างผ้า ÷ ตัวหาร แล้วบวกเผื่อเสีย",
-  area_100:  "คิดตามพื้นที่: (กว้าง×ยาว×ชิ้น) ÷ ตัวหาร แล้วบวกเผื่อเสีย",
-  length:    "คิดตามความยาว: ยาว ÷ ตัวหาร แล้วบวกเผื่อเสีย",
-  count:     "นับเป็นชิ้น: ใช้ตามจำนวนชิ้น",
-  manual:    "กรอกปริมาณเอง",
+  area_face:  "ผ้าม้วน: (กว้าง×ยาว×ชิ้น) ÷ หน้ากว้างผ้า ÷ ตัวหาร แล้วบวกเผื่อเสีย",
+  area_sheet: "ผ้าชิ้น/แผ่น: พื้นที่ที่ตัด ÷ พื้นที่ผืนเต็ม = ใช้กี่ผืน (บวกเผื่อเสีย)",
+  area_100:   "คิดตามพื้นที่: (กว้าง×ยาว×ชิ้น) ÷ ตัวหาร แล้วบวกเผื่อเสีย",
+  length:     "คิดตามความยาว: ยาว ÷ ตัวหาร แล้วบวกเผื่อเสีย",
+  count:      "นับเป็นชิ้น: ใช้ตามจำนวนชิ้น",
+  manual:     "กรอกปริมาณเอง",
 };
-const usesWidth = (m: string) => m === "area_100" || m === "area_face";
-const usesLength = (m: string) => m === "length" || m === "area_100" || m === "area_face";
+const usesWidth = (m: string) => m === "area_100" || m === "area_face" || m === "area_sheet";
+const usesLength = (m: string) => m === "length" || m === "area_100" || m === "area_face" || m === "area_sheet";
 const usesFace = (m: string) => m === "area_face";
+const usesSheet = (m: string) => m === "area_sheet";
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const toMeter = (yard: number) => r2(yard * 0.9144);
@@ -45,18 +51,19 @@ function explainCalc(r: Row, pu: number | null): string {
   const k = `(1+${r.waste_percent || 0}%)`;
   const res = `= ${r4(pu)} ${r.uom}`;
   switch (r.calc_method) {
-    case "count":     return `จำนวนชิ้น ${r.pieces} ${res}`;
-    case "length":    return `ยาว ${r.cut_length} × ${k} ÷ ${r.divisor} ${res}`;
-    case "area_100":  return `(กว้าง ${r.cut_width} × ยาว ${r.cut_length} × ชิ้น ${r.pieces}) × ${k} ÷ ${r.divisor} ${res}`;
-    case "area_face": return `(กว้าง ${r.cut_width} × ยาว ${r.cut_length} × ชิ้น ${r.pieces}) × ${k} ÷ หน้ากว้าง ${r.face_width_cm} ÷ ${r.divisor} ${res}`;
-    default:          return "กรอกปริมาณเอง";
+    case "count":      return `จำนวนชิ้น ${r.pieces} ${res}`;
+    case "length":     return `ยาว ${r.cut_length} × ${k} ÷ ${r.divisor} ${res}`;
+    case "area_100":   return `(กว้าง ${r.cut_width} × ยาว ${r.cut_length} × ชิ้น ${r.pieces}) × ${k} ÷ ${r.divisor} ${res}`;
+    case "area_face":  return `(กว้าง ${r.cut_width} × ยาว ${r.cut_length} × ชิ้น ${r.pieces}) × ${k} ÷ หน้ากว้าง ${r.face_width_cm} ÷ ${r.divisor} ${res}`;
+    case "area_sheet": return `(ตัด ${r.cut_width}×${r.cut_length}×${r.pieces}) × ${k} ÷ ผืนเต็ม (${r.sheet_width}×${r.sheet_length}=${r.sheet_width * r.sheet_length}) ${res}`;
+    default:           return "กรอกปริมาณเอง";
   }
 }
 
 let _k = 0;
 const newRow = (): Row => ({
   key: `r${_k++}`, group_id: "", group_name: "", calc_method: "area_face", divisor: 90, uom: "หลา",
-  pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, waste_percent: 0,
+  pieces: 1, cut_width: 0, cut_length: 0, face_width_cm: 0, waste_percent: 0, sheet_width: 0, sheet_length: 0,
 });
 
 export default function FabricCalcPage() {
@@ -81,9 +88,13 @@ export default function FabricCalcPage() {
   const pickGroup = (key: string, gid: string) => {
     const g = groups.find((x) => x.id === gid);
     if (!g) { patch(key, { group_id: "", group_name: "" }); return; }
+    // ผ้าชิ้น/ตัวเสริม/ลายพิมพ์ → คิดแบบ พื้นที่ตัด ÷ พื้นที่ผืนเต็ม (หน่วยเป็น "ผืน")
+    const isSheet = SHEET_CODES.has(g.code);
     patch(key, {
-      group_id: g.id, group_name: g.name, calc_method: g.calc_method,
-      divisor: g.divisor ?? 90, waste_percent: g.loss_percent ?? 0, uom: g.uom_default ?? "หลา",
+      group_id: g.id, group_name: g.name,
+      calc_method: isSheet ? "area_sheet" : g.calc_method,
+      divisor: g.divisor ?? 90, waste_percent: g.loss_percent ?? 0,
+      uom: isSheet ? "ผืน" : (g.uom_default ?? "หลา"),
     });
   };
 
@@ -91,6 +102,7 @@ export default function FabricCalcPage() {
   const perUnit = (r: Row): number | null => fabricQty({
     calc_method: r.calc_method as FabricCalcMethod, divisor: r.divisor, waste_percent: r.waste_percent,
     pieces: r.pieces, cut_width: r.cut_width, cut_length: r.cut_length, face_width_cm: r.face_width_cm,
+    sheet_width: r.sheet_width, sheet_length: r.sheet_length,
   });
 
   // รวมตามหน่วย+ชนิด
@@ -139,11 +151,13 @@ export default function FabricCalcPage() {
                     <button onClick={() => removeRow(r.key)} className="text-slate-300 hover:text-red-500 text-lg px-0.5" title="ลบแถว">✕</button>
                   </div>
 
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                     <Num label="ชิ้น" value={r.pieces} onChange={(v) => patch(r.key, { pieces: v })} />
-                    {usesWidth(r.calc_method) && <Num label="กว้าง(ซม.)" value={r.cut_width} onChange={(v) => patch(r.key, { cut_width: v })} />}
-                    {usesLength(r.calc_method) && <Num label="ยาว(ซม.)" value={r.cut_length} onChange={(v) => patch(r.key, { cut_length: v })} />}
+                    {usesWidth(r.calc_method) && <Num label={usesSheet(r.calc_method) ? "ตัดกว้าง(ซม.)" : "กว้าง(ซม.)"} value={r.cut_width} onChange={(v) => patch(r.key, { cut_width: v })} />}
+                    {usesLength(r.calc_method) && <Num label={usesSheet(r.calc_method) ? "ตัดยาว(ซม.)" : "ยาว(ซม.)"} value={r.cut_length} onChange={(v) => patch(r.key, { cut_length: v })} />}
                     {usesFace(r.calc_method) && <Num label="หน้ากว้าง(ซม.)" value={r.face_width_cm} onChange={(v) => patch(r.key, { face_width_cm: v })} />}
+                    {usesSheet(r.calc_method) && <Num label="ผืนกว้าง(ซม.)" value={r.sheet_width} onChange={(v) => patch(r.key, { sheet_width: v })} />}
+                    {usesSheet(r.calc_method) && <Num label="ผืนยาว(ซม.)" value={r.sheet_length} onChange={(v) => patch(r.key, { sheet_length: v })} />}
                     {r.calc_method !== "count" && <Num label="เผื่อเสีย%" value={r.waste_percent} onChange={(v) => patch(r.key, { waste_percent: v })} />}
                   </div>
 

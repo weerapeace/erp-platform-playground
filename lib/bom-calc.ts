@@ -6,7 +6,7 @@
  * แก้ที่นี่ที่เดียว → กฎทั้งสองที่ตรงกันเสมอ
  */
 
-export type FabricCalcMethod = "count" | "length" | "area_100" | "area_face" | "manual";
+export type FabricCalcMethod = "count" | "length" | "area_100" | "area_face" | "area_sheet" | "manual";
 
 export type FabricCalcInput = {
   calc_method:   FabricCalcMethod | string;
@@ -16,6 +16,8 @@ export type FabricCalcInput = {
   cut_width:     number | null | undefined;    // กว้าง (ซม.)
   cut_length:    number | null | undefined;    // ยาว (ซม.)
   face_width_cm: number | null | undefined;    // หน้ากว้างผ้า (ซม.)
+  sheet_width?:  number | null | undefined;    // ขนาดผืนเต็ม กว้าง (ซม.) — area_sheet
+  sheet_length?: number | null | undefined;    // ขนาดผืนเต็ม ยาว (ซม.) — area_sheet
 };
 
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -30,7 +32,8 @@ export function lineArea(i: Pick<FabricCalcInput, "cut_width" | "cut_length" | "
  * - count:     จำนวนชิ้น
  * - length:    ยาว × (1+เผื่อ%) ÷ ตัวหาร
  * - area_100:  พื้นที่ × (1+เผื่อ%) ÷ ตัวหาร
- * - area_face: พื้นที่ × (1+เผื่อ%) ÷ หน้ากว้างผ้า ÷ ตัวหาร   (ผ้า → หลา/เมตร)
+ * - area_face: พื้นที่ × (1+เผื่อ%) ÷ หน้ากว้างผ้า ÷ ตัวหาร   (ผ้าม้วน → หลา/เมตร)
+ * - area_sheet: พื้นที่ตัด × (1+เผื่อ%) ÷ พื้นที่ผืนเต็ม      (ผ้าชิ้น/ตัวเสริม/ลายพิมพ์ → กี่ผืน/แผ่น)
  * - manual:    null (พิมพ์เอง)
  */
 export function fabricQty(i: FabricCalcInput): number | null {
@@ -41,5 +44,9 @@ export function fabricQty(i: FabricCalcInput): number | null {
   if (m === "length")    return i.cut_length ? r4((i.cut_length || 0) * k / d) : null;
   if (m === "area_100")  return (i.cut_width && i.cut_length) ? r4(lineArea(i) * k / d) : null;
   if (m === "area_face") return (i.cut_width && i.cut_length && i.face_width_cm) ? r4(lineArea(i) * k / (i.face_width_cm || 1) / d) : null;
+  if (m === "area_sheet") {
+    const sheet = (i.sheet_width || 0) * (i.sheet_length || 0);
+    return (i.cut_width && i.cut_length && sheet) ? r4(lineArea(i) * k / sheet) : null;
+  }
   return null;
 }
