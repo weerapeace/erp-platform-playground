@@ -9,7 +9,8 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
-import { DataTable, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
+import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
+import { getStatusStyle } from "@/lib/status-config";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
@@ -249,36 +250,20 @@ function getGroupConfig(key: string) {
 }
 
 // ---- Status summary cards (ของกลาง) ----
-// แปลงค่าสถานะ (technical) → ชื่อไทย + สี — ครอบคลุมสถานะที่พบบ่อยในหลายโมดูล
-// ค่าที่ไม่รู้จัก → ใช้ค่าดิบ + สี neutral
-const STATUS_META: Record<string, { label: string; ring: string; bg: string; text: string; dot: string }> = {
-  draft:       { label: "ร่าง",          ring: "ring-slate-300",   bg: "bg-slate-50",   text: "text-slate-600",   dot: "bg-slate-400" },
-  waiting:     { label: "รอสั่งซื้อ",     ring: "ring-amber-300",   bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500" },
-  pending:     { label: "รอดำเนินการ",   ring: "ring-amber-300",   bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500" },
-  submitted:   { label: "ส่งแล้ว",        ring: "ring-sky-300",     bg: "bg-sky-50",     text: "text-sky-700",     dot: "bg-sky-500" },
-  rfq_created: { label: "สั่งซื้อแล้ว",   ring: "ring-blue-300",    bg: "bg-blue-50",    text: "text-blue-700",    dot: "bg-blue-500" },
-  confirmed:   { label: "ยืนยันแล้ว",    ring: "ring-blue-300",    bg: "bg-blue-50",    text: "text-blue-700",    dot: "bg-blue-500" },
-  partial:     { label: "รับบางส่วน",     ring: "ring-amber-300",   bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500" },
-  short_closed:{ label: "ปิดยอด (ขาด)",  ring: "ring-orange-300",  bg: "bg-orange-50",  text: "text-orange-700",  dot: "bg-orange-500" },
-  approved:    { label: "อนุมัติแล้ว",   ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
-  received:    { label: "รับของแล้ว",    ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
-  done:        { label: "เสร็จสิ้น",      ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
-  completed:   { label: "เสร็จสิ้น",      ring: "ring-emerald-300", bg: "bg-emerald-50", text: "text-emerald-700", dot: "bg-emerald-500" },
-  rejected:    { label: "ปฏิเสธ",         ring: "ring-red-300",     bg: "bg-red-50",     text: "text-red-700",     dot: "bg-red-500" },
-  cancelled:   { label: "ยกเลิก",         ring: "ring-red-300",     bg: "bg-red-50",     text: "text-red-700",     dot: "bg-red-500" },
-};
-const statusMeta = (v: string) => STATUS_META[v] ?? { label: v, ring: "ring-slate-300", bg: "bg-slate-50", text: "text-slate-600", dot: "bg-slate-400" };
+// ป้าย/สีสถานะใช้แหล่งกลาง lib/status-config.ts (ชุดเดียวกับ StatusBadge ในตาราง — กันป้ายขัดกัน)
+// รองรับป้ายรายโมดูลผ่าน getStatusStyle(code, moduleKey)
 
 function StatusCards({
-  options, counts, total, active, onPick,
+  options, counts, total, active, onPick, moduleKey,
 }: {
   options: string[];
   counts: Record<string, number>;
   total: number;
   active: string | null;
   onPick: (v: string | null) => void;
+  moduleKey?: string;
 }) {
-  const card = (key: string | null, label: string, count: number, m?: ReturnType<typeof statusMeta>) => {
+  const card = (key: string | null, label: string, count: number, m?: ReturnType<typeof getStatusStyle>) => {
     const on = active === key;
     return (
       <button key={key ?? "__all__"} type="button" onClick={() => onPick(on ? null : key)}
@@ -295,7 +280,7 @@ function StatusCards({
   return (
     <div className="flex flex-wrap gap-2 mb-3">
       {card(null, "ทั้งหมด", total)}
-      {options.map((o) => card(o, statusMeta(o).label, counts[o] ?? 0, statusMeta(o)))}
+      {options.map((o) => { const m = getStatusStyle(o, moduleKey); return card(o, m.label, counts[o] ?? 0, m); })}
     </div>
   );
 }
@@ -2094,6 +2079,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
             total={rows.length}
             active={statusFilter}
             onPick={setStatusFilter}
+            moduleKey={config.moduleKey}
           />
         )}
 
@@ -2104,6 +2090,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           </div>
         )}
 
+        <StatusModuleContext.Provider value={config.moduleKey}>
         <DataTable
           tableId={config.tableId}
           data={displayRows}
@@ -2140,6 +2127,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
           onSetFilterable={config.moduleKey && canEdit ? handleSetFilterable : undefined}
           fetchFilterOptions={fetchFilterOptions}
         />
+        </StatusModuleContext.Provider>
 
       </div>
 
