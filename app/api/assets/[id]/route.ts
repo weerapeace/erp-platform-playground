@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
-import { type AssetDetail, type AssetUsage, rowOf, attachTags, actorId } from "../shared";
+import { type AssetDetail, type AssetUsage, rowOf, attachTags, actorId, loadCollectionIds, setCollections } from "../shared";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +28,8 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
     .select("module, record_id, record_label, field, created_at").eq("asset_id", id)
     .order("created_at", { ascending: false });
 
-  const detail: AssetDetail = { ...base, usages: (u ?? []) as AssetUsage[] };
+  const collection_ids = await loadCollectionIds(admin, id);
+  const detail: AssetDetail = { ...base, usages: (u ?? []) as AssetUsage[], collection_ids };
   return NextResponse.json({ data: detail, error: null });
 }
 
@@ -40,7 +41,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
   let body: {
     title?: string; description?: string | null; collection_id?: string | null;
-    tags?: string[]; restore?: boolean;
+    collection_ids?: string[]; tags?: string[]; restore?: boolean;
   };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
@@ -68,6 +69,9 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     await admin.from("asset_tag_map").delete().eq("asset_id", id);
     await attachTags(admin, id, body.tags);
   }
+
+  // อัลบั้ม: แทนที่ทั้งชุด (asset อยู่ได้หลายอัลบั้ม)
+  if (Array.isArray(body.collection_ids)) await setCollections(admin, id, body.collection_ids);
 
   await writeAudit(admin, { action: "update", entityType: "asset", entityId: id, actorId: await actorId(request) });
 

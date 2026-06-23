@@ -41,7 +41,7 @@ export type AssetUsage = {
   created_at: string;
 };
 
-export type AssetDetail = AssetRow & { usages: AssetUsage[] };
+export type AssetDetail = AssetRow & { usages: AssetUsage[]; collection_ids: string[] };
 
 /** dict columns ที่ดึงจากตาราง assets */
 type AssetDbRow = {
@@ -139,4 +139,21 @@ export async function actorId(request: NextRequest): Promise<string | null> {
     const { data } = await supabaseFromRequest(request).auth.getUser();
     return data.user?.id ?? null;
   } catch { return null; }
+}
+
+/** อัลบั้มทั้งหมดที่ asset อยู่ (asset อยู่ได้หลายอัลบั้ม ผ่าน asset_collection_map) */
+export async function loadCollectionIds(admin: Db, assetId: string): Promise<string[]> {
+  const { data } = await admin.from("asset_collection_map").select("collection_id").eq("asset_id", assetId);
+  return (data ?? []).map((r) => (r as { collection_id: string }).collection_id);
+}
+
+/** ตั้งอัลบั้มของ asset (แทนที่ทั้งชุด) + sync assets.collection_id = อัลบั้มแรก (ให้ฟิลเตอร์ "ไม่อยู่อัลบั้ม" ทำงาน) */
+export async function setCollections(admin: Db, assetId: string, ids: string[]): Promise<void> {
+  const clean = [...new Set(ids.filter(Boolean))];
+  await admin.from("asset_collection_map").delete().eq("asset_id", assetId);
+  if (clean.length)
+    await admin.from("asset_collection_map").upsert(
+      clean.map((collection_id) => ({ asset_id: assetId, collection_id })),
+      { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
+  await admin.from("assets").update({ collection_id: clean[0] ?? null }).eq("id", assetId);
 }

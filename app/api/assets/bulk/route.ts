@@ -28,9 +28,21 @@ export async function POST(request: NextRequest) {
   const admin = supabaseAdmin();
 
   if (action === "move") {
-    const { error } = await admin.from("assets")
-      .update({ collection_id: b.collection_id || null, updated_at: new Date().toISOString() }).in("id", ids);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const target = b.collection_id || null;
+    if (target) {
+      // เพิ่มเข้าอัลบั้ม (asset อยู่ได้หลายอัลบั้ม)
+      const { error } = await admin.from("asset_collection_map").upsert(
+        ids.map((asset_id) => ({ asset_id, collection_id: target })),
+        { onConflict: "asset_id,collection_id", ignoreDuplicates: true });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      // ตั้งเป็นอัลบั้มหลักให้ตัวที่ยังไม่มี
+      await admin.from("assets").update({ collection_id: target, updated_at: new Date().toISOString() })
+        .in("id", ids).is("collection_id", null);
+    } else {
+      // เอาออกจากทุกอัลบั้ม
+      await admin.from("asset_collection_map").delete().in("asset_id", ids);
+      await admin.from("assets").update({ collection_id: null, updated_at: new Date().toISOString() }).in("id", ids);
+    }
   } else if (action === "tag" || action === "untag") {
     const name = String(b.tag ?? "").trim();
     if (!name) return NextResponse.json({ error: "ต้องมีชื่อแท็ก" }, { status: 400 });
