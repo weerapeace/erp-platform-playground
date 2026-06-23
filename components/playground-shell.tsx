@@ -20,7 +20,7 @@ import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
-import { apiFetch } from "@/lib/api";
+import { cachedGetJson } from "@/lib/shell-cache";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
 // เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
@@ -417,10 +417,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   // โหลดทะเบียนเมนู + โมดูลใหญ่ (App) จาก DB — ถ้าว่าง/พลาด ใช้ default ในโค้ด
   useEffect(() => {
     let alive = true;
-    apiFetch("/api/menu").then((r) => r.json()).then((j) => {
+    // แคชข้ามการเปลี่ยนหน้า (lib/shell-cache) — ไม่ยิง 3 API นี้ซ้ำทุกหน้า → เปลี่ยนหน้าไวขึ้น + ลด contention
+    cachedGetJson<{ data?: MenuRow[] }>("/api/menu").then((j) => {
       if (alive && Array.isArray(j.data)) setMenuRows(j.data as MenuRow[]);
     }).catch(() => { if (alive) setMenuRows([]); });
-    apiFetch("/api/menu/apps").then((r) => r.json()).then((j) => {
+    cachedGetJson<{ data?: AppGroup[] }>("/api/menu/apps").then((j) => {
       if (!alive || !Array.isArray(j.data)) return;
       const apps = (j.data as AppGroup[]).filter((a) => a.is_active);
       setAppGroups(apps);
@@ -432,7 +433,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     // รายชื่อโมดูล (key+label) สำหรับหมวด "⚙ ตั้งค่า" — ไม่จำเป็นตอนเปิดหน้า
     // perf: เลื่อนไปโหลดหลังเนื้อหาหลัก กันแย่ง resource (Worker↔Supabase รับ concurrent ได้น้อย)
     const modTimer = window.setTimeout(() => {
-      apiFetch("/api/admin/modules").then((r) => r.json()).then((j) => {
+      cachedGetJson<{ data?: { key: string; label: string }[] }>("/api/admin/modules").then((j) => {
         if (alive && Array.isArray(j.data)) setModules(j.data as { key: string; label: string }[]);
       }).catch(() => {});
     }, 1200);
