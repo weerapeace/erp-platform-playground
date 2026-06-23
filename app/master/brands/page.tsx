@@ -19,6 +19,8 @@ export default function BrandsPage() {
 
   const [brands, setBrands] = useState<Brand[]>([]);
   const [newBrand, setNewBrand] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);   // กำลังแก้ชื่อแบรนด์ไหน
+  const [editName, setEditName] = useState("");
   const [subs, setSubs] = useState<Subcontractor[]>([]);
   const [subSearch, setSubSearch] = useState("");
 
@@ -39,6 +41,19 @@ export default function BrandsPage() {
     const name = newBrand.trim(); if (!name) return;
     try { const r = await apiFetch("/api/brands", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); const j = await r.json(); if (j.error) throw new Error(j.error); setNewBrand(""); toast.success("เพิ่มแบรนด์แล้ว"); await loadBrands(); }
     catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มไม่สำเร็จ"); }
+  };
+  const saveRename = async (id: string) => {
+    const name = editName.trim();
+    setEditingId(null);
+    const cur = brands.find((b) => b.id === id);
+    if (!name || !cur || name === cur.name) return;   // ไม่เปลี่ยน → ไม่ต้องบันทึก
+    await patchBrand(id, { name });
+  };
+  const deleteBrand = async (id: string, name: string) => {
+    if (!confirm(`ลบแบรนด์ "${name}"?\n(ซ่อนจากรายการ — ข้อมูลเดิมที่อ้างถึงแบรนด์นี้ยังอยู่)`)) return;
+    setBrands((bs) => bs.filter((b) => b.id !== id));
+    try { const r = await apiFetch(`/api/brands?id=${encodeURIComponent(id)}`, { method: "DELETE" }); const j = await r.json(); if (j.error) throw new Error(j.error); toast.success("ลบแบรนด์แล้ว"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); void loadBrands(); }
   };
   const toggleSub = async (id: string, v: boolean) => {
     setSubs((ss) => ss.map((s) => s.id === id ? { ...s, is_subcontract: v } : s));
@@ -68,14 +83,28 @@ export default function BrandsPage() {
           </div>
           <div className="divide-y divide-slate-50">
             {brands.map((b) => (
-              <div key={b.id} className="flex items-center gap-3 px-3 py-2">
+              <div key={b.id} className="flex items-center gap-3 px-3 py-2 group">
                 <span className="w-6 h-6 rounded border border-slate-200 shrink-0" style={{ background: b.color ?? "transparent" }} />
                 <input type="color" value={b.color ?? "#94a3b8"} onChange={(e) => patchBrand(b.id, { color: e.target.value })} className="h-7 w-9 cursor-pointer rounded shrink-0" title="ตั้งสีแบรนด์" />
-                <span className="flex-1 text-sm text-slate-700 truncate">{b.name}</span>
+                {editingId === b.id ? (
+                  <input
+                    autoFocus value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void saveRename(b.id); if (e.key === "Escape") setEditingId(null); }}
+                    onBlur={() => void saveRename(b.id)}
+                    className="flex-1 h-7 px-2 text-sm border border-indigo-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                ) : (
+                  <span className="flex-1 text-sm text-slate-700 truncate cursor-text" title="คลิกดินสอเพื่อแก้ชื่อ" onDoubleClick={() => { setEditingId(b.id); setEditName(b.name); }}>{b.name}</span>
+                )}
                 <label className="flex items-center gap-1.5 text-[12px] text-slate-600 cursor-pointer shrink-0">
                   <input type="checkbox" checked={!!b.is_customer_job} onChange={(e) => patchBrand(b.id, { is_customer_job: e.target.checked })} />
                   <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">👤 งานลูกค้า</span>
                 </label>
+                <button onClick={() => { setEditingId(b.id); setEditName(b.name); }} title="แก้ชื่อ"
+                  className="shrink-0 w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">✎</button>
+                <button onClick={() => void deleteBrand(b.id, b.name)} title="ลบแบรนด์"
+                  className="shrink-0 w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:text-red-600 hover:bg-red-50">🗑</button>
               </div>
             ))}
             {brands.length === 0 && <div className="text-center text-sm text-slate-400 py-12">ยังไม่มีแบรนด์</div>}
