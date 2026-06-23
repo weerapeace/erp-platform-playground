@@ -56,10 +56,42 @@ export async function GET(request: NextRequest): Promise<Response> {
         status: 404, headers: { "Content-Type": "application/json" },
       });
     }
+
+    // ── ย่อรูปตามขนาดที่ขอ (?w=) — เฉพาะที่ย่อได้ (Vercel/Node มี sharp) ──
+    // ย่อไม่ได้ (เช่น Cloudflare ไม่มี sharp) → ส่ง "รูปเดิม" แทน (ปลอดภัย)
+    const ct0 = obj.httpMetadata?.contentType ?? "image/jpeg";
+    const wParam = Number(new URL(request.url).searchParams.get("w") || 0);
+    const canResize = wParam > 0 && wParam <= 2000 && ct0.startsWith("image/") && ct0 !== "image/svg+xml";
+    if (canResize) {
+      try {
+        const sharp = (await import("sharp")).default;
+        const input = Buffer.from(await new Response(obj.body as ReadableStream).arrayBuffer());
+        const out = await sharp(input).rotate().resize({ width: wParam, withoutEnlargement: true }).webp({ quality: 75 }).toBuffer();
+        const body = new Uint8Array(out);   // Buffer → Uint8Array<ArrayBuffer> (BodyInit ที่ถูกชนิด)
+        const res = new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "image/webp", "Content-Length": String(body.byteLength), ...CACHE_HEADERS },
+        });
+        if (edge) { try { edge.waitUntil(edge.cache.put(request, res.clone())); } catch { /* noop */ } }
+        return res;
+      } catch {
+        // ย่อไม่ได้ → ดึงรูปเดิมใหม่ (stream เดิมอาจถูกอ่านไปแล้ว) แล้วส่ง original
+        const fresh = await r2GetObject(key);
+        if (fresh) {
+          const res = new Response(fresh.body, {
+            status: 200,
+            headers: { "Content-Type": fresh.httpMetadata?.contentType ?? ct0, "Content-Length": String(fresh.size), ...CACHE_HEADERS },
+          });
+          if (edge) { try { edge.waitUntil(edge.cache.put(request, res.clone())); } catch { /* noop */ } }
+          return res;
+        }
+      }
+    }
+
     const res = new Response(obj.body, {
       status: 200,
       headers: {
-        "Content-Type":   obj.httpMetadata?.contentType ?? "image/jpeg",
+        "Content-Type":   ct0,
         "Content-Length": String(obj.size),
         ...CACHE_HEADERS,
       },

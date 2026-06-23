@@ -12,6 +12,7 @@
  */
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { withImageWidth } from "@/lib/r2-image";
 
 export function HoverImage({
   url, size = 28, previewSize = 256, alt = "", rounded = "rounded", fallback = "📦", className = "",
@@ -52,12 +53,12 @@ export function HoverImage({
   return (
     <span ref={ref} className={`shrink-0 inline-block ${className}`} onMouseEnter={open} onMouseLeave={close} onClick={close}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt={alt} style={dim} className={`object-cover border border-slate-200 ${rounded}`} />
+      <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" style={dim} className={`object-cover border border-slate-200 ${rounded}`} />
       {box && typeof document !== "undefined" && createPortal(
         <div style={{ position: "fixed", left: box.left, top: box.top, zIndex: 9999 }}
           className="pointer-events-none bg-white border border-slate-200 rounded-xl shadow-2xl p-1.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={url} alt={alt} style={{ width: `${previewSize}px`, height: `${previewSize}px` }} className="object-contain rounded-lg" />
+          <img src={withImageWidth(url, previewSize * 2) ?? url} alt={alt} decoding="async" style={{ width: `${previewSize}px`, height: `${previewSize}px` }} className="object-contain rounded-lg" />
         </div>,
         document.body,
       )}

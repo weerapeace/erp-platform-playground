@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { Attachment, AttachmentsResponse } from "@/app/api/attachments/route";
 import { ImageMarkupButton } from "@/components/image-markup-editor";
 import { apiFetch } from "@/lib/api";
+import { withImageWidth } from "@/lib/r2-image";
 
 // ============================================================
 // ImageThumbnail — รูปเล็กในตาราง + hover ขยาย (component กลาง)
@@ -41,12 +42,12 @@ export function ImageThumbnail({ url, size = 40, alt = "" }: { url?: string | nu
   return (
     <div ref={ref} onMouseEnter={onEnter} onMouseLeave={() => setHover(false)} className="inline-block">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={url} alt={alt} className="rounded object-cover border border-slate-200 bg-white" style={{ width: size, height: size }} />
+      <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" className="rounded object-cover border border-slate-200 bg-white" style={{ width: size, height: size }} />
       {mounted && hover && createPortal(
         <div className="fixed z-[60] pointer-events-none rounded-lg overflow-hidden shadow-2xl border border-slate-200 bg-white"
           style={{ left, top, width: ZOOM, height: ZOOM }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={url} alt={alt} className="w-full h-full object-contain bg-slate-50" />
+          <img src={withImageWidth(url, 480) ?? url} alt={alt} decoding="async" className="w-full h-full object-contain bg-slate-50" />
         </div>,
         document.body
       )}
