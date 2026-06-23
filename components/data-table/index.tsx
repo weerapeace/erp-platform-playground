@@ -11,6 +11,7 @@ import { RelationPicker, type RelationConfig } from "@/components/relation-picke
 import { readRelationLabel } from "@/lib/relation";
 import { formatDate } from "@/lib/date";
 import { formatAmount } from "@/lib/money";
+import { getStatusStyle } from "@/lib/status-config";
 import type { TableLayoutSettings, RowColorRule } from "@/app/api/table-layouts/route";
 import {
   getRowActionStorageKey,
@@ -120,26 +121,7 @@ function IconBookmark() {
 
 // ---- Status Badge ----
 
-const STATUS_CONFIG: Record<string, { bg: string; text: string; border: string; label: string }> = {
-  active:           { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "Active" },
-  inactive:         { bg: "bg-slate-100",   text: "text-slate-500",   border: "border-slate-200",   label: "Inactive" },
-  draft:            { bg: "bg-slate-100",   text: "text-slate-600",   border: "border-slate-200",   label: "ร่าง" },
-  submitted:        { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รออนุมัติ" },
-  waiting_approval: { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รอ Approve" },
-  approved:         { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "อนุมัติแล้ว" },
-  rejected:         { bg: "bg-red-50",      text: "text-red-700",     border: "border-red-200",     label: "ไม่อนุมัติ" },
-  cancelled:        { bg: "bg-red-50",      text: "text-red-600",     border: "border-red-200",     label: "ยกเลิก" },
-  low_stock:        { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "Low Stock" },
-  // ---- จัดซื้อ v2 (purchasing) ----
-  waiting:          { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รออนุมัติ" },
-  rfq_created:      { bg: "bg-blue-50",     text: "text-blue-700",    border: "border-blue-200",    label: "ออกใบสั่งซื้อแล้ว" },
-  confirmed:        { bg: "bg-blue-50",     text: "text-blue-700",    border: "border-blue-200",    label: "ยืนยันแล้ว" },
-  partial:          { bg: "bg-amber-50",    text: "text-amber-700",   border: "border-amber-200",   label: "รับบางส่วน" },
-  received:         { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "รับของแล้ว" },
-  short_closed:     { bg: "bg-slate-100",   text: "text-slate-600",   border: "border-slate-200",   label: "ปิดยอดขาด" },
-  completed:        { bg: "bg-purple-50",   text: "text-purple-700",  border: "border-purple-200",  label: "เสร็จสิ้น" },
-  done:             { bg: "bg-emerald-50",  text: "text-emerald-700", border: "border-emerald-200", label: "เสร็จสิ้น" },
-};
+// ป้ายสถานะ + สี ย้ายไปแหล่งกลาง lib/status-config.ts (ใช้ร่วมกับการ์ดสรุปใน master-crud)
 
 // ระบายสีแถวตามเงื่อนไข (ของกลาง) — กฎแรกที่เข้าเงื่อนไขชนะ
 const ROW_COLOR_BG: Record<string, string> = {
@@ -171,8 +153,12 @@ function evalRowColor(rules: RowColorRule[] | undefined, rowData: Record<string,
   return null;
 }
 
-export function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? { bg: "bg-slate-100", text: "text-slate-600", border: "border-slate-200", label: status };
+/** บอก "โมดูล" ให้ StatusBadge ที่อยู่ใน cell ของตาราง → ใช้ป้ายรายโมดูล (master-crud ตั้งค่าให้) */
+export const StatusModuleContext = React.createContext<string | undefined>(undefined);
+
+export function StatusBadge({ status, module }: { status: string; module?: string }) {
+  const ctxModule = React.useContext(StatusModuleContext);
+  const cfg = getStatusStyle(status, module ?? ctxModule);
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
       {cfg.label}
