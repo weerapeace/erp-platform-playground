@@ -117,6 +117,7 @@ type CreateBody = {
   status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
   parent_sku_code?: string | null;        // เดิม (รหัสเดี่ยว) — ยังรองรับเพื่อ backward compat
   parent_sku_codes?: string[];            // ใหม่ — หลายรหัส
+  parent_sku_drafts?: string[];           // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
 };
 
 // รวม/ปรับรหัส Parent SKU จาก payload (รองรับทั้งฟิลด์เดี่ยวเดิม + array ใหม่) → uppercase, ตัดช่องว่าง, ตัดซ้ำ
@@ -154,12 +155,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // ข้อ 6: ร่าง Parent (ชื่อล้วน) — sanitize + dedupe
+  const parentDrafts: string[] = [];
+  for (const d of Array.isArray(body.parent_sku_drafts) ? body.parent_sku_drafts : []) {
+    const s = String(d ?? "").trim().slice(0, 200);
+    if (s && !parentDrafts.includes(s)) parentDrafts.push(s);
+  }
+
   const code = await nextDsNo(admin);
   const { data: row, error } = await admin.from("design_sheets").insert({
     code, name, brand_id: body.brand_id || null, detail: body.detail ?? null, note: body.note ?? null,
     status, order_date: body.order_date || null, deadline: body.deadline || null,
     drive_link: body.drive_link?.trim() || null,
     parent_sku_codes: parentCodes, parent_sku_code: parentCodes[0] ?? null,   // เก็บ array + ตัวแรก (backward compat)
+    parent_sku_drafts: parentDrafts,
     is_active: true, created_by: user?.id ?? null,
   }).select("id, code").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });

@@ -51,11 +51,12 @@ type FormState = {
   id: string | null; code: string;
   name: string; brand_id: string; detail: string; note: string;
   status: string; order_date: string; deadline: string; drive_link: string;
-  parent_sku_codes: string[];   // ตั้งได้หลาย Parent SKU
+  parent_sku_codes: string[];   // ตั้งได้หลาย Parent SKU (รหัสจริง)
+  parent_sku_drafts: string[];  // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
 };
 const todayStr = () => new Date().toISOString().slice(0, 10);
 // วันที่สั่ง default = วันนี้ (แก้ได้)
-const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", drive_link: "", parent_sku_codes: [] });
+const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", detail: "", note: "", status: "design", order_date: todayStr(), deadline: "", drive_link: "", parent_sku_codes: [], parent_sku_drafts: [] });
 
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
@@ -292,6 +293,7 @@ export default function DesignSheetsPage() {
   const [skuCheck, setSkuCheck] = useState<ParentSkuCheck | null>(null);
   const [skuChecking, setSkuChecking] = useState(false);
   const [skuInput, setSkuInput] = useState("");   // ช่องพิมพ์รหัส Parent SKU ที่กำลังจะเพิ่ม
+  const [draftInput, setDraftInput] = useState("");   // ช่องพิมพ์ "ร่าง Parent" (ชื่อ ยังไม่มีรหัสจริง)
 
   // ---- ปุ่ม ＋ เพิ่มแบรนด์ใหม่จากในฟอร์ม ----
   const [brandModal, setBrandModal] = useState(false);
@@ -541,6 +543,16 @@ export default function DesignSheetsPage() {
   };
   const removeParentCode = (code: string) =>
     setForm((f) => (f ? { ...f, parent_sku_codes: f.parent_sku_codes.filter((c) => c !== code) } : f));
+
+  // ข้อ 6: ร่าง Parent (ชื่อล้วน ยังไม่มีรหัสจริง)
+  const addParentDraft = () => {
+    const label = draftInput.trim();
+    if (!label) return;
+    setForm((f) => (f && !f.parent_sku_drafts.includes(label) ? { ...f, parent_sku_drafts: [...f.parent_sku_drafts, label] } : f));
+    setDraftInput("");
+  };
+  const removeParentDraft = (label: string) =>
+    setForm((f) => (f ? { ...f, parent_sku_drafts: f.parent_sku_drafts.filter((d) => d !== label) } : f));
 
   const saveCost = useCallback(async (): Promise<boolean> => {
     if (!form?.id) return false;
@@ -817,6 +829,7 @@ export default function DesignSheetsPage() {
         order_date: d.order_date ?? "", deadline: d.deadline ?? "", drive_link: d.drive_link ?? "",
         parent_sku_codes: Array.isArray(d.parent_sku_codes) ? (d.parent_sku_codes as string[])
           : (d.parent_sku_code ? [String(d.parent_sku_code)] : []),
+        parent_sku_drafts: Array.isArray(d.parent_sku_drafts) ? (d.parent_sku_drafts as string[]) : [],
       });
       setSkuInput("");
       const ce = (Array.isArray(d.cost_extra) ? d.cost_extra : []) as CostExtra[];
@@ -838,6 +851,7 @@ export default function DesignSheetsPage() {
       name: form.name.trim(), brand_id: form.brand_id || null, detail: form.detail || null, note: form.note || null,
       status: form.status, order_date: form.order_date || null, deadline: form.deadline || null, drive_link: form.drive_link || null,
       parent_sku_codes: parentCodes,
+      parent_sku_drafts: form.parent_sku_drafts,
     };
     try {
       const res = form.id
@@ -1316,6 +1330,30 @@ export default function DesignSheetsPage() {
                     : skuCheck?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ {skuCheck.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)</span>
                     : skuCheck?.latest ? <span className="text-slate-400">✓ ใช้ได้ · ล่าสุดที่ตั้ง: <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · ถัดไป: <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · เลขสูงสุด: {skuCheck.max_code}</> : null}</span>
                     : skuCheck ? <span className="text-emerald-600">✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้</span> : null}
+                </div>
+                {/* ข้อ 6: ร่าง Parent (ชื่อก่อน ยังไม่ใส่รหัสจริง) — ใช้ตั้งชื่อแบบที่จะทำ แล้วค่อยสร้างรหัสจริงทีหลัง */}
+                <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
+                  <span className="text-[11px] text-slate-500">ร่าง Parent (ยังไม่มีรหัส) — เช่น &quot;พวงกุญแจ มะพร้าว&quot;</span>
+                  {form.parent_sku_drafts.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {form.parent_sku_drafts.map((d) => (
+                        <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 border border-dashed border-amber-300 text-amber-700 rounded">
+                          ✎ {d}
+                          {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {canEdit && (
+                    <div className="flex gap-1 mt-1">
+                      <input value={draftInput} onChange={(e) => setDraftInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentDraft(); } }}
+                        placeholder="เช่น พวงกุญแจ มะพร้าว แล้วกด Enter"
+                        className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                      <button type="button" onClick={addParentDraft} disabled={!draftInput.trim()}
+                        className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40">＋ ร่าง</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -35,6 +35,7 @@ type PatchBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
   status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
   is_active?: boolean; parent_sku_code?: string | null; parent_sku_codes?: string[]; cost_extra?: CostExtra[];
+  parent_sku_drafts?: string[];   // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -91,6 +92,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
     patch.parent_sku_codes = codes;
     patch.parent_sku_code = codes[0] ?? null;   // เก็บตัวแรกไว้ด้วย (backward compat)
+  }
+
+  // ข้อ 6: ร่าง Parent (ชื่อล้วน) — ไม่เช็คซ้ำในระบบ (ยังไม่ใช่รหัสจริง) แค่ sanitize + dedupe
+  if (body.parent_sku_drafts !== undefined) {
+    const drafts: string[] = [];
+    for (const d of Array.isArray(body.parent_sku_drafts) ? body.parent_sku_drafts : []) {
+      const s = String(d ?? "").trim().slice(0, 200);
+      if (s && !drafts.includes(s)) drafts.push(s);
+    }
+    patch.parent_sku_drafts = drafts;
   }
 
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });
