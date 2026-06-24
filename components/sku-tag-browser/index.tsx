@@ -55,6 +55,11 @@ export function SkuTagBrowser() {
   const [sortKey, setSortKey] = useState<string>("code");
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
   const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายตัว (bulk)
+  const [view, setView] = useState<"card" | "table">(() => {
+    if (typeof window !== "undefined" && localStorage.getItem("sku-browser-view") === "table") return "table";
+    return "card";
+  });
+  const setViewPersist = (v: "card" | "table") => { setView(v); try { localStorage.setItem("sku-browser-view", v); } catch { /* ignore */ } };
 
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
@@ -203,7 +208,11 @@ export function SkuTagBrowser() {
         : <>
             <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
               <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ (แสดง {(onlyIncomplete ? shown.length : cards.length).toLocaleString("th-TH")})</p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
+                  <button onClick={() => setViewPersist("card")} className={`h-8 px-2.5 text-[12px] ${view === "card" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>▦ การ์ด</button>
+                  <button onClick={() => setViewPersist("table")} className={`h-8 px-2.5 text-[12px] border-l border-slate-200 ${view === "table" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>☰ ตาราง</button>
+                </div>
                 <button onClick={() => setOnlyIncomplete((v) => !v)}
                   className={`h-8 px-2.5 text-[12px] rounded-lg border ${onlyIncomplete ? "bg-amber-50 border-amber-300 text-amber-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>⚠️ เฉพาะข้อมูลไม่ครบ</button>
                 <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
@@ -217,9 +226,11 @@ export function SkuTagBrowser() {
             {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">กรองจากที่โหลดมา {cards.length.toLocaleString("th-TH")} ตัว — กด “โหลดเพิ่ม” ด้านล่างเพื่อตรวจตัวที่เหลือ</p>}
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">ไม่มีรายการที่ข้อมูลไม่ครบในที่โหลดมา 🎉</div>
-              : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-                  {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
-                </div>}
+              : view === "table"
+                ? <SkuTable rows={shown} selected={selected} onToggle={toggleSel} onOpen={setEditId} />
+                : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
+                    {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
+                  </div>}
             {cards.length < total && (
               <div className="text-center mt-4">
                 <button onClick={loadMore} disabled={loadingMore}
@@ -322,6 +333,62 @@ function SkuCardView({ c, fields, onOpen, selected, onToggleSelect }: { c: SkuCa
         )}
       </div>
     </button>
+  );
+}
+
+// มุมมองตาราง — ใช้ข้อมูลชุดเดียวกับการ์ด (filter/sort/เลือก เหมือนกัน)
+function SkuTable({ rows, selected, onToggle, onOpen }: {
+  rows: SkuCard[]; selected: Set<string>; onToggle: (id: string) => void; onOpen: (id: string) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-slate-500 text-[12px]">
+          <tr className="text-left">
+            <th className="px-2 py-2 w-8"></th>
+            <th className="px-2 py-2 w-12">รูป</th>
+            <th className="px-3 py-2 font-medium">รหัส</th>
+            <th className="px-3 py-2 font-medium">ชื่อ</th>
+            <th className="px-3 py-2 font-medium text-right">ราคาขาย</th>
+            <th className="px-3 py-2 font-medium text-right">สต๊อก</th>
+            <th className="px-3 py-2 font-medium">แท็ก</th>
+            <th className="px-3 py-2 font-medium">สถานะ</th>
+            <th className="px-3 py-2 font-medium">เตือน</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((c) => {
+            const w = cardWarnings(c);
+            const sel = selected.has(c.id);
+            return (
+              <tr key={c.id} onClick={() => onOpen(c.id)}
+                className={`border-t border-slate-100 cursor-pointer ${sel ? "bg-indigo-50" : "hover:bg-slate-50"}`}>
+                <td className="px-2 py-1.5" onClick={(e) => { e.stopPropagation(); onToggle(c.id); }}>
+                  <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-[10px] cursor-pointer ${sel ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
+                </td>
+                <td className="px-2 py-1.5">
+                  {c.image
+                    ? <img src={withImageWidth(c.image, 80) ?? c.image} alt="" loading="lazy" className="w-9 h-9 rounded object-cover border border-slate-200" />
+                    : <div className="w-9 h-9 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs">—</div>}
+                </td>
+                <td className="px-3 py-1.5 font-mono text-[12px] whitespace-nowrap">{c.code}</td>
+                <td className="px-3 py-1.5"><span className="block max-w-[260px] truncate">{c.name || "—"}</span></td>
+                <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">{c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-slate-500 whitespace-nowrap">{c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"}</td>
+                <td className="px-3 py-1.5">
+                  <div className="flex flex-wrap gap-1">
+                    {c.tags.slice(0, 2).map((t) => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{t}</span>)}
+                    {c.tags.length > 2 && <span className="text-[10px] text-slate-400">+{c.tags.length - 2}</span>}
+                  </div>
+                </td>
+                <td className="px-3 py-1.5"><span className={`text-[10px] px-1.5 py-0.5 rounded-full ${c.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{c.is_active ? "ใช้งาน" : "ปิด"}</span></td>
+                <td className="px-3 py-1.5 whitespace-nowrap">{w.length > 0 ? <span className="text-[11px] text-amber-700" title={w.join(", ")}>⚠ {w.length}</span> : <span className="text-emerald-500 text-[11px]">✓</span>}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
