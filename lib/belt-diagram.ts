@@ -20,6 +20,7 @@ export type BeltDiagramParams = {
   // รูปจริงจากตารางหลัก (URL /api/r2-image) — มีอย่างน้อย 1 → ใช้โหมดซ้อนรูป
   strapImg?: string | null;      // belt_tails (ทรงปลายหาง = เข็มขัดทั้งเส้น)
   holeImg?: string | null;       // belt_hole (ลายรู)
+  holeBackOnly?: boolean;        // ลายรูอยู่ "หลังอย่างเดียว" (เช่น พิมพ์บันได) → หน้าไม่โชว์
   frontLogoImg?: string | null;  // belt_logo (โลโก้ด้านหน้า)
   backLogoImg?: string | null;   // belt_logo (โลโก้ด้านหลัง)
 };
@@ -40,10 +41,15 @@ function imageComposite(p: BeltDiagramParams): string {
     const lx = Math.round(BX + BW * LOGO_FX), ly = Math.round(boxY + BH * LOGO_FY);
     return `<image href="${esc(href)}" x="${lx}" y="${ly}" width="${lw}" height="${lh}" preserveAspectRatio="xMidYMid meet"/>`;
   };
-  const fY = 26, bY = fY + BH + 34;
-  const front = `<text x="${BX}" y="18" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${full(p.holeImg, fY)}${logoAt(p.frontLogoImg, fY)}`;
-  const back  = `<text x="${BX}" y="${bY - 8}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${logoAt(p.backLogoImg, bY)}`;
-  const H = bY + BH + 8;
+  const dim = (txt: string, x: number, y: number, anchor: string) =>
+    txt ? `<text x="${x}" y="${y}" font-size="11" fill="#b91c1c" text-anchor="${anchor}">${esc(txt)}</text>` : "";
+  const fY = 30, bY = fY + BH + 42;
+  const logoDist = p.logoDistIn != null ? `ห่าง ${p.logoDistIn} นิ้ว` : "";
+  const toEnd = `${p.toEndIn ?? 7} นิ้วถึงปลายสาย`;
+  // ลายรูบนหน้า: โชว์เฉพาะถ้า "ไม่ใช่หลังอย่างเดียว" (เจาะรูจริง=ทั้งสองด้าน · พิมพ์บันได=หลังเท่านั้น)
+  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${logoAt(p.frontLogoImg, fY)}${dim(logoDist, BX + BW, fY - 6, "end")}`;
+  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${full(p.holeImg, bY)}${logoAt(p.backLogoImg, bY)}${dim(toEnd, BX + BW / 2, bY + BH + 16, "middle")}`;
+  const H = bY + BH + 26;
   return `<svg viewBox="0 0 740 ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
 }
 

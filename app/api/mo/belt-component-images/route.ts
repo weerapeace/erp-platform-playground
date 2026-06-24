@@ -1,8 +1,9 @@
 /**
  * จับคู่ "ค่าที่เลือกในสเปกเข็มขัด" → รูปจริงจากตารางหลัก (belt_tails/belt_hole/belt_logo)
- * GET /api/mo/belt-component-images?tail=<ชื่อปลายหาง>&hole=<ชื่อรู>&frontLogo=<ชื่อโลโก้หน้า>&backLogo=<ชื่อโลโก้หลัง>
- *   → { strap, hole, frontLogo, backLogo }  เป็น URL /api/r2-image (หรือ null ถ้าไม่เจอ)
- * จับแบบยืดหยุ่น (ชื่อในสเปกกับในตารางอาจไม่ตรงเป๊ะ เช่น จั้ม/จิ้ม/ปากเป็ด-ปากเปิด)
+ * GET /api/mo/belt-component-images?tail=&hole=&frontLogo=&backLogo=
+ *   → { strap, hole, holeBackOnly, frontLogo, backLogo }  (รูป=URL /api/r2-image หรือ null)
+ *   holeBackOnly = true แปลว่าลาย/รูนี้อยู่ "ด้านหลังอย่างเดียว" (เช่น พิมพ์บันได) · false = ทั้งหน้า-หลัง (เจาะรูจริง)
+ * จับแบบยืดหยุ่น (ชื่ออาจไม่ตรงเป๊ะ เช่น จั้ม/จิ้ม/ปากเป็ด-ปากเปิด)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -11,11 +12,11 @@ import { guardApi } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Row = { name: string; image: string | null };
+type Row = { name: string; image: string | null; back_only?: boolean };
 const norm = (s: string) => s.replace(/\s+/g, "").toLowerCase();
 
-// เลือกรูปที่ "ชื่อใกล้ที่สุด": ตรงเป๊ะ → มีคำซ้อนกัน → token ตรงมากสุด
-function pickImage(rows: Row[], q: string): string | null {
+// เลือกแถวที่ "ชื่อใกล้ที่สุด": ตรงเป๊ะ → มีคำซ้อนกัน → token ตรงมากสุด
+function pickRow(rows: Row[], q: string): Row | null {
   const query = (q ?? "").trim();
   if (!query) return null;
   const withImg = rows.filter((r) => r.image);
@@ -31,8 +32,9 @@ function pickImage(rows: Row[], q: string): string | null {
     }
     if (bestScore > 0) m = best;
   }
-  return m?.image ? `/api/r2-image?key=${encodeURIComponent(m.image)}` : null;
+  return m ?? null;
 }
+const urlOf = (r: Row | null) => (r?.image ? `/api/r2-image?key=${encodeURIComponent(r.image)}` : null);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
@@ -41,18 +43,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [tails, holes, logos] = await Promise.all([
     admin.from("belt_tails").select("name, image"),
-    admin.from("belt_hole").select("name, image"),
+    admin.from("belt_hole").select("name, image, back_only"),
     admin.from("belt_logo").select("name, image"),
   ]);
   const tailRows = (tails.data ?? []) as Row[];
   const holeRows = (holes.data ?? []) as Row[];
   const logoRows = (logos.data ?? []) as Row[];
+  const holeRow = pickRow(holeRows, sp.get("hole") ?? "");
 
   return NextResponse.json({
-    strap:     pickImage(tailRows, sp.get("tail") ?? ""),
-    hole:      pickImage(holeRows, sp.get("hole") ?? ""),
-    frontLogo: pickImage(logoRows, sp.get("frontLogo") ?? ""),
-    backLogo:  pickImage(logoRows, sp.get("backLogo") ?? ""),
+    strap:        urlOf(pickRow(tailRows, sp.get("tail") ?? "")),
+    hole:         urlOf(holeRow),
+    holeBackOnly: !!holeRow?.back_only,
+    frontLogo:    urlOf(pickRow(logoRows, sp.get("frontLogo") ?? "")),
+    backLogo:     urlOf(pickRow(logoRows, sp.get("backLogo") ?? "")),
     error: null,
   });
 }

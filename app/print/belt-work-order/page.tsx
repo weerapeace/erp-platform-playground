@@ -99,7 +99,7 @@ function BeltWorkOrderInner() {
   const [bw, setBw] = useState<BeltWorkOrder | null>(null);
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [skuSpecs, setSkuSpecs] = useState<Record<string, ProductSpec>>({});
-  const [beltImgs, setBeltImgs] = useState<{ strap?: string | null; hole?: string | null; frontLogo?: string | null; backLogo?: string | null }>({});
+  const [beltImgs, setBeltImgs] = useState<{ strap?: string | null; hole?: string | null; frontLogo?: string | null; backLogo?: string | null; holeBackOnly?: boolean }>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -169,7 +169,7 @@ function BeltWorkOrderInner() {
       has_spec: specFields.length > 0,
       specs: specFields.map((f) => ({ label: f.label, value: f.value })),
       // เฟส 3b: รูปวาดจากตัวเลขจริงในช่องสเปก (จำนวนรู/ระยะ/ห่างโลโก้/ปลายหาง) — ไม่กรอก → ใช้ค่า default
-      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape, strapImg: beltImgs.strap, holeImg: beltImgs.hole, frontLogoImg: beltImgs.frontLogo, backLogoImg: beltImgs.backLogo }),
+      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape, strapImg: beltImgs.strap, holeImg: beltImgs.hole, holeBackOnly: beltImgs.holeBackOnly, frontLogoImg: beltImgs.frontLogo, backLogoImg: beltImgs.backLogo }),
     };
     return buildReportHtml(TEMPLATE, data);
   }, [bw, spec, skuSpecs, beltImgs]);
