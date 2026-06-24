@@ -19,6 +19,7 @@ export type BrowseTree  = { groups: BrowseGroup[]; tags: BrowseTag[] };
 export type SkuCard = {
   id: string; code: string; name: string; image: string | null;
   list_price: number | null; qty_on_hand: number | null; is_active: boolean; tags: string[];
+  has_bom: boolean;   // มีสูตร BOM ไหม (ไว้เตือน "ข้อมูลไม่ครบ")
 };
 
 const sanitize = (t: string) => t.replace(/[,()%*]/g, " ").trim();
@@ -109,11 +110,19 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // มี BOM ไหม (bom_headers.product_sku = code) — ไว้เตือน "ข้อมูลไม่ครบ"
+  const bomSet = new Set<string>();
+  if (rows.length) {
+    const codes = rows.map((r) => r.code).filter(Boolean);
+    const { data: boms } = await admin.from("bom_headers").select("product_sku").in("product_sku", codes);
+    for (const b of (boms ?? []) as { product_sku: string }[]) bomSet.add(b.product_sku);
+  }
+
   const cards: SkuCard[] = rows.map((r) => ({
     id: r.id, code: r.code, name: r.name_th ?? "",
     image: r.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(r.cover_image_r2_key)}` : null,
     list_price: r.list_price, qty_on_hand: stock.has(r.id) ? (stock.get(r.id) as number) : null,
-    is_active: r.is_active, tags: tagMap.get(r.id) ?? [],
+    is_active: r.is_active, tags: tagMap.get(r.id) ?? [], has_bom: bomSet.has(r.code),
   }));
   return NextResponse.json({ cards, total, error: null });
 }

@@ -36,6 +36,16 @@ const SORTS = [
   { key: "newest",     label: "ใหม่ล่าสุด",      by: "created_at", dir: "desc" },
 ] as const;
 
+/** เช็คว่าการ์ดนี้ข้อมูลไม่ครบตรงไหน (ไว้โชว์ป้ายเตือน + กรอง) */
+function cardWarnings(c: SkuCard): string[] {
+  const w: string[] = [];
+  if (!c.image) w.push("ไม่มีรูป");
+  if (c.list_price == null || c.list_price <= 0) w.push("ไม่มีราคา");
+  if (c.tags.length === 0) w.push("ไม่มีแท็ก");
+  if (!c.has_bom) w.push("ไม่มี BOM");
+  return w;
+}
+
 export function SkuTagBrowser() {
   const toast = useToast();
   const [tree, setTree] = useState<BrowseTree | null>(null);
@@ -43,6 +53,7 @@ export function SkuTagBrowser() {
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string>("code");
+  const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
 
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
@@ -63,6 +74,7 @@ export function SkuTagBrowser() {
   const cardsMode = !!search.trim() || tagFilter.tagIds.length > 0;
   const currentGroupId = groupPath.length ? groupPath[groupPath.length - 1].id : null;
   const sort = SORTS.find((s) => s.key === sortKey) ?? SORTS[0];
+  const shown = onlyIncomplete ? cards.filter((c) => cardWarnings(c).length > 0) : cards;
 
   // ดึงการ์ดหนึ่งหน้า (off = ตำแหน่งเริ่ม)
   const fetchPage = useCallback(async (off: number) => {
@@ -158,19 +170,25 @@ export function SkuTagBrowser() {
         loadingCards ? <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
         : cards.length === 0 ? <div className="text-center py-16 text-slate-400 text-sm">ไม่พบ SKU</div>
         : <>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ (แสดง {cards.length.toLocaleString("th-TH")})</p>
-              <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
-                <span>เรียง</span>
-                <select value={sortKey} onChange={(e) => setSortKey(e.target.value)}
-                  className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white">
-                  {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-                </select>
+            <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+              <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ (แสดง {(onlyIncomplete ? shown.length : cards.length).toLocaleString("th-TH")})</p>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setOnlyIncomplete((v) => !v)}
+                  className={`h-8 px-2.5 text-[12px] rounded-lg border ${onlyIncomplete ? "bg-amber-50 border-amber-300 text-amber-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>⚠️ เฉพาะข้อมูลไม่ครบ</button>
+                <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
+                  <span>เรียง</span>
+                  <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white">
+                    {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-              {cards.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} />)}
-            </div>
+            {onlyIncomplete && <p className="text-[11px] text-amber-600 mb-2">กรองจากที่โหลดมา {cards.length.toLocaleString("th-TH")} ตัว — กด “โหลดเพิ่ม” ด้านล่างเพื่อตรวจตัวที่เหลือ</p>}
+            {shown.length === 0
+              ? <div className="text-center py-12 text-slate-400 text-sm">ไม่มีรายการที่ข้อมูลไม่ครบในที่โหลดมา 🎉</div>
+              : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
+                  {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} />)}
+                </div>}
             {cards.length < total && (
               <div className="text-center mt-4">
                 <button onClick={loadMore} disabled={loadingMore}
@@ -219,6 +237,7 @@ function SkuCardView({ c, fields, onOpen }: { c: SkuCard; fields: string[]; onOp
   const has = (k: string) => fields.includes(k);
   const showTopRow = has("code") || has("status");
   const showPriceRow = has("price") || has("stock");
+  const warns = cardWarnings(c);
   return (
     <button onClick={onOpen} className="text-left rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-indigo-300 hover:shadow-sm transition">
       {has("image") && (
@@ -229,6 +248,11 @@ function SkuCardView({ c, fields, onOpen }: { c: SkuCard; fields: string[]; onOp
         </div>
       )}
       <div className="p-2.5">
+        {warns.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1.5">
+            {warns.map((x) => <span key={x} className="text-[9px] px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">⚠ {x}</span>)}
+          </div>
+        )}
         {showTopRow && (
           <div className="flex items-center gap-1.5 flex-wrap">
             {has("code") && <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">{c.code}</span>}
