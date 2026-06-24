@@ -1,77 +1,105 @@
 "use client";
 
 /**
- * SkuTagBrowser — ของกลาง "เลือกดู SKU ตามกลุ่มแท็ก" (drill-down)
+ * SkuTagBrowser — ของกลาง "เลือกดู SKU ตามกลุ่มแท็ก"
  *
- * กลุ่มหลัก → กลุ่มย่อย/แท็ก → การ์ด SKU · breadcrumb ย้อนกลับ · ค้นหา SKU ทั้งหมด
- * การ์ดปรับแต่งได้ (เลือกฟิลด์ที่โชว์) บันทึกผ่าน /api/card-layouts (ของฉัน/ทุกคน)
- * อ่านผ่าน /api/sku-browser (tree + การ์ด) — ใช้โครง product_family_groups/families เดิม
+ * - drill-down: กลุ่มหลัก → กลุ่มย่อย/แท็ก (ตามรูปที่ออกแบบ)
+ * - TagGroupFilter (ของกลางเดียวกับจัดซื้อ): กรองหลายแท็กพร้อมกัน
+ * - การ์ด SKU: เรียงลำดับ · โหลดเพิ่ม · กดการ์ด → ดู/แก้ SKU (SkuFormModal) · ปรับฟิลด์การ์ด
+ * - ค้นหา SKU ทั้งหมด · ดึงผ่าน /api/sku-browser (RPC กลาง erp_skus_tag_page)
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
+import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
+import { SkuFormModal } from "@/components/sku-form-modal";
 import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
 
 type Crumb = { id: string; name: string };
 
 const CARD_FIELDS: { key: string; label: string }[] = [
-  { key: "image",  label: "รูป" },
-  { key: "code",   label: "รหัส" },
-  { key: "name",   label: "ชื่อ" },
-  { key: "price",  label: "ราคาขาย" },
-  { key: "stock",  label: "สต๊อกคงเหลือ" },
-  { key: "tags",   label: "แท็ก" },
-  { key: "status", label: "สถานะ" },
+  { key: "image",  label: "รูป" }, { key: "code", label: "รหัส" }, { key: "name", label: "ชื่อ" },
+  { key: "price",  label: "ราคาขาย" }, { key: "stock", label: "สต๊อกคงเหลือ" }, { key: "tags", label: "แท็ก" }, { key: "status", label: "สถานะ" },
 ];
 const DEFAULT_CARD_FIELDS = CARD_FIELDS.map((f) => f.key);
 const CARD_SCOPE = "sku-browser";
+const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
+const LIMIT = 120;
+
+const SORTS = [
+  { key: "code",       label: "รหัส (A→Z)",     by: "code",       dir: "asc"  },
+  { key: "name",       label: "ชื่อ (A→Z)",      by: "name_th",    dir: "asc"  },
+  { key: "price_desc", label: "ราคา (สูง→ต่ำ)",  by: "list_price", dir: "desc" },
+  { key: "price_asc",  label: "ราคา (ต่ำ→สูง)",  by: "list_price", dir: "asc"  },
+  { key: "newest",     label: "ใหม่ล่าสุด",      by: "created_at", dir: "desc" },
+] as const;
 
 export function SkuTagBrowser() {
   const toast = useToast();
   const [tree, setTree] = useState<BrowseTree | null>(null);
   const [groupPath, setGroupPath] = useState<Crumb[]>([]);
-  const [tag, setTag] = useState<Crumb | null>(null);
+  const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<string>("code");
+
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingCards, setLoadingCards] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_CARD_FIELDS);
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch("/api/sku-browser").then((r) => r.json())
-      .then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
+    apiFetch("/api/sku-browser").then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
     apiFetch(`/api/card-layouts?scope=${CARD_SCOPE}`).then((r) => r.json())
       .then((j) => { const f = (j.mine ?? j.default) as string[] | null; if (f && f.length) setCardFields(f); }).catch(() => {});
   }, []);
 
-  const cardsMode = !!tag || !!search.trim();
+  const tagNameById = useMemo(() => new Map((tree?.tags ?? []).map((t) => [t.id, t.name])), [tree]);
+  const cardsMode = !!search.trim() || tagFilter.tagIds.length > 0;
   const currentGroupId = groupPath.length ? groupPath[groupPath.length - 1].id : null;
+  const sort = SORTS.find((s) => s.key === sortKey) ?? SORTS[0];
 
+  // ดึงการ์ดหนึ่งหน้า (off = ตำแหน่งเริ่ม)
+  const fetchPage = useCallback(async (off: number) => {
+    const p = new URLSearchParams();
+    if (tagFilter.tagIds.length) p.set("family_ids", tagFilter.tagIds.join(","));
+    if (search.trim()) p.set("search", search.trim());
+    p.set("sort", sort.by); p.set("dir", sort.dir);
+    p.set("limit", String(LIMIT)); p.set("offset", String(off));
+    const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
+    return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
+  }, [tagFilter, search, sort]);
+
+  // โหลดหน้าแรกใหม่เมื่อเปลี่ยน filter/search/sort
   useEffect(() => {
     if (!cardsMode) { setCards([]); setTotal(0); return; }
     let alive = true;
     setLoadingCards(true);
-    const p = new URLSearchParams();
-    if (tag) p.set("family_id", tag.id);
-    if (search.trim()) p.set("search", search.trim());
-    p.set("limit", "120");
-    apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json())
-      .then((j) => { if (!alive) return; setCards(j.cards ?? []); setTotal(j.total ?? 0); })
+    fetchPage(0).then((r) => { if (!alive) return; setCards(r.cards); setTotal(r.total); })
       .catch(() => {}).finally(() => { if (alive) setLoadingCards(false); });
     return () => { alive = false; };
-  }, [tag, search, cardsMode]);
+  }, [cardsMode, fetchPage]);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    try { const r = await fetchPage(cards.length); setCards((prev) => [...prev, ...r.cards]); setTotal(r.total); }
+    catch { /* ignore */ } finally { setLoadingMore(false); }
+  };
+  const reloadFirst = async () => { try { const r = await fetchPage(0); setCards(r.cards); setTotal(r.total); } catch { /* ignore */ } };
 
   const childGroups = (tree?.groups ?? []).filter((g) => g.parent_group_id === currentGroupId);
   const childTags   = (tree?.tags   ?? []).filter((t) => t.group_id === currentGroupId);
 
-  const openGroup = (g: BrowseGroup) => { setTag(null); setGroupPath((p) => [...p, { id: g.id, name: g.name }]); };
-  const openTag   = (t: BrowseTag)   => { setTag({ id: t.id, name: t.name }); };
-  const goRoot    = () => { setGroupPath([]); setTag(null); setSearch(""); };
-  const goCrumb   = (i: number) => { setGroupPath((p) => p.slice(0, i + 1)); setTag(null); };
+  const openGroup = (g: BrowseGroup) => setGroupPath((p) => [...p, { id: g.id, name: g.name }]);
+  const openTag   = (t: BrowseTag)   => setTagFilter({ tagIds: [t.id], none: false });
+  const goRoot    = () => { setGroupPath([]); setTagFilter(EMPTY_FILTER); setSearch(""); };
+  const goCrumb   = (i: number) => { setGroupPath((p) => p.slice(0, i + 1)); setTagFilter(EMPTY_FILTER); };
+  const clearTags = () => setTagFilter(EMPTY_FILTER);
 
   const saveCard = async (fields: string[], target: "me" | "all") => {
     try {
@@ -92,7 +120,7 @@ export function SkuTagBrowser() {
 
   return (
     <div>
-      {/* search + ปรับการ์ด */}
+      {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
       <div className="flex items-center gap-2 mb-3">
         <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
           <span className="text-slate-400">🔍</span>
@@ -101,21 +129,28 @@ export function SkuTagBrowser() {
             className="flex-1 h-full text-sm outline-none bg-transparent" />
           {search && <button onClick={() => setSearch("")} className="text-slate-400 hover:text-slate-600 text-sm">✕</button>}
         </div>
+        <TagGroupFilter value={tagFilter} onChange={setTagFilter} label="กรองแท็ก" showNone={false} />
         <button onClick={() => setCustomizeOpen(true)}
           className="h-10 px-3 text-[13px] border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 whitespace-nowrap">⚙️ ปรับการ์ด</button>
       </div>
 
       {/* breadcrumb */}
       <div className="flex items-center gap-1 text-[13px] mb-3 flex-wrap">
-        <button onClick={goRoot} className={`hover:underline ${groupPath.length === 0 && !tag && !search ? "text-slate-700 font-medium" : "text-indigo-600"}`}>🏠 ทั้งหมด</button>
+        <button onClick={goRoot} className={`hover:underline ${groupPath.length === 0 && !cardsMode ? "text-slate-700 font-medium" : "text-indigo-600"}`}>🏠 ทั้งหมด</button>
         {search.trim() && <><span className="text-slate-300">›</span><span className="text-slate-500">ค้นหา “{search.trim()}”</span></>}
-        {!search.trim() && groupPath.map((c, i) => (
+        {!search.trim() && tagFilter.tagIds.length > 0 && (
+          <>
+            <span className="text-slate-300">›</span>
+            <span className="text-slate-700 font-medium">🔖 {tagFilter.tagIds.map((id) => tagNameById.get(id) ?? "แท็ก").join(", ")}</span>
+            <button onClick={clearTags} className="text-slate-400 hover:text-rose-500 text-xs ml-1">✕</button>
+          </>
+        )}
+        {!cardsMode && groupPath.map((c, i) => (
           <span key={c.id} className="flex items-center gap-1">
             <span className="text-slate-300">›</span>
-            <button onClick={() => goCrumb(i)} className={`hover:underline ${i === groupPath.length - 1 && !tag ? "text-slate-700 font-medium" : "text-indigo-600"}`}>{c.name}</button>
+            <button onClick={() => goCrumb(i)} className={`hover:underline ${i === groupPath.length - 1 ? "text-slate-700 font-medium" : "text-indigo-600"}`}>{c.name}</button>
           </span>
         ))}
-        {!search.trim() && tag && <><span className="text-slate-300">›</span><span className="text-slate-700 font-medium">{tag.name}</span></>}
       </div>
 
       {/* body */}
@@ -123,10 +158,27 @@ export function SkuTagBrowser() {
         loadingCards ? <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
         : cards.length === 0 ? <div className="text-center py-16 text-slate-400 text-sm">ไม่พบ SKU</div>
         : <>
-            <p className="text-[12px] text-slate-400 mb-2">{total.toLocaleString("th-TH")} รายการ{total > cards.length ? ` (แสดง ${cards.length})` : ""}</p>
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-              {cards.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} />)}
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ (แสดง {cards.length.toLocaleString("th-TH")})</p>
+              <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
+                <span>เรียง</span>
+                <select value={sortKey} onChange={(e) => setSortKey(e.target.value)}
+                  className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white">
+                  {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </div>
             </div>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
+              {cards.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} />)}
+            </div>
+            {cards.length < total && (
+              <div className="text-center mt-4">
+                <button onClick={loadMore} disabled={loadingMore}
+                  className="h-9 px-5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+                  {loadingMore ? "กำลังโหลด…" : `โหลดเพิ่ม (เหลือ ${(total - cards.length).toLocaleString("th-TH")})`}
+                </button>
+              </div>
+            )}
           </>
       ) : (
         (childGroups.length === 0 && childTags.length === 0)
@@ -152,19 +204,23 @@ export function SkuTagBrowser() {
       )}
 
       {customizeOpen && (
-        <CardCustomizeModal value={cardFields}
-          onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
+        <CardCustomizeModal value={cardFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
+      )}
+      {editId && (
+        <SkuFormModal mode="edit" skuId={editId}
+          onClose={() => setEditId(null)}
+          onSaved={() => { setEditId(null); void reloadFirst(); }} />
       )}
     </div>
   );
 }
 
-function SkuCardView({ c, fields }: { c: SkuCard; fields: string[] }) {
+function SkuCardView({ c, fields, onOpen }: { c: SkuCard; fields: string[]; onOpen: () => void }) {
   const has = (k: string) => fields.includes(k);
   const showTopRow = has("code") || has("status");
   const showPriceRow = has("price") || has("stock");
   return (
-    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+    <button onClick={onOpen} className="text-left rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-indigo-300 hover:shadow-sm transition">
       {has("image") && (
         <div className="h-32 bg-slate-100 flex items-center justify-center overflow-hidden">
           {c.image
@@ -193,7 +249,7 @@ function SkuCardView({ c, fields }: { c: SkuCard; fields: string[] }) {
           </div>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -218,20 +274,15 @@ function CardCustomizeModal({ value, onClose, onSave, onReset }: {
       <div className="flex flex-col gap-1.5 mb-4">
         {CARD_FIELDS.map((f) => (
           <label key={f.key} className="flex items-center gap-2 text-[13px] cursor-pointer">
-            <input type="checkbox" checked={sel.includes(f.key)} onChange={() => toggle(f.key)} className="w-4 h-4" />
-            {f.label}
+            <input type="checkbox" checked={sel.includes(f.key)} onChange={() => toggle(f.key)} className="w-4 h-4" /> {f.label}
           </label>
         ))}
       </div>
       <div className="pt-3 border-t border-slate-100">
         <p className="text-[12px] text-slate-500 mb-1.5">บันทึกให้</p>
         <div className="flex gap-2">
-          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
-            <input type="radio" checked={target === "me"} onChange={() => setTarget("me")} /> เฉพาะฉัน
-          </label>
-          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer">
-            <input type="radio" checked={target === "all"} onChange={() => setTarget("all")} /> ทุกคน (ต้องมีสิทธิ์)
-          </label>
+          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer"><input type="radio" checked={target === "me"} onChange={() => setTarget("me")} /> เฉพาะฉัน</label>
+          <label className="flex items-center gap-1.5 text-[13px] cursor-pointer"><input type="radio" checked={target === "all"} onChange={() => setTarget("all")} /> ทุกคน (ต้องมีสิทธิ์)</label>
         </div>
       </div>
     </ERPModal>
