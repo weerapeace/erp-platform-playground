@@ -54,6 +54,7 @@ export function SkuTagBrowser() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<string>("code");
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);   // กรองเฉพาะ SKU ที่ข้อมูลไม่ครบ
+  const [selected, setSelected] = useState<Set<string>>(new Set());   // เลือกหลายตัว (bulk)
 
   const [cards, setCards] = useState<SkuCard[]>([]);
   const [total, setTotal] = useState(0);
@@ -91,7 +92,7 @@ export function SkuTagBrowser() {
   useEffect(() => {
     if (!cardsMode) { setCards([]); setTotal(0); return; }
     let alive = true;
-    setLoadingCards(true);
+    setLoadingCards(true); setSelected(new Set());
     fetchPage(0).then((r) => { if (!alive) return; setCards(r.cards); setTotal(r.total); })
       .catch(() => {}).finally(() => { if (alive) setLoadingCards(false); });
     return () => { alive = false; };
@@ -112,6 +113,36 @@ export function SkuTagBrowser() {
   const goRoot    = () => { setGroupPath([]); setTagFilter(EMPTY_FILTER); setSearch(""); };
   const goCrumb   = (i: number) => { setGroupPath((p) => p.slice(0, i + 1)); setTagFilter(EMPTY_FILTER); };
   const clearTags = () => setTagFilter(EMPTY_FILTER);
+
+  // ── เลือกหลายตัว + bulk ──
+  const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const clearSel = () => setSelected(new Set());
+  const selectAllShown = () => setSelected(new Set(shown.map((c) => c.id)));
+  const bulkAddTag = async (tagId: string) => {
+    const ids = [...selected]; if (!tagId || ids.length === 0) return;
+    try {
+      const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction: "skus_v2_product_family_m2m", links: ids.map((src_id) => ({ src_id, tgt_id: tagId })) }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(`ติดแท็กให้ ${ids.length} SKU แล้ว`); clearSel(); void reloadFirst();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ติดแท็กไม่สำเร็จ"); }
+  };
+  const bulkStatus = async (active: boolean) => {
+    const ids = [...selected]; if (ids.length === 0) return;
+    let ok = 0;
+    for (const id of ids) {
+      try { const res = await apiFetch(`/api/master-v2/skus/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_active: active }) }); if (res.ok) ok++; } catch { /* ignore */ }
+    }
+    toast.success(`${active ? "เปิด" : "ปิด"}ใช้งาน ${ok}/${ids.length} SKU แล้ว`); clearSel(); void reloadFirst();
+  };
+  const exportCsv = () => {
+    const rows = shown.filter((c) => selected.has(c.id)); if (rows.length === 0) return;
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = [["รหัส", "ชื่อ", "ราคาขาย", "สต๊อก", "แท็ก", "สถานะ"].join(",")]
+      .concat(rows.map((c) => [c.code, c.name, c.list_price ?? "", c.qty_on_hand ?? "", c.tags.join("|"), c.is_active ? "ใช้งาน" : "ปิด"].map(esc).join(",")));
+    const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "skus-export.csv"; a.click(); URL.revokeObjectURL(a.href);
+    toast.success(`Export ${rows.length} รายการแล้ว`);
+  };
 
   const saveCard = async (fields: string[], target: "me" | "all") => {
     try {
@@ -187,7 +218,7 @@ export function SkuTagBrowser() {
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">ไม่มีรายการที่ข้อมูลไม่ครบในที่โหลดมา 🎉</div>
               : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-                  {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} />)}
+                  {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
                 </div>}
             {cards.length < total && (
               <div className="text-center mt-4">
@@ -221,6 +252,21 @@ export function SkuTagBrowser() {
             </div>
       )}
 
+      {selected.size > 0 && (
+        <div className="sticky bottom-4 mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap">
+          <span className="text-sm font-medium">เลือก {selected.size}</span>
+          <button onClick={selectAllShown} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">เลือกทั้งหมดที่แสดง</button>
+          <select onChange={(e) => { const v = e.target.value; e.currentTarget.value = ""; if (v) void bulkAddTag(v); }} defaultValue=""
+            className="h-8 px-2 text-[12px] rounded-lg text-slate-700 bg-white">
+            <option value="">🏷️ ติดแท็ก…</option>
+            {(tree?.tags ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <button onClick={() => bulkStatus(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">เปิดใช้งาน</button>
+          <button onClick={() => bulkStatus(false)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">ปิดใช้งาน</button>
+          <button onClick={exportCsv} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">⬇ Export CSV</button>
+          <button onClick={clearSel} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
+        </div>
+      )}
       {customizeOpen && (
         <CardCustomizeModal value={cardFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
       )}
@@ -233,13 +279,15 @@ export function SkuTagBrowser() {
   );
 }
 
-function SkuCardView({ c, fields, onOpen }: { c: SkuCard; fields: string[]; onOpen: () => void }) {
+function SkuCardView({ c, fields, onOpen, selected, onToggleSelect }: { c: SkuCard; fields: string[]; onOpen: () => void; selected: boolean; onToggleSelect: () => void }) {
   const has = (k: string) => fields.includes(k);
   const showTopRow = has("code") || has("status");
   const showPriceRow = has("price") || has("stock");
   const warns = cardWarnings(c);
   return (
-    <button onClick={onOpen} className="text-left rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-indigo-300 hover:shadow-sm transition">
+    <button onClick={onOpen} className={`relative text-left rounded-xl border bg-white overflow-hidden hover:shadow-sm transition ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
+      <span onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
+        className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] cursor-pointer ${selected ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
       {has("image") && (
         <div className="h-32 bg-slate-100 flex items-center justify-center overflow-hidden">
           {c.image
