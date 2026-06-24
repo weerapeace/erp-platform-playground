@@ -9,6 +9,7 @@ import type { CustomerPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -57,13 +58,17 @@ export default function BillingNotesPage() {
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 2500); };
 
   const fetchList = useCallback(async () => {
-    setLoading(true); setError(null);
+    // SWR-lite: กลับเข้าหน้าเดิม → โชว์ของแคชทันที แล้ว revalidate เงียบ
+    const cached = peekSWR<BillingNoteListItem[]>("billing-notes:list");
+    if (cached) { setRows(cached); setLoading(false); } else { setLoading(true); }
+    setError(null);
     try {
       const res = await apiFetch("/api/billing-notes?limit=200");
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      setRows(json.data ?? []);
-    } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
+      const data = (json.data ?? []) as BillingNoteListItem[];
+      setRows(data); mutateSWR("billing-notes:list", data);
+    } catch (err) { if (!cached) setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);

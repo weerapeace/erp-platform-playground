@@ -10,6 +10,7 @@ import type { CustomerPickerValue, WarehousePickerValue, EmployeePickerValue } f
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { SOListItem, SODetail } from "@/app/api/sales-orders/route";
@@ -135,27 +136,30 @@ export default function SalesOrdersPage() {
 
   // ---- Fetch ----
   const fetchList = useCallback(async () => {
-    setLoading(true); setError(null);
+    // SWR-lite: กลับเข้าหน้าเดิม → โชว์ของแคชทันที (ไม่ขึ้น spinner) แล้ว revalidate เงียบ
+    const cached = peekSWR<SOListItem[]>("so:list");
+    if (cached) { setRows(cached); setLoading(false); } else { setLoading(true); }
+    setError(null);
     try {
       const res = await apiFetch("/api/sales-orders?limit=200");
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      setRows(json.data ?? []);
-    } catch (err) { setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
+      const data = (json.data ?? []) as SOListItem[];
+      setRows(data); mutateSWR("so:list", data);
+    } catch (err) { if (!cached) setError(err instanceof Error ? err.message : "โหลดไม่ได้"); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
-  // โหลดคลังหลัก (WH-MAIN) ไว้เป็นค่าเริ่มต้นตอนสร้าง SO
+  // โหลดคลังหลัก (WH-MAIN) ไว้เป็นค่าเริ่มต้นตอนสร้าง SO — แคชไว้ ไม่ยิงซ้ำทุกครั้งที่เข้าหน้า
   useEffect(() => {
     if (!canView) return;
+    const apply = (list: WarehousePickerValue[]) => { const main = list.find(w => w.code === "WH-MAIN") ?? null; if (main) setDefaultWarehouse(main); };
+    const cached = peekSWR<WarehousePickerValue[]>("warehouses:list");
+    if (cached) { apply(cached); return; }
     apiFetch("/api/master/warehouses?limit=50")
       .then(r => r.json())
-      .then(j => {
-        const list = (j.data ?? []) as WarehousePickerValue[];
-        const main = list.find(w => w.code === "WH-MAIN") ?? null;
-        if (main) setDefaultWarehouse(main);
-      })
+      .then(j => { const list = (j.data ?? []) as WarehousePickerValue[]; mutateSWR("warehouses:list", list); apply(list); })
       .catch(() => {});
   }, [canView]);
 
