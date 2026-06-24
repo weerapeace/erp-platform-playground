@@ -880,9 +880,10 @@ export default function WorkBoardPage() {
 
   if (!canView) return <AccessDenied />;
 
+  // ⚠️ ห้ามใส่ CSS zoom ที่ wrapper ล่างนี้ — บน iPad/Safari ทำให้ "จุดแตะ" เพี้ยน (ยิ่งไปทางขวายิ่งคลาด)
+  //    → แตะช่องโต๊ะฝั่งขวาไม่ติด จ่ายงานไม่ได้ (เคยใช้ zoom:1.25 บน tablet แล้วพัง)
   return (
-    <div className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3 overflow-auto" : "max-w-[1700px] mx-auto px-5 py-5"}
-      style={tablet ? { zoom: 1.25 } : undefined}>
+    <div className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3 overflow-auto" : "max-w-[1700px] mx-auto px-5 py-5"}>
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">📋 บอร์ดจ่ายงาน</h1>
