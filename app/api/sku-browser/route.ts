@@ -1,0 +1,104 @@
+/**
+ * GET /api/sku-browser
+ *   - ไม่มี family_id & ไม่มี search → คืน "ต้นไม้แท็ก" (groups + tags + จำนวน SKU ต่อแท็ก)
+ *   - มี family_id (หรือ search) → คืน "การ์ด SKU" (รูป/รหัส/ชื่อ/ราคาขาย/สต๊อก/สถานะ/แท็ก)
+ *
+ * อ่านของเดิมล้วน: product_family_groups (กลุ่ม, ซ้อนกลุ่มย่อย) · product_families (แท็ก)
+ *   · skus_v2_product_family_m2m (src_id=sku, tgt_id=tag) · skus_v2 · sku_stock_balances
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { guardApi } from "@/lib/api-auth";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export type BrowseGroup = { id: string; name: string; parent_group_id: string | null; icon: string | null; color: string | null; sort_order: number };
+export type BrowseTag   = { id: string; name: string; group_id: string | null; sort_order: number; sku_count: number };
+export type BrowseTree  = { groups: BrowseGroup[]; tags: BrowseTag[] };
+export type SkuCard = {
+  id: string; code: string; name: string; image: string | null;
+  list_price: number | null; qty_on_hand: number | null; is_active: boolean; tags: string[];
+};
+
+const sanitize = (t: string) => t.replace(/[,()%*]/g, " ").trim();
+
+export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "products.view");
+  if (denied) return denied;
+
+  const sp = new URL(request.url).searchParams;
+  const familyId = sp.get("family_id");
+  const search   = (sp.get("search") ?? "").trim();
+  const admin = supabaseAdmin();
+
+  // ── โหมดต้นไม้ ──
+  if (!familyId && !search) {
+    const [gRes, tRes, mRes] = await Promise.all([
+      admin.from("product_family_groups").select("id, name, parent_group_id, icon, color, sort_order").eq("is_active", true).order("sort_order"),
+      admin.from("product_families").select("id, name, group_id, sort_order").eq("is_active", true).order("sort_order"),
+      admin.from("skus_v2_product_family_m2m").select("tgt_id"),
+    ]);
+    const counts = new Map<string, number>();
+    for (const r of (mRes.data ?? []) as { tgt_id: string }[]) counts.set(r.tgt_id, (counts.get(r.tgt_id) ?? 0) + 1);
+    const tags = ((tRes.data ?? []) as Omit<BrowseTag, "sku_count">[]).map((t) => ({ ...t, sku_count: counts.get(t.id) ?? 0 }));
+    const tree: BrowseTree = { groups: (gRes.data ?? []) as BrowseGroup[], tags };
+    return NextResponse.json({ tree, error: null });
+  }
+
+  // ── โหมดการ์ด SKU ──
+  const limit  = Math.min(Number(sp.get("limit") ?? 60) || 60, 120);
+  const offset = Number(sp.get("offset") ?? 0) || 0;
+
+  let skuIds: string[] | null = null;
+  if (familyId) {
+    const { data: links } = await admin.from("skus_v2_product_family_m2m").select("src_id").eq("tgt_id", familyId).limit(5000);
+    skuIds = (links ?? []).map((l) => (l as { src_id: string }).src_id);
+    if (skuIds.length === 0) return NextResponse.json({ cards: [], total: 0, error: null });
+  }
+
+  let q = admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key, list_price, is_active", { count: "exact" });
+  if (skuIds) q = q.in("id", skuIds);
+  if (search) {
+    for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
+  }
+  q = q.order("code").range(offset, offset + limit - 1);
+
+  const { data: skus, count, error } = await q;
+  if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
+
+  const rows = (skus ?? []) as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; list_price: number | null; is_active: boolean }[];
+  const ids = rows.map((r) => r.id);
+
+  // สต๊อก
+  const stock = new Map<string, number>();
+  if (ids.length) {
+    const { data: bal } = await admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", ids);
+    for (const b of (bal ?? []) as { sku_id: string; qty_on_hand: number | string | null }[]) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
+  }
+
+  // แท็กต่อ SKU (ดึง m2m + ชื่อแท็ก แยก ไม่พึ่ง FK embed)
+  const tagMap = new Map<string, string[]>();
+  if (ids.length) {
+    const { data: links } = await admin.from("skus_v2_product_family_m2m").select("src_id, tgt_id").in("src_id", ids);
+    const linkRows = (links ?? []) as { src_id: string; tgt_id: string }[];
+    const tgtIds = [...new Set(linkRows.map((l) => l.tgt_id))];
+    const nameById = new Map<string, string>();
+    if (tgtIds.length) {
+      const { data: fams } = await admin.from("product_families").select("id, name").in("id", tgtIds);
+      for (const f of (fams ?? []) as { id: string; name: string }[]) nameById.set(f.id, f.name);
+    }
+    for (const l of linkRows) {
+      const name = nameById.get(l.tgt_id); if (!name) continue;
+      const arr = tagMap.get(l.src_id) ?? []; arr.push(name); tagMap.set(l.src_id, arr);
+    }
+  }
+
+  const cards: SkuCard[] = rows.map((r) => ({
+    id: r.id, code: r.code, name: r.name_th ?? "",
+    image: r.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(r.cover_image_r2_key)}` : null,
+    list_price: r.list_price, qty_on_hand: stock.has(r.id) ? (stock.get(r.id) as number) : null,
+    is_active: r.is_active, tags: tagMap.get(r.id) ?? [],
+  }));
+  return NextResponse.json({ cards, total: count ?? cards.length, error: null });
+}

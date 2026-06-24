@@ -3,12 +3,12 @@
 /**
  * Master Data v2 — SKUs (Product Variants)
  *
- * URL: /master/skus
+ * URL: /master/skus  · 3 แท็บ: ตาราง / เลือกดูตามแท็ก (drill-down) / Tags Manager
  * Field config: /admin/schema-sync (เลือก module: SKUs)
  */
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
@@ -17,6 +17,14 @@ import { SkuWizard } from "./sku-wizard";
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
+  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+);
+const SkuTagBrowser = dynamic(
+  () => import("@/components/sku-tag-browser").then((m) => m.SkuTagBrowser),
+  { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+);
+const TagsManagerPage = dynamic(
+  () => import("@/app/master/tags-manager/page"),
   { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
 );
 
@@ -77,8 +85,17 @@ function fmtPrice(v: unknown) {
     : <span className="text-xs text-slate-300">—</span>;
 }
 
+const TABS = [
+  { key: "table",  label: "📋 ตาราง SKU" },
+  { key: "browse", label: "🗂️ เลือกดูตามแท็ก" },
+  { key: "tags",   label: "🏷️ Tags Manager" },
+] as const;
+type TabKey = (typeof TABS)[number]["key"];
+
 export default function SkusV2Page() {
   const toast = useToast();
+  const [tab, setTab] = useState<TabKey>("table");
+
   // เพิ่มปุ่ม "คัดลอก" รายแถว — ก๊อปทุกฟิลด์ไปเป็น SKU ใหม่ + (copy) ท้ายชื่อ + รหัสใหม่
   const config = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
@@ -94,5 +111,21 @@ export default function SkusV2Page() {
       },
     }],
   }), [toast]);
-  return <MasterCRUDPage config={config} />;
+
+  return (
+    <div>
+      <div className="flex items-center gap-1 border-b border-slate-200 px-3 pt-2">
+        {TABS.map((t) => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`px-3.5 py-2 text-sm border-b-2 -mb-px transition ${tab === t.key
+              ? "border-indigo-500 text-indigo-700 font-medium"
+              : "border-transparent text-slate-500 hover:text-slate-700"}`}>{t.label}</button>
+        ))}
+      </div>
+
+      {tab === "table"  && <MasterCRUDPage config={config} />}
+      {tab === "browse" && <div className="max-w-[1200px] mx-auto px-5 py-5"><SkuTagBrowser /></div>}
+      {tab === "tags"   && <TagsManagerPage />}
+    </div>
+  );
 }
