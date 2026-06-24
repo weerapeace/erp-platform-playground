@@ -50,24 +50,36 @@ export async function GET(request: NextRequest) {
   const limit  = Math.min(Number(sp.get("limit") ?? 60) || 60, 120);
   const offset = Number(sp.get("offset") ?? 0) || 0;
 
-  let skuIds: string[] | null = null;
+  type SkuRow = { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; list_price: number | null; is_active: boolean };
+  const SEL = "id, code, name_th, cover_image_r2_key, list_price, is_active";
+  let rows: SkuRow[] = [];
+  let total = 0;
+
   if (familyId) {
-    const { data: links } = await admin.from("skus_v2_product_family_m2m").select("src_id").eq("tgt_id", familyId).limit(5000);
-    skuIds = (links ?? []).map((l) => (l as { src_id: string }).src_id);
-    if (skuIds.length === 0) return NextResponse.json({ cards: [], total: 0, error: null });
-  }
-
-  let q = admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key, list_price, is_active", { count: "exact" });
-  if (skuIds) q = q.in("id", skuIds);
-  if (search) {
+    // กรองแท็กผ่าน RPC กลาง erp_skus_tag_page (EXISTS ที่ DB + แบ่งหน้า) — รองรับแท็กที่มี SKU เป็นพัน ไม่ส่ง id ยาวใน URL
+    const { data: rpc, error: rpcErr } = await admin.rpc("erp_skus_tag_page", {
+      p_incl: [familyId], p_excl: null, p_search: search || null,
+      p_include_inactive: true, p_limit: limit, p_offset: offset, p_sort_by: "code", p_sort_dir: "asc",
+    });
+    if (rpcErr) return NextResponse.json({ cards: [], total: 0, error: rpcErr.message }, { status: 500 });
+    const pageIds = (rpc as { ids?: string[] } | null)?.ids ?? [];
+    total = Number((rpc as { total?: number } | null)?.total ?? 0);
+    if (pageIds.length === 0) return NextResponse.json({ cards: [], total, error: null });
+    const { data: skus, error } = await admin.from("skus_v2").select(SEL).in("id", pageIds);
+    if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
+    const order = new Map(pageIds.map((id, i) => [id, i]));
+    rows = ((skus ?? []) as SkuRow[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  } else {
+    // ค้นหาอย่างเดียว (ไม่มีแท็ก) — search จำกัดผลอยู่แล้ว
+    let q = admin.from("skus_v2").select(SEL, { count: "exact" });
     for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
+    q = q.order("code").range(offset, offset + limit - 1);
+    const { data: skus, count, error } = await q;
+    if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
+    rows = (skus ?? []) as SkuRow[];
+    total = count ?? rows.length;
   }
-  q = q.order("code").range(offset, offset + limit - 1);
 
-  const { data: skus, count, error } = await q;
-  if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
-
-  const rows = (skus ?? []) as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; list_price: number | null; is_active: boolean }[];
   const ids = rows.map((r) => r.id);
 
   // สต๊อก
@@ -100,5 +112,5 @@ export async function GET(request: NextRequest) {
     list_price: r.list_price, qty_on_hand: stock.has(r.id) ? (stock.get(r.id) as number) : null,
     is_active: r.is_active, tags: tagMap.get(r.id) ?? [],
   }));
-  return NextResponse.json({ cards, total: count ?? cards.length, error: null });
+  return NextResponse.json({ cards, total, error: null });
 }
