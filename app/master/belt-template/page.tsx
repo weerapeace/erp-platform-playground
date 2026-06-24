@@ -10,11 +10,11 @@ import { useCallback } from "react";
 const W = 1000, H = 185;
 const TEMPLATE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
   <rect x="1" y="1" width="998" height="183" fill="none" stroke="#e2e8f0" stroke-width="2"/>
-  <path d="M40,45 H840 L930,80 Q945,92 930,105 L840,140 H40 Z" fill="none" stroke="#94a3b8" stroke-width="2"/>
-  <line x1="520" y1="20" x2="520" y2="165" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="5 5"/>
+  <path d="M40,45 H685 L790,80 Q805,92 790,105 L685,140 H40 Z" fill="none" stroke="#94a3b8" stroke-width="2"/>
+  <line x1="450" y1="20" x2="450" y2="165" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="5 5"/>
   <text x="40" y="22" font-family="sans-serif" font-size="12" fill="#94a3b8">เทมเพลตเข็มขัด 1000 × 185 px — วาดทับเส้นไกด์ · พื้นหลังโปร่งใส · export PNG</text>
-  <text x="120" y="178" font-family="sans-serif" font-size="11" fill="#cbd5e1">โซนรู / ลายพิมพ์ (ซ้าย)</text>
-  <text x="640" y="178" font-family="sans-serif" font-size="11" fill="#cbd5e1">โซนโลโก้ (ขวา)</text>
+  <text x="110" y="178" font-family="sans-serif" font-size="11" fill="#cbd5e1">โซนรู / ลายพิมพ์ (ซ้าย)</text>
+  <text x="510" y="178" font-family="sans-serif" font-size="11" fill="#cbd5e1">โซนโลโก้ (ขวา)</text>
 </svg>`;
 
 function triggerDownload(href: string, name: string) {
