@@ -28,6 +28,32 @@ export default function StandalonePreviewPage() {
   const size = device === "iphone" ? { w: 390, h: 740 } : { w: 768, h: 1000 };
   const url = sel ? linkFor(sel) : null;
 
+  // ลิงก์เต็ม (origin จริง) + QR สำหรับสแกนติดตั้งบนมือถือ
+  const [origin, setOrigin] = useState("");
+  useEffect(() => { setOrigin(window.location.origin); }, []);
+  const fullUrl = url ? `${origin}${url}` : null;
+
+  const [qr, setQr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!fullUrl) { setQr(null); return; }
+    let alive = true;
+    void (async () => {
+      try {
+        const m = await import("qrcode");
+        const QR = (m.default ?? m) as { toDataURL: (text: string, opts?: { width?: number; margin?: number }) => Promise<string> };
+        const d = await QR.toDataURL(fullUrl, { width: 220, margin: 1 });
+        if (alive) setQr(d);
+      } catch { if (alive) setQr(null); }
+    })();
+    return () => { alive = false; };
+  }, [fullUrl]);
+
+  const [copied, setCopied] = useState(false);
+  const copyLink = async () => {
+    if (!fullUrl) return;
+    try { await navigator.clipboard.writeText(fullUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
+  };
+
   return (
     <PlaygroundShell>
       <div className="max-w-6xl mx-auto px-6 py-6">
@@ -51,7 +77,24 @@ export default function StandalonePreviewPage() {
               <div className="pt-2 space-y-2">
                 <a href={url} target="_blank" rel="noopener noreferrer"
                   className="block w-full text-center h-9 leading-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">เปิดเต็มจอ (แท็บใหม่) →</a>
-                <div className="text-[11px] text-slate-400 break-all">ลิงก์: <code>{url}</code></div>
+
+                {/* ลิงก์ติดตั้งแอป standalone — ลิงก์เต็ม + คัดลอก */}
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-1.5">
+                  <div className="text-[11px] font-medium text-slate-500">📲 ลิงก์ติดตั้งแอป (เปิดบนมือถือ → “เพิ่มไปหน้าโฮม”)</div>
+                  <div className="text-[11px] text-slate-600 break-all font-mono bg-white border border-slate-200 rounded px-2 py-1">{fullUrl ?? url}</div>
+                  <button onClick={copyLink} className="w-full h-8 text-xs font-medium border border-slate-200 rounded-lg bg-white hover:bg-slate-50">
+                    {copied ? "✓ คัดลอกแล้ว" : "📋 คัดลอกลิงก์"}
+                  </button>
+                </div>
+
+                {/* QR — สแกนด้วยมือถือเพื่อเปิดแอปแล้วติดตั้ง */}
+                {qr && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 flex flex-col items-center gap-1.5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={qr} alt="QR ลิงก์แอป" width={180} height={180} className="rounded" />
+                    <div className="text-[11px] text-slate-400 text-center leading-tight">สแกนด้วยกล้องมือถือ → เปิดแอป<br/>แล้วกด “เพิ่มไปหน้าจอโฮม” เพื่อติดตั้ง</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
