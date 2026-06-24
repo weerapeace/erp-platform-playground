@@ -52,6 +52,8 @@ export type LineItemsGridProps<T> = {
   groupByOptions?: { key: string; label: string }[];
   addLabel?:  string;
   onAdd?:     () => T;
+  /** ทำซ้ำบรรทัด — คืน row ใหม่ (ต้องตั้ง id/key ใหม่เอง) แล้วระบบแทรกต่อจากบรรทัดเดิม */
+  onDuplicate?: (row: T) => T;
   emptyText?: string;
   footer?:    React.ReactNode;
   /** key เก็บความกว้างคอลัมน์ลง localStorage (เฟส 2) */
@@ -74,7 +76,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
-  groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, emptyText = "ยังไม่มีรายการ", footer, storageKey,
+  groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", footer, storageKey,
   stickyHeader = false, maxHeight, defaultSort = null, dense = false,
 }: LineItemsGridProps<T>) {
   const [sort, setSort]       = useState<SortState>(defaultSort);
@@ -105,18 +107,25 @@ export function LineItemsGrid<T>({
     const parts: string[] = [];
     if (canDrag) parts.push("28px");
     for (const c of columns) parts.push(widths[c.key] ? `${widths[c.key]}px` : (c.width ? `${c.width}px` : `minmax(${c.minWidth ?? 120}px, 1fr)`));
-    if (!readonly) parts.push("36px");
+    if (!readonly) parts.push(onDuplicate ? "64px" : "36px");
     return parts.join(" ");
-  }, [columns, canDrag, readonly, widths]);
+  }, [columns, canDrag, readonly, widths, onDuplicate]);
 
   const minWidth = useMemo(() => {
-    let w = (canDrag ? 28 : 0) + (readonly ? 0 : 36);
+    let w = (canDrag ? 28 : 0) + (readonly ? 0 : (onDuplicate ? 64 : 36));
     for (const c of columns) w += baseWidth(c);
     return w;
   }, [columns, canDrag, readonly, widths]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const update = (id: string, patch: Partial<T>) => onChange(rows.map((r) => (rowId(r) === id ? { ...r, ...patch } : r)));
   const remove = (id: string) => onChange(rows.filter((r) => rowId(r) !== id));
+  // ทำซ้ำบรรทัด → แทรกต่อจากบรรทัดเดิมทันที (parent เป็นคนตั้ง id/key ใหม่ผ่าน onDuplicate)
+  const duplicate = (id: string) => {
+    if (!onDuplicate) return;
+    const idx = rows.findIndex((r) => rowId(r) === id);
+    if (idx < 0) return;
+    onChange([...rows.slice(0, idx + 1), onDuplicate(rows[idx]), ...rows.slice(idx + 1)]);
+  };
 
   const onDragEnd = (e: DragEndEvent) => {
     const { active, over } = e;
@@ -294,7 +303,8 @@ export function LineItemsGrid<T>({
                   ) : (
                     <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
                       columns={columns} row={d.row} dense={dense}
-                      onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))} />
+                      onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))}
+                      onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined} />
                   ),
                 )}
               </SortableContext>
@@ -318,11 +328,11 @@ export function LineItemsGrid<T>({
 
 // ---- single sortable row ----
 function GridRow<T>({
-  id, template, canDrag, readonly, columns, row, onUpdate, onRemove, dense = false,
+  id, template, canDrag, readonly, columns, row, onUpdate, onRemove, onDuplicate, dense = false,
 }: {
   id: string; template: string; canDrag: boolean; readonly: boolean;
   columns: LineColumn<T>[]; row: T;
-  onUpdate: (patch: Partial<T>) => void; onRemove: () => void; dense?: boolean;
+  onUpdate: (patch: Partial<T>) => void; onRemove: () => void; onDuplicate?: () => void; dense?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !canDrag });
   const style: React.CSSProperties = {
@@ -345,8 +355,14 @@ function GridRow<T>({
         </div>
       ))}
       {!readonly && (
-        <button type="button" onClick={onRemove}
-          className="h-9 w-9 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
+        <div className="flex items-center justify-center">
+          {onDuplicate && (
+            <button type="button" onClick={onDuplicate} title="ทำซ้ำบรรทัด"
+              className="h-9 w-7 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">⧉</button>
+          )}
+          <button type="button" onClick={onRemove} title="ลบบรรทัด"
+            className="h-9 w-7 flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">✕</button>
+        </div>
       )}
     </div>
   );

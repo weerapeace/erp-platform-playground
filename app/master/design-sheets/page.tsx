@@ -168,6 +168,43 @@ function deadlineTone(deadline: string | null, status: string, finished: Set<str
   return { dot: "bg-emerald-500", text: "text-slate-500" };
 }
 
+// ปุ่มเลือก "ฐานราคา" แบบ compact (สัญลักษณ์ + ราคา) — แทน <select> ยาว ๆ ที่ทำให้ดูรก/ขึ้น 2 บรรทัด
+type BasisOption = { value: string; symbol: string; label: string; price?: number | null; note?: string };
+function BasisPicker({ value, options, onChange }: { value: string; options: BasisOption[]; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const cur = options.find((o) => o.value === value) ?? options[0];
+  return (
+    <div className="relative inline-block shrink-0" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)} title={`ฐานราคา: ${cur?.label ?? ""}`}
+        className="h-7 px-1.5 inline-flex items-center gap-1 text-xs border border-slate-200 rounded bg-white hover:bg-slate-50 max-w-[120px]">
+        <span>{cur?.symbol}</span>
+        <span className="text-slate-500 truncate tabular-nums">{cur && cur.price != null ? fmtBaht(cur.price) : (cur?.note ?? cur?.label)}</span>
+        <span className="text-slate-300">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 right-0 mt-1 min-w-[220px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+          <div className="px-2.5 py-1 text-[10px] text-slate-400">ฐานราคาที่ใช้</div>
+          {options.map((o) => (
+            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
+              className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 hover:bg-blue-50 ${o.value === value ? "bg-blue-50/60 text-blue-700 font-medium" : "text-slate-700"}`}>
+              <span className="w-4 text-center">{o.symbol}</span>
+              <span className="flex-1 truncate">{o.label}</span>
+              <span className="tabular-nums text-slate-500">{o.price != null ? fmtBaht(o.price) : (o.note ?? "—")}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DesignSheetsPage() {
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
@@ -907,41 +944,45 @@ export default function DesignSheetsPage() {
         const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) : undefined;
         return (
           <div className="space-y-1">
-            <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!canEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
-              options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
-              onChange={(val) => {
-                const it = priceItems.find((p) => p.id === val);
-                if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
-                const piece = isPieceGroup(it.group_code, it.group_name);
-                // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
-                u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
-                    price_basis: piece ? null : "manual", calc_method: it.calc_method,
-                    waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
-                    pieces: piece ? (r.pieces ?? 1) : r.pieces,
-                    uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
-                    unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
-              }} />
-            {/* ฐานราคาของวัสดุ (กรอกเอง/ล่าสุด/เฉลี่ย) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
-            {item && !rowIsPiece(r) && canEdit && (
-              <select value={r.price_basis ?? "manual"} title="ฐานราคาจาก SKU ที่ผูกกับวัสดุนี้"
-                onChange={(e) => u({ price_basis: e.target.value, unit_price: itemBasisPrice(item, e.target.value) })}
-                className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
-                <option value="manual">ฐาน: กรอกเอง{item.price_per_unit != null ? ` (${fmtBaht(item.price_per_unit)})` : ""}</option>
-                <option value="latest">ฐาน: ซื้อจริงล่าสุด{item.sku_latest_price != null ? ` (${item.sku_latest_currency && item.sku_latest_currency !== "THB" ? `${item.sku_latest_currency} ` : ""}${item.sku_latest_price.toLocaleString("th-TH")})` : item.sku_count > 0 ? " — ยังไม่มีราคาซื้อ" : " — ยังไม่ผูก SKU"}</option>
-                <option value="avg">ฐาน: เฉลี่ยจาก SKU{item.sku_avg_price != null ? ` (${fmtBaht(item.sku_avg_price)})` : " — ยังไม่มี"}</option>
-              </select>
-            )}
+            <div className="flex items-center gap-1">
+              <div className="flex-1 min-w-0">
+                <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!canEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
+                  options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
+                  onChange={(val) => {
+                    const it = priceItems.find((p) => p.id === val);
+                    if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
+                    const piece = isPieceGroup(it.group_code, it.group_name);
+                    // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
+                    u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
+                        price_basis: piece ? null : "manual", calc_method: it.calc_method,
+                        waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
+                        pieces: piece ? (r.pieces ?? 1) : r.pieces,
+                        uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
+                        unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
+                  }} />
+              </div>
+              {/* ฐานราคาของวัสดุ (ปุ่ม compact มีสัญลักษณ์) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
+              {item && !rowIsPiece(r) && canEdit && (
+                <BasisPicker value={r.price_basis ?? "manual"}
+                  onChange={(v) => u({ price_basis: v, unit_price: itemBasisPrice(item, v) })}
+                  options={[
+                    { value: "manual", symbol: "✍️", label: "กรอกเอง", price: item.price_per_unit },
+                    { value: "latest", symbol: "🕐", label: "ซื้อจริงล่าสุด", price: item.sku_latest_price, note: item.sku_count > 0 ? "ยังไม่มีราคาซื้อ" : "ยังไม่ผูก SKU" },
+                    { value: "avg", symbol: "≈", label: "เฉลี่ยจาก SKU", price: item.sku_avg_price, note: "ยังไม่มี" },
+                  ]} />
+              )}
+              {inGroupMode && canEdit && (
+                <BasisPicker value={r.price_basis ?? "avg"}
+                  onChange={(v) => u({ price_basis: v, unit_price: g ? groupBasisPrice(g, v) : r.unit_price })}
+                  options={[
+                    { value: "avg", symbol: "≈", label: "เฉลี่ย", price: g?.avg_price ?? null },
+                    { value: "set", symbol: "📌", label: "ตั้งไว้", price: g?.set_price ?? null, note: "ยังไม่ตั้ง" },
+                    { value: "latest", symbol: "🕐", label: "ซื้อจริงล่าสุด", price: g?.latest_price ?? null },
+                  ]} />
+              )}
+            </div>
             {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
               <div className="text-[10px] text-amber-600">⚠ ราคาเป็น {item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”</div>
-            )}
-            {inGroupMode && canEdit && (
-              <select value={r.price_basis ?? "avg"} title="ฐานราคาของกลุ่ม (รายการเดิม)"
-                onChange={(e) => u({ price_basis: e.target.value, unit_price: g ? groupBasisPrice(g, e.target.value) : r.unit_price })}
-                className="w-full h-7 px-1 text-xs border border-slate-200 rounded bg-white">
-                <option value="avg">ฐาน: เฉลี่ย{g?.avg_price != null ? ` (${fmtBaht(g.avg_price)})` : ""}</option>
-                <option value="set">ฐาน: ตั้งไว้{g?.set_price != null ? ` (${fmtBaht(g.set_price)})` : " — ยังไม่ตั้ง"}</option>
-                <option value="latest">ฐาน: ซื้อจริงล่าสุด{g?.latest_price != null ? ` (${g.latest_price.toLocaleString("th-TH")})` : " —"}</option>
-              </select>
             )}
           </div>
         );
@@ -1387,6 +1428,7 @@ export default function DesignSheetsPage() {
                 })}
                 addLabel="＋ เพิ่มบรรทัดตีราคา"
                 emptyText="ยังไม่มีบรรทัดตีราคา — กดเพิ่มบรรทัดแล้วเลือกวัสดุ"
+                onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}` })}
               />
 
 
@@ -1438,15 +1480,16 @@ export default function DesignSheetsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              {/* แถบยอดรวม + ปุ่ม — sticky ติดล่าง (เลื่อนตารางยาวแค่ไหนก็เห็นปุ่มเสมอ) */}
+              <div className="sticky bottom-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm text-slate-600">ต้นทุนสินค้า: <b className="text-base text-emerald-700">{fmtBaht(grandTotal)}</b> บาท
                   {costDirty && <span className="ml-2 text-[11px] text-amber-600">● มีแก้ไขที่ยังไม่บันทึก</span>}</div>
                 {canEdit && (
                   <div className="flex gap-1.5">
                     <button onClick={() => void saveCost()} disabled={costSaving}
-                      className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{costSaving ? "กำลังบันทึก..." : "💾 บันทึกตีราคา"}</button>
+                      className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm">{costSaving ? "กำลังบันทึก..." : "💾 บันทึกตีราคา"}</button>
                     <button onClick={() => void sendCostToQuote()} disabled={costSaving || !(grandTotal > 0)}
-                      className="h-8 px-3 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50">→ ส่งยอดไปเสนอราคา</button>
+                      className="h-9 px-4 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 bg-white">→ ส่งยอดไปเสนอราคา</button>
                   </div>
                 )}
               </div>
