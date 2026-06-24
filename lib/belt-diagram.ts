@@ -31,14 +31,14 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 // strap/hole เป็นกรอบเดียวกัน (925×167) → ซ้อนตรงพอดี · โลโก้เป็นรูปเล็กแยก (208×45) วางช่วงปลายขวา
 const IMG_W = 925, IMG_H = 167;                               // ขนาดจริงของรูป strap/hole
 const BX = 18, BW = 704, BH = Math.round((BW * IMG_H) / IMG_W); // กรอบเข็มขัด (รักษาอัตราส่วน → ไม่บิด) ≈ 127
-const LOGO_FX = 0.60, LOGO_FY = 0.27, LOGO_FW = 0.26;          // ตำแหน่ง/ขนาดโลโก้ (สัดส่วนในกรอบ — ปรับได้ถ้าต้องจูน)
+const LOGO_FX = 0.60, LOGO_FW = 0.26;          // ตำแหน่ง/ขนาดโลโก้ (สัดส่วนในกรอบ — ปรับได้ถ้าต้องจูน)
 function imageComposite(p: BeltDiagramParams): string {
   const full = (href: string | null | undefined, y: number) =>
     href ? `<image href="${esc(href)}" x="${BX}" y="${y}" width="${BW}" height="${BH}" preserveAspectRatio="none"/>` : "";
   const logoAt = (href: string | null | undefined, boxY: number) => {
     if (!href) return "";
     const lw = Math.round(BW * LOGO_FW), lh = Math.round((lw * 45) / 208);
-    const lx = Math.round(BX + BW * LOGO_FX), ly = Math.round(boxY + BH * LOGO_FY);
+    const lx = Math.round(BX + BW * LOGO_FX), ly = Math.round(boxY + (BH - lh) / 2);   // จัดกลางแนวตั้ง
     return `<image href="${esc(href)}" x="${lx}" y="${ly}" width="${lw}" height="${lh}" preserveAspectRatio="xMidYMid meet"/>`;
   };
   const dim = (txt: string, x: number, y: number, anchor: string) =>
@@ -50,7 +50,7 @@ function imageComposite(p: BeltDiagramParams): string {
   //        ถ้าไม่ใช่ (รูที่เนื้อหาอยู่ซ้ายในกรอบโปร่งใสอยู่แล้ว เช่นเจาะรูไข่) → วางเต็มกรอบ
   const holeAt = (href: string | null | undefined, y: number) => !href ? ""
     : p.holeBackOnly
-      ? `<image href="${esc(href)}" x="${BX + 4}" y="${y + 8}" width="${Math.round(BW * 0.46)}" height="${BH - 16}" preserveAspectRatio="none"/>`
+      ? `<image href="${esc(href)}" x="${BX + 4}" y="${Math.round(y + BH * 0.25)}" width="${Math.round(BW * 0.46)}" height="${Math.round(BH * 0.5)}" preserveAspectRatio="none"/>`
       : full(href, y);
   // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (เจาะรู=ทั้งสองด้าน · พิมพ์บันได=หลังเท่านั้น)
   const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : holeAt(p.holeImg, fY)}${logoAt(p.frontLogoImg, fY)}${dim(logoDist, BX + BW, fY - 6, "end")}`;
