@@ -13,6 +13,7 @@ const ENTITY: Record<SearchHit["entity_type"], { icon: string; label: string; co
   supplier: { icon: "🏢", label: "ผู้จำหน่าย", color: "text-emerald-700" },
   pr:       { icon: "🛒", label: "ใบขอซื้อ",   color: "text-amber-700"   },
   user:     { icon: "👤", label: "ผู้ใช้",      color: "text-purple-700"  },
+  asset:    { icon: "🖼️", label: "ไฟล์/คลัง",  color: "text-indigo-700"  },
 };
 
 // ---- Highlight helper ----
@@ -132,7 +133,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
           </svg>
           <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-            placeholder="ค้นหา SKU, รหัสผู้จำหน่าย, เลข PR, ชื่อ user..."
+            placeholder="ค้นหา SKU, ผู้จำหน่าย, เลข PR, ไฟล์/artwork, ชื่อ user..."
             className="flex-1 text-sm bg-transparent border-0 focus:outline-none text-slate-800 placeholder-slate-400" />
           <kbd className="text-[10px] font-mono text-slate-400 border border-slate-200 px-1.5 py-0.5 rounded">ESC</kbd>
         </div>
