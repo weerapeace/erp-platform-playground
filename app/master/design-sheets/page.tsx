@@ -804,9 +804,9 @@ export default function DesignSheetsPage() {
 
   const openCreate = () => { setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostExtra(DEFAULT_COST_EXTRA); };
 
-  const openEdit = async (row: DesignSheetListItem) => {
+  const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty());
-    setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend();
+    setModalTab(tab); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend();
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
       if (j.error) throw new Error(j.error);
@@ -1133,6 +1133,10 @@ export default function DesignSheetsPage() {
             renderCard={(it, dragging) => {
               const tone = deadlineTone(it.deadline, it.status, wfMeta.finished);
               const brandColor = it.brand_color ?? "#cbd5e1";
+              // เฟส 8: ไฟสถานะขั้นตอน — เขียว=เสนอราคาแล้ว · เหลือง=ตีราคาแล้วยังไม่เสนอ · เทา=ยังไม่ตีราคา
+              const step = it.has_quote ? { dot: "bg-emerald-500", label: "เสนอราคาแล้ว" }
+                : it.has_cost ? { dot: "bg-amber-500", label: "ตีราคาแล้ว · ยังไม่เสนอ" }
+                : { dot: "bg-slate-300", label: "ยังไม่ตีราคา" };
               return (
                 /* เงาทึบเหลื่อมขวา-ล่างสีแบรนด์ (ตามสเก็ตช์เจ้าของ) — ไม่ระบุแบรนด์ = เทาอ่อน */
                 <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden ${dragging ? "ring-2 ring-blue-300 rotate-1" : "hover:border-blue-300"}`}
@@ -1156,7 +1160,21 @@ export default function DesignSheetsPage() {
                       <span className={`w-2 h-2 rounded-full shrink-0 ${tone.dot}`} />
                       {it.deadline ? `เสร็จ ${formatDate(it.deadline)}` : "ไม่กำหนดเสร็จ"}
                     </div>
+                    {/* เฟส 8: ไฟสถานะขั้นตอน (ครบ/ขาด) */}
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500" title={step.label}>
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${step.dot}`} />
+                      <span className="truncate">{step.label}</span>
+                    </div>
                     {it.note && <p className="text-[11px] text-slate-400 line-clamp-1">{it.note}</p>}
+                    {/* เฟส 8: ปุ่มลัดบนการ์ด — กดแล้วไม่เปิดการ์ด (stopPropagation) */}
+                    <div className="flex items-center gap-1 pt-1 mt-0.5 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
+                      <button type="button" title="ตีราคา" onClick={(e) => { e.stopPropagation(); void openEdit(it, "cost"); }}
+                        className="flex-1 h-7 inline-flex items-center justify-center gap-1 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-amber-50 hover:border-amber-200">🧮 ตีราคา</button>
+                      <button type="button" title="เสนอราคา" onClick={(e) => { e.stopPropagation(); void openEdit(it, "quotes"); }}
+                        className="flex-1 h-7 inline-flex items-center justify-center gap-1 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:border-emerald-200">💰 เสนอ</button>
+                      <a href={`/print/design-sheet-quote/${it.id}`} target="_blank" rel="noreferrer" title="พิมพ์ใบเสนอราคา" onClick={(e) => e.stopPropagation()}
+                        className="h-7 px-2 inline-flex items-center justify-center text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">🖨</a>
+                    </div>
                   </div>
                 </div>
               );

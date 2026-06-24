@@ -24,6 +24,8 @@ export type DesignSheetListItem = {
   status: string; order_date: string | null; deadline: string | null;
   drive_link: string | null; note: string | null; is_active: boolean;
   updated_at: string; cover_url: string | null;
+  // เฟส 8 (Canvas): สถานะความครบของขั้นตอน — ไว้โชว์ไฟบนการ์ด
+  has_cost: boolean; has_quote: boolean; parent_count: number;
 };
 
 async function nextDsNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string> {
@@ -69,7 +71,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   let q = admin.from("design_sheets")
-    .select("id, code, name, brand_id, status, order_date, deadline, drive_link, note, is_active, updated_at, brand:brands!brand_id(name, color)", { count: "exact" })
+    .select("id, code, name, brand_id, status, order_date, deadline, drive_link, note, is_active, updated_at, parent_sku_codes, brand:brands!brand_id(name, color)", { count: "exact" })
     .eq("is_active", !archived)
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
@@ -81,15 +83,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ data: [], total: 0, error: friendlyDbError(error.message) }, { status: 500 });
 
   const rows = (data ?? []) as Array<Record<string, unknown>>;
-  const covers = await coverMap(admin, rows.map((r) => String(r.id)));
+  const ids = rows.map((r) => String(r.id));
+  const covers = await coverMap(admin, ids);
+  // เฟส 8: ขั้นตอนที่ทำแล้ว (มีบรรทัดตีราคา? / มีรอบเสนอราคา?) — batch ครั้งเดียวต่อหน้า
+  const withCost = new Set<string>(), withQuote = new Set<string>();
+  if (ids.length) {
+    const [cl, ql] = await Promise.all([
+      admin.from("design_sheet_cost_lines").select("sheet_id").in("sheet_id", ids),
+      admin.from("design_sheet_quotes").select("sheet_id").in("sheet_id", ids),
+    ]);
+    for (const r of (cl.data ?? []) as Array<Record<string, unknown>>) withCost.add(String(r.sheet_id));
+    for (const r of (ql.data ?? []) as Array<Record<string, unknown>>) withQuote.add(String(r.sheet_id));
+  }
   const items: DesignSheetListItem[] = rows.map((r) => {
     const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
+    const id = String(r.id);
     return {
-      id: String(r.id), code: String(r.code), name: String(r.name),
+      id, code: String(r.code), name: String(r.name),
       brand_id: (r.brand_id as string) ?? null, brand_name: b?.name ?? null, brand_color: b?.color ?? null,
       status: String(r.status ?? "design"), order_date: (r.order_date as string) ?? null, deadline: (r.deadline as string) ?? null,
       drive_link: (r.drive_link as string) ?? null, note: (r.note as string) ?? null, is_active: !!r.is_active,
-      updated_at: String(r.updated_at), cover_url: covers.get(String(r.id)) ?? null,
+      updated_at: String(r.updated_at), cover_url: covers.get(id) ?? null,
+      has_cost: withCost.has(id), has_quote: withQuote.has(id),
+      parent_count: Array.isArray(r.parent_sku_codes) ? (r.parent_sku_codes as unknown[]).length : 0,
     };
   });
   return NextResponse.json({ data: items, total: count ?? 0, error: null });
