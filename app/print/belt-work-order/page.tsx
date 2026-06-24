@@ -12,7 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import type { BeltWorkOrder } from "@/app/api/mo/belt-work-order/route";
 import type { ProductSpec } from "@/app/api/product-spec/route";
-import { buildBeltDiagramSvg, type BeltTailShape } from "@/lib/belt-diagram";
+import { buildBeltDiagramSvg, type BeltTailShape, type BeltLayout } from "@/lib/belt-diagram";
 
 const TEMPLATE: ReportTemplate = {
   paper_size: "A4",
@@ -100,6 +100,8 @@ function BeltWorkOrderInner() {
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [skuSpecs, setSkuSpecs] = useState<Record<string, ProductSpec>>({});
   const [beltImgs, setBeltImgs] = useState<{ strap?: string | null; hole?: string | null; frontLogo?: string | null; backLogo?: string | null; holeBackOnly?: boolean }>({});
+  const [beltLayout, setBeltLayout] = useState<BeltLayout>({});
+  useEffect(() => { apiFetch("/api/mo/belt-layout").then((r) => r.json()).then((j) => setBeltLayout((j.layout ?? {}) as BeltLayout)).catch(() => {}); }, []);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -169,10 +171,10 @@ function BeltWorkOrderInner() {
       has_spec: specFields.length > 0,
       specs: specFields.map((f) => ({ label: f.label, value: f.value })),
       // เฟส 3b: รูปวาดจากตัวเลขจริงในช่องสเปก (จำนวนรู/ระยะ/ห่างโลโก้/ปลายหาง) — ไม่กรอก → ใช้ค่า default
-      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape, strapImg: beltImgs.strap, holeImg: beltImgs.hole, holeBackOnly: beltImgs.holeBackOnly, frontLogoImg: beltImgs.frontLogo, backLogoImg: beltImgs.backLogo }),
+      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape, strapImg: beltImgs.strap, holeImg: beltImgs.hole, holeBackOnly: beltImgs.holeBackOnly, frontLogoImg: beltImgs.frontLogo, backLogoImg: beltImgs.backLogo, layout: beltLayout }),
     };
     return buildReportHtml(TEMPLATE, data);
-  }, [bw, spec, skuSpecs, beltImgs]);
+  }, [bw, spec, skuSpecs, beltImgs, beltLayout]);
 
   return (
     <div className="min-h-screen bg-slate-100">
