@@ -8,7 +8,8 @@
  *
  * ใช้ที่ไหนก็ได้ที่อยากให้ "ชี้รูปเล็กแล้วเห็นรูปใหญ่":
  *   <HoverImage url={img} size={28} />
- * แท็บเล็ต/มือถือไม่มี hover → ไม่เด้ง (ใช้ปุ่มดูรายละเอียดแทน) — ปลอดภัย
+ * - เดสก์ท็อป: ชี้เมาส์ = เด้งรูปพรีวิวลอยตามเมาส์
+ * - แตะ/คลิกที่รูป = เด้งรูปใหญ่เต็มจอ (lightbox) แตะที่ใดก็ปิด → ใช้ได้ทั้งทัช (iPad) และเมาส์
  */
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -27,6 +28,7 @@ export function HoverImage({
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [box, setBox] = useState<{ left: number; top: number } | null>(null);
+  const [zoom, setZoom] = useState(false);   // แตะ/คลิก = เปิดรูปใหญ่เต็มจอ (ใช้บนทัชที่ไม่มี hover)
 
   const open = () => {
     const r = ref.current?.getBoundingClientRect();
@@ -51,14 +53,24 @@ export function HoverImage({
     );
   }
   return (
-    <span ref={ref} className={`shrink-0 inline-block ${className}`} onMouseEnter={open} onMouseLeave={close} onClick={close}>
+    <span ref={ref} className={`shrink-0 inline-block cursor-zoom-in ${className}`} onMouseEnter={open} onMouseLeave={close}
+      onClick={(e) => { e.stopPropagation(); setBox(null); setZoom(true); }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" style={dim} className={`object-cover border border-slate-200 ${rounded}`} />
-      {box && typeof document !== "undefined" && createPortal(
+      {box && !zoom && typeof document !== "undefined" && createPortal(
         <div style={{ position: "fixed", left: box.left, top: box.top, zIndex: 9999 }}
           className="pointer-events-none bg-white border border-slate-200 rounded-xl shadow-2xl p-1.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={withImageWidth(url, previewSize * 2) ?? url} alt={alt} decoding="async" style={{ width: `${previewSize}px`, height: `${previewSize}px` }} className="object-contain rounded-lg" />
+        </div>,
+        document.body,
+      )}
+      {/* แตะ/คลิก → รูปใหญ่เต็มจอ (แตะที่ใดก็ปิด) */}
+      {zoom && typeof document !== "undefined" && createPortal(
+        <div onClick={(e) => { e.stopPropagation(); setZoom(false); }}
+          className="fixed inset-0 z-[10000] bg-black/70 flex items-center justify-center p-4 cursor-zoom-out">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={withImageWidth(url, 1024) ?? url} alt={alt} decoding="async" className="max-w-[92vw] max-h-[92vh] object-contain rounded-lg shadow-2xl" />
         </div>,
         document.body,
       )}
