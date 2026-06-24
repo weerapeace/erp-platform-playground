@@ -15,7 +15,7 @@ import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
 type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null };
-type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_name: string | null; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
+type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
 
@@ -44,7 +44,7 @@ export function DispatchPlanBoard({
   onOpenWork: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
   onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
-  onUpdateWO?: (id: string, patch: { labor_cost?: number }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
+  onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
@@ -55,6 +55,26 @@ export function DispatchPlanBoard({
   const [laborEditId, setLaborEditId] = useState<string | null>(null);   // ใบงานจริงที่กำลังใส่ค่าแรง
   const [laborEditVal, setLaborEditVal] = useState("");
   const [laborSaving, setLaborSaving] = useState(false);
+  const [assignPopup, setAssignPopup] = useState<{ wo: WOLite; dept: DeptLite } | null>(null);   // เลือกช่าง (หลายคน) ของใบงานจริง
+  const [assignSel, setAssignSel] = useState<Set<string>>(new Set());
+  const [assignSaving, setAssignSaving] = useState(false);
+  // เปิด/บันทึก ตัวเลือกช่างหลายคน
+  const craftsOfDept = useCallback((dept: DeptLite) => /เหมา/.test(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id), [craftsmen]);
+  const openAssign = (w: WOLite, dept: DeptLite) => {
+    const cur = new Set<string>();
+    (w.assignees ?? []).forEach((a) => { if (a.id) cur.add(a.id); });
+    if (cur.size === 0 && w.assignee_id) cur.add(w.assignee_id);   // ของเดิม (ช่างเดี่ยว)
+    setAssignSel(cur); setAssignPopup({ wo: w, dept });
+  };
+  const saveAssign = async () => {
+    if (!assignPopup || !onUpdateWO) return;
+    const list = [...assignSel].map((id) => { const c = craftsmen.find((x) => x.id === id); return c ? { id: c.id, name: c.name } : null; }).filter(Boolean) as { id: string; name: string }[];
+    setAssignSaving(true);
+    try {
+      await onUpdateWO(assignPopup.wo.id, { assignees: list, assignee_name: list.map((x) => x.name).join(", ") || null, assignee_id: list[0]?.id ?? null, assignee_type: list.length ? "craftsman" : "department" });
+      setAssignPopup(null);
+    } catch { /* parent toast */ } finally { setAssignSaving(false); }
+  };
   const [focusDept, setFocusDept] = useState<string | null>(null);   // โหมดแท็บเล็ต: โต๊ะที่กำลังโฟกัส
   const [colW, setColW] = useState(240);   // ความกว้างคอลัมน์/โต๊ะ (px) — ปรับได้ จำที่เครื่อง
   useEffect(() => { try { const v = Number(localStorage.getItem("wb:planColW")); if (v >= 180 && v <= 480) setColW(v); } catch { /* ignore */ } }, []);
@@ -392,7 +412,13 @@ export function DispatchPlanBoard({
                             {!realMode && <span className="text-slate-400" title="จ่ายจริงแล้ว — ในแผนดูอย่างเดียว">🔒</span>}
                           </span>
                         </div>
-                        <div className="text-[11px] text-slate-400 truncate">{w.assignee_name ?? "—"} · {fmt(w.qty)} ชิ้น · {baht(wl)}</div>
+                        <div className="text-[11px] text-slate-400 truncate">
+                          {/* #3: เลือกช่างหลายคน (เฉพาะของจริง) — กดที่ชื่อเพื่อเลือก */}
+                          {canEditWO
+                            ? <button onClick={(e) => { e.stopPropagation(); openAssign(w, d); }} className="text-violet-600 hover:underline font-medium">👤 {w.assignee_name || "เลือกช่าง"} ✎</button>
+                            : <span>{w.assignee_name ?? "—"}</span>}
+                          {" · "}{fmt(w.qty)} ชิ้น · {baht(wl)}
+                        </div>
                         {/* #2: ใส่ค่าแรง (เฉพาะของจริง + การ์ดที่ยังไม่มีค่าแรง) — กดง่าย */}
                         {canEditWO && wl <= 0 && !editing && (
                           <button onClick={(e) => { e.stopPropagation(); setLaborEditId(w.id); setLaborEditVal(""); }}
@@ -437,6 +463,35 @@ export function DispatchPlanBoard({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* #3: เลือกช่างหลายคน (multi-pick) ให้ใบงานจริง */}
+      {assignPopup && (
+        <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4" onClick={() => setAssignPopup(null)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-xs w-full p-4 max-h-[75vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-bold text-slate-800 truncate">👤 เลือกช่าง (เลือกได้หลายคน)</h3>
+              <button onClick={() => setAssignPopup(null)} className="text-slate-400 hover:text-slate-600 shrink-0">✕</button>
+            </div>
+            <div className="text-[11px] text-slate-400 mb-2">{assignPopup.dept.name} · เลือกแล้ว {assignSel.size} คน</div>
+            <div className="flex-1 overflow-auto -mx-1 px-1 space-y-0.5">
+              {(() => {
+                const crafts = craftsOfDept(assignPopup.dept);
+                if (crafts.length === 0) return <div className="text-[12px] text-slate-300 py-4 text-center">แผนกนี้ยังไม่มีช่าง</div>;
+                return crafts.map((c) => (
+                  <label key={c.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer text-sm">
+                    <input type="checkbox" checked={assignSel.has(c.id)} onChange={() => setAssignSel((prev) => { const n = new Set(prev); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })} className="w-4 h-4 accent-violet-600" />
+                    <span className="flex-1 truncate text-slate-700">{c.code ? `[${c.code}] ` : ""}{c.name}</span>
+                  </label>
+                ));
+              })()}
+            </div>
+            <div className="flex items-center justify-between gap-2 mt-3">
+              <button onClick={() => setAssignSel(new Set())} className="h-8 px-2 text-xs text-slate-500 hover:text-slate-700">ล้าง (ทั้งโต๊ะ)</button>
+              <button disabled={assignSaving} onClick={saveAssign} className="h-8 px-4 text-sm bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{assignSaving ? "บันทึก…" : "บันทึก"}</button>
+            </div>
+          </div>
         </div>
       )}
 

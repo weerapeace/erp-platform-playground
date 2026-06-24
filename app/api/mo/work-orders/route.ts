@@ -95,7 +95,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 // PATCH — แก้ใบงานจริง (ค่าแรง / ผู้รับงาน) หลังจ่ายแล้ว
-type PatchBody = { id?: string; labor_cost?: number | null; assignee_type?: string | null; assignee_id?: string | null; assignee_name?: string | null };
+type PatchBody = { id?: string; labor_cost?: number | null; assignee_type?: string | null; assignee_id?: string | null; assignee_name?: string | null; assignees?: { id: string | null; name: string }[] };
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -108,6 +108,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("labor_cost" in body)    patch.labor_cost    = body.labor_cost != null ? num(body.labor_cost) : null;
   if ("assignee_type" in body) patch.assignee_type = body.assignee_type ?? "department";
   if ("assignee_id" in body)   patch.assignee_id   = body.assignee_id ?? null;
+  if ("assignees" in body)     patch.assignees     = Array.isArray(body.assignees) ? body.assignees : [];
   if ("assignee_name" in body) patch.assignee_name = body.assignee_name ?? null;
   if (Object.keys(patch).length === 1) return NextResponse.json({ id: body.id, error: null });   // มีแค่ updated_at = ไม่มีอะไรแก้
 
