@@ -26,22 +26,25 @@ export type BeltDiagramParams = {
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
-// ── โหมดซ้อนรูปจริง — ปรับกรอบ/ตำแหน่งที่ค่าพวกนี้ถ้าต้องจูน ──
-const BOX_X = 28, BOX_W = 684, BOX_H = 96;   // กรอบเข็มขัด 1 เส้น
+// ── โหมดซ้อนรูปจริง ──
+// strap/hole เป็นกรอบเดียวกัน (925×167) → ซ้อนตรงพอดี · โลโก้เป็นรูปเล็กแยก (208×45) วางช่วงปลายขวา
+const IMG_W = 925, IMG_H = 167;                               // ขนาดจริงของรูป strap/hole
+const BX = 18, BW = 704, BH = Math.round((BW * IMG_H) / IMG_W); // กรอบเข็มขัด (รักษาอัตราส่วน → ไม่บิด) ≈ 127
+const LOGO_FX = 0.60, LOGO_FY = 0.27, LOGO_FW = 0.26;          // ตำแหน่ง/ขนาดโลโก้ (สัดส่วนในกรอบ — ปรับได้ถ้าต้องจูน)
 function imageComposite(p: BeltDiagramParams): string {
-  const img = (href: string | null | undefined, y: number) =>
-    href ? `<image href="${esc(href)}" x="${BOX_X}" y="${y}" width="${BOX_W}" height="${BOX_H}" preserveAspectRatio="none"/>` : "";
-  const logoTxt = p.logoDistIn != null ? `ห่างโลโก้ ${p.logoDistIn} นิ้ว` : "";
-
-  const front = `
-    <text x="${BOX_X}" y="40" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>
-    ${img(p.strapImg, 48)}${img(p.holeImg, 48)}${img(p.frontLogoImg, 48)}
-    ${logoTxt ? `<text x="${BOX_X + BOX_W}" y="44" font-size="12" fill="#92400e" text-anchor="end">${esc(logoTxt)}</text>` : ""}`;
-  const back = `
-    <text x="${BOX_X}" y="185" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>
-    ${img(p.strapImg, 193)}${img(p.backLogoImg, 193)}`;
-
-  return `<svg viewBox="0 0 740 300" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
+  const full = (href: string | null | undefined, y: number) =>
+    href ? `<image href="${esc(href)}" x="${BX}" y="${y}" width="${BW}" height="${BH}" preserveAspectRatio="none"/>` : "";
+  const logoAt = (href: string | null | undefined, boxY: number) => {
+    if (!href) return "";
+    const lw = Math.round(BW * LOGO_FW), lh = Math.round((lw * 45) / 208);
+    const lx = Math.round(BX + BW * LOGO_FX), ly = Math.round(boxY + BH * LOGO_FY);
+    return `<image href="${esc(href)}" x="${lx}" y="${ly}" width="${lw}" height="${lh}" preserveAspectRatio="xMidYMid meet"/>`;
+  };
+  const fY = 26, bY = fY + BH + 34;
+  const front = `<text x="${BX}" y="18" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${full(p.holeImg, fY)}${logoAt(p.frontLogoImg, fY)}`;
+  const back  = `<text x="${BX}" y="${bY - 8}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${logoAt(p.backLogoImg, bY)}`;
+  const H = bY + BH + 8;
+  return `<svg viewBox="0 0 740 ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
 }
 
 // ── โหมดเวกเตอร์ (fallback เมื่อไม่มีรูป) ──
