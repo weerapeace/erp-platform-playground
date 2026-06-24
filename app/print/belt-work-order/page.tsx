@@ -37,7 +37,7 @@ const TEMPLATE: ReportTemplate = {
   <table class="bw-size">
     <thead><tr><th class="lcol">หนัง / สี</th>{{#sizes}}<th>{{label}}</th>{{/sizes}}<th class="sum">รวม</th></tr></thead>
     <tbody>
-      {{#rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
+      {{#rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span>{{#detail}}<div class="rdet">{{detail}}</div>{{/detail}}</td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
       <tr class="trow"><td class="lcol">รวมทุก MO</td>{{#total_cells}}<td>{{v}}</td>{{/total_cells}}<td class="sum">{{grand}}</td></tr>
     </tbody>
   </table>
@@ -66,6 +66,7 @@ const TEMPLATE: ReportTemplate = {
 .bw-size .sum { background: #f8fafc; font-weight: 700; }
 .bw-size .trow td { background: #eef2ff; font-weight: 800; }
 .bw-size .mo { color: #94a3b8; font-size: 9px; }
+.bw-size .rdet { font-size: 8.5px; color: #64748b; font-weight: 400; margin-top: 0.3mm; text-align: left; }
 .bw-spec { width: 100%; border-collapse: collapse; }
 .bw-spec td { padding: 1mm 2mm; border-bottom: 1px solid #e5e7eb; }
 .bw-spec td.k { width: 35mm; white-space: nowrap; }
@@ -77,6 +78,19 @@ const TEMPLATE: ReportTemplate = {
 const FMT_OPT: Intl.DateTimeFormatOptions = { day: "2-digit", month: "2-digit", year: "numeric" };
 const fmtDate = (d: string) => { const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString("th-TH", FMT_OPT); };
 
+// บรรทัดย่อยใต้แต่ละสี: หนังบน/หนังล่าง/ขอบ/ด้าย (ดึงจาก sku_attrs + legacy ของ SKU นั้น)
+function beltColorDetail(s: ProductSpec | undefined): string {
+  if (!s) return "";
+  const all = [...s.sku_attrs, ...s.legacy];
+  const pick = (re: RegExp) => all.find((f) => re.test(f.label))?.value;
+  const parts: string[] = [];
+  const top = pick(/หนังบน/); if (top) parts.push(`หนังบน: ${top}`);
+  const bot = pick(/หนังล่าง/); if (bot) parts.push(`หนังล่าง: ${bot}`);
+  const edge = pick(/ริม|ขอบ/); if (edge) parts.push(`ขอบ: ${edge}`);
+  const thread = pick(/ด้าย/); if (thread) parts.push(`ด้าย: ${thread}`);
+  return parts.join(" · ");
+}
+
 function BeltWorkOrderInner() {
   const sp = useSearchParams();
   const router = useRouter();
@@ -84,6 +98,7 @@ function BeltWorkOrderInner() {
 
   const [bw, setBw] = useState<BeltWorkOrder | null>(null);
   const [spec, setSpec] = useState<ProductSpec | null>(null);
+  const [skuSpecs, setSkuSpecs] = useState<Record<string, ProductSpec>>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -95,11 +110,18 @@ function BeltWorkOrderInner() {
         if (!on) return;
         if (data.error) throw new Error(data.error);
         setBw(data);
+        // ดึงสเปกของทุก SKU (ต่อสี) พร้อมกัน → ใช้ทำบรรทัดย่อย หนังบน/ล่าง/ขอบ/ด้าย
+        const uniq = [...new Set(data.rows.map((r) => r.product_sku).filter(Boolean))];
+        const entries = await Promise.all(uniq.map(async (code) => {
+          const s = await apiFetch(`/api/product-spec?sku=${encodeURIComponent(code)}`).then((r) => r.json()).catch(() => null);
+          return [code, s && !s.error ? (s as ProductSpec) : null] as const;
+        }));
+        if (!on) return;
+        const map: Record<string, ProductSpec> = {};
+        for (const [code, s] of entries) if (s) map[code] = s;
+        setSkuSpecs(map);
         const firstSku = data.rows[0]?.product_sku;
-        if (firstSku) {
-          const s = await apiFetch(`/api/product-spec?sku=${encodeURIComponent(firstSku)}`).then((r) => r.json()).catch(() => null);
-          if (on && s && !s.error) setSpec(s as ProductSpec);
-        }
+        if (firstSku && map[firstSku]) setSpec(map[firstSku]);
       })
       .catch((e) => { if (on) setError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ"); });
     return () => { on = false; };
@@ -130,6 +152,7 @@ function BeltWorkOrderInner() {
         label: r.label,
         mo_short: r.mo_no.split("-").pop() || r.mo_no,
         total: r.total,
+        detail: beltColorDetail(skuSpecs[r.product_sku]),
         cells: sizes.map((s) => ({ v: r.by_size[s] || "" })),
       })),
       total_cells: sizes.map((s) => ({ v: bw.totals_by_size[s] || 0 })),
@@ -140,7 +163,7 @@ function BeltWorkOrderInner() {
       belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape }),
     };
     return buildReportHtml(TEMPLATE, data);
-  }, [bw, spec]);
+  }, [bw, spec, skuSpecs]);
 
   return (
     <div className="min-h-screen bg-slate-100">
