@@ -23,31 +23,47 @@ export type BeltDiagramParams = {
   holeBackOnly?: boolean;        // ลายรูอยู่ "หลังอย่างเดียว" (เช่น พิมพ์บันได) → หน้าไม่โชว์
   frontLogoImg?: string | null;  // belt_logo (โลโก้ด้านหน้า)
   backLogoImg?: string | null;   // belt_logo (โลโก้ด้านหลัง)
+  layout?: BeltLayout;           // เฟส 2: ปรับ ความสูง/ตำแหน่งเส้นระยะ (บันทึกค่าได้)
+};
+
+// ตำแหน่ง+ความสูง ที่ปรับ+บันทึกได้ (พิกัดในระบบ viewBox 0..740)
+export type BeltLayout = {
+  boxH?: number;                                  // ความสูงเข็มขัด (compact)
+  frontDim?: { x: number; y: number; w: number }; // วงเล็บ "ห่างโลโก้" (เหนือกรอบหน้า)
+  backDim?: { x: number; y: number; w: number };  // วงเล็บ "ถึงปลายสาย" (ใต้กรอบหลัง)
 };
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 // ── โหมดซ้อนรูปจริง ──
 // strap/hole เป็นกรอบเดียวกัน (925×167) → ซ้อนตรงพอดี · โลโก้เป็นรูปเล็กแยก (208×45) วางช่วงปลายขวา
-const IMG_W = 1000, IMG_H = 185;                              // ขนาดกรอบเทมเพลตมาตรฐาน (ตรงกับหน้า belt-template)
-const BX = 18, BW = 704, BH = Math.round((BW * IMG_H) / IMG_W); // กรอบเข็มขัด (รักษาอัตราส่วน → ไม่บิด) ≈ 130
+const BX = 18, BW = 704;
+export const BELT_DEFAULT_LAYOUT = {
+  boxH: 104,                                       // ความสูง compact (เดิม ~130)
+  frontDim: { x: BX + BW - 96, y: 12, w: 74 },     // วงเล็บ "ห่างโลโก้" (เหนือกรอบหน้า ใกล้ปลาย)
+  backDim:  { x: BX + 120, y: 14, w: BW - 132 },   // วงเล็บ "ถึงปลายสาย" (ใต้กรอบหลัง)
+};
 function imageComposite(p: BeltDiagramParams): string {
-  // ทุกรูป (ทรงปลายหาง/ลายรู/โลโก้) ทำบนกรอบเทมเพลตเดียวกัน 1000×185 → วางเต็มกรอบให้ซ้อนตรงกันเป๊ะ
-  // (โลโก้ก็เป็นรูปเต็มกรอบที่มีโลโก้อยู่โซนขวา ไม่ใช่รูปเล็กแยก — จึงต้องวางเต็มกรอบเหมือนกัน)
+  // ทุกรูป (ทรงปลายหาง/ลายรู/โลโก้) ทำบนกรอบเทมเพลตเดียวกัน → วางเต็มกรอบ ซ้อนตรงเป๊ะ
+  const L = p.layout ?? {};
+  const BH = L.boxH ?? BELT_DEFAULT_LAYOUT.boxH;
+  const fd = L.frontDim ?? BELT_DEFAULT_LAYOUT.frontDim;
+  const bd = L.backDim ?? BELT_DEFAULT_LAYOUT.backDim;
+  const fY = 28, bY = fY + BH + 46;
   const full = (href: string | null | undefined, y: number) =>
     href ? `<image href="${esc(href)}" x="${BX}" y="${y}" width="${BW}" height="${BH}" preserveAspectRatio="none"/>` : "";
-  const dim = (txt: string, x: number, y: number, anchor: string) =>
-    txt ? `<text x="${x}" y="${y}" font-size="11" fill="#b91c1c" text-anchor="${anchor}">${esc(txt)}</text>` : "";
-  const fY = 30, bY = fY + BH + 42;
-  const logoDist = p.logoDistIn != null ? `ห่าง ${p.logoDistIn} นิ้ว` : "";
+  // เส้นบอกระยะแบบวงเล็บ (เส้นโยง + ป้าย)
+  const bracket = (x: number, w: number, y: number, label: string, down: boolean) => {
+    const t = down ? 5 : -5;
+    return `<path d="M${x},${y + t} V${y} H${x + w} V${y + t}" fill="none" stroke="#b91c1c" stroke-width="1.1"/>` +
+      `<text x="${x + w / 2}" y="${down ? y - 3 : y + 13}" font-size="11" fill="#b91c1c" text-anchor="middle">${esc(label)}</text>`;
+  };
+  const logoDist = p.logoDistIn != null ? `ห่าง ${p.logoDistIn} นิ้ว` : "ห่าง 1 นิ้ว";
   const toEnd = `${p.toEndIn ?? 7} นิ้วถึงปลายสาย`;
-  // ลายรู: ถ้า back_only (ลายเต็มกรอบ เช่นพิมพ์บันได) → ย่อไว้ครึ่งซ้าย ให้เห็นทรง+โลโก้หลังฝั่งขวา
-  //        ถ้าไม่ใช่ (รูที่เนื้อหาอยู่ซ้ายในกรอบโปร่งใสอยู่แล้ว เช่นเจาะรูไข่) → วางเต็มกรอบ
-  // รูป hole/strap/logo ทำบนเทมเพลตมาตรฐานเดียวกันแล้ว → วางเต็มกรอบ ซ้อนตรงเป๊ะเอง (ไม่ย่อ)
-  // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (เจาะรู=ทั้งสองด้าน · พิมพ์บันได back_only=หลังเท่านั้น)
-  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${dim(logoDist, BX + BW, fY - 6, "end")}`;
-  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${dim(toEnd, BX + BW / 2, bY + BH + 16, "middle")}`;
-  const H = bY + BH + 26;
+  // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (พิมพ์บันได back_only=หลังเท่านั้น)
+  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${bracket(fd.x, fd.w, fY - fd.y, logoDist, false)}`;
+  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${bracket(bd.x, bd.w, bY + BH + bd.y, toEnd, true)}`;
+  const H = bY + BH + 30;
   return `<svg viewBox="0 0 740 ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
 }
 
