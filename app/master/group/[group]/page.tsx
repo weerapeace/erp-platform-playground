@@ -111,14 +111,20 @@ export default function ModuleGroupPage() {
             <h1 className="text-xl font-bold text-slate-900">{groupIcon} {groupParam || "กลุ่มโมดูล"}</h1>
             <p className="text-sm text-slate-500 mt-0.5">รวมหลายตารางไว้ในหน้าเดียว — เลือกแท็บด้านล่าง</p>
           </div>
-          {canManage && (
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={openEdit} title="แก้ชื่อ/ไอคอนกลุ่ม"
-                className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">✏️ แก้ไขกลุ่ม</button>
-              <button onClick={() => setShowWizard(true)}
-                className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">➕ เพิ่มโมดูลในกลุ่มนี้</button>
-            </div>
-          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {groupParam.includes("เข็มขัด") && (
+              <a href="/master/belt-template" target="_blank" rel="noopener noreferrer" title="ดาวน์โหลดเทมเพลตกรอบมาตรฐานสำหรับวาดรูป ปลายหาง/รู/โลโก้"
+                className="h-9 px-3 text-sm font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 inline-flex items-center">🧷 เทมเพลตรูป</a>
+            )}
+            {canManage && (
+              <>
+                <button onClick={openEdit} title="แก้ชื่อ/ไอคอนกลุ่ม"
+                  className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">✏️ แก้ไขกลุ่ม</button>
+                <button onClick={() => setShowWizard(true)}
+                  className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">➕ เพิ่มโมดูลในกลุ่มนี้</button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* แก้ไขกลุ่ม (inline) */}
