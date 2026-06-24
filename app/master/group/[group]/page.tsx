@@ -113,8 +113,12 @@ export default function ModuleGroupPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {groupParam.includes("เข็มขัด") && (
-              <a href="/master/belt-template" target="_blank" rel="noopener noreferrer" title="ดาวน์โหลดเทมเพลตกรอบมาตรฐานสำหรับวาดรูป ปลายหาง/รู/โลโก้"
-                className="h-9 px-3 text-sm font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 inline-flex items-center">🧷 เทมเพลตรูป</a>
+              <>
+                <a href="/master/belt-template" target="_blank" rel="noopener noreferrer" title="ดาวน์โหลดเทมเพลตกรอบมาตรฐานสำหรับวาดรูป ปลายหาง/รู/โลโก้"
+                  className="h-9 px-3 text-sm font-medium text-amber-700 border border-amber-300 rounded-lg hover:bg-amber-50 inline-flex items-center">🧷 เทมเพลตรูป</a>
+                <a href="/master/belt-layout" target="_blank" rel="noopener noreferrer" title="ปรับความสูง + ตำแหน่งเส้นบอกระยะของรูปในใบงาน (บันทึกใช้ทุกใบ)"
+                  className="h-9 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 inline-flex items-center">⚙️ ตั้งค่ารูปใบงาน</a>
+              </>
             )}
             {canManage && (
               <>
