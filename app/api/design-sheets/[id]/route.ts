@@ -34,9 +34,17 @@ type CostExtra = { label: string; amount: number };
 type PatchBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
   status?: string; order_date?: string | null; deadline?: string | null; drive_link?: string | null;
-  is_active?: boolean; parent_sku_code?: string | null; parent_sku_codes?: string[]; cost_extra?: CostExtra[];
+  is_active?: boolean; parent_sku_code?: string | null; parent_sku_codes?: string[];
+  cost_extra?: CostExtra[] | Record<string, CostExtra[]>;   // array (เดิม) หรือ object แยกตาม Parent (ข้อ 7)
   parent_sku_drafts?: string[];   // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
 };
+
+// sanitize ค่าใช้จ่ายเพิ่ม 1 ชุด (array ของ {label, amount})
+function cleanExtraArr(raw: unknown): CostExtra[] {
+  return (Array.isArray(raw) ? raw : [])
+    .map((c) => ({ label: String((c as CostExtra)?.label ?? "").slice(0, 200), amount: Number((c as CostExtra)?.amount) || 0 }))
+    .filter((c) => c.label.trim() !== "" || c.amount !== 0);
+}
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -60,10 +68,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.drive_link !== undefined) patch.drive_link = body.drive_link?.trim() || null;
   if (body.is_active !== undefined)  patch.is_active = !!body.is_active;
   if (body.cost_extra !== undefined) {
-    // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ) — sanitize: เก็บเฉพาะ {label, amount}
-    patch.cost_extra = (Array.isArray(body.cost_extra) ? body.cost_extra : [])
-      .map((c) => ({ label: String(c?.label ?? "").slice(0, 200), amount: Number(c?.amount) || 0 }))
-      .filter((c) => c.label.trim() !== "" || c.amount !== 0);
+    // ค่าใช้จ่ายเพิ่ม — array (เดิม) เก็บเป็น array · object (แยก Parent) เก็บเป็น object {parentKey: [...]}
+    if (Array.isArray(body.cost_extra)) {
+      patch.cost_extra = cleanExtraArr(body.cost_extra);
+    } else if (body.cost_extra && typeof body.cost_extra === "object") {
+      const out: Record<string, CostExtra[]> = {};
+      for (const [k, v] of Object.entries(body.cost_extra)) { const arr = cleanExtraArr(v); if (arr.length) out[k] = arr; }
+      patch.cost_extra = out;
+    }
   }
   if (body.status !== undefined) patch.status = body.status;   // ตรวจกับ workflow ด้านล่าง (หลังมี admin)
   const admin = supabaseAdmin();

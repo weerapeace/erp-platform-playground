@@ -63,6 +63,7 @@ type CostRow = CostLine & { key: string; group_code?: string | null };
 const METHOD_LABEL: Record<string, string> = { area_face: "พื้นที่÷หน้ากว้าง", area_100: "พื้นที่÷100", length: "ความยาว", count: "นับชิ้น", manual: "พิมพ์เอง" };
 const fmtQty = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { maximumFractionDigits: 4 }));
 const fmtBaht = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const pkey = (s: string | null | undefined) => s ?? "";   // ข้อ 7: คีย์แท็บ Parent ของบรรทัดตีราคา ("" = ทั่วไป)
 
 // ชนิด "ชิ้นสำเร็จขนาดตายตัว" — กว้าง×ยาว→พื้นที่ cm², ราคาต่อชิ้น (ไม่ใช้หน้ากว้าง/สูตรพื้นที่หาร)
 // ตรวจจาก code (ตอนเลือกสด) หรือชื่อกลุ่ม (ตอนโหลดจาก DB) — ไม่แตะ material_groups ที่ BOM ใช้
@@ -209,6 +210,37 @@ function BasisPicker({ value, options, onChange }: { value: string; options: Bas
   );
 }
 
+// ปุ่ม "Copy ตีราคา" — คัดลอกบรรทัด + ค่าใช้จ่ายของ Parent ที่กำลังดู ไปยัง Parent อื่น (แทนที่ของปลายทาง)
+function CopyCostButton({ tabs, current, onCopy }: { tabs: { key: string; label: string; kind: string }[]; current: string; onCopy: (target: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const targets = tabs.filter((t) => t.key !== current);
+  if (targets.length === 0) return null;
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⧉ Copy ตีราคา</button>
+      {open && (
+        <div className="absolute z-30 right-0 mt-1 min-w-[200px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+          <div className="px-2.5 py-1 text-[10px] text-slate-400">คัดลอกไปยัง (แทนที่ของปลายทาง)</div>
+          {targets.map((t) => (
+            <button key={t.key || "__gen__"} type="button" onClick={() => { setOpen(false); onCopy(t.key); }}
+              className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-blue-50 text-slate-700">
+              {t.kind === "general" ? "ทั่วไป" : t.kind === "draft" ? `✎ ${t.label}` : t.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DesignSheetsPage() {
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
@@ -267,13 +299,19 @@ export default function DesignSheetsPage() {
   const [pmLinks, setPmLinks] = useState<Record<string, string[]>>({});   // item_id → sku_ids
   const [pmLinkSkus, setPmLinkSkus] = useState<Record<string, SkuLite>>({}); // sku_id → {code,name}
   const [pmLinkFor, setPmLinkFor] = useState<PmRow | null>(null);          // แถวที่กำลังเลือก SKU
-  const [costLines, setCostLines] = useState<CostRow[]>([]);
+  const [costLines, setCostLines] = useState<CostRow[]>([]);             // ทุก Parent รวมกัน (กรองด้วย parent_code ตอนแสดง)
   const [costDirty, setCostDirty] = useState(false);
   const [costSaving, setCostSaving] = useState(false);
-  const [costExtra, setCostExtra] = useState<CostExtra[]>([]);            // ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ)
-  const costTotal  = costLines.reduce((s, r) => s + (r.amount || 0), 0);  // ต้นทุนวัสดุดิบรวม
+  const [costParent, setCostParent] = useState<string>("");              // ข้อ 7: แท็บ Parent ที่กำลังดู ("" = ทั่วไป)
+  const [costExtraMap, setCostExtraMap] = useState<Record<string, CostExtra[]>>({});   // ค่าใช้จ่ายเพิ่ม แยกตาม Parent
+  // บรรทัด + ค่าใช้จ่าย ของ Parent ที่กำลังดู (ตีราคาแยกตาม Parent SKU)
+  const curLines = useMemo(() => costLines.filter((r) => pkey(r.parent_code) === costParent), [costLines, costParent]);
+  const costExtra = costExtraMap[costParent] ?? [];
+  const setCurExtra = (updater: (l: CostExtra[]) => CostExtra[]) =>
+    setCostExtraMap((m) => ({ ...m, [costParent]: updater(m[costParent] ?? []) }));
+  const costTotal  = curLines.reduce((s, r) => s + (r.amount || 0), 0);   // ต้นทุนวัสดุของ Parent นี้
   const extraTotal = costExtra.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-  const grandTotal = costTotal + extraTotal;                              // ต้นทุนสินค้า (รวมทั้งหมด)
+  const grandTotal = costTotal + extraTotal;                              // ต้นทุนสินค้าของ Parent นี้ (รวมทั้งหมด)
   // ราคาที่เสนอ (ผ่านแล้ว) ล่าสุด — ใช้เป็นราคาตั้งต้นใน Wizard สร้าง SKU
   const offeredPrice = useMemo<number | null>(() => {
     const val = (q: DesignSheetQuote) => (q.offered_price ?? q.price);
@@ -285,9 +323,21 @@ export default function DesignSheetsPage() {
   // ต้นทุนวัสดุแยกตามชนิด (สำหรับการ์ดสรุป)
   const costByGroup = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of costLines) { const k = r.group_name || "ไม่ระบุชนิด"; m.set(k, (m.get(k) ?? 0) + (r.amount || 0)); }
+    for (const r of curLines) { const k = r.group_name || "ไม่ระบุชนิด"; m.set(k, (m.get(k) ?? 0) + (r.amount || 0)); }
     return [...m.entries()].map(([label, amount]) => ({ label, amount }));
-  }, [costLines]);
+  }, [curLines]);
+  // แท็บ Parent ในแท็บตีราคา: ทั่วไป + รหัสจริง + ร่าง + parent_code ที่มีบรรทัดแต่หลุดจากลิสต์ (กันงานหาย)
+  const costParentTabs = useMemo(() => {
+    const codes = form?.parent_sku_codes ?? [];
+    const drafts = form?.parent_sku_drafts ?? [];
+    const tabs: { key: string; label: string; kind: "general" | "code" | "draft" | "orphan" }[] = [{ key: "", label: "ทั่วไป", kind: "general" }];
+    for (const c of codes) tabs.push({ key: c, label: c, kind: "code" });
+    for (const d of drafts) tabs.push({ key: d, label: d, kind: "draft" });
+    for (const k of new Set(costLines.map((r) => pkey(r.parent_code)))) {
+      if (k && !codes.includes(k) && !drafts.includes(k)) tabs.push({ key: k, label: k, kind: "orphan" });
+    }
+    return tabs;
+  }, [form?.parent_sku_codes, form?.parent_sku_drafts, costLines]);
 
   // ---- เฟส 5: ตั้ง Parent SKU + ตัวเช็ครหัส ----
   const [skuCheck, setSkuCheck] = useState<ParentSkuCheck | null>(null);
@@ -563,7 +613,7 @@ export default function DesignSheetsPage() {
         apiFetch(`/api/design-sheets/${form.id}/cost-lines`, { method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lines: costLines.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }) }) }),
         apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cost_extra: costExtra.map((c) => ({ label: c.label, amount: Number(c.amount) || 0 })) }) }),
+          body: JSON.stringify({ cost_extra: costExtraMap }) }),   // ส่งทั้ง map (แยกตาม Parent) — backend sanitize เอง
       ]);
       const lj = await lr.json(); if (lj.error) throw new Error(lj.error);
       const ej = await er.json(); if (ej.error) throw new Error(ej.error);
@@ -572,7 +622,7 @@ export default function DesignSheetsPage() {
       return true;
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกตีราคาไม่สำเร็จ"); return false; }
     finally { setCostSaving(false); }
-  }, [form?.id, costLines, costExtra, toast]);
+  }, [form?.id, costLines, costExtraMap, toast]);
 
   // ส่งยอดต้นทุนสินค้ารวม (วัสดุ + ค่าใช้จ่ายเพิ่ม) ไปเป็นรอบเสนอราคาใหม่
   const sendCostToQuote = async () => {
@@ -814,7 +864,7 @@ export default function DesignSheetsPage() {
     } catch { /* ไม่ critical */ }
   };
 
-  const openCreate = () => { setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostExtra(DEFAULT_COST_EXTRA); };
+  const openCreate = () => { setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty());
@@ -832,8 +882,19 @@ export default function DesignSheetsPage() {
         parent_sku_drafts: Array.isArray(d.parent_sku_drafts) ? (d.parent_sku_drafts as string[]) : [],
       });
       setSkuInput("");
-      const ce = (Array.isArray(d.cost_extra) ? d.cost_extra : []) as CostExtra[];
-      setCostExtra(ce.length ? ce.map((c) => ({ label: String(c.label ?? ""), amount: Number(c.amount) || 0 })) : DEFAULT_COST_EXTRA);
+      // ค่าใช้จ่ายเพิ่ม: รองรับทั้ง array (เดิม → Parent ทั่วไป) และ object {parentKey: [...]} (ใหม่ แยก Parent)
+      const normArr = (a: unknown): CostExtra[] => (Array.isArray(a) ? a : []).map((c) => ({ label: String((c as CostExtra)?.label ?? ""), amount: Number((c as CostExtra)?.amount) || 0 }));
+      const rawCe = d.cost_extra;
+      let ceMap: Record<string, CostExtra[]>;
+      if (rawCe && !Array.isArray(rawCe) && typeof rawCe === "object") {
+        ceMap = {};
+        for (const [k, v] of Object.entries(rawCe as Record<string, unknown>)) ceMap[k] = normArr(v);
+      } else {
+        const arr = normArr(rawCe);
+        ceMap = { "": arr.length ? arr : DEFAULT_COST_EXTRA };
+      }
+      if (!(ceMap[""]?.length)) ceMap[""] = DEFAULT_COST_EXTRA;   // แท็บทั่วไปโชว์ค่าแรงตั้งต้นเสมอถ้ายังว่าง
+      setCostParent(""); setCostExtraMap(ceMap);
     } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดไม่ได้"); }
     finally { setLoadingForm(false); }
   };
@@ -1465,8 +1526,39 @@ export default function DesignSheetsPage() {
 
             {/* แท็บตีราคา (เฟส 4) — สูตรเดียวกับ BOM, วัสดุจาก master /master/design-price-items */}
             {modalTab === "cost" && form.id && <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
+              {/* ข้อ 7: แท็บย่อยตีราคาแยกตาม Parent SKU (ทั่วไป + รหัสจริง + ร่าง) + ปุ่ม Copy */}
+              <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 pb-1">
+                {costParentTabs.map((t) => {
+                  const n = costLines.filter((r) => pkey(r.parent_code) === t.key).length;
+                  const active = costParent === t.key;
+                  return (
+                    <button key={t.key || "__gen__"} onClick={() => setCostParent(t.key)}
+                      title={t.kind === "draft" ? "ร่าง Parent" : t.kind === "orphan" ? "Parent นี้ถูกเอาออกจากใบแล้ว (ยังมีบรรทัดค้าง)" : undefined}
+                      className={`h-7 px-2.5 text-xs rounded-md inline-flex items-center gap-1 border ${active ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"} ${t.kind === "draft" ? "border-dashed" : ""}`}>
+                      {t.kind === "general" ? "ทั่วไป" : t.kind === "draft" ? `✎ ${t.label}` : t.kind === "orphan" ? `⚠ ${t.label}` : t.label}
+                      {n > 0 && <span className={`text-[10px] rounded-full px-1 ${active ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{n}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] text-slate-400">
+                  กำลังตีราคาของ: <b className="text-slate-600">{costParent === "" ? "ทั่วไป" : costParent}</b>
+                </div>
+                <div className="flex items-center gap-2">
+                  {canEdit && costParentTabs.length > 1 && (
+                    <CopyCostButton tabs={costParentTabs} current={costParent}
+                      onCopy={(target) => {
+                        const src = costLines.filter((r) => pkey(r.parent_code) === costParent);
+                        const cloned = src.map((r, i) => recomputeRow({ ...r, key: `cp${Date.now()}_${i}`, parent_code: target || null }));
+                        setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== target), ...cloned]);
+                        setCostExtraMap((m) => ({ ...m, [target]: (m[costParent] ?? []).map((c) => ({ ...c })) }));
+                        setCostDirty(true); setCostParent(target);
+                        toast.success(`คัดลอกตีราคาไปยัง "${target === "" ? "ทั่วไป" : target}" แล้ว`);
+                      }} />
+                  )}
+                  {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
+                </div>
               </div>
               {priceItems.length === 0 && (
                 <div className="px-3 py-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
@@ -1475,14 +1567,19 @@ export default function DesignSheetsPage() {
               )}
 
               <LineItemsGrid<CostRow>
-                rows={costLines}
+                rows={curLines}
                 columns={costCols}
-                onChange={(rows) => { setCostLines(rows.map(recomputeRow)); setCostDirty(true); }}
+                onChange={(rows) => {
+                  // เก็บบรรทัดของ Parent อื่นไว้ + แทนที่เฉพาะของ Parent ที่กำลังดู
+                  const others = costLines.filter((r) => pkey(r.parent_code) !== costParent);
+                  setCostLines([...others, ...rows.map(recomputeRow)]); setCostDirty(true);
+                }}
                 rowId={(r) => r.key}
                 readonly={!canEdit}
                 groupByOptions={[{ key: "group", label: "ชนิดวัสดุ" }]}
                 onAdd={() => ({
                   key: `n${Date.now()}_${costLines.length}`,
+                  parent_code: costParent || null,
                   item_id: null, item_name: null, group_name: null, calc_method: null,
                   width_cm: null, length_cm: null, pieces: null, face_width_cm: null,
                   waste_percent: null, divisor: null, qty: null, uom: null,
@@ -1498,20 +1595,20 @@ export default function DesignSheetsPage() {
               <div className="border border-slate-200 rounded-lg p-2.5 space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-slate-600">💼 ค่าใช้จ่ายเพิ่ม (นอกจากวัสดุ)</span>
-                  {canEdit && <button onClick={() => { setCostExtra((l) => [...l, { label: "", amount: 0 }]); setCostDirty(true); }}
+                  {canEdit && <button onClick={() => { setCurExtra((l) => [...l, { label: "", amount: 0 }]); setCostDirty(true); }}
                     className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">＋ เพิ่มรายการ</button>}
                 </div>
                 {costExtra.length === 0 && <p className="text-xs text-slate-300">— ยังไม่มีรายการ —</p>}
                 {costExtra.map((c, i) => (
                   <div key={i} className="flex items-center gap-1.5">
                     <input value={c.label} disabled={!canEdit} placeholder="ชื่อรายการ เช่น ค่าแรงผลิต"
-                      onChange={(e) => { setCostExtra((l) => l.map((x, xi) => (xi === i ? { ...x, label: e.target.value } : x))); setCostDirty(true); }}
+                      onChange={(e) => { setCurExtra((l) => l.map((x, xi) => (xi === i ? { ...x, label: e.target.value } : x))); setCostDirty(true); }}
                       className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
                     <input type="number" min={0} step="any" value={c.amount || ""} disabled={!canEdit} placeholder="0.00"
-                      onChange={(e) => { setCostExtra((l) => l.map((x, xi) => (xi === i ? { ...x, amount: Number(e.target.value) || 0 } : x))); setCostDirty(true); }}
+                      onChange={(e) => { setCurExtra((l) => l.map((x, xi) => (xi === i ? { ...x, amount: Number(e.target.value) || 0 } : x))); setCostDirty(true); }}
                       className="w-28 h-8 px-2 text-sm text-right tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
                     <span className="text-xs text-slate-400">บาท</span>
-                    {canEdit && <button onClick={() => { setCostExtra((l) => l.filter((_, xi) => xi !== i)); setCostDirty(true); }}
+                    {canEdit && <button onClick={() => { setCurExtra((l) => l.filter((_, xi) => xi !== i)); setCostDirty(true); }}
                       title="ลบ" className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">🗑</button>}
                   </div>
                 ))}
