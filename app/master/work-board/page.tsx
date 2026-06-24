@@ -528,6 +528,24 @@ export default function WorkBoardPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
     finally { setDispSaving(false); }
   };
+
+  // A: จ่ายจริงทันที (แตะการ์ด→แตะโต๊ะ บนบอร์ดของจริง) — ไม่เปิดหน้าต่าง
+  // ค่าเริ่มต้น: ทั้งโต๊ะ (ไม่ระบุช่าง) + จำนวนที่เลือก + ค่าแรงราคากลางจาก BOM (เลือกช่าง/แก้ทีหลังที่การ์ดในโต๊ะได้)
+  const quickDispatch = useCallback(async (mo: PendingMO, dept: Dept, qty: number, ratePerUnit: number) => {
+    if (!(qty > 0)) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    try {
+      const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mo_no: mo.mo_no, product_sku: mo.product_sku, product_name: mo.product_name,
+          stage: stageOfDept(dept.name), department_id: dept.id, department_name: dept.name,
+          assignee_type: "department", assignee_id: null, assignee_name: dept.name,
+          qty, uom: "ชิ้น", dispatch_date: new Date().toISOString().slice(0, 10), due_date: mo.due_date ?? null,
+          note: `จากใบสั่งผลิต ${mo.mo_no}`, labor_cost: ratePerUnit > 0 ? ratePerUnit * qty : null }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(`จ่ายเข้า ${dept.name}: ${fmt(qty)} ชิ้น`);
+      await load(true);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load]);
   // ช่างในแผนก — ยกเว้นแผนก "ช่างเหมา" (ชื่อมีคำว่า เหมา) ให้เลือกพนักงานได้ทุกคน
   const dispIsHire = useMemo(() => !!dispDept && /เหมา/.test(dispDept.name), [dispDept]);
   const deptCraftsmen = useMemo(() => {
@@ -983,8 +1001,9 @@ export default function WorkBoardPage() {
             onApplied={() => {}} onRenamed={() => {}} onDates={() => {}} onDeleted={() => {}}
             onDispatch={({ moId, deptId, qty }) => {
               const mo = board.pending.find((x) => x.id === moId);
-              const dept = board.departments.find((x) => x.id === deptId) ?? null;
-              if (mo) { openDispatch(mo, dept); setDispQty(qty); }
+              const dept = board.departments.find((x) => x.id === deptId);
+              // A: แตะการ์ด→แตะโต๊ะ = จ่ายจริงทันที (ไม่เปิดหน้าต่าง) — ทั้งโต๊ะ + จำนวนที่เลือก + ค่าแรงราคากลาง
+              if (mo && dept) void quickDispatch(mo, dept, qty, laborPerUnit[mo.mo_no] ?? 0);
             }}
             onOpenWork={(info) => {
               const mo = info.moId ? board.pending.find((x) => x.id === info.moId) : null;
