@@ -153,11 +153,11 @@ export default function FabricCalcPage() {
 
                   <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                     <Num label="ชิ้น" value={r.pieces} onChange={(v) => patch(r.key, { pieces: v })} />
-                    {usesWidth(r.calc_method) && <Num label={usesSheet(r.calc_method) ? "ตัดกว้าง(ซม.)" : "กว้าง(ซม.)"} value={r.cut_width} onChange={(v) => patch(r.key, { cut_width: v })} />}
-                    {usesLength(r.calc_method) && <Num label={usesSheet(r.calc_method) ? "ตัดยาว(ซม.)" : "ยาว(ซม.)"} value={r.cut_length} onChange={(v) => patch(r.key, { cut_length: v })} />}
+                    {usesWidth(r.calc_method) && <Num tone={usesSheet(r.calc_method) ? "cut" : "default"} label={usesSheet(r.calc_method) ? "ตัดกว้าง(ซม.)" : "กว้าง(ซม.)"} value={r.cut_width} onChange={(v) => patch(r.key, { cut_width: v })} />}
+                    {usesLength(r.calc_method) && <Num tone={usesSheet(r.calc_method) ? "cut" : "default"} label={usesSheet(r.calc_method) ? "ตัดยาว(ซม.)" : "ยาว(ซม.)"} value={r.cut_length} onChange={(v) => patch(r.key, { cut_length: v })} />}
                     {usesFace(r.calc_method) && <Num label="หน้ากว้าง(ซม.)" value={r.face_width_cm} onChange={(v) => patch(r.key, { face_width_cm: v })} />}
-                    {usesSheet(r.calc_method) && <Num label="ผืนกว้าง(ซม.)" value={r.sheet_width} onChange={(v) => patch(r.key, { sheet_width: v })} />}
-                    {usesSheet(r.calc_method) && <Num label="ผืนยาว(ซม.)" value={r.sheet_length} onChange={(v) => patch(r.key, { sheet_length: v })} />}
+                    {usesSheet(r.calc_method) && <Num tone="sheet" label="ผืนกว้าง(ซม.)" value={r.sheet_width} onChange={(v) => patch(r.key, { sheet_width: v })} />}
+                    {usesSheet(r.calc_method) && <Num tone="sheet" label="ผืนยาว(ซม.)" value={r.sheet_length} onChange={(v) => patch(r.key, { sheet_length: v })} />}
                     {r.calc_method !== "count" && <Num label="เผื่อเสีย%" value={r.waste_percent} onChange={(v) => patch(r.key, { waste_percent: v })} />}
                   </div>
 
@@ -205,14 +205,20 @@ export default function FabricCalcPage() {
   );
 }
 
-function Num({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+const NUM_TONES: Record<string, { label: string; input: string }> = {
+  default: { label: "text-slate-400",   input: "border-indigo-200 focus:border-indigo-400" },
+  cut:     { label: "text-amber-600",   input: "border-amber-300 bg-amber-50/50 focus:border-amber-500" },     // ชิ้นที่ตัด
+  sheet:   { label: "text-emerald-600", input: "border-emerald-300 bg-emerald-50/50 focus:border-emerald-500" }, // ผืนเต็ม
+};
+function Num({ label, value, onChange, tone = "default" }: { label: string; value: number; onChange: (v: number) => void; tone?: "default" | "cut" | "sheet" }) {
+  const t = NUM_TONES[tone];
   return (
     <label className="block">
-      <span className="block text-[10px] font-medium text-slate-400 mb-0.5 truncate">{label}</span>
+      <span className={`block text-[10px] font-medium mb-0.5 truncate ${t.label}`}>{label}</span>
       <input type="number" min={0} step="any" value={value === 0 ? "" : value} placeholder="0"
         onFocus={(e) => e.currentTarget.select()}
         onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
-        className="w-full h-8 px-2 rounded-lg border border-indigo-200 text-right outline-none focus:border-indigo-400 text-sm" />
+        className={`w-full h-8 px-2 rounded-lg border text-right outline-none text-sm ${t.input}`} />
     </label>
   );
 }
