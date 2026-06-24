@@ -48,13 +48,10 @@ function imageComposite(p: BeltDiagramParams): string {
   const toEnd = `${p.toEndIn ?? 7} นิ้วถึงปลายสาย`;
   // ลายรู: ถ้า back_only (ลายเต็มกรอบ เช่นพิมพ์บันได) → ย่อไว้ครึ่งซ้าย ให้เห็นทรง+โลโก้หลังฝั่งขวา
   //        ถ้าไม่ใช่ (รูที่เนื้อหาอยู่ซ้ายในกรอบโปร่งใสอยู่แล้ว เช่นเจาะรูไข่) → วางเต็มกรอบ
-  const holeAt = (href: string | null | undefined, y: number) => !href ? ""
-    : p.holeBackOnly
-      ? `<image href="${esc(href)}" x="${BX + 4}" y="${Math.round(y + BH * 0.25)}" width="${Math.round(BW * 0.46)}" height="${Math.round(BH * 0.5)}" preserveAspectRatio="none"/>`
-      : full(href, y);
-  // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (เจาะรู=ทั้งสองด้าน · พิมพ์บันได=หลังเท่านั้น)
-  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : holeAt(p.holeImg, fY)}${logoAt(p.frontLogoImg, fY)}${dim(logoDist, BX + BW, fY - 6, "end")}`;
-  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${holeAt(p.holeImg, bY)}${logoAt(p.backLogoImg, bY)}${dim(toEnd, BX + BW / 2, bY + BH + 16, "middle")}`;
+  // รูป hole/strap/logo ทำบนเทมเพลตมาตรฐานเดียวกันแล้ว → วางเต็มกรอบ ซ้อนตรงเป๊ะเอง (ไม่ย่อ)
+  // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (เจาะรู=ทั้งสองด้าน · พิมพ์บันได back_only=หลังเท่านั้น)
+  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${logoAt(p.frontLogoImg, fY)}${dim(logoDist, BX + BW, fY - 6, "end")}`;
+  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${full(p.holeImg, bY)}${logoAt(p.backLogoImg, bY)}${dim(toEnd, BX + BW / 2, bY + BH + 16, "middle")}`;
   const H = bY + BH + 26;
   return `<svg viewBox="0 0 740 ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
 }
