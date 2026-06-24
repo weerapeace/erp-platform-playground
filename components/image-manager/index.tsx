@@ -43,7 +43,8 @@ export function ImageThumbnail({ url, size = 40, alt = "" }: { url?: string | nu
   return (
     <div ref={ref} onMouseEnter={onEnter} onMouseLeave={() => setHover(false)} className="inline-block">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" className="rounded object-cover border border-slate-200 bg-white" style={{ width: size, height: size }} />
+      {/* object-contain (fit): รูปไม่จัตุรัสเห็นทั้งใบ ไม่ถูกครอบตัด · รูปจัตุรัสยังเต็มกรอบเหมือนเดิม */}
+      <img src={withImageWidth(url, Math.min(size * 3, 512)) ?? url} alt={alt} loading="lazy" decoding="async" className="rounded object-contain border border-slate-200 bg-white" style={{ width: size, height: size }} />
       {mounted && hover && createPortal(
         <div className="fixed z-[60] pointer-events-none rounded-lg overflow-hidden shadow-2xl border border-slate-200 bg-white"
           style={{ left, top, width: ZOOM, height: ZOOM }}>
