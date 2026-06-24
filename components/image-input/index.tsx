@@ -331,11 +331,12 @@ export function ImageCell({ r2Key, size = 40 }: { r2Key: string | null | undefin
       onMouseLeave={() => setHover(false)}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
+      {/* object-contain (fit): รูปไม่จัตุรัสเห็นทั้งใบ ไม่ถูกครอบตัด (เช่นโลโก้แนวนอน) · รูปจัตุรัสยังเต็มกรอบ */}
       <img
         src={src}
         alt=""
         loading="lazy"
-        className="rounded object-cover border border-slate-200 bg-white"
+        className="rounded object-contain border border-slate-200 bg-white"
         style={{ width: size, height: size }}
       />
       {/* F22: floating zoom preview (fixed → ลอยเหนือทุกอย่าง) */}
