@@ -93,3 +93,27 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     actorName: user.email ?? null, metadata: { wo_no: woNo, mo_no: body.mo_no, qty, stage: body.stage } });
   return NextResponse.json({ id: wo.id, wo_no: woNo, error: null });
 }
+
+// PATCH — แก้ใบงานจริง (ค่าแรง / ผู้รับงาน) หลังจ่ายแล้ว
+type PatchBody = { id?: string; labor_cost?: number | null; assignee_type?: string | null; assignee_id?: string | null; assignee_name?: string | null };
+export async function PATCH(request: NextRequest): Promise<NextResponse> {
+  const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
+  let body: PatchBody;
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  if (!body.id) return NextResponse.json({ error: "ไม่พบใบงาน" }, { status: 400 });
+
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if ("labor_cost" in body)    patch.labor_cost    = body.labor_cost != null ? num(body.labor_cost) : null;
+  if ("assignee_type" in body) patch.assignee_type = body.assignee_type ?? "department";
+  if ("assignee_id" in body)   patch.assignee_id   = body.assignee_id ?? null;
+  if ("assignee_name" in body) patch.assignee_name = body.assignee_name ?? null;
+  if (Object.keys(patch).length === 1) return NextResponse.json({ id: body.id, error: null });   // มีแค่ updated_at = ไม่มีอะไรแก้
+
+  const admin = supabaseAdmin();
+  const { error } = await admin.from("mo_work_orders").update(patch).eq("id", body.id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  await writeAudit(admin, { action: "update", entityType: "mo_work_order", entityId: body.id, actorId: user.id, actorName: user.email ?? null, metadata: patch });
+  return NextResponse.json({ id: body.id, error: null });
+}

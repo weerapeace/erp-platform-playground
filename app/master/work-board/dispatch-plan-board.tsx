@@ -29,7 +29,7 @@ function Thumb({ url }: { url?: string | null }) {
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch,
-  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -44,6 +44,7 @@ export function DispatchPlanBoard({
   onOpenWork: (info: { moId: string | null; moNo: string | null; productSku: string | null; productName: string | null; qty: number }) => void;
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
   onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
+  onUpdateWO?: (id: string, patch: { labor_cost?: number }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
@@ -51,6 +52,9 @@ export function DispatchPlanBoard({
   const [selected, setSelected] = useState<string | null>(null);   // mo_no ของการ์ดรอจ่ายที่เลือก
   const [dispQty, setDispQty] = useState<Record<string, string>>({});   // จำนวนที่จะจ่าย (แบ่งจ่าย) ต่อ mo_no
   const [staffPopup, setStaffPopup] = useState<DeptLite | null>(null);   // popup ดูพนักงานในแผนก
+  const [laborEditId, setLaborEditId] = useState<string | null>(null);   // ใบงานจริงที่กำลังใส่ค่าแรง
+  const [laborEditVal, setLaborEditVal] = useState("");
+  const [laborSaving, setLaborSaving] = useState(false);
   const [focusDept, setFocusDept] = useState<string | null>(null);   // โหมดแท็บเล็ต: โต๊ะที่กำลังโฟกัส
   const [colW, setColW] = useState(240);   // ความกว้างคอลัมน์/โต๊ะ (px) — ปรับได้ จำที่เครื่อง
   useEffect(() => { try { const v = Number(localStorage.getItem("wb:planColW")); if (v >= 180 && v <= 480) setColW(v); } catch { /* ignore */ } }, []);
@@ -371,8 +375,12 @@ export function DispatchPlanBoard({
                     {(deptWages[d.id] ?? 0) > 0 && totLabor > 0 && (() => { const diff = (deptWages[d.id] ?? 0) - totLabor; return <span className={`block ${diff >= 0 ? "text-amber-600" : "text-rose-600"}`} title="เงินเดือนพนักงาน − ค่าแรงงานที่จ่าย">ต่าง {baht(diff)}</span>; })()}
                   </span>
                 </div>
-                {/* ใบจ่ายจริง (ล็อก) */}
-                {reals.map((w) => (
+                {/* ใบจ่ายจริง — ในแผน "ล็อก" (ดูอย่างเดียว) · ในของจริง "แก้ได้" (ใส่ค่าแรง ฯลฯ) */}
+                {reals.map((w) => {
+                  const wl = woLabor(w);
+                  const canEditWO = realMode && editable && !!onUpdateWO;
+                  const editing = laborEditId === w.id;
+                  return (
                   <div key={w.id} className={`rounded-lg px-2 py-1.5 mb-1.5 bg-slate-50 border border-slate-200 ${realMode ? "" : "opacity-70"}`}>
                     <div className="flex items-center gap-2">
                       <Thumb url={w.image_url} />
@@ -380,15 +388,34 @@ export function DispatchPlanBoard({
                         <div className="flex items-center justify-between gap-1">
                           <span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span>
                           <span className="flex items-center gap-1 shrink-0">
-                            <button onClick={() => onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
-                            <span className="text-slate-400">🔒</span>
+                            <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty }); }} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+                            {!realMode && <span className="text-slate-400" title="จ่ายจริงแล้ว — ในแผนดูอย่างเดียว">🔒</span>}
                           </span>
                         </div>
-                        <div className="text-[11px] text-slate-400 truncate">{w.assignee_name ?? "—"} · {fmt(w.qty)} ชิ้น · {baht(woLabor(w))}</div>
+                        <div className="text-[11px] text-slate-400 truncate">{w.assignee_name ?? "—"} · {fmt(w.qty)} ชิ้น · {baht(wl)}</div>
+                        {/* #2: ใส่ค่าแรง (เฉพาะของจริง + การ์ดที่ยังไม่มีค่าแรง) — กดง่าย */}
+                        {canEditWO && wl <= 0 && !editing && (
+                          <button onClick={(e) => { e.stopPropagation(); setLaborEditId(w.id); setLaborEditVal(""); }}
+                            className="mt-1 text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">💰 ใส่ค่าแรง</button>
+                        )}
+                        {canEditWO && editing && (
+                          <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <input type="number" min={0} step="any" autoFocus value={laborEditVal} onChange={(e) => setLaborEditVal(e.target.value)} placeholder="บาท/ชิ้น"
+                              className="w-20 h-7 px-1.5 text-xs text-right border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                            <span className="text-[10px] text-slate-400 shrink-0">× {fmt(w.qty)} = ฿{fmt((Number(laborEditVal) || 0) * (Number(w.qty) || 0))}</span>
+                            <button disabled={laborSaving} title="บันทึก" onClick={async () => {
+                              setLaborSaving(true);
+                              try { await onUpdateWO!(w.id, { labor_cost: (Number(laborEditVal) || 0) * (Number(w.qty) || 0) }); setLaborEditId(null); }
+                              catch { /* parent toast */ } finally { setLaborSaving(false); }
+                            }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">✓</button>
+                            <button title="ยกเลิก" onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {/* รายการร่าง — จัดกลุ่มย่อยตามช่าง */}
                 {(() => {
                   const byCraft = new Map<string, DispatchPlanLine[]>();

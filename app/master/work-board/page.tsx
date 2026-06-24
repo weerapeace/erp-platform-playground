@@ -1005,6 +1005,13 @@ export default function WorkBoardPage() {
               // A: แตะการ์ด→แตะโต๊ะ = จ่ายจริงทันที (ไม่เปิดหน้าต่าง) — ทั้งโต๊ะ + จำนวนที่เลือก + ค่าแรงราคากลาง
               if (mo && dept) void quickDispatch(mo, dept, qty, laborPerUnit[mo.mo_no] ?? 0);
             }}
+            onUpdateWO={async (id, patch) => {
+              try {
+                const res = await apiFetch("/api/mo/work-orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...patch }) });
+                const j = await res.json(); if (j.error) throw new Error(j.error);
+                toast.success("บันทึกค่าแรงแล้ว"); await load(true);
+              } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); throw e; }
+            }}
             onOpenWork={(info) => {
               const mo = info.moId ? board.pending.find((x) => x.id === info.moId) : null;
               setClWO(null);
