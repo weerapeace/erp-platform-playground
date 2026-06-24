@@ -29,18 +29,13 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 // ── โหมดซ้อนรูปจริง ──
 // strap/hole เป็นกรอบเดียวกัน (925×167) → ซ้อนตรงพอดี · โลโก้เป็นรูปเล็กแยก (208×45) วางช่วงปลายขวา
-const IMG_W = 925, IMG_H = 167;                               // ขนาดจริงของรูป strap/hole
-const BX = 18, BW = 704, BH = Math.round((BW * IMG_H) / IMG_W); // กรอบเข็มขัด (รักษาอัตราส่วน → ไม่บิด) ≈ 127
-const LOGO_FX = 0.60, LOGO_FW = 0.26;          // ตำแหน่ง/ขนาดโลโก้ (สัดส่วนในกรอบ — ปรับได้ถ้าต้องจูน)
+const IMG_W = 1000, IMG_H = 185;                              // ขนาดกรอบเทมเพลตมาตรฐาน (ตรงกับหน้า belt-template)
+const BX = 18, BW = 704, BH = Math.round((BW * IMG_H) / IMG_W); // กรอบเข็มขัด (รักษาอัตราส่วน → ไม่บิด) ≈ 130
 function imageComposite(p: BeltDiagramParams): string {
+  // ทุกรูป (ทรงปลายหาง/ลายรู/โลโก้) ทำบนกรอบเทมเพลตเดียวกัน 1000×185 → วางเต็มกรอบให้ซ้อนตรงกันเป๊ะ
+  // (โลโก้ก็เป็นรูปเต็มกรอบที่มีโลโก้อยู่โซนขวา ไม่ใช่รูปเล็กแยก — จึงต้องวางเต็มกรอบเหมือนกัน)
   const full = (href: string | null | undefined, y: number) =>
     href ? `<image href="${esc(href)}" x="${BX}" y="${y}" width="${BW}" height="${BH}" preserveAspectRatio="none"/>` : "";
-  const logoAt = (href: string | null | undefined, boxY: number) => {
-    if (!href) return "";
-    const lw = Math.round(BW * LOGO_FW), lh = Math.round((lw * 45) / 208);
-    const lx = Math.round(BX + BW * LOGO_FX), ly = Math.round(boxY + (BH - lh) / 2);   // จัดกลางแนวตั้ง
-    return `<image href="${esc(href)}" x="${lx}" y="${ly}" width="${lw}" height="${lh}" preserveAspectRatio="xMidYMid meet"/>`;
-  };
   const dim = (txt: string, x: number, y: number, anchor: string) =>
     txt ? `<text x="${x}" y="${y}" font-size="11" fill="#b91c1c" text-anchor="${anchor}">${esc(txt)}</text>` : "";
   const fY = 30, bY = fY + BH + 42;
@@ -50,8 +45,8 @@ function imageComposite(p: BeltDiagramParams): string {
   //        ถ้าไม่ใช่ (รูที่เนื้อหาอยู่ซ้ายในกรอบโปร่งใสอยู่แล้ว เช่นเจาะรูไข่) → วางเต็มกรอบ
   // รูป hole/strap/logo ทำบนเทมเพลตมาตรฐานเดียวกันแล้ว → วางเต็มกรอบ ซ้อนตรงเป๊ะเอง (ไม่ย่อ)
   // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (เจาะรู=ทั้งสองด้าน · พิมพ์บันได back_only=หลังเท่านั้น)
-  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${logoAt(p.frontLogoImg, fY)}${dim(logoDist, BX + BW, fY - 6, "end")}`;
-  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${full(p.holeImg, bY)}${logoAt(p.backLogoImg, bY)}${dim(toEnd, BX + BW / 2, bY + BH + 16, "middle")}`;
+  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${dim(logoDist, BX + BW, fY - 6, "end")}`;
+  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${dim(toEnd, BX + BW / 2, bY + BH + 16, "middle")}`;
   const H = bY + BH + 26;
   return `<svg viewBox="0 0 740 ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
 }
