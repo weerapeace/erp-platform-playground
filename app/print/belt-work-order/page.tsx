@@ -99,6 +99,7 @@ function BeltWorkOrderInner() {
   const [bw, setBw] = useState<BeltWorkOrder | null>(null);
   const [spec, setSpec] = useState<ProductSpec | null>(null);
   const [skuSpecs, setSkuSpecs] = useState<Record<string, ProductSpec>>({});
+  const [beltImgs, setBeltImgs] = useState<{ strap?: string | null; hole?: string | null; frontLogo?: string | null; backLogo?: string | null }>({});
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -121,7 +122,15 @@ function BeltWorkOrderInner() {
         for (const [code, s] of entries) if (s) map[code] = s;
         setSkuSpecs(map);
         const firstSku = data.rows[0]?.product_sku;
-        if (firstSku && map[firstSku]) setSpec(map[firstSku]);
+        const fs = firstSku ? map[firstSku] : undefined;
+        if (fs) setSpec(fs);
+        // จับคู่รูปจริง (ทรงปลายหาง/ลายรู/โลโก้) จากค่าที่เลือกในสเปก → ตารางหลัก
+        if (fs) {
+          const v = (re: RegExp) => fs.model_attrs.find((x) => re.test(x.label))?.value ?? "";
+          const qs = new URLSearchParams({ tail: v(/^ปลายหาง/), hole: v(/เจาะรู/), frontLogo: v(/ด้านหน้า/), backLogo: v(/ด้านหลัง/) });
+          const bi = await apiFetch(`/api/mo/belt-component-images?${qs}`).then((r) => r.json()).catch(() => null);
+          if (on && bi && !bi.error) setBeltImgs(bi);
+        }
       })
       .catch((e) => { if (on) setError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ"); });
     return () => { on = false; };
@@ -160,10 +169,10 @@ function BeltWorkOrderInner() {
       has_spec: specFields.length > 0,
       specs: specFields.map((f) => ({ label: f.label, value: f.value })),
       // เฟส 3b: รูปวาดจากตัวเลขจริงในช่องสเปก (จำนวนรู/ระยะ/ห่างโลโก้/ปลายหาง) — ไม่กรอก → ใช้ค่า default
-      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape }),
+      belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape, strapImg: beltImgs.strap, holeImg: beltImgs.hole, frontLogoImg: beltImgs.frontLogo, backLogoImg: beltImgs.backLogo }),
     };
     return buildReportHtml(TEMPLATE, data);
-  }, [bw, spec, skuSpecs]);
+  }, [bw, spec, skuSpecs, beltImgs]);
 
   return (
     <div className="min-h-screen bg-slate-100">
