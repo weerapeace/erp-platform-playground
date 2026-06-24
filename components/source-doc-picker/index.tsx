@@ -32,8 +32,8 @@ type ModeConfig = {
 };
 
 const SO_STATUS_LABEL: Record<string, string> = {
-  confirmed: "ยืนยันแล้ว", in_production: "กำลังผลิต", ready: "พร้อมส่ง",
-  shipped: "จัดส่งแล้ว", completed: "เสร็จสิ้น",
+  draft: "ร่าง", confirmed: "ยืนยันแล้ว", in_production: "กำลังผลิต", ready: "พร้อมส่ง",
+  shipped: "จัดส่งแล้ว", completed: "เสร็จสิ้น", cancelled: "ยกเลิก",
 };
 
 const CONFIGS: Record<"quotation" | "mo" | "so", ModeConfig> = {
@@ -68,7 +68,8 @@ const CONFIGS: Record<"quotation" | "mo" | "so", ModeConfig> = {
   so: {
     title: "เลือกใบกำกับภาษี (ใบสั่งขาย)",
     endpoint: "/api/sales-orders?limit=300",
-    eligible: (r) => ["confirmed", "in_production", "ready", "shipped", "completed"].includes(String(r.status)),
+    // วางบิลได้ทุกสถานะ ยกเว้น "ยกเลิก" (รวมร่าง draft ด้วย — ธุรกิจนี้ออกบิลจาก SO ร่างได้)
+    eligible: (r) => String(r.status) !== "cancelled",
     searchText: (r) => `${r.so_number ?? ""} ${r.customer_name ?? ""} ${r.customer_code ?? ""}`,
     columns: [
       { key: "so_number", label: "เลขที่บิล", render: (r) => <code className="font-mono text-xs text-slate-700">{String(r.so_number ?? "—")}</code> },
