@@ -126,6 +126,9 @@ function groupBasisPrice(g: PriceGroup, basis: string | null): number | null {
 function itemBasisPrice(it: PriceItem, basis: string | null): number | null {
   if (basis === "latest") return it.sku_latest_price ?? it.price_per_unit;
   if (basis === "avg")    return it.sku_avg_price ?? it.price_per_unit;
+  if (basis === "max")    return it.sku_max_price ?? it.price_per_unit;   // แพงสุดจากราคาซื้อจริง
+  if (basis === "min")    return it.sku_min_price ?? it.price_per_unit;   // ถูกสุดจากราคาซื้อจริง
+  if (basis === "used")   return it.last_used_price ?? it.price_per_unit; // ราคาที่เคยตีครั้งล่าสุด
   return it.price_per_unit;   // manual (ค่าเริ่มต้น)
 }
 // ฟิลด์บรรทัดเมื่อเลือกแบบ "กลุ่ม" (item_id = null = จับคู่วัสดุจริงทีหลัง)
@@ -969,6 +972,9 @@ export default function DesignSheetsPage() {
                     { value: "manual", symbol: "✍️", label: "กรอกเอง", price: item.price_per_unit },
                     { value: "latest", symbol: "🕐", label: "ซื้อจริงล่าสุด", price: item.sku_latest_price, note: item.sku_count > 0 ? "ยังไม่มีราคาซื้อ" : "ยังไม่ผูก SKU" },
                     { value: "avg", symbol: "≈", label: "เฉลี่ยจาก SKU", price: item.sku_avg_price, note: "ยังไม่มี" },
+                    { value: "max", symbol: "🔺", label: "แพงสุดจาก SKU", price: item.sku_max_price, note: item.sku_count > 0 ? "ยังไม่มีราคาซื้อ" : "ยังไม่ผูก SKU" },
+                    { value: "min", symbol: "🔻", label: "ถูกสุดจาก SKU", price: item.sku_min_price, note: item.sku_count > 0 ? "ยังไม่มีราคาซื้อ" : "ยังไม่ผูก SKU" },
+                    { value: "used", symbol: "♻️", label: "ที่ใช้ตีล่าสุด", price: item.last_used_price, note: "ยังไม่เคยใช้" },
                   ]} />
               )}
               {inGroupMode && canEdit && (
