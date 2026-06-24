@@ -86,10 +86,13 @@ export default function BillingNotesPage() {
 
   // เลือกใบกำกับภาษี (SO) เข้าใบวางบิล
   const handlePicked = (rowsPicked: SourceDocRow[]) => {
-    const custSet = new Set([customer?.id, ...rowsPicked.map(r => r.customer_id as string)].filter(Boolean));
+    // ล็อก "ลูกค้าเดียวกัน" เฉพาะตอนมีรายการดึงไว้แล้ว — ถ้ายังไม่มี ให้ลูกค้าของใบที่เลือกใหม่เป็นตัวกำหนด
+    // (กันเคสลูกค้าค้างจากการเลือกก่อนหน้า แล้วเลือกลูกค้าคนใหม่ไม่ได้)
+    const lockedCust = picked.length > 0 ? customer?.id : undefined;
+    const custSet = new Set([lockedCust, ...rowsPicked.map(r => r.customer_id as string)].filter(Boolean));
     if (custSet.size > 1) { flash("ใบที่เลือกเป็นคนละลูกค้า — วางบิลได้เฉพาะลูกค้าเดียวกัน"); return; }
     const first = rowsPicked[0];
-    if (!customer && first?.customer_id) {
+    if (picked.length === 0 && first?.customer_id) {
       setCustomer({ id: first.customer_id as string, code: (first.customer_code as string) ?? null, name: (first.customer_name as string) ?? "" } as CustomerPickerValue);
     }
     setPicked(prev => {
@@ -100,7 +103,11 @@ export default function BillingNotesPage() {
       return [...prev, ...add];
     });
   };
-  const removePicked = (id: string) => setPicked(prev => prev.filter(p => p.id !== id));
+  const removePicked = (id: string) => {
+    const next = picked.filter(p => p.id !== id);
+    setPicked(next);
+    if (next.length === 0) setCustomer(null);   // ไม่เหลือรายการ → ปลดล็อกลูกค้า เลือกลูกค้าคนใหม่ได้
+  };
 
   const pickedTotal = useMemo(() => picked.reduce((s, p) => s + p.grand_total, 0), [picked]);
 
