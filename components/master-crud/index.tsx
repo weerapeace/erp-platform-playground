@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { PlaygroundShell, useShellPresent } from "@/components/playground-shell";
 import { DataTable, StatusModuleContext, type DataTableView, type RowAction, type BulkAction, type BulkEditField, type BulkEditResult, type ServerFetchParams, type FilterFieldOption } from "@/components/data-table";
 import { getStatusStyle } from "@/lib/status-config";
@@ -1322,10 +1323,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       cell: f.type === "many2many"
         ? ({ row }) => {
             const vals = m2mMap[String((row.original as Record<string, unknown>).id)]?.[f.key] ?? [];
-            if (vals.length === 0) return <span className="text-slate-300">—</span>;
-            return <div className="flex flex-wrap gap-1">{vals.map((v, i) => (
-              <span key={i} className="px-1.5 py-0.5 rounded-full text-[11px] bg-blue-50 text-blue-700 border border-blue-100">{v}</span>
-            ))}</div>;
+            return <M2mChipsCell vals={vals} />;
           }
         : f.cellRender
         ? ({ getValue, row }) => f.cellRender!(getValue(), row.original as Record<string, unknown>)
@@ -2874,5 +2872,45 @@ function DetailSections({
         {current && <div className="pt-4">{renderDl(current[1], 2)}</div>}
       </div>
     </div>
+  );
+}
+
+// ป้าย many2many ในตาราง (ของกลาง): น้อย → โชว์ chips · เยอะ → ยุบเป็นปุ่ม "📎 N รายการ" กดดูทั้งหมดใน popover
+// (กันแถวสูงเวอร์เมื่อผูกหลายสิบ/ร้อยตัว เช่น SKU ในวัสดุตีราคา)
+function M2mChipsCell({ vals }: { vals: string[] }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const chip = (v: string, i: number) => (
+    <span key={i} className="px-1.5 py-0.5 rounded-full text-[11px] bg-blue-50 text-blue-700 border border-blue-100">{v}</span>
+  );
+  if (vals.length === 0) return <span className="text-slate-300">—</span>;
+  if (vals.length <= 4) return <div className="flex flex-wrap gap-1">{vals.map(chip)}</div>;
+  const openPop = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, left: Math.min(r.left, window.innerWidth - 380) });
+    setOpen(true);
+  };
+  return (
+    <>
+      <button ref={btnRef} type="button" onClick={openPop} title="กดดูรายการทั้งหมด"
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100">
+        📎 {vals.length} รายการ ▾
+      </button>
+      {open && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[998]" onClick={() => setOpen(false)} />
+          <div className="fixed z-[999] w-[360px] max-h-[320px] overflow-auto bg-white border border-slate-200 rounded-lg shadow-xl p-2"
+            style={{ top: pos.top, left: pos.left }}>
+            <div className="flex items-center justify-between mb-1.5 pb-1 border-b border-slate-100 sticky top-0 bg-white">
+              <span className="text-xs font-medium text-slate-600">📎 {vals.length} รายการ</span>
+              <button type="button" onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600 text-base leading-none">✕</button>
+            </div>
+            <div className="flex flex-wrap gap-1">{vals.map(chip)}</div>
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
   );
 }
