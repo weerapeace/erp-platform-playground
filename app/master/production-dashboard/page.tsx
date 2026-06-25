@@ -5,7 +5,7 @@
  * แถบ filter ซ้าย (5 กลุ่ม + ตัวเลขนับ) · DataTable กลาง (สลับ ตาราง/การ์ด + ค้นหา) · ปฏิทิน=เฟส 2
  * ของกลาง: DataTable, HoverImage, getStatusStyle, PlaygroundShell (ผ่าน /master/layout)
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table";
@@ -156,6 +156,98 @@ function CalendarView({ jobs, onJobClick }: { jobs: ProductionJob[]; onJobClick:
   );
 }
 
+// ── โหมด 🏰 เกม — รูปพื้นหลังแฟนตาซี + ข้อมูลจริงวางทับ ──
+function GameSign({ x, y, label, value, sub, w }: { x: number; y: number; label: string; value: React.ReactNode; sub?: string; w?: number }) {
+  return (
+    <div style={{ position: "absolute", left: `${x}%`, top: `${y}%`, transform: "translate(-50%,-50%)", textAlign: "center", width: w ? `${w}%` : undefined, textShadow: "0 1px 4px rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.6)" }}>
+      <div style={{ fontSize: "clamp(9px,1.25vw,15px)", color: "#fcd34d", fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+      <div style={{ fontSize: "clamp(15px,2.6vw,32px)", color: "#fff", fontWeight: 800, lineHeight: 1.05 }}>{value}</div>
+      {sub && <div style={{ fontSize: "clamp(8px,1vw,12px)", color: "#e2e8f0" }}>{sub}</div>}
+    </div>
+  );
+}
+function GameView({ jobs, counts }: { jobs: ProductionJob[]; counts: ProductionDashboardResponse["counts"] }) {
+  const [bgKey, setBgKey] = useState<string | null | undefined>(undefined);
+  const [now, setNow] = useState(() => new Date());
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    apiFetch("/api/ui-config?key=production_game").then((r) => r.json()).then((j) => setBgKey((j.value?.bg_key as string) ?? null)).catch(() => setBgKey(null));
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const bgUrl = bgKey ? `/api/r2-image?key=${encodeURIComponent(bgKey)}` : null;
+  const totalQty = jobs.reduce((a, j) => a + j.qty, 0);
+  const eff = jobs.length ? Math.round(jobs.reduce((a, j) => a + j.progress_pct, 0) / jobs.length) : 0;
+  const deptCount = new Map<string, number>();
+  for (const j of jobs) if (j.categories.includes("in_production") && j.dept_names) for (const d of j.dept_names.split(", ")) deptCount.set(d, (deptCount.get(d) ?? 0) + 1);
+  const benches = [...deptCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const latest = jobs.slice(0, 5);
+  const upload = async (file: File) => {
+    setUploading(true);
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("folder", "game-bg");
+      const r = await apiFetch("/api/admin/upload", { method: "POST", body: fd }); const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "production_game", value: { bg_key: j.r2_key } }) });
+      setBgKey(j.r2_key);
+    } catch (e) { alert(String((e as Error).message)); }
+    finally { setUploading(false); }
+  };
+  const pick = () => fileRef.current?.click();
+  const hidden = <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />;
+
+  if (bgKey === undefined) return <div className="py-16 text-center text-slate-400">กำลังโหลด…</div>;
+  if (!bgUrl) return (
+    <div className="py-16 text-center">
+      <p className="text-slate-500 mb-1">ยังไม่ได้ตั้งรูปพื้นหลังเกม</p>
+      <p className="text-[11px] text-slate-400 mb-3">อัปรูปฉากแฟนตาซี (ป้ายว่าง) → ระบบจะวางข้อมูลจริงทับให้</p>
+      <button onClick={pick} disabled={uploading} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{uploading ? "กำลังอัป…" : "📷 อัปรูปพื้นหลัง"}</button>
+      {hidden}
+    </div>
+  );
+  const stats: [string, React.ReactNode][] = [
+    ["วันที่", now.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" })],
+    ["เวลา", now.toLocaleTimeString("th-TH", { hour12: false })],
+    ["ออเดอร์", counts.all],
+    ["กำลังผลิต", counts.in_production],
+    ["เสร็จ", counts.done_waiting],
+    ["ชิ้นรวม", fmt(totalQty)],
+    ["ประสิทธิภาพ", `${eff}%`],
+  ];
+  return (
+    <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9", background: `#0b1220 url(${bgUrl}) center/cover no-repeat`, borderRadius: 12, overflow: "hidden" }}>
+      {/* แถบสถิติบน */}
+      <div style={{ position: "absolute", top: "1.5%", left: "8%", right: "13%", display: "flex", justifyContent: "space-between" }}>
+        {stats.map(([l, v]) => (
+          <div key={l} style={{ textAlign: "center", textShadow: "0 1px 3px rgba(0,0,0,.9)" }}>
+            <div style={{ fontSize: "clamp(7px,0.85vw,11px)", color: "#cbd5e1" }}>{l}</div>
+            <div style={{ fontSize: "clamp(10px,1.4vw,17px)", color: "#fde68a", fontWeight: 700, lineHeight: 1.1 }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      {/* ป้ายโซน */}
+      <GameSign x={17} y={22} label="🪧 รอจ่าย" value={counts.unassigned} sub="งานยังไม่จ่าย" />
+      <GameSign x={47} y={15.5} label="🔨 ช่างโต๊ะ" value={counts.in_production} sub="กำลังผลิต" />
+      {benches.map((b, i) => <GameSign key={i} x={36 + i * 10.5} y={27.5} label={b[0]} value={`${b[1]}`} sub="งาน" />)}
+      <GameSign x={82} y={20} label="🧵 ช่างเหมา" value={counts.piecework} sub="งานเหมา" />
+      <GameSign x={50} y={50} label="🔮 QC / เสร็จรอส่ง" value={counts.done_waiting} sub="รอตรวจ/ส่ง" />
+      {/* ออเดอร์ล่าสุด (แผงล่างซ้าย-กลาง) */}
+      <div style={{ position: "absolute", left: "33%", bottom: "2.5%", width: "32%", color: "#e8eefc", textShadow: "0 1px 2px rgba(0,0,0,.9)" }}>
+        <div style={{ fontSize: "clamp(8px,1vw,12px)", color: "#fcd34d", fontWeight: 700, marginBottom: 2 }}>ออเดอร์ล่าสุด</div>
+        {latest.map((j) => (
+          <div key={j.id} style={{ display: "flex", justifyContent: "space-between", gap: 6, fontSize: "clamp(7px,0.9vw,11px)", lineHeight: 1.5 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.product_sku ?? j.mo_no}</span>
+            <span style={{ color: isOverdue(j.due_date) ? "#fca5a5" : "#cbd5e1", flexShrink: 0 }}>{j.progress_pct}%</span>
+          </div>
+        ))}
+      </div>
+      <button onClick={pick} disabled={uploading} style={{ position: "absolute", top: 8, right: 8, fontSize: 12, padding: "4px 10px", borderRadius: 8, background: "rgba(15,23,42,.7)", color: "#fde68a", border: "1px solid rgba(252,211,77,.4)", cursor: "pointer" }}>{uploading ? "อัป…" : "📷 เปลี่ยนรูป"}</button>
+      {hidden}
+    </div>
+  );
+}
+
 const COLUMNS: ColumnDef<ProductionJob>[] = [
   { id: "image", header: "", size: 56, enableSorting: false, cell: ({ row }) => <HoverImage url={row.original.image_url} size={36} previewSize={240} /> },
   { accessorKey: "product_sku", header: "SKU", size: 130, cell: ({ getValue }) => <span className="font-mono text-xs text-slate-700">{(getValue() as string) || "—"}</span> },
@@ -181,7 +273,7 @@ export default function ProductionDashboardPage() {
   const [groupField, setGroupField] = useState<GroupField>("brand");
   const [gSearch, setGSearch] = useState("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // กลุ่มที่พับอยู่
-  const [view, setView] = useState<"list" | "calendar">("list");
+  const [view, setView] = useState<"list" | "calendar" | "game">("list");
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
 
   useEffect(() => {
@@ -224,6 +316,7 @@ export default function ProductionDashboardPage() {
           <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
             <button onClick={() => setView("list")} className={`h-9 px-3 font-medium ${view === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 รายการ</button>
             <button onClick={() => setView("calendar")} className={`h-9 px-3 font-medium border-l border-slate-200 ${view === "calendar" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 ปฏิทิน</button>
+            <button onClick={() => setView("game")} className={`h-9 px-3 font-medium border-l border-slate-200 ${view === "game" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🏰 เกม</button>
           </div>
           <button onClick={() => router.push("/master/work-board")} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🗂 ไปบอร์ดจ่ายงาน</button>
         </div>
@@ -262,7 +355,7 @@ export default function ProductionDashboardPage() {
 
         {/* เนื้อหา */}
         <main className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-3">
-          {view === "calendar" ? <CalendarView jobs={shown} onJobClick={setSelectedJob} /> : <>
+          {view === "game" ? <GameView jobs={jobs} counts={counts} /> : view === "calendar" ? <CalendarView jobs={shown} onJobClick={setSelectedJob} /> : <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="w-4 h-4 accent-blue-600" /> จัดกลุ่ม
