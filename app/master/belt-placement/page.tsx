@@ -162,7 +162,7 @@ export default function BeltPlacementPage() {
               const on = sel === key;
               return (
                 <g key={key}>
-                  <image href={href} x={a.x} y={a.y} width={a.w} height={a.h} preserveAspectRatio="xMidYMid meet" style={{ pointerEvents: "none" }} />
+                  <image href={href} x={a.x} y={a.y} width={a.w} height={a.h} preserveAspectRatio="xMidYMid slice" style={{ pointerEvents: "none" }} />
                   <rect x={a.x} y={a.y} width={a.w} height={a.h} fill="transparent"
                     stroke={on ? "#2563eb" : "transparent"} strokeWidth={on ? 1.5 : 0} strokeDasharray="4 3"
                     style={{ cursor: "move" }} onPointerDown={onDown(key, "move")} />

@@ -82,12 +82,12 @@ function imageComposite(p: BeltDiagramParams): string {
   const leather = (p.leatherText ?? "Genuine Leather").trim();
   const fp = L.images?.front ?? BELT_DEFAULT_PLACE.front;
   const bp = L.images?.back ?? BELT_DEFAULT_PLACE.back;
-  // วางรูปตามกล่องที่บันทึก (สัดส่วน 0..1 ของกรอบด้านนั้น) · meet = ไม่ยืดรูป
+  // วางรูปตามกล่องที่บันทึก (สัดส่วน 0..1 ของกรอบด้านนั้น) · slice = เต็มช่องเสมอ (ไม่ย่อ ไม่ยืด · ตัดส่วนเกิน)
   const placeImg = (href: string | null | undefined, top: number, b: ImgBox | undefined) => {
     if (!href) return "";
     const box = b ?? { x: 0, y: 0, w: 1, h: 1 };
     const x = BX + box.x * BW, y = top + box.y * BH, w = box.w * BW, h = box.h * BH;
-    return `<image href="${esc(href)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+    return `<image href="${esc(href)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid slice"/>`;
   };
   // ชั้นทรงเข็มขัด: มีรูป→วางตามกล่อง, ไม่มีรูป→วาดโครงจำลอง (สำหรับหน้าตั้งค่า/รูปขาด)
   const strap = (y: number, label: string, mirror: boolean, b: ImgBox | undefined) =>
