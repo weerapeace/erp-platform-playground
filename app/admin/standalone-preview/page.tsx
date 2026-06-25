@@ -6,8 +6,18 @@
 import { useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
+import { ImageInput } from "@/components/image-input";
 
-type AppGroup = { key: string; label: string; icon: string | null };
+type AppGroup = { id: string; key: string; label: string; icon: string | null; icon_url: string | null };
+
+// แสดงไอคอนแอป: มีรูป (icon_url) → รูป · ไม่มี → อิโมจิ (icon)
+function AppIcon({ app, cls = "text-lg" }: { app: AppGroup; cls?: string }) {
+  if (app.icon_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={`/api/r2-image?key=${encodeURIComponent(app.icon_url)}`} alt="" className="w-6 h-6 rounded object-contain shrink-0" />;
+  }
+  return <span className={`${cls} shrink-0`}>{app.icon || "🧩"}</span>;
+}
 
 // china-pay มีหน้า custom; ที่เหลือใช้เชลล์กลาง /app/<key>
 const linkFor = (key: string) => `/app/${key}`;
@@ -54,6 +64,19 @@ export default function StandalonePreviewPage() {
     try { await navigator.clipboard.writeText(fullUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ }
   };
 
+  const selApp = apps.find((a) => a.key === sel) ?? null;
+  // แก้ไอคอนแอป (อัปเดตจอทันที + บันทึก) — ต้องมีสิทธิ์ admin
+  const patchApp = async (id: string, patch: Partial<AppGroup>) => {
+    setApps((as) => as.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+    try {
+      const j = await apiFetch("/api/menu/apps", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, patch }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+    } catch {
+      // บันทึกพลาด → โหลดของจริงกลับมา
+      apiFetch("/api/menu/apps").then((r) => r.json()).then((j) => setApps((j.data ?? []) as AppGroup[])).catch(() => {});
+    }
+  };
+
   return (
     <PlaygroundShell>
       <div className="max-w-6xl mx-auto px-6 py-6">
@@ -67,11 +90,32 @@ export default function StandalonePreviewPage() {
             {apps.map((a) => (
               <button key={a.key} onClick={() => setSel(a.key)}
                 className={`w-full text-left px-3 py-2 rounded-lg border text-sm flex items-center gap-2 ${sel === a.key ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 hover:bg-slate-50"}`}>
-                <span className="text-lg">{a.icon ?? "🧩"}</span>
+                <AppIcon app={a} />
                 <span className="flex-1 truncate">{a.label}</span>
               </button>
             ))}
             {apps.length === 0 && <div className="text-xs text-slate-300">— ยังไม่มี App —</div>}
+
+            {/* แก้ไอคอนของแอปที่เลือก */}
+            {selApp && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-2.5 space-y-2">
+                <div className="text-[11px] font-medium text-amber-700 flex items-center gap-1.5">🎨 ไอคอนแอป: <AppIcon app={selApp} cls="text-base" /> {selApp.label}</div>
+                <div className="flex items-center gap-2">
+                  <ImageInput compact value={selApp.icon_url ?? null} onChange={(key) => patchApp(selApp.id, { icon_url: key })} folder="app-icons" />
+                  <div className="text-[11px] text-slate-500 leading-tight">อัปรูปไอคอน<br />(ลากวาง/วาง/เลือกจากคลัง)</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={selApp.icon ?? ""}
+                    onChange={(e) => setApps((as) => as.map((a) => (a.id === selApp.id ? { ...a, icon: e.target.value } : a)))}
+                    onBlur={(e) => patchApp(selApp.id, { icon: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    placeholder="🛒"
+                    className="w-16 h-9 px-2 text-center text-lg border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                  <div className="text-[11px] text-slate-500 leading-tight">หรือใช้อิโมจิ<br />(ใช้เมื่อไม่มีรูป)</div>
+                </div>
+              </div>
+            )}
 
             {url && (
               <div className="pt-2 space-y-2">
