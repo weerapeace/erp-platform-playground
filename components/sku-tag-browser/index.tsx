@@ -315,10 +315,26 @@ export function SkuTagBrowser() {
       {customizeOpen && (
         <CardCustomizeModal value={cardFields} avail={availFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
       )}
-      {peekId && (
-        <RelationPeekModal moduleKey="skus-v2" recordId={peekId}
-          onClose={() => setPeekId(null)} onChanged={() => void reloadFirst()} />
-      )}
+      {peekId && (() => {
+        const idx = cards.findIndex((c) => c.id === peekId);
+        return (
+          <RelationPeekModal moduleKey="skus-v2" recordId={peekId}
+            onClose={() => setPeekId(null)} onChanged={() => void reloadFirst()}
+            nav={idx >= 0 ? {
+              onPrev: idx > 0 ? () => setPeekId(cards[idx - 1].id) : undefined,
+              onNext: idx < cards.length - 1 ? () => setPeekId(cards[idx + 1].id) : undefined,
+              label: `${idx + 1}/${cards.length}`,
+            } : undefined}
+            onCopy={async () => {
+              try {
+                const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: peekId }) });
+                const j = await res.json().catch(() => ({}));
+                if (!res.ok || j.error) throw new Error(j.error ?? "คัดลอกไม่สำเร็จ");
+                toast.success(`คัดลอกเป็น ${j.code} แล้ว — แก้ไขรายละเอียดได้`); void reloadFirst();
+              } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
+            }} />
+        );
+      })()}
     </div>
   );
 }

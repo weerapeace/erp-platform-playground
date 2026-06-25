@@ -38,7 +38,7 @@ const fieldCurrency = (f: RF, rec: Record<string, unknown> | null): unknown => {
 const img = (k: unknown) => (k ? `/api/r2-image?key=${encodeURIComponent(String(k))}` : null);
 
 export function RelationPeekModal({
-  moduleKey, recordId, onClose, startInEdit, onChanged, createDefaults, createTitle, quickEdit,
+  moduleKey, recordId, onClose, startInEdit, onChanged, createDefaults, createTitle, quickEdit, nav, onCopy,
 }: {
   moduleKey: string;
   recordId?: string | null;       // ว่าง/null = โหมดสร้างใหม่ (POST)
@@ -48,6 +48,8 @@ export function RelationPeekModal({
   createDefaults?: Record<string, unknown>;  // โหมดสร้าง: ค่าตั้งต้น เช่น { parent_sku_id, is_active:true }
   createTitle?: string;           // โหมดสร้าง: หัวข้อ popup
   quickEdit?: boolean;            // โหมดแก้เร็ว: กรองตามชุดฟิลด์ของโมดูล + ปุ่ม ⚙ (admin) เลือกฟิลด์
+  nav?: { onPrev?: () => void; onNext?: () => void; label?: string };   // เลื่อนรายการก่อนหน้า/ถัดไป (ตัวเรียกส่งรายการมา)
+  onCopy?: () => void;            // ปุ่มคัดลอก (ตัวเรียกจัดการ action เอง)
 }) {
   const isCreate = !recordId;
   const { user } = useAuth();
@@ -404,6 +406,20 @@ export function RelationPeekModal({
           <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
             <button onClick={() => { setEditing(false); setErr(null); }} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
             <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+          </div>
+        )}
+
+        {!editing && !cfgOpen && !loading && row && (nav || onCopy) && (
+          <div className="px-5 py-3 border-t border-slate-100 flex items-center gap-2 flex-wrap">
+            {nav && (
+              <>
+                <button onClick={() => nav.onPrev?.()} disabled={!nav.onPrev} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title="รายการก่อนหน้า">◀ ก่อนหน้า</button>
+                <button onClick={() => nav.onNext?.()} disabled={!nav.onNext} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40" title="รายการถัดไป">ถัดไป ▶</button>
+                {nav.label && <span className="text-xs text-slate-400 ml-1">{nav.label}</span>}
+              </>
+            )}
+            <div className="flex-1" />
+            {onCopy && <button onClick={onCopy} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1">⧉ คัดลอก</button>}
           </div>
         )}
       </div>
