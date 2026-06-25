@@ -84,38 +84,35 @@ export async function GET(request: NextRequest) {
     total = count ?? rows.length;
   }
 
-  const ids = rows.map((r) => r.id);
+  const ids   = rows.map((r) => r.id);
+  const codes = rows.map((r) => r.code).filter(Boolean);
 
-  // สต๊อก
-  const stock = new Map<string, number>();
-  if (ids.length) {
-    const { data: bal } = await admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", ids);
-    for (const b of (bal ?? []) as { sku_id: string; qty_on_hand: number | string | null }[]) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
-  }
-
-  // แท็กต่อ SKU (ดึง m2m + ชื่อแท็ก แยก ไม่พึ่ง FK embed)
+  const stock  = new Map<string, number>();
+  const bomSet = new Set<string>();
   const tagMap = new Map<string, string[]>();
+
   if (ids.length) {
-    const { data: links } = await admin.from("skus_v2_product_family_m2m").select("src_id, tgt_id").in("src_id", ids);
-    const linkRows = (links ?? []) as { src_id: string; tgt_id: string }[];
+    // ยิงขนาน: สต๊อก + ลิงก์แท็ก + BOM (เร็วกว่ารอทีละ query)
+    const [balRes, linkRes, bomRes] = await Promise.all([
+      admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", ids),
+      admin.from("skus_v2_product_family_m2m").select("src_id, tgt_id").in("src_id", ids),
+      admin.from("bom_headers").select("product_sku").in("product_sku", codes),
+    ]);
+    for (const b of (balRes.data ?? []) as { sku_id: string; qty_on_hand: number | string | null }[]) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
+    for (const b of (bomRes.data ?? []) as { product_sku: string }[]) bomSet.add(b.product_sku);
+
+    // ชื่อแท็ก: query เพิ่มหลังได้ลิงก์ (m2m → product_families.name)
+    const linkRows = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
     const tgtIds = [...new Set(linkRows.map((l) => l.tgt_id))];
-    const nameById = new Map<string, string>();
     if (tgtIds.length) {
       const { data: fams } = await admin.from("product_families").select("id, name").in("id", tgtIds);
+      const nameById = new Map<string, string>();
       for (const f of (fams ?? []) as { id: string; name: string }[]) nameById.set(f.id, f.name);
+      for (const l of linkRows) {
+        const name = nameById.get(l.tgt_id); if (!name) continue;
+        const arr = tagMap.get(l.src_id) ?? []; arr.push(name); tagMap.set(l.src_id, arr);
+      }
     }
-    for (const l of linkRows) {
-      const name = nameById.get(l.tgt_id); if (!name) continue;
-      const arr = tagMap.get(l.src_id) ?? []; arr.push(name); tagMap.set(l.src_id, arr);
-    }
-  }
-
-  // มี BOM ไหม (bom_headers.product_sku = code) — ไว้เตือน "ข้อมูลไม่ครบ"
-  const bomSet = new Set<string>();
-  if (rows.length) {
-    const codes = rows.map((r) => r.code).filter(Boolean);
-    const { data: boms } = await admin.from("bom_headers").select("product_sku").in("product_sku", codes);
-    for (const b of (boms ?? []) as { product_sku: string }[]) bomSet.add(b.product_sku);
   }
 
   const cards: SkuCard[] = rows.map((r) => ({

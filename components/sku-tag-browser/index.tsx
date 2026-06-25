@@ -26,7 +26,7 @@ const CARD_FIELDS: { key: string; label: string }[] = [
 const DEFAULT_CARD_FIELDS = CARD_FIELDS.map((f) => f.key);
 const CARD_SCOPE = "sku-browser";
 const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
-const LIMIT = 120;
+const LIMIT = 60;   // โหลดหน้าละ 60 (เดิม 120) — เห็นเร็วขึ้น แล้วค่อย "โหลดเพิ่ม"
 
 const SORTS = [
   { key: "code",       label: "รหัส (A→Z)",     by: "code",       dir: "asc"  },
@@ -302,7 +302,7 @@ function SkuCardView({ c, fields, onOpen, selected, onToggleSelect }: { c: SkuCa
       {has("image") && (
         <div className="h-32 bg-slate-100 flex items-center justify-center overflow-hidden">
           {c.image
-            ? <img src={withImageWidth(c.image, 320) ?? c.image} alt={c.code} loading="lazy" className="w-full h-full object-cover" />
+            ? <img src={withImageWidth(c.image, 320) ?? c.image} alt={c.code} loading="lazy" className="w-full h-full object-contain" />
             : <span className="text-3xl text-slate-300">🏷️</span>}
         </div>
       )}
