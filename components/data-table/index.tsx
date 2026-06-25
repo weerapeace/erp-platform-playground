@@ -2604,13 +2604,18 @@ function SelectFilterCard({ field, opts, selected, onChange, fetchOptions }: {
 // ============================================================
 
 // แก้ "ทั้งหมดที่ตรงตัวกรอง" (server mode) — เลือก field + ใส่ค่าเดียวต่อ field → ใช้กับทุกแถวที่ตรง
-function BulkEditAllModal({
-  fields, count, onClose, onApply,
+// export = ของกลาง ใช้ซ้ำได้จากที่อื่น (เช่น SKU browser การ์ด — แก้ N รายการที่เลือก)
+//   title/note/applyLabel = ปรับข้อความได้ (default = โหมด "ตรงตัวกรอง")
+export function BulkEditAllModal({
+  fields, count, onClose, onApply, title, note, applyLabel,
 }: {
   fields: BulkEditField[];
   count: number;
   onClose: () => void;
   onApply: (changes: Record<string, unknown>) => Promise<{ affected: number }>;
+  title?: string;
+  note?: string;
+  applyLabel?: string;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -2643,13 +2648,13 @@ function BulkEditAllModal({
 
   const btn = "h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50";
   return (
-    <ERPModal open onClose={onClose} title={`แก้ทั้งหมดที่ตรงตัวกรอง (${count.toLocaleString()} รายการ)`} size="md"
+    <ERPModal open onClose={onClose} title={title ?? `แก้ทั้งหมดที่ตรงตัวกรอง (${count.toLocaleString()} รายการ)`} size="md"
       footer={result != null ? (
         <button onClick={onClose} className={`${btn} text-white bg-blue-600 hover:bg-blue-700`}>เสร็จสิ้น</button>
       ) : (
         <>
           <button onClick={onClose} disabled={applying} className={`${btn} text-slate-700 border border-slate-200 hover:bg-slate-50`}>ยกเลิก</button>
-          <button onClick={apply} disabled={applying || !canApply} className={`${btn} text-white bg-amber-600 hover:bg-amber-700`}>{applying ? "กำลังแก้..." : "แก้ทั้งหมด"}</button>
+          <button onClick={apply} disabled={applying || !canApply} className={`${btn} text-white bg-amber-600 hover:bg-amber-700`}>{applying ? "กำลังแก้..." : (applyLabel ?? "แก้ทั้งหมด")}</button>
         </>
       )}>
       {result != null ? (
@@ -2657,7 +2662,7 @@ function BulkEditAllModal({
       ) : (
         <div className="space-y-3">
           <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
-            ⚠ จะแก้ <b>ทุกแถวที่ตรงตัวกรอง/ค้นหาปัจจุบัน</b> ({count.toLocaleString()} รายการ) ไม่ใช่แค่ที่เลือกในหน้านี้
+            {note ?? <>⚠ จะแก้ <b>ทุกแถวที่ตรงตัวกรอง/ค้นหาปัจจุบัน</b> ({count.toLocaleString()} รายการ) ไม่ใช่แค่ที่เลือกในหน้านี้</>}
           </div>
           {err && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">⚠ {err}</div>}
           <p className="text-xs font-medium text-slate-600">เลือกข้อมูลที่จะแก้ + ใส่ค่าใหม่:</p>

@@ -8,13 +8,15 @@
  * - การ์ด SKU: เรียงลำดับ · โหลดเพิ่ม · กดการ์ด → ดู/แก้ SKU (SkuFormModal) · ปรับฟิลด์การ์ด
  * - ค้นหา SKU ทั้งหมด · ดึงผ่าน /api/sku-browser (RPC กลาง erp_skus_tag_page)
  */
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
+// ของกลาง bulk edit — type อย่างเดียว (ไม่กิน runtime); ตัว modal โหลดแบบ dynamic ด้านล่าง (กัน data-table เข้า bundle หน้านี้)
+import type { BulkEditField } from "@/components/data-table";
 import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
 // drawer เก่าตัวจริงของ MasterCRUD — โหลดเฉพาะตอนเปิด (master-crud หนัก) กันบวม bundle
 // loading: โชว์ "กำลังเปิด…" ทันทีระหว่างโหลดก้อนโค้ดครั้งแรก (ไม่ให้รู้สึกค้าง)
@@ -28,6 +30,8 @@ const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").
     </div>
   ),
 });
+// ป๊อปอัป bulk edit ของกลาง — โหลดเฉพาะตอนกด "แก้ไขข้อมูล" (data-table ใหญ่ ไม่เอาเข้า bundle หน้านี้)
+const BulkEditAllModal = nextDynamic(() => import("@/components/data-table").then((m) => ({ default: m.BulkEditAllModal })), { ssr: false });
 
 type Crumb = { id: string; name: string };
 
@@ -66,6 +70,37 @@ function cardWarnings(c: SkuCard): string[] {
   return w;
 }
 
+// ── แปลงฟิลด์จาก Field Registry → BulkEditField (ของกลาง) ──
+// เลือกเฉพาะชนิดที่แก้แบบหลายรายการได้อย่างปลอดภัย (text/number/boolean/select/relation) — ไม่ hardcode รายฟิลด์
+type RegField = {
+  column_name: string | null; field_label: string; ui_field_type: string; data_type: string;
+  is_visible: boolean; is_sensitive: boolean; is_editable: boolean; is_bulk_editable: boolean;
+  options: unknown; relation_config: Record<string, unknown> | null;
+};
+const NO_BULK = new Set(["id", "code", "created_at", "updated_at", "created_by", "cover_image_r2_key"]);
+function parseOptions(opt: unknown): { value: string; label: string }[] | undefined {
+  const arr = Array.isArray(opt) ? opt
+    : (opt && typeof opt === "object" && Array.isArray((opt as { choices?: unknown }).choices)) ? (opt as { choices: unknown[] }).choices
+    : null;
+  if (!arr) return undefined;
+  const out = arr.map((o) => {
+    if (o && typeof o === "object") { const r = o as Record<string, unknown>; const v = String(r.value ?? r.key ?? ""); return { value: v, label: String(r.label ?? r.name ?? v) }; }
+    const v = String(o); return { value: v, label: v };
+  }).filter((o) => o.value);
+  return out.length ? out : undefined;
+}
+function toBulkField(f: RegField): BulkEditField | null {
+  const col = f.column_name; if (!col || NO_BULK.has(col)) return null;
+  const ui = (f.ui_field_type || "").toLowerCase(); const dt = (f.data_type || "").toLowerCase();
+  if ((ui.includes("relation") || ui.includes("many2one") || ui.includes("picker")) && f.relation_config && Object.keys(f.relation_config).length) {
+    return { key: col, label: f.field_label, type: "relation", relationConfig: f.relation_config as unknown as BulkEditField["relationConfig"] };
+  }
+  if (["boolean", "toggle", "switch", "checkbox"].includes(ui) || dt === "boolean") return { key: col, label: f.field_label, type: "boolean" };
+  if (["select", "status", "enum", "dropdown"].includes(ui)) { const options = parseOptions(f.options); if (options) return { key: col, label: f.field_label, type: "select", options }; }
+  if (["number", "currency", "integer", "decimal", "float"].includes(ui) || ["number", "numeric", "integer", "bigint", "double precision", "real"].includes(dt)) return { key: col, label: f.field_label, type: "number" };
+  return { key: col, label: f.field_label, type: "text" };
+}
+
 export function SkuTagBrowser() {
   const toast = useToast();
   const [entity, setEntity] = useState<"skus" | "parent-skus">("skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
@@ -89,8 +124,11 @@ export function SkuTagBrowser() {
 
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_CARD_FIELDS);
   const [availFields, setAvailFields] = useState<FieldDef[]>([]);   // ฟิลด์ SKU ทั้งหมด (จาก Field Registry — ไม่ hardcode)
+  const [bulkFields, setBulkFields] = useState<BulkEditField[]>([]);   // ฟิลด์ที่ "แก้หลายรายการ" ได้ (จาก Field Registry §18)
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → RelationPeek (ของกลาง: ดู/แก้ทุกฟิลด์)
+  const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → drawer เก่าตัวจริง (ของกลาง: ดู/แก้ทุกฟิลด์)
 
   // ชุดฟิลด์การ์ด (ครั้งเดียว)
   useEffect(() => {
@@ -108,10 +146,15 @@ export function SkuTagBrowser() {
     apiFetch(`/api/sku-browser?entity=${entity}`).then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
     apiFetch(`/api/admin/field-registry-v2?module=${entity === "parent-skus" ? "parent-skus-v2" : "skus-v2"}`).then((r) => r.json())
       .then((j) => {
-        const fs = ((j.fields ?? []) as { column_name: string | null; field_label: string; is_visible: boolean; is_sensitive: boolean }[])
-          .filter((f) => f.column_name && f.is_visible && !f.is_sensitive && !CORE_COLUMNS.has(f.column_name))
-          .map((f) => ({ key: f.column_name as string, label: f.field_label }));
-        setAvailFields(fs);
+        const all = (j.fields ?? []) as RegField[];
+        // ฟิลด์เพิ่มบนการ์ด (visible + ไม่ sensitive + ไม่ใช่ core)
+        setAvailFields(all.filter((f) => f.column_name && f.is_visible && !f.is_sensitive && !CORE_COLUMNS.has(f.column_name as string))
+          .map((f) => ({ key: f.column_name as string, label: f.field_label })));
+        // ฟิลด์ที่แก้หลายรายการได้ (§18) — ใช้ is_bulk_editable ถ้าตั้งค่าไว้, ไม่งั้น editable & ไม่ sensitive
+        const anyFlagged = all.some((f) => f.is_bulk_editable === true);
+        setBulkFields(all
+          .filter((f) => f.column_name && !f.is_sensitive && f.is_editable !== false && (anyFlagged ? f.is_bulk_editable === true : true))
+          .map(toBulkField).filter((x): x is BulkEditField => !!x));
       }).catch(() => {});
   }, [entity]);
 
@@ -181,21 +224,72 @@ export function SkuTagBrowser() {
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const clearSel = () => setSelected(new Set());
   const selectAllShown = () => setSelected(new Set(shown.map((c) => c.id)));
+  const allShownSelected = shown.length > 0 && shown.every((c) => selected.has(c.id));
+
+  // โหมดเลือก = มีของเลือกอยู่ ≥1 → คลิกการ์ดทั้งใบ = toggle (ไม่เปิด drawer)
+  const selectMode = selected.size > 0;
+  // ลากคลุมเลือก: เริ่มจาก checkbox (หรือลากการ์ดในโหมดเลือก) แล้วลากผ่านการ์ดอื่น
+  const dragRef = useRef<{ active: boolean; mode: boolean; moved: boolean }>({ active: false, mode: true, moved: false });
+  const justDragged = useRef(false);
+  const applyDrag = useCallback((id: string) => setSelected((s) => { const n = new Set(s); if (dragRef.current.mode) n.add(id); else n.delete(id); return n; }), []);
+  const beginDrag = useCallback((id: string, currentlySelected: boolean) => { dragRef.current = { active: true, mode: !currentlySelected, moved: false }; applyDrag(id); }, [applyDrag]);
+  const dragOver = useCallback((id: string) => { if (dragRef.current.active) { dragRef.current.moved = true; applyDrag(id); } }, [applyDrag]);
+  useEffect(() => {
+    const up = () => {
+      if (!dragRef.current.active) return;
+      if (dragRef.current.moved) { justDragged.current = true; setTimeout(() => { justDragged.current = false; }, 0); }
+      dragRef.current.active = false;
+    };
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, []);
+
+  // เลือกทั้งหมด "ทุกหน้า" (ตามตัวกรองปัจจุบัน) — ดึง id ทั้งหมดจาก API (เบา)
+  const selectAllMatching = async () => {
+    setSelectingAll(true);
+    try {
+      const p = new URLSearchParams();
+      if (tagFilter.tagIds.length) p.set("family_ids", tagFilter.tagIds.join(","));
+      if (search.trim()) p.set("search", search.trim());
+      p.set("entity", entity); p.set("ids", "1");
+      const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
+      const ids = (j.ids ?? []) as string[];
+      setSelected(new Set(ids));
+      if ((j.total ?? 0) > ids.length) toast.success(`เลือกได้สูงสุด ${ids.length.toLocaleString("th-TH")} รายการ (กรองให้แคบลงถ้าต้องการมากกว่านี้)`);
+    } catch { toast.error("เลือกทั้งหมดไม่สำเร็จ"); } finally { setSelectingAll(false); }
+  };
+
+  // ── bulk: ใช้ของกลางทั้งหมด (ไม่ hardcode) ──
+  const junction = entity === "parent-skus" ? "parent_skus_v2_product_family_m2m" : "skus_v2_product_family_m2m";
+  const apiPath = entity === "parent-skus" ? "parent-skus" : "skus";
+  // ของกลาง: แก้หลายรายการผ่าน route กลาง /api/master-v2/<entity>/bulk-update (edits ราย id → group + validate สิทธิ์ฟิลด์ + audit ฝั่ง server)
+  const bulkUpdateCentral = useCallback(async (ids: string[], changes: Record<string, unknown>): Promise<number> => {
+    const res = await apiFetch(`/api/master-v2/${apiPath}/bulk-update`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ edits: ids.map((id) => ({ id, changes })) }),
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok || !j || j.error) throw new Error(j?.error ?? "แก้ไม่สำเร็จ");
+    return (j.affected as number) ?? ids.length;
+  }, [apiPath]);
   const bulkAddTag = async (tagId: string) => {
     const ids = [...selected]; if (!tagId || ids.length === 0) return;
     try {
-      const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction: "skus_v2_product_family_m2m", links: ids.map((src_id) => ({ src_id, tgt_id: tagId })) }) });
+      const res = await apiFetch("/api/admin/schema/m2m-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ junction, links: ids.map((src_id) => ({ src_id, tgt_id: tagId })) }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(`ติดแท็กให้ ${ids.length} SKU แล้ว`); clearSel(); void reloadFirst();
+      toast.success(`ติดแท็กให้ ${ids.length} รายการแล้ว`); clearSel(); void reloadFirst();
     } catch (e) { toast.error(e instanceof Error ? e.message : "ติดแท็กไม่สำเร็จ"); }
   };
   const bulkStatus = async (active: boolean) => {
     const ids = [...selected]; if (ids.length === 0) return;
-    let ok = 0;
-    for (const id of ids) {
-      try { const res = await apiFetch(`/api/master-v2/skus/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_active: active }) }); if (res.ok) ok++; } catch { /* ignore */ }
-    }
-    toast.success(`${active ? "เปิด" : "ปิด"}ใช้งาน ${ok}/${ids.length} SKU แล้ว`); clearSel(); void reloadFirst();
+    try { const n = await bulkUpdateCentral(ids, { is_active: active }); toast.success(`${active ? "เปิด" : "ปิด"}ใช้งาน ${n} รายการแล้ว`); clearSel(); void reloadFirst(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); }
+  };
+  // ป๊อปอัป bulk edit ของกลาง onApply → ยิง route กลาง
+  const applyBulkEdit = async (changes: Record<string, unknown>): Promise<{ affected: number }> => {
+    const affected = await bulkUpdateCentral([...selected], changes);
+    void reloadFirst();
+    return { affected };
   };
   const exportCsv = () => {
     const rows = shown.filter((c) => selected.has(c.id)); if (rows.length === 0) return;
@@ -274,6 +368,10 @@ export function SkuTagBrowser() {
             <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
               <p className="text-[12px] text-slate-400">{total.toLocaleString("th-TH")} รายการ (แสดง {(onlyIncomplete ? shown.length : cards.length).toLocaleString("th-TH")})</p>
               <div className="flex items-center gap-2 flex-wrap">
+                <button onClick={allShownSelected ? clearSel : selectAllShown}
+                  className={`h-8 px-2.5 text-[12px] rounded-lg border ${allShownSelected ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                  {allShownSelected ? "☑ เลือกแล้ว" : "☐ เลือกทั้งหมด"}
+                </button>
                 <div className="flex items-center rounded-lg border border-slate-200 overflow-hidden">
                   <button onClick={() => setViewPersist("card")} className={`h-8 px-2.5 text-[12px] ${view === "card" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>▦ การ์ด</button>
                   <button onClick={() => setViewPersist("table")} className={`h-8 px-2.5 text-[12px] border-l border-slate-200 ${view === "table" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>☰ ตาราง</button>
@@ -292,9 +390,16 @@ export function SkuTagBrowser() {
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">ไม่มีรายการที่ข้อมูลไม่ครบในที่โหลดมา 🎉</div>
               : view === "table"
-                ? <SkuTable rows={shown} selected={selected} onToggle={toggleSel} onOpen={(id) => setPeekId(id)} />
-                : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-                    {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs} onOpen={() => setPeekId(c.id)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
+                ? <SkuTable rows={shown} selected={selected} selectMode={selectMode} onToggle={toggleSel} onOpen={(id) => setPeekId(id)} />
+                : <div className="grid gap-3 select-none" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
+                    {shown.map((c) => (
+                      <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs}
+                        selected={selected.has(c.id)} selectMode={selectMode}
+                        onClick={() => { if (justDragged.current || selectMode) return; setPeekId(c.id); }}
+                        onPointerDownCard={() => { if (selectMode) beginDrag(c.id, selected.has(c.id)); }}
+                        onPointerDownHandle={() => beginDrag(c.id, selected.has(c.id))}
+                        onPointerEnter={() => dragOver(c.id)} />
+                    ))}
                   </div>}
             {cards.length < total && (
               <div className="text-center mt-4">
@@ -330,8 +435,16 @@ export function SkuTagBrowser() {
 
       {selected.size > 0 && (
         <div className="sticky bottom-4 mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white shadow-lg w-fit mx-auto flex-wrap">
-          <span className="text-sm font-medium">เลือก {selected.size}</span>
-          <button onClick={selectAllShown} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">เลือกทั้งหมดที่แสดง</button>
+          <span className="text-sm font-medium">เลือก {selected.size.toLocaleString("th-TH")}</span>
+          {!allShownSelected && <button onClick={selectAllShown} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">เลือกที่แสดง</button>}
+          {total > shown.length && (
+            <button onClick={selectAllMatching} disabled={selectingAll} className="text-[12px] px-2 py-1 rounded-lg bg-white/15 hover:bg-white/25 disabled:opacity-60">
+              {selectingAll ? "กำลังเลือก…" : `เลือกทั้งหมด ${total.toLocaleString("th-TH")}`}
+            </button>
+          )}
+          {bulkFields.length > 0 && (
+            <button onClick={() => setBulkEditOpen(true)} className="text-[12px] px-2.5 py-1 rounded-lg bg-white text-indigo-700 font-medium hover:bg-indigo-50">✏️ แก้ไขข้อมูล</button>
+          )}
           <select onChange={(e) => { const v = e.target.value; e.currentTarget.value = ""; if (v) void bulkAddTag(v); }} defaultValue=""
             className="h-8 px-2 text-[12px] rounded-lg text-slate-700 bg-white">
             <option value="">🏷️ ติดแท็ก…</option>
@@ -342,6 +455,17 @@ export function SkuTagBrowser() {
           <button onClick={exportCsv} className="text-[12px] px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25">⬇ Export CSV</button>
           <button onClick={clearSel} className="text-[12px] px-2 py-1 rounded-lg hover:bg-white/15">ยกเลิก</button>
         </div>
+      )}
+      {bulkEditOpen && bulkFields.length > 0 && (
+        <BulkEditAllModal
+          fields={bulkFields}
+          count={selected.size}
+          title={`แก้ ${selected.size.toLocaleString("th-TH")} รายการที่เลือก`}
+          note={`จะแก้เฉพาะ ${selected.size.toLocaleString("th-TH")} รายการที่เลือกไว้ — เลือกข้อมูลที่จะแก้แล้วใส่ค่าใหม่`}
+          applyLabel="บันทึก"
+          onApply={applyBulkEdit}
+          onClose={() => setBulkEditOpen(false)}
+        />
       )}
       {customizeOpen && (
         <CardCustomizeModal value={cardFields} avail={availFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
@@ -380,19 +504,30 @@ export function SkuTagBrowser() {
   );
 }
 
-function SkuCardView({ c, fields, extraDefs, onOpen, selected, onToggleSelect }: { c: SkuCard; fields: string[]; extraDefs: FieldDef[]; onOpen: () => void; selected: boolean; onToggleSelect: () => void }) {
+function SkuCardView({ c, fields, extraDefs, selected, selectMode, onClick, onPointerDownCard, onPointerDownHandle, onPointerEnter }: {
+  c: SkuCard; fields: string[]; extraDefs: FieldDef[]; selected: boolean; selectMode: boolean;
+  onClick: () => void; onPointerDownCard: () => void; onPointerDownHandle: () => void; onPointerEnter: () => void;
+}) {
   const has = (k: string) => fields.includes(k);
   const showTopRow = has("code") || has("status");
   const showPriceRow = has("price") || has("stock");
   const warns = cardWarnings(c);
   return (
-    <button onClick={onOpen} className={`relative text-left rounded-xl border bg-white overflow-hidden hover:shadow-sm transition ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
-      <span onClick={(e) => { e.stopPropagation(); onToggleSelect(); }}
-        className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] cursor-pointer ${selected ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
+    <div role="button" tabIndex={0}
+      onClick={onClick}
+      onPointerDown={(e) => { if (e.button === 0) onPointerDownCard(); }}
+      onPointerEnter={onPointerEnter}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      className={`relative text-left rounded-xl border bg-white overflow-hidden hover:shadow-sm transition cursor-pointer ${selected ? "border-indigo-500 ring-2 ring-indigo-200" : "border-slate-200 hover:border-indigo-300"}`}>
+      <span
+        onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onPointerDownHandle(); }}
+        onClick={(e) => { e.stopPropagation(); }}
+        title="เลือก / ลากคลุมเพื่อเลือกหลายรายการ"
+        className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border flex items-center justify-center text-[11px] cursor-pointer ${selected ? "bg-indigo-600 border-indigo-600 text-white" : selectMode ? "bg-white border-slate-300 text-slate-300" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>
       {has("image") && (
         <div className="h-32 bg-slate-100 flex items-center justify-center overflow-hidden">
           {c.image
-            ? <img src={withImageWidth(c.image, 320) ?? c.image} alt={c.code} loading="lazy" className="w-full h-full object-contain" />
+            ? <img src={withImageWidth(c.image, 320) ?? c.image} alt={c.code} loading="lazy" draggable={false} className="w-full h-full object-contain" />
             : <span className="text-3xl text-slate-300">🏷️</span>}
         </div>
       )}
@@ -429,13 +564,13 @@ function SkuCardView({ c, fields, extraDefs, onOpen, selected, onToggleSelect }:
           </div>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
 // มุมมองตาราง — ใช้ข้อมูลชุดเดียวกับการ์ด (filter/sort/เลือก เหมือนกัน)
-function SkuTable({ rows, selected, onToggle, onOpen }: {
-  rows: SkuCard[]; selected: Set<string>; onToggle: (id: string) => void; onOpen: (id: string) => void;
+function SkuTable({ rows, selected, selectMode, onToggle, onOpen }: {
+  rows: SkuCard[]; selected: Set<string>; selectMode: boolean; onToggle: (id: string) => void; onOpen: (id: string) => void;
 }) {
   return (
     <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
@@ -458,7 +593,7 @@ function SkuTable({ rows, selected, onToggle, onOpen }: {
             const w = cardWarnings(c);
             const sel = selected.has(c.id);
             return (
-              <tr key={c.id} onClick={() => onOpen(c.id)}
+              <tr key={c.id} onClick={() => (selectMode ? onToggle(c.id) : onOpen(c.id))}
                 className={`border-t border-slate-100 cursor-pointer ${sel ? "bg-indigo-50" : "hover:bg-slate-50"}`}>
                 <td className="px-2 py-1.5" onClick={(e) => { e.stopPropagation(); onToggle(c.id); }}>
                   <span className={`inline-flex w-4 h-4 rounded border items-center justify-center text-[10px] cursor-pointer ${sel ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent hover:text-slate-300"}`}>✓</span>

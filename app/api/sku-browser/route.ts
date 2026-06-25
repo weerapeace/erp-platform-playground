@@ -55,6 +55,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ tree, error: null });
   }
 
+  // ── โหมด "ดึง id ทั้งหมดที่ตรงตัวกรอง" (สำหรับปุ่ม "เลือกทั้งหมด" ข้ามหน้า) ──
+  // คืนแค่ id (เบา) ไม่ดึงรูป/แท็ก/สต๊อก — cap 10,000 (สอดคล้องเพดาน bulk-update กลาง)
+  if (sp.get("ids") === "1") {
+    const IDS_CAP = 10000;
+    if (familyIds.length) {
+      const pageRpc = entity === "parent-skus" ? "erp_parent_skus_tag_page" : "erp_skus_tag_page";
+      const { data: rpc, error } = await admin.rpc(pageRpc, {
+        p_incl: familyIds, p_excl: null, p_search: search || null,
+        p_include_inactive: true, p_limit: IDS_CAP, p_offset: 0, p_sort_by: "code", p_sort_dir: "asc",
+      });
+      if (error) return NextResponse.json({ ids: [], total: 0, error: error.message }, { status: 500 });
+      return NextResponse.json({ ids: (rpc as { ids?: string[] } | null)?.ids ?? [], total: Number((rpc as { total?: number } | null)?.total ?? 0), error: null });
+    }
+    const tbl = entity === "parent-skus" ? "parent_skus_v2" : "skus_v2";
+    let q = admin.from(tbl).select("id", { count: "exact" });
+    for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
+    const { data, count, error } = await q.range(0, IDS_CAP - 1);
+    if (error) return NextResponse.json({ ids: [], total: 0, error: error.message }, { status: 500 });
+    return NextResponse.json({ ids: ((data ?? []) as { id: string }[]).map((r) => r.id), total: count ?? 0, error: null });
+  }
+
   // ── โหมดการ์ด SKU ──
   const limit  = Math.min(Number(sp.get("limit") ?? 60) || 60, 120);
   const offset = Number(sp.get("offset") ?? 0) || 0;
