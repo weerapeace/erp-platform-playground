@@ -210,8 +210,8 @@ function BasisPicker({ value, options, onChange }: { value: string; options: Bas
   );
 }
 
-// ปุ่ม "Copy ตีราคา" — คัดลอกบรรทัด + ค่าใช้จ่ายของ Parent ที่กำลังดู ไปยัง Parent อื่น (แทนที่ของปลายทาง)
-function CopyCostButton({ tabs, current, onCopy }: { tabs: { key: string; label: string; kind: string }[]; current: string; onCopy: (target: string) => void }) {
+// ปุ่ม "Copy ตีราคา" — คัดลอกบรรทัด + ค่าใช้จ่าย"จาก" Parent อื่น "มาใส่แท็บที่กำลังดู" (แทนที่ของแท็บนี้)
+function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: string; label: string; kind: string }[]; current: string; onCopy: (source: string) => void; lineCountOf?: (key: string) => number }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -220,21 +220,27 @@ function CopyCostButton({ tabs, current, onCopy }: { tabs: { key: string; label:
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
-  const targets = tabs.filter((t) => t.key !== current);
-  if (targets.length === 0) return null;
+  const sources = tabs.filter((t) => t.key !== current);   // แท็บอื่น = ตัวเลือก "ต้นทาง" ที่จะคัดลอกมา
+  if (sources.length === 0) return null;
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen((o) => !o)}
-        className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⧉ Copy ตีราคา</button>
+      <button type="button" onClick={() => setOpen((o) => !o)} title="คัดลอกบรรทัดตีราคาจากแท็บอื่นมาใส่แท็บนี้"
+        className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⧉ Copy ตีราคาจาก…</button>
       {open && (
-        <div className="absolute z-30 right-0 mt-1 min-w-[200px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
-          <div className="px-2.5 py-1 text-[10px] text-slate-400">คัดลอกไปยัง (แทนที่ของปลายทาง)</div>
-          {targets.map((t) => (
-            <button key={t.key || "__gen__"} type="button" onClick={() => { setOpen(false); onCopy(t.key); }}
-              className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-blue-50 text-slate-700">
-              {t.kind === "general" ? "ทั่วไป" : t.kind === "draft" ? `✎ ${t.label}` : t.label}
-            </button>
-          ))}
+        <div className="absolute z-30 right-0 mt-1 min-w-[220px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+          <div className="px-2.5 py-1 text-[10px] text-slate-400">คัดลอก<b>จาก</b>แท็บไหน (มาแทนที่แท็บนี้)</div>
+          {sources.map((t) => {
+            const n = lineCountOf?.(t.key) ?? 0;
+            const name = t.kind === "general" ? "ทั่วไป" : t.kind === "draft" ? `✎ ${t.label}` : t.label;
+            return (
+              <button key={t.key || "__gen__"} type="button" disabled={n === 0}
+                onClick={() => { setOpen(false); onCopy(t.key); }}
+                className="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs hover:bg-blue-50 text-slate-700 disabled:opacity-40 disabled:hover:bg-transparent">
+                <span className="truncate">{name}</span>
+                <span className="shrink-0 tabular-nums text-[10px] text-slate-400">{n > 0 ? `${n} บรรทัด` : "ว่าง"}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1548,13 +1554,16 @@ export default function DesignSheetsPage() {
                 <div className="flex items-center gap-2">
                   {canEdit && costParentTabs.length > 1 && (
                     <CopyCostButton tabs={costParentTabs} current={costParent}
-                      onCopy={(target) => {
-                        const src = costLines.filter((r) => pkey(r.parent_code) === costParent);
-                        const cloned = src.map((r, i) => recomputeRow({ ...r, key: `cp${Date.now()}_${i}`, parent_code: target || null }));
-                        setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== target), ...cloned]);
-                        setCostExtraMap((m) => ({ ...m, [target]: (m[costParent] ?? []).map((c) => ({ ...c })) }));
-                        setCostDirty(true); setCostParent(target);
-                        toast.success(`คัดลอกตีราคาไปยัง "${target === "" ? "ทั่วไป" : target}" แล้ว`);
+                      lineCountOf={(key) => costLines.filter((r) => pkey(r.parent_code) === key).length}
+                      onCopy={(source) => {
+                        // คัดลอก "จาก" source → "มาใส่" แท็บปัจจุบัน (costParent) แทนที่ของเดิมในแท็บนี้
+                        const src = costLines.filter((r) => pkey(r.parent_code) === source);
+                        if (src.length === 0) { toast.info(`"${source === "" ? "ทั่วไป" : source}" ยังไม่มีบรรทัดให้คัดลอก`); return; }
+                        const cloned = src.map((r, i) => recomputeRow({ ...r, key: `cp${Date.now()}_${i}`, parent_code: costParent || null }));
+                        setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned]);
+                        setCostExtraMap((m) => ({ ...m, [costParent]: (m[source] ?? []).map((c) => ({ ...c })) }));
+                        setCostDirty(true);
+                        toast.success(`คัดลอกตีราคาจาก "${source === "" ? "ทั่วไป" : source}" มาแล้ว (${cloned.length} บรรทัด)`);
                       }} />
                   )}
                   {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
