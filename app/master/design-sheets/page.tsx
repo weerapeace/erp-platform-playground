@@ -1017,6 +1017,23 @@ export default function DesignSheetsPage() {
     finally { setLoadingForm(false); }
   };
 
+  // คัดลอกลิงก์มาที่ใบงานนี้ (เปิดลิงก์แล้วเด้ง modal ใบนี้อัตโนมัติ ผ่าน ?sheet=<id>)
+  const copySheetLink = async () => {
+    if (!form?.id || typeof window === "undefined") return;
+    const url = `${window.location.origin}${window.location.pathname}?sheet=${form.id}`;
+    try { await navigator.clipboard.writeText(url); toast.success("คัดลอกลิงก์ใบงานนี้แล้ว — วางส่งให้คนอื่นเปิดได้เลย"); }
+    catch { toast.error("คัดลอกลิงก์ไม่สำเร็จ"); }
+  };
+  // เปิดหน้าด้วยลิงก์ ?sheet=<id> → เปิด modal ใบงานนั้นอัตโนมัติ (ครั้งเดียวตอนเข้าหน้า)
+  const autoOpenRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenRef.current || typeof window === "undefined") return;
+    autoOpenRef.current = true;
+    const id = new URLSearchParams(window.location.search).get("sheet");
+    if (id) void openEdit({ id } as DesignSheetListItem);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const save = async () => {
     if (!form) return;
     if (!form.name.trim()) { setFormErr("กรุณาใส่ชื่องาน"); return; }
@@ -1402,6 +1419,8 @@ export default function DesignSheetsPage() {
         footer={<>
           {form?.id && (
             <div className="mr-auto flex items-center gap-1.5">
+              <button onClick={() => void copySheetLink()} title="คัดลอกลิงก์มาที่ใบงานนี้ (ส่งให้คนอื่นเปิดตรงนี้ได้เลย)"
+                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔗 คัดลอกลิงก์</button>
               <a href={`/print/design-sheet/${form.id}`} target="_blank" rel="noreferrer"
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบสั่งตัวอย่าง</a>
               <a href={`/print/design-sheet-quote/${form.id}`} target="_blank" rel="noreferrer"

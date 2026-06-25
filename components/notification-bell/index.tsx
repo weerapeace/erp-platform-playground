@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -32,6 +32,7 @@ export function NotificationBell() {
   const [items,  setItems]  = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
   const [open,   setOpen]   = useState(false);
+  const [openUp, setOpenUp] = useState(false);   // เด้งขึ้นบนถ้าที่ว่างด้านล่างไม่พอ (กระดิ่งอยู่ท้าย sidebar = ติดล่างจอ)
   const [loading,setLoading]= useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +61,15 @@ export function NotificationBell() {
 
   // refresh เมื่อ user คลิกเปิด dropdown
   useEffect(() => { if (open) fetch_(); }, [open, fetch_]);
+
+  // เลือกทิศเปิด panel: ที่ว่างด้านล่างไม่พอ → เด้งขึ้นบน (ทำงานได้ทั้งกระดิ่งบน topbar และท้าย sidebar)
+  useLayoutEffect(() => {
+    if (!open) return;
+    const el = boxRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    setOpenUp(spaceBelow < 460 && r.top > spaceBelow);
+  }, [open]);
 
   // ปิดเมื่อคลิกข้างนอก
   useEffect(() => {
@@ -117,7 +127,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 z-30 w-96 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden">
+        <div className={`absolute right-0 z-40 w-96 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden ${openUp ? "bottom-full mb-2" : "top-full mt-2"}`}>
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100 bg-slate-50">
             <h3 className="text-sm font-semibold text-slate-800">การแจ้งเตือน</h3>
             {unread > 0 && (
