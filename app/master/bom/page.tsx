@@ -87,6 +87,7 @@ export default function BomWorkspacePage() {
   const [dirty, setDirty]     = useState(false);
   const dirtyRef = useRef(false); dirtyRef.current = dirty;   // อ่านค่า dirty ล่าสุดใน async (กัน merge ทับสิ่งที่ผู้ใช้พิมพ์)
   const [saving, setSaving]   = useState(false);
+  const [pieceEdit, setPieceEdit] = useState(false);   // งานเหมารายชิ้น: ล็อกดูอย่างเดียว จนกดแก้ไข (กันแก้พลาด)
   const [formErr, setFormErr] = useState<string | null>(null);
   const [loadingForm, setLoadingForm] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);   // optimistic: โชว์หัวฟอร์มก่อน แล้วโหลดวัตถุดิบ/ค่าแรงเบื้องหลัง
@@ -549,9 +550,17 @@ export default function BomWorkspacePage() {
               <BomLineEditor lines={form.lines} onChange={(lines) => patchForm({ lines })} readonly={!canEdit} sizes={form.sizes.map((s) => s.label)} />
             </div>
 
-            {/* ตารางที่ 2: งานเหมารายชิ้น */}
+            {/* ตารางที่ 2: งานเหมารายชิ้น — ล็อกดูอย่างเดียว จนกด "แก้ไข" (กันแก้พลาด) */}
             <div className="pt-3 border-t border-slate-100">
-              <PieceworkLines value={form.piecework} onChange={(piecework) => patchForm({ piecework })} readonly={!canEdit} />
+              {canEdit && (
+                <div className="flex justify-end mb-1">
+                  <button type="button" onClick={() => setPieceEdit((v) => !v)}
+                    className={`h-7 px-2.5 text-xs font-medium rounded-lg border ${pieceEdit ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                    {pieceEdit ? "🔒 ล็อก (ดูอย่างเดียว)" : "✏️ แก้ไขงานเหมา"}
+                  </button>
+                </div>
+              )}
+              <PieceworkLines value={form.piecework} onChange={(piecework) => patchForm({ piecework })} readonly={!canEdit || !pieceEdit} />
             </div>
 
             {/* ค่าแรงผลิต */}
