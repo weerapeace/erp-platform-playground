@@ -42,6 +42,7 @@ export type ProductionJob = {
   qty: number; dispatched: number; received: number; remaining: number;
   progress_pct: number;                 // รับคืนแล้วกี่ % ของจำนวน
   due_date: string | null; status: string | null;
+  mo_group: string | null;              // ชุดใบสั่งงาน (mo_groups)
   categories: ProdJobCategory[];
   dept_names: string | null;            // โต๊ะ/แผนกที่กำลังทำ (รวมชื่อ)
   worker_names: string | null;          // ช่างที่รับงาน (รวมชื่อ)
@@ -57,12 +58,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
 
-  const [{ data: mos }, { data: wos }, { data: pcs }] = await Promise.all([
+  const [{ data: mos }, { data: wos }, { data: pcs }, { data: grps }] = await Promise.all([
     admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, created_at")
       .eq("is_active", true).neq("status", "cancelled").order("created_at", { ascending: false }).limit(1000),
     admin.from("mo_work_orders").select("mo_no, qty, received_qty, status, department_name, assignee_name").eq("is_active", true).limit(3000),
     admin.from("mo_piecework").select("mo_no").eq("is_active", true).limit(3000),
+    admin.from("mo_groups").select("name, mo_nos").eq("is_active", true).limit(500),
   ]);
+
+  // mo_no → ชื่อชุดใบสั่งงาน (mo_groups)
+  const groupOfMo = new Map<string, string>();
+  for (const g of (grps ?? []) as Record<string, unknown>[]) {
+    const name = String(g.name ?? ""); const nos = Array.isArray(g.mo_nos) ? g.mo_nos : [];
+    for (const n of nos) if (n) groupOfMo.set(String(n), name);
+  }
 
   const moList = (mos ?? []) as Record<string, unknown>[];
   const workOrders = (wos ?? []) as Record<string, unknown>[];
@@ -108,6 +117,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ...inf, qty, dispatched, received, remaining,
       progress_pct: qty > 0 ? Math.min(100, Math.round((received / qty) * 100)) : 0,
       due_date: (m.due_date as string) ?? null, status: (m.status as string) ?? null,
+      mo_group: groupOfMo.get(moNo) ?? null,
       categories, dept_names: deptsByMo.get(moNo) ? [...deptsByMo.get(moNo)!].join(", ") : null,
       worker_names: workersByMo.get(moNo) ? [...workersByMo.get(moNo)!].join(", ") : null,
       piecework: pieceworkMo.has(moNo),

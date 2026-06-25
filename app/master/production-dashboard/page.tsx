@@ -37,12 +37,13 @@ function StatusBadge({ status }: { status: string | null }) {
 }
 
 // จัดกลุ่ม (โหมดการ์ด) — แบรนด์ / สถานะ / เดือนกำหนดส่ง
-type GroupField = "brand" | "status" | "due_month";
+type GroupField = "mo_group" | "brand" | "status" | "due_month";
 const GROUP_FIELDS: { key: GroupField; label: string }[] = [
-  { key: "brand", label: "แบรนด์" }, { key: "status", label: "สถานะ" }, { key: "due_month", label: "เดือนกำหนดส่ง" },
+  { key: "mo_group", label: "ใบสั่งงาน (ชุด)" }, { key: "brand", label: "แบรนด์" }, { key: "status", label: "สถานะ" }, { key: "due_month", label: "เดือนกำหนดส่ง" },
 ];
 const groupValueOf = (j: ProductionJob, f: GroupField): string =>
-  f === "brand" ? (j.brand || "— ไม่มีแบรนด์ —")
+  f === "mo_group" ? (j.mo_group || "— ยังไม่จับชุด —")
+  : f === "brand" ? (j.brand || "— ไม่มีแบรนด์ —")
   : f === "status" ? (j.status ? getStatusStyle(j.status).label : "—")
   : (j.due_date ? new Date(j.due_date).toLocaleDateString("th-TH", { year: "numeric", month: "long" }) : "— ไม่มีกำหนดส่ง —");
 
@@ -176,9 +177,10 @@ export default function ProductionDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cat, setCat] = useState<CatKey>("all");
-  const [grouped, setGrouped] = useState(false);
+  const [grouped, setGrouped] = useState(true);            // เปิดมา = จัดกลุ่มเลย
   const [groupField, setGroupField] = useState<GroupField>("brand");
   const [gSearch, setGSearch] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());   // กลุ่มที่พับอยู่
   const [view, setView] = useState<"list" | "calendar">("list");
   const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
 
@@ -269,7 +271,10 @@ export default function ProductionDashboardPage() {
               <select value={groupField} onChange={(e) => setGroupField(e.target.value as GroupField)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
                 {GROUP_FIELDS.map((g) => <option key={g.key} value={g.key}>ตาม{g.label}</option>)}
               </select>
-              <input value={gSearch} onChange={(e) => setGSearch(e.target.value)} placeholder="🔍 ค้นหา SKU / ชื่อ / ใบสั่งผลิต" className="h-8 px-3 text-sm border border-slate-200 rounded-lg flex-1 min-w-[180px] max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <input value={gSearch} onChange={(e) => setGSearch(e.target.value)} placeholder="🔍 ค้นหา SKU / ชื่อ / ใบสั่งผลิต" className="h-8 px-3 text-sm border border-slate-200 rounded-lg flex-1 min-w-[160px] max-w-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {groups.length > 0 && (() => { const allC = collapsed.size >= groups.length; return (
+                <button onClick={() => setCollapsed(allC ? new Set() : new Set(groups.map(([l]) => l)))} className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 shrink-0">{allC ? "▾ กางทั้งหมด" : "▸ พับทั้งหมด"}</button>
+              ); })()}
             </>}
             {!grouped && <span className="text-[11px] text-slate-400">ติ๊ก “จัดกลุ่ม” เพื่อดูการ์ดแยกกลุ่ม · หรือใช้ปุ่มสลับ ตาราง/การ์ด + ค้นหาในตารางด้านล่าง</span>}
           </div>
@@ -277,18 +282,25 @@ export default function ProductionDashboardPage() {
           {grouped ? (
             loading ? <div className="py-16 text-center text-slate-400">กำลังโหลด…</div>
             : groups.length === 0 ? <div className="py-16 text-center text-slate-400">{cat === "all" ? "ยังไม่มีงานผลิต" : "ไม่มีงานในกลุ่มนี้"}</div>
-            : <div className="space-y-4">
-                {groups.map(([label, items]) => (
+            : <div className="space-y-3">
+                {groups.map(([label, items]) => {
+                  const open = !collapsed.has(label);
+                  return (
                   <div key={label}>
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <h3 className="text-sm font-bold text-slate-700">{label}</h3>
-                      <span className="text-xs text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{items.length}</span>
-                    </div>
-                    <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-                      {items.map((j) => <JobCard key={j.id} j={j} onClick={() => setSelectedJob(j)} />)}
-                    </div>
+                    <button type="button" onClick={() => setCollapsed((s) => { const n = new Set(s); n.has(label) ? n.delete(label) : n.add(label); return n; })}
+                      className="w-full flex items-center gap-2 mb-1.5 text-left px-2 py-1.5 rounded-lg hover:bg-slate-50 sticky top-0 bg-white z-[1]">
+                      <span className="text-[10px] w-3 shrink-0 text-slate-400">{open ? "▾" : "▸"}</span>
+                      <h3 className="text-sm font-bold text-slate-700 truncate">{label}</h3>
+                      <span className="text-xs text-slate-400 bg-slate-100 rounded-full px-2 py-0.5 shrink-0">{items.length}</span>
+                    </button>
+                    {open && (
+                      <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
+                        {items.map((j) => <JobCard key={j.id} j={j} onClick={() => setSelectedJob(j)} />)}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
           ) : (
             <DataTable<ProductionJob>
