@@ -15,9 +15,19 @@ import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
-// drawer เก่าตัวจริงของ MasterCRUD — โหลดเฉพาะตอนเปิด (master-crud หนัก) กันบวม bundle
-const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
+// drawer เก่าตัวจริงของ MasterCRUD — โหลดเฉพาะตอนเปิด (master-crud หนัก) กันบวม bundle
+// loading: โชว์ "กำลังเปิด…" ทันทีระหว่างโหลดก้อนโค้ดครั้งแรก (ไม่ให้รู้สึกค้าง)
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), {
+  ssr: false,
+  loading: () => (
+    <div className="fixed inset-0 z-[140] bg-black/30 flex items-center justify-center">
+      <div className="bg-white rounded-xl px-5 py-3 text-sm text-slate-500 shadow-2xl inline-flex items-center gap-2">
+        <span className="w-4 h-4 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin" /> กำลังเปิด…
+      </div>
+    </div>
+  ),
+});
 
 type Crumb = { id: string; name: string };
 
@@ -86,6 +96,11 @@ export function SkuTagBrowser() {
   useEffect(() => {
     apiFetch(`/api/card-layouts?scope=${CARD_SCOPE}`).then((r) => r.json())
       .then((j) => { const f = (j.mine ?? j.default) as string[] | null; if (f && f.length) setCardFields(f); }).catch(() => {});
+  }, []);
+  // อุ่นโค้ด drawer เก่า (ก้อนใหญ่) ล่วงหน้าหลังหน้าโหลดเสร็จ → คลิกการ์ดแล้วเปิดทันที ไม่ต้องรอโหลดก้อนโค้ด
+  useEffect(() => {
+    const t = setTimeout(() => { void import("@/components/master-crud"); }, 1200);
+    return () => clearTimeout(t);
   }, []);
   // ต้นไม้แท็ก + ฟิลด์ทะเบียน + รีเซ็ตการเดิน — เปลี่ยนเมื่อสลับ entity (SKU/Parent)
   useEffect(() => {

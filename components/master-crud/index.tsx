@@ -23,7 +23,6 @@ import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/v
 import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
-import { RelationPeekModal } from "@/components/relation-peek";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { ImageManager } from "@/components/image-manager";
 import { FieldCreatorModal } from "@/components/field-creator";
@@ -499,11 +498,6 @@ export type MasterCRUDConfig = {
     onClick: (row: Record<string, unknown>) => Promise<void> | void;
     show?: (row: Record<string, unknown>) => boolean;
   }>;
-  /**
-   * Unify drawer: คลิกแถว/กดเพิ่ม → เปิด RelationPeek (drawer กลางตัวเดียวทั้งระบบ) แทน drawer ในตัว
-   * ต้องตั้ง moduleKey ด้วย · เปิดเฉพาะหน้าที่ตั้ง flag นี้ (หน้าอื่นยังใช้ drawer เดิม)
-   */
-  peekDrawer?: boolean;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -544,6 +538,7 @@ export type EmbeddedDrawer = {
   onClose: () => void;
   onChanged?: () => void;
   navIds?: string[];              // รายการ id สำหรับปุ่ม ◀ ก่อนหน้า / ถัดไป ▶
+  startInEdit?: boolean;          // เปิดมาในโหมดแก้เลย (เช่นกดปุ่ม ✎ จากการ์ด)
 };
 
 export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig; embedded?: EmbeddedDrawer }) {
@@ -920,8 +915,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // F19: refresh trigger สำหรับ server mode (เพิ่มค่า → DataTable โหลดหน้าใหม่)
   const [serverRefresh, setServerRefresh] = useState(0);
 
-  // กดดู record ที่เชื่อม (relation) แบบ popup ซ้อน · self=true → peek ของโมดูลตัวเอง (โหมด unify drawer)
-  const [peek, setPeek] = useState<{ moduleKey: string; id: string | null; self?: boolean } | null>(null);
+  // กดดู record ที่เชื่อม (relation) แบบ popup ซ้อน → เปิด "drawer เก่าตัวจริง" ของโมดูลปลายทาง (MasterRecordDrawer)
+  const [peek, setPeek] = useState<{ moduleKey: string; id: string } | null>(null);
 
   // การ์ดสรุปสถานะ (ของกลาง) — กรองตาราง client-side ตามสถานะที่กด
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -1048,8 +1043,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   };
 
   const openCreate = () => {
-    // Unify drawer: หน้าที่เปิด peekDrawer → สร้างใหม่ผ่าน RelationPeek (drawer กลาง)
-    if (config.peekDrawer && config.moduleKey) { setPeek({ moduleKey: config.moduleKey, id: null, self: true }); return; }
     // ของกลาง: รายการใหม่ default เป็น "เปิดอยู่" (active=true) ทุกโมดูล
     // — createDefaults ของแต่ละโมดูล override ได้ถ้าต้องการค่าอื่น
     setEditingId(null); setForm({ ...emptyForm, [activeField]: true, ...(config.createDefaults ?? {}) }); setFormErr(null); setDirty(false);
@@ -1059,8 +1052,6 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   // F10a: open edit drawer — fetch full row จาก /[id] เพื่อได้ทุก field
   // (sync wrapper เพื่อให้ rowActions/onRowClick type ตรง — fetch ผ่าน .then ภายใน)
   const openEdit = (r: Row) => {
-    // Unify drawer: หน้าที่เปิด peekDrawer → เปิด record ผ่าน RelationPeek (drawer กลาง) แทน drawer ในตัว
-    if (config.peekDrawer && config.moduleKey) { setPeek({ moduleKey: config.moduleKey, id: String(r.id), self: true }); return; }
     setEditingId(r.id);
     setFormErr(null); setDirty(false); setModalOpen(true);
 
@@ -1141,7 +1132,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     if (!embedded || embeddedOpenedRef.current || registryLoading) return;
     embeddedOpenedRef.current = true;
     if (embedded.navIds) navRowsRef.current = embedded.navIds.map((id) => ({ id })) as Row[];
-    if (embedded.recordId) { setDrawerMode("view"); openEdit({ id: embedded.recordId } as Row); }
+    if (embedded.recordId) { setDrawerMode(embedded.startInEdit ? "edit" : "view"); openEdit({ id: embedded.recordId } as Row); }
     else openCreate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded, registryLoading]);
@@ -1994,6 +1985,16 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
       const n = Number(v);
       return <span className="text-sm tabular-nums text-slate-800" style={vs}>{isNaN(n) ? String(v) : n.toLocaleString("th-TH")}</span>;
     }
+    // jsonb/array (เช่น attribute_values) → แปลงให้อ่านได้ (กัน [object Object])
+    if (Array.isArray(v)) return v.length
+      ? <span className="text-sm text-slate-800" style={vs}>{v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ")}</span>
+      : <span className="text-slate-300 text-sm">—</span>;
+    if (typeof v === "object") {
+      const ents = Object.entries(v as Record<string, unknown>).filter(([, vv]) => vv != null && vv !== "");
+      return ents.length
+        ? <span className="text-xs text-slate-600" style={vs}>{ents.map(([k, vv]) => `${k}: ${typeof vv === "object" ? JSON.stringify(vv) : String(vv)}`).join(" · ")}</span>
+        : <span className="text-slate-300 text-sm">—</span>;
+    }
     return <span className="text-sm text-slate-800 whitespace-pre-wrap break-words" style={vs}>{String(v)}</span>;
   };
 
@@ -2028,7 +2029,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   const insideShell = useShellPresent();
   const Wrap = (insideShell || embedded) ? ShellPassthrough : PlaygroundShell;   // embedded = drawer-only ไม่ครอบ shell
 
-  if (!canView) return <Wrap><AccessDenied /></Wrap>;
+  // embedded (drawer-only): ข้ามด่านสิทธิ์ระดับจอ — ปล่อยให้ "ด่าน API" (guardApi) เป็นตัวคุมจริง
+  // (ผู้ใช้กดมาจาก context ที่ดูได้อยู่แล้ว · เปิดได้ทุกโมดูลโดยไม่ต้องตั้ง permission รายโมดูล)
+  if (!canView && !embedded) return <Wrap><AccessDenied /></Wrap>;
 
   return (
     <Wrap>
@@ -2516,35 +2519,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         />
       )}
 
-      {/* popup ดูรายละเอียด record:
-          - relation (กดค่าที่เชื่อม) → peek แบบเบา
-          - self (โหมด unify drawer: คลิกแถว/กดเพิ่มของหน้านี้เอง) → ส่ง nav/แกลเลอรี/refresh เหมือน drawer เต็ม */}
+      {/* กดค่า relation (เช่น Brand/Category) → เปิด "drawer เก่าตัวจริง" ของโมดูลปลายทาง (เปิดด้วย moduleKey อย่างเดียว) */}
       {peek && (
-        peek.self ? (
-          <RelationPeekModal
-            moduleKey={peek.moduleKey}
-            recordId={peek.id}
-            onClose={() => setPeek(null)}
-            onChanged={() => { void refreshData(); }}
-            createDefaults={config.createDefaults}
-            createTitle={`เพิ่ม ${config.title}ใหม่`}
-            mediaGallery={config.mediaGallery}
-            defaultWidth={820}
-            nav={(() => {
-              if (!peek.id) return undefined;   // โหมดสร้าง — ไม่มีเลื่อนรายการ
-              const list = navRowsRef.current;
-              const idx = list.findIndex((r) => String(r.id) === String(peek.id));
-              if (idx < 0) return undefined;
-              return {
-                onPrev: idx > 0 ? () => setPeek({ moduleKey: peek.moduleKey, id: String(list[idx - 1].id), self: true }) : undefined,
-                onNext: idx < list.length - 1 ? () => setPeek({ moduleKey: peek.moduleKey, id: String(list[idx + 1].id), self: true }) : undefined,
-                label: `${idx + 1}/${list.length}`,
-              };
-            })()}
-          />
-        ) : (
-          <RelationPeekModal moduleKey={peek.moduleKey} recordId={peek.id} onClose={() => setPeek(null)} />
-        )
+        <MasterRecordDrawer key={`${peek.moduleKey}|${peek.id}`} moduleKey={peek.moduleKey} recordId={peek.id} onClose={() => setPeek(null)} />
       )}
     </Wrap>
   );
@@ -2554,32 +2531,43 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
 // MasterRecordDrawer — เปิด "drawer เก่าตัวจริง" ของ MasterCRUD เดี่ยวๆ (ไม่ต้องมีตาราง)
 // ใช้จากที่อื่น (เช่น SKU browser, การ์ด) → ได้ drawer หน้าตา/ความสามารถเดียวกับหน้า master เป๊ะ
 // ============================================================
+// ชื่อโมดูลสวยๆ จาก moduleKey (fallback ตอนไม่ส่ง title) เช่น "parent-skus-v2" → "Parent Skus"
+function prettifyModuleKey(k: string): string {
+  return k.replace(/-v\d+$/, "").replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim() || k;
+}
+
 export function MasterRecordDrawer({
-  moduleKey, apiPath, apiBase, title, icon, mediaGallery, permissions, extraRowActions, cellRenderers, createDefaults, recordId, navIds, onClose, onChanged,
+  moduleKey, recordId, onClose, onChanged, startInEdit, createDefaults, createTitle,
+  apiPath, apiBase, title, icon, mediaGallery, permissions, extraRowActions, cellRenderers, navIds,
 }: {
   moduleKey: string;
-  apiPath: string;
+  recordId: string | null;        // null = สร้างใหม่
+  onClose: () => void;
+  onChanged?: () => void;
+  startInEdit?: boolean;          // เปิดมาในโหมดแก้เลย
+  createDefaults?: MasterCRUDConfig["createDefaults"];
+  createTitle?: string;
+  // ออปชัน — ถ้าไม่ส่ง เดาจาก moduleKey (apiPath=moduleKey, ชื่อ=prettify, สิทธิ์=ด่าน API คุม)
+  apiPath?: string;
   apiBase?: string;
-  title: string;
+  title?: string;
   icon?: string;
   mediaGallery?: MasterCRUDConfig["mediaGallery"];
   permissions?: MasterCRUDConfig["permissions"];
   extraRowActions?: MasterCRUDConfig["extraRowActions"];
   cellRenderers?: MasterCRUDConfig["cellRenderers"];
-  createDefaults?: MasterCRUDConfig["createDefaults"];
-  recordId: string | null;        // null = สร้างใหม่
   navIds?: string[];
-  onClose: () => void;
-  onChanged?: () => void;
 }) {
   const config: MasterCRUDConfig = useMemo(() => ({
     apiBase: apiBase ?? "/api/master-v2/",
-    apiPath, moduleKey, tableId: `embed-${moduleKey}`, title, icon,
-    activeField: "is_active", serverMode: true,
+    apiPath: apiPath ?? moduleKey,        // v2 API รับ moduleKey ตรงๆ ได้ (RelationPeek ใช้แบบนี้อยู่แล้ว)
+    moduleKey, tableId: `embed-${moduleKey}`,
+    title: title ?? createTitle ?? prettifyModuleKey(moduleKey),
+    icon, activeField: "is_active", serverMode: true,
     permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
     mediaGallery, extraRowActions, cellRenderers, createDefaults,
-  }), [apiBase, apiPath, moduleKey, title, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults]);
-  return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose, onChanged }} />;
+  }), [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults]);
+  return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose, onChanged, startInEdit }} />;
 }
 
 // ============================================================
