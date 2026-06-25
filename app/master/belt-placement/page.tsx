@@ -91,6 +91,44 @@ export default function BeltPlacementPage() {
     finally { setSaving(false); }
   }, [base, place]);
 
+  // ── โหลดเทมเพลตนี้ (กรอบ + กล่องบอกตำแหน่ง/ขนาดของแต่ละรูป) ไปทำรูปให้พอดีก่อนอัปโหลด ──
+  const triggerDownload = (href: string, name: string) => {
+    const a = document.createElement("a"); a.href = href; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  };
+  const buildGuideSvg = () => {
+    const colors: Record<Key, string> = { strap: "#94a3b8", hole: "#0ea5e9", logo: "#7c3aed" };
+    const parts: string[] = [
+      `<rect x="0" y="0" width="740" height="${VH}" fill="#ffffff"/>`,
+      `<text x="${BX}" y="15" font-size="11" fill="#64748b" font-family="sans-serif">เทมเพลตวางรูปเข็มขัด · กรอบประ = ตำแหน่ง+ขนาด (px) ของแต่ละรูป — ทำรูปให้พอดีช่องแล้วอัปโหลด</text>`,
+    ];
+    for (const { side, top, label } of [{ side: "front" as Side, top: fY, label: "ด้านหน้า" }, { side: "back" as Side, top: bY, label: "ด้านหลัง" }]) {
+      parts.push(`<text x="${BX}" y="${top - 8}" font-size="13" font-weight="600" fill="#475569" font-family="sans-serif">${label}</text>`);
+      parts.push(`<rect x="${BX}" y="${top}" width="${BW}" height="${boxH}" fill="none" stroke="#cbd5e1" stroke-width="1.5" rx="6"/>`);
+      for (const key of ["strap", "hole", "logo"] as Key[]) {
+        if (!hrefOf(side, key)) continue;
+        const a = abs(side, key);
+        parts.push(`<rect x="${a.x.toFixed(0)}" y="${a.y.toFixed(0)}" width="${a.w.toFixed(0)}" height="${a.h.toFixed(0)}" fill="none" stroke="${colors[key]}" stroke-width="1.5" stroke-dasharray="6 4"/>`);
+        parts.push(`<text x="${(a.x + 4).toFixed(0)}" y="${(a.y + 13).toFixed(0)}" font-size="10" fill="${colors[key]}" font-family="sans-serif">${KEY_LABEL[key]} · ${a.w.toFixed(0)}×${a.h.toFixed(0)}px</text>`);
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="740" height="${VH}" viewBox="0 0 740 ${VH}">${parts.join("")}</svg>`;
+  };
+  const downloadSvg = () => {
+    const url = URL.createObjectURL(new Blob([buildGuideSvg()], { type: "image/svg+xml" }));
+    triggerDownload(url, "belt-placement-template.svg"); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const downloadPng = () => {
+    const svgUrl = URL.createObjectURL(new Blob([buildGuideSvg()], { type: "image/svg+xml" }));
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas"); c.width = 740; c.height = VH;
+      const ctx = c.getContext("2d"); if (ctx) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, 740, VH); ctx.drawImage(img, 0, 0); }
+      c.toBlob((png) => { if (!png) return; const u = URL.createObjectURL(png); triggerDownload(u, "belt-placement-template.png"); setTimeout(() => URL.revokeObjectURL(u), 1000); }, "image/png");
+      URL.revokeObjectURL(svgUrl);
+    };
+    img.src = svgUrl;
+  };
+
   // วาดรูป 1 ด้าน (กรอบ + รูปตามลำดับ strap→hole→logo + overlay ลาก/ปรับขนาด)
   const renderSide = (side: Side) => {
     const top = side === "front" ? fY : bY;
@@ -152,6 +190,8 @@ export default function BeltPlacementPage() {
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button onClick={save} disabled={saving || noImg} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : "💾 บันทึก (ใช้ทุกใบงาน)"}</button>
+        <button onClick={downloadPng} disabled={noImg} title="โหลดเทมเพลตนี้ (กรอบ+ตำแหน่ง/ขนาดของแต่ละรูป) ไปทำรูปให้พอดีช่องก่อนอัปโหลด" className="h-9 rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">⬇️ โหลดเทมเพลต (PNG)</button>
+        <button onClick={downloadSvg} disabled={noImg} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">SVG</button>
         <button onClick={() => setPlace(BELT_DEFAULT_PLACE)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-500 hover:bg-slate-50">↺ ค่าเริ่มต้น</button>
         {sel && <button onClick={() => setPlace((p) => ({ ...p, [sel.side]: { ...p[sel.side], [sel.key]: BELT_DEFAULT_PLACE[sel.side][sel.key] } }))}
           className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-500 hover:bg-slate-50">↺ รีเซ็ตชิ้นที่เลือก</button>}
