@@ -37,10 +37,15 @@ const TEMPLATE: ReportTemplate = {
   <table class="bw-size">
     <thead><tr><th class="lcol">หนัง / สี</th>{{#sizes}}<th>{{label}}</th>{{/sizes}}<th class="sum">รวม</th></tr></thead>
     <tbody>
-      {{#rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span>{{#detail}}<div class="rdet">{{detail}}</div>{{/detail}}</td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
+      {{#rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
       <tr class="trow"><td class="lcol">รวมทุก MO</td>{{#total_cells}}<td>{{v}}</td>{{/total_cells}}<td class="sum">{{grand}}</td></tr>
     </tbody>
   </table>
+  {{#has_color_detail}}<div class="bw-section">รายละเอียดหนัง / สี</div>
+  <table class="bw-cdet">
+    <thead><tr><th class="lcol">รหัส / สี</th><th>หนังบน</th><th>หนังล่าง</th><th>ขอบ</th><th>ด้าย</th></tr></thead>
+    <tbody>{{#color_rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td><td>{{top}}</td><td>{{bot}}</td><td>{{edge}}</td><td>{{thread}}</td></tr>{{/color_rows}}</tbody>
+  </table>{{/has_color_detail}}
   {{#has_spec}}<div class="bw-section">สเปก</div>
   <table class="bw-spec">{{#specs}}<tr><td class="k">{{label}}</td><td class="v">{{value}}</td></tr>{{/specs}}</table>{{/has_spec}}
   <div class="bw-section">รูปประกอบ (จากสเปก)</div>
@@ -66,7 +71,11 @@ const TEMPLATE: ReportTemplate = {
 .bw-size .sum { background: #f8fafc; font-weight: 700; }
 .bw-size .trow td { background: #eef2ff; font-weight: 800; }
 .bw-size .mo { color: #94a3b8; font-size: 9px; }
-.bw-size .rdet { font-size: 8.5px; color: #64748b; font-weight: 400; margin-top: 0.3mm; text-align: left; }
+.bw-cdet { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+.bw-cdet th, .bw-cdet td { border: 1px solid #cbd5e1; padding: 1.2mm 1.5mm; font-size: 9px; vertical-align: top; text-align: left; word-break: break-word; }
+.bw-cdet th { background: #f1f5f9; font-weight: 700; }
+.bw-cdet .lcol { white-space: nowrap; font-weight: 700; }
+.bw-cdet .mo { color: #94a3b8; font-size: 8px; font-weight: 400; }
 .bw-spec { width: 100%; border-collapse: collapse; }
 .bw-spec td { padding: 1mm 2mm; border-bottom: 1px solid #e5e7eb; }
 .bw-spec td.k { width: 35mm; white-space: nowrap; }
@@ -78,17 +87,11 @@ const TEMPLATE: ReportTemplate = {
 const FMT_OPT: Intl.DateTimeFormatOptions = { day: "2-digit", month: "2-digit", year: "numeric" };
 const fmtDate = (d: string) => { const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleDateString("th-TH", FMT_OPT); };
 
-// บรรทัดย่อยใต้แต่ละสี: หนังบน/หนังล่าง/ขอบ/ด้าย (ดึงจาก sku_attrs + legacy ของ SKU นั้น)
-function beltColorDetail(s: ProductSpec | undefined): string {
-  if (!s) return "";
-  const all = [...s.sku_attrs, ...s.legacy];
-  const pick = (re: RegExp) => all.find((f) => re.test(f.label))?.value;
-  const parts: string[] = [];
-  const top = pick(/หนังบน/); if (top) parts.push(`หนังบน: ${top}`);
-  const bot = pick(/หนังล่าง/); if (bot) parts.push(`หนังล่าง: ${bot}`);
-  const edge = pick(/ริม|ขอบ/); if (edge) parts.push(`ขอบ: ${edge}`);
-  const thread = pick(/ด้าย/); if (thread) parts.push(`ด้าย: ${thread}`);
-  return parts.join(" · ");
+// รายละเอียดหนัง/สี แยกเป็นคอลัมน์: หนังบน/หนังล่าง/ขอบ/ด้าย (ดึงจาก sku_attrs + legacy ของ SKU นั้น)
+function beltColorParts(s: ProductSpec | undefined): { top: string; bot: string; edge: string; thread: string } {
+  const all = s ? [...s.sku_attrs, ...s.legacy] : [];
+  const pick = (re: RegExp) => all.find((f) => re.test(f.label))?.value || "";
+  return { top: pick(/หนังบน/) || "—", bot: pick(/หนังล่าง/) || "—", edge: pick(/ริม|ขอบ/) || "—", thread: pick(/ด้าย/) || "—" };
 }
 
 function BeltWorkOrderInner() {
@@ -142,7 +145,11 @@ function BeltWorkOrderInner() {
     if (!bw) return "";
     const sizes = bw.sizes;
     const specFields = spec ? [...spec.model_attrs, ...spec.legacy] : [];
-    const detail = spec?.parent?.work_instruction_notes || spec?.parent?.size_summary || "";
+    // รายละเอียด = ค่าของ "รูปแบบเข็มขัด" · และซ่อน 3 ฟิลด์นี้ออกจากตารางสเปก
+    const HIDE_SPEC = /รูปแบบเข็มขัด|ระยะถึงปลายสาย|ห่างโลโก้จากปลาย/;
+    const detail = specFields.find((f) => /รูปแบบเข็มขัด/.test(f.label))?.value || "";
+    const visibleSpecs = specFields.filter((f) => !HIDE_SPEC.test(f.label));
+    const colorRows = bw.rows.map((r) => { const p = beltColorParts(skuSpecs[r.product_sku]); return { label: r.label, mo_short: r.mo_no.split("-").pop() || r.mo_no, top: p.top, bot: p.bot, edge: p.edge, thread: p.thread }; });
     // เฟส 3b: ดึงตัวเลขวาดรูปจากช่องสเปก (จับด้วยป้ายชื่อ) — ไม่เจอ → ใช้ค่า default ในตัววาด
     const bf = spec ? [...spec.model_attrs, ...spec.legacy, ...spec.sku_attrs] : [];
     const bnum = (re: RegExp) => { const f = bf.find((x) => re.test(x.label)); const m = f && String(f.value).match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : undefined; };
@@ -154,7 +161,7 @@ function BeltWorkOrderInner() {
       printed_at: new Date().toLocaleDateString("th-TH", FMT_OPT),
       order_date: new Date().toLocaleDateString("th-TH", FMT_OPT),
       brand: bw.brand || "—",
-      model: bw.parent_name || bw.parent_code || "—",
+      model: bw.parent_code ? `${bw.parent_code} · ${bw.parent_name || ""}`.replace(/ · $/, "") : (bw.parent_name || "—"),
       due_text: bw.due_dates.length ? bw.due_dates.map(fmtDate).join(", ") : "—",
       detail,
       warnings: bw.warnings,
@@ -163,13 +170,14 @@ function BeltWorkOrderInner() {
         label: r.label,
         mo_short: r.mo_no.split("-").pop() || r.mo_no,
         total: r.total,
-        detail: beltColorDetail(skuSpecs[r.product_sku]),
         cells: sizes.map((s) => ({ v: r.by_size[s] || "" })),
       })),
       total_cells: sizes.map((s) => ({ v: bw.totals_by_size[s] || 0 })),
       grand: bw.grand_total,
-      has_spec: specFields.length > 0,
-      specs: specFields.map((f) => ({ label: f.label, value: f.value })),
+      has_color_detail: colorRows.some((r) => [r.top, r.bot, r.edge, r.thread].some((v) => v && v !== "—")),
+      color_rows: colorRows,
+      has_spec: visibleSpecs.length > 0,
+      specs: visibleSpecs.map((f) => ({ label: f.label, value: f.value })),
       // เฟส 3b: รูปวาดจากตัวเลขจริงในช่องสเปก (จำนวนรู/ระยะ/ห่างโลโก้/ปลายหาง) — ไม่กรอก → ใช้ค่า default
       belt_svg: buildBeltDiagramSvg({ brandText: bw.brand || bw.parent_name || bw.parent_code || "", holeCount: bnum(/จำนวนรู/), holeSpacingIn: bnum(/ห่างรู/), toEndIn: bnum(/ปลายสาย|ถึงปลาย/), logoDistIn: bnum(/ห่างโลโก้|ระยะโลโก้/), tailShape, strapImg: beltImgs.strap, holeImg: beltImgs.hole, holeBackOnly: beltImgs.holeBackOnly, frontLogoImg: beltImgs.frontLogo, backLogoImg: beltImgs.backLogo, layout: beltLayout }),
     };
