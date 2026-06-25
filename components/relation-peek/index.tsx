@@ -70,7 +70,7 @@ const junctionOf = (f: RF): string | null => {
 };
 
 export function RelationPeekModal({
-  moduleKey, recordId, onClose, startInEdit, onChanged, createDefaults, createTitle, quickEdit, nav, onCopy, mediaGallery,
+  moduleKey, recordId, onClose, startInEdit, onChanged, createDefaults, createTitle, quickEdit, nav, onCopy, mediaGallery, defaultWidth,
 }: {
   moduleKey: string;
   recordId?: string | null;       // ว่าง/null = โหมดสร้างใหม่ (POST)
@@ -83,6 +83,7 @@ export function RelationPeekModal({
   nav?: { onPrev?: () => void; onNext?: () => void; label?: string };   // เลื่อนรายการก่อนหน้า/ถัดไป (ตัวเรียกส่งรายการมา)
   onCopy?: () => void;            // ปุ่มคัดลอก (ตัวเรียกจัดการ action เอง)
   mediaGallery?: MediaGalleryCfg;  // เปิดแท็บ "📷 รูป" (แกลเลอรีหลายรูป ImageManager) — ตัวเรียก opt-in
+  defaultWidth?: number;           // ความกว้างเริ่มต้น (ถ้ายังไม่เคยลากปรับ) — เช่นหน้า master ใช้กว้างกว่า peek ทั่วไป
 }) {
   const isCreate = !recordId;
   const { user } = useAuth();
@@ -104,8 +105,8 @@ export function RelationPeekModal({
   const [studioOpen, setStudioOpen] = useState(false);   // เปิดตัวออกแบบ layout กลาง (StudioPanel)
   const [activeTab, setActiveTab] = useState(0);   // แท็บที่เลือกในโหมดดู (drawer ขวา)
   const [editTab, setEditTab] = useState(0);       // แท็บที่เลือกในโหมดแก้
-  const [width, setWidth] = useState(560);   // ความกว้าง drawer (ลากปรับ + จำค่า)
-  const widthRef = useRef(560);
+  const [width, setWidth] = useState(defaultWidth ?? 560);   // ความกว้าง drawer (ลากปรับ + จำค่า)
+  const widthRef = useRef(defaultWidth ?? 560);
   const resizing = useRef(false);
   const [zoom, setZoom] = useState<string | null>(null);   // รูปที่กดดูใหญ่ (lightbox)
   // Phase 1 unify — แท็ก m2m (ลิงก์ปัจจุบันต่อฟิลด์) + กฎ validation + error รายฟิลด์

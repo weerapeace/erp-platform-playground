@@ -47,6 +47,8 @@ const CONFIG: MasterCRUDConfig = {
   // server mode — โหลดทีละหน้า (smooth + กัน 1102) เหมือนหน้า SKU; card view เปิดได้ใน server mode แล้ว
   serverMode:  true,
   pageLimit:   200,
+  // Unify drawer (ตัวอย่างหน้าแรก): คลิกแถว/กดเพิ่ม → เปิด RelationPeek (drawer กลางตัวเดียวทั้งระบบ) แทน drawer ในตัว
+  peekDrawer:  true,
   exportEntityType: "parent_skus_v2",
   mediaGallery: {
     entityType: "parent_skus_v2",

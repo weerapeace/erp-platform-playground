@@ -499,6 +499,11 @@ export type MasterCRUDConfig = {
     onClick: (row: Record<string, unknown>) => Promise<void> | void;
     show?: (row: Record<string, unknown>) => boolean;
   }>;
+  /**
+   * Unify drawer: คลิกแถว/กดเพิ่ม → เปิด RelationPeek (drawer กลางตัวเดียวทั้งระบบ) แทน drawer ในตัว
+   * ต้องตั้ง moduleKey ด้วย · เปิดเฉพาะหน้าที่ตั้ง flag นี้ (หน้าอื่นยังใช้ drawer เดิม)
+   */
+  peekDrawer?: boolean;
 };
 
 type Row = Record<string, unknown> & { id: string; active?: boolean };
@@ -904,8 +909,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // F19: refresh trigger สำหรับ server mode (เพิ่มค่า → DataTable โหลดหน้าใหม่)
   const [serverRefresh, setServerRefresh] = useState(0);
 
-  // กดดู record ที่เชื่อม (relation) แบบ popup ซ้อน
-  const [peek, setPeek] = useState<{ moduleKey: string; id: string } | null>(null);
+  // กดดู record ที่เชื่อม (relation) แบบ popup ซ้อน · self=true → peek ของโมดูลตัวเอง (โหมด unify drawer)
+  const [peek, setPeek] = useState<{ moduleKey: string; id: string | null; self?: boolean } | null>(null);
 
   // การ์ดสรุปสถานะ (ของกลาง) — กรองตาราง client-side ตามสถานะที่กด
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -1032,6 +1037,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   };
 
   const openCreate = () => {
+    // Unify drawer: หน้าที่เปิด peekDrawer → สร้างใหม่ผ่าน RelationPeek (drawer กลาง)
+    if (config.peekDrawer && config.moduleKey) { setPeek({ moduleKey: config.moduleKey, id: null, self: true }); return; }
     // ของกลาง: รายการใหม่ default เป็น "เปิดอยู่" (active=true) ทุกโมดูล
     // — createDefaults ของแต่ละโมดูล override ได้ถ้าต้องการค่าอื่น
     setEditingId(null); setForm({ ...emptyForm, [activeField]: true, ...(config.createDefaults ?? {}) }); setFormErr(null); setDirty(false);
@@ -1041,6 +1048,8 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // F10a: open edit drawer — fetch full row จาก /[id] เพื่อได้ทุก field
   // (sync wrapper เพื่อให้ rowActions/onRowClick type ตรง — fetch ผ่าน .then ภายใน)
   const openEdit = (r: Row) => {
+    // Unify drawer: หน้าที่เปิด peekDrawer → เปิด record ผ่าน RelationPeek (drawer กลาง) แทน drawer ในตัว
+    if (config.peekDrawer && config.moduleKey) { setPeek({ moduleKey: config.moduleKey, id: String(r.id), self: true }); return; }
     setEditingId(r.id);
     setFormErr(null); setDirty(false); setModalOpen(true);
 
@@ -2473,9 +2482,35 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         />
       )}
 
-      {/* popup ดูรายละเอียด record ที่เชื่อม (relation) เช่น Parent SKU */}
+      {/* popup ดูรายละเอียด record:
+          - relation (กดค่าที่เชื่อม) → peek แบบเบา
+          - self (โหมด unify drawer: คลิกแถว/กดเพิ่มของหน้านี้เอง) → ส่ง nav/แกลเลอรี/refresh เหมือน drawer เต็ม */}
       {peek && (
-        <RelationPeekModal moduleKey={peek.moduleKey} recordId={peek.id} onClose={() => setPeek(null)} />
+        peek.self ? (
+          <RelationPeekModal
+            moduleKey={peek.moduleKey}
+            recordId={peek.id}
+            onClose={() => setPeek(null)}
+            onChanged={() => { void refreshData(); }}
+            createDefaults={config.createDefaults}
+            createTitle={`เพิ่ม ${config.title}ใหม่`}
+            mediaGallery={config.mediaGallery}
+            defaultWidth={820}
+            nav={(() => {
+              if (!peek.id) return undefined;   // โหมดสร้าง — ไม่มีเลื่อนรายการ
+              const list = navRowsRef.current;
+              const idx = list.findIndex((r) => String(r.id) === String(peek.id));
+              if (idx < 0) return undefined;
+              return {
+                onPrev: idx > 0 ? () => setPeek({ moduleKey: peek.moduleKey, id: String(list[idx - 1].id), self: true }) : undefined,
+                onNext: idx < list.length - 1 ? () => setPeek({ moduleKey: peek.moduleKey, id: String(list[idx + 1].id), self: true }) : undefined,
+                label: `${idx + 1}/${list.length}`,
+              };
+            })()}
+          />
+        ) : (
+          <RelationPeekModal moduleKey={peek.moduleKey} recordId={peek.id} onClose={() => setPeek(null)} />
+        )
       )}
     </Wrap>
   );
