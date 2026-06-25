@@ -32,7 +32,9 @@ const num = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const money = (n: number) => Math.round(n * 100) / 100 === 0 ? "0" : (Math.round(n * 100) / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const dueText = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "—");
 const BLANK = `<span class="blank"></span>`;
-const thumb = (url: string | null) => (url ? `${url}${url.includes("?") ? "&" : "?"}w=120` : "");
+// ใส่ origin เต็ม + ย่อรูป — กัน path สั้น /api/... resolve ผิดฐานในหน้าต่าง Blob / iframe srcDoc (รูปไม่ขึ้น)
+const ORIGIN = () => (typeof window !== "undefined" ? window.location.origin : "");
+const thumb = (url: string | null) => (url ? `${url.startsWith("/") ? ORIGIN() : ""}${url}${url.includes("?") ? "&" : "?"}w=120` : "");
 const imgCell = (url: string | null) => (url ? `<img class="thumb" src="${thumb(url)}" alt="" />` : `<span class="no-img">—</span>`);
 
 const COMMON_CSS = `
