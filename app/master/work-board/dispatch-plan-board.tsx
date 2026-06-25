@@ -62,11 +62,11 @@ function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
 
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
-  laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch, pendingPiece,
+  laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch, pendingPiece, onPieceClick,
   onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO, onSetCentralRate, onPickDispatch,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
-  departments: DeptLite[]; pending: PendingLite[]; pendingPiece?: PieceLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
+  departments: DeptLite[]; pending: PendingLite[]; pendingPiece?: PieceLite[]; onPieceClick?: (p: PieceLite) => void; realWOs: WOLite[]; craftsmen: CraftLite[];
   defectByWorker: DefectMap; deptWages: Record<string, number>;
   laborPerUnit: Record<string, number>;   // mo_no → ค่าแรงผลิตต่อชิ้น (จากแผนกลุ่ม A)
   imageByMo: Record<string, string | null>;
@@ -453,7 +453,8 @@ export function DispatchPlanBoard({
               <div className="mt-2 pt-2 border-t border-slate-100">
                 <div className="text-[11px] font-semibold text-violet-600 mb-1.5 px-0.5">🧵 งานเหมารอจ่าย ({(pendingPiece ?? []).length})</div>
                 {(pendingPiece ?? []).map((p) => (
-                  <div key={p.id} className="rounded-lg px-2 py-1.5 mb-1.5 bg-violet-50/40 border border-violet-100" style={{ borderLeft: "3px solid #7c3aed" }}>
+                  <div key={p.id} onClick={() => editable && onPieceClick?.(p)}
+                    className={`rounded-lg px-2 py-1.5 mb-1.5 bg-violet-50/40 border border-violet-100 ${editable && onPieceClick ? "cursor-pointer hover:bg-violet-50" : ""}`} style={{ borderLeft: "3px solid #7c3aed" }}>
                     <div className="flex items-center gap-2">
                       <Thumb url={p.image_url} />
                       <div className="min-w-0 flex-1">
@@ -461,6 +462,7 @@ export function DispatchPlanBoard({
                         <div className="text-[10px] text-slate-400 truncate">{p.product_sku} · {p.mo_no}</div>
                         <div className="text-[11px] text-violet-700 mt-0.5">{fmt(p.qty)} ชิ้น · ฿{fmt(p.rate)}/ชิ้น · รวม <b>฿{fmt(p.qty * p.rate)}</b></div>
                       </div>
+                      {editable && onPieceClick && <span className="text-[10px] text-violet-500 shrink-0">แตะจ่าย →</span>}
                     </div>
                   </div>
                 ))}

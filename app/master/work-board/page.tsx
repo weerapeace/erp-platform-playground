@@ -206,6 +206,9 @@ export default function WorkBoardPage() {
   const [dispCraftsman, setDispCraftsman] = useState("");
   const [dispDue, setDispDue] = useState("");
   const [dispSaving, setDispSaving] = useState(false);
+  const [dispPiece, setDispPiece] = useState<PendingPiece | null>(null);   // งานเหมารายชิ้นที่กำลังจ่ายให้ช่างเหมา
+  const [pieceCraftsman, setPieceCraftsman] = useState("");
+  const [pieceSaving, setPieceSaving] = useState(false);
   const [dispRates, setDispRates] = useState<LaborRate[]>([]);   // ค่าแรง/ชิ้น จาก BOM (ราคากลาง + รายช่าง)
   const [dispLaborRate, setDispLaborRate] = useState("");        // ค่าแรง/ชิ้น ที่จะใช้ (default ราคากลาง)
   const [warnDispatch, setWarnDispatch] = useState<{ mo: PendingMO; dept: Dept } | null>(null);  // Phase 3: เตือนจ่ายทั้งที่ยังไม่พร้อม
@@ -599,6 +602,20 @@ export default function WorkBoardPage() {
       toast.success("ตั้งค่าแรงกลางแล้ว — การ์ดของสินค้านี้อัปเดตตาม"); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้งค่าแรงไม่สำเร็จ"); }
   };
+  // เฟส 2: จ่ายงานเหมารายชิ้นให้ช่างเหมา (set assignee_name → ออกจากรอจ่าย)
+  const assignPiece = async () => {
+    if (!dispPiece) return;
+    const craft = craftsmen.find((c) => c.id === pieceCraftsman);
+    if (!craft) { toast.error("เลือกช่างเหมาก่อน"); return; }
+    setPieceSaving(true);
+    try {
+      const res = await apiFetch("/api/mo/piecework", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: dispPiece.id, assignee_name: craft.name }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success(`จ่ายงานเหมา "${dispPiece.job_name}" ให้ ${craft.name} แล้ว`);
+      setDispPiece(null); setPieceCraftsman(""); await load(true);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
+    finally { setPieceSaving(false); }
+  };
   // รับงานคืน/ยกเลิก จากแท็บ "รับงานคืน" ในป๊อปอัปเช็กลิสต์ (clWO)
   // บันทึกค่าแรงผลิตของใบจ่ายงาน (+ เลือกบันทึกกลับเข้า BOM) — ใช้ร่วมตอนรับงานคืน
   const persistLabor = async (wo: WorkOrder) => {
@@ -984,7 +1001,7 @@ export default function WorkBoardPage() {
           return <DispatchPlanBoard
             planId={p.id} planName={p.name} planStatus={p.status} startDate={p.start_date} endDate={p.end_date}
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
-            pending={board.pending} pendingPiece={board.pendingPiece} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
+            pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
@@ -1023,7 +1040,7 @@ export default function WorkBoardPage() {
           return <DispatchPlanBoard
             realMode planId="real" planName="" planStatus="" startDate={null} endDate={null}
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
-            pending={board.pending} pendingPiece={board.pendingPiece} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
+            pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
             onApplied={() => {}} onRenamed={() => {}} onDates={() => {}} onDeleted={() => {}}
@@ -1128,6 +1145,29 @@ export default function WorkBoardPage() {
             style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)", borderBottomRightRadius: 12 }} />
         </div>
       )}
+
+      {/* popup จ่ายงานเหมารายชิ้น → เลือกช่างเหมา */}
+      <ERPModal open={dispPiece !== null} onClose={() => !pieceSaving && setDispPiece(null)} size="sm" title="🧵 จ่ายงานเหมาให้ช่าง"
+        footer={<>
+          <button onClick={() => setDispPiece(null)} disabled={pieceSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={() => void assignPiece()} disabled={pieceSaving || !pieceCraftsman} title={!pieceCraftsman ? "เลือกช่างก่อน" : ""} className="h-9 px-4 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{pieceSaving ? "กำลังจ่าย…" : "จ่ายงานเหมา"}</button>
+        </>}>
+        {dispPiece && (
+          <div className="space-y-3">
+            <div className="rounded-lg bg-violet-50/60 border border-violet-100 px-3 py-2">
+              <div className="text-sm font-semibold text-slate-700">🧵 {dispPiece.job_name}</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">{dispPiece.product_sku} · {dispPiece.mo_no} · <b>{fmt(dispPiece.qty)}</b> ชิ้น × ฿{fmt(dispPiece.rate)} = <b className="text-violet-700">฿{fmt(dispPiece.qty * dispPiece.rate)}</b></div>
+            </div>
+            <label className="block"><span className="text-[11px] text-slate-500">เลือกช่างเหมา (จำเป็น *)</span>
+              <div className="mt-0.5">
+                <SearchableSelect value={pieceCraftsman} onChange={setPieceCraftsman} placeholder="— เลือกช่าง —"
+                  options={craftsmen.map((c) => ({ value: c.id, label: `${c.code ? `[${c.code}] ` : ""}${c.name}`, searchText: `${c.code ?? ""} ${c.name}` }))} />
+              </div>
+              <span className="text-[10px] text-slate-400">จ่ายแล้วงานจะออกจาก “รอจ่าย” · ส่งงานเสร็จ → ค่าแรงนับเป็นงานเหมา-จริง</span>
+            </label>
+          </div>
+        )}
+      </ERPModal>
 
       {/* popup จ่ายงาน */}
       <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}

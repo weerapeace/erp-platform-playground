@@ -86,21 +86,23 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ id: (data as { id: string }).id, total_qty: qtyPer * moQty, error: null });
 }
 
-// ---- PATCH: กด "งานเหมาเสร็จ" / ยกเลิกเสร็จ ----
+// ---- PATCH: กด "งานเหมาเสร็จ" / ยกเลิกเสร็จ · หรือ จ่ายให้ช่างเหมา (assignee_name) ----
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let b: { id?: string; done?: boolean }; try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  let b: { id?: string; done?: boolean; assignee_name?: string | null }; try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = (b.id ?? "").trim();
   if (!id) return NextResponse.json({ error: "ต้องระบุ id" }, { status: 400 });
-  const done = !!b.done;
   const admin = supabaseAdmin();
-  const { error } = await admin.from("mo_piecework")
-    .update({ status: done ? "done" : "pending", done_at: done ? new Date().toISOString() : null })
-    .eq("id", id);
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  // จ่าย/คืน งานเหมาให้ช่างเหมา (assignee_name) — ส่ง null = คืนเข้ารอจ่าย
+  if (b.assignee_name !== undefined) patch.assignee_name = (b.assignee_name ?? "").toString().trim() || null;
+  // กดเสร็จ/ยกเลิกเสร็จ
+  if (b.done !== undefined) { patch.status = b.done ? "done" : "pending"; patch.done_at = b.done ? new Date().toISOString() : null; }
+  const { error } = await admin.from("mo_piecework").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  await writeAudit(admin, { action: "update", entityType: "mo_piecework", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { done } });
-  return NextResponse.json({ data: { id, done }, error: null });
+  await writeAudit(admin, { action: "update", entityType: "mo_piecework", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: patch });
+  return NextResponse.json({ data: { id }, error: null });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
