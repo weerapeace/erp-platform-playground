@@ -537,4 +537,4 @@ function CardCustomizeModal({ value, avail, onClose, onSave, onReset }: {
   );
 }
 
-// (คลิกการ์ด/แถว → ใช้ RelationPeekModal ของกลางแทน drawer ที่เคยทำเอง)
+// (คลิกการ์ด/แถว → ใช้ MasterRecordDrawer ของกลาง = drawer เก่าตัวจริงของ MasterCRUD)

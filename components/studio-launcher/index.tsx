@@ -3,7 +3,7 @@
 /**
  * StudioLauncher — เปิด "ตัวออกแบบ layout กลาง" (StudioPanel) จากที่ไหนก็ได้ (ของกลาง)
  *
- * ใช้กับ popup mini (RelationPeekModal) เป็นหลัก — ดึง field-registry ของโมดูล + แปลงเป็น StudioField
+ * ใช้กับ drawer มินิ (MasterRecordDrawer) เป็นหลัก — ดึง field-registry ของโมดูล + แปลงเป็น StudioField
  * + ต่อ sample loader (ดึงตัวอย่างจริงจาก master-v2) ให้เอง แล้ว render StudioPanel ตัวเดียวกับหน้าเต็ม
  *
  * layout ที่บันทึก = ของกลางชุดเดียว → popup + ฟอร์มหน้าเต็ม + ตาราง สะท้อนผลเหมือนกัน (ออกแบบที่เดียว)
