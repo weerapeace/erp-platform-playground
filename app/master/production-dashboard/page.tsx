@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table";
 import { HoverImage } from "@/components/hover-image";
+import { ERPModal } from "@/components/modal";
 import { getStatusStyle } from "@/lib/status-config";
 import { apiFetch } from "@/lib/api";
 import type { ProductionJob, ProductionDashboardResponse, ProdJobCategory } from "@/app/api/mo/production-dashboard/route";
@@ -25,6 +26,9 @@ const CATS: { key: CatKey; label: string; icon: string }[] = [
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const isOverdue = (d: string | null) => !!d && new Date(d) < new Date(new Date().toDateString());
+const daysUntil = (d: string | null) => d ? Math.ceil((new Date(d).getTime() - new Date(new Date().toDateString()).getTime()) / 86400000) : null;
+// สีกำหนดส่ง: เลยกำหนด=แดง · ใกล้ครบ (≤3 วัน)=ส้ม
+const dueTone = (d: string | null): string => { const n = daysUntil(d); if (n === null) return ""; if (n < 0) return "text-red-600 font-semibold"; if (n <= 3) return "text-amber-600 font-medium"; return ""; };
 
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span className="text-slate-300">—</span>;
@@ -42,11 +46,10 @@ const groupValueOf = (j: ProductionJob, f: GroupField): string =>
   : f === "status" ? (j.status ? getStatusStyle(j.status).label : "—")
   : (j.due_date ? new Date(j.due_date).toLocaleDateString("th-TH", { year: "numeric", month: "long" }) : "— ไม่มีกำหนดส่ง —");
 
-// การ์ดงาน 1 ใบ (โหมดจัดกลุ่ม)
-function JobCard({ j }: { j: ProductionJob }) {
-  const od = isOverdue(j.due_date);
+// การ์ดงาน 1 ใบ (โหมดจัดกลุ่ม/ปฏิทิน) — คลิกเปิดรายละเอียด
+function JobCard({ j, onClick }: { j: ProductionJob; onClick?: () => void }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-2.5 hover:shadow-sm transition-shadow">
+    <div onClick={onClick} className={`rounded-xl border border-slate-200 bg-white p-2.5 hover:shadow-sm transition-shadow ${onClick ? "cursor-pointer hover:border-blue-300" : ""}`}>
       <div className="flex gap-2.5">
         <HoverImage url={j.image_url} size={48} previewSize={260} />
         <div className="min-w-0 flex-1">
@@ -61,7 +64,7 @@ function JobCard({ j }: { j: ProductionJob }) {
             {j.brand && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: j.brand_color || "#cbd5e1" }} />{j.brand}</span>}
             <span>จำนวน {fmt(j.qty)}</span>
             {j.remaining > 0 && <span className="text-indigo-600 font-medium">เหลือจ่าย {fmt(j.remaining)}</span>}
-            {j.due_date && <span className={od ? "text-red-600 font-semibold" : ""}>{od && "⚠ "}ส่ง {new Date(j.due_date).toLocaleDateString("th-TH")}</span>}
+            {j.due_date && <span className={dueTone(j.due_date)}>{isOverdue(j.due_date) && "⚠ "}ส่ง {new Date(j.due_date).toLocaleDateString("th-TH")}</span>}
           </div>
           <div className="mt-1.5 flex items-center gap-1.5">
             <div className="h-1.5 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${j.progress_pct}%` }} /></div>
@@ -78,7 +81,7 @@ function JobCard({ j }: { j: ProductionJob }) {
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const DOW = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 
-function CalendarView({ jobs }: { jobs: ProductionJob[] }) {
+function CalendarView({ jobs, onJobClick }: { jobs: ProductionJob[]; onJobClick: (j: ProductionJob) => void }) {
   const today = new Date();
   const [y, setY] = useState(today.getFullYear());
   const [m, setM] = useState(today.getMonth());
@@ -145,7 +148,7 @@ function CalendarView({ jobs }: { jobs: ProductionJob[] }) {
         <div className="mt-4 border-t border-slate-100 pt-3">
           <h4 className="text-sm font-bold text-slate-700 mb-2">📅 {new Date(sel).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {selJobs.length} งาน</h4>
           {selJobs.length === 0 ? <p className="text-sm text-slate-400">ไม่มีงานกำหนดส่งวันนี้</p>
-            : <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>{selJobs.map((j) => <JobCard key={j.id} j={j} />)}</div>}
+            : <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>{selJobs.map((j) => <JobCard key={j.id} j={j} onClick={() => onJobClick(j)} />)}</div>}
         </div>
       )}
     </div>
@@ -162,7 +165,7 @@ const COLUMNS: ColumnDef<ProductionJob>[] = [
   { accessorKey: "progress_pct", header: "คืบหน้า", size: 120, cell: ({ row }) => { const v = row.original.progress_pct; return <div className="flex items-center gap-1.5"><div className="h-1.5 w-14 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${v}%` }} /></div><span className="text-[11px] text-slate-400 tabular-nums">{fmt(row.original.received)}/{fmt(row.original.qty)}</span></div>; } },
   { accessorKey: "remaining", header: "เหลือจ่าย", size: 90, cell: ({ getValue }) => { const v = getValue() as number; return v > 0 ? <span className="tabular-nums text-sm font-semibold text-indigo-600">{fmt(v)}</span> : <span className="text-slate-300">—</span>; } },
   { accessorKey: "dept_names", header: "โต๊ะ/ช่าง", size: 160, cell: ({ row }) => <span className="text-xs text-slate-500">{row.original.worker_names || row.original.dept_names || <span className="text-slate-300">—</span>}</span> },
-  { accessorKey: "due_date", header: "กำหนดส่ง", size: 110, cell: ({ getValue }) => { const d = getValue() as string | null; if (!d) return <span className="text-xs text-slate-300">—</span>; const od = isOverdue(d); return <span className={`text-xs ${od ? "text-red-600 font-semibold" : "text-slate-500"}`}>{od && "⚠ "}{new Date(d).toLocaleDateString("th-TH")}</span>; } },
+  { accessorKey: "due_date", header: "กำหนดส่ง", size: 110, cell: ({ getValue }) => { const d = getValue() as string | null; if (!d) return <span className="text-xs text-slate-300">—</span>; const tone = dueTone(d); return <span className={`text-xs ${tone || "text-slate-500"}`}>{isOverdue(d) && "⚠ "}{new Date(d).toLocaleDateString("th-TH")}</span>; } },
   { accessorKey: "status", header: "สถานะ", size: 120, cell: ({ getValue }) => <StatusBadge status={getValue() as string | null} /> },
 ];
 
@@ -177,6 +180,7 @@ export default function ProductionDashboardPage() {
   const [groupField, setGroupField] = useState<GroupField>("brand");
   const [gSearch, setGSearch] = useState("");
   const [view, setView] = useState<"list" | "calendar">("list");
+  const [selectedJob, setSelectedJob] = useState<ProductionJob | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -190,6 +194,14 @@ export default function ProductionDashboardPage() {
   }, []);
 
   const shown = useMemo(() => cat === "all" ? jobs : jobs.filter((j) => j.categories.includes(cat)), [jobs, cat]);
+  // การ์ดสรุปเลข (ตาม filter ปัจจุบัน)
+  const kpi = useMemo(() => ({
+    total: shown.length,
+    qty: shown.reduce((a, j) => a + j.qty, 0),
+    remaining: shown.reduce((a, j) => a + j.remaining, 0),
+    overdue: shown.filter((j) => isOverdue(j.due_date) && !j.categories.includes("done_waiting")).length,
+  }), [shown]);
+
   const groups = useMemo(() => {
     if (!grouped) return [] as [string, ProductionJob[]][];
     const q = gSearch.trim().toLowerCase();
@@ -215,6 +227,21 @@ export default function ProductionDashboardPage() {
         </div>
       </div>
 
+      {/* การ์ดสรุปเลข (ตาม filter ปัจจุบัน) */}
+      <div className="px-4 pt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {([
+          { label: "งานในมุมมองนี้", value: fmt(kpi.total), icon: "📋", tone: "text-slate-700" },
+          { label: "ชิ้นรวม", value: fmt(kpi.qty), icon: "🔢", tone: "text-slate-700" },
+          { label: "เหลือจ่าย (ชิ้น)", value: fmt(kpi.remaining), icon: "📥", tone: "text-indigo-600" },
+          { label: "เลยกำหนดส่ง", value: fmt(kpi.overdue), icon: "⚠️", tone: kpi.overdue > 0 ? "text-red-600" : "text-slate-400" },
+        ]).map((k) => (
+          <div key={k.label} className="bg-white rounded-xl border border-slate-200 px-3 py-2.5">
+            <div className="text-[11px] text-slate-400">{k.icon} {k.label}</div>
+            <div className={`text-xl font-bold tabular-nums ${k.tone}`}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+
       <div className="flex-1 flex gap-4 p-4 min-h-0">
         {/* แถบ filter ซ้าย */}
         <aside className="w-44 shrink-0 space-y-1.5">
@@ -233,7 +260,7 @@ export default function ProductionDashboardPage() {
 
         {/* เนื้อหา */}
         <main className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-3">
-          {view === "calendar" ? <CalendarView jobs={shown} /> : <>
+          {view === "calendar" ? <CalendarView jobs={shown} onJobClick={setSelectedJob} /> : <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="w-4 h-4 accent-blue-600" /> จัดกลุ่ม
@@ -258,7 +285,7 @@ export default function ProductionDashboardPage() {
                       <span className="text-xs text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">{items.length}</span>
                     </div>
                     <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-                      {items.map((j) => <JobCard key={j.id} j={j} />)}
+                      {items.map((j) => <JobCard key={j.id} j={j} onClick={() => setSelectedJob(j)} />)}
                     </div>
                   </div>
                 ))}
@@ -272,6 +299,7 @@ export default function ProductionDashboardPage() {
               tableId="production-dashboard"
               searchPlaceholder="ค้นหา SKU / ชื่อ / ใบสั่งผลิต / แบรนด์"
               searchableKeys={["product_sku", "product_name", "mo_no", "brand"]}
+              onRowClick={setSelectedJob}
               emptyMessage={cat === "all" ? "ยังไม่มีงานผลิต" : "ไม่มีงานในกลุ่มนี้"}
               enableCards
               defaultViewMode="cards"
@@ -282,6 +310,40 @@ export default function ProductionDashboardPage() {
           </>}
         </main>
       </div>
+
+      {/* ป๊อปอัปรายละเอียดงาน */}
+      <ERPModal open={selectedJob !== null} onClose={() => setSelectedJob(null)} size="md" title={selectedJob ? `🧰 ${selectedJob.product_sku ?? selectedJob.mo_no}` : ""}>
+        {selectedJob && (() => { const j = selectedJob; return (
+          <div className="space-y-3">
+            <div className="flex gap-3">
+              <HoverImage url={j.image_url} size={72} previewSize={320} />
+              <div className="min-w-0">
+                <div className="text-base font-semibold text-slate-800 leading-snug">{j.product_name || j.product_sku || "—"}</div>
+                <div className="font-mono text-xs text-slate-400">{j.product_sku} · {j.mo_no}</div>
+                <div className="mt-1 flex items-center gap-2 flex-wrap text-xs">
+                  {j.brand && <span className="inline-flex items-center gap-1 text-slate-600"><span className="h-2.5 w-2.5 rounded-full" style={{ background: j.brand_color || "#cbd5e1" }} />{j.brand}</span>}
+                  <StatusBadge status={j.status} />
+                  {j.due_date && <span className={dueTone(j.due_date) || "text-slate-500"}>{isOverdue(j.due_date) && "⚠ "}กำหนดส่ง {new Date(j.due_date).toLocaleDateString("th-TH")}</span>}
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              {([["จำนวน", j.qty], ["จ่ายแล้ว", j.dispatched], ["รับคืน", j.received], ["เหลือจ่าย", j.remaining]] as [string, number][]).map(([l, v]) => (
+                <div key={l} className="bg-slate-50 rounded-lg py-2"><div className="text-[11px] text-slate-400">{l}</div><div className="text-base font-bold tabular-nums text-slate-700">{fmt(v)}</div></div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-400" style={{ width: `${j.progress_pct}%` }} /></div>
+              <span className="text-xs text-slate-500 tabular-nums">คืบหน้า {j.progress_pct}%</span>
+            </div>
+            {(j.worker_names || j.dept_names) && <div className="text-sm text-slate-600">🔨 {j.worker_names || j.dept_names}</div>}
+            <div className="flex gap-2 pt-1">
+              <a href={`/print/work-order/${j.id}`} target="_blank" rel="noreferrer" className="h-9 px-4 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 พิมพ์ใบสั่งงาน</a>
+              <button onClick={() => router.push("/master/work-board")} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🗂 ไปบอร์ดจ่ายงาน</button>
+            </div>
+          </div>
+        ); })()}
+      </ERPModal>
     </div>
   );
 }
