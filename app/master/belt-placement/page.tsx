@@ -15,6 +15,11 @@ type Imgs = { strap: string | null; hole: string | null; logo: string | null };
 
 const KEY_LABEL: Record<Key, string> = { strap: "ทรงปลายหาง (ตัวสาย)", hole: "ลายรู / เจาะรู", logo: "โลโก้" };
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+// เส้นบอกระยะแบบวงเล็บ (ก้านชี้เข้าหาเข็มขัด) — โชว์ในพรีวิว/เทมเพลต
+const bracketGeom = (x: number, w: number, y: number, down: boolean) => {
+  const t = down ? -6 : 6;
+  return { d: `M${x},${y + t} V${y} H${x + w} V${y + t}`, lx: x + w / 2, ly: down ? y + 14 : y - 5 };
+};
 
 export default function BeltPlacementPage() {
   const [imgs, setImgs] = useState<Imgs>({ strap: null, hole: null, logo: null });
@@ -27,7 +32,11 @@ export default function BeltPlacementPage() {
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ key: Key; mode: "move" | "resize"; sx: number; sy: number; box: ImgBox } | null>(null);
 
-  const fY = 28, VH = fY + boxH + 30;
+  const fd = base.frontDim ?? BELT_DEFAULT_LAYOUT.frontDim;
+  const bd = base.backDim ?? BELT_DEFAULT_LAYOUT.backDim;
+  const fY = 28;
+  const fbY = fY - fd.y, bbY = fY + boxH + bd.y;          // เส้น "ห่างโลโก้" (เหนือ) / "ถึงปลายสาย" (ใต้)
+  const VH = Math.max(fY + boxH + 30, bbY + 24);
 
   useEffect(() => {
     apiFetch("/api/mo/belt-component-images?sample=1").then((r) => r.json()).then((j) => {
@@ -86,20 +95,23 @@ export default function BeltPlacementPage() {
   };
   const buildGuideSvg = () => {
     const colors: Record<Key, string> = { strap: "#94a3b8", hole: "#0ea5e9", logo: "#7c3aed" };
-    const top = 24, H = top + boxH + 16;
     const parts: string[] = [
-      `<rect x="0" y="0" width="740" height="${H}" fill="#ffffff"/>`,
-      `<text x="${BX}" y="14" font-size="11" fill="#64748b" font-family="sans-serif">เทมเพลตวางรูปเข็มขัด (ด้านเดียว ใช้ทั้งหน้า-หลัง) · กรอบประ = ตำแหน่ง+ขนาด (px) — ทำรูปพอดีช่องแล้วอัปโหลด</text>`,
-      `<rect x="${BX}" y="${top}" width="${BW}" height="${boxH}" fill="none" stroke="#cbd5e1" stroke-width="1.5" rx="6"/>`,
+      `<rect x="0" y="0" width="740" height="${VH}" fill="#ffffff"/>`,
+      `<text x="${BX}" y="14" font-size="11" fill="#64748b" font-family="sans-serif">เทมเพลตวางรูปเข็มขัด (ด้านเดียว ใช้ทั้งหน้า-หลัง) · กรอบประ = ตำแหน่ง+ขนาด (px) · เส้นแดง = ระยะ — ทำรูปพอดีช่องแล้วอัปโหลด</text>`,
+      `<rect x="${BX}" y="${fY}" width="${BW}" height="${boxH}" fill="none" stroke="#cbd5e1" stroke-width="1.5" rx="6"/>`,
     ];
     for (const key of ["strap", "hole", "logo"] as Key[]) {
       if (!hrefOf(key)) continue;
       const b = boxOf(key);
-      const x = BX + b.x * BW, y = top + b.y * boxH, w = b.w * BW, h = b.h * boxH;
+      const x = BX + b.x * BW, y = fY + b.y * boxH, w = b.w * BW, h = b.h * boxH;
       parts.push(`<rect x="${x.toFixed(0)}" y="${y.toFixed(0)}" width="${w.toFixed(0)}" height="${h.toFixed(0)}" fill="none" stroke="${colors[key]}" stroke-width="1.5" stroke-dasharray="6 4"/>`);
       parts.push(`<text x="${(x + 4).toFixed(0)}" y="${(y + 13).toFixed(0)}" font-size="10" fill="${colors[key]}" font-family="sans-serif">${KEY_LABEL[key]} · ${w.toFixed(0)}×${h.toFixed(0)}px</text>`);
     }
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="740" height="${H}" viewBox="0 0 740 ${H}">${parts.join("")}</svg>`;
+    const gf = bracketGeom(fd.x, fd.w, fbY, false);
+    parts.push(`<path d="${gf.d}" fill="none" stroke="#b91c1c" stroke-width="1.1"/><text x="${gf.lx}" y="${gf.ly}" font-size="11" fill="#b91c1c" text-anchor="middle">ห่างโลโก้</text>`);
+    const gb = bracketGeom(bd.x, bd.w, bbY, true);
+    parts.push(`<path d="${gb.d}" fill="none" stroke="#b91c1c" stroke-width="1.1"/><text x="${gb.lx}" y="${gb.ly}" font-size="11" fill="#b91c1c" text-anchor="middle">ถึงปลายสาย</text>`);
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="740" height="${VH}" viewBox="0 0 740 ${VH}">${parts.join("")}</svg>`;
   };
   const downloadSvg = () => {
     const url = URL.createObjectURL(new Blob([buildGuideSvg()], { type: "image/svg+xml" }));
@@ -159,6 +171,9 @@ export default function BeltPlacementPage() {
                 </g>
               );
             })}
+            {/* เส้นความห่าง (อ้างอิง) — ห่างโลโก้ (เหนือ) / ถึงปลายสาย (ใต้) · ปรับตำแหน่งได้ที่ "⚙️ ตั้งค่ารูปใบงาน" */}
+            {(() => { const g = bracketGeom(fd.x, fd.w, fbY, false); return <g key="bf"><path d={g.d} fill="none" stroke="#b91c1c" strokeWidth={1.1} /><text x={g.lx} y={g.ly} fontSize={11} fill="#b91c1c" textAnchor="middle">ห่างโลโก้</text></g>; })()}
+            {(() => { const g = bracketGeom(bd.x, bd.w, bbY, true); return <g key="bb"><path d={g.d} fill="none" stroke="#b91c1c" strokeWidth={1.1} /><text x={g.lx} y={g.ly} fontSize={11} fill="#b91c1c" textAnchor="middle">ถึงปลายสาย</text></g>; })()}
           </svg>
         )}
         <div className="mt-1 text-center text-[11px] text-slate-400">พรีวิวใช้รูปตัวอย่าง · ใบงานจริงใช้รูปของรุ่นนั้น ๆ วางตำแหน่งเดียวกันนี้ทั้งด้านหน้า-หลัง</div>
