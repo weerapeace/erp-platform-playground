@@ -174,6 +174,12 @@ export default function WorkBoardPage() {
   const [dropDeptId, setDropDeptId] = useState<string | null>(null);   // โต๊ะที่กำลังลากค้างอยู่ (ไฮไลต์)
   // ตัวกรองกลุ่มใน widget รอจ่าย
   const [pendGroupFilter, setPendGroupFilter] = useState("__all__");
+  // เมนูพิมพ์รายงาน (รอจ่าย / กำลังผลิต) — เปิดหน้าพิมพ์กลาง /print/work-board ตามกลุ่มที่กรองอยู่
+  const [printOpen, setPrintOpen] = useState(false);
+  const printUrl = useCallback((type: "pending" | "production") => {
+    const g = pendGroupFilter && pendGroupFilter !== "__all__" ? `&group=${encodeURIComponent(pendGroupFilter)}` : "";
+    return `/print/work-board?type=${type}${g}`;
+  }, [pendGroupFilter]);
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
     setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
@@ -961,6 +967,17 @@ export default function WorkBoardPage() {
           <button onClick={openColor} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
           <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
+          <div className="relative">
+            <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์รายงาน ▾</button>
+            {printOpen && (<>
+              <div className="fixed inset-0 z-40" onClick={() => setPrintOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 w-60 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
+                <a href={printUrl("pending")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">📋 รายการรอจ่ายทั้งหมด<div className="text-[11px] text-slate-400">พร้อมค่าแรง · ตัวที่ยังไม่ตั้ง = เว้นช่องให้กรอก</div></a>
+                <a href={printUrl("production")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🔨 รายการกำลังผลิต<div className="text-[11px] text-slate-400">แยกตามโต๊ะ/ช่าง มีรายละเอียดแต่ละโต๊ะ</div></a>
+                <div className="px-3 pt-1.5 pb-1 text-[10px] text-slate-400 border-t border-slate-100 mt-1">พิมพ์ตามกลุ่มที่กรองอยู่: <b>{pendGroupFilter === "__all__" ? "ทั้งหมด" : pendGroupFilter === "__none__" ? "ยังไม่จับกลุ่ม" : pendGroupFilter}</b></div>
+              </div>
+            </>)}
+          </div>
         </div>
       </div>
 
