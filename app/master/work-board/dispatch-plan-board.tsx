@@ -15,7 +15,7 @@ import { HoverImage } from "@/components/hover-image";
 import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
-type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null };
+type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean };
 type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
@@ -400,14 +400,32 @@ export function DispatchPlanBoard({
                     <Thumb url={p.image_url} />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold text-slate-800 truncate">{p.product_sku}</div>
-                      <div className="text-[10px] text-slate-400 truncate">{p.mo_no} · ค่าแรง {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1 min-w-0">
+                        <span className="truncate">{p.mo_no}</span>
+                        {(laborPerUnit[p.mo_no] ?? 0) > 0
+                          ? <span className="shrink-0">· ค่าแรง {baht(laborPerUnit[p.mo_no] ?? 0)}/ชิ้น</span>
+                          : (editable && onSetCentralRate && laborEditId !== p.id)
+                            ? <button onClick={(e) => { e.stopPropagation(); setLaborEditId(p.id); setLaborEditVal(""); }} className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">💰 ใส่ค่าแรง</button>
+                            : <span className="shrink-0">· ค่าแรง ฿0/ชิ้น</span>}
+                      </div>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }} title="ดูรายละเอียดงาน" className="shrink-0 text-slate-300 hover:text-blue-600">🔍</button>
+                    <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }} title="ดูรายละเอียดงาน" className="shrink-0 -m-1 p-1 text-slate-300 hover:text-blue-600">🔍</button>
                   </div>
-                  {/* จำนวนที่เหลือต้องจ่าย — เด่น ๆ */}
-                  <div className="mt-1 flex items-center justify-between gap-2">
+                  {/* ใส่ค่าแรงกลาง (เมื่อยังไม่มีเรตกลาง) */}
+                  {editable && onSetCentralRate && laborEditId === p.id && (
+                    <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <input type="number" min={0} step="any" autoFocus value={laborEditVal} onChange={(e) => setLaborEditVal(e.target.value)} placeholder="บาท/ชิ้น"
+                        className="w-20 h-7 px-1.5 text-xs text-right border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                      <span className="text-[10px] text-slate-400 shrink-0">/ชิ้น (เรตกลาง)</span>
+                      <button disabled={laborSaving} onClick={async () => { setLaborSaving(true); try { await onSetCentralRate!({ moNo: p.mo_no, rate: Number(laborEditVal) || 0 }); setLaborEditId(null); } catch { /* parent toast */ } finally { setLaborSaving(false); } }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">✓</button>
+                      <button onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+                    </div>
+                  )}
+                  {/* จำนวนที่เหลือต้องจ่าย + สถานะความพร้อม */}
+                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                     <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700">เหลือจ่าย <b className="text-base font-bold tabular-nums">{fmt(availOf(p))}</b> ชิ้น</span>
-                    {!on && editable && <span className="text-[10px] text-slate-300">แตะเพื่อจ่าย</span>}
+                    {(() => { const rdy = p.ready ?? (!!p.prep_done && !!p.cut_done); return <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${rdy ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{rdy ? "✓ พร้อมจ่าย" : "⏳ รอเตรียม/ตัด"}</span>; })()}
+                    {!on && editable && <span className="ml-auto text-[10px] text-slate-300">แตะเพื่อจ่าย</span>}
                   </div>
                   {/* แบ่งจ่าย — ระบุจำนวนแล้วแตะโต๊ะ (จ่ายส่วนที่เหลือไปโต๊ะอื่นต่อได้) */}
                   {on && editable && (
@@ -452,8 +470,20 @@ export function DispatchPlanBoard({
                     {(deptWages[d.id] ?? 0) > 0 && totLabor > 0 && (() => { const diff = (deptWages[d.id] ?? 0) - totLabor; return <span className={`block ${diff >= 0 ? "text-amber-600" : "text-rose-600"}`} title="เงินเดือนพนักงาน − ค่าแรงงานที่จ่าย">ต่าง {baht(diff)}</span>; })()}
                   </span>
                 </div>
-                {/* ใบจ่ายจริง — ในแผน "ล็อก" (ดูอย่างเดียว) · ในของจริง "แก้ได้" (ใส่ค่าแรง ฯลฯ) */}
-                {reals.map((w) => {
+                {/* ใบจ่ายจริง — จัดกลุ่มตามช่างที่เลือก (ถ้ามี) · ในแผน "ล็อก" · ในของจริง "แก้ได้" */}
+                {(() => {
+                  const byWorker = new Map<string, WOLite[]>();
+                  for (const x of reals) { const k = x.assignee_name || ""; (byWorker.get(k) ?? byWorker.set(k, []).get(k)!).push(x); }
+                  const showHeads = byWorker.size > 1 || [...byWorker.keys()].some((k) => k);   // หลายช่าง หรือมีระบุช่าง → จับกลุ่มตามช่าง
+                  return [...byWorker.entries()].map(([worker, ws]) => (
+                  <div key={"rw:" + (worker || "__none__")}>
+                    {showHeads && (
+                      <div className="flex items-center justify-between text-[10px] font-medium mt-1 mb-0.5 px-0.5 text-violet-700">
+                        <span className="truncate">👤 {worker || "ทั้งโต๊ะ (ไม่ระบุช่าง)"}</span>
+                        <span className="text-slate-400 shrink-0">{fmt(ws.reduce((a, x) => a + (Number(x.qty) || 0), 0))} ชิ้น · {baht(ws.reduce((a, x) => a + woLabor(x), 0))}</span>
+                      </div>
+                    )}
+                    {ws.map((w) => {
                   const wl = woLabor(w);
                   const canEditWO = realMode && editable && !!onUpdateWO;
                   const editing = laborEditId === w.id;
@@ -506,7 +536,10 @@ export function DispatchPlanBoard({
                     )}
                   </CardShell>
                   );
-                })}
+                    })}
+                  </div>
+                  ));
+                })()}
                 {/* รายการร่าง — จัดกลุ่มย่อยตามช่าง */}
                 {(() => {
                   const byCraft = new Map<string, DispatchPlanLine[]>();

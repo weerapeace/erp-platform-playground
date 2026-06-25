@@ -915,7 +915,7 @@ export default function WorkBoardPage() {
   // ⚠️ ห้ามใส่ CSS zoom ที่ wrapper ล่างนี้ — บน iPad/Safari ทำให้ "จุดแตะ" เพี้ยน (ยิ่งไปทางขวายิ่งคลาด)
   //    → แตะช่องโต๊ะฝั่งขวาไม่ติด จ่ายงานไม่ได้ (เคยใช้ zoom:1.25 บน tablet แล้วพัง)
   return (
-    <div className={isMax ? "fixed inset-0 z-[60] bg-white flex flex-col p-3 overflow-auto" : "max-w-[1700px] mx-auto px-5 py-5"}>
+    <div className={isMax ? "fixed inset-0 z-40 bg-white flex flex-col p-3 overflow-auto" : "max-w-[1700px] mx-auto px-5 py-5"}>
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">📋 บอร์ดจ่ายงาน</h1>
@@ -1021,6 +1021,7 @@ export default function WorkBoardPage() {
               if (mo && dept) void quickDispatch(mo, dept, qty, laborPerUnit[mo.mo_no] ?? 0);
             }}
             onCancelWO={async (id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) await cancelWO(wo); }}
+            onSetCentralRate={setCentralRate}
             onUpdateWO={async (id, patch) => {
               try {
                 const res = await apiFetch("/api/mo/work-orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...patch }) });

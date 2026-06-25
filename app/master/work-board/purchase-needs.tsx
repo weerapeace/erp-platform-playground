@@ -40,6 +40,7 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);   // popup ยืนยันก่อนสร้างจริง
+  const [detailRow, setDetailRow] = useState<PurchaseNeedRow | null>(null);   // popup ดูข้อมูลย่อวัตถุดิบ
   const [mode, setMode] = useState<"type" | "mo" | "group">("type");  // ตามประเภท / ตามใบสั่งผลิต / ตามกลุ่ม
   const [confirmPrepOpen, setConfirmPrepOpen] = useState(false);   // ยืนยันก่อน "ทำเป็นเตรียมแล้ว"
   const [moGroupList, setMoGroupList] = useState<{ name: string; mo_nos: string[] }[]>([]);
@@ -168,13 +169,14 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
       key: "material", header: "วัตถุดิบ", width: "1.4fr",
       sortValue: (r) => r.component_name ?? "", sortLabel: "ชื่อ",
       cell: (r) => (
-        <div className="flex items-center gap-2 min-w-0">
+        <button type="button" onClick={(e) => { e.stopPropagation(); setDetailRow(r); }} title="คลิกดูข้อมูลวัตถุดิบ"
+          className="flex items-center gap-2 min-w-0 w-full text-left -mx-1 px-1 py-0.5 rounded hover:bg-slate-50">
           <Thumb url={r.component_image} />
           <div className="min-w-0">
-            <p className="truncate"><code className="text-[10px] text-slate-400">{r.component_sku}</code> {r.component_name}</p>
+            <p className="break-words leading-snug"><code className="text-[10px] text-slate-400">{r.component_sku}</code> {r.component_name}</p>
             {r.material_type && <p className="text-[10px] text-slate-400">{r.material_type}{r.total_requested > 0 ? ` · ขอแล้ว ${fmt(r.total_requested)}` : ""}</p>}
           </div>
-        </div>
+        </button>
       ),
     },
     {
@@ -289,11 +291,12 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
           const draft = drafts[sid];
           return (
             <div key={`${l.mo_no}:${l.component_sku ?? l.component_name}`} className={`grid grid-cols-[1.6fr_5rem_4rem_7rem_5rem] gap-2 px-3 py-1.5 items-center ${l.is_ready ? "bg-emerald-50/40" : ""}`}>
-              <div className="flex items-center gap-2 min-w-0">
+              <button type="button" onClick={() => { const k = l.component_sku ?? `nm:${l.component_name ?? ""}`; const row = (rows ?? []).find((rr) => keyOf(rr) === k); if (row) setDetailRow(row); }} title="คลิกดูข้อมูลวัตถุดิบ"
+                className="flex items-center gap-2 min-w-0 text-left -mx-1 px-1 py-0.5 rounded hover:bg-slate-50">
                 <Thumb url={l.component_image} />
-                <div className="min-w-0"><p className="text-sm text-slate-800 truncate"><code className="text-[10px] text-slate-400">{l.component_sku}</code> {l.component_name}</p>
+                <div className="min-w-0"><p className="text-sm text-slate-800 break-words leading-snug"><code className="text-[10px] text-slate-400">{l.component_sku}</code> {l.component_name}</p>
                   {l.material_type && <p className="text-[10px] text-slate-400">{l.material_type}</p>}</div>
-              </div>
+              </button>
               <span className="text-right text-sm font-bold text-rose-600 tabular-nums">{fmt(l.needed)}</span>
               <span className="text-xs text-slate-500">{l.uom ?? ""}</span>
               <div className="flex justify-center">
@@ -459,6 +462,40 @@ export function PurchaseNeeds({ canEdit, onOpenMo }: { canEdit: boolean; onOpenM
           {chosen.length === 0 && <div className="px-3 py-4 text-center text-sm text-slate-300">ยังไม่ได้เลือกวัตถุดิบ</div>}
         </div>
       </div>
+    </ERPModal>
+
+    {/* ป๊อปอัปข้อมูลย่อวัตถุดิบ — รูป/ชื่อเต็ม/ประเภท/รวมต้องซื้อ + ใบสั่งผลิตที่ใช้ (กดเปิดใบได้) */}
+    <ERPModal open={detailRow !== null} onClose={() => setDetailRow(null)} size="md" title="📦 ข้อมูลวัตถุดิบ">
+      {detailRow && (
+        <div className="space-y-3">
+          <div className="flex items-start gap-3">
+            <Thumb url={detailRow.component_image} size="md" />
+            <div className="min-w-0">
+              <div className="text-base font-semibold text-slate-800 break-words leading-snug">{detailRow.component_name}</div>
+              {detailRow.component_sku && <div className="text-xs text-slate-400 font-mono">{detailRow.component_sku}</div>}
+              <div className="text-[11px] text-slate-500 mt-0.5">{detailRow.material_type || "ไม่ระบุประเภท"}</div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 text-sm">
+            <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700">รวมต้องซื้อ <b>{fmt(detailRow.total_remaining)}</b> {detailRow.uom ?? ""}</span>
+            {detailRow.total_requested > 0 && <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">ขอแล้ว <b>{fmt(detailRow.total_requested)}</b></span>}
+            <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600">ใช้ใน <b>{detailRow.mos.length}</b> ใบสั่งผลิต</span>
+          </div>
+          <div className="border border-slate-200 rounded-lg max-h-72 overflow-y-auto divide-y divide-slate-50">
+            {detailRow.mos.map((m) => (
+              <button key={m.mo_no} type="button" onClick={() => { onOpenMo?.(m.mo_id); setDetailRow(null); }} title="คลิกเปิดใบสั่งผลิต"
+                className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-blue-50 text-left">
+                <Thumb url={m.product_image} size="xs" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-slate-700 truncate">{m.product_label || m.mo_no}</div>
+                  <div className="text-[10px] text-slate-400 font-mono">{m.mo_no}{m.due_date ? ` · กำหนด ${m.due_date}` : ""}</div>
+                </div>
+                <span className="text-sm font-bold text-rose-600 tabular-nums shrink-0">{fmt(m.needed)} <span className="text-[10px] font-normal text-slate-400">{detailRow.uom ?? ""}</span></span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </ERPModal>
     </>
   );
