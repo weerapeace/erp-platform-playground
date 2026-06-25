@@ -465,10 +465,10 @@ export function DispatchPlanBoard({
                   onDrop={(e) => { if (deptDragRef.current) { e.stopPropagation(); reorderDept(d.id); } }}>
                   <div className="flex items-center gap-1 min-w-0">
                     {onReorderDepts && <span draggable onDragStart={(e) => { e.stopPropagation(); deptDragRef.current = d.id; dragRef.current = null; }} title="ลากสลับตำแหน่งโต๊ะ" className="shrink-0 cursor-move text-slate-300 hover:text-slate-500 select-none">⠿</span>}
-                    <span className="text-sm font-bold text-slate-700 truncate">{d.name}</span>
-                    <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="ดูพนักงานในแผนก" className="shrink-0 text-slate-300 hover:text-violet-600 text-[11px]">👥</button>
+                    <span className={`font-bold text-slate-700 truncate ${tablet ? "text-lg" : "text-sm"}`}>{d.name}</span>
+                    <button onClick={(e) => { e.stopPropagation(); setStaffPopup(d); }} title="ดูพนักงานในแผนก" className={`shrink-0 text-slate-300 hover:text-violet-600 ${tablet ? "text-sm" : "text-[11px]"}`}>👥</button>
                   </div>
-                  <span className="text-[10px] text-right shrink-0 leading-tight">
+                  <span className={`text-right shrink-0 leading-tight ${tablet ? "text-[13px]" : "text-[10px]"}`}>
                     {(deptWages[d.id] ?? 0) > 0 && <span className="block text-violet-600" title="เงินเดือนรวมพนักงานในแผนก">คน {baht(deptWages[d.id])}</span>}
                     {totQty > 0 && <span className="block text-slate-500" title="ค่าแรงงานที่จ่ายในโต๊ะนี้">งาน {fmt(totQty)} ชิ้น · {baht(totLabor)}</span>}
                     {(deptWages[d.id] ?? 0) > 0 && totLabor > 0 && (() => { const diff = (deptWages[d.id] ?? 0) - totLabor; return <span className={`block ${diff >= 0 ? "text-amber-600" : "text-rose-600"}`} title="เงินเดือนพนักงาน − ค่าแรงงานที่จ่าย">ต่าง {baht(diff)}</span>; })()}
