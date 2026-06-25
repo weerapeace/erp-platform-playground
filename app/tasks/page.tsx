@@ -8,6 +8,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
@@ -20,6 +21,7 @@ import { CreateTaskModal } from "./create-task-modal";
 import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
 import { applyTaskTransition } from "./task-actions";
+import { OverviewDashboard } from "./overview-dashboard";
 import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
@@ -89,11 +91,12 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
 // ============================================================
 export default function TasksPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const VIEWS = useMemo(() => makeViews(t), [t]);
   const { statuses } = useCreativeStatuses();
-  const [view, setView] = useState<"queue" | "table" | "kanban" | "canvas">("table");
+  const [view, setView] = useState<"overview" | "queue" | "table" | "kanban" | "canvas">("overview");
   const [quick, setQuick] = useState<"" | "review" | "overdue">(""); // กรองด่วนจากการ์ดสถิติ
 
   // create modal
@@ -127,7 +130,13 @@ export default function TasksPage() {
   const loading = tasksSWR.loading; // โชว์ skeleton เฉพาะตอนยังไม่เคยมีข้อมูลจริง
 
   // เปิด drawer งานอัตโนมัติจากลิงก์ /tasks?task=<id> (เช่นกดมาจากการ์ดบน Canvas)
-  useEffect(() => { const tid = new URLSearchParams(window.location.search).get("task"); if (tid) setDetailId(tid); }, []);
+  // และรองรับ /tasks?view=table|queue|kanban|canvas|overview (เช่นลิงก์ "งานทั้งหมด" จากหน้าแคมเปญ)
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const tid = sp.get("task"); if (tid) setDetailId(tid);
+    const v = sp.get("view");
+    if (v === "table" || v === "queue" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
+  }, []);
 
   // หลังบันทึก/ลบ → บังคับโหลดงานใหม่ (focus revalidate มีในตัว hook แล้ว)
   const reload = useCallback(async () => { await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]); }, [tasksSWR, mineSWR, subsSWR]);
@@ -169,17 +178,20 @@ export default function TasksPage() {
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
           </div>
         </div>
-        <div className="flex gap-3 mt-4">
-          <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} onClick={() => { setQuick(""); setView("table"); }} active={view === "table" && quick === ""} />
-          <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" onClick={() => setView("queue")} active={view === "queue"} />
-          <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" onClick={() => { setQuick("review"); setView("table"); }} active={view === "table" && quick === "review"} />
-          <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" onClick={() => { setQuick("overdue"); setView("table"); }} active={view === "table" && quick === "overdue"} />
-        </div>
+        {view !== "overview" && (
+          <div className="flex gap-3 mt-4">
+            <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} onClick={() => { setQuick(""); setView("table"); }} active={view === "table" && quick === ""} />
+            <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" onClick={() => setView("queue")} active={view === "queue"} />
+            <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" onClick={() => { setQuick("review"); setView("table"); }} active={view === "table" && quick === "review"} />
+            <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" onClick={() => { setQuick("overdue"); setView("table"); }} active={view === "table" && quick === "overdue"} />
+          </div>
+        )}
       </div>
 
       <div className="px-8 py-6 space-y-5">
         {/* View toggle */}
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
+          <ViewToggleBtn active={view === "overview"} onClick={() => { setQuick(""); setView("overview"); }} icon="🏠" label={t("ภาพรวม", "Overview")} />
           <ViewToggleBtn active={view === "queue"} onClick={() => setView("queue")} icon="🙋" label={t("คิวงานของฉัน", "My queue")} />
           <ViewToggleBtn active={view === "table"} onClick={() => setView("table")} icon="📋" label={t("ตาราง", "Table")} />
           <ViewToggleBtn active={view === "kanban"} onClick={() => setView("kanban")} icon="🟦" label="Kanban" />
@@ -190,6 +202,24 @@ export default function TasksPage() {
           <div className="py-20 text-center text-slate-400">{t("กำลังโหลดข้อมูล...", "Loading data...")}</div>
         ) : (
           <>
+            {view === "overview" && (
+              <OverviewDashboard
+                userName={user?.name}
+                counts={counts}
+                myTasks={myTasks}
+                mySubs={mySubs}
+                campaigns={campaigns}
+                tasks={tasks}
+                isAdmin={user?.role === "admin"}
+                onOpenTask={(id) => setDetailId(id)}
+                onCreate={openCreate}
+                onGotoView={(v, q = "") => { setQuick(q); setView(v); }}
+                onOpenCampaign={(id) => router.push(`/tasks/campaigns/${id}`)}
+                onGotoHref={(href) => router.push(href)}
+                onOpenKnowledge={() => setKnowledgeOpen(true)}
+              />
+            )}
+
             {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
 
             {view === "table" && (

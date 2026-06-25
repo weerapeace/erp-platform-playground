@@ -78,7 +78,7 @@ export default function CampaignsPage() {
             <p className="text-slate-500 mt-1">{t("ตัวครอบงาน — รวมงานถ่ายรูป/แต่งรูป/Banner/Content ของแต่ละแคมเปญไว้ด้วยกัน", "Campaign wrapper — groups photo, retouch, Banner, and Content tasks for each campaign")}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งานทั้งหมด", "All tasks")}</a>
+            <a href="/tasks?view=table" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">← {t("งานทั้งหมด", "All tasks")}</a>
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแคมเปญ", "Create campaign")}</button>
           </div>
         </div>
