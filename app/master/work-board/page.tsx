@@ -14,7 +14,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
-import type { MoCost, CostScenario } from "@/app/api/mo/[id]/cost/route";
+import type { MoCost, CostScenario, PieceJob } from "@/app/api/mo/[id]/cost/route";
 import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
@@ -1495,7 +1495,7 @@ export default function WorkBoardPage() {
                         </div>
                       )
                     ) : clTab === "cost" ? (
-                      <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} canEdit={canEdit} />
+                      <CostTab cost={clCost} pieceRows={clPieceRows} moId={checklistMO.id} bomCode={checklistMO.bom_code ?? null} departments={board.departments} deptWages={deptWages} canEdit={canEdit} />
                     ) : clTab === "purch" ? (
                       <PurchTab rows={clPurch} />
                     ) : clTab === "issue" ? (
@@ -1638,16 +1638,21 @@ const PO_BADGE: Record<string, { t: string; c: string }> = {
   draft: { t: "ร่าง", c: "bg-slate-100 text-slate-600" }, confirmed: { t: "สั่งแล้ว", c: "bg-blue-50 text-blue-700" },
   partially_received: { t: "รับบางส่วน", c: "bg-amber-50 text-amber-700" }, received: { t: "รับครบ", c: "bg-emerald-50 text-emerald-700" }, closed: { t: "ปิดแล้ว", c: "bg-slate-100 text-slate-500" },
 };
-const DEFAULT_SC: CostScenario = { labor_mode: "system", piece_rate: 0, table: { salary: 0, workdays: 26, capacity: 0 }, extras: [] };
+const DEFAULT_SC: CostScenario = { labor_mode: "system", piece_rate: 0, piece_jobs: [], table: { salary: 0, workdays: 26, capacity: 0, dept_name: "", calc: "days", days: 0, target_pp: 0 }, extras: [] };
+const normPieceJob = (j: Partial<PieceJob>): PieceJob => ({ label: String(j.label ?? ""), kind: j.kind === "table" ? "table" : "piece", rate: Number(j.rate) || 0, qty_per: Number(j.qty_per) || 1, salary: Number(j.salary) || 0, workdays: Number(j.workdays) || 26, days: Number(j.days) || 0, dept_name: String(j.dept_name ?? "") });
 
-function CostTab({ cost, pieceRows, moId, canEdit }: { cost: MoCost | null; pieceRows: MoPieceRow[]; moId: string; canEdit: boolean }) {
+function CostTab({ cost, pieceRows, moId, bomCode, departments, deptWages, canEdit }: { cost: MoCost | null; pieceRows: MoPieceRow[]; moId: string; bomCode: string | null; departments: { id: string; name: string }[]; deptWages: Record<string, number>; canEdit: boolean }) {
   const toast = useToast();
   const [sc, setSc] = useState<CostScenario>(DEFAULT_SC);
   const [saving, setSaving] = useState(false);
+  const [bomSaving, setBomSaving] = useState(false);
   useEffect(() => {
     if (!cost) return;
     const s = cost.scenario;
-    setSc(s ? { labor_mode: s.labor_mode ?? "system", piece_rate: Number(s.piece_rate) || 0, table: { salary: Number(s.table?.salary) || 0, workdays: Number(s.table?.workdays) || 26, capacity: Number(s.table?.capacity) || 0 }, extras: Array.isArray(s.extras) ? s.extras : [] } : DEFAULT_SC);
+    setSc(s ? { labor_mode: s.labor_mode ?? "system", piece_rate: Number(s.piece_rate) || 0,
+      piece_jobs: Array.isArray(s.piece_jobs) ? s.piece_jobs.map(normPieceJob) : undefined,
+      table: { salary: Number(s.table?.salary) || 0, workdays: Number(s.table?.workdays) || 26, capacity: Number(s.table?.capacity) || 0, dept_name: s.table?.dept_name ?? "", calc: s.table?.calc === "target" ? "target" : "days", days: Number(s.table?.days) || 0, target_pp: Number(s.table?.target_pp) || 0 },
+      extras: Array.isArray(s.extras) ? s.extras : [] } : DEFAULT_SC);
   }, [cost]);
 
   if (cost === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังคิดต้นทุน…</div>;
@@ -1657,12 +1662,38 @@ function CostTab({ cost, pieceRows, moId, canEdit }: { cost: MoCost | null; piec
   const central = cost.central_rate;
   const estPP = cost.est_labor_pp;
   const overCeiling = central > 0 && estPP > central + 0.0001;
+  const estUsed = estPP > 0 ? estPP : central;                                 // ค่าแรงผลิตที่ใช้จริง (หรือเพดานถ้ายังไม่ตั้ง)
   const sysPiecePP = pieceRows.reduce((a, r) => a + (Number(r.rate) || 0) * (Number(r.qty_per) || 0), 0);
-  const systemLaborPP = (estPP > 0 ? estPP : central) + sysPiecePP;            // ค่าแรงตามระบบ
-  const tablePP = sc.table.salary > 0 && sc.table.workdays > 0 && sc.table.capacity > 0 ? (sc.table.salary / sc.table.workdays) / sc.table.capacity : 0;   // จ่ายโต๊ะ (เงินเดือน)
-  const daysNeeded = sc.table.capacity > 0 ? qty / sc.table.capacity : 0;
-  const laborPP = sc.labor_mode === "piece" ? sc.piece_rate : sc.labor_mode === "table" ? tablePP : systemLaborPP;   // ทดลอง = แทนค่าแรงระบบ
+  const systemLaborPP = estUsed + sysPiecePP;                                  // ค่าแรงตามระบบ
+  // โหมดงานเหมา: รายการงานเหมา (ยังไม่แก้ → ดึงจาก BOM) · แต่ละงาน เหมา ฿/ชิ้น หรือ ประกอบโต๊ะ
+  const effPieceJobs: PieceJob[] = (sc.piece_jobs && sc.piece_jobs.length)
+    ? sc.piece_jobs
+    : pieceRows.map((r) => ({ label: r.job_name, kind: "piece" as const, rate: Number(r.rate) || 0, qty_per: Number(r.qty_per) || 1, salary: 0, workdays: 26, days: 0, dept_name: "" }));
+  const pieceJobPP = (j: PieceJob) => j.kind === "table"
+    ? (qty > 0 && j.workdays > 0 ? ((Number(j.salary) || 0) / j.workdays) * (Number(j.days) || 0) / qty : 0)
+    : (Number(j.rate) || 0) * (Number(j.qty_per) || 1);
+  const pieceJobsPP = effPieceJobs.reduce((a, j) => a + pieceJobPP(j), 0);
+  // โหมดจ่ายโต๊ะ: เงินเดือน/วันทำงาน → ราย/วัน · 2 ทาง (ใส่วัน หรือ ใส่ค่าแรงเป้าหมาย→วันสูงสุด)
+  const t = sc.table;
+  const dailyPay = t.workdays > 0 ? (Number(t.salary) || 0) / t.workdays : 0;
+  const tableCalc = t.calc ?? "days";
+  const tablePP = tableCalc === "target" ? (Number(t.target_pp) || 0) : (qty > 0 ? dailyPay * (Number(t.days) || 0) / qty : 0);
+  const maxDays = tableCalc === "target" && dailyPay > 0 ? Math.floor((tablePP * qty) / dailyPay) : 0;   // ห้ามเกินกี่วัน
+  const daysNeeded = tableCalc === "days" ? (Number(t.days) || 0) : maxDays;
+  const laborPP = sc.labor_mode === "piece" ? pieceJobsPP : sc.labor_mode === "table" ? tablePP : systemLaborPP;
   const laborLabel = sc.labor_mode === "piece" ? "ค่าแรงเหมา (ทดลอง) / ชิ้น" : sc.labor_mode === "table" ? "ค่าแรงจ่ายโต๊ะ / ชิ้น" : "ค่าแรง (ตามระบบ) / ชิ้น";
+  const setJob = (i: number, p: Partial<PieceJob>) => setSc((s) => ({ ...s, piece_jobs: effPieceJobs.map((j, idx) => idx === i ? { ...j, ...p } : j) }));
+  const addJob = () => setSc((s) => ({ ...s, piece_jobs: [...effPieceJobs, { label: "", kind: "piece", rate: 0, qty_per: 1, salary: 0, workdays: 26, days: 0, dept_name: "" }] }));
+  const delJob = (i: number) => setSc((s) => ({ ...s, piece_jobs: effPieceJobs.filter((_, idx) => idx !== i) }));
+  // เพิ่มงานเหมา (kind=piece) กลับเข้าสูตร BOM (แทนที่ทั้งชุด bom_piecework_lines)
+  const saveJobsToBom = async () => {
+    if (!bomCode) { toast.error("ใบนี้ยังไม่มี BOM"); return; }
+    const lines = effPieceJobs.filter((j) => j.kind === "piece" && j.label.trim()).map((j) => ({ job_name: j.label.trim(), rate: j.rate, qty_per: j.qty_per, is_detail: false, note: null }));
+    setBomSaving(true);
+    try { const r = await apiFetch("/api/bom/piecework", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bom_code: bomCode, lines }) }); const j = await r.json(); if (j.error) throw new Error(j.error); toast.success(`บันทึกงานเหมาเข้า BOM แล้ว (${lines.length} งาน)`); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกเข้า BOM ไม่สำเร็จ"); }
+    finally { setBomSaving(false); }
+  };
   const extrasPP = sc.extras.reduce((a, e) => a + (e.per === "mo" ? (qty > 0 ? (Number(e.amount) || 0) / qty : 0) : (Number(e.amount) || 0)), 0);
   const costPP = matPP + laborPP + extrasPP;
   const profitPP = sell - costPP;
@@ -1702,7 +1733,12 @@ function CostTab({ cost, pieceRows, moId, canEdit }: { cost: MoCost | null; piec
         <div className="divide-y divide-slate-50 text-sm">
           <Row label="💵 ราคาขาย / ชิ้น" amount={sell} strong cls="text-slate-800" />
           <Row label="วัตถุดิบ / ชิ้น" amount={matPP} neg sub={cost.missing_price > 0 ? `⚠️ ${cost.missing_price} รายการยังไม่มีราคา` : undefined} subCls={cost.missing_price > 0 ? "text-amber-600" : "text-slate-400"} />
-          <Row label={laborLabel} amount={laborPP} neg sub={sc.labor_mode === "system" && central > 0 ? `เพดาน ฿${fmt(central)}${overCeiling ? " · เกินเพดาน!" : ""}` : sc.labor_mode === "table" && daysNeeded > 0 ? `ต้องทำ ≈ ${fmt(Math.ceil(daysNeeded))} วัน` : undefined} subCls={overCeiling ? "text-rose-600 font-medium" : "text-slate-400"} />
+          <Row label={laborLabel} amount={laborPP} neg subCls={overCeiling ? "text-rose-600 font-medium" : "text-slate-400"}
+            sub={sc.labor_mode === "system"
+              ? `ค่าแรงกลาง ฿${fmt(central)} · ใช้จริง ฿${fmt(estUsed)}${sysPiecePP > 0 ? ` · เหมา ฿${fmt(sysPiecePP)}` : ""}${overCeiling ? " · เกินเพดาน!" : ""}`
+              : sc.labor_mode === "table"
+                ? (tableCalc === "target" ? `อยากได้ → เสร็จใน ≤ ${fmt(maxDays)} วัน` : daysNeeded > 0 ? `ทำ ${fmt(Math.ceil(daysNeeded))} วัน` : undefined)
+                : `${effPieceJobs.length} งานเหมา`} />
           {extrasPP > 0 && <Row label="ค่าอื่นๆ / ชิ้น" amount={extrasPP} neg />}
           <Row label="= กำไร / ชิ้น" amount={profitPP} neg={profitPP < 0} strong cls={profitPP >= 0 ? "text-emerald-700" : "text-rose-600"} sub={`${marginPct}% ของราคาขาย`} subCls={profitPP >= 0 ? "text-emerald-600" : "text-rose-500"} />
         </div>
@@ -1725,19 +1761,66 @@ function CostTab({ cost, pieceRows, moId, canEdit }: { cost: MoCost | null; piec
           {modeBtn("system", "ตามระบบ")}{modeBtn("piece", "งานเหมา/ชิ้น")}{modeBtn("table", "จ่ายโต๊ะ (เงินเดือน)")}
         </div>
         {sc.labor_mode === "piece" && (
-          <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">ค่าแรงเหมา / ชิ้น</span>
-            <input type="number" min={0} step="any" value={sc.piece_rate || ""} disabled={!canEdit} onChange={(e) => setSc((s) => ({ ...s, piece_rate: Number(e.target.value) || 0 }))} className={numIn} /><span className="text-slate-400">บาท</span></label>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-500">รายการงานเหมา (จาก BOM — แก้/เพิ่มได้)</span>
+              {canEdit && bomCode && <button onClick={() => void saveJobsToBom()} disabled={bomSaving} className="h-7 px-2 text-[11px] font-medium text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50 disabled:opacity-50">{bomSaving ? "บันทึก…" : "💾 บันทึกเข้า BOM"}</button>}
+            </div>
+            {effPieceJobs.length === 0 && <div className="text-[11px] text-slate-400 py-1">ยังไม่มีงานเหมา — กด “เพิ่มงานเหมา”</div>}
+            {effPieceJobs.map((j, i) => (
+              <div key={i} className="flex items-center gap-1.5 bg-white border border-slate-100 rounded-lg px-2 py-1.5 flex-wrap">
+                <input value={j.label} disabled={!canEdit} placeholder="ชื่องาน" onChange={(e) => setJob(i, { label: e.target.value })} className="flex-1 min-w-[110px] h-7 px-2 text-xs border border-slate-200 rounded-lg disabled:bg-slate-50" />
+                <select value={j.kind} disabled={!canEdit} onChange={(e) => setJob(i, { kind: e.target.value as "piece" | "table" })} className="h-7 px-1 text-[11px] border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
+                  <option value="piece">เหมา ฿/ชิ้น</option><option value="table">ประกอบที่โต๊ะ</option>
+                </select>
+                {j.kind === "piece" ? (
+                  <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                    <input type="number" min={0} step="any" value={j.rate || ""} disabled={!canEdit} onChange={(e) => setJob(i, { rate: Number(e.target.value) || 0 })} className="w-16 h-7 px-1.5 text-xs text-right border border-slate-200 rounded-lg disabled:bg-slate-50" />฿ ×
+                    <input type="number" min={0} step="any" value={j.qty_per || ""} disabled={!canEdit} onChange={(e) => setJob(i, { qty_per: Number(e.target.value) || 1 })} className="w-12 h-7 px-1.5 text-xs text-right border border-slate-200 rounded-lg disabled:bg-slate-50" />
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                    <select value={j.dept_name} disabled={!canEdit} onChange={(e) => { const d = departments.find((x) => x.name === e.target.value); setJob(i, { dept_name: e.target.value, salary: d ? (deptWages[d.id] || 0) : j.salary }); }} className="h-7 px-1 text-[11px] border border-slate-200 rounded-lg bg-white max-w-[110px] disabled:bg-slate-50">
+                      <option value="">เลือกโต๊ะ</option>{departments.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+                    </select>
+                    <input type="number" min={0} step="any" value={j.days || ""} disabled={!canEdit} placeholder="วัน" onChange={(e) => setJob(i, { days: Number(e.target.value) || 0 })} className="w-12 h-7 px-1.5 text-xs text-right border border-slate-200 rounded-lg disabled:bg-slate-50" />ว.
+                  </span>
+                )}
+                <span className="text-[11px] font-medium text-slate-600 tabular-nums">= ฿{fmt(pieceJobPP(j))}</span>
+                {canEdit && <button onClick={() => delJob(i)} className="text-slate-300 hover:text-rose-600 text-sm">🗑</button>}
+              </div>
+            ))}
+            {canEdit && <button onClick={addJob} className="h-7 px-2.5 text-xs font-medium text-indigo-600 border border-indigo-200 rounded-lg hover:bg-indigo-50">＋ เพิ่มงานเหมา</button>}
+            <div className="text-[11px] text-indigo-700 bg-white border border-indigo-100 rounded-lg px-2.5 py-1.5">รวมค่าแรงเหมา <b>฿{fmt(pieceJobsPP)}</b>/ชิ้น · รวมทั้งใบ <b>฿{fmt(pieceJobsPP * qty)}</b></div>
+          </div>
         )}
         {sc.labor_mode === "table" && (
           <div className="space-y-1.5">
-            <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">เงินเดือน (โต๊ะ)</span>
+            <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">เลือกโต๊ะ</span>
+              <select value={sc.table.dept_name || ""} disabled={!canEdit} onChange={(e) => { const d = departments.find((x) => x.name === e.target.value); setTable({ dept_name: e.target.value, salary: d ? (deptWages[d.id] || 0) : sc.table.salary }); }}
+                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
+                <option value="">— เลือกโต๊ะ (ดึงเงินเดือนรวม) —</option>{departments.map((d) => <option key={d.id} value={d.name}>{d.name}{deptWages[d.id] ? ` · ฿${fmt(deptWages[d.id])}/ด.` : ""}</option>)}
+              </select></label>
+            <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">เงินเดือนรวม (โต๊ะ)</span>
               <input type="number" min={0} step="any" value={sc.table.salary || ""} disabled={!canEdit} onChange={(e) => setTable({ salary: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">บาท/เดือน</span></label>
             <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">วันทำงาน / เดือน</span>
               <input type="number" min={0} step="any" value={sc.table.workdays || ""} disabled={!canEdit} onChange={(e) => setTable({ workdays: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">วัน</span></label>
-            <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">กำลังผลิต / วัน</span>
-              <input type="number" min={0} step="any" value={sc.table.capacity || ""} disabled={!canEdit} onChange={(e) => setTable({ capacity: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">ชิ้น/วัน</span></label>
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              <span className="w-32 text-[12px] text-slate-600">คิดแบบ</span>
+              <button type="button" disabled={!canEdit} onClick={() => setTable({ calc: "days" })} className={`h-7 px-2.5 text-[11px] rounded-lg border ${tableCalc === "days" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200"}`}>ใส่จำนวนวัน</button>
+              <button type="button" disabled={!canEdit} onClick={() => setTable({ calc: "target" })} className={`h-7 px-2.5 text-[11px] rounded-lg border ${tableCalc === "target" ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200"}`}>ใส่ค่าแรงที่อยากได้</button>
+            </div>
+            {tableCalc === "days" ? (
+              <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">ผลิตกี่วัน</span>
+                <input type="number" min={0} step="any" value={sc.table.days || ""} disabled={!canEdit} onChange={(e) => setTable({ days: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">วัน</span></label>
+            ) : (
+              <label className="flex items-center gap-2 text-[12px] text-slate-600"><span className="w-32">ค่าแรง/ชิ้น ที่อยากได้</span>
+                <input type="number" min={0} step="any" value={sc.table.target_pp || ""} disabled={!canEdit} onChange={(e) => setTable({ target_pp: Number(e.target.value) || 0 })} className={numIn} /><span className="text-slate-400">บาท</span></label>
+            )}
             <div className="text-[11px] text-indigo-700 bg-white border border-indigo-100 rounded-lg px-2.5 py-1.5">
-              📅 ต้องทำ ≈ <b>{daysNeeded > 0 ? fmt(Math.ceil(daysNeeded)) : "—"}</b> วัน · ค่าแรง <b>฿{fmt(tablePP)}</b>/ชิ้น · รวม <b>฿{fmt(tablePP * qty)}</b>
+              {tableCalc === "days"
+                ? <>📅 ผลิต <b>{fmt(Number(sc.table.days) || 0)}</b> วัน → ค่าแรง <b>฿{fmt(tablePP)}</b>/ชิ้น · รวม <b>฿{fmt(tablePP * qty)}</b></>
+                : <>🎯 อยากได้ <b>฿{fmt(tablePP)}</b>/ชิ้น (รวม ฿{fmt(tablePP * qty)}) → ต้องผลิตเสร็จใน <b>≤ {fmt(maxDays)}</b> วัน</>}
             </div>
           </div>
         )}

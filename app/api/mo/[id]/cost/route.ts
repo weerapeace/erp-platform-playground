@@ -16,10 +16,23 @@ const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export type MoCostMaterial = { sku: string | null; name: string | null; material_type: string | null; uom: string | null; qty_per: number; unit_cost: number; line_pp: number; has_price: boolean };
 // ค่าทดลองคำนวณต้นทุน (บันทึกต่อใบ) — ค่าแรงทดลอง "แทน" ค่าแรงระบบ · ค่าอื่นๆ "บวกเพิ่ม"
+// งานเหมา 1 รายการ — เลือกได้ว่าเป็น "เหมา ฿/ชิ้น" หรือ "ประกอบที่โต๊ะ (เงินเดือน)"
+export type PieceJob = {
+  label: string;
+  kind: "piece" | "table";
+  rate: number;        // kind=piece: บาท/ชิ้น
+  qty_per: number;     // จำนวนครั้ง/ชิ้น (default 1)
+  salary: number;      // kind=table: เงินเดือนโต๊ะ
+  workdays: number;    // kind=table: วันทำงาน/เดือน
+  days: number;        // kind=table: จำนวนวันที่ใช้ทำงานนี้
+  dept_name: string;   // kind=table: ชื่อโต๊ะ (แสดง)
+};
 export type CostScenario = {
   labor_mode: "system" | "piece" | "table";          // ใช้ค่าแรงแบบไหน
-  piece_rate: number;                                 // งานเหมา/ชิ้น (ทดลอง)
-  table: { salary: number; workdays: number; capacity: number };   // เงินเดือน · วันทำงาน/เดือน · กำลังผลิต/วัน
+  piece_rate: number;                                 // (legacy) งานเหมา/ชิ้น ช่องเดียวเดิม
+  piece_jobs?: PieceJob[];                            // ใหม่: รายการงานเหมา (โหมด piece)
+  // โหมดจ่ายโต๊ะ: เลือกโต๊ะ→เงินเดือนรวม · 2 ทาง (ใส่วัน หรือ ใส่ค่าแรงเป้าหมาย→ได้วันสูงสุด)
+  table: { salary: number; workdays: number; capacity: number; dept_name?: string; calc?: "days" | "target"; days?: number; target_pp?: number };
   extras: { label: string; amount: number; per: "piece" | "mo" }[];   // ค่าส่ง/ค่าจิปาถะ ฯลฯ
 };
 export type MoCost = {
