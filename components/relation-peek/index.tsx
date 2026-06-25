@@ -14,6 +14,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth, usePermission } from "@/components/auth";
 import { useBackdropDismiss } from "@/components/modal";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
+import { RelationOne2Many } from "@/components/relation-multi";   // ของกลาง: ข้อมูลลูก/เกี่ยวข้อง (BOM, 360)
 import { ImageInput } from "@/components/image-input";
 import { invalidateCache } from "@/lib/client-cache";
 import { formatAmount, currencyLabel } from "@/lib/money";
@@ -89,7 +90,7 @@ export function RelationPeekModal({
     setLoading(true); setErr(null);
     try {
       const reg = await apiFetch(`/api/admin/field-registry-v2?module=${moduleKey}`).then((r) => r.json());
-      setFields((reg.fields ?? []).filter((f: RF) => (f.is_visible || f.show_in_form) && !["one2many", "many2many"].includes(f.ui_field_type)));
+      setFields((reg.fields ?? []).filter((f: RF) => (f.is_visible || f.show_in_form) && f.ui_field_type !== "many2many"));   // เก็บ one2many ไว้โชว์ในโหมดดู (RelationOne2Many)
       setLayout((reg.layout ?? null) as PeekLayout);
       setQuickFields(Array.isArray(reg.quick_edit_fields) && reg.quick_edit_fields.length > 0 ? (reg.quick_edit_fields as string[]) : null);
       if (isCreate) {
@@ -103,6 +104,14 @@ export function RelationPeekModal({
   }, [moduleKey, recordId, isCreate]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // ข้อมูลที่เกี่ยวข้อง 360 (โมดูลอื่นชี้กลับมาหา record นี้) — ของกลางเดียวกับ MasterCRUD
+  const [reverseRels, setReverseRels] = useState<{ source_module_key: string; fk_column: string; source_label: string; label_field: string; image_field?: string | null; sub_fields?: string[] }[]>([]);
+  useEffect(() => {
+    if (isCreate) { setReverseRels([]); return; }
+    apiFetch(`/api/admin/reverse-relations?module=${moduleKey}`).then((r) => r.json())
+      .then((j) => { if (Array.isArray(j.data)) setReverseRels(j.data); }).catch(() => {});
+  }, [moduleKey, isCreate]);
 
   // โหมดแก้เร็ว: กรองตามชุดฟิลด์ของโมดูล (ยังไม่ตั้ง = โชว์ทุกฟิลด์)
   const shownFields = quickEdit && quickFields ? fields.filter((f) => quickFields.includes(f.field_key)) : fields;
@@ -362,13 +371,32 @@ export function RelationPeekModal({
                     .map((t) => ({ label: t.label, secs: t.sections.filter((s) => (bySec.get(s.key)?.length ?? 0) > 0) }))
                     .filter((t) => t.secs.length > 0);
                   if (leftover.length) { bySec.set("__lo__", leftover); vtabs.push({ label: "อื่นๆ", secs: [{ key: "__lo__", label: "" }] }); }
-                  if (vtabs.length === 0) return grid(viewFields);
-                  const renderSecs = (secs: { key: string; label: string }[]) => secs.map((s) => (
-                    <div key={s.key} className="mb-3">
-                      {s.label && <div className="text-xs font-semibold text-slate-500 mb-1 pb-0.5 border-b border-slate-100">{s.label}</div>}
-                      {grid(bySec.get(s.key) ?? [])}
-                    </div>
-                  ));
+                  if (reverseRels.length) vtabs.push({ label: "🧩 เกี่ยวข้อง", secs: [{ key: "__360__", label: "" }] });
+                  const normOf = (fs: RF[]) => fs.filter((f) => f.ui_field_type !== "one2many");
+                  const o2mOf  = (fs: RF[]) => fs.filter((f) => f.ui_field_type === "one2many");
+                  const renderSecs = (secs: { key: string; label: string }[]) => secs.map((s) => {
+                    if (s.key === "__360__") return (
+                      <div key="__360__" className="space-y-3">
+                        {reverseRels.map((rr) => (
+                          <RelationOne2Many key={`${rr.source_module_key}|${rr.fk_column}`} recordId={recordId} title={rr.source_label}
+                            config={{ target_module_key: rr.source_module_key, target_fk_column: rr.fk_column, list_title_field: rr.label_field, list_image_field: rr.image_field ?? undefined, list_sub_fields: rr.sub_fields } as never} />
+                        ))}
+                      </div>
+                    );
+                    const fs = bySec.get(s.key) ?? [];
+                    return (
+                      <div key={s.key} className="mb-3">
+                        {s.label && <div className="text-xs font-semibold text-slate-500 mb-1 pb-0.5 border-b border-slate-100">{s.label}</div>}
+                        {normOf(fs).length > 0 && grid(normOf(fs))}
+                        {o2mOf(fs).map((f) => (
+                          <div key={f.field_key} className="mt-2">
+                            <RelationOne2Many recordId={recordId} title={f.field_label} parentValues={row ?? undefined} config={(f.relation_config ?? {}) as never} />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  });
+                  if (vtabs.length === 0) return grid(normOf(viewFields));
                   if (vtabs.length === 1) return <>{renderSecs(vtabs[0].secs)}</>;
                   const ai = Math.min(activeTab, vtabs.length - 1);
                   return (
