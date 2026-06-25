@@ -74,6 +74,84 @@ function JobCard({ j }: { j: ProductionJob }) {
   );
 }
 
+// ── ปฏิทิน (เฟส 2) — งานตามกำหนดส่ง ──
+const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const DOW = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+
+function CalendarView({ jobs }: { jobs: ProductionJob[] }) {
+  const today = new Date();
+  const [y, setY] = useState(today.getFullYear());
+  const [m, setM] = useState(today.getMonth());
+  const [sel, setSel] = useState<string | null>(null);
+
+  const jobsByDay = useMemo(() => {
+    const map = new Map<string, ProductionJob[]>();
+    for (const j of jobs) {
+      if (!j.due_date) continue;
+      const d = new Date(j.due_date);
+      if (d.getFullYear() !== y || d.getMonth() !== m) continue;
+      const k = dayKey(d);
+      (map.get(k) ?? map.set(k, []).get(k)!).push(j);
+    }
+    return map;
+  }, [jobs, y, m]);
+
+  const startDow = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const cells: (number | null)[] = [...Array(startDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
+  const todayKey = dayKey(today);
+  const todayMid = new Date(today.toDateString());
+  const noDue = jobs.filter((j) => !j.due_date).length;
+  const prev = () => (m === 0 ? (setY(y - 1), setM(11)) : setM(m - 1));
+  const next = () => (m === 11 ? (setY(y + 1), setM(0)) : setM(m + 1));
+  const selJobs = sel ? (jobsByDay.get(sel) ?? []) : [];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-1">
+          <button onClick={prev} className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">‹</button>
+          <h3 className="text-base font-bold text-slate-800 w-44 text-center">{new Date(y, m, 1).toLocaleDateString("th-TH", { year: "numeric", month: "long" })}</h3>
+          <button onClick={next} className="h-8 w-8 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">›</button>
+          <button onClick={() => { setY(today.getFullYear()); setM(today.getMonth()); }} className="ml-1 h-8 px-3 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">เดือนนี้</button>
+        </div>
+        {noDue > 0 && <span className="text-[11px] text-slate-400">⚠ {noDue} งานยังไม่ระบุกำหนดส่ง (ไม่แสดงในปฏิทิน)</span>}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-slate-400 mb-1">{DOW.map((d) => <div key={d}>{d}</div>)}</div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((day, i) => {
+          if (day === null) return <div key={i} />;
+          const d = new Date(y, m, day); const k = dayKey(d);
+          const items = jobsByDay.get(k) ?? [];
+          const isToday = k === todayKey;
+          const overdue = items.length > 0 && d < todayMid;
+          return (
+            <button key={i} onClick={() => setSel(sel === k ? null : k)}
+              className={`min-h-[66px] rounded-lg border p-1 text-left flex flex-col transition-colors ${sel === k ? "ring-2 ring-blue-400 " : ""}${isToday ? "border-blue-400 bg-blue-50/50" : overdue ? "border-red-200 bg-red-50/40" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+              <span className={`text-[11px] font-semibold ${isToday ? "text-blue-700" : overdue ? "text-red-600" : "text-slate-500"}`}>{day}</span>
+              {items.length > 0 && (
+                <div className="mt-0.5 space-y-0.5 min-w-0">
+                  {items.slice(0, 2).map((j) => { const s = j.status ? getStatusStyle(j.status) : null; return <div key={j.id} className={`text-[9px] leading-tight truncate rounded px-1 py-0.5 ${s ? `${s.bg} ${s.text}` : "bg-slate-100 text-slate-500"}`}>{j.product_sku || j.mo_no}</div>; })}
+                  {items.length > 2 && <div className="text-[9px] text-slate-400 px-1">+{items.length - 2} อื่น ๆ</div>}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {sel && (
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <h4 className="text-sm font-bold text-slate-700 mb-2">📅 {new Date(sel).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {selJobs.length} งาน</h4>
+          {selJobs.length === 0 ? <p className="text-sm text-slate-400">ไม่มีงานกำหนดส่งวันนี้</p>
+            : <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>{selJobs.map((j) => <JobCard key={j.id} j={j} />)}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const COLUMNS: ColumnDef<ProductionJob>[] = [
   { id: "image", header: "", size: 56, enableSorting: false, cell: ({ row }) => <HoverImage url={row.original.image_url} size={36} previewSize={240} /> },
   { accessorKey: "product_sku", header: "SKU", size: 130, cell: ({ getValue }) => <span className="font-mono text-xs text-slate-700">{(getValue() as string) || "—"}</span> },
@@ -98,6 +176,7 @@ export default function ProductionDashboardPage() {
   const [grouped, setGrouped] = useState(false);
   const [groupField, setGroupField] = useState<GroupField>("brand");
   const [gSearch, setGSearch] = useState("");
+  const [view, setView] = useState<"list" | "calendar">("list");
 
   useEffect(() => {
     let alive = true;
@@ -127,7 +206,13 @@ export default function ProductionDashboardPage() {
           <h1 className="text-xl font-bold text-slate-900">📊 Dashboard ผลิต</h1>
           <p className="text-sm text-slate-500 mt-0.5">งานผลิตทุกสถานะ — กรองซ้าย · สลับ ตาราง/การ์ด · ค้นหาได้</p>
         </div>
-        <button onClick={() => router.push("/master/work-board")} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🗂 ไปบอร์ดจ่ายงาน</button>
+        <div className="flex items-center gap-2">
+          <div className="flex border border-slate-200 rounded-lg overflow-hidden text-sm">
+            <button onClick={() => setView("list")} className={`h-9 px-3 font-medium ${view === "list" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📋 รายการ</button>
+            <button onClick={() => setView("calendar")} className={`h-9 px-3 font-medium border-l border-slate-200 ${view === "calendar" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📅 ปฏิทิน</button>
+          </div>
+          <button onClick={() => router.push("/master/work-board")} className="h-9 px-4 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🗂 ไปบอร์ดจ่ายงาน</button>
+        </div>
       </div>
 
       <div className="flex-1 flex gap-4 p-4 min-h-0">
@@ -148,6 +233,7 @@ export default function ProductionDashboardPage() {
 
         {/* เนื้อหา */}
         <main className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200 p-3">
+          {view === "calendar" ? <CalendarView jobs={shown} /> : <>
           <div className="flex items-center gap-3 mb-3 flex-wrap">
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="w-4 h-4 accent-blue-600" /> จัดกลุ่ม
@@ -193,6 +279,7 @@ export default function ProductionDashboardPage() {
               exportFilename="production-dashboard"
             />
           )}
+          </>}
         </main>
       </div>
     </div>
