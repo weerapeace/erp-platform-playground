@@ -58,12 +58,18 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
   const now = new Date();
   const thisMonth = monthKey(now);
   // 6 เดือนล่าสุด (เก่า→ใหม่)
-  const months: { key: string; label: string; thb: number }[] = [];
+  const months: { key: string; label: string; thb: number; po_count: number; pr_count: number }[] = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    months.push({ key: monthKey(d), label: TH_MONTH[d.getUTCMonth()], thb: 0 });
+    months.push({ key: monthKey(d), label: TH_MONTH[d.getUTCMonth()], thb: 0, po_count: 0, pr_count: 0 });
   }
   const monthIdx = new Map(months.map((m, i) => [m.key, i]));
+  // จำนวนใบขอซื้อ (PR) ต่อเดือน — ตามวันที่สร้าง
+  for (const p of prRows) {
+    const cd = p.created_at ? new Date(String(p.created_at)) : null;
+    const mk = cd && !isNaN(cd.getTime()) ? monthKey(cd) : null;
+    if (mk && monthIdx.has(mk)) months[monthIdx.get(mk)!].pr_count++;
+  }
 
   let spendThisMonth = 0;
   let unpaidSum = 0;
@@ -73,7 +79,7 @@ async function _GET(request: NextRequest): Promise<NextResponse> {
     const od = p.order_date ? new Date(String(p.order_date) + "T00:00:00Z") : null;
     const mk = od && !isNaN(od.getTime()) ? monthKey(od) : null;
     if (mk === thisMonth) spendThisMonth += thb;
-    if (mk && monthIdx.has(mk)) months[monthIdx.get(mk)!].thb += thb;
+    if (mk && monthIdx.has(mk)) { const mi = monthIdx.get(mk)!; months[mi].thb += thb; months[mi].po_count++; }
     if (p.payment_status === "unpaid") unpaidSum += thb;
     const seller = (p.seller_name as string) || "—";
     bySeller.set(seller, (bySeller.get(seller) ?? 0) + thb);

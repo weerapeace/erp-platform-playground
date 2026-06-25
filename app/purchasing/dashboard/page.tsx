@@ -16,7 +16,7 @@ type Dash = {
   rmb_rate: number;
   kpi: { waiting: number; pending_receive: number; unpaid_thb: number; spend_this_month_thb: number };
   pr_status: Record<string, number>;
-  monthly: { key: string; label: string; thb: number }[];
+  monthly: { key: string; label: string; thb: number; po_count: number; pr_count: number }[];
   top_suppliers: { name: string; thb: number }[];
   waiting_list: { id: string; requester: string; seller_name: string | null; amount_thb: number; created_at: string | null }[];
 };
@@ -81,6 +81,7 @@ function Card({ children, className = "", onClick }: { children: React.ReactNode
 export default function PurchasingDashboardPage() {
   const [d, setD] = useState<Dash | null>(null);
   const [drill, setDrill] = useState<{ type: string; seller?: string } | null>(null);   // ป๊อปเจาะรายการ (กดการ์ด/ร้าน)
+  const [metric, setMetric] = useState<"thb" | "po_count" | "pr_count">("thb");   // เลือกสิ่งที่กราฟรายเดือนโชว์
   const [lineOpen, setLineOpen] = useState(false);   // โมดอลตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ
   const [incoming, setIncoming] = useState<Incoming[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,7 +102,10 @@ export default function PurchasingDashboardPage() {
       .catch(() => {});
   }, [d]);
 
-  const maxMonth = Math.max(1, ...(d?.monthly.map(m => m.thb) ?? [1]));
+  const METRICS = { thb: "ยอดซื้อ (บาท)", po_count: "จำนวนใบสั่งซื้อ", pr_count: "จำนวนใบขอซื้อ" } as const;
+  const mVal = (m: { thb: number; po_count: number; pr_count: number }) => m[metric];
+  const mLabel = (v: number) => metric === "thb" ? bahtShort(v) : v.toLocaleString("th-TH");
+  const maxMonth = Math.max(1, ...(d?.monthly.map(mVal) ?? [1]));
   const maxSup = Math.max(1, ...(d?.top_suppliers.map(s => s.thb) ?? [1]));
   const statusData = Object.entries(d?.pr_status ?? {})
     .map(([k, v]) => ({ label: PR_STATUS[k]?.label ?? k, value: v, color: PR_STATUS[k]?.color ?? "#888780" }))
@@ -143,15 +147,23 @@ export default function PurchasingDashboardPage() {
               </Card>
             </div>
 
-            {/* Monthly spend */}
+            {/* Monthly chart — เลือก metric + โชว์ตัวเลขบนแท่ง */}
             <Card>
-              <div className="text-sm font-medium mb-3">ยอดซื้อรายเดือน <span className="text-xs text-slate-400 font-normal">(บาท · แปลงหยวนที่เรต {d.rmb_rate})</span></div>
-              <div className="flex items-end gap-3 h-28 px-1">
+              <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                <div className="text-sm font-medium">รายเดือน {metric === "thb" && <span className="text-xs text-slate-400 font-normal">(แปลงหยวนที่เรต {d.rmb_rate})</span>}</div>
+                <select value={metric} onChange={(e) => setMetric(e.target.value as typeof metric)}
+                  className="h-8 px-2 text-xs border border-slate-200 rounded-lg bg-white">
+                  {(Object.keys(METRICS) as (keyof typeof METRICS)[]).map((k) => <option key={k} value={k}>{METRICS[k]}</option>)}
+                </select>
+              </div>
+              <div className="flex items-end gap-3 h-32 px-1">
                 {d.monthly.map((m, i) => {
-                  const h = Math.round((m.thb / maxMonth) * 96);
+                  const v = mVal(m);
+                  const h = Math.round((v / maxMonth) * 92);
                   const last = i === d.monthly.length - 1;
                   return (
-                    <div key={m.key} className="flex-1 flex flex-col items-center gap-1.5" title={baht(m.thb)}>
+                    <div key={m.key} className="flex-1 flex flex-col items-center gap-1 justify-end" title={mLabel(v)}>
+                      <span className={`text-[10px] tabular-nums ${last ? "text-indigo-600 font-semibold" : "text-slate-400"}`}>{v > 0 ? mLabel(v) : ""}</span>
                       <div className="w-full max-w-[44px] rounded-t" style={{ height: Math.max(2, h), background: last ? "#534AB7" : "#AFA9EC" }} />
                       <span className={`text-[11px] ${last ? "text-indigo-600 font-medium" : "text-slate-400"}`}>{m.label}</span>
                     </div>
@@ -183,7 +195,10 @@ export default function PurchasingDashboardPage() {
             {/* Incoming + Waiting */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
               <Card>
-                <div className="text-sm font-medium mb-3">ของใกล้เข้า / เลยกำหนด</div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="text-sm font-medium">ของใกล้เข้า / เลยกำหนด</div>
+                  <button type="button" onClick={() => setDrill({ type: "pending_receive" })} className="text-xs text-blue-600 hover:underline">รอของเข้าทั้งหมด →</button>
+                </div>
                 <div className="space-y-2 text-xs">
                   {incoming.length === 0 && <div className="text-slate-300 py-4 text-center">ไม่มีรายการคาดเข้า</div>}
                   {incoming.map((r) => {
@@ -200,12 +215,16 @@ export default function PurchasingDashboardPage() {
                       </div>
                     );
                   })}
+                  <Link href="/purchasing" className="block text-center text-blue-600 hover:underline pt-1">+ เพิ่มรายการตามใบสั่งงาน →</Link>
                 </div>
               </Card>
               <Card>
-                <div className="text-sm font-medium mb-3">รออนุมัติ <span className="text-xs text-slate-400 font-normal">({d.kpi.waiting})</span></div>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="text-sm font-medium">รายการรอซื้อ <span className="text-xs text-slate-400 font-normal">({d.kpi.waiting})</span></div>
+                  <button type="button" onClick={() => setDrill({ type: "waiting" })} className="text-xs text-blue-600 hover:underline">เลือกร้าน/ค้นหา/ตามใบสั่งงาน →</button>
+                </div>
                 <div className="space-y-2 text-xs">
-                  {d.waiting_list.length === 0 && <div className="text-slate-300 py-4 text-center">ไม่มีรายการรออนุมัติ</div>}
+                  {d.waiting_list.length === 0 && <div className="text-slate-300 py-4 text-center">ไม่มีรายการรอซื้อ</div>}
                   {d.waiting_list.map((p) => (
                     <div key={p.id} className="flex items-center justify-between gap-2">
                       <span className="truncate text-slate-600">{p.seller_name || "—"} <span className="text-slate-400">· {p.requester}</span></span>
