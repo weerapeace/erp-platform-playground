@@ -29,7 +29,7 @@ export default function BeltLayoutPage() {
   }, []);
 
   const layout: BeltLayout = { boxH, frontDim: fd, backDim: bd };
-  const svg = buildBeltDiagramSvg({ brandText: "Louis Montini", holeCount: 5, holeSpacingIn: 1, toEndIn: 7, logoDistIn: 1, tailShape: "duckbill", layout });
+  const svg = buildBeltDiagramSvg({ brandText: "Louis Montini", holeCount: 5, holeSpacingIn: 1, toEndIn: 7, logoDistIn: 1, tailShape: "duckbill", layout, placeholder: true });
 
   const save = useCallback(async () => {
     setSaving(true); setMsg("");

@@ -24,6 +24,7 @@ export type BeltDiagramParams = {
   frontLogoImg?: string | null;  // belt_logo (โลโก้ด้านหน้า)
   backLogoImg?: string | null;   // belt_logo (โลโก้ด้านหลัง)
   layout?: BeltLayout;           // เฟส 2: ปรับ ความสูง/ตำแหน่งเส้นระยะ (บันทึกค่าได้)
+  placeholder?: boolean;         // หน้าตั้งค่า: วาดโครงจำลอง (ไม่มีรูปจริง) เพื่อพรีวิวตำแหน่ง/ความสูงจากสไลเดอร์
 };
 
 // ตำแหน่ง+ความสูง ที่ปรับ+บันทึกได้ (พิกัดในระบบ viewBox 0..740)
@@ -43,6 +44,22 @@ export const BELT_DEFAULT_LAYOUT = {
   frontDim: { x: BX + BW - 96, y: 12, w: 74 },     // วงเล็บ "ห่างโลโก้" (เหนือกรอบหน้า ใกล้ปลาย)
   backDim:  { x: BX + 120, y: 14, w: BW - 132 },   // วงเล็บ "ถึงปลายสาย" (ใต้กรอบหลัง)
 };
+// โครงเข็มขัดจำลอง (วาดเมื่อยังไม่มีรูปจริง) — เต็มกรอบเดียวกับรูป → เห็นตำแหน่งเส้น/ความสูงจากสไลเดอร์
+function placeholderStrap(y: number, BH: number, label: string, mirror: boolean): string {
+  const x0 = BX, x1 = BX + BW, b = y + BH, cy = y + BH / 2;
+  const tail = Math.min(70, BH * 0.85);
+  const path = `M${x0},${y} H${x1 - tail} L${x1 - 8},${y + 10} Q${x1},${cy} ${x1 - 8},${b - 10} L${x1 - tail},${b} H${x0} Z`;
+  let holes = "";
+  if (!mirror) for (let i = 0; i < 5; i++) holes += `<ellipse cx="${x0 + 40 + i * 46}" cy="${cy}" rx="8" ry="12" fill="#fff" stroke="#94a3b8" stroke-width="1.5"/>`;
+  const tx = x1 - tail - 80;
+  const txt = label
+    ? (mirror
+        ? `<g transform="translate(${tx},${cy + 5}) scale(-1,1)"><text font-size="15" font-weight="700" fill="#94a3b8" text-anchor="middle">${esc(label)}</text></g>`
+        : `<text x="${tx}" y="${cy + 5}" font-size="15" font-weight="700" fill="#94a3b8" text-anchor="middle">${esc(label)}</text>`)
+    : "";
+  return `<path d="${path}" fill="#fff" stroke="#94a3b8" stroke-width="2"/>${holes}${txt}`;
+}
+
 function imageComposite(p: BeltDiagramParams): string {
   // ทุกรูป (ทรงปลายหาง/ลายรู/โลโก้) ทำบนกรอบเทมเพลตเดียวกัน → วางเต็มกรอบ ซ้อนตรงเป๊ะ
   const L = p.layout ?? {};
@@ -50,8 +67,13 @@ function imageComposite(p: BeltDiagramParams): string {
   const fd = L.frontDim ?? BELT_DEFAULT_LAYOUT.frontDim;
   const bd = L.backDim ?? BELT_DEFAULT_LAYOUT.backDim;
   const fY = 28, bY = fY + BH + 46;
+  const brand   = (p.brandText ?? "").trim();
+  const leather = (p.leatherText ?? "Genuine Leather").trim();
   const full = (href: string | null | undefined, y: number) =>
     href ? `<image href="${esc(href)}" x="${BX}" y="${y}" width="${BW}" height="${BH}" preserveAspectRatio="none"/>` : "";
+  // ชั้นทรงเข็มขัด: มีรูป→วางรูป, ไม่มีรูป→วาดโครงจำลอง (สำหรับหน้าตั้งค่า/รูปขาด)
+  const strap = (y: number, label: string, mirror: boolean) =>
+    p.strapImg ? full(p.strapImg, y) : placeholderStrap(y, BH, label, mirror);
   // เส้นบอกระยะแบบวงเล็บ (เส้นโยง + ป้าย)
   const bracket = (x: number, w: number, y: number, label: string, down: boolean) => {
     const t = down ? 5 : -5;
@@ -61,8 +83,8 @@ function imageComposite(p: BeltDiagramParams): string {
   const logoDist = p.logoDistIn != null ? `ห่าง ${p.logoDistIn} นิ้ว` : "ห่าง 1 นิ้ว";
   const toEnd = `${p.toEndIn ?? 7} นิ้วถึงปลายสาย`;
   // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (พิมพ์บันได back_only=หลังเท่านั้น)
-  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${full(p.strapImg, fY)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${bracket(fd.x, fd.w, fY - fd.y, logoDist, false)}`;
-  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${full(p.strapImg, bY)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${bracket(bd.x, bd.w, bY + BH + bd.y, toEnd, true)}`;
+  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${strap(fY, brand, false)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${bracket(fd.x, fd.w, fY - fd.y, logoDist, false)}`;
+  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${strap(bY, leather, true)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${bracket(bd.x, bd.w, bY + BH + bd.y, toEnd, true)}`;
   const H = bY + BH + 30;
   return `<svg viewBox="0 0 740 ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
 }
@@ -109,5 +131,6 @@ function vectorSvg(p: BeltDiagramParams): string {
 
 export function buildBeltDiagramSvg(p: BeltDiagramParams = {}): string {
   const hasImg = !!(p.strapImg || p.holeImg || p.frontLogoImg || p.backLogoImg);
-  return hasImg ? imageComposite(p) : vectorSvg(p);
+  // มีรูปจริง หรือ โหมดพรีวิวหน้าตั้งค่า (placeholder) → ใช้ตัวซ้อนรูป (อ่านค่า layout จากสไลเดอร์)
+  return (hasImg || p.placeholder) ? imageComposite(p) : vectorSvg(p);
 }
