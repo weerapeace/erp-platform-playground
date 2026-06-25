@@ -180,6 +180,8 @@ export default function WorkBoardPage() {
     const g = pendGroupFilter && pendGroupFilter !== "__all__" ? `&group=${encodeURIComponent(pendGroupFilter)}` : "";
     return `/print/work-board?type=${type}${g}`;
   }, [pendGroupFilter]);
+  // แผนที่จะพิมพ์ (รายการจ่ายตามแผน) — ดีฟอลต์เป็นแผนที่กำลังเปิดอยู่ ถ้าไม่ใช่ก็แผนแรก
+  const [printPlan, setPrintPlan] = useState<string>("");
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
     setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
@@ -969,11 +971,14 @@ export default function WorkBoardPage() {
           <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
           <div className="relative">
             <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์รายงาน ▾</button>
-            {printOpen && (<>
+            {printOpen && (() => {
+              const planSel = printPlan || (activePlan !== "real" ? activePlan : plans[0]?.id) || "";
+              const planHref = planSel ? `/print/work-board?type=plan&plan=${encodeURIComponent(planSel)}` : "";
+              return (<>
               <div className="fixed inset-0 z-40" onClick={() => setPrintOpen(false)} />
               <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
                 <div className="px-3 py-2 border-b border-slate-100">
-                  <label className="text-[11px] text-slate-500 block mb-1">เลือกกลุ่มที่จะพิมพ์</label>
+                  <label className="text-[11px] text-slate-500 block mb-1">เลือกกลุ่มที่จะพิมพ์ (รอจ่าย/กำลังผลิต)</label>
                   <select value={pendGroupFilter} onChange={(e) => setPendGroupFilter(e.target.value)} className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
                     <option value="__all__">ทั้งหมด</option>
                     <option value="__none__">— ยังไม่จับกลุ่ม —</option>
@@ -983,8 +988,18 @@ export default function WorkBoardPage() {
                 <a href={printUrl("pending")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">📋 รายการรอจ่ายทั้งหมด<div className="text-[11px] text-slate-400">พร้อมรูป+ค่าแรง · ตัวที่ยังไม่ตั้ง = เว้นช่องให้กรอก</div></a>
                 <a href={printUrl("piece")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🧵 รายการรอจ่ายเหมาทั้งหมด<div className="text-[11px] text-slate-400">เฉพาะงานเหมารายชิ้นที่รอจ่าย</div></a>
                 <a href={printUrl("production")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🔨 รายการกำลังผลิต<div className="text-[11px] text-slate-400">แยกตามโต๊ะ/ช่าง มีรายละเอียดแต่ละโต๊ะ</div></a>
+                <div className="px-3 py-2 border-t border-slate-100">
+                  <label className="text-[11px] text-slate-500 block mb-1">📅 รายการจ่ายงานตามแผน — เลือกแผน</label>
+                  <select value={planSel} onChange={(e) => setPrintPlan(e.target.value)} disabled={plans.length === 0} className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white mb-1.5 disabled:bg-slate-50">
+                    {plans.length === 0 ? <option value="">— ยังไม่มีแผน —</option> : plans.map((p) => <option key={p.id} value={p.id}>{p.name}{p.line_count ? ` (${p.line_count})` : ""}</option>)}
+                  </select>
+                  {planSel
+                    ? <a href={planHref} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block text-center px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">พิมพ์แผนที่เลือก</a>
+                    : <div className="text-center px-3 py-1.5 bg-slate-100 text-slate-400 rounded-lg">ยังไม่มีแผนให้พิมพ์</div>}
+                </div>
               </div>
-            </>)}
+              </>);
+            })()}
           </div>
         </div>
       </div>

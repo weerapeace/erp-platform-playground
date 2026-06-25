@@ -12,8 +12,10 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
+import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
+type PlanResp = { id: string; name: string; status: string; start_date: string | null; end_date: string | null; lines: DispatchPlanLine[] };
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; remaining: number; due_date: string | null;
@@ -23,7 +25,7 @@ type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number;
 type WorkOrder = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
   stage: string; assignee_name: string | null; department_name: string | null;
-  qty: number; status: string; labor_cost?: number | null;
+  qty: number; status: string; labor_cost?: number | null; image_url?: string | null; central_rate?: number;
 };
 type BoardResp = { departments: { id: string; name: string }[]; workOrders: WorkOrder[]; pending: PendingMO[]; pending_piece: PendingPiece[] };
 
@@ -48,7 +50,7 @@ const COMMON_CSS = `
 .wb-t th { background: #f1f5f9; font-weight: 700; text-align: left; }
 .wb-t td.r, .wb-t th.r { text-align: right; white-space: nowrap; }
 .wb-t .mono { font-family: ui-monospace, monospace; color: #475569; white-space: nowrap; }
-.wb-t td.img, .wb-t th.img { width: 15mm; text-align: center; padding: 1mm; }
+td.img, th.img { width: 15mm; text-align: center; padding: 1mm; }
 .thumb { width: 13mm; height: 13mm; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 3px; display: block; margin: 0 auto; }
 .no-img { color: #cbd5e1; }
 .wb-t tfoot td { background: #f8fafc; font-weight: 800; }
@@ -118,6 +120,23 @@ const TEMPLATE_PRODUCTION: ReportTemplate = {
   footer_html: "", custom_css: COMMON_CSS,
 };
 
+const TEMPLATE_PLAN: ReportTemplate = {
+  paper_size: "A4", orientation: "portrait",
+  header_html: `<div class="wb-head">
+    <div><div class="wb-title">รายการจ่ายงานตามแผน</div><div class="wb-sub">แผน: {{plan_name}} · {{date_range}} · {{count}} รายการ</div></div>
+    <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
+  </div>`,
+  body_html: `{{#groups}}<div class="grp-head"><span class="grp-name">{{dept}}</span><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
+  <table class="grp-rows">
+    <thead><tr><th class="img">รูป</th><th>ช่าง</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
+  </table>{{/groups}}
+  {{#empty}}<div class="wb-empty">แผนนี้ยังไม่มีรายการจ่าย</div>{{/empty}}
+  {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
+  <div class="wb-note">ช่องว่างค่าแรง = ยังไม่ตั้งค่าแรงต่อชิ้น (เขียนกรอกด้วยมือ)</div>{{/has_groups}}`,
+  footer_html: "", custom_css: COMMON_CSS,
+};
+
 function groupLabelOf(group: string): string {
   if (!group || group === "__all__") return "ทั้งหมด";
   if (group === "__none__") return "ยังไม่จับกลุ่ม";
@@ -128,11 +147,13 @@ function WorkBoardPrintInner() {
   const sp = useSearchParams();
   const router = useRouter();
   const typeParam = sp.get("type");
-  const type = (typeParam === "production" ? "production" : typeParam === "piece" ? "piece" : "pending") as "pending" | "production" | "piece";
+  const type = (typeParam === "production" ? "production" : typeParam === "piece" ? "piece" : typeParam === "plan" ? "plan" : "pending") as "pending" | "production" | "piece" | "plan";
   const group = sp.get("group") ?? "__all__";
+  const planId = sp.get("plan") ?? "";
 
   const [board, setBoard] = useState<BoardResp | null>(null);
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
+  const [plan, setPlan] = useState<PlanResp | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -140,16 +161,23 @@ function WorkBoardPrintInner() {
     Promise.all([
       apiFetch("/api/mo/work-board").then((r) => r.json()),
       apiFetch("/api/mo/groups").then((r) => r.json()).catch(() => ({ data: [] })),
+      type === "plan" && planId
+        ? apiFetch(`/api/mo/dispatch-plans/${planId}`).then((r) => r.json()).catch(() => ({ data: null }))
+        : Promise.resolve({ data: null }),
     ])
-      .then(([b, g]: [BoardResp & { error?: string }, { data?: { name: string; mo_nos: unknown }[] }]) => {
+      .then(([b, g, p]: [BoardResp & { error?: string }, { data?: { name: string; mo_nos: unknown }[] }, { data?: PlanResp | null; error?: string }]) => {
         if (!on) return;
         if (b.error) throw new Error(b.error);
         setBoard(b);
         setMoGroups((g.data ?? []).map((x) => ({ name: x.name, mo_nos: (Array.isArray(x.mo_nos) ? x.mo_nos : []) as string[] })));
+        if (type === "plan") {
+          if (!p.data) throw new Error(p.error || "ไม่พบแผนที่เลือก");
+          setPlan(p.data);
+        }
       })
       .catch((e) => { if (on) setError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ"); });
     return () => { on = false; };
-  }, []);
+  }, [type, planId]);
 
   const html = useMemo(() => {
     if (!board) return "";
@@ -192,6 +220,40 @@ function WorkBoardPrintInner() {
       });
     }
 
+    if (type === "plan") {
+      if (!plan) return "";
+      // แผนที่ + ค่าแรง/รูป จากบอร์ด (plan lines ไม่มีรูป/เรต → ดึงจาก pending/workOrders ตาม sku/mo)
+      const imgBySku = new Map<string, string | null>();
+      for (const m of board.pending) if (m.product_sku) imgBySku.set(m.product_sku, m.image_url);
+      for (const w of board.workOrders) if (w.product_sku && !imgBySku.has(w.product_sku)) imgBySku.set(w.product_sku, w.image_url ?? null);
+      for (const p of board.pending_piece) if (p.product_sku && !imgBySku.has(p.product_sku)) imgBySku.set(p.product_sku, p.image_url);
+      const rateByMo = new Map<string, number>();
+      for (const m of board.pending) { const r = (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0); if (r > 0) rateByMo.set(m.mo_no, r); }
+      for (const w of board.workOrders) if (!rateByMo.has(w.mo_no) && w.central_rate && w.central_rate > 0) rateByMo.set(w.mo_no, w.central_rate);
+      const deptOrder = new Map<string, number>();
+      board.departments.forEach((d, i) => deptOrder.set(d.name, i));
+      const byDept = new Map<string, DispatchPlanLine[]>();
+      for (const l of plan.lines) { const k = l.department_name || "— ยังไม่จัดโต๊ะ —"; const arr = byDept.get(k) ?? []; arr.push(l); byDept.set(k, arr); }
+      let totQty = 0, totLabor = 0;
+      const groups = [...byDept.entries()].sort((a, b) => (deptOrder.get(a[0]) ?? 999) - (deptOrder.get(b[0]) ?? 999)).map(([dept, list]) => {
+        let gQty = 0, gLabor = 0;
+        const rows = list.map((l) => {
+          const rate = l.mo_no ? (rateByMo.get(l.mo_no) ?? 0) : 0; const qty = l.qty || 0; const labor = rate > 0 ? rate * qty : 0;
+          gQty += qty; if (labor > 0) gLabor += labor;
+          return { img_cell: imgCell(l.product_sku ? (imgBySku.get(l.product_sku) ?? null) : null),
+            assignee: l.assignee_name || "(ทั้งโต๊ะ)", sku: l.product_sku || "—", name: l.product_name || "—",
+            qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
+        });
+        totQty += gQty; totLabor += gLabor;
+        return { dept, g_qty: num(gQty), g_labor: money(gLabor), rows };
+      });
+      const date_range = (plan.start_date || plan.end_date) ? `${dueText(plan.start_date)} – ${dueText(plan.end_date)}` : "ทั้งแผน";
+      return buildReportHtml(TEMPLATE_PLAN, {
+        plan_name: plan.name, date_range, printed_at, count: plan.lines.length, groups, has_groups: groups.length > 0,
+        total_qty: num(totQty), total_labor: money(totLabor), empty: groups.length === 0,
+      });
+    }
+
     // production
     const wos = board.workOrders.filter((w) => w.status !== "done" && w.stage !== "cut" && groupOk(w.mo_no));
     const byDept = new Map<string, WorkOrder[]>();
@@ -209,21 +271,22 @@ function WorkBoardPrintInner() {
       group_label, printed_at, dept_count: groups.length, groups, has_groups: groups.length > 0,
       total_qty: num(totQty), total_labor: money(totLabor), empty: groups.length === 0,
     });
-  }, [board, moGroups, type, group]);
+  }, [board, moGroups, plan, type, group]);
 
-  const title = type === "production" ? "รายการกำลังผลิต (ตามโต๊ะ/ช่าง)" : type === "piece" ? "รายการรอจ่ายเหมาทั้งหมด" : "รายการรอจ่ายทั้งหมด";
+  const title = type === "production" ? "รายการกำลังผลิต (ตามโต๊ะ/ช่าง)" : type === "piece" ? "รายการรอจ่ายเหมาทั้งหมด" : type === "plan" ? "รายการจ่ายงานตามแผน" : "รายการรอจ่ายทั้งหมด";
+  const subLabel = type === "plan" ? (plan ? `แผน ${plan.name}` : "แผน…") : `กลุ่ม ${groupLabelOf(group)}`;
 
   return (
     <div className="min-h-screen bg-slate-100">
       <div className="no-print sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
-        <span className="text-sm text-slate-600">🖨️ {title} · กลุ่ม {groupLabelOf(group)}</span>
+        <span className="text-sm text-slate-600">🖨️ {title} · {subLabel}</span>
         <div className="flex-1" />
         <button onClick={() => printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
-          : !board ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
+          : (!board || (type === "plan" && !plan)) ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
           : <PrintFrame html={html} />}
       </div>
     </div>
