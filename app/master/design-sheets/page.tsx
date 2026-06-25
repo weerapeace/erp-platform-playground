@@ -5,7 +5,8 @@
  * ของกลาง: DataTable(server) / CanvasBoard / ERPModal / ConfirmDialog / ImageManager(แนบไฟล์กลาง→R2) / useToast / useAuth
  * เฟสถัดไป: comment ลูกค้า · รอบเสนอราคา · แท็บตีราคา · ตั้ง Parent SKU
  */
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
@@ -177,35 +178,75 @@ function deadlineTone(deadline: string | null, status: string, finished: Set<str
 type BasisOption = { value: string; symbol: string; label: string; price?: number | null; note?: string };
 function BasisPicker({ value, options, onChange }: { value: string; options: BasisOption[]; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; openUp: boolean } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  // ลอยแบบ portal + fixed (เทคนิคเดียวกับของกลาง SearchableSelect) → ทะลุกล่อง overflow ไม่โดนแถว/ตารางตัด
+  const compute = useCallback(() => {
+    const el = btnRef.current; if (!el) return;
+    const r = el.getBoundingClientRect();
+    const PANEL = 230, spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < PANEL && r.top > spaceBelow;
+    setPos({ left: Math.min(r.right - 230, window.innerWidth - 236), top: openUp ? r.top : r.bottom, openUp });
+  }, []);
+  useLayoutEffect(() => { if (open) compute(); }, [open, compute]);
   useEffect(() => {
     if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
+    const h = () => compute();
+    window.addEventListener("scroll", h, true); window.addEventListener("resize", h);
+    return () => { window.removeEventListener("scroll", h, true); window.removeEventListener("resize", h); };
+  }, [open, compute]);
   const cur = options.find((o) => o.value === value) ?? options[0];
   return (
-    <div className="relative inline-block shrink-0" ref={ref}>
-      <button type="button" onClick={() => setOpen((o) => !o)} title={`ฐานราคา: ${cur?.label ?? ""}`}
+    <div className="relative inline-block shrink-0">
+      <button ref={btnRef} type="button" onClick={() => setOpen((o) => !o)} title={`ฐานราคา: ${cur?.label ?? ""}`}
         className="h-7 px-1.5 inline-flex items-center gap-1 text-xs border border-slate-200 rounded bg-white hover:bg-slate-50 max-w-[120px]">
         <span>{cur?.symbol}</span>
         <span className="text-slate-500 truncate tabular-nums">{cur && cur.price != null ? fmtBaht(cur.price) : (cur?.note ?? cur?.label)}</span>
         <span className="text-slate-300">▾</span>
       </button>
-      {open && (
-        <div className="absolute z-30 right-0 mt-1 min-w-[220px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
-          <div className="px-2.5 py-1 text-[10px] text-slate-400">ฐานราคาที่ใช้</div>
-          {options.map((o) => (
-            <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
-              className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 hover:bg-blue-50 ${o.value === value ? "bg-blue-50/60 text-blue-700 font-medium" : "text-slate-700"}`}>
-              <span className="w-4 text-center">{o.symbol}</span>
-              <span className="flex-1 truncate">{o.label}</span>
-              <span className="tabular-nums text-slate-500">{o.price != null ? fmtBaht(o.price) : (o.note ?? "—")}</span>
-            </button>
-          ))}
-        </div>
+      {open && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-[1000]" onClick={() => setOpen(false)} />
+          <div className="fixed z-[1001] w-[230px] bg-white border border-slate-200 rounded-lg shadow-xl py-1"
+            style={{ left: pos.left, top: pos.top, transform: pos.openUp ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
+            <div className="px-2.5 py-1 text-[10px] text-slate-400">ฐานราคาที่ใช้</div>
+            {options.map((o) => (
+              <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 hover:bg-blue-50 ${o.value === value ? "bg-blue-50/60 text-blue-700 font-medium" : "text-slate-700"}`}>
+                <span className="w-4 text-center">{o.symbol}</span>
+                <span className="flex-1 truncate">{o.label}</span>
+                <span className="tabular-nums text-slate-500">{o.price != null ? fmtBaht(o.price) : (o.note ?? "—")}</span>
+              </button>
+            ))}
+          </div>
+        </>,
+        document.body,
       )}
+    </div>
+  );
+}
+
+// chips รหัส SKU ที่ผูกกับวัสดุ (ตารางจัดการวัสดุตีราคา) — เยอะ→ยุบไว้ตั้งแต่เปิด กดปุ่มกางดู/ลบ (กันรก)
+function LinkedSkuChips({ ids, codeOf, onRemove }: { ids: string[]; codeOf: (sid: string) => string; onRemove: (sid: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!ids || ids.length === 0) return null;
+  if (!open && ids.length > 4) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} title="กดดูรหัส SKU ที่ผูก"
+        className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded hover:bg-blue-100">
+        📎 {ids.length} รหัส ▾
+      </button>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1 mt-1">
+      {ids.map((sid) => (
+        <span key={sid} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono bg-blue-50 border border-blue-200 text-blue-700 rounded">
+          {codeOf(sid)}
+          <button type="button" onClick={() => onRemove(sid)} className="text-blue-300 hover:text-rose-500 leading-none">✕</button>
+        </span>
+      ))}
+      {ids.length > 4 && <button type="button" onClick={() => setOpen(false)} className="text-[10px] text-slate-400 hover:text-slate-600 ml-0.5">ซ่อน ▲</button>}
     </div>
   );
 }
@@ -1089,6 +1130,22 @@ export default function DesignSheetsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [wfMeta]);
 
+  // ข้อ 2: สร้างวัสดุตีราคาใหม่จาก dropdown (ค้นไม่เจอ) → POST + reload price-items + เลือกให้ทันที
+  const createPriceItemInline = useCallback(async (name: string, onPicked: (it: PriceItem) => void) => {
+    const nm = name.trim(); if (!nm) return;
+    try {
+      const res = await apiFetch("/api/master-v2/design-price-items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nm }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      const newId = (j.data?.id as string | undefined) ?? undefined;
+      const pr = await apiFetch("/api/design-sheets/price-items").then((r) => r.json());
+      const items = (pr.data ?? []) as PriceItem[];
+      setPriceItems(items); setPriceGroups((pr.groups ?? []) as PriceGroup[]);
+      const it = items.find((p) => p.id === newId) ?? items.find((p) => p.name === nm);
+      if (it) onPicked(it);
+      toast.success(`เพิ่มวัสดุ "${nm}" แล้ว — เติมราคา/ชนิดได้ที่ปุ่ม 🧮 จัดการวัสดุตีราคา`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มวัสดุไม่สำเร็จ"); }
+  }, [toast]);
+
   // คอลัมน์ตารางตีราคา (ใช้ LineItemsGrid กลาง) — เลือกวัสดุ → เติมชนิด/สูตร/เผื่อเสีย/ราคาอัตโนมัติ แล้วคำนวณสด
   const numInputCls = "w-full h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
@@ -1097,6 +1154,16 @@ export default function DesignSheetsPage() {
         const inGroupMode = !r.item_id && !!r.group_code;   // รายการเดิมที่เคยเลือกแบบกลุ่ม
         const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
         const item = r.item_id ? priceItems.find((x) => x.id === r.item_id) : undefined;
+        // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
+        const applyItem = (it: PriceItem) => {
+          const piece = isPieceGroup(it.group_code, it.group_name);
+          u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
+              price_basis: piece ? null : "manual", calc_method: it.calc_method,
+              waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
+              pieces: piece ? (r.pieces ?? 1) : r.pieces,
+              uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
+              unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
+        };
         return (
           <div className="space-y-1">
             <div className="flex items-center gap-1">
@@ -1106,15 +1173,10 @@ export default function DesignSheetsPage() {
                   onChange={(val) => {
                     const it = priceItems.find((p) => p.id === val);
                     if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
-                    const piece = isPieceGroup(it.group_code, it.group_name);
-                    // เลือกวัสดุ: เก็บ group_code ไว้เป็นป้าย/ตรวจชนิดชิ้น · ราคาเริ่มต้น = กรอกเอง (manual)
-                    u({ item_id: it.id, item_name: it.name, group_name: it.group_name, group_code: it.group_code,
-                        price_basis: piece ? null : "manual", calc_method: it.calc_method,
-                        waste_percent: it.loss_percent, divisor: it.divisor, face_width_cm: it.face_width_cm ?? r.face_width_cm,
-                        pieces: piece ? (r.pieces ?? 1) : r.pieces,
-                        uom: piece ? "cm²" : (it.uom ?? it.uom_default ?? r.uom),
-                        unit_price: piece ? piecePricePerCm2(it) : it.price_per_unit });
-                  }} />
+                    applyItem(it);
+                  }}
+                  onCreate={canEdit ? (q) => void createPriceItemInline(q, applyItem) : undefined}
+                  createLabel="เพิ่มวัสดุใหม่" />
               </div>
               {/* ฐานราคาของวัสดุ (ปุ่ม compact มีสัญลักษณ์) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
               {item && !rowIsPiece(r) && canEdit && (
@@ -1195,7 +1257,7 @@ export default function DesignSheetsPage() {
     { key: "note", header: "หมายเหตุ", minWidth: 120, getValue: (r) => r.note,
       render: (r, u) => <input value={r.note ?? ""} disabled={!canEdit} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-  ], [priceItems, priceGroups, canEdit]);
+  ], [priceItems, priceGroups, canEdit, createPriceItemInline]);
 
   if (!canView) return <AccessDenied />;
 
@@ -1988,16 +2050,9 @@ export default function DesignSheetsPage() {
                           {editing ? <input value={pmEdit.name} onChange={(e) => setPmEdit({ ...pmEdit, name: e.target.value })} className="w-full h-7 px-1 text-sm border border-slate-200 rounded" />
                             : (<>
                               <span className="text-slate-700">{r.name}</span>
-                              {(pmLinks[r.id]?.length ?? 0) > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {pmLinks[r.id].map((sid) => (
-                                    <span key={sid} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono bg-blue-50 border border-blue-200 text-blue-700 rounded">
-                                      {pmLinkSkus[sid]?.code ?? sid.slice(0, 6)}
-                                      <button type="button" onClick={() => void savePmLink(r.id, pmLinks[r.id].filter((x) => x !== sid))} className="text-blue-300 hover:text-rose-500 leading-none">✕</button>
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              <LinkedSkuChips ids={pmLinks[r.id] ?? []}
+                                codeOf={(sid) => pmLinkSkus[sid]?.code ?? sid.slice(0, 6)}
+                                onRemove={(sid) => void savePmLink(r.id, (pmLinks[r.id] ?? []).filter((x) => x !== sid))} />
                             </>)}
                         </td>
                         <td className="border border-slate-200 px-2 py-1 text-center">

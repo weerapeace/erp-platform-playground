@@ -17,7 +17,7 @@ export type SelectOption = { value: string; label: string; badge?: string; sub?:
 type Pos = { left: number; top: number; width: number; openUp: boolean };
 
 export function SearchableSelect({
-  value, options, onChange, placeholder = "— เลือก —", disabled, className,
+  value, options, onChange, placeholder = "— เลือก —", disabled, className, onCreate, createLabel = "เพิ่มใหม่",
 }: {
   value: string;
   options: SelectOption[];
@@ -25,6 +25,9 @@ export function SearchableSelect({
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  /** ถ้าค้นแล้วไม่เจอ → โชว์ปุ่ม "+ สร้าง <คำค้น>" (ของกลาง: ใช้สร้างรายการใหม่ทันทีจาก dropdown) */
+  onCreate?: (query: string) => void;
+  createLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -82,7 +85,7 @@ export function SearchableSelect({
                 className="w-full h-8 px-2 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div className="max-h-60 overflow-y-auto py-1">
-              {filtered.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ไม่พบรายการ</div>}
+              {filtered.length === 0 && !onCreate && <div className="px-3 py-2 text-xs text-slate-400">ไม่พบรายการ</div>}
               {filtered.map((o) => (
                 <button key={o.value} type="button"
                   onClick={() => { onChange(o.value); close(); }}
@@ -91,6 +94,13 @@ export function SearchableSelect({
                   {o.sub ? <span className="text-[11px] text-slate-400"> · {o.sub}</span> : null}
                 </button>
               ))}
+              {/* ค้นไม่เจอ (ชื่อไม่ตรงเป๊ะ) → ปุ่มสร้างใหม่จากคำค้น */}
+              {onCreate && q.trim() && !options.some((o) => o.label.trim().toLowerCase() === q.trim().toLowerCase()) && (
+                <button type="button" onClick={() => { onCreate(q.trim()); close(); }}
+                  className="w-full text-left px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-slate-100 flex items-center gap-1.5">
+                  <span className="text-base leading-none">＋</span> {createLabel}: <strong>&ldquo;{q.trim()}&rdquo;</strong>
+                </button>
+              )}
             </div>
           </div>
         </>,
