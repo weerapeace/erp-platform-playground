@@ -188,15 +188,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // โหลด profile (role) ผ่าน erp_current_user() — SECURITY DEFINER เลี่ยง RLS
   const loadProfile = useCallback(async (fallbackEmail: string) => {
-    const { data } = await supabaseBrowser.rpc("erp_current_user");
-    const p = data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null; avatar_url: string | null } | null;
+    // ยิง 2 RPC พร้อมกัน (โปรไฟล์ + สิทธิ์) — ทั้งคู่อิง auth.uid() อิสระต่อกัน ไม่ต้องรอกัน → ลด 1 รอบวิ่งตอน cold load
+    const [profileRes, permsRes] = await Promise.all([
+      supabaseBrowser.rpc("erp_current_user"),
+      supabaseBrowser.rpc("erp_my_permissions"),
+    ]);
+    const p = profileRes.data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null; avatar_url: string | null } | null;
     if (p && p.active !== false) {
       setUser({ id: p.id, email: p.email ?? fallbackEmail, name: p.display_name ?? p.email ?? fallbackEmail, role: (p.role ?? "viewer") as Role, avatar: p.avatar_url ?? null });
-      // โหลด "รายการสิทธิ์ทั้งหมดของฉัน" จาก DB → can() เช็คจากชุดนี้แทนค่า hardcode
-      try {
-        const { data: permData, error } = await supabaseBrowser.rpc("erp_my_permissions");
-        setPerms(Array.isArray(permData) && !error ? new Set(permData as string[]) : null);
-      } catch { setPerms(null); }   // โหลดพลาด → null → ใช้ค่าสำรอง
+      // รายการสิทธิ์จาก DB → can() เช็คจากชุดนี้แทนค่า hardcode (โหลดพลาด → null → ใช้ค่าสำรอง กันล็อกเอาต์)
+      const permData = permsRes.data;
+      setPerms(Array.isArray(permData) && !permsRes.error ? new Set(permData as string[]) : null);
     } else {
       setUser(null);
       setPerms(null);

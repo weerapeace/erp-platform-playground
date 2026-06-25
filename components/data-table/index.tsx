@@ -723,11 +723,18 @@ export function DataTable<T extends Record<string, unknown>>({
     const tableKey = normalizeRowActionTableKey(tableId || exportEntityType || exportFilename);
     if (!tableKey || actionOptions.length === 0) return () => { alive = false; };
 
+    // SWR: revisit → ใช้ค่าที่แคชไว้ทันที (ไม่ต้องรอ network) แล้ว revalidate เงียบ ๆ
+    const swKey = `ras:${tableKey}`;
+    const cached = peekSWR<Record<string, RowActionSetting>>(swKey);
+    if (cached) setActionSettings({ ...localSettings, ...cached });
+
     apiFetch(`/api/row-action-settings?key=${encodeURIComponent(tableKey)}`)
       .then((res) => res.ok ? res.json() : null)
       .then((json) => {
         if (!alive || !json?.settings) return;
-        setActionSettings({ ...localSettings, ...(json.settings as Record<string, RowActionSetting>) });
+        const settings = json.settings as Record<string, RowActionSetting>;
+        mutateSWR(swKey, settings);
+        setActionSettings({ ...localSettings, ...settings });
       })
       .catch(() => {});
 
