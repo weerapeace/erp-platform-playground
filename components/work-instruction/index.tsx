@@ -12,10 +12,12 @@ import { apiFetch } from "@/lib/api";
 import { cachedJson, invalidateCache } from "@/lib/client-cache";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { RelationPeekModal } from "@/components/relation-peek";
+import nextDynamic from "next/dynamic";
 import { ComponentPicker } from "@/app/master/bom/line-editor";
 import type { ProductSpec, SpecField } from "@/app/api/product-spec/route";
 import type { AttrDef, AttrVal } from "@/app/api/product-attributes/route";
+// drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน + โหลดเฉพาะตอนเปิด
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 function Row({ f, bomSkus, onEdit }: { f: SpecField; bomSkus?: string[]; onEdit?: () => void }) {
   const inBom = f.sku_code && bomSkus ? bomSkus.includes(f.sku_code) : null;
@@ -246,7 +248,7 @@ export function WorkInstructionPanel({ sku, editable = false, bomSkus, onAddMate
       )}
       {editOpen && <WorkInstructionEditor sku={sku} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); setEditData(null); loadSpec(); }} />}
       {skuPeek && (
-        <RelationPeekModal
+        <MasterRecordDrawer
           moduleKey={skuPeek.moduleKey}
           recordId={skuPeek.recordId}
           onClose={() => setSkuPeek(null)}

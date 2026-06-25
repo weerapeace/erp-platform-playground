@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { RelationPeekModal } from "@/components/relation-peek";
+import nextDynamic from "next/dynamic";
+// drawer เก่าตัวจริงของ MasterCRUD — โหลดเฉพาะตอนเปิด + dynamic กัน import วนกับ master-crud
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 export function RecordPeekLink({
   moduleKey,
@@ -25,7 +27,7 @@ export function RecordPeekLink({
         <span className="shrink-0">↗</span>
       </button>
       {open && (
-        <RelationPeekModal
+        <MasterRecordDrawer
           moduleKey={moduleKey}
           recordId={recordId}
           onClose={() => setOpen(false)}

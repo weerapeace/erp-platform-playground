@@ -7,11 +7,13 @@
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
-import { RelationPeekModal } from "@/components/relation-peek";
 import { ImageInput } from "@/components/image-input";
 import { TagOrganizerModal } from "@/components/tag-organizer";
 import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@/lib/relation";
+// drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน (master-crud import ไฟล์นี้อยู่)
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type RelConfig = {
   kind?: string;
@@ -763,7 +765,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
       className="flex-shrink-0 h-6 px-2 rounded-md text-xs font-medium border border-blue-200 text-blue-600 hover:bg-blue-50 inline-flex items-center gap-1">+ เพิ่มแบบเต็ม</button>
   ) : null;
   const createModal = creating ? (
-    <RelationPeekModal moduleKey={moduleKey} recordId={null}
+    <MasterRecordDrawer moduleKey={moduleKey} recordId={null}
       createDefaults={{ [fk]: matchValue, is_active: true }}
       createTitle={title ? `เพิ่ม ${title}` : "เพิ่มรายการใหม่"}
       onChanged={load} onClose={() => setCreating(false)} />
@@ -824,7 +826,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           </div>
         )}
         {peek && moduleKey && (
-          <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
+          <MasterRecordDrawer moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
         {pickerModal}{createModal}{attachModal}
       </>
@@ -863,7 +865,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
           </button>
         )}
         {peek && moduleKey && (
-          <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
+          <MasterRecordDrawer moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit} onChanged={load} onClose={() => setPeek(null)} />
         )}
         {pickerModal}{createModal}{attachModal}
       </>
@@ -1037,7 +1039,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         </button>
       )}
       {peek && moduleKey && (
-        <RelationPeekModal moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit}
+        <MasterRecordDrawer moduleKey={moduleKey} recordId={peek.id} startInEdit={peek.edit}
           onChanged={load} onClose={() => setPeek(null)} />
       )}
       {pickerModal}
@@ -1139,7 +1141,7 @@ export function MasterDetailRelation({ config, recordId, configurable, parentVal
 
       {/* เพิ่มใบใหม่ (version) */}
       {creating && (
-        <RelationPeekModal moduleKey={l1ModuleKey} recordId={null}
+        <MasterRecordDrawer moduleKey={l1ModuleKey} recordId={null}
           createDefaults={{ [l1Fk]: l1MatchValue, is_active: true }}
           createTitle="เพิ่ม BOM version ใหม่"
           onChanged={loadHeaders} onClose={() => setCreating(false)} />

@@ -15,13 +15,15 @@ import { ImageInput } from "@/components/image-input";
 import { SupplierWizard } from "@/components/supplier-wizard";
 import { SupplierPicker } from "@/components/supplier-picker";
 import { SkuSupplierList } from "@/components/sku-supplier-list";
-import { RelationPeekModal } from "@/components/relation-peek";
+import nextDynamic from "next/dynamic";
 import { ApproveActions, RejectedPanel, DeleteButton, BulkApproveBar } from "./approval";
 import { PieceworkFromPoModal, type PieceFromPoInit } from "../piecework-from-po-modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { BulkAction, RowAction } from "@/components/data-table";
+// drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน + โหลดเฉพาะตอนเปิด
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type Row = {
   id: string; seller_name: string; item_sku_id: string | null; item_name: string; code: string;
@@ -1272,9 +1274,10 @@ function CardEditModal({ row, suppliers, onSupplierAdded, onClose, onSaved }: { 
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="(ถ้ามี)" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md" /></div>
       </div>
 
-      {/* popup แก้สินค้า (SKU จริง) — ของกลาง RelationPeek โหมดแก้เร็ว (⚙ เลือกฟิลด์ได้, default ทุกคน) */}
+      {/* popup แก้สินค้า (SKU จริง) — drawer เก่าตัวจริงของ MasterCRUD เปิดโหมดแก้เลย */}
       {skuEdit && row.item_sku_id && (
-        <RelationPeekModal moduleKey="skus-v2" recordId={row.item_sku_id} quickEdit startInEdit
+        <MasterRecordDrawer moduleKey="skus-v2" recordId={row.item_sku_id} startInEdit
+          title="SKU"
           onChanged={() => { skuChanged.current = true; }}
           onClose={() => { setSkuEdit(false); if (skuChanged.current) void onSaved(); }} />
       )}
