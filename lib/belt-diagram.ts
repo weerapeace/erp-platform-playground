@@ -74,19 +74,23 @@ function imageComposite(p: BeltDiagramParams): string {
   // ชั้นทรงเข็มขัด: มีรูป→วางรูป, ไม่มีรูป→วาดโครงจำลอง (สำหรับหน้าตั้งค่า/รูปขาด)
   const strap = (y: number, label: string, mirror: boolean) =>
     p.strapImg ? full(p.strapImg, y) : placeholderStrap(y, BH, label, mirror);
-  // เส้นบอกระยะแบบวงเล็บ (เส้นโยง + ป้าย)
+  // เส้นบอกระยะแบบวงเล็บ — ก้านชี้ "เข้าหา" ตัวเข็มขัด · ป้ายอยู่ฝั่งตรงข้าม (ไกลเข็มขัด)
+  // down=false → วงเล็บเหนือเข็มขัด ก้านชี้ลง ⊓ · down=true → ใต้เข็มขัด ก้านชี้ขึ้น ⊔
   const bracket = (x: number, w: number, y: number, label: string, down: boolean) => {
-    const t = down ? 5 : -5;
+    const t = down ? -6 : 6;
     return `<path d="M${x},${y + t} V${y} H${x + w} V${y + t}" fill="none" stroke="#b91c1c" stroke-width="1.1"/>` +
-      `<text x="${x + w / 2}" y="${down ? y - 3 : y + 13}" font-size="11" fill="#b91c1c" text-anchor="middle">${esc(label)}</text>`;
+      `<text x="${x + w / 2}" y="${down ? y + 14 : y - 5}" font-size="11" fill="#b91c1c" text-anchor="middle">${esc(label)}</text>`;
   };
   const logoDist = p.logoDistIn != null ? `ห่าง ${p.logoDistIn} นิ้ว` : "ห่าง 1 นิ้ว";
   const toEnd = `${p.toEndIn ?? 7} นิ้วถึงปลายสาย`;
+  const fbY = fY - fd.y;          // เส้นวงเล็บหน้า (เหนือกรอบหน้า)
+  const bbY = bY + BH + bd.y;     // เส้นวงเล็บหลัง (ใต้กรอบหลัง)
   // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (พิมพ์บันได back_only=หลังเท่านั้น)
-  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${strap(fY, brand, false)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${bracket(fd.x, fd.w, fY - fd.y, logoDist, false)}`;
-  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${strap(bY, leather, true)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${bracket(bd.x, bd.w, bY + BH + bd.y, toEnd, true)}`;
-  const H = bY + BH + 30;
-  return `<svg viewBox="0 0 740 ${H}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
+  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${strap(fY, brand, false)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${bracket(fd.x, fd.w, fbY, logoDist, false)}`;
+  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${strap(bY, leather, true)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${bracket(bd.x, bd.w, bbY, toEnd, true)}`;
+  const topPad = Math.max(0, 16 - fbY);   // กันป้ายวงเล็บหน้าโดนตัดขอบบน (ตอนเลื่อนเส้นขึ้นสูง)
+  const H = bbY + 22;                       // เผื่อป้ายวงเล็บหลังที่อยู่ใต้สุด
+  return `<svg viewBox="0 ${-topPad} 740 ${H + topPad}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
 }
 
 // ── โหมดเวกเตอร์ (fallback เมื่อไม่มีรูป) ──
