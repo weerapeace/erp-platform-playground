@@ -51,7 +51,6 @@ function cardWarnings(c: SkuCard): string[] {
   if (!c.image) w.push("ไม่มีรูป");
   if (c.list_price == null || c.list_price <= 0) w.push("ไม่มีราคา");
   if (c.tags.length === 0) w.push("ไม่มีแท็ก");
-  if (!c.has_bom) w.push("ไม่มี BOM");
   return w;
 }
 
