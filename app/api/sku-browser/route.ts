@@ -20,6 +20,7 @@ export type SkuCard = {
   id: string; code: string; name: string; image: string | null;
   list_price: number | null; qty_on_hand: number | null; is_active: boolean; tags: string[];
   has_bom: boolean;   // มีสูตร BOM ไหม (ไว้เตือน "ข้อมูลไม่ครบ")
+  extra?: Record<string, unknown>;   // ฟิลด์เพิ่มที่เลือกโชว์บนการ์ด (จาก Field Registry — ไม่ hardcode)
 };
 
 const sanitize = (t: string) => t.replace(/[,()%*]/g, " ").trim();
@@ -54,8 +55,24 @@ export async function GET(request: NextRequest) {
   const sortBy  = ALLOWED_SORT.includes(sp.get("sort") ?? "") ? (sp.get("sort") as string) : "code";
   const sortDir = sp.get("dir") === "desc" ? "desc" : "asc";
 
-  type SkuRow = { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; list_price: number | null; is_active: boolean };
-  const SEL = "id, code, name_th, cover_image_r2_key, list_price, is_active";
+  type SkuRow = { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; list_price: number | null; is_active: boolean } & Record<string, unknown>;
+
+  // ฟิลด์เพิ่มที่ขอโชว์บนการ์ด — whitelist กับ Field Registry (เฉพาะที่ visible + ไม่ sensitive)
+  const CORE_COLS = new Set(["id", "code", "name_th", "list_price", "is_active", "cover_image_r2_key"]);
+  const reqFields = (sp.get("fields") ?? "").split(",").map((s) => s.trim())
+    .filter((f) => f && !CORE_COLS.has(f) && /^[a-z_][a-z0-9_]*$/i.test(f));
+  let extraCols: string[] = [];
+  if (reqFields.length) {
+    const { data: mod } = await admin.from("erp_modules").select("id").eq("module_key", "skus-v2").maybeSingle();
+    if (mod?.id) {
+      const { data: regCols } = await admin.from("erp_module_fields")
+        .select("column_name, is_sensitive").eq("module_id", mod.id as string).eq("is_visible", true).not("column_name", "is", null);
+      const allowed = new Set(((regCols ?? []) as { column_name: string | null; is_sensitive: boolean | null }[])
+        .filter((r) => r.column_name && !r.is_sensitive).map((r) => r.column_name as string));
+      extraCols = reqFields.filter((f) => allowed.has(f));
+    }
+  }
+  const sel = "id, code, name_th, cover_image_r2_key, list_price, is_active" + (extraCols.length ? ", " + extraCols.join(", ") : "");
   let rows: SkuRow[] = [];
   let total = 0;
 
@@ -69,18 +86,18 @@ export async function GET(request: NextRequest) {
     const pageIds = (rpc as { ids?: string[] } | null)?.ids ?? [];
     total = Number((rpc as { total?: number } | null)?.total ?? 0);
     if (pageIds.length === 0) return NextResponse.json({ cards: [], total, error: null });
-    const { data: skus, error } = await admin.from("skus_v2").select(SEL).in("id", pageIds);
+    const { data: skus, error } = await admin.from("skus_v2").select(sel).in("id", pageIds);
     if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
     const order = new Map(pageIds.map((id, i) => [id, i]));
-    rows = ((skus ?? []) as SkuRow[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+    rows = ((skus ?? []) as unknown as SkuRow[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   } else {
     // ค้นหาอย่างเดียว (ไม่มีแท็ก) — search จำกัดผลอยู่แล้ว
-    let q = admin.from("skus_v2").select(SEL, { count: "exact" });
+    let q = admin.from("skus_v2").select(sel, { count: "exact" });
     for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
     q = q.order(sortBy, { ascending: sortDir === "asc" }).range(offset, offset + limit - 1);
     const { data: skus, count, error } = await q;
     if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
-    rows = (skus ?? []) as SkuRow[];
+    rows = (skus ?? []) as unknown as SkuRow[];
     total = count ?? rows.length;
   }
 
@@ -120,6 +137,7 @@ export async function GET(request: NextRequest) {
     image: r.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(r.cover_image_r2_key)}` : null,
     list_price: r.list_price, qty_on_hand: stock.has(r.id) ? (stock.get(r.id) as number) : null,
     is_active: r.is_active, tags: tagMap.get(r.id) ?? [], has_bom: bomSet.has(r.code),
+    extra: extraCols.length ? Object.fromEntries(extraCols.map((col) => [col, r[col] ?? null])) : undefined,
   }));
   return NextResponse.json({ cards, total, error: null });
 }

@@ -24,6 +24,15 @@ const CARD_FIELDS: { key: string; label: string }[] = [
   { key: "price",  label: "ราคาขาย" }, { key: "stock", label: "สต๊อกคงเหลือ" }, { key: "tags", label: "แท็ก" }, { key: "status", label: "สถานะ" },
 ];
 const DEFAULT_CARD_FIELDS = CARD_FIELDS.map((f) => f.key);
+const CORE_KEYS = new Set(DEFAULT_CARD_FIELDS);   // 7 ฟิลด์หลัก (เรนเดอร์พิเศษ) — ที่เหลือ = ฟิลด์เพิ่มจาก Field Registry
+const CORE_COLUMNS = new Set(["id", "code", "name_th", "list_price", "is_active", "cover_image_r2_key"]);
+function fmtCell(v: unknown): string {
+  if (v == null || v === "") return "—";
+  if (typeof v === "boolean") return v ? "ใช่" : "ไม่";
+  if (typeof v === "number") return v.toLocaleString("th-TH");
+  return String(v);
+}
+type FieldDef = { key: string; label: string };
 const CARD_SCOPE = "sku-browser";
 const EMPTY_FILTER: TagFilterValue = { tagIds: [], none: false };
 const LIMIT = 60;   // โหลดหน้าละ 60 (เดิม 120) — เห็นเร็วขึ้น แล้วค่อย "โหลดเพิ่ม"
@@ -67,6 +76,7 @@ export function SkuTagBrowser() {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_CARD_FIELDS);
+  const [availFields, setAvailFields] = useState<FieldDef[]>([]);   // ฟิลด์ SKU ทั้งหมด (จาก Field Registry — ไม่ hardcode)
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [detailCard, setDetailCard] = useState<SkuCard | null>(null);   // คลิกการ์ด → drawer ดูรายละเอียด
@@ -75,9 +85,18 @@ export function SkuTagBrowser() {
     apiFetch("/api/sku-browser").then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
     apiFetch(`/api/card-layouts?scope=${CARD_SCOPE}`).then((r) => r.json())
       .then((j) => { const f = (j.mine ?? j.default) as string[] | null; if (f && f.length) setCardFields(f); }).catch(() => {});
+    apiFetch("/api/admin/field-registry-v2?module=skus-v2").then((r) => r.json())
+      .then((j) => {
+        const fs = ((j.fields ?? []) as { column_name: string | null; field_label: string; is_visible: boolean; is_sensitive: boolean }[])
+          .filter((f) => f.column_name && f.is_visible && !f.is_sensitive && !CORE_COLUMNS.has(f.column_name))
+          .map((f) => ({ key: f.column_name as string, label: f.field_label }));
+        setAvailFields(fs);
+      }).catch(() => {});
   }, []);
 
   const tagNameById = useMemo(() => new Map((tree?.tags ?? []).map((t) => [t.id, t.name])), [tree]);
+  const fieldLabels = useMemo(() => new Map(availFields.map((f) => [f.key, f.label])), [availFields]);
+  const extraDefs = useMemo<FieldDef[]>(() => cardFields.filter((k) => !CORE_KEYS.has(k)).map((k) => ({ key: k, label: fieldLabels.get(k) ?? k })), [cardFields, fieldLabels]);
   const cardsMode = !!search.trim() || tagFilter.tagIds.length > 0;
   const currentGroupId = groupPath.length ? groupPath[groupPath.length - 1].id : null;
   const sort = SORTS.find((s) => s.key === sortKey) ?? SORTS[0];
@@ -90,9 +109,11 @@ export function SkuTagBrowser() {
     if (search.trim()) p.set("search", search.trim());
     p.set("sort", sort.by); p.set("dir", sort.dir);
     p.set("limit", String(LIMIT)); p.set("offset", String(off));
+    const extra = cardFields.filter((k) => !CORE_KEYS.has(k));
+    if (extra.length) p.set("fields", extra.join(","));
     const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
     return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
-  }, [tagFilter, search, sort]);
+  }, [tagFilter, search, sort, cardFields]);
 
   // โหลดหน้าแรกใหม่เมื่อเปลี่ยน filter/search/sort
   useEffect(() => {
@@ -230,7 +251,7 @@ export function SkuTagBrowser() {
               : view === "table"
                 ? <SkuTable rows={shown} selected={selected} onToggle={toggleSel} onOpen={(id) => { const c = cards.find((x) => x.id === id); if (c) setDetailCard(c); }} />
                 : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-                    {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setDetailCard(c)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
+                    {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} extraDefs={extraDefs} onOpen={() => setDetailCard(c)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
                   </div>}
             {cards.length < total && (
               <div className="text-center mt-4">
@@ -280,10 +301,10 @@ export function SkuTagBrowser() {
         </div>
       )}
       {customizeOpen && (
-        <CardCustomizeModal value={cardFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
+        <CardCustomizeModal value={cardFields} avail={availFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
       )}
       {detailCard && (
-        <SkuDetailDrawer card={detailCard} onClose={() => setDetailCard(null)}
+        <SkuDetailDrawer card={detailCard} extraDefs={extraDefs} onClose={() => setDetailCard(null)}
           onEdit={() => { const id = detailCard.id; setDetailCard(null); setEditId(id); }} />
       )}
       {editId && (
@@ -295,7 +316,7 @@ export function SkuTagBrowser() {
   );
 }
 
-function SkuCardView({ c, fields, onOpen, selected, onToggleSelect }: { c: SkuCard; fields: string[]; onOpen: () => void; selected: boolean; onToggleSelect: () => void }) {
+function SkuCardView({ c, fields, extraDefs, onOpen, selected, onToggleSelect }: { c: SkuCard; fields: string[]; extraDefs: FieldDef[]; onOpen: () => void; selected: boolean; onToggleSelect: () => void }) {
   const has = (k: string) => fields.includes(k);
   const showTopRow = has("code") || has("status");
   const showPriceRow = has("price") || has("stock");
@@ -334,6 +355,11 @@ function SkuCardView({ c, fields, onOpen, selected, onToggleSelect }: { c: SkuCa
           <div className="flex flex-wrap gap-1 mt-1.5">
             {c.tags.slice(0, 3).map((t) => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{t}</span>)}
             {c.tags.length > 3 && <span className="text-[10px] text-slate-400">+{c.tags.length - 3}</span>}
+          </div>
+        )}
+        {extraDefs.length > 0 && (
+          <div className="mt-1.5 flex flex-col gap-0.5 border-t border-slate-100 pt-1.5">
+            {extraDefs.map((d) => <p key={d.key} className="text-[10px] text-slate-500 truncate"><span className="text-slate-400">{d.label}:</span> {fmtCell(c.extra?.[d.key])}</p>)}
           </div>
         )}
       </div>
@@ -397,8 +423,8 @@ function SkuTable({ rows, selected, onToggle, onOpen }: {
   );
 }
 
-function CardCustomizeModal({ value, onClose, onSave, onReset }: {
-  value: string[]; onClose: () => void; onSave: (f: string[], t: "me" | "all") => void; onReset: () => void;
+function CardCustomizeModal({ value, avail, onClose, onSave, onReset }: {
+  value: string[]; avail: FieldDef[]; onClose: () => void; onSave: (f: string[], t: "me" | "all") => void; onReset: () => void;
 }) {
   const [sel, setSel] = useState<string[]>(value);
   const [target, setTarget] = useState<"me" | "all">("me");
@@ -415,13 +441,25 @@ function CardCustomizeModal({ value, onClose, onSave, onReset }: {
         </div>
       }>
       <p className="text-[12px] text-slate-500 mb-2">เลือกฟิลด์ที่จะโชว์บนการ์ด</p>
-      <div className="flex flex-col gap-1.5 mb-4">
+      <div className="flex flex-col gap-1.5 mb-3">
         {CARD_FIELDS.map((f) => (
           <label key={f.key} className="flex items-center gap-2 text-[13px] cursor-pointer">
             <input type="checkbox" checked={sel.includes(f.key)} onChange={() => toggle(f.key)} className="w-4 h-4" /> {f.label}
           </label>
         ))}
       </div>
+      {avail.length > 0 && (
+        <div className="mb-4 pt-3 border-t border-slate-100">
+          <p className="text-[12px] text-slate-500 mb-2">＋ เพิ่มฟิลด์อื่นของ SKU <span className="text-[10px] text-slate-400">(จากทะเบียน field — ไม่ตายตัว)</span></p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 max-h-44 overflow-auto pr-1">
+            {avail.map((f) => (
+              <label key={f.key} className="flex items-center gap-2 text-[12px] cursor-pointer">
+                <input type="checkbox" checked={sel.includes(f.key)} onChange={() => toggle(f.key)} className="w-4 h-4 shrink-0" /> <span className="truncate">{f.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="pt-3 border-t border-slate-100">
         <p className="text-[12px] text-slate-500 mb-1.5">บันทึกให้</p>
         <div className="flex gap-2">
@@ -434,7 +472,7 @@ function CardCustomizeModal({ value, onClose, onSave, onReset }: {
 }
 
 // คลิกการ์ด → Drawer ดูรายละเอียด (ใช้ข้อมูลที่โหลดมาแล้ว ไม่ยิงเพิ่ม) + ปุ่มแก้ไข
-function SkuDetailDrawer({ card: c, onClose, onEdit }: { card: SkuCard; onClose: () => void; onEdit: () => void }) {
+function SkuDetailDrawer({ card: c, extraDefs, onClose, onEdit }: { card: SkuCard; extraDefs: FieldDef[]; onClose: () => void; onEdit: () => void }) {
   const warns = cardWarnings(c);
   return (
     <Drawer open onClose={onClose} title={c.code} description={c.name || undefined} size="md"
@@ -460,6 +498,7 @@ function SkuDetailDrawer({ card: c, onClose, onEdit }: { card: SkuCard; onClose:
           <DRow label="สต๊อกคงเหลือ" value={c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"} />
           <DRow label="สถานะ" value={c.is_active ? "ใช้งาน" : "ปิด"} />
           <DRow label="มี BOM" value={c.has_bom ? "มี" : "ยังไม่มี"} />
+          {extraDefs.map((d) => <DRow key={d.key} label={d.label} value={fmtCell(c.extra?.[d.key])} />)}
         </tbody>
       </table>
       {c.tags.length > 0 && (
