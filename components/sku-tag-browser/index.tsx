@@ -12,7 +12,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
-import { ERPModal } from "@/components/modal";
+import { ERPModal, Drawer } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { SkuFormModal } from "@/components/sku-form-modal";
 import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
@@ -69,6 +69,7 @@ export function SkuTagBrowser() {
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_CARD_FIELDS);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [detailCard, setDetailCard] = useState<SkuCard | null>(null);   // คลิกการ์ด → drawer ดูรายละเอียด
 
   useEffect(() => {
     apiFetch("/api/sku-browser").then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
@@ -227,9 +228,9 @@ export function SkuTagBrowser() {
             {shown.length === 0
               ? <div className="text-center py-12 text-slate-400 text-sm">ไม่มีรายการที่ข้อมูลไม่ครบในที่โหลดมา 🎉</div>
               : view === "table"
-                ? <SkuTable rows={shown} selected={selected} onToggle={toggleSel} onOpen={setEditId} />
+                ? <SkuTable rows={shown} selected={selected} onToggle={toggleSel} onOpen={(id) => { const c = cards.find((x) => x.id === id); if (c) setDetailCard(c); }} />
                 : <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
-                    {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setEditId(c.id)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
+                    {shown.map((c) => <SkuCardView key={c.id} c={c} fields={cardFields} onOpen={() => setDetailCard(c)} selected={selected.has(c.id)} onToggleSelect={() => toggleSel(c.id)} />)}
                   </div>}
             {cards.length < total && (
               <div className="text-center mt-4">
@@ -280,6 +281,10 @@ export function SkuTagBrowser() {
       )}
       {customizeOpen && (
         <CardCustomizeModal value={cardFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
+      )}
+      {detailCard && (
+        <SkuDetailDrawer card={detailCard} onClose={() => setDetailCard(null)}
+          onEdit={() => { const id = detailCard.id; setDetailCard(null); setEditId(id); }} />
       )}
       {editId && (
         <SkuFormModal mode="edit" skuId={editId}
@@ -425,5 +430,55 @@ function CardCustomizeModal({ value, onClose, onSave, onReset }: {
         </div>
       </div>
     </ERPModal>
+  );
+}
+
+// คลิกการ์ด → Drawer ดูรายละเอียด (ใช้ข้อมูลที่โหลดมาแล้ว ไม่ยิงเพิ่ม) + ปุ่มแก้ไข
+function SkuDetailDrawer({ card: c, onClose, onEdit }: { card: SkuCard; onClose: () => void; onEdit: () => void }) {
+  const warns = cardWarnings(c);
+  return (
+    <Drawer open onClose={onClose} title={c.code} description={c.name || undefined} size="md"
+      footer={
+        <div className="flex justify-end gap-2 w-full">
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
+          <button onClick={onEdit} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">✏️ แก้ไข SKU</button>
+        </div>
+      }>
+      <div className="rounded-xl bg-slate-100 h-56 flex items-center justify-center overflow-hidden mb-3">
+        {c.image ? <img src={withImageWidth(c.image, 600) ?? c.image} alt={c.code} className="max-w-full max-h-full object-contain" /> : <span className="text-5xl text-slate-300">🏷️</span>}
+      </div>
+      {warns.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-3">
+          {warns.map((x) => <span key={x} className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">⚠ {x}</span>)}
+        </div>
+      )}
+      <table className="w-full text-[13px]">
+        <tbody>
+          <DRow label="รหัส" value={c.code} mono />
+          <DRow label="ชื่อ" value={c.name || "—"} />
+          <DRow label="ราคาขาย" value={c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"} />
+          <DRow label="สต๊อกคงเหลือ" value={c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"} />
+          <DRow label="สถานะ" value={c.is_active ? "ใช้งาน" : "ปิด"} />
+          <DRow label="มี BOM" value={c.has_bom ? "มี" : "ยังไม่มี"} />
+        </tbody>
+      </table>
+      {c.tags.length > 0 && (
+        <div className="mt-3">
+          <p className="text-[12px] text-slate-500 mb-1">แท็ก</p>
+          <div className="flex flex-wrap gap-1.5">
+            {c.tags.map((t) => <span key={t} className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{t}</span>)}
+          </div>
+        </div>
+      )}
+    </Drawer>
+  );
+}
+
+function DRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <tr>
+      <td className="py-1.5 text-slate-500 align-top w-28">{label}</td>
+      <td className={`py-1.5 text-slate-800 ${mono ? "font-mono text-[12px]" : ""}`}>{value}</td>
+    </tr>
   );
 }
