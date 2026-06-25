@@ -8,7 +8,7 @@
  * โหมด quickEdit: โชว์เฉพาะ "ชุดฟิลด์แก้เร็ว" ของโมดูล (erp_modules.config.quick_edit_fields)
  * — ยังไม่ตั้ง = โชว์ทุกฟิลด์เหมือนเดิม · ปุ่ม ⚙ (admin) เลือกฟิลด์ → เป็น default ของทุก user
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
 import { useAuth, usePermission } from "@/components/auth";
@@ -68,6 +68,18 @@ export function RelationPeekModal({
   const [cfgSaving, setCfgSaving] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);   // เปิดตัวออกแบบ layout กลาง (StudioPanel)
   const [activeTab, setActiveTab] = useState(0);   // แท็บที่เลือกในโหมดดู (drawer ขวา)
+  const [width, setWidth] = useState(560);   // ความกว้าง drawer (ลากปรับ + จำค่า)
+  const widthRef = useRef(560);
+  const resizing = useRef(false);
+  const [zoom, setZoom] = useState<string | null>(null);   // รูปที่กดดูใหญ่ (lightbox)
+  useEffect(() => { widthRef.current = width; }, [width]);
+  useEffect(() => {
+    try { const w = Number(localStorage.getItem("relpeek-w")); if (w >= 360) setWidth(Math.min(w, 1100)); } catch { /* ignore */ }
+    const mv = (e: MouseEvent) => { if (resizing.current) setWidth(Math.max(360, Math.min(window.innerWidth - e.clientX, window.innerWidth - 40))); };
+    const up = () => { if (resizing.current) { resizing.current = false; document.body.style.userSelect = ""; try { localStorage.setItem("relpeek-w", String(widthRef.current)); } catch { /* ignore */ } } };
+    window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
+  }, []);
 
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -262,8 +274,11 @@ export function RelationPeekModal({
   const dismiss = useBackdropDismiss(editing ? () => {} : onClose);
 
   return createPortal(
+    <>
     <div className="fixed inset-0 z-[140] bg-black/40 flex justify-end" {...dismiss}>
-      <div className="bg-white shadow-2xl w-full max-w-xl h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="relative bg-white shadow-2xl h-full flex flex-col" style={{ width, maxWidth: "100vw" }} onClick={(e) => e.stopPropagation()}>
+        <div onMouseDown={(e) => { e.preventDefault(); resizing.current = true; document.body.style.userSelect = "none"; }}
+          className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-blue-300 z-20" title="ลากปรับความกว้าง" />
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">{isCreate ? "➕ " : editing ? "✎ " : "🔗 "}{title}</h3>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -317,10 +332,11 @@ export function RelationPeekModal({
           ) : (
             <div className="flex gap-4">
               {img(cover) && (
-                <div className="w-28 h-28 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100 bg-slate-50">
+                <button type="button" onClick={() => setZoom(img(cover)!)} title="กดดูรูปใหญ่"
+                  className="w-40 h-40 flex-shrink-0 rounded-lg overflow-hidden border border-slate-100 bg-slate-50 cursor-zoom-in">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={img(cover)!} alt="" className="w-full h-full object-cover" />
-                </div>
+                  <img src={img(cover)!} alt="" className="w-full h-full object-contain" />
+                </button>
               )}
               <div className="flex-1 min-w-0 space-y-3">
                 {(() => {
@@ -401,7 +417,14 @@ export function RelationPeekModal({
           onSaved={() => void load()}
         />
       )}
-    </div>,
+    </div>
+      {zoom && (
+        <div className="fixed inset-0 z-[160] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out" onClick={() => setZoom(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoom} alt="" className="max-w-full max-h-full object-contain" />
+        </div>
+      )}
+    </>,
     document.body,
   );
 }
