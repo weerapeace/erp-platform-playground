@@ -15,6 +15,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
+import { RecordTasksButton } from "@/components/record-tasks";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
 import { SkuWizard } from "./sku-wizard";
@@ -1321,6 +1322,7 @@ export default function DesignSheetsPage() {
             <p className="text-sm text-slate-500 mt-0.5">งานออกแบบสินค้าใหม่ ตั้งแต่รับโจทย์จนตั้งเป็นสินค้าจริง — คลิกแถวเพื่อเปิดดู/แก้</p>
           </div>
           <div className="flex items-center gap-2">
+            <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
             {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบงานออกแบบ</button>}
           </div>
         </div>
