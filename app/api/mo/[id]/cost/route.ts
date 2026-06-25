@@ -31,8 +31,8 @@ export type CostScenario = {
   labor_mode: "system" | "piece" | "table";          // ใช้ค่าแรงแบบไหน
   piece_rate: number;                                 // (legacy) งานเหมา/ชิ้น ช่องเดียวเดิม
   piece_jobs?: PieceJob[];                            // ใหม่: รายการงานเหมา (โหมด piece)
-  // โหมดจ่ายโต๊ะ: เลือกโต๊ะ→เงินเดือนรวม · 2 ทาง (ใส่วัน หรือ ใส่ค่าแรงเป้าหมาย→ได้วันสูงสุด)
-  table: { salary: number; workdays: number; capacity: number; dept_name?: string; calc?: "days" | "target"; days?: number; target_pp?: number };
+  // โหมดจ่ายโต๊ะ: เลือกทั้งโต๊ะ หรือ เลือกบางคน (multi-pick) → เงินเดือนรวม · 2 ทาง (ใส่วัน หรือ ใส่ค่าแรงเป้าหมาย→ได้วันสูงสุด)
+  table: { salary: number; workdays: number; capacity: number; dept_name?: string; calc?: "days" | "target"; days?: number; target_pp?: number; pick_mode?: "table" | "workers"; worker_ids?: string[] };
   extras: { label: string; amount: number; per: "piece" | "mo" }[];   // ค่าส่ง/ค่าจิปาถะ ฯลฯ
 };
 export type MoCost = {
