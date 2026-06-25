@@ -49,13 +49,14 @@ const SORTS = [
 function cardWarnings(c: SkuCard): string[] {
   const w: string[] = [];
   if (!c.image) w.push("ไม่มีรูป");
-  if (c.list_price == null || c.list_price <= 0) w.push("ไม่มีราคา");
+  if (c.variant_count == null && (c.list_price == null || c.list_price <= 0)) w.push("ไม่มีราคา");   // Parent ไม่มีราคา = ไม่เตือน
   if (c.tags.length === 0) w.push("ไม่มีแท็ก");
   return w;
 }
 
 export function SkuTagBrowser() {
   const toast = useToast();
+  const [entity, setEntity] = useState<"skus" | "parent-skus">("skus");   // ดูตาม SKU หรือ Parent SKU (ของกลางตัวเดียว)
   const [tree, setTree] = useState<BrowseTree | null>(null);
   const [groupPath, setGroupPath] = useState<Crumb[]>([]);
   const [tagFilter, setTagFilter] = useState<TagFilterValue>(EMPTY_FILTER);
@@ -79,18 +80,23 @@ export function SkuTagBrowser() {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [peekId, setPeekId] = useState<string | null>(null);   // คลิกการ์ด/แถว → RelationPeek (ของกลาง: ดู/แก้ทุกฟิลด์)
 
+  // ชุดฟิลด์การ์ด (ครั้งเดียว)
   useEffect(() => {
-    apiFetch("/api/sku-browser").then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
     apiFetch(`/api/card-layouts?scope=${CARD_SCOPE}`).then((r) => r.json())
       .then((j) => { const f = (j.mine ?? j.default) as string[] | null; if (f && f.length) setCardFields(f); }).catch(() => {});
-    apiFetch("/api/admin/field-registry-v2?module=skus-v2").then((r) => r.json())
+  }, []);
+  // ต้นไม้แท็ก + ฟิลด์ทะเบียน + รีเซ็ตการเดิน — เปลี่ยนเมื่อสลับ entity (SKU/Parent)
+  useEffect(() => {
+    setGroupPath([]); setTagFilter(EMPTY_FILTER); setSearch("");
+    apiFetch(`/api/sku-browser?entity=${entity}`).then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
+    apiFetch(`/api/admin/field-registry-v2?module=${entity === "parent-skus" ? "parent-skus-v2" : "skus-v2"}`).then((r) => r.json())
       .then((j) => {
         const fs = ((j.fields ?? []) as { column_name: string | null; field_label: string; is_visible: boolean; is_sensitive: boolean }[])
           .filter((f) => f.column_name && f.is_visible && !f.is_sensitive && !CORE_COLUMNS.has(f.column_name))
           .map((f) => ({ key: f.column_name as string, label: f.field_label }));
         setAvailFields(fs);
       }).catch(() => {});
-  }, []);
+  }, [entity]);
 
   const tagNameById = useMemo(() => new Map((tree?.tags ?? []).map((t) => [t.id, t.name])), [tree]);
   const fieldLabels = useMemo(() => new Map(availFields.map((f) => [f.key, f.label])), [availFields]);
@@ -107,11 +113,12 @@ export function SkuTagBrowser() {
     if (search.trim()) p.set("search", search.trim());
     p.set("sort", sort.by); p.set("dir", sort.dir);
     p.set("limit", String(LIMIT)); p.set("offset", String(off));
+    p.set("entity", entity);
     const extra = cardFields.filter((k) => !CORE_KEYS.has(k));
     if (extra.length) p.set("fields", extra.join(","));
     const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
     return { cards: (j.cards ?? []) as SkuCard[], total: Number(j.total ?? 0) };
-  }, [tagFilter, search, sort, cardFields]);
+  }, [tagFilter, search, sort, cardFields, entity]);
 
   // โหลดหน้าแรกใหม่เมื่อเปลี่ยน filter/search/sort
   useEffect(() => {
@@ -202,6 +209,13 @@ export function SkuTagBrowser() {
 
   return (
     <div>
+      {/* สลับ SKU / Parent SKU (ของกลางตัวเดียว — แท็ก/กลุ่มชุดเดียวกัน) */}
+      <div className="flex items-center gap-1 mb-3">
+        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+          <button onClick={() => setEntity("skus")} className={`h-9 px-4 text-sm ${entity === "skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>🏷️ SKU</button>
+          <button onClick={() => setEntity("parent-skus")} className={`h-9 px-4 text-sm border-l border-slate-200 ${entity === "parent-skus" ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>📦 Parent SKU</button>
+        </div>
+      </div>
       {/* search + กรองแท็ก (ของกลาง) + ปรับการ์ด */}
       <div className="flex items-center gap-2 mb-3">
         <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 h-10 flex-1 bg-white focus-within:ring-2 focus-within:ring-indigo-500">
@@ -318,14 +332,14 @@ export function SkuTagBrowser() {
       {peekId && (() => {
         const idx = cards.findIndex((c) => c.id === peekId);
         return (
-          <RelationPeekModal moduleKey="skus-v2" recordId={peekId}
+          <RelationPeekModal moduleKey={entity === "parent-skus" ? "parent-skus-v2" : "skus-v2"} recordId={peekId}
             onClose={() => setPeekId(null)} onChanged={() => void reloadFirst()}
             nav={idx >= 0 ? {
               onPrev: idx > 0 ? () => setPeekId(cards[idx - 1].id) : undefined,
               onNext: idx < cards.length - 1 ? () => setPeekId(cards[idx + 1].id) : undefined,
               label: `${idx + 1}/${cards.length}`,
             } : undefined}
-            onCopy={async () => {
+            onCopy={entity !== "skus" ? undefined : async () => {
               try {
                 const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: peekId }) });
                 const j = await res.json().catch(() => ({}));
@@ -368,12 +382,14 @@ function SkuCardView({ c, fields, extraDefs, onOpen, selected, onToggleSelect }:
           </div>
         )}
         {has("name") && <p className="text-[12px] text-slate-700 mt-1" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: "2.4em" }}>{c.name || "—"}</p>}
-        {showPriceRow && (
+        {c.variant_count != null ? (
+          <div className="mt-1.5 text-[12px] text-indigo-600">📦 {c.variant_count.toLocaleString("th-TH")} ตัวลูก (SKU)</div>
+        ) : showPriceRow ? (
           <div className="flex items-center justify-between mt-1.5">
             {has("price") ? <span className="text-[13px] font-medium text-slate-800">{c.list_price != null && c.list_price > 0 ? `฿${Number(c.list_price).toLocaleString("th-TH")}` : "—"}</span> : <span />}
             {has("stock") && <span className="text-[11px] text-slate-400">สต๊อก {c.qty_on_hand != null ? Number(c.qty_on_hand).toLocaleString("th-TH") : "—"}</span>}
           </div>
-        )}
+        ) : null}
         {has("tags") && c.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {c.tags.slice(0, 3).map((t) => <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{t}</span>)}

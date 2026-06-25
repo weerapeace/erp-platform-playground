@@ -20,6 +20,7 @@ export type SkuCard = {
   id: string; code: string; name: string; image: string | null;
   list_price: number | null; qty_on_hand: number | null; is_active: boolean; tags: string[];
   has_bom: boolean;   // มีสูตร BOM ไหม (ไว้เตือน "ข้อมูลไม่ครบ")
+  variant_count?: number | null;     // จำนวน SKU ลูก (เฉพาะ Parent SKU — แทนราคา/สต๊อก)
   extra?: Record<string, unknown>;   // ฟิลด์เพิ่มที่เลือกโชว์บนการ์ด (จาก Field Registry — ไม่ hardcode)
 };
 
@@ -34,12 +35,18 @@ export async function GET(request: NextRequest) {
   const search   = (sp.get("search") ?? "").trim();
   const admin = supabaseAdmin();
 
+  // entity: skus (ดีฟอลต์) หรือ parent-skus — สลับตาราง/junction/RPC (ใช้ของกลางตัวเดียว)
+  const entity = sp.get("entity") === "parent-skus" ? "parent-skus" : "skus";
+  const ENT = entity === "parent-skus"
+    ? { table: "parent_skus_v2", junction: "parent_skus_v2_product_family_m2m", countsRpc: "erp_parent_family_counts", pageRpc: "erp_parent_skus_tag_page", moduleKey: "parent-skus-v2", hasPrice: false }
+    : { table: "skus_v2", junction: "skus_v2_product_family_m2m", countsRpc: "erp_sku_family_counts", pageRpc: "erp_skus_tag_page", moduleKey: "skus-v2", hasPrice: true };
+
   // ── โหมดต้นไม้ ──
   if (familyIds.length === 0 && !search) {
     const [gRes, tRes, mRes] = await Promise.all([
       admin.from("product_family_groups").select("id, name, parent_group_id, icon, color, sort_order").eq("is_active", true).order("sort_order"),
       admin.from("product_families").select("id, name, group_id, sort_order").eq("is_active", true).order("sort_order"),
-      admin.rpc("erp_sku_family_counts"),   // นับฝั่ง DB (group by) เลี่ยงเพดาน 1,000 แถว
+      admin.rpc(ENT.countsRpc),   // นับฝั่ง DB (group by) เลี่ยงเพดาน 1,000 แถว — ตาม entity
     ]);
     const counts = new Map<string, number>();
     for (const r of (mRes.data ?? []) as { family_id: string; cnt: number }[]) counts.set(r.family_id, Number(r.cnt));
@@ -63,7 +70,7 @@ export async function GET(request: NextRequest) {
     .filter((f) => f && !CORE_COLS.has(f) && /^[a-z_][a-z0-9_]*$/i.test(f));
   let extraCols: string[] = [];
   if (reqFields.length) {
-    const { data: mod } = await admin.from("erp_modules").select("id").eq("module_key", "skus-v2").maybeSingle();
+    const { data: mod } = await admin.from("erp_modules").select("id").eq("module_key", ENT.moduleKey).maybeSingle();
     if (mod?.id) {
       const { data: regCols } = await admin.from("erp_module_fields")
         .select("column_name, is_sensitive").eq("module_id", mod.id as string).eq("is_visible", true).not("column_name", "is", null);
@@ -72,29 +79,31 @@ export async function GET(request: NextRequest) {
       extraCols = reqFields.filter((f) => allowed.has(f));
     }
   }
-  const sel = "id, code, name_th, cover_image_r2_key, list_price, is_active" + (extraCols.length ? ", " + extraCols.join(", ") : "");
+  const baseCols = "id, code, name_th, cover_image_r2_key, is_active" + (ENT.hasPrice ? ", list_price" : "");
+  const effSort = (!ENT.hasPrice && sortBy === "list_price") ? "code" : sortBy;   // parent ไม่มี list_price
+  const sel = baseCols + (extraCols.length ? ", " + extraCols.join(", ") : "");
   let rows: SkuRow[] = [];
   let total = 0;
 
   if (familyIds.length) {
     // กรองแท็ก (หลายแท็ก = OR) ผ่าน RPC กลาง erp_skus_tag_page (EXISTS ที่ DB + แบ่งหน้า) — รองรับแท็กที่มี SKU เป็นพัน ไม่ส่ง id ยาวใน URL
-    const { data: rpc, error: rpcErr } = await admin.rpc("erp_skus_tag_page", {
+    const { data: rpc, error: rpcErr } = await admin.rpc(ENT.pageRpc, {
       p_incl: familyIds, p_excl: null, p_search: search || null,
-      p_include_inactive: true, p_limit: limit, p_offset: offset, p_sort_by: sortBy, p_sort_dir: sortDir,
+      p_include_inactive: true, p_limit: limit, p_offset: offset, p_sort_by: effSort, p_sort_dir: sortDir,
     });
     if (rpcErr) return NextResponse.json({ cards: [], total: 0, error: rpcErr.message }, { status: 500 });
     const pageIds = (rpc as { ids?: string[] } | null)?.ids ?? [];
     total = Number((rpc as { total?: number } | null)?.total ?? 0);
     if (pageIds.length === 0) return NextResponse.json({ cards: [], total, error: null });
-    const { data: skus, error } = await admin.from("skus_v2").select(sel).in("id", pageIds);
+    const { data: skus, error } = await admin.from(ENT.table).select(sel).in("id", pageIds);
     if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
     const order = new Map(pageIds.map((id, i) => [id, i]));
     rows = ((skus ?? []) as unknown as SkuRow[]).sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   } else {
     // ค้นหาอย่างเดียว (ไม่มีแท็ก) — search จำกัดผลอยู่แล้ว
-    let q = admin.from("skus_v2").select(sel, { count: "exact" });
+    let q = admin.from(ENT.table).select(sel, { count: "exact" });
     for (const raw of search.split(/\s+/)) { const t = sanitize(raw); if (t) q = q.or(`code.ilike.%${t}%,name_th.ilike.%${t}%`); }
-    q = q.order(sortBy, { ascending: sortDir === "asc" }).range(offset, offset + limit - 1);
+    q = q.order(effSort, { ascending: sortDir === "asc" }).range(offset, offset + limit - 1);
     const { data: skus, count, error } = await q;
     if (error) return NextResponse.json({ cards: [], total: 0, error: error.message }, { status: 500 });
     rows = (skus ?? []) as unknown as SkuRow[];
@@ -104,28 +113,38 @@ export async function GET(request: NextRequest) {
   const ids   = rows.map((r) => r.id);
   const codes = rows.map((r) => r.code).filter(Boolean);
 
-  const stock  = new Map<string, number>();
-  const bomSet = new Set<string>();
-  const tagMap = new Map<string, string[]>();
+  const stock   = new Map<string, number>();
+  const bomSet  = new Set<string>();
+  const tagMap  = new Map<string, string[]>();
+  const variant = new Map<string, number>();   // จำนวน SKU ลูก ต่อ Parent
 
   if (ids.length) {
-    // ยิงขนาน: สต๊อก + ลิงก์แท็ก + BOM (เร็วกว่ารอทีละ query)
-    const [balRes, linkRes, bomRes] = await Promise.all([
-      admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", ids),
-      admin.from("skus_v2_product_family_m2m").select("src_id, tgt_id").in("src_id", ids),
-      admin.from("bom_headers").select("product_sku").in("product_sku", codes),
-    ]);
-    for (const b of (balRes.data ?? []) as { sku_id: string; qty_on_hand: number | string | null }[]) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
-    for (const b of (bomRes.data ?? []) as { product_sku: string }[]) bomSet.add(b.product_sku);
+    let linkData: { src_id: string; tgt_id: string }[] = [];
+    if (ENT.hasPrice) {
+      const [linkRes, balRes, bomRes] = await Promise.all([
+        admin.from(ENT.junction).select("src_id, tgt_id").in("src_id", ids),
+        admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", ids),
+        admin.from("bom_headers").select("product_sku").in("product_sku", codes),
+      ]);
+      linkData = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
+      for (const b of ((balRes.data ?? []) as { sku_id: string; qty_on_hand: number | string | null }[])) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
+      for (const b of ((bomRes.data ?? []) as { product_sku: string }[])) bomSet.add(b.product_sku);
+    } else {
+      const [linkRes, varRes] = await Promise.all([
+        admin.from(ENT.junction).select("src_id, tgt_id").in("src_id", ids),
+        admin.from("skus_v2").select("parent_sku_id").in("parent_sku_id", ids),   // นับ SKU ลูกต่อ Parent
+      ]);
+      linkData = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
+      for (const v of ((varRes.data ?? []) as { parent_sku_id: string | null }[])) if (v.parent_sku_id) variant.set(v.parent_sku_id, (variant.get(v.parent_sku_id) ?? 0) + 1);
+    }
 
-    // ชื่อแท็ก: query เพิ่มหลังได้ลิงก์ (m2m → product_families.name)
-    const linkRows = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
-    const tgtIds = [...new Set(linkRows.map((l) => l.tgt_id))];
+    // ชื่อแท็ก (m2m → product_families.name)
+    const tgtIds = [...new Set(linkData.map((l) => l.tgt_id))];
     if (tgtIds.length) {
       const { data: fams } = await admin.from("product_families").select("id, name").in("id", tgtIds);
       const nameById = new Map<string, string>();
       for (const f of (fams ?? []) as { id: string; name: string }[]) nameById.set(f.id, f.name);
-      for (const l of linkRows) {
+      for (const l of linkData) {
         const name = nameById.get(l.tgt_id); if (!name) continue;
         const arr = tagMap.get(l.src_id) ?? []; arr.push(name); tagMap.set(l.src_id, arr);
       }
@@ -133,10 +152,12 @@ export async function GET(request: NextRequest) {
   }
 
   const cards: SkuCard[] = rows.map((r) => ({
-    id: r.id, code: r.code, name: r.name_th ?? "",
+    id: r.id, code: r.code, name: (r.name_th as string) ?? "",
     image: r.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(r.cover_image_r2_key)}` : null,
-    list_price: r.list_price, qty_on_hand: stock.has(r.id) ? (stock.get(r.id) as number) : null,
-    is_active: r.is_active, tags: tagMap.get(r.id) ?? [], has_bom: bomSet.has(r.code),
+    list_price: ENT.hasPrice ? (r.list_price ?? null) : null,
+    qty_on_hand: ENT.hasPrice ? (stock.has(r.id) ? (stock.get(r.id) as number) : null) : null,
+    variant_count: ENT.hasPrice ? null : (variant.get(r.id) ?? 0),
+    is_active: r.is_active, tags: tagMap.get(r.id) ?? [], has_bom: ENT.hasPrice ? bomSet.has(r.code) : false,
     extra: extraCols.length ? Object.fromEntries(extraCols.map((col) => [col, r[col] ?? null])) : undefined,
   }));
   return NextResponse.json({ cards, total, error: null });
