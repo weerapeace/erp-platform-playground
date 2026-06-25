@@ -10,6 +10,7 @@ import Link from "next/link";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import type { DrillRow } from "@/app/api/purchasing/dashboard/list/route";
 
 type Dash = {
   rmb_rate: number;
@@ -73,12 +74,13 @@ function Donut({ data }: { data: { label: string; value: number; color: string }
   );
 }
 
-function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`bg-white border border-slate-200 rounded-xl p-4 ${className}`}>{children}</div>;
+function Card({ children, className = "", onClick }: { children: React.ReactNode; className?: string; onClick?: () => void }) {
+  return <div onClick={onClick} className={`bg-white border border-slate-200 rounded-xl p-4 ${onClick ? "cursor-pointer hover:border-blue-300 hover:shadow-sm transition" : ""} ${className}`}>{children}</div>;
 }
 
 export default function PurchasingDashboardPage() {
   const [d, setD] = useState<Dash | null>(null);
+  const [drill, setDrill] = useState<{ type: string; seller?: string } | null>(null);   // ป๊อปเจาะรายการ (กดการ์ด/ร้าน)
   const [lineOpen, setLineOpen] = useState(false);   // โมดอลตั้งค่ากลุ่ม LINE แจ้งเตือนขอซื้อ
   const [incoming, setIncoming] = useState<Incoming[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,20 +125,20 @@ export default function PurchasingDashboardPage() {
           <div className="space-y-3">
             {/* KPI */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card>
-                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-amber-600">⏳</span> รออนุมัติ</div>
+              <Card onClick={() => setDrill({ type: "waiting" })}>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-amber-600">⏳</span> รออนุมัติ <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{d.kpi.waiting} <span className="text-xs text-slate-400 font-normal">ใบ</span></div>
               </Card>
-              <Card>
-                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-blue-600">🚚</span> ค้างรับเข้า</div>
+              <Card onClick={() => setDrill({ type: "pending_receive" })}>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-blue-600">🚚</span> ค้างรับเข้า <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{d.kpi.pending_receive} <span className="text-xs text-slate-400 font-normal">รายการ</span></div>
               </Card>
-              <Card>
-                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-rose-600">💰</span> รอจ่ายเงิน</div>
+              <Card onClick={() => setDrill({ type: "unpaid" })}>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-rose-600">💰</span> รอจ่ายเงิน <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{baht(d.kpi.unpaid_thb)}</div>
               </Card>
-              <Card>
-                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-emerald-600">🛒</span> ยอดซื้อเดือนนี้</div>
+              <Card onClick={() => setDrill({ type: "spend_month" })}>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500"><span className="text-emerald-600">🛒</span> ยอดซื้อเดือนนี้ <span className="ml-auto text-[10px] text-slate-300">กดดู</span></div>
                 <div className="text-2xl font-semibold mt-1">{bahtShort(d.kpi.spend_this_month_thb)}</div>
               </Card>
             </div>
@@ -165,14 +167,14 @@ export default function PurchasingDashboardPage() {
                 <Donut data={statusData} />
               </Card>
               <Card>
-                <div className="text-sm font-medium mb-3">ร้านค้าที่ซื้อมากสุด</div>
+                <div className="text-sm font-medium mb-3">ร้านค้าที่ซื้อมากสุด <span className="text-[11px] text-slate-400 font-normal">· กดร้านดูว่าซื้ออะไร</span></div>
                 <div className="space-y-2.5 text-xs">
                   {d.top_suppliers.length === 0 && <div className="text-slate-300 py-4 text-center">ยังไม่มีข้อมูล</div>}
                   {d.top_suppliers.map((s, i) => (
-                    <div key={i}>
-                      <div className="flex justify-between mb-0.5"><span className="truncate pr-2 text-slate-600">{s.name}</span><span className="text-slate-500 flex-shrink-0">{bahtShort(s.thb)}</span></div>
+                    <button key={i} type="button" onClick={() => setDrill({ type: "supplier", seller: s.name })} className="w-full text-left block group">
+                      <div className="flex justify-between mb-0.5"><span className="truncate pr-2 text-slate-600 group-hover:text-blue-600">{s.name}</span><span className="text-slate-500 flex-shrink-0">{bahtShort(s.thb)}</span></div>
                       <div className="h-[7px] bg-slate-100 rounded"><div className="h-[7px] rounded" style={{ width: `${Math.max(4, (s.thb / maxSup) * 100)}%`, background: "#D85A30" }} /></div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </Card>
@@ -220,7 +222,93 @@ export default function PurchasingDashboardPage() {
         )}
       </div>
       <LineGroupModal open={lineOpen} onClose={() => setLineOpen(false)} />
+      <DrillModal drill={drill} onClose={() => setDrill(null)} />
     </PlaygroundShell>
+  );
+}
+
+// ป๊อปเจาะรายการเบื้องหลังตัวเลข/ร้าน — มีค้นหา + เลือกร้าน + จัดกลุ่มตามใบสั่งงาน (กลุ่ม C) + ลิงก์ไปหน้าจริง
+function DrillModal({ drill, onClose }: { drill: { type: string; seller?: string } | null; onClose: () => void }) {
+  const [data, setData] = useState<{ title: string; rows: DrillRow[]; sellers: string[]; link: { href: string; label: string } | null } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [q, setQ] = useState("");
+  const [seller, setSeller] = useState("");
+  const [groupMo, setGroupMo] = useState(false);
+  const open = drill !== null;
+  const fixedSeller = drill?.type === "supplier" ? (drill.seller ?? "") : "";
+
+  useEffect(() => { if (open) { setQ(""); setSeller(""); setGroupMo(false); setData(null); } }, [open, drill?.type, drill?.seller]);
+
+  useEffect(() => {
+    if (!open || !drill) return;
+    setLoading(true);
+    const t = setTimeout(() => {
+      const qs = new URLSearchParams({ type: drill.type });
+      if (fixedSeller) qs.set("seller", fixedSeller);
+      else if (seller) qs.set("seller", seller);
+      if (q) qs.set("q", q);
+      apiFetch(`/api/purchasing/dashboard/list?${qs}`).then((r) => r.json())
+        .then((j) => { if (!j.error) setData(j); }).catch(() => {}).finally(() => setLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [open, drill, fixedSeller, seller, q]);
+
+  const canGroupMo = drill?.type === "waiting";
+  const rows = data?.rows ?? [];
+  // จัดกลุ่มตามใบสั่งงาน (เฉพาะรายการรอซื้อ)
+  const groups = groupMo
+    ? Object.entries(rows.reduce((m: Record<string, DrillRow[]>, r) => { const k = r.mo_no || "— ไม่มีใบสั่งงาน —"; (m[k] ??= []).push(r); return m; }, {}))
+    : [["", rows] as [string, DrillRow[]]];
+
+  return (
+    <ERPModal open={open} onClose={onClose} size="lg" title={data?.title ?? "รายการ"}>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาสินค้า / เลขเอกสาร..."
+            className="flex-1 min-w-[160px] h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          {!fixedSeller && (data?.sellers.length ?? 0) > 1 && (
+            <select value={seller} onChange={(e) => setSeller(e.target.value)} className="h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white max-w-[180px]">
+              <option value="">ทุกร้าน</option>
+              {data?.sellers.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          {canGroupMo && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 whitespace-nowrap">
+              <input type="checkbox" checked={groupMo} onChange={(e) => setGroupMo(e.target.checked)} className="rounded border-slate-300" /> 🏭 ตามใบสั่งงาน
+            </label>
+          )}
+        </div>
+
+        {loading && rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลด...</div>
+          : rows.length === 0 ? <div className="py-10 text-center text-sm text-slate-300">— ไม่มีรายการ —</div>
+          : (
+            <div className="space-y-3 max-h-[55vh] overflow-y-auto">
+              {groups.map(([gk, grows]) => (
+                <div key={gk || "_"}>
+                  {gk && <div className="text-[11px] font-medium text-slate-400 px-1 pb-1 sticky top-0 bg-white">{gk} <span className="text-slate-300">({grows.length})</span></div>}
+                  <div className="space-y-1">
+                    {grows.map((r) => (
+                      <div key={r.id} className="flex items-start justify-between gap-3 px-2 py-1.5 rounded-lg border border-slate-100 hover:bg-slate-50">
+                        <div className="min-w-0">
+                          <div className="text-sm text-slate-700 truncate">{r.primary}</div>
+                          <div className="text-[11px] text-slate-400 truncate">{r.secondary}</div>
+                        </div>
+                        <div className="text-xs text-slate-600 text-right shrink-0 tabular-nums">{r.right}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+        {data?.link && (
+          <div className="pt-1 text-right border-t border-slate-100">
+            <Link href={data.link.href} className="text-sm text-blue-600 hover:underline">{data.link.label} →</Link>
+          </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }
 
