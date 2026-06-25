@@ -67,6 +67,7 @@ export function RelationPeekModal({
   const [cfgQ, setCfgQ] = useState("");
   const [cfgSaving, setCfgSaving] = useState(false);
   const [studioOpen, setStudioOpen] = useState(false);   // เปิดตัวออกแบบ layout กลาง (StudioPanel)
+  const [activeTab, setActiveTab] = useState(0);   // แท็บที่เลือกในโหมดดู (drawer ขวา)
 
   const set = (k: string, v: unknown) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -261,8 +262,8 @@ export function RelationPeekModal({
   const dismiss = useBackdropDismiss(editing ? () => {} : onClose);
 
   return createPortal(
-    <div className="fixed inset-0 z-[140] bg-black/40 flex items-center justify-center p-4" {...dismiss}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[140] bg-black/40 flex justify-end" {...dismiss}>
+      <div className="bg-white shadow-2xl w-full max-w-xl h-full flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
           <h3 className="text-base font-semibold text-slate-800 line-clamp-1">{isCreate ? "➕ " : editing ? "✎ " : "🔗 "}{title}</h3>
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -334,26 +335,35 @@ export function RelationPeekModal({
                       ))}
                     </dl>
                   );
-                  // จัดเซกชัน/ลำดับตาม layout ฟอร์มที่ออกแบบไว้ (group_key ↔ section.key) · ไม่มี layout → แบบเดิม
-                  const secs = (layout?.tabs ?? []).flatMap((t) => t.sections);
-                  if (secs.length === 0) return grid(viewFields);
+                  // จัดเป็น "แท็บ" ตาม layout ฟอร์ม (Tab→Section) · ไม่มี layout → grid แบบเดิม
                   const bySec = new Map<string, RF[]>();
-                  for (const f of viewFields) { const k = f.group_key || ""; (bySec.get(k) ?? bySec.set(k, []).get(k)!).push(f); }
-                  const known = new Set(secs.map((s) => s.key));
-                  const ordered = secs.filter((s) => (bySec.get(s.key)?.length ?? 0) > 0);
+                  for (const f of viewFields) { const k = f.group_key || ""; if (!bySec.has(k)) bySec.set(k, []); bySec.get(k)!.push(f); }
+                  const known = new Set((layout?.tabs ?? []).flatMap((t) => t.sections.map((s) => s.key)));
                   const leftover = viewFields.filter((f) => !known.has(f.group_key || ""));
-                  if (ordered.length === 0) return grid(viewFields);
-                  return <>
-                    {ordered.map((s) => (
-                      <div key={s.key}>
-                        <div className="text-xs font-semibold text-slate-500 mb-1 pb-0.5 border-b border-slate-100">{s.label}</div>
-                        {grid(bySec.get(s.key)!)}
+                  const vtabs = (layout?.tabs ?? [])
+                    .map((t) => ({ label: t.label, secs: t.sections.filter((s) => (bySec.get(s.key)?.length ?? 0) > 0) }))
+                    .filter((t) => t.secs.length > 0);
+                  if (leftover.length) { bySec.set("__lo__", leftover); vtabs.push({ label: "อื่นๆ", secs: [{ key: "__lo__", label: "" }] }); }
+                  if (vtabs.length === 0) return grid(viewFields);
+                  const renderSecs = (secs: { key: string; label: string }[]) => secs.map((s) => (
+                    <div key={s.key} className="mb-3">
+                      {s.label && <div className="text-xs font-semibold text-slate-500 mb-1 pb-0.5 border-b border-slate-100">{s.label}</div>}
+                      {grid(bySec.get(s.key) ?? [])}
+                    </div>
+                  ));
+                  if (vtabs.length === 1) return <>{renderSecs(vtabs[0].secs)}</>;
+                  const ai = Math.min(activeTab, vtabs.length - 1);
+                  return (
+                    <>
+                      <div className="flex gap-1 border-b border-slate-100 mb-3 flex-wrap">
+                        {vtabs.map((t, i) => (
+                          <button key={i} onClick={() => setActiveTab(i)}
+                            className={`px-3 py-1.5 text-[13px] -mb-px border-b-2 ${i === ai ? "border-blue-500 text-blue-600 font-medium" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{t.label}</button>
+                        ))}
                       </div>
-                    ))}
-                    {leftover.length > 0 && (
-                      <div><div className="text-xs font-semibold text-slate-400 mb-1 pb-0.5 border-b border-slate-100">อื่นๆ</div>{grid(leftover)}</div>
-                    )}
-                  </>;
+                      {renderSecs(vtabs[ai].secs)}
+                    </>
+                  );
                 })()}
               </div>
             </div>
