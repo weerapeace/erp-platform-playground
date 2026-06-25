@@ -135,11 +135,25 @@ export function SkuTagBrowser() {
   const childGroups = (tree?.groups ?? []).filter((g) => g.parent_group_id === currentGroupId);
   const childTags   = (tree?.tags   ?? []).filter((t) => t.group_id === currentGroupId);
 
-  const openGroup = (g: BrowseGroup) => setGroupPath((p) => [...p, { id: g.id, name: g.name }]);
-  const openTag   = (t: BrowseTag)   => setTagFilter({ tagIds: [t.id], none: false });
-  const goRoot    = () => { setGroupPath([]); setTagFilter(EMPTY_FILTER); setSearch(""); };
-  const goCrumb   = (i: number) => { setGroupPath((p) => p.slice(0, i + 1)); setTagFilter(EMPTY_FILTER); };
-  const clearTags = () => setTagFilter(EMPTY_FILTER);
+  // ผูกการเดินเข้ากลุ่ม/แท็กกับประวัติเบราว์เซอร์ → ปุ่ม Back ย้อนทีละชั้น (ไม่เด้งออกหน้าเลย)
+  const pushNav = useCallback((gp: Crumb[], tf: TagFilterValue) => {
+    setGroupPath(gp); setTagFilter(tf);
+    try { window.history.pushState({ __skuNav: { gp, tf } }, ""); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const s = (e.state as { __skuNav?: { gp: Crumb[]; tf: TagFilterValue } } | null)?.__skuNav;
+      setGroupPath(s?.gp ?? []); setTagFilter(s?.tf ?? EMPTY_FILTER);   // ไม่มี state ของเรา = กลับถึงราก
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const openGroup = (g: BrowseGroup) => pushNav([...groupPath, { id: g.id, name: g.name }], EMPTY_FILTER);
+  const openTag   = (t: BrowseTag)   => pushNav(groupPath, { tagIds: [t.id], none: false });
+  const goRoot    = () => { setSearch(""); pushNav([], EMPTY_FILTER); };
+  const goCrumb   = (i: number) => pushNav(groupPath.slice(0, i + 1), EMPTY_FILTER);
+  const clearTags = () => pushNav(groupPath, EMPTY_FILTER);
 
   // ── เลือกหลายตัว + bulk ──
   const toggleSel = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
