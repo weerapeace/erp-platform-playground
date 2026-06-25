@@ -61,7 +61,7 @@ export function RecordTasksButton({ moduleKey, recordId = null, label = "📝 �
   };
 
   const toggle = async (it: RecordTask) => {
-    const next = it.status === "done" ? "open" : "done";
+    const next = it.status === "resolved" ? "open" : "resolved";   // "เสร็จ" = resolved (ตาม check constraint ของตาราง)
     setItems((p) => p.map((x) => x.id === it.id ? { ...x, status: next } : x));   // optimistic
     try {
       const r = await apiFetch(`/api/record-tasks/${it.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: next, actor: user?.name }) });
@@ -75,11 +75,11 @@ export function RecordTasksButton({ moduleKey, recordId = null, label = "📝 �
     catch { toast.error("ลบไม่สำเร็จ"); void load(); }
   };
 
-  const openItems = items.filter((t) => t.status !== "done");
-  const doneItems = items.filter((t) => t.status === "done");
+  const openItems = items.filter((t) => t.status !== "resolved");
+  const doneItems = items.filter((t) => t.status === "resolved");
 
   const row = (it: RecordTask) => {
-    const done = it.status === "done";
+    const done = it.status === "resolved";
     return (
       <div key={it.id} className="group flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50">
         <button type="button" onClick={() => canEdit && void toggle(it)} disabled={!canEdit} title={done ? "ทำเครื่องหมายว่ายังค้าง" : "ทำเครื่องหมายว่าเสร็จ"}

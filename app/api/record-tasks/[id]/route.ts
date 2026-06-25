@@ -25,10 +25,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const patch: Record<string, unknown> = {};
   if (typeof body.title === "string") { const t = body.title.trim(); if (!t) return NextResponse.json({ error: "ชื่อว่างไม่ได้" }, { status: 400 }); patch.title = t; }
   if (typeof body.status === "string") {
-    const st = body.status === "done" ? "done" : "open";
+    // ค่าใน DB ถูกจำกัดด้วย check constraint: open/in_progress/resolved/ignored/archived → "เสร็จ" = resolved
+    const st = body.status === "resolved" || body.status === "done" ? "resolved" : "open";
     patch.status = st;
-    patch.resolved_at = st === "done" ? new Date().toISOString() : null;
-    patch.resolved_by = st === "done" ? actor : null;
+    patch.resolved_at = st === "resolved" ? new Date().toISOString() : null;
+    patch.resolved_by = st === "resolved" ? actor : null;
   }
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีอะไรให้แก้" }, { status: 400 });
 
