@@ -17,9 +17,9 @@ type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; remaining: number; due_date: string | null;
-  brand: string | null; labor?: Labor; central_rate?: number;
+  brand: string | null; image_url: string | null; labor?: Labor; central_rate?: number;
 };
-type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty: number; product_sku: string | null; product_name: string | null };
+type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty: number; product_sku: string | null; product_name: string | null; image_url: string | null };
 type WorkOrder = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
   stage: string; assignee_name: string | null; department_name: string | null;
@@ -32,6 +32,8 @@ const num = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const money = (n: number) => Math.round(n * 100) / 100 === 0 ? "0" : (Math.round(n * 100) / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const dueText = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "—");
 const BLANK = `<span class="blank"></span>`;
+const thumb = (url: string | null) => (url ? `${url}${url.includes("?") ? "&" : "?"}w=120` : "");
+const imgCell = (url: string | null) => (url ? `<img class="thumb" src="${thumb(url)}" alt="" />` : `<span class="no-img">—</span>`);
 
 const COMMON_CSS = `
 .doc { font-size: 11px; color: #111827; }
@@ -44,6 +46,9 @@ const COMMON_CSS = `
 .wb-t th { background: #f1f5f9; font-weight: 700; text-align: left; }
 .wb-t td.r, .wb-t th.r { text-align: right; white-space: nowrap; }
 .wb-t .mono { font-family: ui-monospace, monospace; color: #475569; white-space: nowrap; }
+.wb-t td.img, .wb-t th.img { width: 15mm; text-align: center; padding: 1mm; }
+.thumb { width: 13mm; height: 13mm; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 3px; display: block; margin: 0 auto; }
+.no-img { color: #cbd5e1; }
 .wb-t tfoot td { background: #f8fafc; font-weight: 800; }
 .blank { display: inline-block; width: 16mm; height: 4.5mm; border: 1px solid #94a3b8; border-radius: 2px; }
 .wb-note { font-size: 9.5px; color: #94a3b8; margin-top: 2mm; }
@@ -65,18 +70,33 @@ const TEMPLATE_PENDING: ReportTemplate = {
     <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
   </div>`,
   body_html: `{{#has_rows}}<table class="wb-t">
-    <thead><tr><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">กำหนดส่ง</th><th class="r">เหลือจ่าย</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{due}}</td><td class="r">{{remaining}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{total_cell}}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="4">รวม {{count}} รายการ</td><td class="r">{{total_qty}}</td><td class="r"></td><td class="r">{{grand_total}}</td></tr></tfoot>
+    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">กำหนดส่ง</th><th class="r">เหลือจ่าย</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{due}}</td><td class="r">{{remaining}}</td><td class="r">{{{rate_cell}}}</td><td class="r">{{{total_cell}}}</td></tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="5">รวม {{count}} รายการ</td><td class="r">{{total_qty}}</td><td class="r"></td><td class="r">{{grand_total}}</td></tr></tfoot>
   </table>
   <div class="wb-note">ช่องว่าง = ยังไม่ตั้งค่าแรง · เขียนกรอกด้วยมือ (ยอดรวมด้านล่างนับเฉพาะรายการที่มีค่าแรงแล้ว)</div>{{/has_rows}}
   {{#has_piece}}<div class="wb-sec">งานเหมารอจ่าย</div>
   <table class="wb-t">
-    <thead><tr><th>รหัส MO</th><th>งาน</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#piece_rows}}<tr><td class="mono">{{mo_no}}</td><td>{{job}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{rate}}</td><td class="r">{{total}}</td></tr>{{/piece_rows}}</tbody>
-    <tfoot><tr><td colspan="6">รวมงานเหมา {{piece_count}} รายการ</td><td class="r">{{piece_grand}}</td></tr></tfoot>
+    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>งาน</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
+    <tbody>{{#piece_rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td>{{job}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{rate}}</td><td class="r">{{total}}</td></tr>{{/piece_rows}}</tbody>
+    <tfoot><tr><td colspan="7">รวมงานเหมา {{piece_count}} รายการ</td><td class="r">{{piece_grand}}</td></tr></tfoot>
   </table>{{/has_piece}}
   {{#empty}}<div class="wb-empty">ไม่มีรายการรอจ่าย</div>{{/empty}}`,
+  footer_html: "", custom_css: COMMON_CSS,
+};
+
+const TEMPLATE_PIECE: ReportTemplate = {
+  paper_size: "A4", orientation: "portrait",
+  header_html: `<div class="wb-head">
+    <div><div class="wb-title">รายการรอจ่ายเหมาทั้งหมด</div><div class="wb-sub">กลุ่ม: {{group_label}} · {{count}} รายการ</div></div>
+    <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
+  </div>`,
+  body_html: `{{#has_rows}}<table class="wb-t">
+    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>งาน</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
+    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td>{{job}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{rate}}</td><td class="r">{{total}}</td></tr>{{/rows}}</tbody>
+    <tfoot><tr><td colspan="7">รวม {{count}} รายการ</td><td class="r">{{grand_total}}</td></tr></tfoot>
+  </table>{{/has_rows}}
+  {{#empty}}<div class="wb-empty">ไม่มีงานเหมารอจ่าย</div>{{/empty}}`,
   footer_html: "", custom_css: COMMON_CSS,
 };
 
@@ -105,7 +125,8 @@ function groupLabelOf(group: string): string {
 function WorkBoardPrintInner() {
   const sp = useSearchParams();
   const router = useRouter();
-  const type = (sp.get("type") === "production" ? "production" : "pending") as "pending" | "production";
+  const typeParam = sp.get("type");
+  const type = (typeParam === "production" ? "production" : typeParam === "piece" ? "piece" : "pending") as "pending" | "production" | "piece";
   const group = sp.get("group") ?? "__all__";
 
   const [board, setBoard] = useState<BoardResp | null>(null);
@@ -136,6 +157,19 @@ function WorkBoardPrintInner() {
     const printed_at = new Date().toLocaleDateString("th-TH", FMT_OPT);
     const group_label = groupLabelOf(group);
 
+    const pieceRowsOf = () => board.pending_piece.filter((p) => groupOk(p.mo_no)).map((p) => {
+      const t = p.rate * p.qty;
+      return { img_cell: imgCell(p.image_url), mo_no: p.mo_no, job: p.job_name, sku: p.product_sku || "—", name: p.product_name || "—", qty: num(p.qty), rate: money(p.rate), total: money(t), _t: t };
+    });
+
+    if (type === "piece") {
+      const rows = pieceRowsOf();
+      const grand = rows.reduce((a, r) => a + r._t, 0);
+      return buildReportHtml(TEMPLATE_PIECE, {
+        group_label, printed_at, count: rows.length, has_rows: rows.length > 0, rows, grand_total: money(grand), empty: rows.length === 0,
+      });
+    }
+
     if (type === "pending") {
       const laborPP = (m: PendingMO) => (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0);
       const pend = board.pending.filter((m) => groupOk(m.mo_no));
@@ -143,13 +177,11 @@ function WorkBoardPrintInner() {
       const rows = pend.map((m) => {
         const pp = laborPP(m); const has = pp > 0; const total = has ? pp * m.remaining : 0;
         if (has) grand += total; qtySum += m.remaining;
-        return { mo_no: m.mo_no, sku: m.product_sku || "—", name: m.product_name || "—", due: dueText(m.due_date),
+        return { img_cell: imgCell(m.image_url), mo_no: m.mo_no, sku: m.product_sku || "—", name: m.product_name || "—", due: dueText(m.due_date),
           remaining: num(m.remaining), rate_cell: has ? money(pp) : BLANK, total_cell: has ? money(total) : BLANK };
       });
-      const piece = board.pending_piece.filter((p) => groupOk(p.mo_no));
-      let pieceGrand = 0;
-      const piece_rows = piece.map((p) => { const t = p.rate * p.qty; pieceGrand += t;
-        return { mo_no: p.mo_no, job: p.job_name, sku: p.product_sku || "—", name: p.product_name || "—", qty: num(p.qty), rate: money(p.rate), total: money(t) }; });
+      const piece_rows = pieceRowsOf();
+      const pieceGrand = piece_rows.reduce((a, r) => a + r._t, 0);
       return buildReportHtml(TEMPLATE_PENDING, {
         group_label, printed_at, count: rows.length, has_rows: rows.length > 0, rows,
         total_qty: num(qtySum), grand_total: money(grand),
@@ -177,7 +209,7 @@ function WorkBoardPrintInner() {
     });
   }, [board, moGroups, type, group]);
 
-  const title = type === "production" ? "รายการกำลังผลิต (ตามโต๊ะ/ช่าง)" : "รายการรอจ่ายทั้งหมด";
+  const title = type === "production" ? "รายการกำลังผลิต (ตามโต๊ะ/ช่าง)" : type === "piece" ? "รายการรอจ่ายเหมาทั้งหมด" : "รายการรอจ่ายทั้งหมด";
 
   return (
     <div className="min-h-screen bg-slate-100">

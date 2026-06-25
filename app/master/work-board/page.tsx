@@ -176,7 +176,7 @@ export default function WorkBoardPage() {
   const [pendGroupFilter, setPendGroupFilter] = useState("__all__");
   // เมนูพิมพ์รายงาน (รอจ่าย / กำลังผลิต) — เปิดหน้าพิมพ์กลาง /print/work-board ตามกลุ่มที่กรองอยู่
   const [printOpen, setPrintOpen] = useState(false);
-  const printUrl = useCallback((type: "pending" | "production") => {
+  const printUrl = useCallback((type: "pending" | "production" | "piece") => {
     const g = pendGroupFilter && pendGroupFilter !== "__all__" ? `&group=${encodeURIComponent(pendGroupFilter)}` : "";
     return `/print/work-board?type=${type}${g}`;
   }, [pendGroupFilter]);
@@ -971,10 +971,18 @@ export default function WorkBoardPage() {
             <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์รายงาน ▾</button>
             {printOpen && (<>
               <div className="fixed inset-0 z-40" onClick={() => setPrintOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 w-60 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
-                <a href={printUrl("pending")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">📋 รายการรอจ่ายทั้งหมด<div className="text-[11px] text-slate-400">พร้อมค่าแรง · ตัวที่ยังไม่ตั้ง = เว้นช่องให้กรอก</div></a>
+              <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
+                <div className="px-3 py-2 border-b border-slate-100">
+                  <label className="text-[11px] text-slate-500 block mb-1">เลือกกลุ่มที่จะพิมพ์</label>
+                  <select value={pendGroupFilter} onChange={(e) => setPendGroupFilter(e.target.value)} className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                    <option value="__all__">ทั้งหมด</option>
+                    <option value="__none__">— ยังไม่จับกลุ่ม —</option>
+                    {moGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
+                  </select>
+                </div>
+                <a href={printUrl("pending")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">📋 รายการรอจ่ายทั้งหมด<div className="text-[11px] text-slate-400">พร้อมรูป+ค่าแรง · ตัวที่ยังไม่ตั้ง = เว้นช่องให้กรอก</div></a>
+                <a href={printUrl("piece")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🧵 รายการรอจ่ายเหมาทั้งหมด<div className="text-[11px] text-slate-400">เฉพาะงานเหมารายชิ้นที่รอจ่าย</div></a>
                 <a href={printUrl("production")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🔨 รายการกำลังผลิต<div className="text-[11px] text-slate-400">แยกตามโต๊ะ/ช่าง มีรายละเอียดแต่ละโต๊ะ</div></a>
-                <div className="px-3 pt-1.5 pb-1 text-[10px] text-slate-400 border-t border-slate-100 mt-1">พิมพ์ตามกลุ่มที่กรองอยู่: <b>{pendGroupFilter === "__all__" ? "ทั้งหมด" : pendGroupFilter === "__none__" ? "ยังไม่จับกลุ่ม" : pendGroupFilter}</b></div>
               </div>
             </>)}
           </div>
