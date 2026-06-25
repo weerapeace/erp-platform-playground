@@ -39,10 +39,10 @@ export async function GET(request: NextRequest) {
     const [gRes, tRes, mRes] = await Promise.all([
       admin.from("product_family_groups").select("id, name, parent_group_id, icon, color, sort_order").eq("is_active", true).order("sort_order"),
       admin.from("product_families").select("id, name, group_id, sort_order").eq("is_active", true).order("sort_order"),
-      admin.from("skus_v2_product_family_m2m").select("tgt_id"),
+      admin.rpc("erp_sku_family_counts"),   // นับฝั่ง DB (group by) เลี่ยงเพดาน 1,000 แถว
     ]);
     const counts = new Map<string, number>();
-    for (const r of (mRes.data ?? []) as { tgt_id: string }[]) counts.set(r.tgt_id, (counts.get(r.tgt_id) ?? 0) + 1);
+    for (const r of (mRes.data ?? []) as { family_id: string; cnt: number }[]) counts.set(r.family_id, Number(r.cnt));
     const tags = ((tRes.data ?? []) as Omit<BrowseTag, "sku_count">[]).map((t) => ({ ...t, sku_count: counts.get(t.id) ?? 0 }));
     const tree: BrowseTree = { groups: (gRes.data ?? []) as BrowseGroup[], tags };
     return NextResponse.json({ tree, error: null });
