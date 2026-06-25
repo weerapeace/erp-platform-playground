@@ -62,7 +62,7 @@ function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch,
-  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO, onSetCentralRate,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -79,6 +79,7 @@ export function DispatchPlanBoard({
   onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
   onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
   onCancelWO?: (id: string) => void | Promise<void>;   // ยกเลิกใบจ่ายงาน (ของจริง) → คืน qty กลับ "รอจ่าย"
+  onSetCentralRate?: (info: { moNo: string; rate: number }) => void | Promise<void>;   // การ์ดร่าง: ใส่ค่าแรง → ตั้งเรตกลางสินค้า
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
@@ -267,11 +268,38 @@ export function DispatchPlanBoard({
       <CardShell key={l.id} accent="#1d9e75" thumbUrl={imageByMo[l.mo_no ?? ""]} sku={l.product_sku}
         drag={editable ? <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }} title="ลากย้ายโต๊ะ" className="shrink-0 cursor-move text-emerald-500 hover:text-emerald-700 select-none">⠿</span> : null}
         actions={<>
-          <button onClick={() => onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+          <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 }); }} title="ดูรายละเอียดงาน" className="-m-1 p-1 text-slate-400 hover:text-blue-600 text-xs">🔍</button>
           <span className="text-[10px] px-1 rounded text-emerald-700 border border-emerald-300" title="ร่าง (ยังไม่จ่ายจริง)">ร่าง</span>
-          {editable && <button onClick={() => removeLine(l.id)} className="text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
+          {editable && <button onClick={(e) => { e.stopPropagation(); removeLine(l.id); }} className="-m-1 p-1 text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
         </>}>
-        <div className="text-[10px] mt-0.5 text-slate-400">ค่าแรงผลิต {baht(lineLabor(l))} ({fmt(Number(l.qty) || 0)} × {baht(laborPerUnit[l.mo_no ?? ""] ?? 0)})</div>
+        {(() => {
+          const wl = lineLabor(l);
+          const editing = laborEditId === l.id;
+          const canRate = editable && !!onSetCentralRate;
+          return <>
+            {/* ค่าแรง: มีค่าแล้ว→ข้อความ · ยังไม่มี→ปุ่ม "ใส่ค่าแรง" (เหมือนการ์ดของจริง) → ตั้งเรตกลางสินค้า */}
+            {wl > 0 && !editing && (
+              <div className="text-[10px] mt-0.5 text-slate-400">ค่าแรงผลิต {baht(wl)} ({fmt(Number(l.qty) || 0)} × {baht(laborPerUnit[l.mo_no ?? ""] ?? 0)})</div>
+            )}
+            {canRate && wl <= 0 && !editing && (
+              <button onClick={(e) => { e.stopPropagation(); setLaborEditId(l.id); setLaborEditVal(""); }}
+                className="mt-1 text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">💰 ใส่ค่าแรง</button>
+            )}
+            {canRate && editing && (
+              <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <input type="number" min={0} step="any" autoFocus value={laborEditVal} onChange={(e) => setLaborEditVal(e.target.value)} placeholder="บาท/ชิ้น"
+                  className="w-20 h-7 px-1.5 text-xs text-right border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                <span className="text-[10px] text-slate-400 shrink-0">/ชิ้น (เรตกลาง)</span>
+                <button disabled={laborSaving} title="บันทึก" onClick={async () => {
+                  setLaborSaving(true);
+                  try { await onSetCentralRate!({ moNo: l.mo_no ?? "", rate: Number(laborEditVal) || 0 }); setLaborEditId(null); }
+                  catch { /* parent toast */ } finally { setLaborSaving(false); }
+                }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">✓</button>
+                <button title="ยกเลิก" onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+            )}
+          </>;
+        })()}
         <div className="flex items-center gap-1.5 mt-1">
           <input type="number" min={0} step="any" value={Number(l.qty) || 0} disabled={!editable}
             onChange={(e) => updateLine(l.id, { qty: Number(e.target.value) })}

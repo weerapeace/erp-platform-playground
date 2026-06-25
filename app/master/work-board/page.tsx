@@ -572,6 +572,20 @@ export default function WorkBoardPage() {
       toast.success("ยกเลิกใบจ่ายงานแล้ว"); setDetailWO(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกไม่สำเร็จ"); }
   };
+  // การ์ดร่าง (แผน) กด "ใส่ค่าแรง" → ตั้งเรตกลางสินค้า (bom_labor_rates ราคากลาง) → ทุกการ์ดของสินค้านี้อัปเดตตาม
+  const setCentralRate = async ({ moNo, rate }: { moNo: string; rate: number }) => {
+    const mo = board.pending.find((x) => x.mo_no === moNo);
+    const wo = board.workOrders.find((x) => x.mo_no === moNo);
+    const bomCode = mo?.bom_code ?? null;
+    const productSku = mo?.product_sku ?? wo?.product_sku ?? null;
+    if (!bomCode && !productSku) { toast.error("สินค้านี้ยังไม่มี BOM ตั้งค่าแรงกลางไม่ได้"); return; }
+    try {
+      const res = await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bom_code: bomCode ?? undefined, product_sku: productSku ?? undefined, craftsman_id: null, craftsman_name: "ราคากลาง", rate }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      toast.success("ตั้งค่าแรงกลางแล้ว — การ์ดของสินค้านี้อัปเดตตาม"); await load(true);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้งค่าแรงไม่สำเร็จ"); }
+  };
   // รับงานคืน/ยกเลิก จากแท็บ "รับงานคืน" ในป๊อปอัปเช็กลิสต์ (clWO)
   // บันทึกค่าแรงผลิตของใบจ่ายงาน (+ เลือกบันทึกกลับเข้า BOM) — ใช้ร่วมตอนรับงานคืน
   const persistLabor = async (wo: WorkOrder) => {
@@ -961,6 +975,7 @@ export default function WorkBoardPage() {
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
+            onSetCentralRate={setCentralRate}
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
             onDates={(start_date, end_date) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, start_date, end_date } : x))}
             onDeleted={() => { setActivePlan("real"); void loadPlans(); }}
