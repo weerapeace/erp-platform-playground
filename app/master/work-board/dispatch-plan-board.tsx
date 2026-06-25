@@ -29,7 +29,7 @@ function Thumb({ url }: { url?: string | null }) {
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch,
-  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -45,6 +45,7 @@ export function DispatchPlanBoard({
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
   onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
   onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
+  onCancelWO?: (id: string) => void | Promise<void>;   // ยกเลิกใบจ่ายงาน (ของจริง) → คืน qty กลับ "รอจ่าย"
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
@@ -55,6 +56,8 @@ export function DispatchPlanBoard({
   const [laborEditId, setLaborEditId] = useState<string | null>(null);   // ใบงานจริงที่กำลังใส่ค่าแรง
   const [laborEditVal, setLaborEditVal] = useState("");
   const [laborSaving, setLaborSaving] = useState(false);
+  const [cancelArmId, setCancelArmId] = useState<string | null>(null);   // ใบงานจริงที่กด X แล้ว (รอยืนยันคืนรอจ่าย)
+  const [cancelSaving, setCancelSaving] = useState(false);
   const [assignPopup, setAssignPopup] = useState<{ wo: WOLite; dept: DeptLite } | null>(null);   // เลือกช่าง (หลายคน) ของใบงานจริง
   const [assignSel, setAssignSel] = useState<Set<string>>(new Set());
   const [assignSaving, setAssignSaving] = useState(false);
@@ -409,6 +412,10 @@ export function DispatchPlanBoard({
                           <span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span>
                           <span className="flex items-center gap-1 shrink-0">
                             <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty }); }} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+                            {/* X: ย้อนการ์ดกลับ "รอจ่าย" (เฉพาะของจริง + ยังไม่ส่งงานคืน) — กด 1 ครั้ง = ติดอาวุธ, ยืนยันด้านล่าง */}
+                            {realMode && editable && onCancelWO && w.status !== "partial_return" && (
+                              <button onClick={(e) => { e.stopPropagation(); setCancelArmId((id) => id === w.id ? null : w.id); }} title="ย้อนกลับไปรอจ่าย" className="text-slate-300 hover:text-rose-600 text-xs">✕</button>
+                            )}
                             {!realMode && <span className="text-slate-400" title="จ่ายจริงแล้ว — ในแผนดูอย่างเดียว">🔒</span>}
                           </span>
                         </div>
@@ -435,6 +442,18 @@ export function DispatchPlanBoard({
                               catch { /* parent toast */ } finally { setLaborSaving(false); }
                             }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">✓</button>
                             <button title="ยกเลิก" onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+                          </div>
+                        )}
+                        {/* ยืนยันย้อนกลับไปรอจ่าย */}
+                        {cancelArmId === w.id && (
+                          <div className="mt-1 flex items-center gap-1 rounded-md bg-rose-50 border border-rose-200 px-1.5 py-1" onClick={(e) => e.stopPropagation()}>
+                            <span className="text-[11px] text-rose-700 flex-1">ย้อนใบนี้กลับ “รอจ่าย”?</span>
+                            <button disabled={cancelSaving} onClick={async () => {
+                              setCancelSaving(true);
+                              try { await onCancelWO!(w.id); setCancelArmId(null); }
+                              catch { /* parent toast */ } finally { setCancelSaving(false); }
+                            }} className="h-7 px-2 text-xs bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50">↩ ย้อนกลับ</button>
+                            <button title="ไม่ย้อน" onClick={() => setCancelArmId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
                           </div>
                         )}
                       </div>
