@@ -29,14 +29,16 @@ export default function BeltPlacementPage() {
   const [sel, setSel] = useState<Key | null>(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [selDim, setSelDim] = useState<"front" | "back" | null>(null);          // เส้นแดงที่เลือก (ห่างโลโก้/ถึงปลายสาย)
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ key: Key; mode: "move" | "resize"; sx: number; sy: number; box: ImgBox } | null>(null);
+  const dimDrag = useRef<{ which: "front" | "back"; mode: "move" | "width"; sx: number; sy: number; dim: { x: number; y: number; w: number } } | null>(null);
 
   const fd = base.frontDim ?? BELT_DEFAULT_LAYOUT.frontDim;
   const bd = base.backDim ?? BELT_DEFAULT_LAYOUT.backDim;
   const fY = 28;
   const fbY = fY - fd.y, bbY = fY + boxH + bd.y;          // เส้น "ห่างโลโก้" (เหนือ) / "ถึงปลายสาย" (ใต้)
-  const VH = Math.max(fY + boxH + 30, bbY + 24);
+  const VH = Math.max(fY + boxH + 42, bbY + 32);          // เผื่อขอบล่างให้เส้น "ถึงปลายสาย" + ป้ายไม่ตกขอบ
 
   useEffect(() => {
     apiFetch("/api/mo/belt-component-images?sample=1").then((r) => r.json()).then((j) => {
@@ -66,16 +68,38 @@ export default function BeltPlacementPage() {
     setSel(key);
     svgRef.current?.setPointerCapture(e.pointerId);
   };
-  const onMove = (e: React.PointerEvent) => {
-    const d = drag.current; if (!d) return;
+  // ลากเส้นแดง (วงเล็บบอกระยะ) — ย้าย x + ดึงขึ้น/ลง (y) หรือลากปุ่มขวาปรับความกว้าง w
+  const dimDown = (which: "front" | "back", mode: "move" | "width") => (e: React.PointerEvent) => {
+    e.stopPropagation();
     const c = toSvg(e.clientX, e.clientY);
-    const dx = (c.x - d.sx) / BW, dy = (c.y - d.sy) / boxH;
-    const nb: ImgBox = d.mode === "move"
-      ? { ...d.box, x: clamp(d.box.x + dx, 0, 1 - d.box.w), y: clamp(d.box.y + dy, 0, 1 - d.box.h) }
-      : { ...d.box, w: clamp(d.box.w + dx, 0.05, 1 - d.box.x), h: clamp(d.box.h + dy, 0.05, 1 - d.box.y) };
-    setPlace((p) => ({ ...p, [d.key]: nb }));
+    const dim = which === "front" ? fd : bd;
+    dimDrag.current = { which, mode, sx: c.x, sy: c.y, dim: { ...dim } };
+    setSelDim(which); setSel(null);
+    svgRef.current?.setPointerCapture(e.pointerId);
   };
-  const onUp = (e: React.PointerEvent) => { drag.current = null; try { svgRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ } };
+  const onMove = (e: React.PointerEvent) => {
+    const c = toSvg(e.clientX, e.clientY);
+    const d = drag.current;
+    if (d) {
+      const dx = (c.x - d.sx) / BW, dy = (c.y - d.sy) / boxH;
+      const nb: ImgBox = d.mode === "move"
+        ? { ...d.box, x: clamp(d.box.x + dx, 0, 1 - d.box.w), y: clamp(d.box.y + dy, 0, 1 - d.box.h) }
+        : { ...d.box, w: clamp(d.box.w + dx, 0.05, 1 - d.box.x), h: clamp(d.box.h + dy, 0.05, 1 - d.box.y) };
+      setPlace((p) => ({ ...p, [d.key]: nb }));
+      return;
+    }
+    const dd = dimDrag.current;
+    if (dd) {
+      const dx = c.x - dd.sx, dy = c.y - dd.sy;
+      const nd = dd.mode === "width"
+        ? { ...dd.dim, w: clamp(dd.dim.w + dx, 30, BX + BW - dd.dim.x) }
+        : { ...dd.dim, x: clamp(dd.dim.x + dx, BX, BX + BW - 20),
+            // front (เหนือกรอบ) ลากขึ้น = y มาก · back (ใต้กรอบ) ลากลง = y มาก
+            y: dd.which === "front" ? clamp(dd.dim.y - dy, 0, 24) : clamp(dd.dim.y + dy, 0, 90) };
+      setBase((b) => ({ ...b, [dd.which === "front" ? "frontDim" : "backDim"]: nd }));
+    }
+  };
+  const onUp = (e: React.PointerEvent) => { drag.current = null; dimDrag.current = null; try { svgRef.current?.releasePointerCapture(e.pointerId); } catch { /* ignore */ } };
 
   const save = useCallback(async () => {
     setSaving(true); setMsg("");
@@ -136,7 +160,7 @@ export default function BeltPlacementPage() {
   return (
     <div className="mx-auto max-w-4xl px-6 py-8">
       <h1 className="text-xl font-bold text-slate-800">🖼️ เทมเพลตวางรูปเข็มขัด</h1>
-      <p className="mt-1 text-sm text-slate-500"><b>ลากรูป</b>ไปวาง · ลาก<b>มุมน้ำเงิน</b>ปรับขนาด · จัด<b>ด้านเดียว</b> ระบบใช้ทั้งหน้า-หลังให้เหมือนกัน → กดบันทึก ใช้ทุกใบงาน</p>
+      <p className="mt-1 text-sm text-slate-500"><b>ลากรูป</b>ไปวาง · ลาก<b>มุมน้ำเงิน</b>ปรับขนาด · ลาก<b className="text-rose-600">เส้นแดง</b>ย้าย/ดึงขึ้น-ลง (ปุ่มแดงขวา = ปรับความกว้าง) · จัด<b>ด้านเดียว</b> ใช้ทั้งหน้า-หลัง → กดบันทึก</p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
         <span className="text-slate-400">เลือกชิ้น:</span>
@@ -153,7 +177,7 @@ export default function BeltPlacementPage() {
           <div className="py-16 text-center text-sm text-slate-400">ยังไม่มีรูปตัวอย่างในตาราง belt_tails / belt_hole / belt_logo<br />อัปโหลดรูปในมาสเตอร์เข็มขัดก่อน แล้วกลับมาวางได้</div>
         ) : (
           <svg ref={svgRef} viewBox={`0 0 740 ${VH}`} width="100%" style={{ touchAction: "none" }}
-            onPointerMove={onMove} onPointerUp={onUp} onPointerDown={() => setSel(null)}>
+            onPointerMove={onMove} onPointerUp={onUp} onPointerDown={() => { setSel(null); setSelDim(null); }}>
             <text x={BX} y={fY - 8} fontSize={13} fontWeight={600} fill="#475569">เข็มขัด (ด้านเดียว)</text>
             <rect x={BX} y={fY} width={BW} height={boxH} fill="none" stroke="#e2e8f0" strokeWidth={1.5} rx={6} />
             {(["strap", "hole", "logo"] as Key[]).map((key) => {
@@ -171,9 +195,21 @@ export default function BeltPlacementPage() {
                 </g>
               );
             })}
-            {/* เส้นความห่าง (อ้างอิง) — ห่างโลโก้ (เหนือ) / ถึงปลายสาย (ใต้) · ปรับตำแหน่งได้ที่ "⚙️ ตั้งค่ารูปใบงาน" */}
-            {(() => { const g = bracketGeom(fd.x, fd.w, fbY, false); return <g key="bf"><path d={g.d} fill="none" stroke="#b91c1c" strokeWidth={1.1} /><text x={g.lx} y={g.ly} fontSize={11} fill="#b91c1c" textAnchor="middle">ห่างโลโก้</text></g>; })()}
-            {(() => { const g = bracketGeom(bd.x, bd.w, bbY, true); return <g key="bb"><path d={g.d} fill="none" stroke="#b91c1c" strokeWidth={1.1} /><text x={g.lx} y={g.ly} fontSize={11} fill="#b91c1c" textAnchor="middle">ถึงปลายสาย</text></g>; })()}
+            {/* เส้นความห่าง (วงเล็บ) — ลากปรับได้: ลากตัวเส้น = ย้าย/ดึงขึ้น-ลง · ลากปุ่มแดงขวา = ปรับความกว้าง */}
+            {(["front", "back"] as const).map((which) => {
+              const dim = which === "front" ? fd : bd;
+              const y = which === "front" ? fbY : bbY;
+              const g = bracketGeom(dim.x, dim.w, y, which === "back");
+              const on = selDim === which;
+              return (
+                <g key={which}>
+                  <path d={g.d} fill="none" stroke="#b91c1c" strokeWidth={on ? 1.9 : 1.1} />
+                  <text x={g.lx} y={g.ly} fontSize={11} fill="#b91c1c" textAnchor="middle" style={{ pointerEvents: "none" }}>{which === "front" ? "ห่างโลโก้" : "ถึงปลายสาย"}</text>
+                  <path d={g.d} fill="none" stroke="transparent" strokeWidth={16} style={{ cursor: "move" }} onPointerDown={dimDown(which, "move")} />
+                  {on && <rect x={dim.x + dim.w - 5} y={y - 5} width={10} height={10} fill="#b91c1c" rx={2} style={{ cursor: "ew-resize" }} onPointerDown={dimDown(which, "width")} />}
+                </g>
+              );
+            })}
           </svg>
         )}
         <div className="mt-1 text-center text-[11px] text-slate-400">พรีวิวใช้รูปตัวอย่าง · ใบงานจริงใช้รูปของรุ่นนั้น ๆ วางตำแหน่งเดียวกันนี้ทั้งด้านหน้า-หลัง</div>
@@ -186,6 +222,8 @@ export default function BeltPlacementPage() {
         <button onClick={() => setPlace(BELT_DEFAULT_PLACE.front)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-500 hover:bg-slate-50">↺ ค่าเริ่มต้น</button>
         {sel && <button onClick={() => setPlace((p) => ({ ...p, [sel]: BELT_DEFAULT_PLACE.front[sel] }))}
           className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-500 hover:bg-slate-50">↺ รีเซ็ตชิ้นที่เลือก</button>}
+        {selDim && <button onClick={() => setBase((b) => ({ ...b, [selDim === "front" ? "frontDim" : "backDim"]: selDim === "front" ? BELT_DEFAULT_LAYOUT.frontDim : BELT_DEFAULT_LAYOUT.backDim }))}
+          className="h-9 rounded-lg border border-rose-200 bg-white px-4 text-sm text-rose-500 hover:bg-rose-50">↺ รีเซ็ตเส้นแดง ({selDim === "front" ? "ห่างโลโก้" : "ถึงปลายสาย"})</button>}
         {msg && <span className="text-sm text-slate-600">{msg}</span>}
       </div>
 
@@ -193,6 +231,7 @@ export default function BeltPlacementPage() {
         <div className="font-semibold">วิธีใช้</div>
         <ol className="mt-1 list-decimal space-y-1 pl-5">
           <li>คลิกรูปเพื่อเลือก → <b>ลากตัวรูป</b>เพื่อย้าย · <b>ลากมุมน้ำเงินขวาล่าง</b>เพื่อปรับขนาด</li>
+          <li><b className="text-rose-700">เส้นแดงบอกระยะ</b> (ห่างโลโก้/ถึงปลายสาย) — ลากตัวเส้นเพื่อย้ายซ้าย-ขวา/ดึงขึ้น-ลง · ลาก<b>ปุ่มแดงปลายขวา</b>เพื่อปรับความกว้าง · ถ้าเส้นล่างชิดขอบ ดึงขึ้นได้</li>
           <li>จัด<b>ด้านเดียว</b>ให้สวย → กด <b>บันทึก</b> (ระบบใช้ตำแหน่งนี้ทั้งด้านหน้า-หลังให้อัตโนมัติ)</li>
           <li>อยากทำรูปจริงให้พอดี → กด <b>โหลดเทมเพลต</b> ไปเป็นไกด์ · พื้นหลังโปร่งใส ห้ามกล่องทึบ</li>
         </ol>
