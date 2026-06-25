@@ -9,12 +9,14 @@
  * - ค้นหา SKU ทั้งหมด · ดึงผ่าน /api/sku-browser (RPC กลาง erp_skus_tag_page)
  */
 import { useState, useEffect, useMemo, useCallback } from "react";
+import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
-import { RelationPeekModal } from "@/components/relation-peek";
+// drawer เก่าตัวจริงของ MasterCRUD — โหลดเฉพาะตอนเปิด (master-crud หนัก) กันบวม bundle
+const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 import type { BrowseTree, BrowseGroup, BrowseTag, SkuCard } from "@/app/api/sku-browser/route";
 
 type Crumb = { id: string; name: string };
@@ -330,23 +332,33 @@ export function SkuTagBrowser() {
         <CardCustomizeModal value={cardFields} avail={availFields} onClose={() => setCustomizeOpen(false)} onSave={saveCard} onReset={resetCard} />
       )}
       {peekId && (() => {
-        const idx = cards.findIndex((c) => c.id === peekId);
+        const isParent = entity === "parent-skus";
+        // ใช้ "drawer เก่าตัวจริง" ของ MasterCRUD (เหมือนหน้า master เป๊ะ) — ไม่ใช่ RelationPeek
         return (
-          <RelationPeekModal moduleKey={entity === "parent-skus" ? "parent-skus-v2" : "skus-v2"} recordId={peekId}
-            onClose={() => setPeekId(null)} onChanged={() => void reloadFirst()}
-            nav={idx >= 0 ? {
-              onPrev: idx > 0 ? () => setPeekId(cards[idx - 1].id) : undefined,
-              onNext: idx < cards.length - 1 ? () => setPeekId(cards[idx + 1].id) : undefined,
-              label: `${idx + 1}/${cards.length}`,
-            } : undefined}
-            onCopy={entity !== "skus" ? undefined : async () => {
-              try {
-                const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: peekId }) });
-                const j = await res.json().catch(() => ({}));
-                if (!res.ok || j.error) throw new Error(j.error ?? "คัดลอกไม่สำเร็จ");
-                toast.success(`คัดลอกเป็น ${j.code} แล้ว — แก้ไขรายละเอียดได้`); void reloadFirst();
-              } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
-            }} />
+          <MasterRecordDrawer
+            key={peekId}
+            moduleKey={isParent ? "parent-skus-v2" : "skus-v2"}
+            apiPath={isParent ? "parent-skus" : "skus"}
+            title={isParent ? "Parent SKUs" : "SKU"}
+            mediaGallery={isParent
+              ? { entityType: "parent_skus_v2", title: "รูปภาพเพิ่มเติม", maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }
+              : { entityType: "skus_v2", title: "รูปภาพเพิ่มเติม", maxItems: 9, maxSizeBytes: 2 * 1024 * 1024, imageOnly: true }}
+            extraRowActions={isParent ? undefined : [{
+              label: "คัดลอก", icon: "⧉",
+              onClick: async (row) => {
+                try {
+                  const res = await apiFetch("/api/skus/copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.id }) });
+                  const j = await res.json().catch(() => ({}));
+                  if (!res.ok || j.error) throw new Error(j.error ?? "คัดลอกไม่สำเร็จ");
+                  toast.success(`คัดลอกเป็น ${j.code} แล้ว — แก้ไขรายละเอียดได้`); void reloadFirst();
+                } catch (e) { toast.error(e instanceof Error ? e.message : "คัดลอกไม่สำเร็จ"); }
+              },
+            }]}
+            recordId={peekId}
+            navIds={cards.map((c) => c.id)}
+            onClose={() => setPeekId(null)}
+            onChanged={() => void reloadFirst()}
+          />
         );
       })()}
     </div>

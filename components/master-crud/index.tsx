@@ -535,7 +535,18 @@ function buildListUrl(
 // MasterCRUDPage component
 // ============================================================
 
-export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
+/**
+ * โหมด embedded (drawer-only): เปิด "drawer เก่าตัวจริง" ของ MasterCRUD เดี่ยวๆ จากที่อื่น (เช่น SKU browser)
+ * โดยไม่ render ตาราง — auto-open record ที่ส่งมา + แจ้ง onClose/onChanged กลับ
+ */
+export type EmbeddedDrawer = {
+  recordId: string | null;        // null = โหมดสร้างใหม่
+  onClose: () => void;
+  onChanged?: () => void;
+  navIds?: string[];              // รายการ id สำหรับปุ่ม ◀ ก่อนหน้า / ถัดไป ▶
+};
+
+export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig; embedded?: EmbeddedDrawer }) {
   const canView   = usePermission(config.permissions.view);
   const canCreate = usePermission(config.permissions.create) && !config.readOnly;
   const canEdit   = usePermission(config.permissions.edit)   && !config.readOnly;
@@ -1124,6 +1135,26 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canView]);
 
+  // โหมด embedded (drawer-only): เปิด record/สร้างใหม่ทันทีหลัง registry พร้อม + ป้อนรายการ nav
+  const embeddedOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!embedded || embeddedOpenedRef.current || registryLoading) return;
+    embeddedOpenedRef.current = true;
+    if (embedded.navIds) navRowsRef.current = embedded.navIds.map((id) => ({ id })) as Row[];
+    if (embedded.recordId) { setDrawerMode("view"); openEdit({ id: embedded.recordId } as Row); }
+    else openCreate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, registryLoading]);
+  // navIds เปลี่ยน → อัปเดตรายการเลื่อนก่อนหน้า/ถัดไป
+  useEffect(() => {
+    if (embedded?.navIds) navRowsRef.current = embedded.navIds.map((id) => ({ id })) as Row[];
+  }, [embedded?.navIds]);
+  // ปิด drawer (ทุกทาง: ปิด/backdrop/บันทึกสร้างเสร็จ) ในโหมด embedded → แจ้งตัวเรียกให้ unmount
+  useEffect(() => {
+    if (embedded && embeddedOpenedRef.current && !modalOpen) embedded.onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalOpen]);
+
   // อ่านตัวกรองจากลิงก์ ?flt=<json> ครั้งเดียวตอนเข้า → กรองไว้ล่วงหน้า (ล้างได้)
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1267,6 +1298,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         setModalOpen(false);
       }
       await refreshData();
+      embedded?.onChanged?.();   // โหมด embedded: ให้ตัวเรียก (เช่น SKU browser) รีเฟรชการ์ด
     } catch (err) { const m = err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"; setFormErr(m); fail(m); }
     finally { setSaving(false); }
   };
@@ -1994,12 +2026,13 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
   // ⚠ ต้องใช้ component ที่ "identity คงที่" (ShellPassthrough ระดับโมดูล) ไม่ใช่ arrow inline
   //   ไม่งั้น React เห็น type ใหม่ทุก render → remount ทั้ง subtree (ตาราง reload + search หาย)
   const insideShell = useShellPresent();
-  const Wrap = insideShell ? ShellPassthrough : PlaygroundShell;
+  const Wrap = (insideShell || embedded) ? ShellPassthrough : PlaygroundShell;   // embedded = drawer-only ไม่ครอบ shell
 
   if (!canView) return <Wrap><AccessDenied /></Wrap>;
 
   return (
     <Wrap>
+      {!embedded && (
       <div className="w-full px-6 py-6" style={{ "--dt-sticky-top": `${headerH}px` } as React.CSSProperties}>
         <div ref={headerRef} className="sticky top-0 z-40 bg-white pb-3 mb-3 border-b border-slate-100 flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
@@ -2137,6 +2170,7 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
         </StatusModuleContext.Provider>
 
       </div>
+      )}
 
       {/* F11: Drawer (slide จากขวา) — สลับ view/edit */}
       <Drawer
@@ -2514,6 +2548,38 @@ export function MasterCRUDPage({ config }: { config: MasterCRUDConfig }) {
       )}
     </Wrap>
   );
+}
+
+// ============================================================
+// MasterRecordDrawer — เปิด "drawer เก่าตัวจริง" ของ MasterCRUD เดี่ยวๆ (ไม่ต้องมีตาราง)
+// ใช้จากที่อื่น (เช่น SKU browser, การ์ด) → ได้ drawer หน้าตา/ความสามารถเดียวกับหน้า master เป๊ะ
+// ============================================================
+export function MasterRecordDrawer({
+  moduleKey, apiPath, apiBase, title, icon, mediaGallery, permissions, extraRowActions, cellRenderers, createDefaults, recordId, navIds, onClose, onChanged,
+}: {
+  moduleKey: string;
+  apiPath: string;
+  apiBase?: string;
+  title: string;
+  icon?: string;
+  mediaGallery?: MasterCRUDConfig["mediaGallery"];
+  permissions?: MasterCRUDConfig["permissions"];
+  extraRowActions?: MasterCRUDConfig["extraRowActions"];
+  cellRenderers?: MasterCRUDConfig["cellRenderers"];
+  createDefaults?: MasterCRUDConfig["createDefaults"];
+  recordId: string | null;        // null = สร้างใหม่
+  navIds?: string[];
+  onClose: () => void;
+  onChanged?: () => void;
+}) {
+  const config: MasterCRUDConfig = useMemo(() => ({
+    apiBase: apiBase ?? "/api/master-v2/",
+    apiPath, moduleKey, tableId: `embed-${moduleKey}`, title, icon,
+    activeField: "is_active", serverMode: true,
+    permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
+    mediaGallery, extraRowActions, cellRenderers, createDefaults,
+  }), [apiBase, apiPath, moduleKey, title, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults]);
+  return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose, onChanged }} />;
 }
 
 // ============================================================
