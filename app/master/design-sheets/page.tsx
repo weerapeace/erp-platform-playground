@@ -247,6 +247,76 @@ function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: s
   );
 }
 
+// โมดอล "คัดลอกตีราคาจากใบงานอื่น" — ค้นหาใบ → ดึงบรรทัดตีราคา(ทั่วไป)+ค่าใช้จ่าย มาใส่แท็บที่กำลังดู
+function CopyFromSheetModal({ open, excludeId, onClose, onApply }: {
+  open: boolean; excludeId: string | null; onClose: () => void;
+  onApply: (lines: CostLine[], extra: CostExtra[], label: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<DesignSheetListItem[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) { setQ(""); setRows(null); return; }
+    setLoading(true);
+    const t = setTimeout(() => {
+      apiFetch(`/api/design-sheets?limit=30${q ? `&search=${encodeURIComponent(q)}` : ""}`).then((r) => r.json())
+        .then((j) => setRows(((j.data ?? []) as DesignSheetListItem[]).filter((s) => s.id !== excludeId)))
+        .catch(() => setRows([])).finally(() => setLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [open, q, excludeId]);
+
+  const pick = async (s: DesignSheetListItem) => {
+    setBusyId(s.id);
+    try {
+      const [lr, dr] = await Promise.all([
+        apiFetch(`/api/design-sheets/${s.id}/cost-lines`).then((r) => r.json()),
+        apiFetch(`/api/design-sheets/${s.id}`).then((r) => r.json()),
+      ]);
+      const allLines = (lr.data ?? []) as CostLine[];
+      const genLines = allLines.filter((l) => !l.parent_code);   // เอาตีราคา "ทั่วไป" ก่อน · ไม่มีก็เอาทั้งหมด
+      const lines = genLines.length ? genLines : allLines;
+      // ค่าใช้จ่ายเพิ่ม: รองรับทั้ง object {parent:[...]} และ array เดิม → เอาของ "ทั่วไป" ([""]) หรือชุดแรกที่มี
+      const rawCe = (dr.data ?? {}).cost_extra;
+      const arrOf = (a: unknown): CostExtra[] => (Array.isArray(a) ? a : []).map((c) => ({ label: String((c as CostExtra)?.label ?? ""), amount: Number((c as CostExtra)?.amount) || 0 }));
+      let extra: CostExtra[] = [];
+      if (rawCe && !Array.isArray(rawCe) && typeof rawCe === "object") {
+        const m = rawCe as Record<string, unknown>;
+        extra = arrOf(m[""]).length ? arrOf(m[""]) : arrOf(Object.values(m).find((v) => Array.isArray(v) && (v as unknown[]).length));
+      } else extra = arrOf(rawCe);
+      extra = extra.filter((c) => c.label || c.amount);
+      onApply(lines, extra, `${s.code} ${s.name}`.trim());
+    } catch { /* ignore */ } finally { setBusyId(null); }
+  };
+
+  return (
+    <ERPModal open={open} onClose={onClose} size="lg" title="📄 คัดลอกตีราคาจากใบงานอื่น"
+      description="เลือกใบงานต้นทาง — ดึงบรรทัดตีราคา (ทั่วไป) + ค่าใช้จ่าย มาใส่แท็บที่กำลังดู (แทนที่ของเดิมในแท็บนี้)">
+      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเลขใบ / ชื่องาน..."
+        className="w-full h-9 px-3 text-sm border border-slate-200 rounded-md mb-2" />
+      {loading ? <div className="py-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>
+        : !rows || rows.length === 0 ? <div className="py-8 text-center text-slate-300 text-sm">— ไม่พบใบงาน —</div>
+        : <div className="space-y-1 max-h-[50vh] overflow-auto">
+            {rows.map((s) => (
+              <div key={s.id} className="flex items-center gap-3 p-2 border border-slate-100 rounded-lg">
+                <div className="w-10 h-10 rounded bg-slate-50 overflow-hidden shrink-0 flex items-center justify-center">
+                  {s.cover_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={s.cover_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300">📦</span>}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-slate-800 truncate">{s.code} · {s.name}</div>
+                  <div className="text-[11px] text-slate-400">{s.brand_name ?? "—"}{s.has_cost ? " · ✅ มีตีราคา" : " · ยังไม่ตีราคา"}</div>
+                </div>
+                <button type="button" disabled={busyId === s.id || !s.has_cost} onClick={() => void pick(s)}
+                  className="h-8 px-3 text-xs rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50 disabled:opacity-40 whitespace-nowrap">
+                  {busyId === s.id ? "..." : "⧉ คัดลอกมา"}</button>
+              </div>
+            ))}
+          </div>}
+    </ERPModal>
+  );
+}
+
 export default function DesignSheetsPage() {
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
@@ -301,6 +371,7 @@ export default function DesignSheetsPage() {
   // ---- เฟส 4: ตีราคา ----
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
+  const [copyFromOpen, setCopyFromOpen] = useState(false);   // โมดอลคัดลอกตีราคาจากใบงานอื่น
   // ผูก SKU เข้าวัสดุตีราคา — ทำในตารางจัดการวัสดุตีราคา (ต่อแถว)
   const [pmLinks, setPmLinks] = useState<Record<string, string[]>>({});   // item_id → sku_ids
   const [pmLinkSkus, setPmLinkSkus] = useState<Record<string, SkuLite>>({}); // sku_id → {code,name}
@@ -1566,6 +1637,8 @@ export default function DesignSheetsPage() {
                         toast.success(`คัดลอกตีราคาจาก "${source === "" ? "ทั่วไป" : source}" มาแล้ว (${cloned.length} บรรทัด)`);
                       }} />
                   )}
+                  {canEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="คัดลอกตีราคาจากใบงานอื่น"
+                    className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📄 Copy จากใบอื่น</button>}
                   {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
                 </div>
               </div>
@@ -1822,6 +1895,19 @@ export default function DesignSheetsPage() {
         excludeIds={pmLinkFor ? (pmLinks[pmLinkFor.id] ?? []) : []} onConfirm={onPmLinkPicked} />
 
       {/* ป๊อปจัดการวัสดุตีราคา — CRUD ผ่าน API กลาง master-v2 (เหมือนหน้า /master/design-price-items) */}
+      {/* คัดลอกตีราคาจากใบงานอื่น (ข้ามใบ) → มาใส่แท็บที่กำลังดู */}
+      {form?.id && (
+        <CopyFromSheetModal open={copyFromOpen} excludeId={form.id} onClose={() => setCopyFromOpen(false)}
+          onApply={(srcLines, srcExtra, label) => {
+            if (srcLines.length === 0 && srcExtra.length === 0) { toast.info(`ใบ "${label}" ยังไม่มีตีราคาให้คัดลอก`); return; }
+            const cloned = srcLines.map((r, i) => recomputeRow({ ...(r as CostRow), id: undefined, key: `cx${Date.now()}_${i}`, parent_code: costParent || null }));
+            setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned]);
+            if (srcExtra.length) setCostExtraMap((m) => ({ ...m, [costParent]: srcExtra.map((c) => ({ ...c })) }));
+            setCostDirty(true); setCopyFromOpen(false);
+            toast.success(`คัดลอกตีราคาจากใบ "${label}" มาแล้ว (${cloned.length} บรรทัด)`);
+          }} />
+      )}
+
       <ERPModal open={pmOpen} onClose={closePm} size="lg" title="🧮 จัดการวัสดุตีราคา"
         footer={<button onClick={closePm} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด (รายการวัสดุในตารางจะอัปเดตเอง)</button>}>
         <div className="space-y-2">
