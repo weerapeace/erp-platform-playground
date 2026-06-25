@@ -49,7 +49,8 @@ type PendingMO = {
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
 type CutRow = { id: string; component_sku: string | null; component_name: string | null; material_type: string | null; cut_block_code: string | null; cut_width: number | null; cut_length: number | null; pieces: number | null; required_qty: number; uom: string | null; cut_done: boolean };
-type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[] };
+type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty_per: number; qty: number; product_sku: string | null; product_name: string | null; image_url: string | null; brand: string | null; brand_color: string | null };
+type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; pendingPiece: PendingPiece[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
 type Viewport = { x: number; y: number; scale: number };
@@ -124,7 +125,7 @@ export default function WorkBoardPage() {
   const { user } = useAuth(); void user;
   const toast = useToast();
 
-  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [] });
+  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<"board" | "table" | "purchase">("board");   // สลับ บอร์ด/ตาราง/ขอซื้อ
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
@@ -251,7 +252,7 @@ export default function WorkBoardPage() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try { const res = await apiFetch("/api/mo/work-board"); const j = await res.json();
-      if (!j.error) setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [] });
+      if (!j.error) setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], pendingPiece: j.pending_piece ?? [] });
     } catch { /* ignore */ } finally { if (!silent) setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -983,7 +984,7 @@ export default function WorkBoardPage() {
           return <DispatchPlanBoard
             planId={p.id} planName={p.name} planStatus={p.status} startDate={p.start_date} endDate={p.end_date}
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
-            pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
+            pending={board.pending} pendingPiece={board.pendingPiece} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
@@ -1022,7 +1023,7 @@ export default function WorkBoardPage() {
           return <DispatchPlanBoard
             realMode planId="real" planName="" planStatus="" startDate={null} endDate={null}
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
-            pending={board.pending} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
+            pending={board.pending} pendingPiece={board.pendingPiece} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr}
             onApplied={() => {}} onRenamed={() => {}} onDates={() => {}} onDeleted={() => {}}

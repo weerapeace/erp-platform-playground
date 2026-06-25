@@ -16,6 +16,7 @@ import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type DeptLite = { id: string; name: string };
 type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean };
+type PieceLite = { id: string; mo_no: string; job_name: string; rate: number; qty_per: number; qty: number; product_sku: string | null; product_name: string | null; image_url?: string | null };
 type WOLite = { id: string; mo_no: string; mo_id?: string | null; qty: number; department_id: string | null; stage: string; assignee_id?: string | null; assignee_name: string | null; assignees?: { id: string | null; name: string }[]; product_sku: string | null; product_name: string | null; status: string; image_url?: string | null; labor?: { prod_plan: number; prod_actual?: number } };
 type CraftLite = { id: string; name: string; department_id?: string | null; code?: string | null };
 type DefectMap = Record<string, { count: number } | undefined>;
@@ -61,11 +62,11 @@ function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
 
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
-  laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch,
+  laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch, pendingPiece,
   onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO, onSetCentralRate, onPickDispatch,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
-  departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
+  departments: DeptLite[]; pending: PendingLite[]; pendingPiece?: PieceLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
   defectByWorker: DefectMap; deptWages: Record<string, number>;
   laborPerUnit: Record<string, number>;   // mo_no → ค่าแรงผลิตต่อชิ้น (จากแผนกลุ่ม A)
   imageByMo: Record<string, string | null>;
@@ -447,6 +448,24 @@ export function DispatchPlanBoard({
               );
             })}
             {visiblePending.length === 0 && <div className="text-center text-[11px] text-slate-300 py-3">— ไม่มีใบในกลุ่มนี้ —</div>}
+            {/* งานเหมารายชิ้นที่ติ๊กไว้ → รอจ่ายให้ช่างเหมา (เฟส 1: แสดง · เฟส 2: ลากจ่าย) */}
+            {(pendingPiece ?? []).length > 0 && (
+              <div className="mt-2 pt-2 border-t border-slate-100">
+                <div className="text-[11px] font-semibold text-violet-600 mb-1.5 px-0.5">🧵 งานเหมารอจ่าย ({(pendingPiece ?? []).length})</div>
+                {(pendingPiece ?? []).map((p) => (
+                  <div key={p.id} className="rounded-lg px-2 py-1.5 mb-1.5 bg-violet-50/40 border border-violet-100" style={{ borderLeft: "3px solid #7c3aed" }}>
+                    <div className="flex items-center gap-2">
+                      <Thumb url={p.image_url} />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-slate-700 truncate">🧵 {p.job_name}</div>
+                        <div className="text-[10px] text-slate-400 truncate">{p.product_sku} · {p.mo_no}</div>
+                        <div className="text-[11px] text-violet-700 mt-0.5">{fmt(p.qty)} ชิ้น · ฿{fmt(p.rate)}/ชิ้น · รวม <b>฿{fmt(p.qty * p.rate)}</b></div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* คอลัมน์แผนก (แท็บเล็ต = เฉพาะโต๊ะที่โฟกัส) */}

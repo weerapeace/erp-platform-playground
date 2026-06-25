@@ -84,7 +84,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     skuInfoMap(admin, allSkus),
     missingMoNos.length ? admin.from("manufacturing_orders").select("id, mo_no").in("mo_no", missingMoNos) : Promise.resolve(noData),
     bomCodes.length ? admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true) : Promise.resolve(noData),
-    allMoNos.length ? admin.from("mo_piecework").select("mo_no, total_qty, rate, status").in("mo_no", allMoNos).eq("is_active", true) : Promise.resolve(noData),
+    allMoNos.length ? admin.from("mo_piecework").select("id, mo_no, job_name, rate, qty_per, total_qty, status, assignee_name").in("mo_no", allMoNos).eq("is_active", true) : Promise.resolve(noData),
     pendingMoNos.length ? admin.from("mo_material_summary").select("mo_no, is_ready").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
     pendingMoNos.length ? admin.from("mo_materials").select("mo_no, cut_block_code, cut_length, pieces, cut_done").in("mo_no", pendingMoNos).eq("is_active", true) : Promise.resolve(noData),
   ]);
@@ -152,5 +152,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return { ...p, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: p.prep_done && p.cut_done };
   });
 
-  return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched, error: null });
+  // งานเหมารายชิ้นที่ "รอจ่าย" (ติ๊กแล้ว ยังไม่จ่ายให้ช่างเหมา) → โผล่เป็นการ์ดในโซนรอจ่าย
+  const moInfoByNo = new Map<string, { sku: string | null; name: string | null }>();
+  for (const m of moList) moInfoByNo.set(String(m.mo_no), { sku: (m.product_sku as string) ?? null, name: (m.product_name as string) ?? null });
+  const pendingPiece = ((pcsRes.data ?? []) as Record<string, unknown>[])
+    .filter((p) => p.status !== "done" && !(p.assignee_name as string))
+    .map((p) => {
+      const moNo = String(p.mo_no);
+      const mi = moInfoByNo.get(moNo) ?? { sku: null, name: null };
+      const inf = (mi.sku && info.get(mi.sku)) || { image_url: null, brand: null, brand_color: null };
+      return { id: String(p.id), mo_no: moNo, job_name: (p.job_name as string) ?? "งานเหมา", rate: Number(p.rate) || 0, qty_per: Number(p.qty_per) || 1, qty: Number(p.total_qty) || 0, product_sku: mi.sku, product_name: mi.name, ...inf };
+    });
+
+  return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched, pending_piece: pendingPiece, error: null });
 }
