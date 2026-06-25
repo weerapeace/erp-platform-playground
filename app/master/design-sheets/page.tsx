@@ -1276,6 +1276,40 @@ export default function DesignSheetsPage() {
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
   ], [priceItems, priceGroups, canEdit, createPriceItemInline]);
 
+  // ส่วนรูปภาพ (คอลัมน์ซ้ายของ modal — เห็นตลอดทุกแท็บ): บันทึกแล้ว=ImageManager แกลเลอรี · ยังไม่บันทึก=ที่พักรูป (อัปตอนกดบันทึก)
+  const imageSection = !form ? null : form.id ? (
+    <ImageManager entityType="design_sheet" entityId={form.id} actor={user?.name ?? user?.email ?? undefined} readonly={!canEdit} layout="gallery" />
+  ) : (
+    <div>
+      <div
+        onDragOver={(e) => { e.preventDefault(); setPendDragging(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setPendDragging(false); }}
+        onDrop={(e) => { e.preventDefault(); setPendDragging(false); if (e.dataTransfer.files.length) addPendFiles(e.dataTransfer.files); }}
+        onClick={() => pendFileRef.current?.click()}
+        className={`border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors ${
+          pendDragging ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50"}`}>
+        <input ref={pendFileRef} type="file" accept="image/*,application/pdf" multiple className="hidden"
+          onChange={(e) => { if (e.target.files?.length) { addPendFiles(e.target.files); e.target.value = ""; } }} />
+        <p className="text-sm text-slate-600">{pendDragging ? "วางไฟล์ที่นี่" : "ลากรูปมาวาง · คลิกเลือก · หรือกด Ctrl+V"}</p>
+        <p className="text-xs text-slate-400 mt-0.5">อัปโหลดอัตโนมัติตอนกด &quot;บันทึก&quot;</p>
+      </div>
+      {pendImgs.length > 0 && (
+        <div className="grid grid-cols-3 gap-1.5 mt-1.5">
+          {pendImgs.map((p, i) => (
+            <div key={p.url} className="relative group aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
+              {p.file.type.startsWith("image/")
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={p.url} alt="" className="w-full h-full object-cover" />
+                : <div className="w-full h-full flex flex-col items-center justify-center text-slate-400"><span className="text-xl">📄</span><span className="text-[9px] px-0.5 truncate max-w-full">{p.file.name}</span></div>}
+              <button type="button" onClick={(e) => { e.stopPropagation(); removePend(i); }} title="เอาออก"
+                className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-[10px] text-rose-600 opacity-0 group-hover:opacity-100 border border-slate-200">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   if (!canView) return <AccessDenied />;
 
   return (
@@ -1442,7 +1476,14 @@ export default function DesignSheetsPage() {
           {canEdit && modalTab === "info" && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>}
         </>}>
         {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && (
-          <div className="space-y-2">
+          <div className="flex flex-col lg:flex-row gap-4">
+            {/* ซ้าย: รูปภาพงานออกแบบ — เห็นตลอดทุกแท็บ */}
+            <div className="lg:w-[300px] lg:shrink-0">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">รูปภาพงานออกแบบ</span>
+              <div className="mt-1">{imageSection}</div>
+            </div>
+            {/* ขวา: ข้อมูลงาน + แท็บ (สลับแท็บได้) */}
+            <div className="flex-1 min-w-0 space-y-2">
             {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
 
             {/* แท็บ (โผล่เมื่อบันทึกแล้ว) */}
@@ -1592,43 +1633,6 @@ export default function DesignSheetsPage() {
                 className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
             </label>
 
-            {/* รูปภาพ — ระบบแนบไฟล์กลาง (เก็บที่ R2, ลบแล้วตามไปลบไฟล์ให้) */}
-            <div className="pt-1">
-              <span className="text-[11px] text-slate-500">รูปภาพงานออกแบบ</span>
-              {form.id ? (
-                <div className="mt-1"><ImageManager entityType="design_sheet" entityId={form.id} actor={user?.name ?? user?.email ?? undefined} readonly={!canEdit} layout="gallery" /></div>
-              ) : (
-                /* ยังไม่บันทึก — รับรูปไว้ก่อน (ลาก/วาง/Ctrl+V) แล้วอัปโหลดอัตโนมัติตอนกดบันทึก */
-                <div className="mt-1">
-                  <div
-                    onDragOver={(e) => { e.preventDefault(); setPendDragging(true); }}
-                    onDragLeave={(e) => { e.preventDefault(); setPendDragging(false); }}
-                    onDrop={(e) => { e.preventDefault(); setPendDragging(false); if (e.dataTransfer.files.length) addPendFiles(e.dataTransfer.files); }}
-                    onClick={() => pendFileRef.current?.click()}
-                    className={`border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors ${
-                      pendDragging ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50"}`}>
-                    <input ref={pendFileRef} type="file" accept="image/*,application/pdf" multiple className="hidden"
-                      onChange={(e) => { if (e.target.files?.length) { addPendFiles(e.target.files); e.target.value = ""; } }} />
-                    <p className="text-sm text-slate-600">{pendDragging ? "วางไฟล์ที่นี่" : "ลากรูปมาวาง · คลิกเลือก · หรือกด Ctrl+V วางรูปที่ copy มา"}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">รูปจะอัปโหลดให้อัตโนมัติตอนกด &quot;บันทึก&quot; — ถ้าปิดฟอร์มทิ้ง จะไม่มีไฟล์ค้างในระบบ</p>
-                  </div>
-                  {pendImgs.length > 0 && (
-                    <div className="grid grid-cols-6 gap-1.5 mt-1.5">
-                      {pendImgs.map((p, i) => (
-                        <div key={p.url} className="relative group aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
-                          {p.file.type.startsWith("image/")
-                            // eslint-disable-next-line @next/next/no-img-element
-                            ? <img src={p.url} alt="" className="w-full h-full object-cover" />
-                            : <div className="w-full h-full flex flex-col items-center justify-center text-slate-400"><span className="text-xl">📄</span><span className="text-[9px] px-0.5 truncate max-w-full">{p.file.name}</span></div>}
-                          <button type="button" onClick={(e) => { e.stopPropagation(); removePend(i); }} title="เอาออก"
-                            className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-[10px] text-rose-600 opacity-0 group-hover:opacity-100 border border-slate-200">✕</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
             </div>}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}
@@ -1903,6 +1907,7 @@ export default function DesignSheetsPage() {
                 </table>
               )}
             </div>}
+            </div>
           </div>
         )}
       </ERPModal>

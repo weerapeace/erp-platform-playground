@@ -303,30 +303,28 @@ export function ImageManager({
           {[0,1,2].map(i => <div key={i} className="aspect-square bg-slate-100 rounded-lg animate-pulse" />)}
         </div>
       ) : layout === "gallery" ? (
-        // แกลเลอรี: รูปย่อ + กล่องอัปโหลดอยู่ซ้าย · พรีวิวรูปใหญ่ของตัวที่เลือกอยู่ขวา
-        <div className="flex gap-3">
-          <div className="w-[150px] shrink-0 space-y-2">
-            {items.length > 0 && (
-              <div className="grid grid-cols-2 gap-1.5 max-h-[360px] overflow-y-auto pr-0.5">
-                {items.map(a => renderTile(a, true))}
-              </div>
-            )}
-            {renderUpload(true)}
-            {libraryBtn}
-          </div>
-          <div className="flex-1 min-h-[300px] rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+        // แกลเลอรีแนวตั้ง (เหมาะกับคอลัมน์แคบ): พรีวิวรูปใหญ่ด้านบน + รูปย่อด้านล่าง
+        <div className="space-y-2">
+          <div className="w-full min-h-[220px] rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
             {selected ? (
               isImage(selected.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={withImageWidth(selected.public_url, 1024) ?? selected.public_url} alt={selected.file_name} className="max-w-full max-h-[460px] object-contain" />
+                <img src={withImageWidth(selected.public_url, 1024) ?? selected.public_url} alt={selected.file_name} className="max-w-full max-h-[340px] object-contain" />
               ) : (
-                <a href={selected.public_url} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-2 text-slate-500 hover:text-slate-700">
+                <a href={selected.public_url} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-2 text-slate-500 hover:text-slate-700 py-6">
                   <span className="text-5xl">📄</span><span className="text-sm px-3 text-center break-all">{selected.file_name}</span>
                   <span className="text-xs text-blue-600 underline">เปิดไฟล์</span>
                 </a>
               )
-            ) : <span className="text-sm text-slate-300">{readonly ? "ไม่มีรูป" : "ยังไม่มีรูป — ลากมาวางทางซ้าย"}</span>}
+            ) : <span className="text-sm text-slate-300 py-10">{readonly ? "ไม่มีรูป" : "ยังไม่มีรูป — ลากมาวางด้านล่าง"}</span>}
           </div>
+          {items.length > 0 && (
+            <div className="grid grid-cols-4 gap-1.5">
+              {items.map(a => renderTile(a, true))}
+            </div>
+          )}
+          {renderUpload(false)}
+          {libraryBtn}
         </div>
       ) : (
         // กริด (เริ่มต้น)
