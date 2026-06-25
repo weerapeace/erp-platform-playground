@@ -49,6 +49,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const tailRows = (tails.data ?? []) as Row[];
   const holeRows = (holes.data ?? []) as Row[];
   const logoRows = (logos.data ?? []) as Row[];
+
+  // โหมดตัวอย่าง (หน้าเทมเพลตวางรูป) — คืนรูปแรกที่มีของแต่ละชนิด ไว้ลากวาง
+  if (sp.get("sample")) {
+    const first = (rows: Row[]) => urlOf(rows.find((r) => r.image) ?? null);
+    return NextResponse.json({ strap: first(tailRows), hole: first(holeRows), holeBackOnly: false, frontLogo: first(logoRows), backLogo: first(logoRows), error: null });
+  }
+
   const holeRow = pickRow(holeRows, sp.get("hole") ?? "");
 
   return NextResponse.json({

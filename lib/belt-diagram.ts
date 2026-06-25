@@ -27,11 +27,22 @@ export type BeltDiagramParams = {
   placeholder?: boolean;         // หน้าตั้งค่า: วาดโครงจำลอง (ไม่มีรูปจริง) เพื่อพรีวิวตำแหน่ง/ความสูงจากสไลเดอร์
 };
 
+// กล่องวางรูป — สัดส่วน 0..1 เทียบกรอบเข็มขัดแต่ละด้าน (x,y=มุมบนซ้าย · w,h=กว้าง/สูง)
+export type ImgBox = { x: number; y: number; w: number; h: number };
+export type BeltImgPlace = { strap?: ImgBox; hole?: ImgBox; logo?: ImgBox };
+
 // ตำแหน่ง+ความสูง ที่ปรับ+บันทึกได้ (พิกัดในระบบ viewBox 0..740)
 export type BeltLayout = {
   boxH?: number;                                  // ความสูงเข็มขัด (compact)
   frontDim?: { x: number; y: number; w: number }; // วงเล็บ "ห่างโลโก้" (เหนือกรอบหน้า)
   backDim?: { x: number; y: number; w: number };  // วงเล็บ "ถึงปลายสาย" (ใต้กรอบหลัง)
+  images?: { front?: BeltImgPlace; back?: BeltImgPlace };  // เทมเพลตวางรูป: ลากวาง ปลายหาง/รู/โลโก้ เอง
+};
+
+// ค่าเริ่มต้นการวางรูป (สัดส่วน 0..1) — strap เต็มกรอบ · รู=แถบซ้าย · โลโก้=ช่วงขวา
+export const BELT_DEFAULT_PLACE: { front: BeltImgPlace; back: BeltImgPlace } = {
+  front: { strap: { x: 0, y: 0, w: 1, h: 1 }, hole: { x: 0.04, y: 0.12, w: 0.42, h: 0.76 }, logo: { x: 0.62, y: 0.30, w: 0.30, h: 0.40 } },
+  back:  { strap: { x: 0, y: 0, w: 1, h: 1 }, hole: { x: 0.04, y: 0.12, w: 0.86, h: 0.76 }, logo: { x: 0.58, y: 0.30, w: 0.30, h: 0.40 } },
 };
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
@@ -69,11 +80,18 @@ function imageComposite(p: BeltDiagramParams): string {
   const fY = 28, bY = fY + BH + 46;
   const brand   = (p.brandText ?? "").trim();
   const leather = (p.leatherText ?? "Genuine Leather").trim();
-  const full = (href: string | null | undefined, y: number) =>
-    href ? `<image href="${esc(href)}" x="${BX}" y="${y}" width="${BW}" height="${BH}" preserveAspectRatio="none"/>` : "";
-  // ชั้นทรงเข็มขัด: มีรูป→วางรูป, ไม่มีรูป→วาดโครงจำลอง (สำหรับหน้าตั้งค่า/รูปขาด)
-  const strap = (y: number, label: string, mirror: boolean) =>
-    p.strapImg ? full(p.strapImg, y) : placeholderStrap(y, BH, label, mirror);
+  const fp = L.images?.front ?? BELT_DEFAULT_PLACE.front;
+  const bp = L.images?.back ?? BELT_DEFAULT_PLACE.back;
+  // วางรูปตามกล่องที่บันทึก (สัดส่วน 0..1 ของกรอบด้านนั้น) · meet = ไม่ยืดรูป
+  const placeImg = (href: string | null | undefined, top: number, b: ImgBox | undefined) => {
+    if (!href) return "";
+    const box = b ?? { x: 0, y: 0, w: 1, h: 1 };
+    const x = BX + box.x * BW, y = top + box.y * BH, w = box.w * BW, h = box.h * BH;
+    return `<image href="${esc(href)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+  };
+  // ชั้นทรงเข็มขัด: มีรูป→วางตามกล่อง, ไม่มีรูป→วาดโครงจำลอง (สำหรับหน้าตั้งค่า/รูปขาด)
+  const strap = (y: number, label: string, mirror: boolean, b: ImgBox | undefined) =>
+    p.strapImg ? placeImg(p.strapImg, y, b) : placeholderStrap(y, BH, label, mirror);
   // เส้นบอกระยะแบบวงเล็บ — ก้านชี้ "เข้าหา" ตัวเข็มขัด · ป้ายอยู่ฝั่งตรงข้าม (ไกลเข็มขัด)
   // down=false → วงเล็บเหนือเข็มขัด ก้านชี้ลง ⊓ · down=true → ใต้เข็มขัด ก้านชี้ขึ้น ⊔
   const bracket = (x: number, w: number, y: number, label: string, down: boolean) => {
@@ -86,8 +104,8 @@ function imageComposite(p: BeltDiagramParams): string {
   const fbY = fY - fd.y;          // เส้นวงเล็บหน้า (เหนือกรอบหน้า)
   const bbY = bY + BH + bd.y;     // เส้นวงเล็บหลัง (ใต้กรอบหลัง)
   // หน้า: ลายรูโชว์เฉพาะเจาะรูจริง (พิมพ์บันได back_only=หลังเท่านั้น)
-  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${strap(fY, brand, false)}${p.holeBackOnly ? "" : full(p.holeImg, fY)}${full(p.frontLogoImg, fY)}${bracket(fd.x, fd.w, fbY, logoDist, false)}`;
-  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${strap(bY, leather, true)}${full(p.holeImg, bY)}${full(p.backLogoImg, bY)}${bracket(bd.x, bd.w, bbY, toEnd, true)}`;
+  const front = `<text x="${BX}" y="20" font-size="13" font-weight="600" fill="#475569">ด้านหน้า</text>${strap(fY, brand, false, fp.strap)}${p.holeBackOnly ? "" : placeImg(p.holeImg, fY, fp.hole)}${placeImg(p.frontLogoImg, fY, fp.logo)}${bracket(fd.x, fd.w, fbY, logoDist, false)}`;
+  const back  = `<text x="${BX}" y="${bY - 10}" font-size="13" font-weight="600" fill="#475569">ด้านหลัง</text>${strap(bY, leather, true, bp.strap)}${placeImg(p.holeImg, bY, bp.hole)}${placeImg(p.backLogoImg, bY, bp.logo)}${bracket(bd.x, bd.w, bbY, toEnd, true)}`;
   const topPad = Math.max(0, 16 - fbY);   // กันป้ายวงเล็บหน้าโดนตัดขอบบน (ตอนเลื่อนเส้นขึ้นสูง)
   const H = bbY + 22;                       // เผื่อป้ายวงเล็บหลังที่อยู่ใต้สุด
   return `<svg viewBox="0 ${-topPad} 740 ${H + topPad}" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">${front}${back}</svg>`;
