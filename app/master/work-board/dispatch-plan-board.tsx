@@ -62,7 +62,7 @@ function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch,
-  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO, onSetCentralRate,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onUpdateWO, onCancelWO, onSetCentralRate, onPickDispatch,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -80,6 +80,7 @@ export function DispatchPlanBoard({
   onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string }) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น)
   onCancelWO?: (id: string) => void | Promise<void>;   // ยกเลิกใบจ่ายงาน (ของจริง) → คืน qty กลับ "รอจ่าย"
   onSetCentralRate?: (info: { moNo: string; rate: number }) => void | Promise<void>;   // การ์ดร่าง: ใส่ค่าแรง → ตั้งเรตกลางสินค้า
+  onPickDispatch?: (moNo: string, qty: number) => void;   // tablet: แตะการ์ดซ้ำ/กดเลือกโต๊ะ → เปิด popup จ่ายงาน (เลือกโต๊ะ+ช่าง)
 }) {
   const toast = useToast();
   const [lines, setLines] = useState<DispatchPlanLine[]>([]);
@@ -393,7 +394,7 @@ export function DispatchPlanBoard({
               const on = selected === p.mo_no;
               return (
                 <div key={p.id}
-                  onClick={() => editable && setSelected(on ? null : p.mo_no)}
+                  onClick={() => { if (!editable) return; if (tablet && on && onPickDispatch) { onPickDispatch(p.mo_no, Number(dispQty[p.mo_no] ?? availOf(p)) || availOf(p)); } else { setSelected(on ? null : p.mo_no); } }}
                   className={`rounded-lg px-2 py-1.5 mb-1.5 bg-white ${on ? "ring-2 ring-indigo-400 border-indigo-300" : "border border-slate-200"} ${editable ? "cursor-pointer hover:bg-slate-50" : ""}`}>
                   <div className="flex items-center gap-1.5">
                     {editable && <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "pending", moNo: p.mo_no }; }} onClick={(e) => e.stopPropagation()} title="ลากไปวางที่โต๊ะ" className="shrink-0 cursor-move text-slate-300 hover:text-slate-500 select-none">⠿</span>}
@@ -436,7 +437,10 @@ export function DispatchPlanBoard({
                         onChange={(e) => setDispQty((d) => ({ ...d, [p.mo_no]: e.target.value }))}
                         className="w-16 h-7 px-1.5 text-sm text-right border border-indigo-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400" />
                       <span className="text-[11px] text-slate-500 shrink-0">ชิ้น</span>
-                      <span className="text-[10px] text-indigo-500 ml-auto shrink-0">→ แตะโต๊ะ</span>
+                      {tablet && onPickDispatch
+                        ? <button onClick={(e) => { e.stopPropagation(); onPickDispatch(p.mo_no, Number(dispQty[p.mo_no] ?? availOf(p)) || availOf(p)); }}
+                            className="ml-auto shrink-0 h-7 px-2.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">📋 เลือกโต๊ะจ่าย →</button>
+                        : <span className="text-[10px] text-indigo-500 ml-auto shrink-0">→ แตะโต๊ะ</span>}
                     </div>
                   )}
                 </div>

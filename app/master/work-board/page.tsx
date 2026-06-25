@@ -1022,6 +1022,7 @@ export default function WorkBoardPage() {
             }}
             onCancelWO={async (id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) await cancelWO(wo); }}
             onSetCentralRate={setCentralRate}
+            onPickDispatch={(moNo, qty) => { const mo = board.pending.find((x) => x.mo_no === moNo); if (mo) { openDispatch(mo, null); if (qty > 0) setDispQty(qty); } }}
             onUpdateWO={async (id, patch) => {
               try {
                 const res = await apiFetch("/api/mo/work-orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...patch }) });
