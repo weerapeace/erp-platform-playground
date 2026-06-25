@@ -131,7 +131,9 @@ export default function WorkBoardPage() {
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
   const [deptWages, setDeptWages] = useState<Record<string, number>>({});   // เงินเดือนรวมพนักงานต่อแผนก (จาก payroll)
   // กลุ่ม B: ประวัติงานเสียต่อช่าง (จับด้วยชื่อ) → เตือนตอนจ่ายงาน
-  const [defectByWorker, setDefectByWorker] = useState<Record<string, { worker: string; count: number; last_at: string | null; types: string[] }>>({});
+  type DefItem = { sku: string | null; mo_no: string | null; defect_type: string; qty: number; created_at: string | null };
+  const [defectByWorker, setDefectByWorker] = useState<Record<string, { worker: string; count: number; last_at: string | null; types: string[]; items: DefItem[] }>>({});
+  const [defectListOpen, setDefectListOpen] = useState(false);   // popup จ่ายงาน: กางรายการงานเสีย (กดดูว่างานอะไร)
   // กลุ่ม D: แผนจ่ายงาน (ร่าง) — แท็บบนบอร์ด ("real" = บอร์ดจริง · id = แผนร่าง)
   const [plans, setPlans] = useState<DispatchPlan[]>([]);
   const [activePlan, setActivePlan] = useState<string>("real");
@@ -265,8 +267,8 @@ export default function WorkBoardPage() {
       try { const r = await apiFetch("/api/mo/assignees"); const j = await r.json(); if (alive) { setCraftsmen(j.craftsmen ?? []); setDeptWages(j.dept_wages ?? {}); } } catch { /* ignore */ }
       if (!alive) return;
       try { const r = await apiFetch("/api/mo/craftsman-defects"); const j = await r.json();
-        const m: Record<string, { worker: string; count: number; last_at: string | null; types: string[] }> = {};
-        for (const d of (j.data ?? []) as { worker: string; count: number; last_at: string | null; types: string[] }[]) m[(d.worker ?? "").trim().toLowerCase()] = d;
+        const m: Record<string, { worker: string; count: number; last_at: string | null; types: string[]; items: DefItem[] }> = {};
+        for (const d of (j.data ?? []) as { worker: string; count: number; last_at: string | null; types: string[]; items?: DefItem[] }[]) m[(d.worker ?? "").trim().toLowerCase()] = { ...d, items: d.items ?? [] };
         if (alive) setDefectByWorker(m); } catch { /* ignore */ }
       if (!alive) return;
       await loadPlans();
@@ -392,7 +394,7 @@ export default function WorkBoardPage() {
   // เปิด popup จ่ายงาน (ตั้งค่าเริ่มต้นจาก MO)
   const openDispatch = useCallback((mo: PendingMO, dept: Dept | null) => {
     setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.due_date ?? "");
-    setDispRates([]); setDispLaborRate("");
+    setDispRates([]); setDispLaborRate(""); setDefectListOpen(false);
     // ดึงค่าแรง/ชิ้น จาก BOM ของสินค้านี้ (ราคากลาง + รายช่าง) → ใช้ตั้ง default
     if (mo.bom_code) void (async () => {
       try { const r = await apiFetch(`/api/bom/labor-rates?bom_code=${encodeURIComponent(mo.bom_code!)}`); const j = await r.json(); setDispRates((j.data ?? []) as LaborRate[]); }
@@ -552,8 +554,18 @@ export default function WorkBoardPage() {
     if (!dispDept) return [];
     return dispIsHire ? craftsmen : craftsmen.filter((c) => c.department_id === dispDept.id);
   }, [dispDept, dispIsHire, craftsmen]);
-  // กลุ่ม B: หาประวัติงานเสียจากชื่อผู้รับงาน (ช่าง หรือชื่อแผนกถ้าไม่ระบุช่าง)
-  const defectOf = useCallback((name: string | null | undefined) => name ? defectByWorker[name.trim().toLowerCase()] : undefined, [defectByWorker]);
+  // กลุ่ม B: ประวัติงานเสีย — Parent SKU จากรหัส (ตัดท้าย -NN) เช่น TTM094-02 → TTM094
+  const parentKeyOf = (sku: string | null | undefined) => (sku ?? "").trim().toUpperCase().replace(/-\d+$/, "");
+  // ประวัติงานเสียของผู้รับงาน "เฉพาะ Parent SKU เดียวกับ MO ที่กำลังจ่าย" (ไม่ใช่ทุกงาน)
+  const defectScoped = useCallback((name: string | null | undefined, parentKey: string) => {
+    const d = name ? defectByWorker[name.trim().toLowerCase()] : undefined;
+    if (!d || !parentKey) return undefined;
+    const items = d.items.filter((it) => parentKeyOf(it.sku) === parentKey);
+    if (items.length === 0) return undefined;
+    const types = [...new Set(items.map((it) => it.defect_type).filter(Boolean))];
+    const last_at = items.reduce<string | null>((a, it) => (it.created_at && (!a || it.created_at > a)) ? it.created_at : a, null);
+    return { count: items.length, types, last_at, items };
+  }, [defectByWorker]);
 
   // รับงานคืน (จากการ์ดบนบอร์ด) — รองรับรับคืนบางส่วน
   const submitReceive = async () => {
@@ -1120,7 +1132,7 @@ export default function WorkBoardPage() {
       <ERPModal open={dispMO !== null} onClose={() => !dispSaving && setDispMO(null)} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
         footer={<>
           <button onClick={() => setDispMO(null)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={submitDispatch} disabled={dispSaving || !dispDept} title={!dispDept ? "เลือกโต๊ะก่อน" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
+          <button onClick={submitDispatch} disabled={dispSaving || !dispDept || (dispIsHire && !dispCraftsman)} title={!dispDept ? "เลือกโต๊ะก่อน" : (dispIsHire && !dispCraftsman) ? "งานเหมา ต้องเลือกช่างก่อน" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
         </>}>
         {dispMO && (
           <div className="space-y-3">
@@ -1139,12 +1151,15 @@ export default function WorkBoardPage() {
               <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
                 <input type="date" value={dispDue} onChange={(e) => setDispDue(e.target.value)} className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
             </div>
-            <label className="block"><span className="text-[11px] text-slate-500">{dispIsHire ? "เลือกช่าง (งานเหมา — เลือกได้ทุกคน)" : `ช่างในแผนก ${dispDept?.name ?? ""}`}</span>
+            <label className="block"><span className="text-[11px] text-slate-500">{dispIsHire ? "เลือกช่าง (งานเหมา — จำเป็น *)" : `ช่างในแผนก ${dispDept?.name ?? ""}`}</span>
               <div className="mt-0.5">
-                <SearchableSelect value={dispCraftsman} onChange={setDispCraftsman} placeholder="— ทั้งแผนก (ไม่ระบุช่าง) —"
-                  options={[{ value: "", label: "— ทั้งแผนก (ไม่ระบุช่าง) —" }, ...deptCraftsmen.map((c) => { const d = defectOf(c.name); return { value: c.id, label: `${d ? "⚠️ " : ""}${c.code ? `[${c.code}] ` : ""}${c.name}`, sub: d ? `เคยมีงานเสีย ${d.count} ครั้ง` : undefined, searchText: `${c.code ?? ""} ${c.name}` }; })]} />
+                <SearchableSelect value={dispCraftsman} onChange={setDispCraftsman} placeholder={dispIsHire ? "— เลือกช่าง (จำเป็น) —" : "— ทั้งแผนก (ไม่ระบุช่าง) —"}
+                  options={[
+                    ...(dispIsHire ? [] : [{ value: "", label: "— ทั้งแผนก (ไม่ระบุช่าง) —" }]),
+                    ...deptCraftsmen.map((c) => { const d = defectScoped(c.name, parentKeyOf(dispMO.product_sku)); return { value: c.id, label: `${d ? "⚠️ " : ""}${c.code ? `[${c.code}] ` : ""}${c.name}`, sub: d ? `เคยทำรุ่นนี้เสีย ${d.count} ครั้ง` : undefined, searchText: `${c.code ?? ""} ${c.name}` }; }),
+                  ]} />
               </div>
-              {dispIsHire ? <span className="text-[10px] text-indigo-500">งานเหมาเลือกพนักงานได้ทุกคน · พิมพ์ชื่อ/รหัสเพื่อค้นหา</span>
+              {dispIsHire ? <span className="text-[10px] text-rose-500">งานเหมา — ต้องเลือกช่าง (จ่ายทั้งแผนกไม่ได้) · พิมพ์ชื่อ/รหัสค้นหา</span>
                 : deptCraftsmen.length === 0 && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
             </label>
             {/* ค่าแรงผลิต/ชิ้น — default ราคากลางจาก BOM (เลือกช่างที่มีเรต → ใช้เรตช่างนั้น) */}
@@ -1157,17 +1172,32 @@ export default function WorkBoardPage() {
                 {dispRates.some((r) => !r.craftsman_id) && <span className="text-[10px] text-slate-400">ราคากลาง ฿{fmt(dispRates.find((r) => !r.craftsman_id)!.rate)}/ชิ้น</span>}
               </div>
             </label>
-            {/* กลุ่ม B: เตือนถ้าผู้รับงาน (ช่างที่เลือก หรือชื่อแผนก) เคยมีประวัติงานเสีย */}
+            {/* กลุ่ม B: เตือนถ้าผู้รับงานเคยทำ "รุ่นเดียวกัน (Parent SKU)" เสีย — กดดูได้ว่างานอะไร */}
             {(() => {
               const craftName = deptCraftsmen.find((c) => c.id === dispCraftsman)?.name ?? null;
               const targetName = craftName ?? dispDept?.name ?? "";
-              const d = defectOf(targetName);
+              const d = defectScoped(targetName, parentKeyOf(dispMO.product_sku));
               if (!d) return null;
               return (
                 <div className={`rounded-lg border px-3 py-2 text-xs ${dispIsHire ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
-                  ⚠️ <b>{targetName}</b> เคยมีประวัติงานเสีย <b>{d.count}</b> ครั้ง
-                  {d.types.length > 0 && <span className="opacity-70"> ({d.types.slice(0, 3).join(", ")}{d.types.length > 3 ? "…" : ""})</span>}
-                  {d.last_at && <span className="opacity-60"> · ล่าสุด {new Date(d.last_at).toLocaleDateString("th-TH")}</span>}
+                  <button type="button" onClick={() => setDefectListOpen((o) => !o)} className="w-full text-left">
+                    ⚠️ <b>{targetName}</b> เคยทำ<b>รุ่นนี้</b>เสีย <b>{d.count}</b> ครั้ง
+                    {d.types.length > 0 && <span className="opacity-70"> ({d.types.slice(0, 3).join(", ")}{d.types.length > 3 ? "…" : ""})</span>}
+                    {d.last_at && <span className="opacity-60"> · ล่าสุด {new Date(d.last_at).toLocaleDateString("th-TH")}</span>}
+                    <span className="ml-1 underline shrink-0">{defectListOpen ? "ซ่อน" : "ดูว่างานอะไร"}</span>
+                  </button>
+                  {defectListOpen && (
+                    <div className="mt-1.5 border-t border-current/20 pt-1.5 space-y-0.5 max-h-40 overflow-y-auto">
+                      {d.items.map((it, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <code className="text-[10px] opacity-80 shrink-0">{it.sku ?? "—"}</code>
+                          <span className="flex-1 truncate">{it.defect_type}{it.qty ? ` · ${fmt(it.qty)} ชิ้น` : ""}</span>
+                          {it.mo_no && <span className="opacity-60 text-[10px] shrink-0">{it.mo_no}</span>}
+                          {it.created_at && <span className="opacity-50 text-[10px] shrink-0">{new Date(it.created_at).toLocaleDateString("th-TH")}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {dispIsHire && <div className="mt-0.5 text-[11px] font-medium">เป็นช่างเหมา — โปรดพิจารณาก่อนจ่ายงาน</div>}
                 </div>
               );

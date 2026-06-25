@@ -11,13 +11,14 @@ import { guardApi } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type CraftsmanDefect = { worker: string; count: number; qty: number; last_at: string | null; types: string[] };
+export type CraftsmanDefectItem = { sku: string | null; mo_no: string | null; defect_type: string; qty: number; created_at: string | null };
+export type CraftsmanDefect = { worker: string; count: number; qty: number; last_at: string | null; types: string[]; items: CraftsmanDefectItem[] };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("defect_logs")
-    .select("worker, defect_type, qty, created_at")
+    .select("worker, sku, mo_no, defect_type, qty, created_at")
     .not("worker", "is", null)
     .order("created_at", { ascending: false })
     .limit(5000);
@@ -28,15 +29,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const worker = String(r.worker ?? "").trim();
     if (!worker) continue;
     const key = worker.toLowerCase();
-    const cur = map.get(key) ?? { worker, count: 0, qty: 0, last_at: null as string | null, types: [], _types: new Set<string>() };
+    const cur = map.get(key) ?? { worker, count: 0, qty: 0, last_at: null as string | null, types: [], items: [], _types: new Set<string>() };
     cur.count += 1;
     cur.qty += Number(r.qty) || 0;
     const at = r.created_at ? String(r.created_at) : null;
     if (at && (!cur.last_at || at > cur.last_at)) cur.last_at = at;   // เรียง desc แล้ว แต่กันไว้
     const t = (r.defect_type as string) ?? "";
     if (t) cur._types.add(t);
+    if (cur.items.length < 200) cur.items.push({ sku: (r.sku as string) ?? null, mo_no: (r.mo_no as string) ?? null, defect_type: t, qty: Number(r.qty) || 0, created_at: at });
     map.set(key, cur);
   }
-  const out: CraftsmanDefect[] = [...map.values()].map((c) => ({ worker: c.worker, count: c.count, qty: c.qty, last_at: c.last_at, types: [...c._types] }));
+  const out: CraftsmanDefect[] = [...map.values()].map((c) => ({ worker: c.worker, count: c.count, qty: c.qty, last_at: c.last_at, types: [...c._types], items: c.items }));
   return NextResponse.json({ data: out, error: null });
 }
