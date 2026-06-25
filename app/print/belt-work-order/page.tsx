@@ -41,10 +41,10 @@ const TEMPLATE: ReportTemplate = {
       <tr class="trow"><td class="lcol">รวมทุก MO</td>{{#total_cells}}<td>{{v}}</td>{{/total_cells}}<td class="sum">{{grand}}</td></tr>
     </tbody>
   </table>
-  {{#has_color_detail}}<div class="bw-section">รายละเอียดหนัง / สี</div>
+  {{#has_color_detail}}<div class="bw-section">รายละเอียดหนัง / สี / หัวเข็มขัด</div>
   <table class="bw-cdet">
-    <thead><tr><th class="lcol">รหัส / สี</th><th>หนังบน</th><th>หนังล่าง</th><th>ขอบ</th><th>ด้าย</th></tr></thead>
-    <tbody>{{#color_rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td><td>{{top}}</td><td>{{bot}}</td><td>{{edge}}</td><td>{{thread}}</td></tr>{{/color_rows}}</tbody>
+    <thead><tr><th class="imgc">รูป</th><th class="lcol">รหัส / สี</th><th>หัวเข็มขัด</th><th>หนังบน</th><th>หนังล่าง</th><th>ขอบ</th><th>ด้าย</th></tr></thead>
+    <tbody>{{#color_rows}}<tr><td class="imgc">{{{img_cell}}}</td><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td><td>{{buckle}}</td><td>{{top}}</td><td>{{bot}}</td><td>{{edge}}</td><td>{{thread}}</td></tr>{{/color_rows}}</tbody>
   </table>{{/has_color_detail}}
   {{#has_spec}}<div class="bw-section">สเปก</div>
   <table class="bw-spec">{{#specs}}<tr><td class="k">{{label}}</td><td class="v">{{value}}</td></tr>{{/specs}}</table>{{/has_spec}}
@@ -76,6 +76,8 @@ const TEMPLATE: ReportTemplate = {
 .bw-cdet th { background: #f1f5f9; font-weight: 700; }
 .bw-cdet .lcol { white-space: nowrap; font-weight: 700; }
 .bw-cdet .mo { color: #94a3b8; font-size: 8px; font-weight: 400; }
+.bw-cdet .imgc { width: 16mm; text-align: center; padding: 1mm; }
+.bw-cdet img.thumb { width: 14mm; height: 14mm; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 3px; display: block; margin: 0 auto; background: #fff; }
 .bw-spec { width: 100%; border-collapse: collapse; }
 .bw-spec td { padding: 1mm 2mm; border-bottom: 1px solid #e5e7eb; }
 .bw-spec td.k { width: 35mm; white-space: nowrap; }
@@ -93,6 +95,15 @@ function beltColorParts(s: ProductSpec | undefined): { top: string; bot: string;
   const pick = (re: RegExp) => all.find((f) => re.test(f.label))?.value || "";
   return { top: pick(/หนังบน/) || "—", bot: pick(/หนังล่าง/) || "—", edge: pick(/ริม|ขอบ/) || "—", thread: pick(/ด้าย/) || "—" };
 }
+// หัวเข็มขัดต่อ SKU (ดูทั้ง model + sku + legacy เผื่อรุ่นต่างหัว)
+function beltBuckle(s: ProductSpec | undefined): string {
+  const all = s ? [...s.model_attrs, ...s.sku_attrs, ...s.legacy] : [];
+  return all.find((f) => /หัวเข็มขัด|ประเภทหัว/.test(f.label))?.value || "—";
+}
+// รูปต่อ SKU → ใส่ origin เต็ม (กัน path สั้นไม่ขึ้นในหน้าต่าง Blob/iframe) + ย่อ
+const ORIGIN = () => (typeof window !== "undefined" ? window.location.origin : "");
+const beltImgCell = (url: string | null | undefined) =>
+  url ? `<img class="thumb" src="${url.startsWith("/") ? ORIGIN() : ""}${url}${url.includes("?") ? "&" : "?"}w=160" alt="" />` : "—";
 
 function BeltWorkOrderInner() {
   const sp = useSearchParams();
@@ -149,7 +160,11 @@ function BeltWorkOrderInner() {
     const HIDE_SPEC = /รูปแบบเข็มขัด|ระยะถึงปลายสาย|ห่างโลโก้จากปลาย/;
     const detail = specFields.find((f) => /รูปแบบเข็มขัด/.test(f.label))?.value || "";
     const visibleSpecs = specFields.filter((f) => !HIDE_SPEC.test(f.label));
-    const colorRows = bw.rows.map((r) => { const p = beltColorParts(skuSpecs[r.product_sku]); return { label: r.label, mo_short: r.mo_no.split("-").pop() || r.mo_no, top: p.top, bot: p.bot, edge: p.edge, thread: p.thread }; });
+    const colorRows = bw.rows.map((r) => {
+      const spec = skuSpecs[r.product_sku]; const p = beltColorParts(spec);
+      const imgUrl = spec?.image_url || spec?.parent?.image_url || null;
+      return { label: r.label, mo_short: r.mo_no.split("-").pop() || r.mo_no, img_cell: beltImgCell(imgUrl), buckle: beltBuckle(spec), top: p.top, bot: p.bot, edge: p.edge, thread: p.thread };
+    });
     // เฟส 3b: ดึงตัวเลขวาดรูปจากช่องสเปก (จับด้วยป้ายชื่อ) — ไม่เจอ → ใช้ค่า default ในตัววาด
     const bf = spec ? [...spec.model_attrs, ...spec.legacy, ...spec.sku_attrs] : [];
     const bnum = (re: RegExp) => { const f = bf.find((x) => re.test(x.label)); const m = f && String(f.value).match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : undefined; };
@@ -174,7 +189,7 @@ function BeltWorkOrderInner() {
       })),
       total_cells: sizes.map((s) => ({ v: bw.totals_by_size[s] || 0 })),
       grand: bw.grand_total,
-      has_color_detail: colorRows.some((r) => [r.top, r.bot, r.edge, r.thread].some((v) => v && v !== "—")),
+      has_color_detail: colorRows.some((r) => r.img_cell.includes("<img") || (r.buckle && r.buckle !== "—") || [r.top, r.bot, r.edge, r.thread].some((v) => v && v !== "—")),
       color_rows: colorRows,
       has_spec: visibleSpecs.length > 0,
       specs: visibleSpecs.map((f) => ({ label: f.label, value: f.value })),

@@ -93,7 +93,7 @@ export default function BeltPlacementPage() {
       const dx = c.x - dd.sx, dy = c.y - dd.sy;
       const nd = dd.mode === "width"
         ? { ...dd.dim, w: clamp(dd.dim.w + dx, 30, BX + BW - dd.dim.x) }
-        : { ...dd.dim, x: clamp(dd.dim.x + dx, BX, BX + BW - 20),
+        : { ...dd.dim, x: clamp(dd.dim.x + dx, BX, BX + BW - dd.dim.w),   // ล็อกให้ทั้งเส้น (x..x+w) อยู่ในกรอบ ไม่ตกขอบ
             // front (เหนือกรอบ) ลากขึ้น = y มาก · back (ใต้กรอบ) ลากลง = y มาก
             y: dd.which === "front" ? clamp(dd.dim.y - dy, 0, 24) : clamp(dd.dim.y + dy, 0, 90) };
       setBase((b) => ({ ...b, [dd.which === "front" ? "frontDim" : "backDim"]: nd }));
