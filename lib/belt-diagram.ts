@@ -83,15 +83,15 @@ function imageComposite(p: BeltDiagramParams): string {
   const fp = L.images?.front ?? BELT_DEFAULT_PLACE.front;
   const bp = L.images?.back ?? BELT_DEFAULT_PLACE.back;
   // วางรูปตามกล่องที่บันทึก (สัดส่วน 0..1 ของกรอบด้านนั้น) · slice = เต็มช่องเสมอ (ไม่ย่อ ไม่ยืด · ตัดส่วนเกิน)
-  const placeImg = (href: string | null | undefined, top: number, b: ImgBox | undefined) => {
+  const placeImg = (href: string | null | undefined, top: number, b: ImgBox | undefined, par = "xMidYMid slice") => {
     if (!href) return "";
     const box = b ?? { x: 0, y: 0, w: 1, h: 1 };
     const x = BX + box.x * BW, y = top + box.y * BH, w = box.w * BW, h = box.h * BH;
-    return `<image href="${esc(href)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="xMidYMid slice"/>`;
+    return `<image href="${esc(href)}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" preserveAspectRatio="${par}"/>`;
   };
-  // ชั้นทรงเข็มขัด: มีรูป→วางตามกล่อง, ไม่มีรูป→วาดโครงจำลอง (สำหรับหน้าตั้งค่า/รูปขาด)
+  // ชั้นทรงเข็มขัด: มีรูป→วางเต็มช่องพอดี (none = ไม่ย่อ ไม่ตัดขอบ เส้นทรงครบ), ไม่มีรูป→วาดโครงจำลอง
   const strap = (y: number, label: string, mirror: boolean, b: ImgBox | undefined) =>
-    p.strapImg ? placeImg(p.strapImg, y, b) : placeholderStrap(y, BH, label, mirror);
+    p.strapImg ? placeImg(p.strapImg, y, b, "none") : placeholderStrap(y, BH, label, mirror);
   // เส้นบอกระยะแบบวงเล็บ — ก้านชี้ "เข้าหา" ตัวเข็มขัด · ป้ายอยู่ฝั่งตรงข้าม (ไกลเข็มขัด)
   // down=false → วงเล็บเหนือเข็มขัด ก้านชี้ลง ⊓ · down=true → ใต้เข็มขัด ก้านชี้ขึ้น ⊔
   const bracket = (x: number, w: number, y: number, label: string, down: boolean) => {
