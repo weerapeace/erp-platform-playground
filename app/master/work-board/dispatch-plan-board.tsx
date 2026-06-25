@@ -8,6 +8,7 @@
  * แยกจากบอร์ด canvas เดิม เพื่อไม่ให้กระทบของจริง
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { HoverImage } from "@/components/hover-image";
@@ -24,6 +25,38 @@ const baht = (n: number) => "฿" + fmt(n);
 
 function Thumb({ url }: { url?: string | null }) {
   return <HoverImage url={url} size={28} previewSize={224} />;
+}
+
+// การ์ดงานกลาง — ใช้ทั้ง "ของจริง" / "ล็อก" / "ร่าง" ให้หน้าตาเหมือนกัน (ต่างแค่ปุ่ม + เนื้อใน)
+// ยึดสไตล์ตามของจริง: พื้นเทา ขอบทึบ · ร่าง = เส้นซ้ายเขียวบาง ๆ + ป้าย "ร่าง" · ล็อก = จาง
+function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
+  dim?: boolean;            // ล็อก/ดูอย่างเดียว → จาง
+  accent?: string;          // ร่าง → เส้นซ้ายบาง ๆ (สี)
+  thumbUrl?: string | null;
+  sku: ReactNode;
+  drag?: ReactNode;         // ปุ่มลากย้ายโต๊ะ (ร่าง)
+  actions?: ReactNode;      // ปุ่มมุมขวาบน (🔍 / ✕ / 🔒 / ร่าง)
+  children?: ReactNode;     // เนื้อใน (ช่าง/จำนวน/ค่าแรง ฯลฯ)
+}) {
+  return (
+    <div className={`rounded-lg px-2 py-1.5 mb-1.5 bg-slate-50 border border-slate-200 ${dim ? "opacity-70" : ""}`}
+      style={accent ? { borderLeft: `3px solid ${accent}` } : undefined}
+      onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-2">
+        <Thumb url={thumbUrl} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-1">
+            <span className="flex items-center gap-1 min-w-0">
+              {drag}
+              <span className="text-sm font-medium text-slate-600 truncate">{sku}</span>
+            </span>
+            {actions && <span className="flex items-center gap-1 shrink-0">{actions}</span>}
+          </div>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function DispatchPlanBoard({
@@ -231,37 +264,30 @@ export function DispatchPlanBoard({
   const draftCard = (l: DispatchPlanLine, d: DeptLite) => {
     const opts = deptCraftsmen(d);
     return (
-      <div key={l.id}
-        className="rounded-lg px-2 py-1.5 mb-1.5" style={{ background: "#e1f5ee", border: "1.5px dashed #1d9e75" }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between gap-1">
-          <div className="flex items-center gap-1.5 min-w-0">
-            {editable && <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }} title="ลากย้ายโต๊ะ" className="shrink-0 cursor-move text-emerald-400 hover:text-emerald-600 select-none">⠿</span>}
-            <Thumb url={imageByMo[l.mo_no ?? ""]} />
-            <span className="text-sm font-semibold truncate" style={{ color: "#0f6e56" }}>{l.product_sku}</span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button onClick={() => onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
-            <span className="text-[10px] px-1 rounded" style={{ color: "#0f6e56", border: "0.5px solid #5dcaa5" }}>ร่าง</span>
-            {editable && <button onClick={() => removeLine(l.id)} className="text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
-          </div>
-        </div>
-        <div className="text-[10px] mt-0.5" style={{ color: "#0f6e56" }}>ค่าแรงผลิต {baht(lineLabor(l))} ({fmt(Number(l.qty) || 0)} × {baht(laborPerUnit[l.mo_no ?? ""] ?? 0)})</div>
+      <CardShell key={l.id} accent="#1d9e75" thumbUrl={imageByMo[l.mo_no ?? ""]} sku={l.product_sku}
+        drag={editable ? <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }} title="ลากย้ายโต๊ะ" className="shrink-0 cursor-move text-emerald-500 hover:text-emerald-700 select-none">⠿</span> : null}
+        actions={<>
+          <button onClick={() => onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 })} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+          <span className="text-[10px] px-1 rounded text-emerald-700 border border-emerald-300" title="ร่าง (ยังไม่จ่ายจริง)">ร่าง</span>
+          {editable && <button onClick={() => removeLine(l.id)} className="text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
+        </>}>
+        <div className="text-[10px] mt-0.5 text-slate-400">ค่าแรงผลิต {baht(lineLabor(l))} ({fmt(Number(l.qty) || 0)} × {baht(laborPerUnit[l.mo_no ?? ""] ?? 0)})</div>
         <div className="flex items-center gap-1.5 mt-1">
           <input type="number" min={0} step="any" value={Number(l.qty) || 0} disabled={!editable}
             onChange={(e) => updateLine(l.id, { qty: Number(e.target.value) })}
-            className="w-14 h-6 px-1 text-xs text-right border rounded" style={{ borderColor: "#9fe1cb" }} />
-          <span className="text-[10px]" style={{ color: "#0f6e56" }}>ชิ้น</span>
+            className="w-14 h-6 px-1 text-xs text-right border border-slate-200 rounded" />
+          <span className="text-[10px] text-slate-400">ชิ้น</span>
           {opts.length > 0 && (
             <select value={l.assignee_id ?? ""} disabled={!editable}
               onChange={(e) => { const c = opts.find((x) => x.id === e.target.value); updateLine(l.id, { assignee_id: c?.id ?? null, assignee_name: c?.name ?? null }); }}
-              className="flex-1 h-6 px-1 text-[11px] border rounded min-w-0" style={{ borderColor: "#9fe1cb" }}>
+              className="flex-1 h-6 px-1 text-[11px] border border-slate-200 rounded min-w-0">
               <option value="">ทั้งโต๊ะ</option>
               {opts.map((c) => { const df = defectOf(c.name); return <option key={c.id} value={c.id}>{df ? "⚠️ " : ""}{c.name}</option>; })}
             </select>
           )}
         </div>
         {(() => { const df = defectOf(l.assignee_name); return df ? <div className="text-[10px] text-amber-600 mt-0.5">⚠️ ช่างนี้เคยมีงานเสีย {df.count} ครั้ง</div> : null; })()}
-      </div>
+      </CardShell>
     );
   };
 
@@ -404,61 +430,53 @@ export function DispatchPlanBoard({
                   const canEditWO = realMode && editable && !!onUpdateWO;
                   const editing = laborEditId === w.id;
                   return (
-                  <div key={w.id} className={`rounded-lg px-2 py-1.5 mb-1.5 bg-slate-50 border border-slate-200 ${realMode ? "" : "opacity-70"}`}>
-                    <div className="flex items-center gap-2">
-                      <Thumb url={w.image_url} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-sm font-medium text-slate-600 truncate">{w.product_sku}</span>
-                          <span className="flex items-center gap-1 shrink-0">
-                            <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty }); }} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
-                            {/* X: ย้อนการ์ดกลับ "รอจ่าย" (เฉพาะของจริง + ยังไม่ส่งงานคืน) — กด 1 ครั้ง = ติดอาวุธ, ยืนยันด้านล่าง */}
-                            {realMode && editable && onCancelWO && w.status !== "partial_return" && (
-                              <button onClick={(e) => { e.stopPropagation(); setCancelArmId((id) => id === w.id ? null : w.id); }} title="ย้อนกลับไปรอจ่าย" className="text-slate-300 hover:text-rose-600 text-xs">✕</button>
-                            )}
-                            {!realMode && <span className="text-slate-400" title="จ่ายจริงแล้ว — ในแผนดูอย่างเดียว">🔒</span>}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 truncate">
-                          {/* #3: เลือกช่างหลายคน (เฉพาะของจริง) — กดที่ชื่อเพื่อเลือก */}
-                          {canEditWO
-                            ? <button onClick={(e) => { e.stopPropagation(); openAssign(w, d); }} className="text-violet-600 hover:underline font-medium">👤 {w.assignee_name || "เลือกช่าง"} ✎</button>
-                            : <span>{w.assignee_name ?? "—"}</span>}
-                          {" · "}{fmt(w.qty)} ชิ้น · {baht(wl)}
-                        </div>
-                        {/* #2: ใส่ค่าแรง (เฉพาะของจริง + การ์ดที่ยังไม่มีค่าแรง) — กดง่าย */}
-                        {canEditWO && wl <= 0 && !editing && (
-                          <button onClick={(e) => { e.stopPropagation(); setLaborEditId(w.id); setLaborEditVal(""); }}
-                            className="mt-1 text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">💰 ใส่ค่าแรง</button>
-                        )}
-                        {canEditWO && editing && (
-                          <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <input type="number" min={0} step="any" autoFocus value={laborEditVal} onChange={(e) => setLaborEditVal(e.target.value)} placeholder="บาท/ชิ้น"
-                              className="w-20 h-7 px-1.5 text-xs text-right border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400" />
-                            <span className="text-[10px] text-slate-400 shrink-0">× {fmt(w.qty)} = ฿{fmt((Number(laborEditVal) || 0) * (Number(w.qty) || 0))}</span>
-                            <button disabled={laborSaving} title="บันทึก" onClick={async () => {
-                              setLaborSaving(true);
-                              try { await onUpdateWO!(w.id, { labor_cost: (Number(laborEditVal) || 0) * (Number(w.qty) || 0) }); setLaborEditId(null); }
-                              catch { /* parent toast */ } finally { setLaborSaving(false); }
-                            }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">✓</button>
-                            <button title="ยกเลิก" onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
-                          </div>
-                        )}
-                        {/* ยืนยันย้อนกลับไปรอจ่าย */}
-                        {cancelArmId === w.id && (
-                          <div className="mt-1 flex items-center gap-1 rounded-md bg-rose-50 border border-rose-200 px-1.5 py-1" onClick={(e) => e.stopPropagation()}>
-                            <span className="text-[11px] text-rose-700 flex-1">ย้อนใบนี้กลับ “รอจ่าย”?</span>
-                            <button disabled={cancelSaving} onClick={async () => {
-                              setCancelSaving(true);
-                              try { await onCancelWO!(w.id); setCancelArmId(null); }
-                              catch { /* parent toast */ } finally { setCancelSaving(false); }
-                            }} className="h-7 px-2 text-xs bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50">↩ ย้อนกลับ</button>
-                            <button title="ไม่ย้อน" onClick={() => setCancelArmId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
-                          </div>
-                        )}
-                      </div>
+                  <CardShell key={w.id} dim={!realMode} thumbUrl={w.image_url} sku={w.product_sku}
+                    actions={<>
+                      <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty }); }} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+                      {/* X: ย้อนการ์ดกลับ "รอจ่าย" (เฉพาะของจริง + ยังไม่ส่งงานคืน) — กด 1 ครั้ง = ติดอาวุธ, ยืนยันด้านล่าง */}
+                      {realMode && editable && onCancelWO && w.status !== "partial_return" && (
+                        <button onClick={(e) => { e.stopPropagation(); setCancelArmId((id) => id === w.id ? null : w.id); }} title="ย้อนกลับไปรอจ่าย" className="text-slate-300 hover:text-rose-600 text-xs">✕</button>
+                      )}
+                      {!realMode && <span className="text-slate-400" title="จ่ายจริงแล้ว — ในแผนดูอย่างเดียว">🔒</span>}
+                    </>}>
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {/* #3: เลือกช่างหลายคน (เฉพาะของจริง) — กดที่ชื่อเพื่อเลือก */}
+                      {canEditWO
+                        ? <button onClick={(e) => { e.stopPropagation(); openAssign(w, d); }} className="text-violet-600 hover:underline font-medium">👤 {w.assignee_name || "เลือกช่าง"} ✎</button>
+                        : <span>{w.assignee_name ?? "—"}</span>}
+                      {" · "}{fmt(w.qty)} ชิ้น · {baht(wl)}
                     </div>
-                  </div>
+                    {/* #2: ใส่ค่าแรง (เฉพาะของจริง + การ์ดที่ยังไม่มีค่าแรง) — กดง่าย */}
+                    {canEditWO && wl <= 0 && !editing && (
+                      <button onClick={(e) => { e.stopPropagation(); setLaborEditId(w.id); setLaborEditVal(""); }}
+                        className="mt-1 text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100">💰 ใส่ค่าแรง</button>
+                    )}
+                    {canEditWO && editing && (
+                      <div className="mt-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                        <input type="number" min={0} step="any" autoFocus value={laborEditVal} onChange={(e) => setLaborEditVal(e.target.value)} placeholder="บาท/ชิ้น"
+                          className="w-20 h-7 px-1.5 text-xs text-right border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-400" />
+                        <span className="text-[10px] text-slate-400 shrink-0">× {fmt(w.qty)} = ฿{fmt((Number(laborEditVal) || 0) * (Number(w.qty) || 0))}</span>
+                        <button disabled={laborSaving} title="บันทึก" onClick={async () => {
+                          setLaborSaving(true);
+                          try { await onUpdateWO!(w.id, { labor_cost: (Number(laborEditVal) || 0) * (Number(w.qty) || 0) }); setLaborEditId(null); }
+                          catch { /* parent toast */ } finally { setLaborSaving(false); }
+                        }} className="h-7 px-2 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">✓</button>
+                        <button title="ยกเลิก" onClick={() => setLaborEditId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+                      </div>
+                    )}
+                    {/* ยืนยันย้อนกลับไปรอจ่าย */}
+                    {cancelArmId === w.id && (
+                      <div className="mt-1 flex items-center gap-1 rounded-md bg-rose-50 border border-rose-200 px-1.5 py-1" onClick={(e) => e.stopPropagation()}>
+                        <span className="text-[11px] text-rose-700 flex-1">ย้อนใบนี้กลับ “รอจ่าย”?</span>
+                        <button disabled={cancelSaving} onClick={async () => {
+                          setCancelSaving(true);
+                          try { await onCancelWO!(w.id); setCancelArmId(null); }
+                          catch { /* parent toast */ } finally { setCancelSaving(false); }
+                        }} className="h-7 px-2 text-xs bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50">↩ ย้อนกลับ</button>
+                        <button title="ไม่ย้อน" onClick={() => setCancelArmId(null)} className="h-7 px-1.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+                      </div>
+                    )}
+                  </CardShell>
                   );
                 })}
                 {/* รายการร่าง — จัดกลุ่มย่อยตามช่าง */}
