@@ -72,6 +72,7 @@ export function ImageManager({
   imageOnly = false,
   title,
   description,
+  layout = "grid",
 }: {
   entityType: string;
   entityId:   string;
@@ -82,6 +83,8 @@ export function ImageManager({
   imageOnly?: boolean;
   title?: string;
   description?: string;
+  /** "grid" (เริ่มต้น) = กริดเต็มความกว้าง · "gallery" = รูปย่อฝั่งซ้าย + พรีวิวใหญ่ฝั่งขวา */
+  layout?: "grid" | "gallery";
 }) {
   const [items,   setItems]   = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +106,13 @@ export function ImageManager({
   }, [entityType, entityId]);
 
   useEffect(() => { fetchList(); }, [fetchList]);
+
+  // gallery: รูปที่โชว์ใหญ่ฝั่งขวา = รูปหลัก (หรือรูปแรก) · คงไว้ถ้าตัวที่เลือกยังอยู่
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (items.length === 0) { setSelectedId(null); return; }
+    setSelectedId((cur) => (cur && items.some((a) => a.id === cur)) ? cur : (items.find((a) => a.is_primary)?.id ?? items[0].id));
+  }, [items]);
 
   const upload = useCallback(async (files: FileList | File[]) => {
     const incoming = Array.from(files);
@@ -199,6 +209,78 @@ export function ImageManager({
     finally { setUploading(false); }
   };
 
+  const selected = items.find((a) => a.id === selectedId) ?? null;
+
+  // รูปย่อ 1 ใบ (ใช้ทั้งกริดและแกลเลอรี) — pickable=true → กดเลือกมาโชว์ใหญ่ฝั่งขวา (โหมด gallery)
+  const renderTile = (a: Attachment, pickable: boolean) => (
+    <div key={a.id} onClick={pickable ? () => setSelectedId(a.id) : undefined}
+      className={`relative group aspect-square rounded-lg overflow-hidden border bg-slate-50 ${pickable ? "cursor-pointer" : ""} ${pickable && selectedId === a.id ? "border-blue-500 ring-2 ring-blue-300" : "border-slate-200"}`}>
+      {isImage(a.content_type) ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={a.public_url} alt={a.file_name} className="w-full h-full object-cover" />
+      ) : (
+        <a href={a.public_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="w-full h-full flex flex-col items-center justify-center text-slate-400 hover:text-slate-600">
+          <span className="text-2xl">📄</span>
+          <span className="text-[10px] px-1 truncate max-w-full">{a.file_name}</span>
+        </a>
+      )}
+      {a.is_primary && (
+        <span className="absolute top-1 left-1 text-[10px] bg-blue-600 text-white px-1.5 rounded-full">หลัก</span>
+      )}
+      {!readonly && (
+        <div onClick={(e) => e.stopPropagation()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
+          {isImage(a.content_type) && (
+            <ImageMarkupButton sourceUrl={a.public_url} fileName={a.file_name} entityType={entityType} entityId={entityId} actor={actor} onSaved={fetchList}
+              triggerClassName="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50 text-blue-600" />
+          )}
+          {!a.is_primary && (
+            <button onClick={() => setPrimary(a.id)} title="ตั้งเป็นรูปหลัก"
+              className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50">⭐</button>
+          )}
+          <button onClick={() => remove(a.id)} title="ลบ"
+            className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-red-50 text-red-600">🗑</button>
+        </div>
+      )}
+    </div>
+  );
+
+  // กล่องลากวาง/อัปโหลด (compact = ใช้ในคอลัมน์ซ้ายของแกลเลอรี ให้เล็กลง)
+  const renderUpload = (compact: boolean) => !readonly && (
+    <div
+      onDragOver={e => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={e => { e.preventDefault(); setDragging(false); }}
+      onDrop={e => { e.preventDefault(); setDragging(false); if (!atMaxItems && e.dataTransfer.files.length) upload(e.dataTransfer.files); }}
+      onClick={() => { if (!atMaxItems) fileRef.current?.click(); }}
+      className={`image-manager-upload ${imageOnly ? "image-only-upload [&>p]:hidden" : ""} border-2 border-dashed rounded-lg ${compact ? "p-3" : "p-4"} text-center transition-colors ${
+        atMaxItems ? "border-slate-200 bg-slate-50 cursor-not-allowed" : dragging ? "border-blue-400 bg-blue-50 cursor-pointer" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50 cursor-pointer"
+      }`}
+    >
+      <input ref={fileRef} type="file" accept={imageOnly ? "image/*" : "image/*,application/pdf"} multiple className="hidden"
+        onChange={e => { if (e.target.files?.length) upload(e.target.files); }} />
+      {uploading ? (
+        <p className="text-sm text-blue-600">⏳ กำลังอัปโหลด...</p>
+      ) : atMaxItems ? (
+        <p className="text-sm text-slate-500">ครบ {maxItems} รูปแล้ว</p>
+      ) : (
+        <>
+          {imageOnly && (
+            <div>
+              <p className={`${compact ? "text-xs" : "text-sm"} text-slate-600`}>{dragging ? "วางรูปที่นี่" : compact ? "ลาก/คลิก/Ctrl+V" : "ลากรูปมาวาง · คลิกเลือก · หรือกด Ctrl+V"}</p>
+              {!compact && <p className="text-xs text-slate-400 mt-0.5">รับเฉพาะรูปภาพ · ไม่เกิน {maxSizeMb}MB/รูป</p>}
+            </div>
+          )}
+          <p className={`${compact ? "text-xs" : "text-sm"} text-slate-600`}>{dragging ? "วางไฟล์ที่นี่" : compact ? "＋ ลาก/คลิก/Ctrl+V" : "ลากรูป/ไฟล์มาวาง · คลิกเลือก · หรือชี้ที่กล่องนี้แล้วกด Ctrl+V"}</p>
+          {!compact && <p className="text-xs text-slate-400 mt-0.5">รูปภาพ หรือ PDF · ไม่เกิน 10MB</p>}
+        </>
+      )}
+    </div>
+  );
+
+  const libraryBtn = !readonly && !atMaxItems && (
+    <button type="button" onClick={() => setPickerOpen(true)} disabled={uploading}
+      className="mt-2 h-8 px-3 text-xs font-medium border border-indigo-200 rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">📁 เลือกจากคลังไฟล์กลาง</button>
+  );
+
   return (
     <div onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -216,89 +298,47 @@ export function ImageManager({
 
       {error && <div className="mb-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠️ {error}</div>}
 
-      {/* Grid */}
       {loading ? (
         <div className="grid grid-cols-3 gap-2">
           {[0,1,2].map(i => <div key={i} className="aspect-square bg-slate-100 rounded-lg animate-pulse" />)}
         </div>
-      ) : items.length > 0 ? (
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          {items.map(a => (
-            <div key={a.id} className="relative group aspect-square rounded-lg overflow-hidden border border-slate-200 bg-slate-50">
-              {isImage(a.content_type) ? (
+      ) : layout === "gallery" ? (
+        // แกลเลอรี: รูปย่อ + กล่องอัปโหลดอยู่ซ้าย · พรีวิวรูปใหญ่ของตัวที่เลือกอยู่ขวา
+        <div className="flex gap-3">
+          <div className="w-[150px] shrink-0 space-y-2">
+            {items.length > 0 && (
+              <div className="grid grid-cols-2 gap-1.5 max-h-[360px] overflow-y-auto pr-0.5">
+                {items.map(a => renderTile(a, true))}
+              </div>
+            )}
+            {renderUpload(true)}
+            {libraryBtn}
+          </div>
+          <div className="flex-1 min-h-[300px] rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+            {selected ? (
+              isImage(selected.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={a.public_url} alt={a.file_name} className="w-full h-full object-cover" />
+                <img src={withImageWidth(selected.public_url, 1024) ?? selected.public_url} alt={selected.file_name} className="max-w-full max-h-[460px] object-contain" />
               ) : (
-                <a href={a.public_url} target="_blank" rel="noopener noreferrer" className="w-full h-full flex flex-col items-center justify-center text-slate-400 hover:text-slate-600">
-                  <span className="text-2xl">📄</span>
-                  <span className="text-[10px] px-1 truncate max-w-full">{a.file_name}</span>
+                <a href={selected.public_url} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-2 text-slate-500 hover:text-slate-700">
+                  <span className="text-5xl">📄</span><span className="text-sm px-3 text-center break-all">{selected.file_name}</span>
+                  <span className="text-xs text-blue-600 underline">เปิดไฟล์</span>
                 </a>
-              )}
-              {a.is_primary && (
-                <span className="absolute top-1 left-1 text-[10px] bg-blue-600 text-white px-1.5 rounded-full">หลัก</span>
-              )}
-              {!readonly && (
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-                  {isImage(a.content_type) && (
-                    <ImageMarkupButton
-                      sourceUrl={a.public_url}
-                      fileName={a.file_name}
-                      entityType={entityType}
-                      entityId={entityId}
-                      actor={actor}
-                      onSaved={fetchList}
-                      triggerClassName="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50 text-blue-600"
-                    />
-                  )}
-                  {!a.is_primary && (
-                    <button onClick={() => setPrimary(a.id)} title="ตั้งเป็นรูปหลัก"
-                      className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50">⭐</button>
-                  )}
-                  <button onClick={() => remove(a.id)} title="ลบ"
-                    className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-red-50 text-red-600">🗑</button>
-                </div>
-              )}
-            </div>
-          ))}
+              )
+            ) : <span className="text-sm text-slate-300">{readonly ? "ไม่มีรูป" : "ยังไม่มีรูป — ลากมาวางทางซ้าย"}</span>}
+          </div>
         </div>
-      ) : null}
-
-      {/* Upload zone */}
-      {!readonly && (
-        <div
-          onDragOver={e => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={e => { e.preventDefault(); setDragging(false); }}
-          onDrop={e => { e.preventDefault(); setDragging(false); if (!atMaxItems && e.dataTransfer.files.length) upload(e.dataTransfer.files); }}
-          onClick={() => { if (!atMaxItems) fileRef.current?.click(); }}
-          className={`image-manager-upload ${imageOnly ? "image-only-upload [&>p]:hidden" : ""} border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
-            atMaxItems ? "border-slate-200 bg-slate-50 cursor-not-allowed" : dragging ? "border-blue-400 bg-blue-50 cursor-pointer" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50 cursor-pointer"
-          }`}
-        >
-          <input ref={fileRef} type="file" accept={imageOnly ? "image/*" : "image/*,application/pdf"} multiple className="hidden"
-            onChange={e => { if (e.target.files?.length) upload(e.target.files); }} />
-          {uploading ? (
-            <p className="text-sm text-blue-600">⏳ กำลังอัปโหลด...</p>
-          ) : atMaxItems ? (
-            <p className="text-sm text-slate-500">ครบ {maxItems} รูปแล้ว</p>
-          ) : (
-            <>
-              {imageOnly && (
-                <div>
-                  <p className="text-sm text-slate-600">{dragging ? "วางรูปที่นี่" : "ลากรูปมาวาง · คลิกเลือก · หรือกด Ctrl+V"}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">รับเฉพาะรูปภาพ · ไม่เกิน {maxSizeMb}MB/รูป</p>
-                </div>
-              )}
-              <p className="text-sm text-slate-600">{dragging ? "วางไฟล์ที่นี่" : "ลากรูป/ไฟล์มาวาง · คลิกเลือก · หรือชี้ที่กล่องนี้แล้วกด Ctrl+V"}</p>
-              <p className="text-xs text-slate-400 mt-0.5">รูปภาพ หรือ PDF · ไม่เกิน 10MB</p>
-            </>
+      ) : (
+        // กริด (เริ่มต้น)
+        <>
+          {items.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 mb-3">{items.map(a => renderTile(a, false))}</div>
           )}
-        </div>
+          {renderUpload(false)}
+          {libraryBtn}
+        </>
       )}
 
-      {!readonly && !atMaxItems && (
-        <button type="button" onClick={() => setPickerOpen(true)} disabled={uploading}
-          className="mt-2 h-8 px-3 text-xs font-medium border border-indigo-200 rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50">📁 เลือกจากคลังไฟล์กลาง</button>
-      )}
       {!readonly && (
         <AssetPicker open={pickerOpen} onClose={() => setPickerOpen(false)} multiple
           typeFilter={imageOnly ? "image" : undefined}

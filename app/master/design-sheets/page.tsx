@@ -1596,7 +1596,7 @@ export default function DesignSheetsPage() {
             <div className="pt-1">
               <span className="text-[11px] text-slate-500">รูปภาพงานออกแบบ</span>
               {form.id ? (
-                <div className="mt-1"><ImageManager entityType="design_sheet" entityId={form.id} actor={user?.name ?? user?.email ?? undefined} readonly={!canEdit} /></div>
+                <div className="mt-1"><ImageManager entityType="design_sheet" entityId={form.id} actor={user?.name ?? user?.email ?? undefined} readonly={!canEdit} layout="gallery" /></div>
               ) : (
                 /* ยังไม่บันทึก — รับรูปไว้ก่อน (ลาก/วาง/Ctrl+V) แล้วอัปโหลดอัตโนมัติตอนกดบันทึก */
                 <div className="mt-1">
