@@ -1173,7 +1173,7 @@ export default function WorkBoardPage() {
                 {m.ready
                   ? <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">พร้อม ✓</span>
                   : <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 whitespace-nowrap">ยังไม่พร้อม</span>}
-                <button onClick={() => { setClWO(null); setChecklistMO(m); }} title="ดูรายละเอียด/เช็กลิสต์" className="shrink-0 text-slate-300 hover:text-blue-600">🔍</button>
+                <button onClick={() => { setClWO(null); setChecklistMO(m); }} title="ดูรายละเอียด/เช็กลิสต์" className="shrink-0 text-slate-300 hover:text-blue-600">📋</button>
                 {canDispatch && <button onClick={() => openDispatch(m, null)} title="เลือกโต๊ะแล้วจ่าย" className="shrink-0 h-7 px-2.5 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">จ่ายงาน</button>}
               </div>
             ))}
@@ -2178,10 +2178,29 @@ const DueCell = ({ d }: { d: string | null }) => (
 function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void; onReload?: () => void;
 }) {
+  const toast = useToast();
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
-  const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม
+  const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
   const [assignOpen, setAssignOpen] = useState(false);
+  const [dueOpen, setDueOpen] = useState(false);
+  const [dueVal, setDueVal] = useState("");
+  const [dueSaving, setDueSaving] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
+  // คลิกแถว/ชื่อ: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → เปิดรายละเอียด
+  const toggleSel = useCallback((id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
+  const onPendRow = useCallback((m: PendingMO) => { if (sel.size > 0) toggleSel(m.id); else onOpenMO(m); }, [sel.size, toggleSel, onOpenMO]);
+  const applyDue = useCallback(async () => {
+    const ids = pending.filter((m) => sel.has(m.id)).map((m) => m.id);
+    if (!ids.length) return;
+    setDueSaving(true);
+    try {
+      const r = await apiFetch("/api/mo/bulk-due-date", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, due_date: dueVal || null }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast.success(`แก้กำหนดเสร็จแล้ว ${j.updated} ใบ`);
+      setDueOpen(false); setSel(new Set()); onReload?.();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setDueSaving(false); }
+  }, [pending, sel, dueVal, toast, onReload]);
   // กลุ่มใบสั่งผลิต (สำหรับคอลัมน์ "กลุ่ม" + จัดกลุ่มตามกลุ่ม)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
@@ -2219,7 +2238,7 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
     <div className="space-y-5 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
       <MiniTable
         key={`pend-${pendGroup}`}
-        rows={pending} rowKey={(m) => m.id} columns={pendCols} onRowClick={onOpenMO}
+        rows={pending} rowKey={(m) => m.id} columns={pendCols} onRowClick={onPendRow}
         title="📥 รอจ่าย" countUnit="ใบ"
         selectable selected={sel} onSelectedChange={setSel}
         actions={<div className="flex items-center gap-2">
@@ -2228,7 +2247,10 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="ready">จัดกลุ่มตามความพร้อม</option>
           </select>
-          {selMoNos.length > 0 && <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>}
+          {selMoNos.length > 0 && <>
+            <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>
+            <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้กำหนดเสร็จ ({selMoNos.length})</button>
+          </>}
         </div>}
         searchText={(m) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`}
         searchPlaceholder="ค้นหา สินค้า / เลขใบสั่งผลิต"
@@ -2237,6 +2259,20 @@ function BoardTable({ pending, workOrders, onOpenMO, onOpenWO, onReload }: {
         emptyText="ไม่มีงานรอจ่าย"
       />
       {assignOpen && <AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); onReload?.(); }} />}
+      {dueOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setDueOpen(false)}>
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-slate-800">📅 แก้กำหนดเสร็จ</h3>
+            <p className="mt-0.5 mb-3 text-xs text-slate-500">ตั้งวันกำหนดเสร็จใหม่ให้ใบที่เลือก <b>{selMoNos.length}</b> ใบ</p>
+            <input type="date" value={dueVal} onChange={(e) => setDueVal(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+            <button onClick={() => setDueVal("")} className="mt-1.5 text-[11px] text-slate-400 underline hover:text-slate-600">ล้างวัน (ตั้งเป็นไม่กำหนด)</button>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setDueOpen(false)} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={() => void applyDue()} disabled={dueSaving} className="h-9 rounded-lg bg-amber-600 px-5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">{dueSaving ? "กำลังบันทึก…" : "บันทึก"}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <MiniTable
         key={`wo-${woGroup}`}
         rows={wos} rowKey={(w) => w.id} columns={woCols} onRowClick={onOpenWO}

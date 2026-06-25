@@ -16,6 +16,7 @@ import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
 type PlanResp = { id: string; name: string; status: string; start_date: string | null; end_date: string | null; lines: DispatchPlanLine[] };
+type AssigneeResp = { craftsmen: { id: string; name: string; department_id?: string | null }[]; dept_wages: Record<string, number> };
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; remaining: number; due_date: string | null;
@@ -59,6 +60,7 @@ td.img, th.img { width: 15mm; text-align: center; padding: 1mm; }
 .wb-sec { font-size: 12px; font-weight: 800; margin: 4mm 0 1.5mm; }
 .grp-head { display: flex; justify-content: space-between; align-items: center; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 3px; padding: 1.5mm 2.5mm; margin: 3mm 0 0; }
 .grp-name { font-size: 12px; font-weight: 800; }
+.grp-staff { font-size: 9.5px; font-weight: 400; color: #475569; margin-top: 0.5mm; }
 .grp-sum { font-size: 10.5px; color: #4338ca; font-weight: 700; }
 .grp-rows { width: 100%; border-collapse: collapse; margin-top: 0; }
 .grp-rows th, .grp-rows td { border: 1px solid #cbd5e1; border-top: none; padding: 1.3mm 2mm; font-size: 10.5px; }
@@ -110,7 +112,7 @@ const TEMPLATE_PRODUCTION: ReportTemplate = {
     <div><div class="wb-title">รายการกำลังผลิต — แยกตามโต๊ะ/ช่าง</div><div class="wb-sub">{{group_label}} · {{dept_count}} โต๊ะ · {{total_qty}} ชิ้น</div></div>
     <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
   </div>`,
-  body_html: `{{#groups}}<div class="grp-head"><span class="grp-name">{{dept}}</span><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
+  body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="grp-rows">
     <thead><tr><th>ช่าง</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
     <tbody>{{#rows}}<tr><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
@@ -126,7 +128,7 @@ const TEMPLATE_PLAN: ReportTemplate = {
     <div><div class="wb-title">รายการจ่ายงานตามแผน</div><div class="wb-sub">แผน: {{plan_name}} · {{date_range}} · {{count}} รายการ</div></div>
     <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
   </div>`,
-  body_html: `{{#groups}}<div class="grp-head"><span class="grp-name">{{dept}}</span><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
+  body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
   <table class="grp-rows">
     <thead><tr><th class="img">รูป</th><th>ช่าง</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง</th></tr></thead>
     <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td>{{assignee}}</td><td><span class="mono">{{sku}}</span> · {{name}}</td><td class="r">{{qty}}</td><td class="r">{{{labor_cell}}}</td></tr>{{/rows}}</tbody>
@@ -154,7 +156,9 @@ function WorkBoardPrintInner() {
   const [board, setBoard] = useState<BoardResp | null>(null);
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
   const [plan, setPlan] = useState<PlanResp | null>(null);
+  const [assignees, setAssignees] = useState<AssigneeResp>({ craftsmen: [], dept_wages: {} });
   const [error, setError] = useState<string | null>(null);
+  const withStaff = type === "plan" || type === "production";   // ใบที่แยกตามโต๊ะ → โชว์พนักงานในโต๊ะ
 
   useEffect(() => {
     let on = true;
@@ -164,12 +168,16 @@ function WorkBoardPrintInner() {
       type === "plan" && planId
         ? apiFetch(`/api/mo/dispatch-plans/${planId}`).then((r) => r.json()).catch(() => ({ data: null }))
         : Promise.resolve({ data: null }),
+      withStaff
+        ? apiFetch("/api/mo/assignees").then((r) => r.json()).catch(() => ({ craftsmen: [], dept_wages: {} }))
+        : Promise.resolve({ craftsmen: [], dept_wages: {} }),
     ])
-      .then(([b, g, p]: [BoardResp & { error?: string }, { data?: { name: string; mo_nos: unknown }[] }, { data?: PlanResp | null; error?: string }]) => {
+      .then(([b, g, p, a]: [BoardResp & { error?: string }, { data?: { name: string; mo_nos: unknown }[] }, { data?: PlanResp | null; error?: string }, AssigneeResp]) => {
         if (!on) return;
         if (b.error) throw new Error(b.error);
         setBoard(b);
         setMoGroups((g.data ?? []).map((x) => ({ name: x.name, mo_nos: (Array.isArray(x.mo_nos) ? x.mo_nos : []) as string[] })));
+        setAssignees({ craftsmen: a.craftsmen ?? [], dept_wages: a.dept_wages ?? {} });
         if (type === "plan") {
           if (!p.data) throw new Error(p.error || "ไม่พบแผนที่เลือก");
           setPlan(p.data);
@@ -177,7 +185,7 @@ function WorkBoardPrintInner() {
       })
       .catch((e) => { if (on) setError(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ"); });
     return () => { on = false; };
-  }, [type, planId]);
+  }, [type, planId, withStaff]);
 
   const html = useMemo(() => {
     if (!board) return "";
@@ -186,6 +194,18 @@ function WorkBoardPrintInner() {
       group === "__all__" ? true : group === "__none__" ? groupOf(moNo) === null : groupOf(moNo) === group;
     const printed_at = new Date().toLocaleDateString("th-TH", FMT_OPT);
     const group_label = groupLabelOf(group);
+
+    // พนักงานในโต๊ะ (ชื่อ+จำนวน+เงินเดือนรวม) ตามชื่อโต๊ะ → โชว์ในหัวกลุ่มของใบแผน/กำลังผลิต
+    const deptIdByName = new Map<string, string>();
+    for (const d of board.departments) deptIdByName.set(d.name, d.id);
+    const namesByDeptId = new Map<string, string[]>();
+    for (const c of assignees.craftsmen) { if (!c.department_id) continue; const a = namesByDeptId.get(c.department_id) ?? []; a.push(c.name); namesByDeptId.set(c.department_id, a); }
+    const staffHtmlOf = (deptName: string) => {
+      const id = deptIdByName.get(deptName); if (!id) return "";
+      const names = namesByDeptId.get(id) ?? []; const wage = assignees.dept_wages[id] ?? 0;
+      if (names.length === 0 && wage === 0) return "";
+      return `<div class="grp-staff">👥 ${names.length} คน${names.length ? ": " + names.join(", ") : ""}${wage > 0 ? ` · เงินเดือนรวม ฿${money(wage)}` : ""}</div>`;
+    };
 
     const pieceRowsOf = () => board.pending_piece.filter((p) => groupOk(p.mo_no)).map((p) => {
       const t = p.rate * p.qty;
@@ -245,7 +265,7 @@ function WorkBoardPrintInner() {
             qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
         });
         totQty += gQty; totLabor += gLabor;
-        return { dept, g_qty: num(gQty), g_labor: money(gLabor), rows };
+        return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor), rows };
       });
       const date_range = (plan.start_date || plan.end_date) ? `${dueText(plan.start_date)} – ${dueText(plan.end_date)}` : "ทั้งแผน";
       return buildReportHtml(TEMPLATE_PLAN, {
@@ -263,7 +283,7 @@ function WorkBoardPrintInner() {
       const gQty = list.reduce((a, w) => a + (w.qty || 0), 0);
       const gLabor = list.reduce((a, w) => a + (w.labor_cost || 0), 0);
       totQty += gQty; totLabor += gLabor;
-      return { dept, g_qty: num(gQty), g_labor: money(gLabor),
+      return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor),
         rows: list.map((w) => ({ assignee: w.assignee_name || w.department_name || "—", sku: w.product_sku || "—", name: w.product_name || "—",
           qty: num(w.qty || 0), labor_cell: (w.labor_cost != null && w.labor_cost > 0) ? money(w.labor_cost) : BLANK })) };
     });
@@ -271,7 +291,7 @@ function WorkBoardPrintInner() {
       group_label, printed_at, dept_count: groups.length, groups, has_groups: groups.length > 0,
       total_qty: num(totQty), total_labor: money(totLabor), empty: groups.length === 0,
     });
-  }, [board, moGroups, plan, type, group]);
+  }, [board, moGroups, plan, assignees, type, group]);
 
   const title = type === "production" ? "รายการกำลังผลิต (ตามโต๊ะ/ช่าง)" : type === "piece" ? "รายการรอจ่ายเหมาทั้งหมด" : type === "plan" ? "รายการจ่ายงานตามแผน" : "รายการรอจ่ายทั้งหมด";
   const subLabel = type === "plan" ? (plan ? `แผน ${plan.name}` : "แผน…") : `กลุ่ม ${groupLabelOf(group)}`;

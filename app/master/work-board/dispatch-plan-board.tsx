@@ -36,7 +36,7 @@ function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
   thumbUrl?: string | null;
   sku: ReactNode;
   drag?: ReactNode;         // ปุ่มลากย้ายโต๊ะ (ร่าง)
-  actions?: ReactNode;      // ปุ่มมุมขวาบน (🔍 / ✕ / 🔒 / ร่าง)
+  actions?: ReactNode;      // ปุ่มมุมขวาบน (📋 / ✕ / 🔒 / ร่าง)
   children?: ReactNode;     // เนื้อใน (ช่าง/จำนวน/ค่าแรง ฯลฯ)
 }) {
   return (
@@ -270,7 +270,7 @@ export function DispatchPlanBoard({
       <CardShell key={l.id} accent="#1d9e75" thumbUrl={imageByMo[l.mo_no ?? ""]} sku={l.product_sku}
         drag={editable ? <span draggable onDragStart={(e) => { e.stopPropagation(); dragRef.current = { kind: "draft", moNo: l.mo_no ?? "", lineId: l.id }; deptDragRef.current = null; }} title="ลากย้ายโต๊ะ" className="shrink-0 cursor-move text-emerald-500 hover:text-emerald-700 select-none">⠿</span> : null}
         actions={<>
-          <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 }); }} title="ดูรายละเอียดงาน" className="-m-1 p-1 text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+          <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: l.mo_id, moNo: l.mo_no, productSku: l.product_sku, productName: l.product_name, qty: Number(l.qty) || 0 }); }} title="ดูรายละเอียดงาน" className="-m-1 p-1 text-slate-400 hover:text-blue-600 text-xs">📋</button>
           <span className="text-[10px] px-1 rounded text-emerald-700 border border-emerald-300" title="ร่าง (ยังไม่จ่ายจริง)">ร่าง</span>
           {editable && <button onClick={(e) => { e.stopPropagation(); removeLine(l.id); }} className="-m-1 p-1 text-rose-400 hover:text-rose-600 text-xs" title="เอาออก">✕</button>}
         </>}>
@@ -411,7 +411,7 @@ export function DispatchPlanBoard({
                             : <span className="shrink-0">· ค่าแรง ฿0/ชิ้น</span>}
                       </div>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }} title="ดูรายละเอียดงาน" className="shrink-0 -m-1 p-1 text-slate-300 hover:text-blue-600">🔍</button>
+                    <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: p.id, moNo: p.mo_no, productSku: p.product_sku, productName: p.product_name, qty: p.qty }); }} title="ดูรายละเอียดงาน" className="shrink-0 -m-1 p-1 text-slate-300 hover:text-blue-600">📋</button>
                   </div>
                   {/* ใส่ค่าแรงกลาง (เมื่อยังไม่มีเรตกลาง) */}
                   {editable && onSetCentralRate && laborEditId === p.id && (
@@ -515,7 +515,7 @@ export function DispatchPlanBoard({
                   return (
                   <CardShell key={w.id} dim={!realMode} thumbUrl={w.image_url} sku={w.product_sku}
                     actions={<>
-                      <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty }); }} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">🔍</button>
+                      <button onClick={(e) => { e.stopPropagation(); onOpenWork({ moId: w.mo_id ?? null, moNo: w.mo_no, productSku: w.product_sku, productName: w.product_name, qty: w.qty }); }} title="ดูรายละเอียดงาน" className="text-slate-400 hover:text-blue-600 text-xs">📋</button>
                       {/* X: ย้อนการ์ดกลับ "รอจ่าย" (เฉพาะของจริง + ยังไม่ส่งงานคืน) — กด 1 ครั้ง = ติดอาวุธ, ยืนยันด้านล่าง */}
                       {realMode && editable && onCancelWO && w.status !== "partial_return" && (
                         <button onClick={(e) => { e.stopPropagation(); setCancelArmId((id) => id === w.id ? null : w.id); }} title="ย้อนกลับไปรอจ่าย" className="text-slate-300 hover:text-rose-600 text-xs">✕</button>
