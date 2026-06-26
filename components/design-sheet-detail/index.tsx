@@ -18,9 +18,9 @@ import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { RecordTasksButton } from "@/components/record-tasks";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
-import { SkuWizard } from "./sku-wizard";
-import { ToQuotationModal } from "./to-quotation-modal";
-import { QuotationCartDrawer } from "./quotation-cart-drawer";
+import { SkuWizard } from "@/app/master/design-sheets/sku-wizard";
+import { ToQuotationModal } from "@/app/master/design-sheets/to-quotation-modal";
+import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
 
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
 import { RichTextEditor } from "@/components/rich-text";

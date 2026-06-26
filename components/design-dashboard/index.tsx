@@ -14,8 +14,8 @@ const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
   { ssr: false }
 );
-// popup รายละเอียดงาน = หน้า Design Sheets ในโหมด "เฉพาะ popup" (โหลดเฉพาะตอนเปิดการ์ด ไม่ถ่วงบอร์ด)
-const DesignSheetDetail = dynamic(() => import("@/app/master/design-sheets/detail-view").then((m) => m.DesignSheetsDetail), { ssr: false });
+// popup รายละเอียดงาน = ของกลาง design-sheet-detail โหมด "เฉพาะ popup" (โหลดเฉพาะตอนเปิดการ์ด ไม่ถ่วงบอร์ด)
+const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
 
 type Tone = "danger" | "warn" | "good" | "done" | "normal";
 
@@ -721,7 +721,7 @@ export function DesignDashboard() {
     }
   };
   // preload chunk ของ popup ไว้ล่วงหน้า → กดการ์ดแล้วเปิดทันที (ไม่ต้องรอโหลดไฟล์ครั้งแรก)
-  useEffect(() => { void import("@/app/master/design-sheets/detail-view"); }, []);
+  useEffect(() => { void import("@/components/design-sheet-detail"); }, []);
   // refresh "เงียบ" หลังปิด popup — อัปเดตการ์ดบนบอร์ดเบื้องหลัง ไม่เด้ง skeleton ทั้งหน้า
   const silentRefresh = () => {
     apiFetch(`/api/design-sheets?limit=${DASHBOARD_LIMIT}&archived=0&sort_by=updated_at&sort_dir=desc`)

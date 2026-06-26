@@ -1,6 +1,6 @@
-import { DesignSheetsDetail } from "./detail-view";
+import { DesignSheetsDetail } from "@/components/design-sheet-detail";
 
-// หน้า /master/design-sheets (โหมดเต็ม: ตาราง/Canvas + popup) — logic อยู่ใน detail-view (reuse ได้)
+// หน้า /master/design-sheets (โหมดเต็ม: ตาราง/Canvas + popup) — logic อยู่ในของกลาง design-sheet-detail
 export default function DesignSheetsPage() {
   return <DesignSheetsDetail />;
 }
