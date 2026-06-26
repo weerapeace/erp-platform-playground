@@ -11,13 +11,25 @@ import { ERPModal } from "@/components/modal";
 import { ImageAttach } from "@/components/image-attach";
 import { UserPicker } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
+import { avatarSrc } from "@/lib/r2-image";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import type { UserPickerValue } from "@/components/pickers";
 import {
   listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes,
-  type CreativeSubtask, type SubtaskType,
+  type CreativeSubtask, type SubtaskType, type SubtaskAssignee,
 } from "./data";
+
+// อวตารผู้รับผิดชอบ (ของกลางในโมดูล) — รูปจริงที่พนักงานตั้งไว้ ไม่มี → วงกลมตัวอักษร+สีธีม
+function AssigneeAvatar({ a, size = 20 }: { a: SubtaskAssignee; size?: number }) {
+  const src = avatarSrc(a.avatar_url, size * 2);
+  if (src) return <img src={src} alt={a.label} title={a.label} className="rounded-full object-cover border border-white shrink-0" style={{ width: size, height: size }} />;
+  return <span title={a.label} className="rounded-full flex items-center justify-center border border-white font-medium shrink-0" style={{ width: size, height: size, fontSize: size * 0.5, background: a.color || "#ede9fe", color: a.color ? "#fff" : "#6d28d9" }}>{(a.label || "?").slice(0, 1)}</span>;
+}
+// ชิปผู้รับผิดชอบแบบอ่านอย่างเดียว (รูป + ชื่อ + ธีมสีจาง)
+function AssigneeChip({ a }: { a: SubtaskAssignee }) {
+  return <span className="inline-flex items-center gap-1 text-xs rounded-full pl-0.5 pr-2 py-0.5" style={{ background: (a.color || "#8b5cf6") + "1f" }}><AssigneeAvatar a={a} size={18} /><span className="text-slate-700">{a.label}</span></span>;
+}
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 type TypeMeta = Record<string, SubtaskType>;
@@ -124,10 +136,8 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const t = useT();
   const [open, setOpen] = useState(false);
   const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
-  const [desc, setDesc] = useState(sub.description ?? "");
-  const [adding, setAdding] = useState<UserPickerValue | null>(null);
+  const [editOpen, setEditOpen] = useState(false); // ป๊อปอัปแก้ไขงานย่อย
   const [busy, setBusy] = useState(false);
-  const ids = sub.assignees.map((a) => a.id);
   const attachCount = sub.attachments?.length ?? 0;
   const st = sub.status;
   // ชนิดงานย่อย + ความสามารถ (config ทับ registry · legacy ไม่มีค่า = อนุญาตหมด)
@@ -159,8 +169,6 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   };
 
   const patch = async (p: Record<string, unknown>) => { setBusy(true); try { await updateSubtask(taskId, sub.id, p); await reload(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
-  const addAssignee = async (v: UserPickerValue | null) => { if (!v || ids.includes(v.id)) return; setAdding(null); await patch({ assignee_ids: [...ids, v.id] }); };
-  const del = async () => { if (!window.confirm(t(`ลบงานย่อย "${sub.title}" ?`, `Delete subtask "${sub.title}"?`))) return; try { await deleteSubtask(taskId, sub.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   // ③ ส่งงาน/แนบงาน: เปิดป๊อปอัป (แนบรูป/ลิงก์ + กดส่ง) — การ์ดไม่ต้องโชว์ฟอร์มแนบเอง
   const openWork = () => setWorkOpen(true);
@@ -185,7 +193,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {ty && <span className="shrink-0 text-sm leading-none" title={ty.label_th}>{ty.icon ?? "🧩"}</span>}
         <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${isSubDone(st) ? "line-through text-slate-400" : "text-slate-700"}`}>{sub.title}</button>
         {sub.required_before_next && <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
-        <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <span key={a.id} title={a.label} className="h-5 w-5 rounded-full text-[10px] flex items-center justify-center border border-white" style={a.color ? { background: a.color, color: "#fff" } : { background: "#ede9fe", color: "#6d28d9" }}>{(a.label || "?").slice(0, 1)}</span>)}</div>
+        <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <AssigneeAvatar key={a.id} a={a} size={20} />)}</div>
         {attachCount > 0 && <span className="text-[10px] text-slate-400">📎{attachCount}</span>}
         <button onClick={() => setOpen((o) => !o)} className="text-slate-300 text-xs">{open ? "▲" : "▼"}</button>
       </div>
@@ -201,17 +209,15 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               {imageAtts.length > 0 && <button onClick={copyImageLinks} className="text-xs font-medium text-slate-600 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">🔗 {t("คัดลอกลิงก์รูป", "Copy image links")}</button>}
             </div>
           )}
-          <ERPTextarea value={desc} rows={2} onChange={(e) => setDesc(e.target.value)} onBlur={() => { if ((desc.trim() || null) !== (sub.description || null)) patch({ description: desc.trim() || null }); }} placeholder={t("รายละเอียดงานย่อย...", "Subtask description...")} />
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">{t("ผู้รับผิดชอบ", "Assignee")}{canManageAssignees ? ` (${t("เลือกได้หลายคน", "multiple allowed")})` : ""}</p>
-            <div className="flex flex-wrap gap-1.5 mb-1.5">
-              {sub.assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}{canManageAssignees && <button onClick={() => patch({ assignee_ids: ids.filter((x) => x !== a.id) })} className="text-slate-400 hover:text-red-500">✕</button>}</span>)}
-              {sub.assignees.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+          {/* รายละเอียด (อ่านอย่างเดียว — ไม่มีไม่โชว์) */}
+          {sub.description?.trim() && <p className="text-sm text-slate-600 whitespace-pre-wrap">{sub.description}</p>}
+          {/* ผู้รับผิดชอบ (อ่านอย่างเดียว ธีม+รูปพนักงาน — ไม่มีไม่โชว์) */}
+          {sub.assignees.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ", "Assignee")}:</span>
+              {sub.assignees.map((a) => <AssigneeChip key={a.id} a={a} />)}
             </div>
-            {canManageAssignees
-              ? <UserPicker value={adding} onChange={addAssignee} disableCreate />
-              : <p className="text-[11px] text-slate-400 italic">{t("เฉพาะหัวหน้า/ผู้สร้างงานเปลี่ยนผู้รับผิดชอบได้", "Only managers or task creators can change assignees")}</p>}
-          </div>
+          )}
           {/* ③ ไฟล์แนบ (compact) — โชว์เฉพาะที่มีอยู่ ฟอร์มแนบ/ส่งงานไปอยู่ในป๊อปอัป */}
           {(showImages || showLinks) && (
             <div className="space-y-2">
@@ -231,14 +237,85 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               </button>
             </div>
           )}
-          <div className="flex justify-between items-center">
-            <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" disabled={!canManageAssignees} checked={sub.required_before_next} onChange={(e) => patch({ required_before_next: e.target.checked })} />{t("ต้องเสร็จก่อนขั้นถัดไป", "Must complete before next step")}</label>
-            {canManageAssignees && <button onClick={del} className="text-xs text-red-500 hover:underline">{t("ลบงานย่อย", "Delete Subtask")}</button>}
+          {/* ปุ่มแก้ไขงานย่อย (รายละเอียด/ผู้รับผิดชอบ/ตั้งค่าต่างๆ ไปแก้ในป๊อปอัป) */}
+          <div className="flex justify-end">
+            <button onClick={() => setEditOpen(true)} className="text-xs text-slate-500 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">✏️ {t("แก้ไขงานย่อย", "Edit subtask")}</button>
           </div>
         </div>
       )}
       {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} onClose={() => setWorkOpen(false)} />}
+      {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
     </div>
+  );
+}
+
+// ป๊อปอัปแก้ไขงานย่อย — ชื่อ/รายละเอียด/ผู้รับผิดชอบ/ต้องเสร็จก่อน + ลบ
+// แยกจากการ์ดให้การ์ดเป็น readonly · ผู้รับผิดชอบ + ต้องเสร็จก่อน + ลบ = เฉพาะหัวหน้า/ผู้สร้างงาน
+function EditSubtaskModal({ sub, taskId, reload, pushToast, canManageAssignees, onClose }: {
+  sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canManageAssignees: boolean; onClose: () => void;
+}) {
+  const t = useT();
+  const [title, setTitle] = useState(sub.title);
+  const [desc, setDesc] = useState(sub.description ?? "");
+  const [assignees, setAssignees] = useState<SubtaskAssignee[]>(sub.assignees);
+  const [adding, setAdding] = useState<UserPickerValue | null>(null);
+  const [required, setRequired] = useState(sub.required_before_next);
+  const [busy, setBusy] = useState(false);
+  const idsKey = (xs: SubtaskAssignee[]) => xs.map((a) => a.id).join(",");
+  const dirty = title.trim() !== sub.title || (desc.trim() || "") !== (sub.description || "") || required !== sub.required_before_next || idsKey(assignees) !== idsKey(sub.assignees);
+
+  const save = async () => {
+    if (!title.trim()) { pushToast("error", t("ใส่ชื่องานย่อยก่อน", "Title is required")); return; }
+    setBusy(true);
+    try {
+      const p: Record<string, unknown> = { title: title.trim(), description: desc.trim() || null, required_before_next: required };
+      if (canManageAssignees) p.assignee_ids = assignees.map((a) => a.id);
+      await updateSubtask(taskId, sub.id, p);
+      await reload();
+      pushToast("success", t("บันทึกแล้ว", "Saved"));
+      onClose();
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  const del = async () => {
+    if (!window.confirm(t(`ลบงานย่อย "${sub.title}" ?`, `Delete subtask "${sub.title}"?`))) return;
+    setBusy(true);
+    try { await deleteSubtask(taskId, sub.id); await reload(); onClose(); }
+    catch (e) { pushToast("error", (e as Error).message); setBusy(false); }
+  };
+
+  return (
+    <ERPModal open onClose={onClose} size="md" title={t("แก้ไขงานย่อย", "Edit subtask")} hasUnsavedChanges={dirty}
+      footer={
+        <div className="flex items-center justify-between gap-2">
+          {canManageAssignees ? <button onClick={del} disabled={busy} className="text-xs text-red-500 hover:underline disabled:opacity-50">{t("ลบงานย่อย", "Delete subtask")}</button> : <span />}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+            <button onClick={save} disabled={busy || !dirty} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{t("บันทึก", "Save")}</button>
+          </div>
+        </div>
+      }>
+      <div className="space-y-3">
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("ชื่องานย่อย", "Title")}</p>
+          <ERPInput value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t("ชื่องานย่อย", "Subtask title")} />
+        </div>
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("รายละเอียด", "Description")}</p>
+          <ERPTextarea value={desc} rows={3} onChange={(e) => setDesc(e.target.value)} placeholder={t("รายละเอียดงานย่อย (ไม่บังคับ)", "Subtask description (optional)")} />
+        </div>
+        <div>
+          <p className="text-[11px] text-slate-400 mb-1">{t("ผู้รับผิดชอบ", "Assignee")}{canManageAssignees ? ` (${t("เลือกได้หลายคน", "multiple allowed")})` : ""}</p>
+          <div className="flex flex-wrap gap-1.5 mb-1.5">
+            {assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs rounded-full pl-0.5 pr-1.5 py-0.5" style={{ background: (a.color || "#8b5cf6") + "1f" }}><AssigneeAvatar a={a} size={18} /><span className="text-slate-700">{a.label}</span>{canManageAssignees && <button onClick={() => setAssignees((xs) => xs.filter((x) => x.id !== a.id))} className="text-slate-400 hover:text-red-500">✕</button>}</span>)}
+            {assignees.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+          </div>
+          {canManageAssignees
+            ? <UserPicker value={adding} onChange={(v) => { if (v && !assignees.some((a) => a.id === v.id)) setAssignees((xs) => [...xs, { id: v.id, label: v.name, color: null, avatar_url: null }]); setAdding(null); }} disableCreate />
+            : <p className="text-[11px] text-slate-400 italic">{t("เฉพาะหัวหน้า/ผู้สร้างงานเปลี่ยนผู้รับผิดชอบได้", "Only managers or task creators can change assignees")}</p>}
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" disabled={!canManageAssignees} checked={required} onChange={(e) => setRequired(e.target.checked)} />{t("ต้องเสร็จก่อนขั้นถัดไป", "Must complete before next step")}</label>
+      </div>
+    </ERPModal>
   );
 }
 

@@ -16,6 +16,12 @@ export function r2ImageUrl(key: string | null | undefined, w?: number): string |
   return w && w > 0 ? `${base}&w=${Math.round(w)}` : base;
 }
 
+/** URL รูป avatar (ของกลาง): URL เต็ม (http) → คืนเลย · R2 key → proxy + ย่อ (?w=) */
+export function avatarSrc(v: string | null | undefined, w?: number): string | null {
+  if (!v) return null;
+  return v.startsWith("http") ? v : r2ImageUrl(v, w);
+}
+
 /**
  * เติม &w= ให้ URL รูป proxy ที่ "ยังไม่ได้ระบุขนาด" — ใช้ในคอมโพเนนต์รูปกลาง
  * ถ้าไม่ใช่ URL ของ /api/r2-image หรือมี w อยู่แล้ว → คืนค่าเดิม (ไม่ยุ่ง)
