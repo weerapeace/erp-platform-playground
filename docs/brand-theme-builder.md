@@ -22,18 +22,20 @@
 | API | `app/api/brand-themes/[brandId]/route.ts` |
 | ตาราง | `brand_themes` (brand_id · draft_config · published_config · audit cols) |
 
-## module อื่นจะใช้ theme ยังไง
+## หน้าอื่นจะใช้ theme ยังไง (ของกลาง — 1 บรรทัด)
+ครอบเนื้อหาทั้งหน้าด้วย **`<BrandThemed brandId>`** (`components/brand-theme/provider.tsx`) — จัดการโหลดธีม + ทาพื้นหลัง/ตัวแปร `--brand-*` + `<BrandThemeStyles>` + วางรูปตกแต่งมุมหน้า (`page_*`) + provide ธีมผ่าน context ให้ครบ:
 ```tsx
-import { themeToCssVars, resolveTheme } from "@/lib/brand-theme";
-import { BrandThemeStyles } from "@/components/brand-theme/styles";
+import { BrandThemed } from "@/components/brand-theme/provider";
+import { BrandSlot } from "@/components/brand-theme/slots";
 
-// โหลด published theme: GET /api/brand-themes/{brandId} → resolveTheme(j.published)
-<div className="brand-themed" style={themeToCssVars(theme)}>
-  <BrandThemeStyles />
-  {/* element ที่อยากให้ตามธีม ติด data-gg-stat-card / data-gg-task-card / data-gg-action[="primary"] ฯลฯ
+<BrandThemed brandId={brandId}>
+  {/* ติด data-gg-stat-card / data-gg-task-card / data-gg-action[="primary"] ให้ตามธีม
       หรืออ่านตัวแปรเอง: style={{ color: "var(--brand-heading)" }} */}
-</div>
+  <BrandSlot id="header_left" />   {/* ไม่ต้องส่ง theme — อ่านจาก context */}
+</BrandThemed>
 ```
+คุมเองเป็นขั้น ๆ ก็ได้: `const theme = useBrandTheme(brandId, reloadKey)` → `<BrandThemedShell theme={theme}>…</BrandThemedShell>` (เช่น Design Dashboard ที่ต้อง bump reloadKey หลังเผยแพร่). · style ดิบของพื้นหลังใช้ `brandRootStyle(theme)` ได้.
+
 ตัวแปรที่ได้: `--brand-primary/secondary/accent`, `--brand-bg`, `--brand-heading/text/muted`,
 `--brand-card-bg/border/radius/shadow`, `--brand-btn-bg/text`, `--brand-btn2-bg/text`, `--brand-wf-line` (+ custom)
 

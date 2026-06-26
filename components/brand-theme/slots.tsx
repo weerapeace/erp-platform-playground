@@ -10,11 +10,12 @@
  */
 import { withImageWidth } from "@/lib/r2-image";
 import { slotKey, slotStyle, SLOT_REGISTRY, type BrandTheme } from "@/lib/brand-theme";
+import { useBrandThemeValue } from "@/components/brand-theme/context";
 
 const DEF: Record<string, (typeof SLOT_REGISTRY)[number]> = Object.fromEntries(SLOT_REGISTRY.map((d) => [d.id, d]));
 
 export function BrandSlot({ theme, id, w, size, className = "", alt = "", round = false }: {
-  theme: Partial<BrandTheme> | null | undefined;
+  theme?: Partial<BrandTheme> | null;   // ไม่ส่ง = อ่านจาก context (<BrandThemed>/<BrandThemedShell>)
   id: string;
   w?: number;            // override ขนาด (?w=) — ปกติใช้จาก registry
   size?: string;         // override class ขนาดที่แสดง
@@ -22,7 +23,9 @@ export function BrandSlot({ theme, id, w, size, className = "", alt = "", round 
   alt?: string;
   round?: boolean;
 }) {
-  const key = slotKey(theme, id);
+  const ctxTheme = useBrandThemeValue();
+  const t = theme ?? ctxTheme;
+  const key = slotKey(t, id);
   if (!key) return null;
   const def = DEF[id];
   const width = w ?? def?.w ?? 96;
@@ -31,7 +34,7 @@ export function BrandSlot({ theme, id, w, size, className = "", alt = "", round 
     round ? "rounded-full" : "", "object-contain pointer-events-none select-none z-10", className].filter(Boolean).join(" ");
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={alt} loading="lazy" decoding="async" style={slotStyle(theme, id)}
+    <img src={url} alt={alt} loading="lazy" decoding="async" style={slotStyle(t, id)}
       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
       className={cls} />
   );

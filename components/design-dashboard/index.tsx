@@ -9,10 +9,9 @@ import { apiFetch } from "@/lib/api";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
-import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, DEFAULT_THEME, type BrandTheme } from "@/lib/brand-theme";
-import { BrandThemeStyles } from "@/components/brand-theme/styles";
-import { BrandSlot } from "@/components/brand-theme/slots";
 import { wfIconSlotId } from "@/lib/brand-theme";
+import { BrandSlot } from "@/components/brand-theme/slots";
+import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
 
 const WorkflowStatusManager = dynamic(
@@ -300,26 +299,11 @@ export function DesignDashboard() {
     sheets: filteredSheets.filter((sheet) => sheet.status === column.key),
   }));
 
-  // ── Brand Theme (ระบบกลาง) — โหลดธีม published ของแบรนด์ที่เลือก · "ทั้งหมด"/ไม่มีธีม = default ERP ──
-  const [brandTheme, setBrandTheme] = useState<BrandTheme>(DEFAULT_THEME);
+  // ── Brand Theme (ระบบกลาง) — ใช้ของกลาง useBrandTheme + <BrandThemedShell> (หน้าอื่น reuse ได้เหมือนกัน) ──
   const [themeBuilderOpen, setThemeBuilderOpen] = useState(false);
   const [themeReloadKey, setThemeReloadKey] = useState(0);   // bump หลังเผยแพร่ → โหลดธีมใหม่
   const selectedBrandId = selectedBrand?.id ?? null;
-  useEffect(() => {
-    if (!selectedBrandId) { setBrandTheme(DEFAULT_THEME); return; }
-    let alive = true;
-    apiFetch(`/api/brand-themes/${selectedBrandId}`).then((r) => r.json())
-      .then((j) => { if (alive) setBrandTheme(resolveTheme(j.published)); })
-      .catch(() => { if (alive) setBrandTheme(DEFAULT_THEME); });
-    return () => { alive = false; };
-  }, [selectedBrandId, themeReloadKey]);
-  const bgUrl = brandBgUrl(brandTheme.background_image_key, 1600);
-  const overlay = hexToRgba(brandTheme.background_overlay_color, brandTheme.background_opacity);
-  const rootStyle = {
-    ...themeToCssVars(brandTheme),
-    backgroundColor: brandTheme.background_color,
-    ...(bgUrl ? { backgroundImage: `linear-gradient(${overlay}, ${overlay}), url("${bgUrl}")`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" as const } : {}),
-  };
+  const brandTheme = useBrandTheme(selectedBrandId, themeReloadKey);
 
   function refreshDashboard() {
     setMoveMessage(null);
@@ -387,16 +371,8 @@ export function DesignDashboard() {
   }
 
   return (
-    <div className="brand-themed relative min-h-screen overflow-hidden" style={rootStyle}>
-      <BrandThemeStyles />
-      {/* เลเยอร์ตกแต่งมุมหน้า (อยู่หลัง content, ไม่บังคลิก, ซ่อนบนมือถือ) */}
-      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
-        <BrandSlot theme={brandTheme} id="page_tl" />
-        <BrandSlot theme={brandTheme} id="page_tr" />
-        <BrandSlot theme={brandTheme} id="page_bl" />
-        <BrandSlot theme={brandTheme} id="page_br" />
-      </div>
-      <div className="relative z-10 w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
+    <BrandThemedShell theme={brandTheme}>
+      <div className="w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex items-start gap-2">
             <BrandSlot theme={brandTheme} id="header_left" className="shrink-0 mt-1" />
@@ -755,6 +731,6 @@ export function DesignDashboard() {
           open={themeBuilderOpen} onClose={() => setThemeBuilderOpen(false)}
           onPublished={() => setThemeReloadKey((k) => k + 1)} />
       )}
-    </div>
+    </BrandThemedShell>
   );
 }

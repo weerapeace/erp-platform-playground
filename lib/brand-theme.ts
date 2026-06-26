@@ -172,6 +172,18 @@ export function brandIconUrl(key: string | null | undefined, w: 96 | 160 = 96): 
   return withImageWidth(`/api/r2-image?key=${encodeURIComponent(key)}`, w);
 }
 
+// style ของ container หน้า (พื้นหลัง + รูป overlay + ตัวแปร --brand-*) — ใช้ซ้ำทุกหน้าที่ทาธีม
+export function brandRootStyle(config: Partial<BrandTheme> | null | undefined): CSSProperties {
+  const t = resolveTheme(config);
+  const bgUrl = brandBgUrl(t.background_image_key, 1600);
+  const overlay = hexToRgba(t.background_overlay_color, t.background_opacity);
+  return {
+    ...themeToCssVars(t),
+    backgroundColor: t.background_color,
+    ...(bgUrl ? { backgroundImage: `linear-gradient(${overlay}, ${overlay}), url("${bgUrl}")`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" } : {}),
+  };
+}
+
 // hex (#rgb/#rrggbb) + alpha → rgba(...) · ถ้าไม่ใช่ hex คืนค่าเดิม (รองรับ rgba อยู่แล้ว)
 export function hexToRgba(hex: string, alpha: number): string {
   const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((hex ?? "").trim());
