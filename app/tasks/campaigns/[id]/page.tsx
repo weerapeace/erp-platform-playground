@@ -14,6 +14,7 @@ import { StandaloneShell } from "@/components/standalone-shell";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { ERPInput } from "@/components/form";
+import { useAuth } from "@/components/auth";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { CampaignDrawer, CAMPAIGN_STATUS } from "../campaign-drawer";
@@ -29,8 +30,11 @@ const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m)
   ssr: false,
   loading: () => <div className="h-[70vh] flex items-center justify-center text-slate-400 text-sm border border-slate-200 rounded-xl">Loading canvas...</div>,
 });
+const KnowledgeDrawer = dynamic(() => import("../../knowledge-drawer").then((m) => m.KnowledgeDrawer), { ssr: false });
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
+type ParentSkuVal = { id: string; code: string; name: string; image_url: string | null };
 
 // โซนสำเร็จรูปสำหรับกระดานแคมเปญ
 const SECTION_PRESETS = ["Brainstorming (ไอเดีย)", "Reference", "Information (ข้อมูล)", "Products (สินค้าใน Campaign)", "Tasks (งาน)"];
@@ -51,6 +55,21 @@ function skuCardSkeleton(s: SkuPickerValue): Record<string, unknown>[] {
   return els;
 }
 
+// การ์ด Parent SKU บน Excalidraw (สีเขียวน้ำเงิน) -- ดับเบิลคลิกเปิดตัวแก้สินค้ากลาง
+function parentSkuCardSkeleton(s: ParentSkuVal): Record<string, unknown>[] {
+  const gid = `parent_sku-${s.id}-${Math.random().toString(36).slice(2, 7)}`;
+  const data = { kind: "parent_sku", id: s.id, code: s.code, name: s.name, image_url: s.image_url ?? null };
+  const hasImg = !!s.image_url;
+  const W = 230, imgH = 170, txtY = hasImg ? imgH + 18 : 14, H = hasImg ? imgH + 70 : 80;
+  const text = [`🧬 ${s.code}`, s.name].filter(Boolean).join("\n");
+  const els: Record<string, unknown>[] = [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#0d9488", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+  ];
+  if (hasImg) els.push({ type: "image", _imageUrl: s.image_url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
+  els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#0f766e", groupIds: [gid], customData: data });
+  return els;
+}
+
 // การ์ดคอนเทนต์บน Excalidraw -- customData (ดับเบิลคลิกเปิด)
 function contentCardSkeleton(c: { id: string; content_no: string; title: string; platforms: string[] }): Record<string, unknown>[] {
   const gid = `content-${c.id}-${Math.random().toString(36).slice(2, 7)}`;
@@ -64,16 +83,16 @@ function contentCardSkeleton(c: { id: string; content_no: string; title: string;
   ];
 }
 
-// การ์ดโฟลเดอร์บน Excalidraw: เก็บ path -- ดับเบิลคลิก = คัดลอก path (เปิด File Explorer แล้ววาง)
+// การ์ดโฟลเดอร์บน Excalidraw (กล่องเล็ก): 📁 ชื่อ (บน) + path เล็กสีเทา (ล่าง) · คำใบ้เป็น tooltip ตอนชี้
 function folderCardSkeleton(f: { path: string; label: string }): Record<string, unknown>[] {
   const fid = Math.random().toString(36).slice(2, 9);
   const gid = `folder-${fid}`;
-  const data = { kind: "folder", id: fid, path: f.path, label: f.label };
-  const text = `📁 ${f.label || "โฟลเดอร์"}\n${f.path}\n\n(ดับเบิลคลิก = เปิดโฟลเดอร์)`;
-  const W = 290, H = 120;
+  const data = { kind: "folder", id: fid, path: f.path, label: f.label, tooltip: "ดับเบิลคลิก = เปิดโฟลเดอร์" };
+  const W = 250, H = 60;
   return [
     { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ecfeff", strokeColor: "#0891b2", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
-    { type: "text", x: 14, y: 14, width: W - 28, text, fontSize: 13, strokeColor: "#155e75", groupIds: [gid], customData: data },
+    { type: "text", x: 12, y: 9, width: W - 24, text: `📁 ${f.label || "โฟลเดอร์"}`, fontSize: 15, strokeColor: "#155e75", groupIds: [gid], customData: data },
+    { type: "text", x: 12, y: 32, width: W - 24, text: f.path, fontSize: 10, strokeColor: "#64748b", groupIds: [gid], customData: data },
   ];
 }
 
@@ -115,8 +134,13 @@ export default function CampaignCanvasPage() {
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
   const [folderOpen, setFolderOpen] = useState(false); // modal การ์ดโฟลเดอร์
   const [fForm, setFForm] = useState({ label: "", path: "" });
+  const [parentOpen, setParentOpen] = useState(false);  // modal การ์ด Parent SKU
+  const [parentSel, setParentSel] = useState<ParentSkuVal[]>([]);
+  const [parentRecId, setParentRecId] = useState<string | null>(null); // ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false); // คลังความรู้
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const { platforms: platformOpts } = useCreativeOptions();
+  const { user } = useAuth();
   const [fs, setFs] = useState(false); // เต็มจอ
   const [toasts, setToasts] = useState<Toast[]>([]);
   const sketchRef = useRef<CanvasSketchControls | null>(null);
@@ -151,6 +175,13 @@ export default function CampaignCanvasPage() {
     skuSel.forEach((s, i) => { const dx = i * 270; for (const el of skuCardSkeleton(s)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
     void sketchRef.current.insert(all);
     setSkuOpen(false); setSkuSel([]);
+  };
+  const confirmParent = () => {
+    if (!parentSel.length || !sketchRef.current) return;
+    const all: Record<string, unknown>[] = [];
+    parentSel.forEach((s, i) => { const dx = i * 270; for (const el of parentSkuCardSkeleton(s)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+    void sketchRef.current.insert(all);
+    setParentOpen(false); setParentSel([]);
   };
   const onTaskCreated = (tk: CreatedTask) => { sketchRef.current?.insert(taskCardSkeleton(tk)); pushToast("success", t(`สร้างงาน ${tk.task_no} + วางการ์ดแล้ว`, `Created task ${tk.task_no} and placed card`)); };
   const createContentCard = async () => {
@@ -190,7 +221,7 @@ export default function CampaignCanvasPage() {
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
-  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "folder") openFolder(String(data.path ?? "")); }, [openFolder]);
+  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); }, [openFolder]);
   // workflow/ลบงาน สำหรับ TaskDetailDrawer เต็มบน canvas
   const moveTask = useCallback(async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); }, [pushToast]);
   const removeTask = useCallback(async (tid: string) => { try { await deleteTask(tid); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setTaskView(null); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast, t]);
@@ -253,11 +284,13 @@ export default function CampaignCanvasPage() {
           <div className="flex items-center gap-2">
             <button onClick={() => setSectionOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 Section</button>
             <button onClick={() => { setSkuSel([]); setSkuOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📦 SKU Card</button>
+            <button onClick={() => { setParentSel([]); setParentOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-50">🧬 Parent SKU</button>
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
             <button onClick={openDragPanel} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🧲 {t("ลากงานเข้า", "Drag tasks in")}</button>
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
             <button onClick={() => setFolderOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-50">📁 {t("โฟลเดอร์", "Folder")}</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ {t("การ์ดบนกระดาน", "Cards on board")}</button>
+            <button onClick={() => setKnowledgeOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50">📚 {t("ความรู้", "Knowledge")}</button>
             <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 {t("รายละเอียด", "Details")}</button>
             <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{refreshing ? "⏳" : "🔄"} {t("รีเฟรช", "Refresh")}</button>
             <button onClick={toggleFs} title={t("เต็มจอ", "Fullscreen")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{fs ? `⛶ ${t("ออกเต็มจอ", "Exit Fullscreen")}` : `⛶ ${t("เต็มจอ", "Fullscreen")}`}</button>
@@ -305,6 +338,18 @@ export default function CampaignCanvasPage() {
         </>}>
         <SkuMultiPick selected={skuSel} onChange={setSkuSel} />
       </ERPModal>
+
+      <ERPModal open={parentOpen} onClose={() => setParentOpen(false)} title={t("เพิ่มการ์ด Parent SKU ลงกระดาน", "Add Parent SKU Card to board")} size="md"
+        footer={<>
+          <button onClick={() => setParentOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={confirmParent} disabled={!parentSel.length} className="h-9 px-4 text-sm text-white bg-teal-600 rounded-lg disabled:opacity-50">{t("เพิ่มการ์ด", "Add card")}{parentSel.length ? ` (${parentSel.length})` : ""}</button>
+        </>}>
+        <ParentSkuMultiPick selected={parentSel} onChange={setParentSel} />
+      </ERPModal>
+
+      {/* ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง */}
+      {parentRecId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={parentRecId} startInEdit onClose={() => setParentRecId(null)} onChanged={() => {}} />}
+      {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={user?.role === "admin" || user?.role === "manager"} pushToast={pushToast} />}
 
       {skuView && <SkuDrawer data={skuView} onClose={() => setSkuView(null)} />}
       {taskView && <TaskDetailDrawer taskId={String(taskView.id ?? "")} onClose={() => setTaskView(null)} onChanged={() => {}} onMove={moveTask} onDelete={removeTask} pushToast={pushToast} />}
@@ -355,7 +400,7 @@ export default function CampaignCanvasPage() {
       {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
       <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title={t("การ์ดบนกระดาน", "Cards on board")} size="md"
         footer={<button onClick={() => setCardsOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
-        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); }} />
+        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "parent_sku") setParentRecId(String(c.data.id ?? "")); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); }} />
       </ERPModal>
 
       {/* สร้างงานจริง (ฟอร์มเดียวกับหน้างาน) -- ล็อกแคมเปญนี้ → วางการ์ดงานบนกระดาน */}
@@ -435,6 +480,7 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
   const t = useT();
   const tasks = cards.filter((c) => c.kind === "task");
   const skus = cards.filter((c) => c.kind === "sku");
+  const parentSkus = cards.filter((c) => c.kind === "parent_sku");
   const contents = cards.filter((c) => c.kind === "content");
   const folders = cards.filter((c) => c.kind === "folder");
   if (cards.length === 0) return <p className="text-sm text-slate-400 text-center py-6">{t("ยังไม่มีการ์ดบนกระดาน — กด ✅ Task / 📦 SKU / 📱 Content / 📁 โฟลเดอร์ เพื่อเพิ่ม", "No cards on the board yet — click ✅ Task / 📦 SKU / 📱 Content / 📁 Folder to add")}</p>;
@@ -453,6 +499,19 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
           </div>
         )}
       </div>
+      {parentSkus.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">🧬 {t("การ์ด Parent SKU", "Parent SKU cards")} ({parentSkus.length})</p>
+          <div className="space-y-1.5">
+            {parentSkus.map((c, i) => (
+              <button key={i} onClick={() => onOpen(c)} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 hover:border-teal-300 hover:bg-teal-50/40 text-left">
+                <span className="font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{String(c.data.code ?? "")}</span>
+                <span className="text-sm text-slate-700 flex-1 truncate">{String(c.data.name ?? "")}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">📦 {t("การ์ดสินค้า", "Product cards")} ({skus.length})</p>
         {skus.length === 0 ? <p className="text-sm text-slate-400 italic">--</p> : (
@@ -498,6 +557,44 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
 }
 
 
+// เลือก Parent SKU หลายอัน (ค้นหา + checkbox + รูป)
+function ParentSkuMultiPick({ selected, onChange }: { selected: ParentSkuVal[]; onChange: (v: ParentSkuVal[]) => void }) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<ParentSkuVal[]>([]);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    let active = true; setLoading(true);
+    const tmr = setTimeout(async () => {
+      try {
+        const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: query, limit: "30" })}`);
+        const j = await res.json(); const rows = (j.data ?? []) as Record<string, unknown>[];
+        if (active) setResults(rows.map((r) => ({ id: String(r.id), code: String(r.code ?? ""), name: String(r.name ?? r.code ?? ""), image_url: r.image_key ? `/api/r2-image?key=${encodeURIComponent(String(r.image_key))}` : null })));
+      } catch { if (active) setResults([]); } finally { if (active) setLoading(false); }
+    }, 250);
+    return () => { active = false; clearTimeout(tmr); };
+  }, [query]);
+  const toggle = (s: ParentSkuVal) => onChange(selected.some((x) => x.id === s.id) ? selected.filter((x) => x.id !== s.id) : [...selected, s]);
+  return (
+    <div className="space-y-2">
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("🔍 ค้นหา Parent SKU / ชื่อ...", "🔍 Search Parent SKU / name...")} className="w-full h-9 border border-slate-200 rounded-lg px-3 text-sm" />
+      {selected.length > 0 && <div className="flex flex-wrap gap-1.5">{selected.map((s) => <span key={s.id} className="inline-flex items-center gap-1 text-xs bg-teal-50 text-teal-700 rounded-full pl-2 pr-1 py-0.5"><span className="font-mono">{s.code}</span><button onClick={() => toggle(s)} className="hover:text-red-500">✕</button></span>)}</div>}
+      <div className="max-h-64 overflow-y-auto border border-slate-100 rounded-lg divide-y divide-slate-50">
+        {loading ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("กำลังค้นหา...", "Searching...")}</p>
+          : results.length === 0 ? <p className="px-3 py-3 text-sm text-slate-400 text-center">{t("ไม่พบ Parent SKU", "No Parent SKU found")}</p>
+          : results.map((s) => { const on = selected.some((x) => x.id === s.id); return (
+            <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-teal-50/40" : ""}`}>
+              <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-teal-600 pointer-events-none" />
+              {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">🧬</span>}
+              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+              <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+            </button>
+          ); })}
+      </div>
+    </div>
+  );
+}
+
 // เลือก SKU หลายอัน (ค้นหา + checkbox)
 function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onChange: (v: SkuPickerValue[]) => void }) {
   const t = useT();
@@ -526,8 +623,10 @@ function SkuMultiPick({ selected, onChange }: { selected: SkuPickerValue[]; onCh
           : results.map((s) => { const on = selected.some((x) => x.id === s.id); return (
             <button key={s.id} onClick={() => toggle(s)} className={`w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-slate-50 ${on ? "bg-violet-50/40" : ""}`}>
               <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-violet-600 pointer-events-none" />
+              {s.image_url ? <img src={`${s.image_url}&w=72`} alt="" className="h-8 w-8 rounded object-cover border border-slate-200 shrink-0" /> : <span className="h-8 w-8 rounded bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 text-xs">📦</span>}
               <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
               <span className="text-sm text-slate-700 flex-1 truncate">{s.name}</span>
+              {s.color && <span className="text-[10px] text-slate-400 shrink-0">{s.color}</span>}
               {s.list_price != null && <span className="text-xs text-slate-400 shrink-0">{Number(s.list_price).toLocaleString()}฿</span>}
             </button>
           ); })}

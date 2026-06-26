@@ -409,6 +409,7 @@ export function CanvasSketch({
 
   // ล้อเมาส์ = ซูมเข้าหาตำแหน่งเมาส์ (shift+ล้อ = เลื่อนแนวนอนตามปกติ) + ดับเบิลคลิกการ์ด → เปิด drawer
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null); // tooltip ลอยตอนชี้การ์ดที่มี customData.tooltip
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
     const onWheel = (e: WheelEvent) => {
@@ -433,9 +434,33 @@ export function CanvasSketch({
         if (d?.kind && px >= it.x && px <= it.x + it.width && py >= it.y && py <= it.y + it.height) { e.preventDefault(); e.stopPropagation(); cb(d); return; }
       }
     };
+    // hover → tooltip (เฉพาะ element ที่มี customData.tooltip เช่น การ์ดโฟลเดอร์) · throttle ด้วย rAF
+    let rafId = 0;
+    const onMove = (e: MouseEvent) => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        const api = apiRef.current; if (!api) return;
+        if ((e.target as HTMLElement)?.tagName !== "CANVAS") { setTip(null); return; }
+        const st = api.getAppState(); const z = st.zoom?.value || 1;
+        const px = (e.clientX - (st.offsetLeft ?? 0)) / z - st.scrollX;
+        const py = (e.clientY - (st.offsetTop ?? 0)) / z - st.scrollY;
+        const els = api.getSceneElements() as any[];
+        let found: string | null = null;
+        for (let i = els.length - 1; i >= 0; i--) {
+          const it = els[i]; const d = it?.customData;
+          if (d?.tooltip && px >= it.x && px <= it.x + it.width && py >= it.y && py <= it.y + it.height) { found = String(d.tooltip); break; }
+        }
+        if (found) { const rect = el.getBoundingClientRect(); setTip({ text: found, x: e.clientX - rect.left, y: e.clientY - rect.top }); }
+        else setTip(null);
+      });
+    };
+    const onLeave = () => setTip(null);
     el.addEventListener("wheel", onWheel, { passive: false, capture: true });
     el.addEventListener("dblclick", onDbl, { capture: true });
-    return () => { el.removeEventListener("wheel", onWheel, true); el.removeEventListener("dblclick", onDbl, true); };
+    el.addEventListener("mousemove", onMove);
+    el.addEventListener("mouseleave", onLeave);
+    return () => { el.removeEventListener("wheel", onWheel, true); el.removeEventListener("dblclick", onDbl, true); el.removeEventListener("mousemove", onMove); el.removeEventListener("mouseleave", onLeave); if (rafId) cancelAnimationFrame(rafId); };
   }, [scene]); // ผูกใหม่หลังกระดานโหลดเสร็จ (ตอน mount แรก wrapRef ยังไม่ render เพราะอยู่สถานะ loading)
 
   // ปรับขนาด font ของ text ที่เลือก (ละเอียดกว่า S/M/L/XL ของ Excalidraw)
@@ -529,6 +554,10 @@ export function CanvasSketch({
         {editable && !serverCanEdit && <span className="text-[11px] inline-flex items-center gap-1 text-amber-600">👁 อ่านอย่างเดียว (ไม่มีสิทธิ์แก้)</span>}
       </div>
       <div ref={wrapRef} className="relative rounded-xl border border-slate-200 overflow-hidden bg-white" style={{ height }}>
+        {/* tooltip ลอยตอนชี้การ์ดที่มี customData.tooltip (เช่น การ์ดโฟลเดอร์) */}
+        {tip && (
+          <div className="absolute z-20 pointer-events-none px-2 py-1 rounded-md bg-slate-800 text-white text-[11px] shadow-lg whitespace-nowrap max-w-[260px] truncate" style={{ left: tip.x + 12, top: tip.y + 12 }}>{tip.text}</div>
+        )}
         {/* ป้ายสถานะบันทึก — ลอยกลางล่าง โชว์เฉพาะ "กำลังบันทึก/บันทึกแล้ว/ผิดพลาด" (ไม่โชว์ตอนแก้ไขเฉย ๆ) */}
         {editable && serverCanEdit && saveState !== "dirty" && (saveState !== "idle" || savedAt) && (
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 inline-flex items-center gap-1.5">
