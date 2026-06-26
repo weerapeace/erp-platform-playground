@@ -14,10 +14,38 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2PutObject, r2DeleteObject } from "@/lib/r2";
 import { writeAudit } from "@/lib/audit";
+import { detectAssetType, extOf, sha256Hex } from "@/lib/assets";
+import { attachTags } from "@/app/api/assets/shared";
 
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"]);
 const MAX_SIZE = 10 * 1024 * 1024;  // 10 MB (รองรับ PDF บิล/ใบรับ)
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
+
+// แท็กในคลังกลางตาม "ที่มา" (folder) — ใส่ชื่ออ่านง่าย ไม่งั้นใช้ชื่อ folder ตรง ๆ
+const LIBRARY_FOLDER_LABEL: Record<string, string> = {
+  "parent-skus": "สินค้า (Parent)", "skus": "สินค้า (SKU)",
+  "app-icons": "ไอคอนแอป", "section-icons": "ไอคอนหมวด", "overview-theme": "ธีมภาพรวม",
+  "design-sheets": "งานออกแบบ", "uploads": "อัปทั่วไป",
+};
+
+// ลงทะเบียนไฟล์ที่เพิ่งอัปเข้าคลังกลาง (assets) อัตโนมัติ — กันซ้ำด้วย checksum · ห้าม throw (best-effort)
+async function registerToLibrary(p: { buffer: ArrayBuffer; key: string; file: File; folder: string; uploadedBy: string | null }): Promise<void> {
+  try {
+    const admin = supabaseAdmin();
+    const checksum = await sha256Hex(p.buffer);
+    const tag = LIBRARY_FOLDER_LABEL[p.folder] ?? p.folder;
+    // ไฟล์เดิม (เนื้อหาเดียวกัน) อยู่ในคลังแล้ว → ไม่ลงซ้ำ แค่เพิ่มแท็กที่มา
+    const { data: dup } = await admin.from("assets").select("id").eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
+    if (dup?.id) { if (tag) await attachTags(admin, dup.id as string, [tag]); return; }
+    const { data: ins } = await admin.from("assets").insert({
+      title: p.file.name, file_name: p.file.name, r2_key: p.key,
+      asset_type: detectAssetType(p.file.type, p.file.name),
+      content_type: p.file.type || null, ext: extOf(p.file.name) || null, size_bytes: p.file.size,
+      checksum, status: "active", source: "upload", uploaded_by: p.uploadedBy,
+    }).select("id").maybeSingle();
+    if (ins?.id && tag) await attachTags(admin, ins.id as string, [tag]);
+  } catch { /* คลังมีปัญหา ไม่ให้กระทบการอัปโหลด */ }
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "files.upload");
@@ -48,10 +76,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
   // unique key — folder/user_id/timestamp.ext (no random — deterministic OK for now)
   const key = `${folder}/${user.id}/${Date.now()}-${Math.floor(Math.random() * 100000)}.${ext}`;
+  const buffer = await file.arrayBuffer();
 
   try {
     // F21: R2 binding ล้วน (ไม่มี AWS SDK)
-    await r2PutObject(key, await file.arrayBuffer(), file.type);
+    await r2PutObject(key, buffer, file.type);
+    // ของกลาง: ทุกรูปที่อัปผ่านตัวนี้ → ลงคลังกลาง /master/assets อัตโนมัติ (กันซ้ำ · best-effort)
+    await registerToLibrary({ buffer, key, file, folder, uploadedBy: user.email ?? user.id });
     await writeAudit(supabaseAdmin(), {
       action: "upload",
       entityType: "file",
