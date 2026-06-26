@@ -196,7 +196,7 @@ export function DesignDashboard() {
       .then((j) => { if (!j.error && Array.isArray(j.data)) { setSheets(j.data as DesignSheetListItem[]); setTotal(typeof j.total === "number" ? j.total : j.data.length); } })
       .catch(() => {});
   };
-  const [quickFilter, setQuickFilter] = useState<"all" | "urgent" | "soon" | "closed">("all");
+  const [quickFilter, setQuickFilter] = useState<"all" | "active" | "urgent" | "soon" | "closed">("all");
 
   useEffect(() => {
     let alive = true;
@@ -209,7 +209,7 @@ export function DesignDashboard() {
           .then((response) => readApi<ListResponse>(response, "โหลดใบงานไม่สำเร็จ")),
         apiFetch("/api/design-sheets/statuses")
           .then((response) => readApi<StatusResponse>(response, "โหลดสถานะไม่สำเร็จ")),
-        apiFetch("/api/audit-logs?entity_type=design_sheet&limit=6")
+        apiFetch("/api/audit-logs?entity_type=design_sheet&limit=40")
           .then(async (response) => (response.ok ? (await response.json() as AuditResponse) : { data: [], total: 0, error: null }))
           .catch(() => ({ data: [], total: 0, error: null } satisfies AuditResponse)),
       ]);
@@ -218,7 +218,8 @@ export function DesignDashboard() {
       setSheets(listJson.data);
       setTotal(listJson.total);
       setStatusRows(statusJson.data);
-      setAuditRows(Array.isArray(auditJson.data) ? auditJson.data : []);
+      // กรอง canvas_update (ออโต้เซฟกระดานวาด) ออก ไม่ให้ถล่มฟีด แล้วเอา 6 เหตุการณ์ล่าสุดที่มีความหมาย
+      setAuditRows(Array.isArray(auditJson.data) ? auditJson.data.filter((r) => r.action !== "canvas_update").slice(0, 6) : []);
     }
 
     loadDashboard()
@@ -280,6 +281,7 @@ export function DesignDashboard() {
     return sheets.filter((sheet) => {
       if (selectedBrandKey !== "ALL" && brandKeyOf(sheet) !== selectedBrandKey) return false;
       if (q && !`${sheet.code} ${sheet.name} ${sheet.brand_name ?? ""}`.toLowerCase().includes(q)) return false;
+      if (quickFilter === "active" && statusMeta.finished.has(sheet.status)) return false;
       if (quickFilter === "urgent" && !isUrgent(sheet, statusMeta)) return false;
       if (quickFilter === "soon") { const dd = daysUntil(sheet.deadline); if (statusMeta.finished.has(sheet.status) || dd === null || dd > 7) return false; }
       if (quickFilter === "closed" && !statusMeta.finished.has(sheet.status)) return false;
@@ -542,7 +544,7 @@ export function DesignDashboard() {
                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="🔍 ค้นหารหัส / ชื่องาน / แบรนด์..."
                   className="h-9 min-w-[180px] flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
                 <div className="flex flex-wrap items-center gap-1">
-                  {([["all", "ทั้งหมด"], ["urgent", "🔴 ด่วน"], ["soon", "🟠 ใกล้กำหนด"], ["closed", "✅ ปิดงาน"]] as const).map(([key, label]) => (
+                  {([["all", "ทั้งหมด"], ["active", "🛠 กำลังทำ"], ["urgent", "🔴 ด่วน"], ["soon", "🟠 ใกล้กำหนด"], ["closed", "✅ ปิดงาน"]] as const).map(([key, label]) => (
                     <button key={key} type="button" onClick={() => setQuickFilter(key)}
                       className={`h-9 rounded-md border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
                   ))}
