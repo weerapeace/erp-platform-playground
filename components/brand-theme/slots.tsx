@@ -8,6 +8,7 @@
  *
  *   <div className="relative"> ... <BrandSlot theme={theme} id="page_br" /> </div>
  */
+import type { CSSProperties } from "react";
 import { withImageWidth } from "@/lib/r2-image";
 import { slotKey, slotStyle, SLOT_REGISTRY, type BrandTheme } from "@/lib/brand-theme";
 import { useBrandThemeValue } from "@/components/brand-theme/context";
@@ -32,9 +33,22 @@ export function BrandSlot({ theme, id, w, size, className = "", alt = "", round 
   const url = withImageWidth(`/api/r2-image?key=${encodeURIComponent(key)}`, width) ?? `/api/r2-image?key=${encodeURIComponent(key)}`;
   const cls = [def?.pos ?? "", size ?? def?.size ?? "", def?.hideOnMobile ? "hidden md:block" : "",
     round ? "rounded-full" : "", "object-contain pointer-events-none select-none z-10", className].filter(Boolean).join(" ");
+
+  // ลายตกแต่ง "มุมหน้า" (page_tl/tr/bl/br): ทำให้เนียนเป็นพื้นหลังนุ่ม ๆ แทนก้อนทึบที่ทับ UI
+  //  - จางลงโดยปริยาย (เจ้าของยังเร่งความเข้มผ่านสไลเดอร์ได้) + ไล่เฉดให้ลายค่อย ๆ หายเข้ากลางจอ
+  const pos = def?.pos ?? "";
+  const hasTop = pos.includes("top"), hasBottom = pos.includes("bottom");
+  const hasLeft = pos.includes("left"), hasRight = pos.includes("right");
+  const isCornerDeco = !!def && def.group === "page" && (hasTop || hasBottom) && (hasLeft || hasRight);
+  const style: CSSProperties = { ...(slotStyle(t, id) ?? {}) };
+  if (isCornerDeco) {
+    const mask = `linear-gradient(to ${hasTop ? "bottom" : "top"} ${hasLeft ? "right" : "left"}, rgba(0,0,0,1), rgba(0,0,0,0.4) 55%, rgba(0,0,0,0) 88%)`;
+    style.maskImage = mask; style.WebkitMaskImage = mask;
+    if (style.opacity == null) style.opacity = 0.5;   // เจ้าของไม่ได้ตั้งความเข้มเอง → ใช้ค่านุ่ม
+  }
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={alt} loading="lazy" decoding="async" style={slotStyle(t, id)}
+    <img src={url} alt={alt} loading="lazy" decoding="async" style={style}
       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
       className={cls} />
   );
