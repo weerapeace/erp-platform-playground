@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
@@ -25,8 +26,9 @@ export default function PlatformCatalogPage() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
   const [brandId, setBrandId] = useState("");
-  const [tab, setTab] = useState<"catalog" | "fields">("catalog");
+  const [tab, setTab] = useState<"catalog" | "fields" | "mapping">("catalog");
   const [fields, setFields] = useState<FieldRow[]>([]);
+  const [mappings, setMappings] = useState<Record<string, string>>({});
   const [listings, setListings] = useState<Listing[]>([]);
   const [summary, setSummary] = useState({ total: 0, matched: 0 });
   const [loading, setLoading] = useState(false);
@@ -45,10 +47,14 @@ export default function PlatformCatalogPage() {
     setLoading(true);
     try {
       const q = new URLSearchParams({ platform_id: platformId }); if (brandId) q.set("brand_id", brandId);
-      const j = await apiFetch(`/api/platform-catalog?${q}`).then((r) => r.json());
+      const [j, mj] = await Promise.all([
+        apiFetch(`/api/platform-catalog?${q}`).then((r) => r.json()),
+        apiFetch(`/api/platform-field-mappings?platform_id=${platformId}`).then((r) => r.json()),
+      ]);
       setFields((j.fields ?? []) as FieldRow[]);
       setListings((j.listings ?? []) as Listing[]);
       setSummary(j.summary ?? { total: 0, matched: 0 });
+      setMappings((mj.mappings ?? {}) as Record<string, string>);
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [platformId, brandId]);
   useEffect(() => { load(); }, [load]);
@@ -75,6 +81,15 @@ export default function PlatformCatalogPage() {
     } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
   };
+
+  const saveMapping = async (platform_field_key: string, source_key: string) => {
+    setMappings((m) => { const n = { ...m }; if (source_key) n[platform_field_key] = source_key; else delete n[platform_field_key]; return n; });
+    try {
+      const r = await apiFetch("/api/platform-field-mappings", { method: "PATCH", body: JSON.stringify({ platform_id: platformId, platform_field_key, source_key }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+    } catch (e) { setNote("บันทึก mapping ไม่สำเร็จ: " + (e as Error).message); }
+  };
+  const mappedCount = fields.filter((f) => mappings[f.field_key]).length;
 
   const activePf = platforms.find((p) => p.id === platformId);
   const cols: MiniColumn<Listing>[] = [
@@ -115,16 +130,43 @@ export default function PlatformCatalogPage() {
       <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit text-sm mb-3">
         <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({summary.total})</button>
         <button onClick={() => setTab("fields")} className={`px-3 py-1 rounded ${tab === "fields" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ฟิลด์ของ {activePf?.name_th ?? "แพลตฟอร์ม"} ({fields.length})</button>
+        <button onClick={() => setTab("mapping")} className={`px-3 py-1 rounded ${tab === "mapping" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>จับคู่ฟิลด์ ({mappedCount}/{fields.length})</button>
       </div>
 
       {loading ? <p className="text-slate-400 text-sm py-8 text-center">กำลังโหลด...</p> : tab === "catalog" ? (
         listings.length === 0
           ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่มีข้อมูลสินค้าบนแพลตฟอร์มนี้<br />กด “⬆️ อัปไฟล์ export” ด้านบน เพื่อนำเข้าไฟล์ Excel/CSV จาก Seller Center</div>
           : <MiniTable rows={listings} columns={cols} rowKey={(l) => l.id} searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""}`} dense />
-      ) : (
+      ) : tab === "fields" ? (
         fields.length === 0
           ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่ทราบฟิลด์ของแพลตฟอร์มนี้<br />อัปไฟล์ export แล้วระบบจะอ่านหัวคอลัมน์เป็นฟิลด์ให้อัตโนมัติ</div>
           : <MiniTable rows={fields} columns={fcols} rowKey={(f) => f.field_key} searchText={(f) => `${f.field_key} ${f.field_label ?? ""}`} dense />
+      ) : (
+        fields.length === 0
+          ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่ทราบฟิลด์ของแพลตฟอร์มนี้<br />อัปไฟล์ export ก่อน แล้วค่อยจับคู่ฟิลด์</div>
+          : (
+            <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+              <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 text-[11px] text-slate-400 font-medium">
+                <span className="flex-1">ฟิลด์ของ {activePf?.name_th}</span>
+                <span className="text-slate-300">←</span>
+                <span className="w-64">เอาข้อมูล ERP ตัวไหนมาใส่</span>
+              </div>
+              {fields.map((f) => (
+                <div key={f.field_key} className="flex items-center gap-3 px-3 py-2">
+                  <span className="flex-1 min-w-0"><span className="font-mono text-xs text-slate-700">{f.field_key}</span>{f.is_required && <span className="ml-1 text-[10px] text-rose-500">*</span>}{f.field_label && f.field_label !== f.field_key && <span className="text-[11px] text-slate-400 ml-1 truncate">({f.field_label})</span>}</span>
+                  <span className="text-slate-300">←</span>
+                  <select value={mappings[f.field_key] ?? ""} disabled={!canEdit} onChange={(e) => saveMapping(f.field_key, e.target.value)} className="w-64 h-8 border border-slate-200 rounded-md px-2 text-sm bg-white shrink-0">
+                    <option value="">— ไม่ใช้ —</option>
+                    {["Parent SKU", "SKU (สี)", "อื่นๆ"].map((g) => (
+                      <optgroup key={g} label={g}>
+                        {PLATFORM_SOURCE_FIELDS.filter((s) => s.group === g).map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )
       )}
     </div>
   );
