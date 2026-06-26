@@ -105,6 +105,7 @@ export function ColorInput({ value, onChange, allowText = true, invalid }: {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const compute = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect(); if (!r) return;
     const PANEL = 230, below = window.innerHeight - r.bottom;
@@ -112,6 +113,19 @@ export function ColorInput({ value, onChange, allowText = true, invalid }: {
   }, []);
   useLayoutEffect(() => { if (open) compute(); }, [open, compute]);
   useEffect(() => { if (!open) return; const h = () => compute(); window.addEventListener("scroll", h, true); window.addEventListener("resize", h); return () => { window.removeEventListener("scroll", h, true); window.removeEventListener("resize", h); }; }, [open, compute]);
+  // ปิดเมื่อกด "นอกแผง" เท่านั้น (ใช้ pointerdown → กด/ลากในแผงไม่ปิด) + Esc — มาตรฐาน popover
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+  }, [open]);
 
   return (
     <div className="flex items-center gap-1.5">
@@ -122,13 +136,10 @@ export function ColorInput({ value, onChange, allowText = true, invalid }: {
           className={`h-8 flex-1 min-w-0 px-2 text-xs font-mono border rounded ${invalid ? "border-rose-300 bg-rose-50" : "border-slate-200"}`} />
       )}
       {open && pos && createPortal(
-        <>
-          <div className="fixed inset-0 z-[1000]" onClick={() => setOpen(false)} />
-          <div className="fixed z-[1001] bg-white border border-slate-200 rounded-lg shadow-xl p-2"
-            style={{ left: pos.left, top: pos.top, transform: pos.up ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
-            <ColorPicker value={normHex(value) ?? "#000000"} onChange={onChange} />
-          </div>
-        </>,
+        <div ref={panelRef} className="fixed z-[1001] bg-white border border-slate-200 rounded-lg shadow-xl p-2"
+          style={{ left: pos.left, top: pos.top, transform: pos.up ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
+          <ColorPicker value={normHex(value) ?? "#000000"} onChange={onChange} />
+        </div>,
         document.body,
       )}
     </div>

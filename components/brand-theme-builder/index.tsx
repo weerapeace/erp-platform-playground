@@ -121,10 +121,12 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
   };
 
   // ช่องสี: ใช้ของกลาง ColorInput (ลากเลือกได้ + พิมพ์ hex/rgba)
-  const Color = ({ label, k }: { label: string; k: keyof BrandTheme }) => {
+  // เป็น "ฟังก์ชันคืน JSX" ไม่ใช่ component ย่อย → กัน React รีเมานต์ ColorInput ทุกครั้งที่ draft เปลี่ยน
+  // (ถ้าเป็น <Color/> ที่ประกาศในนี้ พอเลือกสี → onChange → re-render → identity ใหม่ → popover เด้งปิด/ลากไม่ติด)
+  const colorField = (label: string, k: keyof BrandTheme) => {
     const v = String(draft[k] ?? "");
     return (
-      <label className="block">
+      <label key={k as string} className="block">
         <span className="text-[11px] text-slate-500">{label}</span>
         <div className="mt-0.5">
           <ColorInput value={v} onChange={(nv) => set(k, nv as BrandTheme[typeof k])} invalid={!isValidColor(v)} />
@@ -187,19 +189,19 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
             )}
             {tab === "colors" && (
               <div className="space-y-2">
-                <Color label="สีหลัก (primary)" k="primary_color" /><Color label="สีรอง (secondary)" k="secondary_color" /><Color label="สีเน้น (accent)" k="accent_color" />
-                <Color label="สีหัวข้อ" k="heading_text_color" /><Color label="สีตัวอักษร" k="body_text_color" /><Color label="สีตัวอักษรจาง" k="muted_text_color" />
-                <Color label="สีเส้น workflow" k="workflow_line_color" />
+                {colorField("สีหลัก (primary)", "primary_color")}{colorField("สีรอง (secondary)", "secondary_color")}{colorField("สีเน้น (accent)", "accent_color")}
+                {colorField("สีหัวข้อ", "heading_text_color")}{colorField("สีตัวอักษร", "body_text_color")}{colorField("สีตัวอักษรจาง", "muted_text_color")}
+                {colorField("สีเส้น workflow", "workflow_line_color")}
               </div>
             )}
             {tab === "background" && (
               <div className="space-y-3">
-                <Color label="สีพื้นหลัง" k="background_color" />
+                {colorField("สีพื้นหลัง", "background_color")}
                 <div>
                   <span className="text-[11px] text-slate-500">รูปพื้นหลัง (ไม่บังคับ · ย่อ ?w= อัตโนมัติ)</span>
                   <div className="mt-1"><ImageInput value={draft.background_image_key ?? null} folder="brand-theme" onChange={(k) => set("background_image_key", k)} /></div>
                 </div>
-                <Color label="สีทับรูป (overlay)" k="background_overlay_color" />
+                {colorField("สีทับรูป (overlay)", "background_overlay_color")}
                 <label className="block">
                   <span className="text-[11px] text-slate-500">ความเข้ม overlay ({Math.round(draft.background_opacity * 100)}%)</span>
                   <input type="range" min={0} max={100} value={Math.round(draft.background_opacity * 100)} onChange={(e) => set("background_opacity", Number(e.target.value) / 100)} className="w-full" />
@@ -208,7 +210,7 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
             )}
             {tab === "cards" && (
               <div className="space-y-2">
-                <Color label="พื้นการ์ด" k="card_background_color" /><Color label="เส้นขอบการ์ด" k="card_border_color" />
+                {colorField("พื้นการ์ด", "card_background_color")}{colorField("เส้นขอบการ์ด", "card_border_color")}
                 <label className="block"><span className="text-[11px] text-slate-500">ความโค้งมุม (เช่น 12px)</span>
                   <input value={draft.card_radius} onChange={(e) => set("card_radius", e.target.value)} className="mt-0.5 h-8 w-full px-2 text-xs border border-slate-200 rounded" /></label>
                 <label className="block"><span className="text-[11px] text-slate-500">เงา (shadow)</span>
@@ -222,8 +224,8 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
             )}
             {tab === "buttons" && (
               <div className="space-y-2">
-                <Color label="พื้นปุ่มหลัก" k="button_primary_bg" /><Color label="ตัวอักษรปุ่มหลัก" k="button_primary_text" />
-                <Color label="พื้นปุ่มรอง" k="button_secondary_bg" /><Color label="ตัวอักษรปุ่มรอง" k="button_secondary_text" />
+                {colorField("พื้นปุ่มหลัก", "button_primary_bg")}{colorField("ตัวอักษรปุ่มหลัก", "button_primary_text")}
+                {colorField("พื้นปุ่มรอง", "button_secondary_bg")}{colorField("ตัวอักษรปุ่มรอง", "button_secondary_text")}
               </div>
             )}
             {tab === "page" && (
