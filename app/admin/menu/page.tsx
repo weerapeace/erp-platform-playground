@@ -40,6 +40,8 @@ export default function MenuManagerPage() {
   const [sel, setSel] = useState<string>(ALL);          // app key ที่เลือก หรือ "__all__"
   const [showAppCfg, setShowAppCfg] = useState(false);  // กางตั้งค่าแอป (PWA)
   const [expanded, setExpanded] = useState<string | null>(null);  // เมนูที่กางตั้งค่าเพิ่ม
+  const [editingSection, setEditingSection] = useState<string | null>(null);  // หมวดที่กำลังแก้ชื่อ
+  const [dropSection, setDropSection] = useState<string | null>(null);  // หมวดที่กำลังลากของมาวาง (ไฮไลต์)
   const [addOpen, setAddOpen] = useState(false);        // เปิดตัวเพิ่มเมนูเข้าแอป
   const [addNew, setAddNew] = useState(false);          // สลับโหมดสร้างเมนูใหม่ในป๊อปอัป
   const [showAddApp, setShowAddApp] = useState(false);
@@ -47,6 +49,7 @@ export default function MenuManagerPage() {
   const [uploadingApp, setUploadingApp] = useState(false);
   const [origin, setOrigin] = useState("");
   const dragId = useRef<string | null>(null);
+  const sectionEscRef = useRef(false);   // กด Escape ตอนแก้ชื่อหมวด = ยกเลิก (ไม่ commit ตอน blur)
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 2000); };
   useEffect(() => { setOrigin(window.location.origin); }, []);
@@ -175,18 +178,55 @@ export default function MenuManagerPage() {
       .filter((r) => !s || r.label.toLowerCase().includes(s) || (r.href ?? "").toLowerCase().includes(s));
   }, [rows, sel, q]);
 
-  // ลากเรียงในหมวด (อัปเดต sort_order ของรายการที่แสดงอยู่)
-  const reorder = (targetId: string, section: string) => {
-    const dId = dragId.current; dragId.current = null;
-    if (!dId || dId === targetId) return;
-    const list = groups.find((g) => g.section === section)?.items ?? [];
-    const from = list.findIndex((r) => r.id === dId);
-    const to = list.findIndex((r) => r.id === targetId);
-    if (from < 0 || to < 0) return;
-    const re = [...list]; const [mv] = re.splice(from, 1); re.splice(to, 0, mv);
-    const updates = re.map((r, i) => ({ id: r.id!, sort_order: (i + 1) * 10 })).filter((u, i) => re[i].sort_order !== u.sort_order);
-    setRows((rs) => rs.map((r) => { const u = updates.find((x) => x.id === r.id); return u ? { ...r, sort_order: u.sort_order } : r; }));
-    updates.forEach((u) => void apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, patch: { sort_order: u.sort_order } }) }).then((r) => r.json()).then((j) => { if (j.error) setErr(j.error); }));
+  // เขียน DB อย่างเดียว (อัปเดต state เองไปแล้ว — ใช้ตอนลาก/วาง/เปลี่ยนชื่อหมวด)
+  const patchSilently = (id: string, p: Partial<MenuRow>) =>
+    void apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, patch: p }) })
+      .then((r) => r.json()).then((j) => { if (j.error) { setErr(j.error); void load(); } });
+
+  // ลาก/วาง: ภายในหมวดเดียว = เรียงลำดับ · ข้ามหมวด = ย้ายไปหมวดใหม่ (อัปเดต section + section_order + sort_order)
+  const handleDrop = (targetSection: string, targetId?: string) => {
+    const dId = dragId.current; dragId.current = null; setDropSection(null);
+    if (!dId) return;
+    const dragged = rows.find((r) => r.id === dId);
+    if (!dragged) return;
+    const destItems = [...(groups.find((g) => g.section === targetSection)?.items ?? [])];
+    const destOrder = destItems[0]?.section_order ?? dragged.section_order;
+
+    if (dragged.section === targetSection) {
+      // เรียงภายในหมวดเดิม
+      if (!targetId || dId === targetId) return;
+      const from = destItems.findIndex((r) => r.id === dId);
+      const to = destItems.findIndex((r) => r.id === targetId);
+      if (from < 0 || to < 0) return;
+      const re = [...destItems]; const [mv] = re.splice(from, 1); re.splice(to, 0, mv);
+      const updates = re.map((r, i) => ({ id: r.id!, sort_order: (i + 1) * 10 })).filter((u, i) => re[i].sort_order !== u.sort_order);
+      setRows((rs) => rs.map((r) => { const u = updates.find((x) => x.id === r.id); return u ? { ...r, sort_order: u.sort_order } : r; }));
+      updates.forEach((u) => patchSilently(u.id, { sort_order: u.sort_order }));
+    } else {
+      // ย้ายข้ามหมวด — แทรกก่อนรายการที่วางทับ (ถ้ามี) ไม่งั้นต่อท้าย
+      const without = destItems.filter((r) => r.id !== dId);
+      const at = targetId ? without.findIndex((r) => r.id === targetId) : -1;
+      without.splice(at < 0 ? without.length : at, 0, dragged);
+      const orderById = new Map(without.map((r, i) => [r.id!, (i + 1) * 10]));
+      setRows((rs) => rs.map((r) => {
+        if (r.id === dId) return { ...r, section: targetSection, section_order: destOrder, sort_order: orderById.get(r.id!) ?? r.sort_order };
+        const so = orderById.get(r.id!); return so != null && so !== r.sort_order ? { ...r, sort_order: so } : r;
+      }));
+      patchSilently(dId, { section: targetSection, section_order: destOrder, sort_order: orderById.get(dId) ?? 10 });
+      without.forEach((r) => { if (r.id !== dId) { const so = orderById.get(r.id!); if (so != null && so !== r.sort_order) patchSilently(r.id!, { sort_order: so }); } });
+      flash(`ย้ายไปหมวด “${targetSection}” แล้ว`);
+    }
+  };
+
+  // เปลี่ยนชื่อหมวดในที่เดียว — แก้ทุกเมนูที่อยู่ในหมวดนี้ (เฉพาะที่เห็นในแอปที่เลือก)
+  const renameSection = (group: { section: string; items: MenuRow[] }, raw: string) => {
+    const newName = raw.trim();
+    setEditingSection(null);
+    if (!newName || newName === group.section) return;
+    const ids = new Set(group.items.map((r) => r.id));
+    setRows((rs) => rs.map((r) => (ids.has(r.id) ? { ...r, section: newName } : r)));
+    group.items.forEach((it) => patchSilently(it.id!, { section: newName }));
+    flash("เปลี่ยนชื่อหมวดแล้ว");
   };
 
   // ตัวอย่างเมนูที่ผู้ใช้เห็น (sidebar ของแอปที่เลือก)
@@ -214,7 +254,7 @@ export default function MenuManagerPage() {
             )}
           </div>
         </div>
-        <p className="text-sm text-slate-500 mb-4">เลือกแอป → จัดเมนูของแอปนั้น (ลากเรียง · ซ่อน/แสดง · เพิ่มเมนู) · เลือก “ทุกเมนู” เพื่อจัดการรวม</p>
+        <p className="text-sm text-slate-500 mb-4">เลือกแอป → จัดเมนูของแอปนั้น (ลากเรียง · <b>ลากข้ามหมวด</b>ได้ · <b>✏️ แก้ชื่อหมวด</b> · ซ่อน/แสดง · เพิ่มเมนู) · เลือก “ทุกเมนู” เพื่อจัดการรวม</p>
 
         {err && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between gap-2">⚠ {err}<button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
 
@@ -337,12 +377,29 @@ export default function MenuManagerPage() {
                 </div>
               )}
               {groups.map((g) => (
-                <div key={g.section} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                  <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-sm font-semibold text-slate-700">{g.section} <span className="text-slate-400 font-normal">({g.items.length})</span></div>
-                  <div className="divide-y divide-slate-100">
+                <div key={g.section}
+                  onDragOver={(e) => { e.preventDefault(); if (dropSection !== g.section) setDropSection(g.section); }}
+                  onDrop={(e) => { e.preventDefault(); handleDrop(g.section); }}
+                  className={`bg-white border rounded-xl overflow-hidden ${dropSection === g.section ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200"}`}>
+                  <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-sm font-semibold text-slate-700 flex items-center gap-2">
+                    {editingSection === g.section ? (
+                      <input autoFocus defaultValue={g.section}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); else if (e.key === "Escape") { sectionEscRef.current = true; setEditingSection(null); } }}
+                        onBlur={(e) => { if (sectionEscRef.current) { sectionEscRef.current = false; return; } renameSection(g, e.target.value); }}
+                        className="h-7 px-2 text-sm font-normal border border-blue-300 rounded w-56" />
+                    ) : (
+                      <>
+                        <span className="cursor-pointer hover:text-blue-700" onClick={() => setEditingSection(g.section)} title="กดเพื่อแก้ชื่อหมวด">{g.section}</span>
+                        <span className="text-slate-400 font-normal">({g.items.length})</span>
+                        <button onClick={() => setEditingSection(g.section)} title="แก้ชื่อหมวด" className="text-slate-300 hover:text-blue-600">✏️</button>
+                      </>
+                    )}
+                  </div>
+                  <div className="divide-y divide-slate-100 min-h-[10px]">
                     {g.items.map((it) => (
                       <div key={it.id}>
-                        <div draggable onDragStart={() => { dragId.current = it.id!; }} onDragOver={(e) => e.preventDefault()} onDrop={() => reorder(it.id!, g.section)}
+                        <div draggable onDragStart={() => { dragId.current = it.id!; }} onDragEnd={() => setDropSection(null)}
+                          onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(g.section, it.id!); }}
                           className={`flex items-center gap-2.5 px-3 py-2 ${it.is_active ? "" : "opacity-55"}`}>
                           <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none" title="ลากเพื่อเรียงลำดับ">⠿</span>
                           <Ico icon={it.icon} size={18} />
