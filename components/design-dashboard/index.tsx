@@ -870,7 +870,7 @@ export function DesignDashboard() {
     }
   }
 
-  function handleCardDragStart(event: DragEvent<HTMLAnchorElement>, sheet: DesignSheetListItem) {
+  function handleCardDragStart(event: DragEvent<HTMLDivElement>, sheet: DesignSheetListItem) {
     event.dataTransfer.setData("text/plain", sheet.id);
     event.dataTransfer.effectAllowed = "move";
     setDraggingSheetId(sheet.id);
@@ -1111,10 +1111,12 @@ export function DesignDashboard() {
                               const isDragging = draggingSheetId === sheet.id;
                               const isMoving = movingSheetId === sheet.id;
                               return (
-                                <a
+                                <div
                                   key={sheet.id}
-                                  href={`/master/design-sheets?open=${encodeURIComponent(sheet.id)}`}
-                                  onClick={(event) => { event.preventDefault(); if (!isMoving) openDetail(sheet.id); }}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => { if (!isMoving) openDetail(sheet.id); }}
+                                  onKeyDown={(event) => { if ((event.key === "Enter" || event.key === " ") && !isMoving) { event.preventDefault(); openDetail(sheet.id); } }}
                                   data-gg-task-card
                                   draggable={!movingSheetId}
                                   onDragStart={(event) => handleCardDragStart(event, sheet)}
@@ -1152,7 +1154,7 @@ export function DesignDashboard() {
                                     {sheet.has_quote && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-600">มีราคา</span>}
                                     {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-600">มี SKU</span>}
                                   </div>
-                                </a>
+                                </div>
                               );
                             })}
                             {shown.length === 0 && (
