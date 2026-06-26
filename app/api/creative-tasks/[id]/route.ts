@@ -136,6 +136,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       if (k === "action" || k === "actor") continue;
       if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
     }
+    // m2m: Parent SKU / SKU (quick edit) — แทนที่ทั้งชุด + sync ฟิลด์เดี่ยว legacy
+    const mParents = Array.isArray(body.parent_sku_ids) ? [...new Set((body.parent_sku_ids as string[]).filter(Boolean))] : null;
+    const mSkus = Array.isArray(body.sku_ids) ? [...new Set((body.sku_ids as string[]).filter(Boolean))] : null;
+    if (mParents) {
+      await admin.from("erp_creative_task_parent_skus").delete().eq("task_id", id);
+      if (mParents.length) await admin.from("erp_creative_task_parent_skus").insert(mParents.map((p) => ({ task_id: id, parent_sku_id: p })));
+      patch.parent_sku_id = mParents[0] ?? null;
+    }
+    if (mSkus) {
+      await admin.from("erp_creative_task_skus").delete().eq("task_id", id);
+      if (mSkus.length) await admin.from("erp_creative_task_skus").insert(mSkus.map((s) => ({ task_id: id, sku_id: s })));
+      patch.sku_id = mSkus[0] ?? null;
+    }
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้ไข" }, { status: 400 });
     // เปลี่ยนผู้รับผิดชอบ → แจ้งคนใหม่
     if ("assignee_id" in patch && patch.assignee_id && patch.assignee_id !== current.assignee_id) {

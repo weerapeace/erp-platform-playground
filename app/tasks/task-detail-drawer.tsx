@@ -5,9 +5,9 @@
 // ใช้ที่: หน้า /tasks และ drawer การ์ดงานบน Campaign Canvas
 // ============================================================
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ERPInput, ERPSelect } from "@/components/form";
-import { UserPicker } from "@/components/pickers";
+import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
 import { useAuth } from "@/components/auth";
@@ -34,15 +34,31 @@ export function PriorityBadge({ priority }: { priority: CreativePriority }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${m.cls}`}>{m.label}</span>;
 }
 
-function Field({ label, value, highlight, dot }: { label: string; value: string | null | undefined; highlight?: boolean; dot?: string | null }) {
+// QuickField — คลิกที่ค่า → แก้ตรงนั้นทันที (เซฟอัตโนมัติ) · ไม่ active = แสดงค่าอ่านอย่างเดียว + ✎ ตอน hover
+function QuickField({ label, value, dot, highlight, active, onOpen, onClose, editor }: {
+  label: string; value: string | null | undefined; dot?: string | null; highlight?: boolean;
+  active: boolean; onOpen: () => void; onClose: () => void; editor: ReactNode;
+}) {
+  if (active) {
+    return (
+      <div className="min-w-0">
+        <p className="text-xs text-slate-400 mb-0.5">{label}</p>
+        <div className="flex items-start gap-1">
+          <div className="flex-1 min-w-0">{editor}</div>
+          <button type="button" onClick={onClose} title="ปิด" className="text-slate-300 hover:text-slate-600 text-xs shrink-0 mt-2">✕</button>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div>
+    <button type="button" onClick={onOpen} title="คลิกเพื่อแก้" className="min-w-0 text-left group rounded-md -mx-1 px-1 py-0.5 hover:bg-violet-50/60 transition-colors">
       <p className="text-xs text-slate-400 mb-0.5">{label}</p>
       <p className={`text-sm font-medium flex items-center gap-1.5 ${highlight ? "text-red-600" : "text-slate-800"}`}>
         {dot && value && <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: dot || "#cbd5e1" }} />}
-        {highlight && "⚠ "}{value || "—"}
+        {highlight && "⚠ "}<span className="truncate">{value || "—"}</span>
+        <span className="text-[10px] text-violet-400 opacity-0 group-hover:opacity-100 shrink-0">✎</span>
       </p>
-    </div>
+    </button>
   );
 }
 
@@ -63,6 +79,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [linkUrl, setLinkUrl] = useState("");
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
+  const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
 
   const load = useCallback(async () => {
     try { setDetail(await getTask(taskId)); }
@@ -108,6 +125,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
   const brandColor = brands.find((b) => b.id === d.brand_id)?.color ?? d.brand_color;
   const campaignName = campaigns.find((c) => c.id === d.campaign_id)?.name ?? d.campaign_label;
+  // quick edit: เซฟทันที (keepOpen=true สำหรับ multi เช่น Parent SKU ที่เพิ่ม/ลบหลายรอบ)
+  const saveQuick = async (patch: Record<string, unknown>, keepOpen = false) => {
+    setBusy(true);
+    try { await updateTask(d.id, patch); await refresh(); if (!keepOpen) setQf(null); pushToast("success", t("บันทึกแล้ว", "Saved")); }
+    catch (e) { pushToast("error", (e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const parentList = d.parent_skus ?? [];
 
   return (
     <>
@@ -163,13 +188,35 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              <Field label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null} />
-              <Field label={t("แบรนด์", "Brand")} value={d.brand_label} dot={brandColor} />
-              <Field label={t("ผู้รับผิดชอบ", "Assignee")} value={d.assignee_label} />
-              <Field label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label} />
-              <Field label={t("กำหนดส่ง", "Due Date")} value={d.due_date} highlight={isOverdue(d)} />
-              <Field label={t("แคมเปญ", "Campaign")} value={campaignName} />
-              <Field label="Parent SKU" value={(d.parent_skus && d.parent_skus.length) ? d.parent_skus.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)} />
+              <QuickField label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null}
+                active={qf === "task_type"} onOpen={() => setQf("task_type")} onClose={() => setQf(null)}
+                editor={<ERPSelect value={d.task_type ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...taskTypes]} onChange={(e) => saveQuick({ task_type: e.target.value || null })} />} />
+              <QuickField label={t("แบรนด์", "Brand")} value={d.brand_label} dot={brandColor}
+                active={qf === "brand"} onOpen={() => setQf("brand")} onClose={() => setQf(null)}
+                editor={<ERPSelect value={d.brand_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => saveQuick({ brand_id: e.target.value || null })} />} />
+              <QuickField label={t("ผู้รับผิดชอบ", "Assignee")} value={d.assignee_label}
+                active={qf === "assignee"} onOpen={() => setQf("assignee")} onClose={() => setQf(null)}
+                editor={<UserPicker value={d.assignee_id ? ({ id: d.assignee_id, name: d.assignee_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assignee_id: v?.id ?? null })} disableCreate />} />
+              <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label}
+                active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
+                editor={<UserPicker value={d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ reviewer_id: v?.id ?? null })} disableCreate />} />
+              <QuickField label={t("กำหนดส่ง", "Due Date")} value={d.due_date} highlight={isOverdue(d)}
+                active={qf === "due_date"} onOpen={() => setQf("due_date")} onClose={() => setQf(null)}
+                editor={<ERPInput type="date" defaultValue={d.due_date ?? ""} onChange={(e) => saveQuick({ due_date: e.target.value || null })} />} />
+              <QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
+                active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
+                editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} />
+              <QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
+                active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
+                editor={
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap gap-1">
+                      {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{p.code || p.name}<button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+                      {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+                    </div>
+                    <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
+                  </div>
+                } />
             </div>
           )}
           {/* SKU cards (m2m — ใส่ได้หลายรายการ) */}

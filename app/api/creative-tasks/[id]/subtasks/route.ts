@@ -57,6 +57,24 @@ async function resolvePrompt(admin: ReturnType<typeof supabaseAdmin>, taskId: st
   return NextResponse.json({ prompt, image_urls: imageUrls, error: null });
 }
 
+// รายละเอียด Platform ของ Parent SKU ที่ผูกกับงาน — ใช้ "ยืนยัน" ตอนส่งงานเขียนคำอธิบาย (ไม่ต้องแนบไฟล์)
+async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: string): Promise<NextResponse> {
+  const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("parent_sku_id").eq("task_id", taskId);
+  const pIds = ((pl ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
+  if (!pIds.length) return NextResponse.json({ parents: [], error: null });
+  const { data } = await admin.from("parent_skus_v2").select("code, name_th, name_platform, introduction, description, english_description").in("id", pIds);
+  const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
+    code: (p.code as string) ?? "",
+    name_th: (p.name_th as string) ?? "",
+    name_platform: (p.name_platform as string) ?? "",
+    introduction: (p.introduction as string) ?? "",
+    description: (p.description as string) ?? "",
+    english_description: (p.english_description as string) ?? "",
+    has_description: !!((p.description as string) ?? "").trim(),
+  }));
+  return NextResponse.json({ parents, error: null });
+}
+
 const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order"]);
 
 // อ่าน role ของผู้ใช้ปัจจุบัน (admin/manager/...) — ใช้คุมสิทธิ์ละเอียดของงานย่อย
@@ -74,8 +92,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
   const { id } = await params;
   const admin = supabaseAdmin();
-  const promptSubId = new URL(request.url).searchParams.get("prompt_subtask_id");
+  const sp = new URL(request.url).searchParams;
+  const promptSubId = sp.get("prompt_subtask_id");
   if (promptSubId) return resolvePrompt(admin, id, promptSubId);
+  if (sp.get("platform") === "1") return platformPreview(admin, id);
   const { data, error } = await admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   const rows = (data ?? []) as Record<string, unknown>[];

@@ -151,6 +151,8 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
   const canSubmit = st === "in_progress"; // ส่งงานได้เฉพาะตอนกำลังทำ
+  // งานที่ไม่รับรูป+ลิงก์ (เช่น เขียนคำอธิบาย) → ส่งงานโดยยืนยันรายละเอียด Platform แทนการแนบไฟล์
+  const platformConfirm = !showImages && !showLinks;
 
   // คัดลอก prompt (เติมข้อมูลสินค้าฝั่ง server) ไปคลิปบอร์ด
   const copyPrompt = async () => {
@@ -218,32 +220,32 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               {sub.assignees.map((a) => <AssigneeChip key={a.id} a={a} />)}
             </div>
           )}
-          {/* ③ ไฟล์แนบ (compact) — โชว์เฉพาะที่มีอยู่ ฟอร์มแนบ/ส่งงานไปอยู่ในป๊อปอัป */}
-          {(showImages || showLinks) && (
-            <div className="space-y-2">
-              {imageAtts.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {imageAtts.slice(0, 8).map((a) => <img key={a.id} src={`/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=120`} alt={a.file_name ?? ""} className="h-12 w-12 rounded object-cover border border-slate-200" />)}
-                  {imageAtts.length > 8 && <span className="self-center text-[11px] text-slate-400">+{imageAtts.length - 8}</span>}
-                </div>
-              )}
-              {linkAtts.length > 0 && (
-                <div className="space-y-1">
-                  {linkAtts.map((a) => <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="block text-xs text-violet-700 truncate">🔗 {a.label || a.url}</a>)}
-                </div>
-              )}
-              <button onClick={openWork} className={`w-full h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
-                {canSubmit ? `📤 ${t("ส่งงาน (แนบรูป/ลิงก์)", "Submit (attach files/links)")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`}
-              </button>
-            </div>
-          )}
+          {/* ③ ไฟล์แนบ (compact) — โชว์เฉพาะที่มีอยู่ · ฟอร์มแนบ/ส่งงาน/ยืนยันไปอยู่ในป๊อปอัป */}
+          <div className="space-y-2">
+            {imageAtts.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {imageAtts.slice(0, 8).map((a) => <img key={a.id} src={`/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=120`} alt={a.file_name ?? ""} className="h-12 w-12 rounded object-cover border border-slate-200" />)}
+                {imageAtts.length > 8 && <span className="self-center text-[11px] text-slate-400">+{imageAtts.length - 8}</span>}
+              </div>
+            )}
+            {linkAtts.length > 0 && (
+              <div className="space-y-1">
+                {linkAtts.map((a) => <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="block text-xs text-violet-700 truncate">🔗 {a.label || a.url}</a>)}
+              </div>
+            )}
+            <button onClick={openWork} className={`w-full h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
+              {canSubmit
+                ? (platformConfirm ? `📤 ${t("ตรวจ & ส่งงาน", "Review & submit")}` : `📤 ${t("ส่งงาน (แนบรูป/ลิงก์)", "Submit (attach files/links)")}`)
+                : (platformConfirm ? `🔎 ${t("ดูรายละเอียด Platform", "View platform details")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`)}
+            </button>
+          </div>
           {/* ปุ่มแก้ไขงานย่อย (รายละเอียด/ผู้รับผิดชอบ/ตั้งค่าต่างๆ ไปแก้ในป๊อปอัป) */}
           <div className="flex justify-end">
             <button onClick={() => setEditOpen(true)} className="text-xs text-slate-500 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">✏️ {t("แก้ไขงานย่อย", "Edit subtask")}</button>
           </div>
         </div>
       )}
-      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} onClose={() => setWorkOpen(false)} />}
+      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} onClose={() => setWorkOpen(false)} />}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
     </div>
   );
@@ -319,60 +321,108 @@ function EditSubtaskModal({ sub, taskId, reload, pushToast, canManageAssignees, 
   );
 }
 
-// ป๊อปอัปแนบงาน/ส่งงาน — ฟอร์มแนบรูป (ImageAttach) + ลิงก์ + ปุ่มส่งงาน (รออนุมัติ)
-// แยกจากการ์ดให้การ์ด compact · ส่งงานได้เฉพาะ canSubmit (กำลังทำ) และต้องแนบ ≥1 ก่อน
-function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, onClose }: {
+type PlatformParent = { code: string; name_th: string; name_platform: string; introduction: string; description: string; english_description: string; has_description: boolean };
+
+// ป๊อปอัปแนบงาน/ส่งงาน
+// - งานปกติ (รับรูป/ลิงก์): แนบ ≥1 ก่อนส่ง
+// - งานเขียนคำอธิบาย (ไม่รับรูป/ลิงก์ = platformConfirm): ไม่ต้องแนบ แต่โชว์รายละเอียด Platform ของ
+//   Parent SKU ให้ตรวจ + ต้องมีรายละเอียด (description) ครบทุกตัวก่อนถึงส่งได้
+function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, platformConfirm, onClose }: {
   sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn;
-  showImages: boolean; showLinks: boolean; canSubmit: boolean; onClose: () => void;
+  showImages: boolean; showLinks: boolean; canSubmit: boolean; platformConfirm: boolean; onClose: () => void;
 }) {
   const t = useT();
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [parents, setParents] = useState<PlatformParent[] | null>(null);
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
   const attachCount = sub.attachments?.length ?? 0;
+
+  // โหลดรายละเอียด Platform ของ Parent SKU (โหมดยืนยัน)
+  useEffect(() => {
+    if (!platformConfirm) return;
+    (async () => {
+      try { const j = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?platform=1`).then((r) => r.json()); setParents((j.parents as PlatformParent[]) ?? []); }
+      catch { setParents([]); }
+    })();
+  }, [platformConfirm, taskId]);
+
+  const platformReady = parents !== null && parents.length > 0 && parents.every((p) => p.has_description);
+  const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : attachCount > 0);
+
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
   const submit = async () => {
-    if (attachCount === 0) { pushToast("error", t("กรุณาแนบลิงก์หรือรูปงานอย่างน้อย 1 ก่อนส่ง", "Please attach at least one file or link before submitting")); return; }
+    if (platformConfirm) {
+      if (!platformReady) { pushToast("error", parents && parents.length === 0 ? t("งานนี้ยังไม่ได้ผูก Parent SKU", "No Parent SKU linked to this task") : t("ยังไม่มีรายละเอียด Platform ครบ — กรอกในสินค้าก่อนส่ง", "Platform details incomplete — fill them in the product first")); return; }
+    } else if (attachCount === 0) {
+      pushToast("error", t("กรุณาแนบลิงก์หรือรูปงานอย่างน้อย 1 ก่อนส่ง", "Please attach at least one file or link before submitting")); return;
+    }
     setBusy(true);
     try { await updateSubtask(taskId, sub.id, { status: "submitted" }); await reload(); pushToast("success", t("ส่งงานแล้ว — รออนุมัติ", "Submitted — pending approval")); onClose(); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
+
   return (
     <ERPModal open onClose={onClose} size="md"
-      title={canSubmit ? t("ส่งงาน — แนบรูป/ลิงก์", "Submit work — attach files/links") : t("แนบไฟล์งาน", "Attach work files")}
+      title={platformConfirm ? t("ส่งงาน — ตรวจรายละเอียด Platform", "Submit — review platform details") : canSubmit ? t("ส่งงาน — แนบรูป/ลิงก์", "Submit work — attach files/links") : t("แนบไฟล์งาน", "Attach work files")}
       footer={
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
-          {canSubmit && <button onClick={submit} disabled={busy || attachCount === 0} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
+          {canSubmit && <button onClick={submit} disabled={!canPressSubmit} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
         </div>
       }>
       <div className="space-y-4">
-        {canSubmit && attachCount === 0 && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
-        {showImages && (
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤800px)", "Work images (resized ≤800px)")}</p>
-            <ImageAttach
-              images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
-              onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
-              onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
-              pushToast={pushToast} />
+        {/* โหมดยืนยันรายละเอียด Platform (งานเขียนคำอธิบาย — ไม่ต้องแนบไฟล์) */}
+        {platformConfirm ? (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">{t("ตรวจรายละเอียด Platform ของสินค้าให้ครบก่อนส่ง (ไม่ต้องแนบไฟล์)", "Review the product platform details before submitting (no file needed)")}</p>
+            {parents === null ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
+              : parents.length === 0 ? <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("งานนี้ยังไม่ได้ผูก Parent SKU — ผูกสินค้าก่อนส่งงาน", "No Parent SKU linked — link a product first")}</p>
+              : parents.map((p) => (
+                <div key={p.code} className={`rounded-lg border p-3 space-y-1.5 ${p.has_description ? "border-slate-200" : "border-rose-200 bg-rose-50/40"}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{p.code}</span>
+                    <span className="text-sm font-medium text-slate-700">{p.name_platform || p.name_th || "—"}</span>
+                    {p.has_description ? <span className="text-[10px] text-emerald-600 ml-auto">✓ {t("มีรายละเอียด", "Has details")}</span> : <span className="text-[10px] text-rose-600 ml-auto">⚠ {t("ยังไม่มีรายละเอียด", "Missing details")}</span>}
+                  </div>
+                  {p.introduction && <p className="text-xs text-slate-500 whitespace-pre-wrap line-clamp-3">{p.introduction}</p>}
+                  {p.description
+                    ? <p className="text-xs text-slate-600 whitespace-pre-wrap line-clamp-6 border-t border-slate-100 pt-1.5">{p.description}</p>
+                    : <p className="text-xs text-rose-600 border-t border-rose-100 pt-1.5">{t("ยังไม่มี Description — ไปกรอกที่หน้าสินค้า (รายละเอียด Platform) ก่อน", "No Description yet — fill it in the product page first")}</p>}
+                </div>
+              ))}
+            {parents !== null && parents.length > 0 && !platformReady && <p className="text-xs text-rose-600">{t("ต้องมีรายละเอียด (Description) ครบทุกสินค้าก่อนถึงจะส่งงานได้", "All products need a Description before you can submit")}</p>}
           </div>
-        )}
-        {showLinks && (
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">{t("ลิงก์ส่งงาน", "Work links")}</p>
-            <div className="space-y-1 mb-1.5">
-              {linkAtts.map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
-              {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มีลิงก์", "No links yet")}</p>}
-            </div>
-            <div className="flex gap-1.5">
-              <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ", "Label")} />
-              <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder={t("วางลิงก์", "Paste link")} />
-              <button onClick={addLink} className="h-9 px-2 text-xs text-violet-700 border border-violet-200 rounded-lg shrink-0">{t("แนบ", "Attach")}</button>
-            </div>
-          </div>
+        ) : (
+          <>
+            {canSubmit && attachCount === 0 && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
+            {showImages && (
+              <div>
+                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤800px)", "Work images (resized ≤800px)")}</p>
+                <ImageAttach
+                  images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
+                  onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
+                  onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
+                  pushToast={pushToast} />
+              </div>
+            )}
+            {showLinks && (
+              <div>
+                <p className="text-[11px] text-slate-400 mb-1">{t("ลิงก์ส่งงาน", "Work links")}</p>
+                <div className="space-y-1 mb-1.5">
+                  {linkAtts.map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
+                  {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มีลิงก์", "No links yet")}</p>}
+                </div>
+                <div className="flex gap-1.5">
+                  <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ", "Label")} />
+                  <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder={t("วางลิงก์", "Paste link")} />
+                  <button onClick={addLink} className="h-9 px-2 text-xs text-violet-700 border border-violet-200 rounded-lg shrink-0">{t("แนบ", "Attach")}</button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </ERPModal>
