@@ -36,8 +36,21 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ data: items, error: null });
 }
 
-type Step = { title: string; required_before_next?: boolean };
+type Step = { type?: string; title?: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; config?: Record<string, unknown> };
 type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; description?: string | null; platforms?: string[]; steps?: Step[] };
+
+// เก็บ step ครบรูปแบบ type-driven: type + title + config + description + ผู้รับผิดชอบ (ของกลาง — ไม่ตัดทิ้ง)
+function normalizeSteps(raw?: Step[]): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((s) => (s?.title ?? "").trim()).map((s) => ({
+    type: (s.type ?? "custom"),
+    title: (s.title ?? "").trim(),
+    description: s.description?.toString().trim() || null,
+    required_before_next: !!s.required_before_next,
+    assignee_ids: Array.isArray(s.assignee_ids) ? s.assignee_ids : [],
+    config: s.config && typeof s.config === "object" ? s.config : {},
+  }));
+}
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.create"); if (denied) return denied;
@@ -46,7 +59,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const name = (body.name ?? "").trim();
   if (!name) return NextResponse.json({ error: "กรุณาใส่ชื่อเทมเพลต" }, { status: 400 });
-  const steps = Array.isArray(body.steps) ? body.steps.filter((s) => s?.title?.trim()).map((s) => ({ title: s.title.trim(), required_before_next: !!s.required_before_next })) : [];
+  const steps = normalizeSteps(body.steps);
 
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_creative_task_templates").insert({

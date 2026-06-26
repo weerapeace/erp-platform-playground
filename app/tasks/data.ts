@@ -346,7 +346,34 @@ export async function deleteHashtag(id: string): Promise<void> {
 // ============================================================
 // Templates + Recurring
 // ============================================================
-export type TemplateStep = { title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[] };
+// ชนิดงานย่อย (registry กลาง) — จาก /api/subtask-types
+export type SubtaskType = {
+  key: string; label_th: string; label_en?: string | null; icon?: string | null; color?: string | null;
+  sort_order: number; is_active: boolean; is_builtin: boolean;
+  accepts_text: boolean; accepts_image: boolean; accepts_multi_image: boolean; accepts_link: boolean; accepts_file: boolean;
+  requires_approval: boolean; approve_target: string; has_copy_prompt: boolean;
+  applies_to: string[]; default_required: boolean; default_due_offset_days: number | null;
+  default_assignee_id: string | null; prompt_template: string | null;
+};
+// ค่าตั้งของงานย่อย 1 ชิ้นในเทมเพลต (snapshot ลง subtask ตอนสร้างงาน)
+export type SubtaskStepConfig = {
+  required?: boolean;
+  due_offset_days?: number | null;
+  requires_approval?: boolean;
+  accepts_text?: boolean; accepts_image?: boolean; accepts_multi_image?: boolean; accepts_link?: boolean; accepts_file?: boolean;
+  applies_to?: ("parent" | "sku")[];
+  approve_target?: string;        // none | sku_media | sku_description | description_media | cover
+  description_field?: string;     // เฉพาะ description_text: description | english_description | platform_description
+  desc_mode?: "append" | "replace";
+  has_copy_prompt?: boolean;
+  prompt_template?: string | null;
+};
+export type TemplateStep = { type?: string; title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; assignee_labels?: string[]; config?: SubtaskStepConfig };
+
+export async function listSubtaskTypes(): Promise<SubtaskType[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/subtask-types"));
+  return (j.data as SubtaskType[]) ?? [];
+}
 export type TaskTemplate = {
   id: string; name: string; task_type: string | null; default_priority: string;
   brand_id: string | null; brand_label?: string | null; description: string | null;

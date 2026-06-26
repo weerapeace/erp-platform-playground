@@ -49,7 +49,11 @@ export type Permission =
   | "app.sales" | "app.china_pay" | "app.payroll" | "app.settings"
   | "app.design" | "app.misc"
   | "offers.view" | "offers.edit"
-  | "report.create" | "report.manage";
+  | "report.create" | "report.manage"
+  // งานจัดการ — เทมเพลต + งานย่อย type-driven + sync เข้าสินค้า
+  | "task_template.view" | "task_template.create" | "task_template.edit" | "task_template.delete"
+  | "task_subtask.approve" | "task_subtask.revise" | "task_subtask.cancel"
+  | "product_media.sync" | "sku_description.sync";
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
 
@@ -89,6 +93,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "work_board.dispatch", "production.piecework",
     "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "admin.users", "admin.audit_log",
+    "task_template.view", "task_template.create", "task_template.edit", "task_template.delete",
+    "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   manager: [
     "products.view", "products.create", "products.edit", "products.cost.view",
@@ -106,6 +112,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "work_board.dispatch", "production.piecework",
     "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "admin.audit_log",
+    "task_template.view", "task_template.create", "task_template.edit", "task_template.delete",
+    "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   staff: [
     "products.view", "products.create", "products.edit",
@@ -122,6 +130,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "po.view", "po.create", "po.edit", "po.receive", "po.cancel",
     "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair",
     "attachments.view", "attachments.upload",
+    "task_template.view",
   ],
   viewer: ["products.view", "qc.view", "pr.view", "suppliers.view", "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",
     "customers.view", "employees.view", "warehouses.view", "departments.view", "units.view", "taxes.view", "validation.view", "roles.view",

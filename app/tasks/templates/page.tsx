@@ -16,10 +16,11 @@ import {
   PRIORITY_META,
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
   listRecurring, createRecurring, deleteRecurring, runRecurringNow,
-  listCampaigns, listBrands,
-  type TaskTemplate, type RecurringRule, type Campaign, type BrandOption,
+  listCampaigns, listBrands, listSubtaskTypes,
+  type TaskTemplate, type RecurringRule, type Campaign, type BrandOption, type SubtaskType,
 } from "../data";
 import { useCreativeOptions, taskTypeLabel } from "../use-options";
+import { SubtaskTypePicker, type EditStep } from "./subtask-type-picker";
 import { useT } from "@/components/i18n";
 
 const FREQ =[{ value: "daily", label: "รายวัน" }, { value: "weekly", label: "รายสัปดาห์" }, { value: "monthly", label: "รายเดือน" }];
@@ -68,30 +69,6 @@ export default function TemplatesPage() {
 // Templates tab
 // ============================================================
 const EMPTY_TPL = { name: "", task_type: "photo_shoot", default_priority: "normal", brand_id: "", description: "", platforms: [] as string[] };
-type EditStep = { title: string; description: string; required_before_next: boolean; assignees: { id: string; label: string }[] };
-
-// ตัวแก้ 1 ขั้นตอน — ชื่อ + รายละเอียด + ผู้รับผิดชอบหลายคน
-function StepEditor({ step, index, onChange, onRemove }: { step: EditStep; index: number; onChange: (p: Partial<EditStep>) => void; onRemove: () => void }) {
-  const t = useT();
-  const [adding, setAdding] = useState<UserPickerValue | null>(null);
-  const ids = step.assignees.map((a) => a.id);
-  return (
-    <div className="border border-slate-200 rounded-lg p-2.5 space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-400 w-5">{index + 1}.</span>
-        <ERPInput value={step.title} onChange={(e) => onChange({ title: e.target.value })} placeholder={t("ชื่อขั้นตอน", "Step name")} />
-        <label className="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap"><input type="checkbox" checked={step.required_before_next} onChange={(e) => onChange({ required_before_next: e.target.checked })} />{t("ต้องเสร็จก่อน", "Must complete first")}</label>
-        <button onClick={onRemove} className="text-slate-400 hover:text-red-500">✕</button>
-      </div>
-      <ERPInput value={step.description} onChange={(e) => onChange({ description: e.target.value })} placeholder={t("รายละเอียดขั้นตอน (ไม่บังคับ)", "Step description (optional)")} />
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ:", "Assignees:")}</span>
-        {step.assignees.map((a) => <span key={a.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{a.label}<button onClick={() => onChange({ assignees: step.assignees.filter((x) => x.id !== a.id) })} className="text-slate-400 hover:text-red-500">✕</button></span>)}
-        <div className="w-44"><UserPicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onChange({ assignees: [...step.assignees, { id: v.id, label: v.name }] }); setAdding(null); }} disableCreate /></div>
-      </div>
-    </div>
-  );
-}
 
 function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
   const t = useT();
@@ -103,21 +80,36 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_TPL);
   const [steps, setSteps] = useState<EditStep[]>([]);
+  const [types, setTypes] = useState<SubtaskType[]>([]);   // registry ชนิดงานย่อย (no hardcode)
+  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [delId, setDelId] = useState<TaskTemplate | null>(null);
 
   const load = useCallback(async () => { try { setItems(await listTemplates()); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast]);
-  useEffect(() => { (async () => { setLoading(true); await load(); try { setBrands(await listBrands()); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
+  useEffect(() => { (async () => { setLoading(true); await load(); try { const [b, ty] = await Promise.all([listBrands(), listSubtaskTypes()]); setBrands(b); setTypes(ty); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
 
-  const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setOpen(true); };
-  const openEdit = (t: TaskTemplate) => { setEditId(t.id); setForm({ name: t.name, task_type: t.task_type ?? "photo_shoot", default_priority: t.default_priority, brand_id: t.brand_id ?? "", description: t.description ?? "", platforms: t.platforms ?? [] }); setSteps((Array.isArray(t.steps) ? t.steps : []).map((s) => ({ title: s.title ?? "", description: s.description ?? "", required_before_next: !!s.required_before_next, assignees: (s.assignee_ids ?? []).map((id, k) => ({ id, label: s.assignee_labels?.[k] || id })) }))); setOpen(true); };
-  const togglePlat = (v: string) => setForm((f) => ({ ...f, platforms: f.platforms.includes(v) ? f.platforms.filter((x) => x !== v) : [...f.platforms, v] }));
+  // map step (DB) → EditStep (UI) — legacy step (ไม่มี type) ถือเป็น custom
+  const toEditStep = (s: TaskTemplate["steps"][number]): EditStep => ({
+    type: s.type ?? "custom", title: s.title ?? "", description: s.description ?? "",
+    required_before_next: !!s.required_before_next,
+    assignees: (s.assignee_ids ?? []).map((id, k) => ({ id, label: s.assignee_labels?.[k] || id })),
+    config: s.config ?? {},
+  });
+  const setFormD = (updater: (f: typeof EMPTY_TPL) => typeof EMPTY_TPL) => { setForm(updater); setDirty(true); };
+  const setStepsD = (s: EditStep[]) => { setSteps(s); setDirty(true); };
+
+  const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setDirty(false); setOpen(true); };
+  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [] }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setDirty(false); setOpen(true); };
+  const togglePlat = (v: string) => setFormD((f) => ({ ...f, platforms: f.platforms.includes(v) ? f.platforms.filter((x) => x !== v) : [...f.platforms, v] }));
+
+  // EditStep → body step (type-driven)
+  const stepBody = (s: EditStep) => ({ type: s.type, title: s.title.trim(), description: s.description.trim() || null, required_before_next: s.required_before_next, assignee_ids: s.assignees.map((a) => a.id), config: s.config });
 
   const save = async () => {
     if (!form.name.trim()) { pushToast("error", t("กรุณาใส่ชื่อเทมเพลต", "Please enter a template name")); return; }
     setSaving(true);
-    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description.trim() || null, required_before_next: s.required_before_next, assignee_ids: s.assignees.map((a) => a.id) })) };
-    try { if (editId) await updateTemplate(editId, body); else await createTemplate(body); setOpen(false); pushToast("success", t("บันทึกเทมเพลตแล้ว", "Template saved")); await load(); }
+    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody) };
+    try { if (editId) await updateTemplate(editId, body); else await createTemplate(body); setOpen(false); setDirty(false); pushToast("success", t("บันทึกเทมเพลตแล้ว", "Template saved")); await load(); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
   };
@@ -127,7 +119,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
       await createTemplate({
         name: `${tpl.name} (${t("สำเนา", "Copy")})`, task_type: tpl.task_type ?? null, default_priority: tpl.default_priority,
         brand_id: tpl.brand_id ?? null, description: tpl.description ?? null, platforms: tpl.platforms ?? [],
-        steps: (Array.isArray(tpl.steps) ? tpl.steps : []).map((s) => ({ title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next, assignee_ids: s.assignee_ids ?? [] })),
+        steps: (Array.isArray(tpl.steps) ? tpl.steps : []).map((s) => stepBody(toEditStep(s))),
       });
       pushToast("success", t("ทำสำเนาเทมเพลตแล้ว", "Template duplicated")); await load();
     } catch (e) { pushToast("error", (e as Error).message); }
@@ -159,27 +151,21 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
           </div>
         )}
 
-      <ERPModal open={open} onClose={() => setOpen(false)} title={editId ? t("แก้ไขเทมเพลต", "Edit Template") : t("สร้างเทมเพลต", "Create Template")} size="lg"
+      <ERPModal open={open} onClose={() => setOpen(false)} title={editId ? t("แก้ไขเทมเพลต", "Edit Template") : t("สร้างเทมเพลต", "Create Template")} size="xl" hasUnsavedChanges={dirty}
         footer={<>
           <button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
           <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </>}>
         <ERPFormSection title={t("ข้อมูลเทมเพลต", "Template Details")} columns={2}>
-          <ERPFormField label={t("ชื่อเทมเพลต", "Template Name")} required span={2}><ERPInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ถ่ายรูปสินค้าใหม่", "e.g. New product photo shoot")} /></ERPFormField>
-          <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setForm((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS} onChange={(e) => setForm((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setForm((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ชื่อเทมเพลต", "Template Name")} required span={2}><ERPInput value={form.name} onChange={(e) => setFormD((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ถ่ายรูปสินค้าใหม่", "e.g. New product photo shoot")} /></ERPFormField>
+          <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={taskTypes} onChange={(e) => setFormD((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ความสำคัญเริ่มต้น", "Default Priority")}><ERPSelect value={form.default_priority} options={PRIORITY_OPTIONS} onChange={(e) => setFormD((f) => ({ ...f, default_priority: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setFormD((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แพลตฟอร์ม", "Platforms")}><div className="flex flex-wrap gap-1.5">{platforms.map((p) => <button key={p.value} type="button" onClick={() => togglePlat(p.value)} className={`px-2 py-0.5 rounded-full text-xs border ${form.platforms.includes(p.value) ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>)}</div></ERPFormField>
-          <ERPFormField label={t("คำอธิบาย", "Description")} span={2}><ERPTextarea value={form.description} rows={2} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("คำอธิบาย", "Description")} span={2}><ERPTextarea value={form.description} rows={2} onChange={(e) => setFormD((f) => ({ ...f, description: e.target.value }))} /></ERPFormField>
         </ERPFormSection>
-        <div className="mt-4">
-          <p className="text-sm font-medium text-slate-700 mb-2">{t("ขั้นตอน (subtask)", "Steps (subtasks)")}</p>
-          <div className="space-y-2">
-            {steps.map((s, i) => (
-              <StepEditor key={i} step={s} index={i} onChange={(patch) => setSteps((ss) => ss.map((x, j) => j === i ? { ...x, ...patch } : x))} onRemove={() => setSteps((ss) => ss.filter((_, j) => j !== i))} />
-            ))}
-            <button onClick={() => setSteps((ss) => [...ss, { title: "", description: "", required_before_next: false, assignees: [] }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มขั้นตอน", "Add step")}</button>
-          </div>
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          <SubtaskTypePicker steps={steps} types={types} onChange={setStepsD} />
         </div>
       </ERPModal>
 
