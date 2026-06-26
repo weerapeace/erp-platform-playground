@@ -16,7 +16,7 @@ import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
 
 type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
 type PlanResp = { id: string; name: string; status: string; start_date: string | null; end_date: string | null; lines: DispatchPlanLine[] };
-type AssigneeResp = { craftsmen: { id: string; name: string; department_id?: string | null }[]; dept_wages: Record<string, number> };
+type AssigneeResp = { craftsmen: { id: string; name: string; nickname?: string | null; department_id?: string | null }[]; dept_wages: Record<string, number> };
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; remaining: number; due_date: string | null;
@@ -199,7 +199,7 @@ function WorkBoardPrintInner() {
     const deptIdByName = new Map<string, string>();
     for (const d of board.departments) deptIdByName.set(d.name, d.id);
     const namesByDeptId = new Map<string, string[]>();
-    for (const c of assignees.craftsmen) { if (!c.department_id) continue; const a = namesByDeptId.get(c.department_id) ?? []; a.push(c.name); namesByDeptId.set(c.department_id, a); }
+    for (const c of assignees.craftsmen) { if (!c.department_id) continue; const a = namesByDeptId.get(c.department_id) ?? []; a.push(c.nickname || c.name); namesByDeptId.set(c.department_id, a); }
     const staffHtmlOf = (deptName: string) => {
       const id = deptIdByName.get(deptName); if (!id) return "";
       const names = namesByDeptId.get(id) ?? []; const wage = assignees.dept_wages[id] ?? 0;

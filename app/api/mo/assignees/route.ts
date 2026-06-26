@@ -11,7 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type Assignee = { id: string; name: string; code: string | null; department_id?: string | null; photo?: string | null };
+export type Assignee = { id: string; name: string; nickname?: string | null; code: string | null; department_id?: string | null; photo?: string | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const name = [th || en, nick && `(${nick})`].filter(Boolean).join(" ") || (e.employee_code as string) || "—";
     const photoKey = (e.profile_photo_key as string) || "";
     return {
-      id: String(e.id), name, code: (e.employee_code as string) ?? null, department_id: (e.department_id as string) ?? null,
+      id: String(e.id), name, nickname: nick || null, code: (e.employee_code as string) ?? null, department_id: (e.department_id as string) ?? null,
       photo: photoKey ? `/api/r2-image?key=${encodeURIComponent(photoKey)}` : null,
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "th"));
