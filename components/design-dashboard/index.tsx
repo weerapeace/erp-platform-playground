@@ -720,6 +720,15 @@ export function DesignDashboard() {
       window.history.replaceState(null, "", url.toString());
     }
   };
+  // preload chunk ของ popup ไว้ล่วงหน้า → กดการ์ดแล้วเปิดทันที (ไม่ต้องรอโหลดไฟล์ครั้งแรก)
+  useEffect(() => { void import("@/app/master/design-sheets/detail-view"); }, []);
+  // refresh "เงียบ" หลังปิด popup — อัปเดตการ์ดบนบอร์ดเบื้องหลัง ไม่เด้ง skeleton ทั้งหน้า
+  const silentRefresh = () => {
+    apiFetch(`/api/design-sheets?limit=${DASHBOARD_LIMIT}&archived=0&sort_by=updated_at&sort_dir=desc`)
+      .then((r) => r.json())
+      .then((j) => { if (!j.error && Array.isArray(j.data)) { setSheets(j.data as DesignSheetListItem[]); setTotal(typeof j.total === "number" ? j.total : j.data.length); } })
+      .catch(() => {});
+  };
   const [quickFilter, setQuickFilter] = useState<"all" | "urgent" | "soon" | "closed">("all");
 
   useEffect(() => {
@@ -1208,13 +1217,13 @@ export function DesignDashboard() {
 
       {/* popup รายละเอียดงาน "ในตัวบอร์ด" (reuse popup ของ Design Sheets) — ปิดแล้วรีเฟรชบอร์ดให้เห็นการเปลี่ยน */}
       {openSheetId && (
-        <DesignSheetDetail detailOnly openId={openSheetId} onDetailClose={() => { openDetail(null); refreshDashboard(); }} />
+        <DesignSheetDetail detailOnly openId={openSheetId} onDetailClose={() => { openDetail(null); silentRefresh(); }} />
       )}
 
-      {/* popup สร้างงานใหม่ (reuse ฟอร์มเดิม) — default แบรนด์ = แบรนด์ที่เลือกอยู่ในแถบซ้าย · ปิดแล้วรีเฟรช */}
+      {/* popup สร้างงานใหม่ (reuse ฟอร์มเดิม) — default แบรนด์ = แบรนด์ที่เลือกอยู่ในแถบซ้าย · ปิดแล้ว refresh เงียบ */}
       {createOpen && (
         <DesignSheetDetail detailOnly createMode defaultBrandId={selectedBrand?.id ?? null}
-          onDetailClose={() => { setCreateOpen(false); refreshDashboard(); }} />
+          onDetailClose={() => { setCreateOpen(false); silentRefresh(); }} />
       )}
     </div>
   );
