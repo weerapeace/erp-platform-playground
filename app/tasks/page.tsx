@@ -19,8 +19,10 @@ import { CanvasBoard } from "./canvas-board";
 import { CreateTaskModal } from "./create-task-modal";
 import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
+import { apiFetch } from "@/lib/api";
 import { applyTaskTransition } from "./task-actions";
 import { OverviewDashboard } from "./overview-dashboard";
+import { DEFAULT_THEME, mergeTheme, type OverviewTheme } from "./overview-customizer";
 import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
@@ -79,13 +81,14 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
 // Main page
 // ============================================================
 export default function TasksPage() {
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const router = useRouter();
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const { statuses } = useCreativeStatuses();
   const [view, setView] = useState<"overview" | "queue" | "kanban" | "canvas">("overview");
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
+  const [ovTheme, setOvTheme] = useState<OverviewTheme>(DEFAULT_THEME); // ธีมหน้าภาพรวม "ของฉัน" (per-user)
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -130,6 +133,13 @@ export default function TasksPage() {
   // หลังบันทึก/ลบ → บังคับโหลดงานใหม่ (focus revalidate มีในตัว hook แล้ว)
   const reload = useCallback(async () => { await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]); }, [tasksSWR, mineSWR, subsSWR]);
 
+  // ธีมหน้าภาพรวม "ของฉัน" — โหลดครั้งเดียว + บันทึกอัตโนมัติเมื่อแต่ง
+  useEffect(() => { apiFetch("/api/user-prefs?key=tasks_overview_theme").then((r) => r.json()).then((j) => { if (j && !j.error) setOvTheme(mergeTheme(j.value)); }).catch(() => {}); }, []);
+  const saveTheme = useCallback((th: OverviewTheme) => {
+    setOvTheme(th);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_overview_theme", value: th }) });
+  }, []);
+
   const counts = useMemo(() => ({
     total: tasks.length,
     mine: myTasks.length,
@@ -151,15 +161,14 @@ export default function TasksPage() {
   return (
     <StandaloneShell title={t("งาน Creative (Task Manager)", "Creative Tasks")} icon="🎨" accent="violet">
       {/* Header */}
+      {/* แถบหัว — ซ่อนทั้งแถบบนหน้าภาพรวม (ปุ่มทั้งหมดมีใน Hero + ทางลัด ของภาพรวมแล้ว) */}
+      {view !== "overview" && (
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="flex items-start justify-between gap-4">
-          {/* หน้าภาพรวมมี Hero ทักทายอยู่แล้ว → ซ่อนหัวข้อนี้กันซ้ำ (โชว์เฉพาะมุมมองอื่น) */}
-          {view !== "overview" ? (
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900">{t("งาน Creative", "Creative Tasks")}</h1>
-              <p className="text-slate-500 mt-1">{t("ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ", "Photo · Retouch · Banner · Video · Listing · Social — central table · workflow · approval")}</p>
-            </div>
-          ) : <div />}
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">{t("งาน Creative", "Creative Tasks")}</h1>
+            <p className="text-slate-500 mt-1">{t("ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ", "Photo · Retouch · Banner · Video · Listing · Social — central table · workflow · approval")}</p>
+          </div>
           <div className="flex items-center gap-2 shrink-0">
             <a href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 {t("แคมเปญ", "Campaigns")}</a>
             <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 {t("คอนเทนต์", "Content")}</a>
@@ -169,15 +178,14 @@ export default function TasksPage() {
             <button onClick={openCreate} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 transition-colors">＋ {t("สร้างงาน", "New task")}</button>
           </div>
         </div>
-        {view !== "overview" && (
-          <div className="flex gap-3 mt-4">
-            <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} onClick={() => { setOvFilter("all"); setView("overview"); }} />
-            <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" onClick={() => setView("queue")} active={view === "queue"} />
-            <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" onClick={() => { setOvFilter("review"); setView("overview"); }} />
-            <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" onClick={() => { setOvFilter("overdue"); setView("overview"); }} />
-          </div>
-        )}
+        <div className="flex gap-3 mt-4">
+          <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} onClick={() => { setOvFilter("all"); setView("overview"); }} />
+          <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" onClick={() => setView("queue")} active={view === "queue"} />
+          <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" onClick={() => { setOvFilter("review"); setView("overview"); }} />
+          <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" onClick={() => { setOvFilter("overdue"); setView("overview"); }} />
+        </div>
       </div>
+      )}
 
       <div className="px-8 py-6 space-y-5">
         {/* View toggle */}
@@ -203,6 +211,9 @@ export default function TasksPage() {
                 columns={COLUMNS}
                 filter={ovFilter}
                 onFilter={setOvFilter}
+                theme={ovTheme}
+                canUpload={can("files.upload")}
+                onThemeChange={saveTheme}
                 isAdmin={user?.role === "admin"}
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}

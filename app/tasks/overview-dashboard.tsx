@@ -1,18 +1,19 @@
 "use client";
 
 // ============================================================
-// Overview Dashboard — หน้าแรกของแอป "จัดการงาน" (รวมตารางงานไว้ในตัว)
-// Hero ทักทาย + การ์ดสรุป (= ตัวกรอง) + ตารางกลางกรองตามการ์ด (ซ้าย 2/3) + แคมเปญที่กำลังทำ (ขวา 1/3) + ทางลัด
-// ของกลาง: reuse ข้อมูลที่หน้า /tasks โหลดอยู่แล้ว (ไม่เพิ่ม API) + DataTable กลางตัวเดียวกับทุกโมดูล
+// Overview Dashboard — หน้าแรกของแอป "จัดการงาน" (รวมตารางงานในตัว + แต่งเองได้ต่อคน)
+// Hero ทักทาย (ธีมแต่งได้) + การ์ดสรุป (= ตัวกรอง, ไอคอน/สีแต่งได้) + ตารางกลางกรองตามการ์ด (ซ้าย 2/3) + แคมเปญ (ขวา 1/3) + ทางลัด
+// ของกลาง: reuse ข้อมูลที่หน้า /tasks โหลดอยู่แล้ว + DataTable กลาง · ธีมต่อคนจาก user_ui_prefs
 // ============================================================
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { isTerminal } from "./use-statuses";
 import { isOverdue, type CreativeTask, type Campaign, type MySubtask } from "./data";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
+import { OverviewCustomizer, CARD_COLORS, heroStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
@@ -21,6 +22,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, columns, filter, isAdmin,
+  theme, canUpload, onThemeChange,
   onFilter, onOpenTask, onCreate, onOpenCampaign, onGotoHref, onOpenKnowledge,
 }: {
   userName?: string;
@@ -32,6 +34,9 @@ export function OverviewDashboard({
   columns: ColumnDef<CreativeTask>[];
   filter: OvFilter;
   isAdmin: boolean;
+  theme: OverviewTheme;
+  canUpload: boolean;
+  onThemeChange: (t: OverviewTheme) => void;
   onFilter: (f: OvFilter) => void;
   onOpenTask: (id: string) => void;
   onCreate: () => void;
@@ -40,6 +45,7 @@ export function OverviewDashboard({
   onOpenKnowledge: () => void;
 }) {
   const t = useT();
+  const [customizing, setCustomizing] = useState(false);
 
   // ตารางกรองตามการ์ดที่เลือก
   const filteredTasks = useMemo(() => {
@@ -50,7 +56,7 @@ export function OverviewDashboard({
   }, [filter, tasks, myTasks]);
   const filterLabel = filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
 
-  // นับงานที่ยังไม่ปิดต่อแคมเปญ + แคมเปญที่กำลังทำ (วางแผน/กำลังทำ)
+  // นับงานที่ยังไม่ปิดต่อแคมเปญ + แคมเปญที่กำลังทำ
   const openByCampaign = useMemo(() => {
     const m: Record<string, number> = {};
     for (const tk of tasks) if (tk.campaign_id && !isTerminal(tk.status)) m[tk.campaign_id] = (m[tk.campaign_id] ?? 0) + 1;
@@ -65,24 +71,41 @@ export function OverviewDashboard({
     ? `${t("คุณมีงานในมือ", "You have")} ${counts.mine} ${t("งาน", "tasks on your plate")}${counts.overdue ? ` · ${t("เกินกำหนด", "overdue")} ${counts.overdue}` : ""}`
     : t("ไม่มีงานค้างในมือคุณตอนนี้ 🎉", "Nothing on your plate right now 🎉");
 
+  const cardMeta: { key: CardKey; value: number; label: string }[] = [
+    { key: "all", value: counts.total, label: t("งานทั้งหมด", "All tasks") },
+    { key: "mine", value: counts.mine, label: t("งานของฉัน", "My tasks") },
+    { key: "review", value: counts.review, label: t("รอตรวจ/อนุมัติ", "In review") },
+    { key: "overdue", value: counts.overdue, label: t("เกินกำหนด", "Overdue") },
+  ];
+
+  const heroImage = theme.hero.mode === "image" && !!theme.hero.imageUrl;
+
   return (
     <div className="space-y-6">
-      {/* Hero */}
-      <div className="rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600 text-white p-6 sm:p-7 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-violet-100 text-sm">{t("ภาพรวมงาน Creative", "Creative work overview")}</p>
-          <h2 className="text-xl sm:text-2xl font-bold mt-0.5">{userName ? `${t("สวัสดี", "Hi")} ${userName} 👋` : `${t("สวัสดี", "Hi")} 👋`}</h2>
-          <p className="text-violet-100/90 text-sm mt-1">{heroLine}</p>
+      {/* Hero (ธีมแต่งได้) */}
+      <div className="relative rounded-2xl overflow-hidden shadow-sm text-white" style={heroStyle(theme.hero)}>
+        {heroImage && <div className="absolute inset-0 bg-black/35" />}
+        <div className="relative p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-white/80 text-sm">{t("ภาพรวมงาน Creative", "Creative work overview")}</p>
+            <h2 className="text-xl sm:text-2xl font-bold mt-0.5 drop-shadow-sm">{userName ? `${t("สวัสดี", "Hi")} ${userName} 👋` : `${t("สวัสดี", "Hi")} 👋`}</h2>
+            <p className="text-white/90 text-sm mt-1 drop-shadow-sm">{heroLine}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
+              className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
+            <button onClick={onCreate} className="h-11 px-5 bg-white text-violet-700 font-semibold rounded-xl shadow hover:bg-violet-50">＋ {t("สร้างงานใหม่", "New task")}</button>
+          </div>
         </div>
-        <button onClick={onCreate} className="h-11 px-5 bg-white text-violet-700 font-semibold rounded-xl shadow hover:bg-violet-50 shrink-0">＋ {t("สร้างงานใหม่", "New task")}</button>
       </div>
 
-      {/* การ์ดสรุป = ตัวกรองตาราง */}
+      {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <SummaryCard icon="📋" tone="slate" value={counts.total} label={t("งานทั้งหมด", "All tasks")} active={filter === "all"} onClick={() => onFilter("all")} />
-        <SummaryCard icon="🙋" tone="violet" value={counts.mine} label={t("งานของฉัน", "My tasks")} active={filter === "mine"} onClick={() => onFilter("mine")} />
-        <SummaryCard icon="🟡" tone="amber" value={counts.review} label={t("รอตรวจ/อนุมัติ", "In review")} active={filter === "review"} onClick={() => onFilter("review")} />
-        <SummaryCard icon="⚠️" tone="red" value={counts.overdue} label={t("เกินกำหนด", "Overdue")} active={filter === "overdue"} onClick={() => onFilter("overdue")} />
+        {cardMeta.map((m) => (
+          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={m.label}
+            active={filter === m.key} hint={filter === m.key ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
+            onClick={() => onFilter(m.key)} />
+        ))}
       </div>
 
       {/* สองคอลัมน์: ตาราง (ซ้าย 2/3) + แคมเปญที่กำลังทำ (ขวา 1/3) */}
@@ -157,26 +180,25 @@ export function OverviewDashboard({
           {isAdmin && <ShortcutBtn icon="⚙️" label={t("ตั้งค่า", "Settings")} onClick={() => onGotoHref("/tasks/settings")} />}
         </div>
       </div>
+
+      <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
     </div>
   );
 }
 
-const TONE: Record<string, { box: string; ring: string }> = {
-  slate: { box: "bg-slate-50 border-slate-200 text-slate-700", ring: "ring-slate-400" },
-  violet: { box: "bg-violet-50 border-violet-200 text-violet-700", ring: "ring-violet-400" },
-  amber: { box: "bg-amber-50 border-amber-200 text-amber-700", ring: "ring-amber-400" },
-  red: { box: "bg-red-50 border-red-200 text-red-700", ring: "ring-red-400" },
-};
-function SummaryCard({ icon, tone, value, label, active, onClick }: { icon: string; tone: keyof typeof TONE | string; value: number; label: string; active?: boolean; onClick: () => void }) {
-  const tc = TONE[tone] ?? TONE.slate;
+function SummaryCard({ card, value, label, active, hint, onClick }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void }) {
+  const c = CARD_COLORS[card.color] ?? CARD_COLORS.slate;
   return (
-    <button onClick={onClick} className={`text-left rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${tc.box} ${active ? `ring-2 ${tc.ring}` : ""}`}>
+    <button onClick={onClick} className={`text-left rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
       <div className="flex items-center justify-between">
-        <span className="text-lg">{icon}</span>
+        {card.iconUrl
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="w-6 h-6 object-contain" />
+          : <span className="text-lg">{card.icon}</span>}
         <span className="text-2xl font-bold tabular-nums">{value}</span>
       </div>
       <p className="text-sm font-medium mt-1">{label}</p>
-      <p className="text-[11px] opacity-70 mt-0.5">{active ? "● กรองอยู่" : "กดเพื่อกรอง"}</p>
+      <p className="text-[11px] opacity-70 mt-0.5">{hint}</p>
     </button>
   );
 }
