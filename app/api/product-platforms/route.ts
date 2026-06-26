@@ -21,7 +21,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, brand_id").eq("id", parentId).maybeSingle(),
-    admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
+    admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
     admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, cover_image_r2_key, is_active").eq("parent_sku_id", parentId).order("code", { ascending: true }),
     admin.from("product_image_slots").select("r2_key").eq("owner_id", parentId),
@@ -52,6 +52,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const platforms = ((pf ?? []) as Record<string, unknown>[]).map((p) => ({
     id: String(p.id), code: String(p.code ?? ""), name_th: String(p.name_th ?? p.code ?? ""),
     icon_key: (p.icon_key as string) ?? null, theme_color: (p.theme_color as string) ?? null,
+    capabilities: (p.capabilities as Record<string, unknown>) ?? {},
   }));
   const draftMap: Record<string, unknown> = {};
   for (const d of ((drafts ?? []) as Record<string, unknown>[])) draftMap[String(d.platform_id)] = d;

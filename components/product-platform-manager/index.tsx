@@ -8,6 +8,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { HoverImage } from "@/components/hover-image";
@@ -15,7 +16,10 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 
-type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null };
+// ตัวแก้สินค้ากลาง (SKU) — เปิดจากตัวจัดการเพื่อแก้ราคา/สี/รูป หรือเพิ่มสีใหม่ · dynamic กัน import วน
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+
+type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null; capabilities?: Record<string, unknown> };
 type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
 type ParentInfo = { id: string; code: string; name_th: string; description: string; category_id: string | null; category_name: string | null };
 type ImageItem = { key: string; source: string };
@@ -40,6 +44,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [active, setActive] = useState<string>("");
   const [catInput, setCatInput] = useState("");
   const [publishing, setPublishing] = useState(false);
+  const [skuEditor, setSkuEditor] = useState<{ recordId: string | null } | null>(null); // แก้/เพิ่มสี (SKU)
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toast = useCallback((type: Toast["type"], msg: string) => {
     const id = Math.floor(performance.now()) + Math.floor(performance.now() % 1000);
@@ -152,7 +157,8 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     { key: "color", header: "สี", width: "1fr", cell: (v) => v.color || "—" },
     { key: "price", header: "ราคา", width: "0.8fr", align: "right", sortValue: (v) => v.price ?? -1, cell: (v) => v.has_price ? <span className="tabular-nums">{v.price!.toLocaleString()}฿</span> : <span className="text-rose-500 text-xs">ไม่มี</span> },
     { key: "ready", header: "พร้อม", width: "4.5rem", align: "center", cell: (v) => (v.has_price && v.has_image && v.is_active) ? <span className="text-emerald-600">✓</span> : <span className="text-rose-500" title={[!v.has_price && "ไม่มีราคา", !v.has_image && "ไม่มีรูป", !v.is_active && "ปิดอยู่"].filter(Boolean).join(", ")}>✗</span> },
-  ], []);
+    { key: "edit", header: "", width: "3rem", align: "center", cell: (v) => canEdit ? <button onClick={() => setSkuEditor({ recordId: v.id })} title="แก้ราคา/สี/รูป" className="text-violet-600 hover:underline">✏️</button> : null },
+  ], [canEdit]);
 
   const activePf = platforms.find((p) => p.id === active);
   const iconOf = (p: Platform) => p.icon_key || PLATFORM_ICON[p.code] || "🏬";
@@ -238,8 +244,13 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                 </div>
 
                 <div>
-                  <p className="text-[11px] text-slate-400 mb-1">SKU / สี ที่จะส่งไป {activePf.name_th} ({variants.length})</p>
-                  <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — เพิ่มที่หน้าสินค้า" />
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[11px] text-slate-400">SKU / สี ที่จะส่งไป {activePf.name_th} ({variants.length})</p>
+                    {canEdit && (activePf.capabilities?.add_variant !== false
+                      ? <button onClick={() => setSkuEditor({ recordId: null })} className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">➕ เพิ่มสี</button>
+                      : <span className="text-[10px] text-amber-600" title="แพลตฟอร์มนี้เพิ่มสีใหม่ใน listing เดิมไม่ได้ ต้องสร้าง listing ใหม่">⚠ เพิ่มสีใน listing เดิมไม่ได้</span>)}
+                  </div>
+                  <MiniTable rows={variants} columns={cols} rowKey={(v) => v.id} searchText={(v) => `${v.code} ${v.color ?? ""}`} dense emptyText="ยังไม่มี SKU ลูก — กด ➕ เพิ่มสี" />
                 </div>
 
                 <div className="rounded-lg border border-slate-200 p-3">
@@ -257,7 +268,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
               <span className="text-[11px] text-slate-400">เซฟร่างอัตโนมัติ · ลงขายตอนนี้เป็นแบบจำลอง (mock) — ต่อ API จริงทีหลังต่อแพลตฟอร์ม</span>
               <div className="flex items-center gap-2 shrink-0">
                 {canPublish && <button onClick={publishAll} disabled={publishing} className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">📦 ลงขายทุกที่พร้อม</button>}
-                <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ลงขายซ้ำ" : "📤 ลงขาย"}</button>
+                <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ส่ง update" : "📤 ลงขาย"}</button>
               </div>
             </div>
           </>
@@ -270,6 +281,13 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
           ))}
         </div>
       </div>
+      {/* ตัวแก้สินค้ากลาง (SKU) — แก้ราคา/สี/รูป หรือเพิ่มสีใหม่ (recordId null = สร้างใต้ parent นี้) · ปิดแล้วโหลดใหม่ */}
+      {skuEditor && parent && (
+        <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" recordId={skuEditor.recordId} startInEdit
+          createTitle="เพิ่มสี (SKU ใหม่)"
+          createDefaults={skuEditor.recordId ? undefined : { parent_sku_id: parent.id }}
+          onClose={() => { setSkuEditor(null); load(); }} onChanged={load} />
+      )}
     </>
   );
 }

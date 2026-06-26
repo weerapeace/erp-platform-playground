@@ -50,12 +50,15 @@ export async function publishOne(admin: Admin, parentSkuId: string, platformId: 
   const { data: acct } = await admin.from("platform_accounts").select("id, label").eq("brand_id", parent.brand_id).eq("platform_id", platformId).eq("is_active", true).maybeSingle();
   if (!acct) throw new Error(`แบรนด์นี้ยังไม่มีร้าน ${platform.name_th} — ตั้งค่าที่ จัดการร้าน/บัญชีแพลตฟอร์ม`);
 
-  const { data: job } = await admin.from("platform_publish_jobs").insert({ parent_sku_id: parentSkuId, platform_id: platformId, account_id: acct.id, job_type: "publish", status: "processing", created_by: userId }).select("id").single();
+  // ถ้ามีรหัสสินค้าบนแพลตฟอร์มอยู่แล้ว = ส่ง update (ไม่งั้น = publish ใหม่)
+  const isUpdate = !!draft.platform_product_id;
+  const jobType = isUpdate ? "update" : "publish";
+  const { data: job } = await admin.from("platform_publish_jobs").insert({ parent_sku_id: parentSkuId, platform_id: platformId, account_id: acct.id, job_type: jobType, status: "processing", created_by: userId }).select("id").single();
   try {
-    const res = mockConnector(platform.code);
+    const res = isUpdate ? { platform_product_id: String(draft.platform_product_id), review_link: (draft.review_link as string) ?? null } : mockConnector(platform.code);
     await admin.from("platform_listing_drafts").update({ status: "published", platform_product_id: res.platform_product_id, review_link: res.review_link, last_sync_status: "success", last_synced_at: new Date().toISOString(), last_error: null, updated_by: userId }).eq("id", draft.id);
     await admin.from("platform_publish_jobs").update({ status: "success", result: res, finished_at: new Date().toISOString() }).eq("id", job!.id);
-    await writeAudit(admin, { action: "publish", entityType: "platform_listing_draft", entityId: String(draft.id), actorId: userId, actorName: null, metadata: { parent_sku_id: parentSkuId, platform: platform.code, platform_product_id: res.platform_product_id, mock: true } });
+    await writeAudit(admin, { action: jobType, entityType: "platform_listing_draft", entityId: String(draft.id), actorId: userId, actorName: null, metadata: { parent_sku_id: parentSkuId, platform: platform.code, platform_product_id: res.platform_product_id, mock: true } });
     return res;
   } catch (e) {
     const msg = (e as Error).message;
