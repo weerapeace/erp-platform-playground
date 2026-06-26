@@ -6,7 +6,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from "react";
-import { ERPTextarea } from "@/components/form";
+import { PromptEditor } from "@/components/prompt-editor";
 import { useT } from "@/components/i18n";
 import { listBrands, listSubtaskTypes, listBrandPrompts, saveBrandPrompt, type BrandOption, type SubtaskType } from "../data";
 
@@ -17,25 +17,28 @@ export function BrandPromptsTab({ pushToast }: { pushToast: ToastFn }) {
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const [types, setTypes] = useState<SubtaskType[]>([]);
   const [brandId, setBrandId] = useState("");
-  const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const [prompts, setPrompts] = useState<Record<string, string>>({}); // ค่าที่บันทึกแล้ว
+  const [draft, setDraft] = useState<Record<string, string>>({});      // ค่าที่กำลังแก้
   const [loading, setLoading] = useState(false);
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
   useEffect(() => { (async () => { try { const [b, ty] = await Promise.all([listBrands(), listSubtaskTypes()]); setBrands(b); setTypes(ty); if (b[0]) setBrandId(b[0].id); } catch { /* ignore */ } })(); }, []);
 
   const loadPrompts = useCallback(async (bid: string) => {
-    if (!bid) { setPrompts({}); return; }
+    if (!bid) { setPrompts({}); setDraft({}); return; }
     setLoading(true);
-    try { const list = await listBrandPrompts(bid); setPrompts(Object.fromEntries(list.map((p) => [p.subtask_type, p.prompt_template ?? ""]))); }
+    try { const list = await listBrandPrompts(bid); const map = Object.fromEntries(list.map((p) => [p.subtask_type, p.prompt_template ?? ""])); setPrompts(map); setDraft(map); }
     catch { /* ignore */ } finally { setLoading(false); }
   }, []);
   useEffect(() => { loadPrompts(brandId); }, [brandId, loadPrompts]);
 
   const promptTypes = types.filter((ty) => ty.has_copy_prompt || (ty.prompt_template ?? "").trim().length > 0);
 
+  const brandName = brands.find((b) => b.id === brandId)?.name ?? "";
+
   const save = async (ty: SubtaskType, val: string) => {
     setSavingKey(ty.key);
-    try { await saveBrandPrompt(brandId, ty.key, val.trim() || null); setPrompts((p) => ({ ...p, [ty.key]: val.trim() })); pushToast("success", val.trim() ? t("บันทึก prompt แล้ว", "Prompt saved") : t("กลับค่าเริ่มต้นแล้ว", "Reset to default")); }
+    try { await saveBrandPrompt(brandId, ty.key, val.trim() || null); const v = val.trim(); setPrompts((p) => ({ ...p, [ty.key]: v })); setDraft((d) => ({ ...d, [ty.key]: v })); pushToast("success", v ? t("บันทึก prompt แล้ว", "Prompt saved") : t("กลับค่าเริ่มต้นแล้ว", "Reset to default")); }
     catch (e) { pushToast("error", (e as Error).message); } finally { setSavingKey(null); }
   };
 
@@ -48,12 +51,13 @@ export function BrandPromptsTab({ pushToast }: { pushToast: ToastFn }) {
           {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </div>
-      <p className="text-xs text-slate-400 mb-3">{t("ตั้ง prompt เฉพาะแบรนด์นี้ — เว้นว่าง = ใช้ค่าเริ่มต้นของชนิดงาน · ตัวแปร เช่น {{brand_name}} {{price}} {{colors}} {{collection}} {{approved_image_urls}}", "Per-brand prompt — empty = use type default")}</p>
+      <p className="text-xs text-slate-400 mb-3">{t("ตั้ง prompt เฉพาะแบรนด์นี้ — เว้นว่าง = ใช้ค่าเริ่มต้นของชนิดงาน · คลิกปุ่มตัวแปรใต้ช่องเพื่อแทรก (เช่น ชื่อแบรนด์ ราคา สี) ไม่ต้องพิมพ์ {{ }} เอง", "Per-brand prompt — empty = use type default · click variable chips to insert")}</p>
       {loading ? <div className="py-10 text-center text-slate-400 text-sm">{t("กำลังโหลด...", "Loading...")}</div> : (
         <div className="space-y-3">
           {promptTypes.map((ty) => {
-            const override = prompts[ty.key] ?? "";
-            const hasOverride = override.trim().length > 0;
+            const saved = prompts[ty.key] ?? "";
+            const cur = draft[ty.key] ?? "";
+            const hasOverride = saved.trim().length > 0;
             return (
               <div key={ty.key} className="border border-slate-200 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-1.5">
@@ -63,9 +67,11 @@ export function BrandPromptsTab({ pushToast }: { pushToast: ToastFn }) {
                     {hasOverride && <button onClick={() => save(ty, "")} className="text-[11px] text-rose-500 hover:underline">{t("กลับค่าเริ่มต้น", "Reset")}</button>}
                   </span>
                 </div>
-                <ERPTextarea key={`${ty.key}:${brandId}:${hasOverride}`} rows={3} defaultValue={override}
-                  placeholder={ty.prompt_template ?? t("(ค่าเริ่มต้น)", "(default)")}
-                  onBlur={(e) => { if (e.target.value.trim() !== override.trim()) save(ty, e.target.value); }} />
+                <PromptEditor value={cur} rows={3}
+                  sampleOverrides={{ brand_name: brandName }}
+                  placeholder={ty.prompt_template ?? t("เว้นว่าง = ใช้ค่าเริ่มต้นของชนิดงาน", "Empty = use type default")}
+                  onChange={(v) => setDraft((d) => ({ ...d, [ty.key]: v }))}
+                  onCommit={(v) => { if (v.trim() !== saved.trim()) save(ty, v); }} />
                 {savingKey === ty.key && <p className="text-[10px] text-slate-400 mt-1">{t("กำลังบันทึก...", "Saving...")}</p>}
               </div>
             );

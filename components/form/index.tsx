@@ -130,9 +130,10 @@ export interface ERPTextareaProps extends React.TextareaHTMLAttributes<HTMLTextA
   error?: boolean;
 }
 
-export function ERPTextarea({ error, className = "", ...props }: ERPTextareaProps) {
+export const ERPTextarea = React.forwardRef<HTMLTextAreaElement, ERPTextareaProps>(function ERPTextarea({ error, className = "", ...props }, ref) {
   return (
     <textarea
+      ref={ref}
       {...props}
       className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 resize-none transition-colors
         ${error
@@ -143,7 +144,7 @@ export function ERPTextarea({ error, className = "", ...props }: ERPTextareaProp
         ${className}`}
     />
   );
-}
+});
 
 // ---- Select ----
 
