@@ -637,7 +637,10 @@ export function DesignDashboard() {
                                   </div>
                                   <div className="mt-0.5 min-h-[32px] text-xs font-semibold text-slate-800">{sheet.name}</div>
                                   {sheet.note && (
-                                    <div className="mt-1 line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-500" title={sheet.note}>📝 {sheet.note}</div>
+                                    <div className="mt-1 line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-600" title={sheet.note}>📝 {sheet.note}</div>
+                                  )}
+                                  {sheet.detail_excerpt && (
+                                    <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-400" title={sheet.detail_excerpt}>{sheet.detail_excerpt}</div>
                                   )}
                                   <div className="mt-2 flex items-center justify-between gap-2">
                                     <span className="truncate text-[11px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>

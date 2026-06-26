@@ -23,10 +23,23 @@ export type DesignSheetListItem = {
   brand_id: string | null; brand_name: string | null; brand_color: string | null;
   status: string; order_date: string | null; deadline: string | null;
   drive_link: string | null; note: string | null; is_active: boolean;
+  detail_excerpt: string | null;   // ตัวอย่างข้อความจาก "รายละเอียดงาน" (ตัด HTML แล้ว) ไว้โชว์บนการ์ด
   updated_at: string; cover_url: string | null;
   // เฟส 8 (Canvas): สถานะความครบของขั้นตอน — ไว้โชว์ไฟบนการ์ด
   has_cost: boolean; has_quote: boolean; parent_count: number;
 };
+
+// ตัด HTML จาก "รายละเอียดงาน" → ข้อความสั้น ๆ สำหรับโชว์บนการ์ด (ไม่ส่ง HTML ก้อนใหญ่ไป client)
+function excerptHtml(html: string | null | undefined, max = 160): string | null {
+  if (!html) return null;
+  const text = html
+    .replace(/<(br|\/p|\/div|\/li|\/h[1-6])>/gi, " ")   // ขึ้นบรรทัด → เว้นวรรค
+    .replace(/<[^>]*>/g, "")                              // ตัด tag ที่เหลือ
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  return text.length > max ? text.slice(0, max).trimEnd() + "…" : text;
+}
 
 async function nextDsNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string> {
   const { data, error } = await admin.rpc("erp_next_number", { p_key: "ds" });
@@ -71,7 +84,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   let q = admin.from("design_sheets")
-    .select("id, code, name, brand_id, status, order_date, deadline, drive_link, note, is_active, updated_at, parent_sku_codes, brand:brands!brand_id(name, color)", { count: "exact" })
+    .select("id, code, name, brand_id, status, order_date, deadline, drive_link, note, detail, is_active, updated_at, parent_sku_codes, brand:brands!brand_id(name, color)", { count: "exact" })
     .eq("is_active", !archived)
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
@@ -103,6 +116,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       brand_id: (r.brand_id as string) ?? null, brand_name: b?.name ?? null, brand_color: b?.color ?? null,
       status: String(r.status ?? "design"), order_date: (r.order_date as string) ?? null, deadline: (r.deadline as string) ?? null,
       drive_link: (r.drive_link as string) ?? null, note: (r.note as string) ?? null, is_active: !!r.is_active,
+      detail_excerpt: excerptHtml(r.detail as string | null),
       updated_at: String(r.updated_at), cover_url: covers.get(id) ?? null,
       has_cost: withCost.has(id), has_quote: withQuote.has(id),
       parent_count: Array.isArray(r.parent_sku_codes) ? (r.parent_sku_codes as unknown[]).length : 0,
