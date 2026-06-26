@@ -361,8 +361,8 @@ function CopyFromSheetModal({ open, excludeId, onClose, onApply }: {
 
 // detailOnly = โหมด "เฉพาะ popup" (ไม่เรนเดอร์ตาราง/canvas) — ให้หน้าอื่น (เช่น Design Dashboard) เปิด popup รายละเอียด
 // ในตัวเองได้ โดย reuse popup เดิมทั้งหมด · openId = ใบที่จะเปิด · onDetailClose = เรียกตอนปิด popup
-export function DesignSheetsDetail({ detailOnly = false, openId = null, onDetailClose }:
-  { detailOnly?: boolean; openId?: string | null; onDetailClose?: () => void } = {}) {
+export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, onDetailClose }:
+  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; onDetailClose?: () => void } = {}) {
   const canView = usePermission("products.view");
   const canCreate = usePermission("products.create");
   const canEdit = usePermission("products.edit");
@@ -1048,6 +1048,15 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, onDetail
     void openEdit({ id: openId } as DesignSheetListItem);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailOnly, openId]);
+  // โหมด popup-เดี่ยว + สร้างงานใหม่: เปิดฟอร์มสร้าง (ครั้งเดียว) + ตั้งแบรนด์เริ่มต้นถ้าส่งมา
+  const createdRef = useRef(false);
+  useEffect(() => {
+    if (!detailOnly || !createMode || createdRef.current) return;
+    createdRef.current = true;
+    openCreate();
+    if (defaultBrandId) patch({ brand_id: defaultBrandId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailOnly, createMode]);
 
   const save = async () => {
     if (!form) return;

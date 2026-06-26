@@ -706,6 +706,7 @@ export function DesignDashboard() {
   const [moveMessage, setMoveMessage] = useState<MoveMessage | null>(null);
   const [search, setSearch] = useState("");
   const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
+  const [createOpen, setCreateOpen] = useState(false);                   // เปิด popup สร้างงานใหม่
   useEffect(() => {
     if (typeof window === "undefined") return;
     const id = new URLSearchParams(window.location.search).get("open");
@@ -917,8 +918,9 @@ export function DesignDashboard() {
             >
               รีเฟรชข้อมูล
             </button>
-            <button data-gg-action="primary" className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
-              อัปเดตหลายงาน
+            <button data-gg-action="primary" onClick={() => setCreateOpen(true)}
+              className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
+              ＋ เพิ่มงาน
             </button>
           </div>
         </div>
@@ -966,6 +968,11 @@ export function DesignDashboard() {
               </div>
               <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
             </div>
+
+            <button data-gg-action onClick={() => setCreateOpen(true)} title="สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)"
+              className="mb-2 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:border-blue-300 hover:text-blue-600">
+              ＋ เพิ่มงาน / แบรนด์
+            </button>
 
             <button
               data-gg-all-button
@@ -1202,6 +1209,12 @@ export function DesignDashboard() {
       {/* popup รายละเอียดงาน "ในตัวบอร์ด" (reuse popup ของ Design Sheets) — ปิดแล้วรีเฟรชบอร์ดให้เห็นการเปลี่ยน */}
       {openSheetId && (
         <DesignSheetDetail detailOnly openId={openSheetId} onDetailClose={() => { openDetail(null); refreshDashboard(); }} />
+      )}
+
+      {/* popup สร้างงานใหม่ (reuse ฟอร์มเดิม) — default แบรนด์ = แบรนด์ที่เลือกอยู่ในแถบซ้าย · ปิดแล้วรีเฟรช */}
+      {createOpen && (
+        <DesignSheetDetail detailOnly createMode defaultBrandId={selectedBrand?.id ?? null}
+          onDetailClose={() => { setCreateOpen(false); refreshDashboard(); }} />
       )}
     </div>
   );
