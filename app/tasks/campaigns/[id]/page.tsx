@@ -175,8 +175,15 @@ export default function CampaignCanvasPage() {
   const openFolder = useCallback((path: string) => {
     if (!path) return;
     navigator.clipboard?.writeText(path).catch(() => {});
-    // ใช้ erpfolder: (ไม่มี //) แบบ mailto: เพื่อเลี่ยง Chrome ตีความเป็น host แล้วแปลง path เพี้ยน
-    try { window.location.href = "erpfolder:" + encodeURIComponent(path); } catch { /* ไม่มี handler ก็ข้าม */ }
+    // เปิด protocol ผ่าน iframe ซ่อน — ไม่ทำให้หน้าเปลี่ยน (เลี่ยง "Leave site?" ของ beforeunload กระดาน)
+    // ใช้ erpfolder: (ไม่มี //) แบบ mailto: กัน Chrome ตีความส่วน path เป็น host แล้วเพี้ยน
+    try {
+      const ifr = document.createElement("iframe");
+      ifr.style.display = "none";
+      ifr.src = "erpfolder:" + encodeURIComponent(path);
+      document.body.appendChild(ifr);
+      setTimeout(() => { try { ifr.remove(); } catch { /* noop */ } }, 2000);
+    } catch { /* ไม่มี handler ก็ข้าม */ }
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
