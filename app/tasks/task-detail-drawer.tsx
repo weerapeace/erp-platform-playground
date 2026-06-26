@@ -10,6 +10,7 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
+import { ImageInput } from "@/components/image-input";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -80,6 +81,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
+  const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
   const [drawerW, setDrawerW] = useState(640);       // ความกว้าง drawer (ลากปรับได้ + จำไว้)
   useEffect(() => { const v = Number(localStorage.getItem("taskDrawerWidth")); if (v && v >= 480) setDrawerW(v); }, []);
   // ลากขอบซ้ายเพื่อปรับความกว้าง (drawer ชิดขวา → กว้าง = ระยะจากขวาถึงเมาส์)
@@ -147,6 +149,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     finally { setBusy(false); }
   };
   const parentList = d.parent_skus ?? [];
+  // รูปปก: ของงานเอง ถ้าไม่มี → fallback รูปจาก Parent SKU ตัวแรกที่มีรูป
+  const parentImg = parentList.find((p) => p.image_key)?.image_key ?? null;
+  const coverKey = d.cover_image_r2_key || parentImg;
+  const coverFromParent = !d.cover_image_r2_key && !!parentImg;
 
   return (
     <>
@@ -170,6 +176,25 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* รูปปกของงาน — ไม่มี = ใช้รูปจาก Parent SKU · กดเปลี่ยน/เพิ่มได้ */}
+          <div>
+            {coverKey ? (
+              <div className="relative rounded-xl overflow-hidden border border-slate-200">
+                <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=900`} alt="" className="w-full max-h-56 object-cover" />
+                {coverFromParent && <span className="absolute top-2 left-2 text-[10px] bg-black/55 text-white px-1.5 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
+                <button type="button" onClick={() => setCoverEdit((v) => !v)} className="absolute top-2 right-2 text-xs bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded-md px-2 py-0.5">✎ {t("เปลี่ยนรูปปก", "Change cover")}</button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setCoverEdit(true)} className="w-full h-20 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-colors">🖼️ {t("เพิ่มรูปปก", "Add cover image")}</button>
+            )}
+            {coverEdit && (
+              <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-3 space-y-2">
+                <p className="text-[11px] text-slate-500">{t("รูปปกของงาน — ไม่ใส่ = ใช้รูปจาก Parent SKU", "Task cover — leave empty to use Parent SKU image")}</p>
+                <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
+                <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-xs text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
+              </div>
+            )}
+          </div>
           {/* status row */}
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={d.status} />

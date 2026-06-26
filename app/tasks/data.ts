@@ -30,6 +30,7 @@ export type CreativeTask = {
   sku_color: string | null; sku_price: number | null; sku_image_key: string | null;
   parent_sku_id: string | null; parent_sku_code: string | null; parent_sku_name: string | null;
   product_name: string | null;
+  cover_image_r2_key: string | null;
   priority: CreativePriority;
   status: CreativeStatus;
   progress_percent: number;
@@ -70,7 +71,7 @@ export type CreativeAttachment = {
 };
 
 export type TaskSkuRef = { id: string; code: string | null; name: string | null; color?: string | null; price?: number | null; image_key?: string | null };
-export type TaskParentRef = { id: string; code: string | null; name: string | null };
+export type TaskParentRef = { id: string; code: string | null; name: string | null; image_key?: string | null };
 export type TaskDetail = CreativeTask & {
   subtasks: CreativeSubtask[];
   comments: CreativeComment[];
