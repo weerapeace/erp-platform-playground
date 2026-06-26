@@ -14,6 +14,8 @@ const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
   { ssr: false }
 );
+// popup รายละเอียดงาน = หน้า Design Sheets ในโหมด "เฉพาะ popup" (โหลดเฉพาะตอนเปิดการ์ด ไม่ถ่วงบอร์ด)
+const DesignSheetDetail = dynamic(() => import("@/app/master/design-sheets/detail-view").then((m) => m.DesignSheetsDetail), { ssr: false });
 
 type Tone = "danger" | "warn" | "good" | "done" | "normal";
 
@@ -703,6 +705,20 @@ export function DesignDashboard() {
   const [movingSheetId, setMovingSheetId] = useState<string | null>(null);
   const [moveMessage, setMoveMessage] = useState<MoveMessage | null>(null);
   const [search, setSearch] = useState("");
+  const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (id) setOpenSheetId(id);   // เปิดด้วยลิงก์ ?open=ID (refresh/copy link แล้วยังเปิดงานเดิม)
+  }, []);
+  const openDetail = (id: string | null) => {
+    setOpenSheetId(id);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (id) url.searchParams.set("open", id); else url.searchParams.delete("open");
+      window.history.replaceState(null, "", url.toString());
+    }
+  };
   const [quickFilter, setQuickFilter] = useState<"all" | "urgent" | "soon" | "closed">("all");
 
   useEffect(() => {
@@ -1082,6 +1098,7 @@ export function DesignDashboard() {
                                 <a
                                   key={sheet.id}
                                   href={`/master/design-sheets?open=${encodeURIComponent(sheet.id)}`}
+                                  onClick={(event) => { event.preventDefault(); if (!isMoving) openDetail(sheet.id); }}
                                   data-gg-task-card
                                   draggable={!movingSheetId}
                                   onDragStart={(event) => handleCardDragStart(event, sheet)}
@@ -1180,6 +1197,11 @@ export function DesignDashboard() {
           actor={null}
           onChanged={refreshDashboard}
         />
+      )}
+
+      {/* popup รายละเอียดงาน "ในตัวบอร์ด" (reuse popup ของ Design Sheets) — ปิดแล้วรีเฟรชบอร์ดให้เห็นการเปลี่ยน */}
+      {openSheetId && (
+        <DesignSheetDetail detailOnly openId={openSheetId} onDetailClose={() => { openDetail(null); refreshDashboard(); }} />
       )}
     </div>
   );
