@@ -211,7 +211,7 @@ export type MenuRow = {
 };
 
 // โมดูลใหญ่ (App) — tabs บนสุด
-export type AppGroup = { id?: string; key: string; label: string; icon: string | null; sort_order: number; permission_key: string | null; is_active: boolean };
+export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean };
 
 // map section (default nav) → app key — สำหรับ "นำเข้าเมนูเริ่มต้น"
 function sectionToApp(label: string): string {
@@ -546,6 +546,23 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     if (!ag?.permission_key) return null;
     return can(ag.permission_key as Parameters<typeof can>[0]) ? null : ag.label;
   })();
+
+  // ไอคอนแท็บ (favicon) + ชื่อแท็บ ตาม "แอปของหน้าปัจจุบัน" → เปิดหลายแท็บแยกออกได้
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const ag = currentAppKey ? appGroups.find((a) => a.key === currentAppKey) : null;
+    document.title = ag ? `${ag.label} · ERP` : "ERP Platform";
+    let href: string | null = null;
+    if (ag?.icon_url) href = `/api/r2-image?key=${encodeURIComponent(ag.icon_url)}&w=64`;
+    else if (ag?.icon) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><text x="32" y="34" font-size="52" text-anchor="middle" dominant-baseline="central">${ag.icon}</text></svg>`;
+      href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    }
+    if (!href) return;
+    let link = document.querySelector<HTMLLinkElement>("link#dynamic-app-favicon");
+    if (!link) { link = document.createElement("link"); link.id = "dynamic-app-favicon"; link.rel = "icon"; document.head.appendChild(link); }
+    link.href = href;
+  }, [currentAppKey, appGroups]);
 
   // ปิด mobile nav อัตโนมัติเมื่อเปลี่ยนหน้า
   useEffect(() => { setMobileNavOpen(false); }, [pathname]);
