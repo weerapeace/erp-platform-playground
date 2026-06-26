@@ -20,10 +20,18 @@ export const revalidate = 0;
 
 // resolve ตัวแปร prompt จากงาน + สินค้า + รูปที่แนบ → คืน prompt พร้อมใช้ (ปุ่ม copy)
 async function resolvePrompt(admin: ReturnType<typeof supabaseAdmin>, taskId: string, subId: string): Promise<NextResponse> {
-  const { data: sub } = await admin.from("erp_creative_subtasks").select("config, description").eq("id", subId).eq("task_id", taskId).maybeSingle();
+  const { data: sub } = await admin.from("erp_creative_subtasks").select("config, description, subtask_type").eq("id", subId).eq("task_id", taskId).maybeSingle();
   const cfg = ((sub?.config ?? {}) as Record<string, unknown>);
   const { data: task } = await admin.from("erp_creative_tasks").select("title, brand_id, product_name, platforms, description").eq("id", taskId).maybeSingle();
   const tk = (task ?? {}) as Record<string, unknown>;
+  // prompt: แบรนด์ทับค่าเริ่มต้น — ถ้าแบรนด์ตั้งไว้ใช้ของแบรนด์ ไม่งั้นใช้ของ config (เทมเพลต/registry)
+  let promptTemplate = cfg.prompt_template as string | undefined;
+  const stype = (sub as { subtask_type?: string | null } | null)?.subtask_type;
+  if (tk.brand_id && stype) {
+    const { data: bp } = await admin.from("erp_brand_subtask_prompts").select("prompt_template").eq("brand_id", tk.brand_id as string).eq("subtask_type", stype).maybeSingle();
+    const bt = ((bp as { prompt_template?: string | null } | null)?.prompt_template ?? "").trim();
+    if (bt) promptTemplate = bt;
+  }
   let brand_name = "";
   if (tk.brand_id) { const { data: b } = await admin.from("brands").select("name").eq("id", tk.brand_id as string).maybeSingle(); brand_name = ((b as { name?: string } | null)?.name) ?? ""; }
   const { data: sl } = await admin.from("erp_creative_task_skus").select("sku_id").eq("task_id", taskId);
@@ -35,7 +43,7 @@ async function resolvePrompt(admin: ReturnType<typeof supabaseAdmin>, taskId: st
   const { data: atts } = await admin.from("erp_creative_attachments").select("r2_key").eq("subtask_id", subId).eq("kind", "image");
   const imageUrls = ((atts ?? []) as { r2_key: string }[]).map((a) => `/api/r2-image?key=${encodeURIComponent(a.r2_key)}`).filter(Boolean);
   const price = skus[0]?.list_price != null ? Number(skus[0].list_price).toLocaleString("th-TH") : "";
-  const prompt = renderPrompt(cfg.prompt_template as string | undefined, {
+  const prompt = renderPrompt(promptTemplate, {
     brand_name,
     task_name: (tk.title as string) ?? "",
     parent_sku: parents.map((p) => p.code as string).filter(Boolean).join(", "),

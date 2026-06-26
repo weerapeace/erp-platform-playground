@@ -375,6 +375,16 @@ export async function listSubtaskTypes(): Promise<SubtaskType[]> {
   const j = await jsonOrThrow(await apiFetch("/api/subtask-types"));
   return (j.data as SubtaskType[]) ?? [];
 }
+
+// prompt ต่อแบรนด์ (override)
+export type BrandPrompt = { brand_id: string; subtask_type: string; prompt_template: string | null };
+export async function listBrandPrompts(brandId: string): Promise<BrandPrompt[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/brand-prompts?brand_id=${encodeURIComponent(brandId)}`));
+  return (j.data as BrandPrompt[]) ?? [];
+}
+export async function saveBrandPrompt(brand_id: string, subtask_type: string, prompt_template: string | null): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/brand-prompts", { method: "PATCH", body: JSON.stringify({ brand_id, subtask_type, prompt_template }) }));
+}
 export type TaskTemplate = {
   id: string; name: string; task_type: string | null; default_priority: string;
   brand_id: string | null; brand_label?: string | null; description: string | null;

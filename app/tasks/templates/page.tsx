@@ -21,6 +21,7 @@ import {
 } from "../data";
 import { useCreativeOptions, taskTypeLabel } from "../use-options";
 import { SubtaskTypePicker, type EditStep } from "./subtask-type-picker";
+import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
 
 const FREQ =[{ value: "daily", label: "รายวัน" }, { value: "weekly", label: "รายสัปดาห์" }, { value: "monthly", label: "รายเดือน" }];
@@ -30,7 +31,7 @@ type Toast = { id: number; type: "success" | "error" | "info"; message: string }
 
 export default function TemplatesPage() {
   const t = useT();
-  const [tab, setTab] = useState<"templates" | "recurring">("templates");
+  const [tab, setTab] = useState<"templates" | "recurring" | "prompts">("templates");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const pushToast = useCallback((type: Toast["type"], message: string) => {
     const id = Date.now() + Math.random();
@@ -51,11 +52,12 @@ export default function TemplatesPage() {
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
           <button onClick={() => setTab("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📋 {t("เทมเพลต", "Templates")}</button>
           <button onClick={() => setTab("recurring")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "recurring" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🔁 {t("งานประจำ", "Recurring")}</button>
+          <button onClick={() => setTab("prompts")} className={`h-8 px-3 rounded-md text-sm font-medium ${tab === "prompts" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📝 {t("Prompt ต่อแบรนด์", "Brand prompts")}</button>
         </div>
       </div>
 
       <div className="px-8 py-6">
-        {tab === "templates" ? <TemplatesTab pushToast={pushToast} /> : <RecurringTab pushToast={pushToast} />}
+        {tab === "templates" ? <TemplatesTab pushToast={pushToast} /> : tab === "recurring" ? <RecurringTab pushToast={pushToast} /> : <BrandPromptsTab pushToast={pushToast} />}
       </div>
 
       <div className="fixed bottom-6 right-6 z-[70] flex flex-col gap-2">
