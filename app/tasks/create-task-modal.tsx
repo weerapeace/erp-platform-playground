@@ -13,6 +13,7 @@ import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { UserPicker, SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
+import { ImageInput } from "@/components/image-input";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
 import {
@@ -28,10 +29,11 @@ type FormState = {
   assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
   priority: CreativePriority; due_date: string;
   products: SkuPickerValue[]; parents: ParentSkuPickerValue[]; platforms: string[]; drive_folder_url: string;
+  cover_image_r2_key: string;
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
-  assignee: null, reviewer: null, priority: "normal", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "",
+  assignee: null, reviewer: null, priority: "normal", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
 };
 
 // แถวงานย่อยในขั้นที่ 2
@@ -106,6 +108,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         sku_id: form.products[0]?.id ?? null, product_name: form.products[0]?.name ?? null, sku_ids: form.products.map((p) => p.id),
         parent_sku_id: form.parents[0]?.id ?? null, parent_sku_ids: form.parents.map((p) => p.id),
         platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
+        cover_image_r2_key: form.cover_image_r2_key || null,
         subtasks,
       });
       setDirty(false);
@@ -167,6 +170,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
             </div>
           </ERPFormField>
           <ERPFormField label={t("รายละเอียด","Description")} span={2}><ERPTextarea value={form.description} rows={2} onChange={(e) => updateForm({ description: e.target.value })} placeholder={t("อธิบายงาน/บรีฟเพิ่มเติม","Describe the task or brief")} /></ERPFormField>
+          <ERPFormField label={t("รูปปก (ไม่บังคับ — ถ้า Parent SKU มีรูป จะใช้รูปนั้นแทน)","Cover image (optional — Parent SKU image takes priority)")} span={2}>
+            <ImageInput value={form.cover_image_r2_key || null} onChange={(k) => updateForm({ cover_image_r2_key: k ?? "" })} folder="creative-tasks" compact />
+          </ERPFormField>
         </ERPFormSection>
       </>)}
 
