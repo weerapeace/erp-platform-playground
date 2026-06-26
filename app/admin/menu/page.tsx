@@ -56,9 +56,29 @@ export default function MenuManagerPage() {
   const dragId = useRef<string | null>(null);
   const dragSection = useRef<string | null>(null);   // หมวดที่กำลังลากเพื่อเรียงลำดับ
   const sectionEscRef = useRef(false);   // กด Escape ตอนแก้ชื่อหมวด = ยกเลิก (ไม่ commit ตอน blur)
+  // ---------- ร่าง (draft) : การแก้ฟิลด์เมนูจะเก็บไว้ก่อน รอกด "บันทึก" ----------
+  const pending = useRef<Map<string, Partial<MenuRow>>>(new Map());  // id → ฟิลด์ที่แก้ค้างไว้ (ยังไม่บันทึก)
+  const [dirtyCount, setDirtyCount] = useState(0);   // จำนวนเมนูที่มีร่างค้าง (ขับ Save bar)
+  const [saving, setSaving] = useState(false);
+  const [dataVer, setDataVer] = useState(0);   // เพิ่มค่าเมื่อโหลดใหม่ — ใช้ key รีเซ็ตช่องกรอก (uncontrolled) ตอนกดยกเลิก
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 2000); };
   useEffect(() => { setOrigin(window.location.origin); }, []);
+
+  // เก็บฟิลด์ที่แก้ลงร่าง (ไม่ยิง API) — ใช้ร่วมทุกจุดที่แก้ฟิลด์เมนู
+  const stageEdit = useCallback((id: string, p: Partial<MenuRow>) => {
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
+    const cur = pending.current.get(id) ?? {};
+    pending.current.set(id, { ...cur, ...p });
+    setDirtyCount(pending.current.size);
+  }, []);
+
+  // เตือนก่อนปิด/รีเฟรชหน้า ถ้ายังมีร่างค้าง
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => { if (pending.current.size) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -74,17 +94,47 @@ export default function MenuManagerPage() {
       setApps((a.data ?? []) as AppGroup[]);
       setModules(Array.isArray(mod.data) ? (mod.data as { key: string; label: string }[]) : []);
       setSections(Array.isArray(sec.data) ? (sec.data as MenuSection[]) : []);
+      setDataVer((v) => v + 1);
     } catch (e) { setErr(String(e)); }
     finally { setLoading(false); }
   }, []);
   useEffect(() => { if (allowed) load(); }, [allowed, load]);
+
+  // โหลดใหม่จากเซิร์ฟเวอร์ แต่ทับร่างที่ยังไม่บันทึกกลับเข้าไป (กันการเพิ่ม/ลบแอป-เมนู ไปล้างร่างเมนูที่แก้ค้าง)
+  const reloadKeepDraft = useCallback(async () => {
+    await load();
+    if (pending.current.size) setRows((rs) => rs.map((r) => { const p = pending.current.get(r.id!); return p ? { ...r, ...p } : r; }));
+  }, [load]);
+
+  // บันทึกร่างทั้งหมด (ยิง PATCH ทีละเมนูที่แก้ค้าง)
+  const saveDraft = async () => {
+    if (pending.current.size === 0) return;
+    setSaving(true); setErr(null);
+    const entries = [...pending.current.entries()];
+    try {
+      for (const [id, p] of entries) {
+        const j = await apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, patch: p }) }).then((r) => r.json());
+        if (j.error) throw new Error(j.error);
+      }
+      pending.current.clear(); setDirtyCount(0);
+      flash(`บันทึก ${entries.length} เมนูแล้ว`);
+    } catch (e) { setErr(`บันทึกไม่สำเร็จ: ${String(e)} — กดบันทึกอีกครั้ง`); }
+    finally { setSaving(false); }
+  };
+  // ยกเลิกร่าง — ดึงค่าจริงจากเซิร์ฟเวอร์กลับมา
+  const cancelDraft = async () => {
+    if (pending.current.size === 0) return;
+    if (!confirm("ยกเลิกการแก้ไขที่ยังไม่บันทึกทั้งหมด?")) return;
+    pending.current.clear(); setDirtyCount(0);
+    await load();
+  };
 
   // ---------- App (โมดูลใหญ่ / PWA) ----------
   const [naApp, setNaApp] = useState({ key: "", label: "", icon: "📦" });
   const patchApp = async (id: string, p: Partial<AppGroup>) => {
     setApps((as) => as.map((a) => (a.id === id ? { ...a, ...p } : a)));
     const j = await apiFetch("/api/menu/apps", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, patch: p }) }).then((r) => r.json());
-    if (j.error) { setErr(j.error); await load(); }
+    if (j.error) { setErr(j.error); await reloadKeepDraft(); }
   };
   const uploadAppIcon = async (id: string, file: File) => {
     setUploadingApp(true); setErr(null);
@@ -101,13 +151,13 @@ export default function MenuManagerPage() {
     const j = await apiFetch("/api/menu/apps", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ item: { key: naApp.key.trim().toLowerCase(), label: naApp.label.trim(), icon: naApp.icon || "📦", sort_order: (apps.length + 1) * 10, permission_key: null, is_active: true } }) }).then((r) => r.json());
     if (j.error) { setErr(j.error); return; }
-    setNaApp({ key: "", label: "", icon: "📦" }); setShowAddApp(false); flash("เพิ่มแอปแล้ว"); await load();
+    setNaApp({ key: "", label: "", icon: "📦" }); setShowAddApp(false); flash("เพิ่มแอปแล้ว"); await reloadKeepDraft();
   };
   const delApp = async (id: string, label: string) => {
     if (!confirm(`ลบแอป "${label}"?\n(เมนูจะไม่ถูกลบ แค่หลุดจากแอปนี้)`)) return;
     const j = await apiFetch(`/api/menu/apps?id=${id}`, { method: "DELETE" }).then((r) => r.json());
     if (j.error) { setErr(j.error); return; }
-    setSel(ALL); await load();
+    setSel(ALL); await reloadKeepDraft();
   };
   const copyShareLink = async (key: string) => {
     try { await navigator.clipboard.writeText(`${origin}/app/${key}`); flash("คัดลอกลิงก์แล้ว"); }
@@ -115,23 +165,19 @@ export default function MenuManagerPage() {
   };
 
   // ---------- Menu items ----------
-  const patch = async (id: string, p: Partial<MenuRow>) => {
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
-    const j = await apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, patch: p }) }).then((r) => r.json());
-    if (j.error) { setErr(j.error); await load(); }
-  };
+  // แก้ฟิลด์เมนู = เก็บลงร่าง (ยังไม่บันทึกจนกว่าจะกดปุ่ม "บันทึก")
+  const patch = (id: string, p: Partial<MenuRow>) => stageEdit(id, p);
   const del = async (id: string, label: string) => {
     if (!confirm(`ลบเมนู "${label}" ออกจากทุกแอป?`)) return;
     const j = await apiFetch(`/api/menu?id=${id}`, { method: "DELETE" }).then((r) => r.json());
     if (j.error) { setErr(j.error); return; }
     setRows((rs) => rs.filter((r) => r.id !== id));
+    if (pending.current.delete(id)) setDirtyCount(pending.current.size);
   };
   const toggleItemApp = (it: MenuRow, appKey: string) => {
     const cur = it.app_keys ?? [];
     const next = cur.includes(appKey) ? cur.filter((k) => k !== appKey) : [...cur, appKey];
-    setRows((rs) => rs.map((r) => (r.id === it.id ? { ...r, app_keys: next } : r)));
-    void apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: it.id, patch: { app_keys: next } }) })
-      .then((r) => r.json()).then((j) => { if (j.error) { setErr(j.error); void load(); } });
+    stageEdit(it.id!, { app_keys: next });
   };
   const importDefaults = async () => {
     if (!confirm("นำเข้าเมนูเริ่มต้นทั้งหมด? (ของที่มีอยู่จะไม่ถูกทับ)")) return;
@@ -158,7 +204,7 @@ export default function MenuManagerPage() {
       const j = await apiFetch("/api/menu", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item }) }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       setNa({ section: "", label: "", href: "", icon: "📄" }); setAddNew(false); setAddOpen(false);
-      flash("เพิ่มเมนูแล้ว"); await load();
+      flash("เพิ่มเมนูแล้ว"); await reloadKeepDraft();
     } catch (e) { setErr(String(e)); } finally { setBusy(false); }
   };
 
@@ -519,7 +565,7 @@ export default function MenuManagerPage() {
 
                         {/* ตั้งค่าเพิ่ม (กาง) */}
                         {expanded === it.id && (
-                          <div className="px-4 pb-3 pt-1 bg-slate-50/60 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                          <div key={`cfg-${it.id}-${dataVer}`} className="px-4 pb-3 pt-1 bg-slate-50/60 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
                             <label className="flex items-center gap-1.5 text-slate-600">ชื่อเมนู
                               <input defaultValue={it.label} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.label) patch(it.id!, { label: v }); }} className="w-44 h-7 px-2 border border-slate-200 rounded" /></label>
                             <div className="flex items-center gap-1.5 text-slate-600">ไอคอน
@@ -634,8 +680,22 @@ export default function MenuManagerPage() {
           {["admin.users", "products.view", "products.edit", "purchase_requests.view", "purchase_requests.approve", "sales.view", "inventory.view"].map((p) => <option key={p} value={p} />)}
         </datalist>
         <datalist id="section-list">{sectionNames.map((s) => <option key={s} value={s} />)}</datalist>
-        <p className="mt-3 text-[11px] text-slate-400">ผู้แก้: {user?.name ?? "—"} · ผูก “ใครเห็น” แล้วเมนูจะโชว์เฉพาะคนที่มีสิทธิ์นั้น · ทุกการเปลี่ยนบันทึกอัตโนมัติ</p>
+        <p className="mt-3 text-[11px] text-slate-400">ผู้แก้: {user?.name ?? "—"} · ผูก “ใครเห็น” แล้วเมนูจะโชว์เฉพาะคนที่มีสิทธิ์นั้น · แก้ชื่อ/ไอคอน/สิทธิ์/ผูกแอป ต้องกด <b>บันทึก</b> · ลากเรียง/จัดหมวด/ตั้งค่าแอป บันทึกทันที</p>
+        {dirtyCount > 0 && <div className="h-20" aria-hidden />}
       </div>
+
+      {/* แถบบันทึกร่าง (โผล่เมื่อมีการแก้ที่ยังไม่บันทึก) */}
+      {dirtyCount > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur border-t border-amber-200 shadow-[0_-2px_12px_rgba(0,0,0,0.06)]">
+          <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-3">
+            <span className="text-sm text-amber-700 flex items-center gap-1.5"><span className="text-amber-500">●</span> แก้ไข {dirtyCount} เมนู — ยังไม่บันทึก</span>
+            <div className="flex items-center gap-2">
+              <button onClick={cancelDraft} disabled={saving} className="h-9 px-4 text-sm font-medium bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+              <button onClick={saveDraft} disabled={saving} className="h-9 px-5 text-sm font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{saving ? "กำลังบันทึก…" : `บันทึก (${dirtyCount})`}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </PlaygroundShell>
   );
 }

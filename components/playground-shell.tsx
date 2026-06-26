@@ -416,7 +416,6 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
   const [sections, setSections] = useState<MenuSectionRow[]>([]);   // ไอคอน/ลำดับหมวด (ต่อแอป)
-  const [modules, setModules] = useState<{ key: string; label: string }[]>([]);
   const [activeApp, setActiveAppState] = useState<string | null>(null);
   const setActiveApp = (k: string | null) => {
     setActiveAppState(k);
@@ -442,40 +441,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         setActiveAppState(saved && apps.some((a) => a.key === saved) ? saved : (apps[0]?.key ?? null));
       } catch { setActiveAppState(apps[0]?.key ?? null); }
     }).catch(() => { if (alive) setAppGroups([]); });
-    // รายชื่อโมดูล (key+label) สำหรับหมวด "⚙ ตั้งค่า" — ไม่จำเป็นตอนเปิดหน้า
-    // perf: เลื่อนไปโหลดหลังเนื้อหาหลัก กันแย่ง resource (Worker↔Supabase รับ concurrent ได้น้อย)
-    const modTimer = window.setTimeout(() => {
-      cachedGetJson<{ data?: { key: string; label: string }[] }>("/api/admin/modules").then((j) => {
-        if (alive && Array.isArray(j.data)) setModules(j.data as { key: string; label: string }[]);
-      }).catch(() => {});
-    }, 1200);
-    return () => { alive = false; window.clearTimeout(modTimer); };
+    return () => { alive = false; };
   }, []);
 
-  // หมวด "⚙ ตั้งค่า" — โมดูลย่อยของแอปปัจจุบัน (resolve module_key จาก href ของเมนู)
-  const settingsItems = (() => {
-    if (!menuRows || !activeApp || modules.length === 0) return [] as { href: string; icon: string; labelTH: string }[];
-    const labelOf = new Map(modules.map((m) => [m.key, m.label]));
-    const resolveKey = (href: string): string | null => {
-      const seg = href.split("?")[0].replace(/\/+$/, "").split("/").pop() ?? "";
-      if (!seg) return null;
-      for (const cand of [seg, `${seg}-v2`]) if (labelOf.has(cand)) return cand;
-      return null;
-    };
-    const seen = new Set<string>();
-    const out: { href: string; icon: string; labelTH: string }[] = [];
-    for (const r of menuRows) {
-      if (!r.is_active || !r.show_in_sidebar) continue;
-      if (!(r.app_keys ?? []).includes(activeApp)) continue;
-      if (r.permission_key && !can(r.permission_key as Parameters<typeof can>[0])) continue;
-      // ใช้ module_key ที่ตั้งไว้ใน /admin/menu ก่อน (แม่นยำ) — ไม่งั้น fallback เดาจาก href
-      const mk = (r.module_key && labelOf.has(r.module_key)) ? r.module_key : resolveKey(r.href);
-      if (!mk || seen.has(mk)) continue;
-      seen.add(mk);
-      out.push({ href: `/admin/module/${mk}`, icon: "⚙", labelTH: labelOf.get(mk) ?? r.label });
-    }
-    return out;
-  })();
 
   // หน้าแรกของโมดูลใหญ่ (App) = เมนูย่อยตัวบนสุดของหมวดนั้น (ตามลำดับใน /admin/menu)
   const firstHrefForApp = (key: string): string | null => {
@@ -758,35 +726,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
             </div>
           ))}
 
-          {/* หมวดตั้งค่าของแอปปัจจุบัน — โชว์เฉพาะโมดูลย่อยในแอปนี้ */}
-          {settingsItems.length > 0 && (
-            <div>
-              {navExpanded
-                ? <div className="px-2 mb-1 flex items-center gap-1.5"><span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">⚙ ตั้งค่า</span></div>
-                : <div className="mx-2 mb-1 border-t border-slate-100" />}
-              <div className="space-y-0.5">
-                {settingsItems.map((item) => {
-                  const isActive = pathname === item.href;
-                  return (
-                    <Link key={item.href} href={item.href} title={!navExpanded ? item.labelTH : undefined}
-                      className={`flex items-center gap-2.5 py-2 rounded-lg text-sm transition-colors ${navExpanded ? "px-2.5" : "px-0 justify-center"} ${
-                        isActive ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-                      }`}>
-                      <span className="text-base leading-none">{item.icon}</span>
-                      {navExpanded && <span className="flex-1 leading-tight truncate">{item.labelTH}</span>}
-                    </Link>
-                  );
-                })}
-                <Link href="/admin/modules" title={!navExpanded ? "ดูโมดูลทั้งหมด" : undefined}
-                  className={`flex items-center gap-2.5 py-2 rounded-lg text-sm transition-colors ${navExpanded ? "px-2.5" : "px-0 justify-center"} ${
-                    pathname === "/admin/modules" ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-400 hover:bg-slate-50 hover:text-slate-700"
-                  }`}>
-                  <span className="text-base leading-none">📋</span>
-                  {navExpanded && <span className="flex-1 leading-tight truncate">ดูโมดูลทั้งหมด</span>}
-                </Link>
-              </div>
-            </div>
-          )}
+          {/* (เดิม) หมวด "⚙ ตั้งค่า" อัตโนมัติถูกเอาออกแล้ว — ให้เพิ่มเมนูตั้งค่าเองที่ /admin/menu */}
         </nav>
 
         <UserSwitcher collapsed={!navExpanded} />
