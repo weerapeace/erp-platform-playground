@@ -11,6 +11,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, DEFAULT_THEME, type BrandTheme } from "@/lib/brand-theme";
 import { BrandThemeStyles } from "@/components/brand-theme/styles";
+import { BrandThemeBuilder } from "@/components/brand-theme-builder";
 
 const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
@@ -299,6 +300,8 @@ export function DesignDashboard() {
 
   // ── Brand Theme (ระบบกลาง) — โหลดธีม published ของแบรนด์ที่เลือก · "ทั้งหมด"/ไม่มีธีม = default ERP ──
   const [brandTheme, setBrandTheme] = useState<BrandTheme>(DEFAULT_THEME);
+  const [themeBuilderOpen, setThemeBuilderOpen] = useState(false);
+  const [themeReloadKey, setThemeReloadKey] = useState(0);   // bump หลังเผยแพร่ → โหลดธีมใหม่
   const selectedBrandId = selectedBrand?.id ?? null;
   useEffect(() => {
     if (!selectedBrandId) { setBrandTheme(DEFAULT_THEME); return; }
@@ -307,7 +310,7 @@ export function DesignDashboard() {
       .then((j) => { if (alive) setBrandTheme(resolveTheme(j.published)); })
       .catch(() => { if (alive) setBrandTheme(DEFAULT_THEME); });
     return () => { alive = false; };
-  }, [selectedBrandId]);
+  }, [selectedBrandId, themeReloadKey]);
   const bgUrl = brandBgUrl(brandTheme.background_image_key, 1600);
   const overlay = hexToRgba(brandTheme.background_overlay_color, brandTheme.background_opacity);
   const rootStyle = {
@@ -407,6 +410,12 @@ export function DesignDashboard() {
             >
               รีเฟรชข้อมูล
             </button>
+            {selectedBrandId && (
+              <button data-gg-action onClick={() => setThemeBuilderOpen(true)} title={`ปรับธีมของ ${selectedBrand?.name ?? "แบรนด์"}`}
+                className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
+                🎨 ปรับธีม
+              </button>
+            )}
             <button data-gg-action="primary" onClick={() => setCreateOpen(true)}
               className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
               ＋ เพิ่มงาน
@@ -712,6 +721,13 @@ export function DesignDashboard() {
       {createOpen && (
         <DesignSheetDetail detailOnly createMode defaultBrandId={selectedBrand?.id ?? null}
           onDetailClose={() => { setCreateOpen(false); silentRefresh(); }} />
+      )}
+
+      {/* Brand Theme Builder — ปรับธีมของแบรนด์ที่เลือก · เผยแพร่แล้วโหลดธีมใหม่ */}
+      {themeBuilderOpen && selectedBrandId && (
+        <BrandThemeBuilder brandId={selectedBrandId} brandName={selectedBrand?.name ?? "แบรนด์"}
+          open={themeBuilderOpen} onClose={() => setThemeBuilderOpen(false)}
+          onPublished={() => setThemeReloadKey((k) => k + 1)} />
       )}
     </div>
   );
