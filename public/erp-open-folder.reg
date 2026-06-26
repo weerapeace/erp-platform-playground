@@ -1,0 +1,21 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================
+; ERP - Open Folder from Canvas (Phase B)
+; Install once per PC: double-click this file -> Yes.
+; After that, clicking a Folder card on the website opens
+; File Explorer at that folder instantly.
+; Per-user install (HKEY_CURRENT_USER) - no admin needed.
+; To uninstall: delete key HKEY_CURRENT_USER\Software\Classes\erpfolder
+; ============================================================
+
+[HKEY_CURRENT_USER\Software\Classes\erpfolder]
+@="URL:ERP Open Folder"
+"URL Protocol"=""
+
+[HKEY_CURRENT_USER\Software\Classes\erpfolder\shell]
+
+[HKEY_CURRENT_USER\Software\Classes\erpfolder\shell\open]
+
+[HKEY_CURRENT_USER\Software\Classes\erpfolder\shell\open\command]
+@="powershell -NoProfile -WindowStyle Hidden -Command \"$p=[Uri]::UnescapeDataString(('%1' -replace '^erpfolder:/*','')); explorer.exe $p\""
