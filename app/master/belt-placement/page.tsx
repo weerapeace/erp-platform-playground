@@ -27,6 +27,7 @@ export default function BeltPlacementPage() {
   const [base, setBase] = useState<BeltLayout>({});                                  // layout เดิม (เก็บ boxH/frontDim/backDim ไว้ตอนบันทึก)
   const [place, setPlace] = useState<BeltImgPlace>(BELT_DEFAULT_PLACE.front);        // ชุดเดียว ใช้ทั้งหน้า-หลัง
   const [sel, setSel] = useState<Key | null>(null);
+  const [sampleOpts, setSampleOpts] = useState<Record<Key, { name: string; url: string }[]>>({ strap: [], hole: [], logo: [] });   // รูปตัวอย่างให้เลือก (เปลี่ยน preview)
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
   const [selDim, setSelDim] = useState<"front" | "back" | null>(null);          // เส้นแดงที่เลือก (ห่างโลโก้/ถึงปลายสาย)
@@ -43,6 +44,8 @@ export default function BeltPlacementPage() {
   useEffect(() => {
     apiFetch("/api/mo/belt-component-images?sample=1").then((r) => r.json()).then((j) => {
       setImgs({ strap: j.strap ?? null, hole: j.hole ?? null, logo: j.frontLogo ?? j.backLogo ?? null });
+      const o = j.options ?? {};
+      setSampleOpts({ strap: o.strap ?? [], hole: o.hole ?? [], logo: o.logo ?? [] });
     }).catch(() => {});
     apiFetch("/api/mo/belt-layout").then((r) => r.json()).then((j) => {
       const L = (j.layout ?? {}) as BeltLayout;
@@ -169,6 +172,19 @@ export default function BeltPlacementPage() {
             className={`px-2 py-1 rounded-md border ${sel === key ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
             {KEY_LABEL[key]}
           </button>
+        ))}
+      </div>
+      {/* เลือกรูปตัวอย่าง (สำหรับพรีวิว) ของแต่ละชิ้น — ใบงานจริงใช้รูปของรุ่นนั้น ๆ */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+        <span className="text-slate-400">รูปตัวอย่าง:</span>
+        {(["strap", "hole", "logo"] as Key[]).map((key) => sampleOpts[key].length > 0 && (
+          <label key={key} className="inline-flex items-center gap-1">
+            <span className="text-slate-500">{KEY_LABEL[key]}</span>
+            <select value={imgs[key] ?? ""} onChange={(e) => setImgs((p) => ({ ...p, [key]: e.target.value || null }))}
+              className="h-7 max-w-[150px] rounded-md border border-slate-200 bg-white px-1.5 text-slate-600">
+              {sampleOpts[key].map((o) => <option key={o.url} value={o.url}>{o.name}</option>)}
+            </select>
+          </label>
         ))}
       </div>
 

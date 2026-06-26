@@ -50,10 +50,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const holeRows = (holes.data ?? []) as Row[];
   const logoRows = (logos.data ?? []) as Row[];
 
-  // โหมดตัวอย่าง (หน้าเทมเพลตวางรูป) — คืนรูปแรกที่มีของแต่ละชนิด ไว้ลากวาง
+  // โหมดตัวอย่าง (หน้าเทมเพลตวางรูป) — คืนรูปแรกที่มี + รายการทั้งหมดให้เลือกเปลี่ยน preview
   if (sp.get("sample")) {
     const first = (rows: Row[]) => urlOf(rows.find((r) => r.image) ?? null);
-    return NextResponse.json({ strap: first(tailRows), hole: first(holeRows), holeBackOnly: false, frontLogo: first(logoRows), backLogo: first(logoRows), error: null });
+    const opts = (rows: Row[]) => rows.filter((r) => r.image).map((r) => ({ name: r.name, url: urlOf(r)! }));
+    return NextResponse.json({
+      strap: first(tailRows), hole: first(holeRows), holeBackOnly: false, frontLogo: first(logoRows), backLogo: first(logoRows),
+      options: { strap: opts(tailRows), hole: opts(holeRows), logo: opts(logoRows) }, error: null,
+    });
   }
 
   const holeRow = pickRow(holeRows, sp.get("hole") ?? "");
