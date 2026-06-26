@@ -13,11 +13,17 @@
  */
 
 import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
+import { useAuth } from "@/components/auth";
 
 const MasterCRUDPage = dynamic(
   () => import("@/components/master-crud").then((m) => m.MasterCRUDPage),
   { ssr: false, loading: () => <div className="p-10 text-center text-slate-400">กำลังโหลด...</div> },
+);
+const ProductPlatformManager = dynamic(
+  () => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager),
+  { ssr: false },
 );
 
 const FAMILY_LABEL: Record<string, string> = {
@@ -87,5 +93,20 @@ const CONFIG: MasterCRUDConfig = {
 };
 
 export default function ParentSKUsV2Page() {
-  return <MasterCRUDPage config={CONFIG} />;
+  const { can } = useAuth();
+  const [mgrId, setMgrId] = useState<string | null>(null);
+  // เพิ่ม row action "ลงขายหลายแพลตฟอร์ม" (เปิด ProductPlatformManager) — config สร้างใน component เพื่อ setState ได้
+  const config = useMemo<MasterCRUDConfig>(() => ({
+    ...CONFIG,
+    extraRowActions: [
+      ...(CONFIG.extraRowActions ?? []),
+      { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
+    ],
+  }), []);
+  return (
+    <>
+      <MasterCRUDPage config={config} />
+      {mgrId && <ProductPlatformManager parentSkuId={mgrId} onClose={() => setMgrId(null)} canEdit={can("products.platforms.edit")} />}
+    </>
+  );
 }
