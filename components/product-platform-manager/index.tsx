@@ -16,7 +16,9 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null };
-type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null };
+type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[] };
+type ParentInfo = { id: string; code: string; name_th: string; description: string; category_id: string | null; category_name: string | null };
+type ImageItem = { key: string; source: string };
 type Variant = { id: string; code: string; name: string; color: string | null; price: number | null; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean };
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
@@ -27,11 +29,14 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
 }) {
   const { width, startResize } = useDrawerResize("platformMgrWidth", 780);
   const [loading, setLoading] = useState(true);
-  const [parent, setParent] = useState<{ code: string; name_th: string; description: string } | null>(null);
+  const [parent, setParent] = useState<ParentInfo | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [variants, setVariants] = useState<Variant[]>([]);
+  const [mappings, setMappings] = useState<Record<string, string>>({});
+  const [images, setImages] = useState<ImageItem[]>([]);
   const [active, setActive] = useState<string>("");
+  const [catInput, setCatInput] = useState("");
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toast = useCallback((type: Toast["type"], msg: string) => {
     const id = Math.floor(performance.now()) + Math.floor(performance.now() % 1000);
@@ -44,11 +49,13 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
     try {
       const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentSkuId)}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      setParent(j.parent ? { code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), description: String(j.parent.description ?? "") } : null);
+      setParent(j.parent ? { id: String(j.parent.id ?? ""), code: String(j.parent.code ?? ""), name_th: String(j.parent.name_th ?? ""), description: String(j.parent.description ?? ""), category_id: j.parent.category_id ?? null, category_name: j.parent.category_name ?? null } : null);
       const pfs = (j.platforms ?? []) as Platform[];
       setPlatforms(pfs);
       setDrafts((j.drafts ?? {}) as Record<string, Draft>);
       setVariants((j.variants ?? []) as Variant[]);
+      setMappings((j.mappings ?? {}) as Record<string, string>);
+      setImages((j.images ?? []) as ImageItem[]);
       setActive((prev) => prev || (pfs[0]?.id ?? ""));
     } catch (e) { toast("error", (e as Error).message); }
     finally { setLoading(false); }
@@ -58,6 +65,9 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
   const activeDraft = drafts[active] ?? {};
   const title = activeDraft.title ?? "";
   const description = activeDraft.description ?? "";
+  // เซ็ตช่องหมวดหมู่เมื่อสลับแพลตฟอร์ม (draft > mapping > ว่าง)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setCatInput((drafts[active]?.category_path ?? mappings[active] ?? "") as string); }, [active]);
 
   const saveField = async (field: keyof Draft, value: string) => {
     const cur = (drafts[active]?.[field] ?? "") as string;
@@ -67,6 +77,27 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
       const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active, [field]: value }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
       toast("success", "เซฟร่างแล้ว");
+    } catch (e) { toast("error", (e as Error).message); }
+  };
+  // เลือกรูปส่งแพลตฟอร์ม (array) — เซฟทันที
+  const saveImages = async (keys: string[]) => {
+    setDrafts((d) => ({ ...d, [active]: { ...d[active], image_keys: keys } }));
+    try { const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active, image_keys: keys }) }); const j = await r.json(); if (j.error) throw new Error(j.error); }
+    catch (e) { toast("error", (e as Error).message); }
+  };
+  const toggleImage = (key: string) => {
+    const cur = activeDraft.image_keys ?? [];
+    saveImages(cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]);
+  };
+  // หมวดหมู่: ใช้ค่ามาตรฐาน / บันทึกเป็นค่ามาตรฐานของหมวดกลางนี้
+  const useStandard = () => { const v = mappings[active] ?? ""; if (!v) { toast("info", "ยังไม่มีค่ามาตรฐานของหมวดนี้"); return; } setCatInput(v); saveField("category_path", v); };
+  const saveMapping = async () => {
+    if (!parent?.category_id) { toast("info", "สินค้านี้ยังไม่มีหมวดหมู่กลาง"); return; }
+    try {
+      const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ save_mapping: true, central_category_id: parent.category_id, platform_id: active, platform_category_path: catInput }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setMappings((m) => ({ ...m, [active]: catInput }));
+      toast("success", "บันทึกเป็นค่ามาตรฐานของหมวดนี้แล้ว");
     } catch (e) { toast("error", (e as Error).message); }
   };
 
@@ -79,10 +110,11 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
       { ok: variants.length > 0, label: "มี SKU/สี อย่างน้อย 1 รายการ" },
       { ok: allHavePrice, label: "SKU ทุกตัวมีราคา" },
       { ok: allHaveImage, label: "SKU ทุกตัวมีรูป" },
-      { ok: !!activeDraft.category_path?.trim(), label: "เลือกหมวดหมู่ปลายทาง (เฟส 2)" },
+      { ok: !!(activeDraft.category_path ?? "").trim(), label: "เลือกหมวดหมู่ปลายทาง" },
+      { ok: (activeDraft.image_keys ?? []).length > 0, label: "เลือกรูปส่งไปแพลตฟอร์ม ≥ 1" },
     ];
-  }, [title, description, variants, activeDraft.category_path]);
-  const ready = checks.slice(0, 5).every((c) => c.ok);
+  }, [title, description, variants, activeDraft.category_path, activeDraft.image_keys]);
+  const ready = checks.every((c) => c.ok);
 
   const cols: MiniColumn<Variant>[] = useMemo(() => [
     { key: "img", header: "รูป", width: "3rem", cell: (v) => <HoverImage url={r2ImageUrl(v.image_key)} size={32} /> },
@@ -135,6 +167,42 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
                     <p className="text-[11px] text-slate-400 mb-1">รายละเอียดสินค้า</p>
                     <ERPTextarea key={`d-${active}`} defaultValue={description} rows={4} placeholder="รายละเอียดเฉพาะแพลตฟอร์มนี้..." disabled={!canEdit} onBlur={(e) => saveField("description", e.target.value)} />
                   </div>
+                </div>
+
+                {/* หมวดหมู่ปลายทาง + mapping */}
+                {parent?.category_id ? (
+                  <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                    <p className="text-xs font-medium text-slate-600">หมวดหมู่ปลายทาง — {activePf.name_th}</p>
+                    <p className="text-[11px] text-slate-400">หมวดกลาง: <span className="text-slate-600">{parent.category_name || "—"}</span></p>
+                    <ERPInput value={catInput} disabled={!canEdit} placeholder="เช่น Women's Bags > Shoulder Bags" onChange={(e) => setCatInput(e.target.value)} onBlur={() => saveField("category_path", catInput)} />
+                    {!catInput.trim() && <p className="text-[11px] text-rose-600">⚠ ยังไม่ได้ตั้งค่าหมวดหมู่สำหรับแพลตฟอร์มนี้</p>}
+                    {canEdit && (
+                      <div className="flex flex-wrap gap-1.5">
+                        <button onClick={useStandard} className="text-xs text-slate-600 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">↩︎ ใช้ค่ามาตรฐาน{mappings[active] ? "" : " (ยังไม่มี)"}</button>
+                        <button onClick={saveMapping} className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-1 hover:bg-violet-50">💾 บันทึกเป็นค่ามาตรฐานของหมวดนี้</button>
+                      </div>
+                    )}
+                  </div>
+                ) : <p className="text-[11px] text-amber-600">สินค้านี้ยังไม่มีหมวดหมู่กลาง — ตั้งที่หน้าสินค้าก่อน จึงจะใช้ mapping ได้</p>}
+
+                {/* เลือกรูปส่งไปแพลตฟอร์ม */}
+                <div className="rounded-lg border border-slate-200 p-3">
+                  <p className="text-xs font-medium text-slate-600 mb-2">รูปที่ส่งไป {activePf.name_th} ({(activeDraft.image_keys ?? []).length}/{images.length})</p>
+                  {images.length === 0 ? <p className="text-xs text-slate-400">ยังไม่มีรูป — เพิ่มที่หน้าสินค้า/SKU</p> : (
+                    <div className="flex flex-wrap gap-2">
+                      {images.map((im) => {
+                        const on = (activeDraft.image_keys ?? []).includes(im.key);
+                        return (
+                          <button key={im.key} type="button" onClick={() => canEdit && toggleImage(im.key)} title={im.source} className={`relative rounded-lg overflow-hidden border-2 ${on ? "border-violet-500" : "border-slate-200"}`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={r2ImageUrl(im.key, 140) ?? ""} alt="" loading="lazy" className="h-16 w-16 object-cover block" />
+                            {on && <span className="absolute top-0.5 right-0.5 bg-violet-600 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center">✓</span>}
+                            <span className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[8px] truncate px-0.5 text-left">{im.source}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div>
