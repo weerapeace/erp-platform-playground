@@ -12,6 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { subtaskAssigneesMap, setSubtaskAssignees, notify } from "@/lib/creative-tasks-server";
+import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,6 +23,11 @@ const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_
 async function currentRole(request: NextRequest): Promise<string> {
   try { const { data } = await supabaseFromRequest(request).rpc("erp_current_user"); return ((data as { role?: string | null } | null)?.role) ?? "viewer"; }
   catch { return "viewer"; }
+}
+// เช็คสิทธิ์ผ่าน erp_can (admin → true เสมอ)
+async function canPerm(request: NextRequest, perm: string): Promise<boolean> {
+  try { const { data } = await supabaseFromRequest(request).rpc("erp_can", { p_permission: perm }); return data === true; }
+  catch { return false; }
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -91,9 +97,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // ⑤ แก้ "ผู้รับผิดชอบ" ได้เฉพาะ admin/ผจก./คนสร้างงานแม่
   if (Array.isArray(body.assignee_ids) && !(isManager || isCreator))
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์เปลี่ยนผู้รับผิดชอบงานย่อย" }, { status: 403 });
-  // ④ อนุมัติ (status → approved) ได้เฉพาะ admin/ผจก./ผู้ตรวจของงาน
-  if (patch.status === "approved" && !(isManager || isReviewer))
+  // ④ อนุมัติ (status → approved) ได้เฉพาะ admin/ผจก./ผู้ตรวจของงาน (หรือมีสิทธิ์ task_subtask.approve)
+  if (patch.status === "approved" && !(isManager || isReviewer || await canPerm(request, "task_subtask.approve")))
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์อนุมัติงานย่อยนี้" }, { status: 403 });
+  if (patch.status === "revision_requested" && !(isManager || isReviewer || await canPerm(request, "task_subtask.revise")))
+    return NextResponse.json({ error: "คุณไม่มีสิทธิ์ขอแก้งานย่อยนี้" }, { status: 403 });
+  if (patch.status === "canceled" && !(isManager || await canPerm(request, "task_subtask.cancel")))
+    return NextResponse.json({ error: "คุณไม่มีสิทธิ์ยกเลิกงานย่อยนี้" }, { status: 403 });
 
   if (Array.isArray(body.assignee_ids)) {
     await setSubtaskAssignees(admin, subtaskId, body.assignee_ids as string[]);
@@ -109,6 +119,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     row = data as Record<string, unknown> | null;
   }
   await writeAudit(admin, { action: "subtask:update", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { subtask_id: subtaskId } });
+
+  // ⑥ Sync เข้าสินค้า (best-effort) — อนุมัติ → ส่งรูป/ข้อความเข้า Parent SKU/SKU · ขอแก้/ยกเลิก → ถอดกลับ
+  const reason = typeof body.comment === "string" ? body.comment.trim() : "";
+  if (patch.status === "approved" && row) {
+    try { await applySubtaskSync(admin, row as Parameters<typeof applySubtaskSync>[1], { actorId: user?.id ?? null }); } catch { /* sync พลาดไม่ทำให้อนุมัติพัง */ }
+  } else if ((patch.status === "revision_requested" || patch.status === "canceled")) {
+    try { await reverseSubtaskSync(admin, subtaskId, { actorId: user?.id ?? null, reason: reason || null }); } catch { /* ถอดพลาดไม่ทำให้บันทึกพัง */ }
+    if (reason) { try { const cfg = (row?.config as Record<string, unknown>) ?? {}; await admin.from("erp_creative_subtasks").update({ config: { ...cfg, review_note: reason, review_status: patch.status } }).eq("id", subtaskId); } catch { /* noop */ } }
+  }
 
   // ④ ส่งงาน (status → submitted) → แจ้งเตือน ผู้ตรวจ + admin/ผจก. ให้มากดอนุมัติ
   if (patch.status === "submitted") {

@@ -30,10 +30,12 @@ const APPROVE_TARGET_HINT: Record<string, string> = {
 
 // ④ สถานะงานย่อย: ยังไม่เริ่ม → กำลังทำ → ส่งงาน(รออนุมัติ) → อนุมัติ (ไม่มี "โพสต์แล้ว" แล้ว)
 export const SUB_STEPS = [
-  { key: "todo",        label: "ยังไม่เริ่ม", dot: "bg-slate-400" },
-  { key: "in_progress", label: "กำลังทำ",     dot: "bg-blue-500" },
-  { key: "submitted",   label: "รออนุมัติ",   dot: "bg-amber-500" },
-  { key: "approved",    label: "อนุมัติแล้ว", dot: "bg-emerald-500" },
+  { key: "todo",               label: "ยังไม่เริ่ม", dot: "bg-slate-400" },
+  { key: "in_progress",        label: "กำลังทำ",     dot: "bg-blue-500" },
+  { key: "submitted",          label: "รออนุมัติ",   dot: "bg-amber-500" },
+  { key: "approved",           label: "อนุมัติแล้ว", dot: "bg-emerald-500" },
+  { key: "revision_requested", label: "ขอแก้",       dot: "bg-orange-500" },
+  { key: "canceled",           label: "ยกเลิก",      dot: "bg-slate-300" },
 ];
 const subStepLabel = (st: string) => SUB_STEPS.find((s) => s.key === st)?.label ?? (st === "posted" || st === "done" ? "อนุมัติแล้ว" : "ยังไม่เริ่ม");
 const subStepDot = (st: string) => (SUB_STEPS.find((s) => s.key === st)?.dot ?? ((st === "posted" || st === "done") ? "bg-emerald-500" : "bg-slate-400"));
@@ -155,8 +157,14 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {st === "todo" && <button disabled={busy} onClick={() => patch({ status: "in_progress" })} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-2 py-0.5 hover:bg-blue-100 disabled:opacity-50">▶ {t("เริ่มงาน", "Start")}</button>}
         {st === "in_progress" && <button disabled={busy} onClick={submitWork} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-100 disabled:opacity-50">📤 {t("ส่งงาน", "Submit")}</button>}
         {st === "submitted" && (canApprove
-          ? <span className="shrink-0 inline-flex items-center gap-1"><button disabled={busy} onClick={() => patch({ status: "approved" })} className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button><button disabled={busy} onClick={() => patch({ status: "in_progress" })} title={t("ตีกลับให้แก้", "Send back for revision")} className="text-xs text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50">↩︎</button></span>
+          ? <span className="shrink-0 inline-flex items-center gap-1">
+              <button disabled={busy} onClick={() => patch({ status: "approved" })} className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
+              <button disabled={busy} onClick={async () => { const r = window.prompt(t("เหตุผลที่ขอแก้ (ส่งให้ผู้ทำ)", "Reason for revision")); if (r === null) return; await patch({ status: "revision_requested", comment: r }); pushToast("info", t("ส่งกลับให้แก้แล้ว", "Sent back for revision")); }} title={t("ขอแก้", "Request revision")} className="text-xs text-orange-600 border border-orange-200 rounded-md px-1.5 py-0.5 hover:bg-orange-50 disabled:opacity-50">↩︎ {t("ขอแก้", "Revise")}</button>
+              <button disabled={busy} onClick={async () => { const r = window.prompt(t("เหตุผลที่ยกเลิก", "Reason to cancel")); if (r === null) return; await patch({ status: "canceled", comment: r }); pushToast("info", t("ยกเลิกงานย่อยแล้ว", "Subtask canceled")); }} title={t("ยกเลิก", "Cancel")} className="text-xs text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">✕</button>
+            </span>
           : <span className="shrink-0 text-xs font-medium text-amber-600">⏳ {t("รออนุมัติ", "Pending approval")}</span>)}
+        {st === "revision_requested" && <button disabled={busy} onClick={() => patch({ status: "in_progress" })} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-2 py-0.5 hover:bg-blue-100 disabled:opacity-50">▶ {t("เริ่มแก้", "Start revision")}</button>}
+        {st === "canceled" && <span className="shrink-0 text-xs font-medium text-slate-400">🚫 {t("ยกเลิก", "Canceled")}</span>}
         {isSubDone(st) && <span className="shrink-0 text-xs font-medium text-emerald-600">✓ {subStepLabel(st)}</span>}
         {ty && <span className="shrink-0 text-sm leading-none" title={ty.label_th}>{ty.icon ?? "🧩"}</span>}
         <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${isSubDone(st) ? "line-through text-slate-400" : "text-slate-700"}`}>{sub.title}</button>
@@ -168,6 +176,9 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-3 border-t border-slate-100">
           {approveHint && <p className="text-[11px] text-emerald-600">↗ {approveHint}</p>}
+          {(st === "revision_requested" || st === "canceled") && ((sub.config as Record<string, unknown> | undefined)?.review_note as string | undefined) && (
+            <p className="text-[11px] text-orange-600">📝 {st === "canceled" ? t("เหตุผลยกเลิก", "Cancel reason") : t("ขอแก้", "Revision")}: {(sub.config as Record<string, unknown>).review_note as string}</p>
+          )}
           <ERPTextarea value={desc} rows={2} onChange={(e) => setDesc(e.target.value)} onBlur={() => { if ((desc.trim() || null) !== (sub.description || null)) patch({ description: desc.trim() || null }); }} placeholder={t("รายละเอียดงานย่อย...", "Subtask description...")} />
           <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("ผู้รับผิดชอบ", "Assignee")}{canManageAssignees ? ` (${t("เลือกได้หลายคน", "multiple allowed")})` : ""}</p>

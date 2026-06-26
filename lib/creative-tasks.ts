@@ -12,7 +12,7 @@ export type CreativePriority = "urgent" | "high" | "normal" | "low";
 export type ApprovalStatus = "none" | "pending" | "approved" | "rejected" | "revision";
 export type AssetStatus = "missing" | "draft" | "final" | "approved";
 // ④ ขั้นตอนใหม่: todo → in_progress → submitted → approved (คงค่าเดิม doing/done/posted ไว้รองรับข้อมูลเก่า)
-export type SubtaskStatus = "todo" | "in_progress" | "submitted" | "approved" | "doing" | "done" | "posted";
+export type SubtaskStatus = "todo" | "in_progress" | "submitted" | "approved" | "revision_requested" | "canceled" | "doing" | "done" | "posted";
 
 // ---- ป้ายสถานะงาน (label ไทย + คลาส Tailwind) ----
 export const STATUS_META: Record<CreativeStatus, { label: string; cls: string; dot: string }> = {
