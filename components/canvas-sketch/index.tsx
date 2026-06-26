@@ -19,6 +19,7 @@ import { useState, useEffect, useRef, useCallback, type MutableRefObject } from 
 import dynamic from "next/dynamic";
 import "@excalidraw/excalidraw/index.css";
 import { apiFetch } from "@/lib/api";
+import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
 import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl } from "./utils";
 
@@ -401,7 +402,11 @@ export function CanvasSketch({
   useEffect(() => {
     if (!editable) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (dirtyRef.current || savingRef.current) { void doSave(true); e.preventDefault(); e.returnValue = ""; }
+      if (dirtyRef.current || savingRef.current) {
+        void doSave(true);
+        if (isUnloadSuppressed()) return; // กำลังยิง external app (เช่นเปิดโฟลเดอร์) — หน้าไม่ได้ออกจริง ไม่ต้องเตือน
+        e.preventDefault(); e.returnValue = "";
+      }
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
