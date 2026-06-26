@@ -293,6 +293,18 @@ function WorkBoardPrintInner() {
     });
   }, [board, moGroups, plan, assignees, type, group]);
 
+  // กด Ctrl/Cmd+P → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        e.preventDefault();
+        if (html) printReportHtmlInNewWindow(html);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [html]);
+
   const title = type === "production" ? "รายการกำลังผลิต (ตามโต๊ะ/ช่าง)" : type === "piece" ? "รายการรอจ่ายเหมาทั้งหมด" : type === "plan" ? "รายการจ่ายงานตามแผน" : "รายการรอจ่ายทั้งหมด";
   const subLabel = type === "plan" ? (plan ? `แผน ${plan.name}` : "แผน…") : `กลุ่ม ${groupLabelOf(group)}`;
 
