@@ -23,7 +23,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, columns, filter, isAdmin,
   theme, canUpload, onThemeChange,
-  onFilter, onOpenTask, onCreate, onOpenCampaign, onGotoHref, onOpenKnowledge,
+  onFilter, onOpenTask, onCreate, onOpenKnowledge,
 }: {
   userName?: string;
   counts: Counts;
@@ -40,8 +40,6 @@ export function OverviewDashboard({
   onFilter: (f: OvFilter) => void;
   onOpenTask: (id: string) => void;
   onCreate: () => void;
-  onOpenCampaign: (id: string) => void;
-  onGotoHref: (href: string) => void;
   onOpenKnowledge: () => void;
 }) {
   const t = useT();
@@ -135,14 +133,14 @@ export function OverviewDashboard({
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
           <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
             <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
-            <button onClick={() => onGotoHref("/tasks/campaigns")} className="text-xs font-medium text-violet-700 hover:underline">{t("ดูทั้งหมด", "See all")} →</button>
+            <a href="/tasks/campaigns" className="text-xs font-medium text-violet-700 hover:underline">{t("ดูทั้งหมด", "See all")} →</a>
           </div>
           <div className="p-2">
             {activeCampaigns.length === 0 ? (
               <div className="py-8 text-center">
                 <div className="text-3xl mb-1">📣</div>
                 <p className="text-slate-500 text-sm">{t("ยังไม่มีแคมเปญที่กำลังทำ", "No active campaigns")}</p>
-                <button onClick={() => onGotoHref("/tasks/campaigns")} className="mt-3 h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</button>
+                <a href="/tasks/campaigns" className="mt-3 inline-flex items-center h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</a>
               </div>
             ) : (
               <div className="space-y-1.5">
@@ -150,7 +148,7 @@ export function OverviewDashboard({
                   const st = CSTATUS[c.status];
                   const open = openByCampaign[c.id] ?? 0;
                   return (
-                    <button key={c.id} onClick={() => onOpenCampaign(c.id)} className="w-full text-left p-3 rounded-lg border border-slate-100 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
+                    <a key={c.id} href={`/tasks/campaigns/${c.id}`} className="block w-full text-left p-3 rounded-lg border border-slate-100 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
                       <div className="flex items-center justify-between gap-2">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${st?.cls ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{st?.label ?? c.status}</span>
                         {open > 0 && <span className="text-[11px] text-slate-500">{open} {t("งานค้าง", "open")}</span>}
@@ -160,7 +158,7 @@ export function OverviewDashboard({
                         {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
                         {(c.start_date || c.end_date) && <span>🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
                       </div>
-                    </button>
+                    </a>
                   );
                 })}
               </div>
@@ -173,11 +171,11 @@ export function OverviewDashboard({
       <div>
         <p className="text-sm font-semibold text-slate-500 mb-2">{t("ทางลัด", "Shortcuts")}</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-          <ShortcutBtn icon="📣" label={t("แคมเปญ", "Campaigns")} onClick={() => onGotoHref("/tasks/campaigns")} />
-          <ShortcutBtn icon="📱" label={t("คอนเทนต์", "Content")} onClick={() => onGotoHref("/tasks/content")} />
-          <ShortcutBtn icon="🔁" label={t("เทมเพลต", "Templates")} onClick={() => onGotoHref("/tasks/templates")} />
+          <ShortcutBtn icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
+          <ShortcutBtn icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
+          <ShortcutBtn icon="🔁" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
           <ShortcutBtn icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
-          {isAdmin && <ShortcutBtn icon="⚙️" label={t("ตั้งค่า", "Settings")} onClick={() => onGotoHref("/tasks/settings")} />}
+          {isAdmin && <ShortcutBtn icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
         </div>
       </div>
 
@@ -203,11 +201,10 @@ function SummaryCard({ card, value, label, active, hint, onClick }: { card: Card
   );
 }
 
-function ShortcutBtn({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="flex flex-col items-center justify-center gap-1.5 h-24 rounded-xl bg-white border border-slate-200 shadow-sm hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
-      <span className="text-2xl">{icon}</span>
-      <span className="text-xs font-medium text-slate-600 text-center px-2">{label}</span>
-    </button>
-  );
+function ShortcutBtn({ icon, label, href, onClick }: { icon: string; label: string; href?: string; onClick?: () => void }) {
+  const cls = "flex flex-col items-center justify-center gap-1.5 h-24 rounded-xl bg-white border border-slate-200 shadow-sm hover:border-violet-300 hover:bg-violet-50/40 transition-colors";
+  const inner = <><span className="text-2xl">{icon}</span><span className="text-xs font-medium text-slate-600 text-center px-2">{label}</span></>;
+  return href
+    ? <a href={href} className={cls}>{inner}</a>
+    : <button onClick={onClick} className={cls}>{inner}</button>;
 }

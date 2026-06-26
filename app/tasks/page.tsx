@@ -8,7 +8,6 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
@@ -82,7 +81,6 @@ function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: nu
 // ============================================================
 export default function TasksPage() {
   const { user, can } = useAuth();
-  const router = useRouter();
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const { statuses } = useCreativeStatuses();
@@ -217,8 +215,6 @@ export default function TasksPage() {
                 isAdmin={user?.role === "admin"}
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}
-                onOpenCampaign={(id) => router.push(`/tasks/campaigns/${id}`)}
-                onGotoHref={(href) => router.push(href)}
                 onOpenKnowledge={() => setKnowledgeOpen(true)}
               />
             )}
