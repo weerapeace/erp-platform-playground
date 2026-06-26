@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPInput, ERPTextarea } from "@/components/form";
+import { ERPModal } from "@/components/modal";
 import { ImageAttach } from "@/components/image-attach";
 import { UserPicker } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
@@ -122,10 +123,9 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
 export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {} }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
   const [desc, setDesc] = useState(sub.description ?? "");
   const [adding, setAdding] = useState<UserPickerValue | null>(null);
-  const [linkLabel, setLinkLabel] = useState("");
-  const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const ids = sub.assignees.map((a) => a.id);
   const attachCount = sub.attachments?.length ?? 0;
@@ -139,6 +139,8 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const approveHint = APPROVE_TARGET_HINT[approveTarget];
   const hasPrompt = (cfg.has_copy_prompt ?? ty?.has_copy_prompt) === true;
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
+  const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
+  const canSubmit = st === "in_progress"; // ส่งงานได้เฉพาะตอนกำลังทำ
 
   // คัดลอก prompt (เติมข้อมูลสินค้าฝั่ง server) ไปคลิปบอร์ด
   const copyPrompt = async () => {
@@ -159,14 +161,9 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const patch = async (p: Record<string, unknown>) => { setBusy(true); try { await updateSubtask(taskId, sub.id, p); await reload(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
   const addAssignee = async (v: UserPickerValue | null) => { if (!v || ids.includes(v.id)) return; setAdding(null); await patch({ assignee_ids: [...ids, v.id] }); };
   const del = async () => { if (!window.confirm(t(`ลบงานย่อย "${sub.title}" ?`, `Delete subtask "${sub.title}"?`))) return; try { await deleteSubtask(taskId, sub.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
-  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
 
-  // ③ ส่งงาน: ต้องแนบอย่างน้อย 1 (link หรือรูป) → status submitted (server แจ้งเตือนผู้อนุมัติ)
-  const submitWork = async () => {
-    if (attachCount === 0) { pushToast("error", t("กรุณาแนบลิงก์หรือรูปงานอย่างน้อย 1 ก่อนส่ง", "Please attach at least one file or link before submitting")); setOpen(true); return; }
-    await patch({ status: "submitted" });
-    pushToast("success", t("ส่งงานแล้ว — รออนุมัติ", "Submitted — pending approval"));
-  };
+  // ③ ส่งงาน/แนบงาน: เปิดป๊อปอัป (แนบรูป/ลิงก์ + กดส่ง) — การ์ดไม่ต้องโชว์ฟอร์มแนบเอง
+  const openWork = () => setWorkOpen(true);
 
   return (
     <div className="border border-slate-200 rounded-lg">
@@ -174,7 +171,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         <span className={`h-2 w-2 rounded-full shrink-0 ${subStepDot(st)}`} title={subStepLabel(st)} />
         {/* ปุ่ม action ตามสถานะ */}
         {st === "todo" && <button disabled={busy} onClick={() => patch({ status: "in_progress" })} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-2 py-0.5 hover:bg-blue-100 disabled:opacity-50">▶ {t("เริ่มงาน", "Start")}</button>}
-        {st === "in_progress" && <button disabled={busy} onClick={submitWork} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-100 disabled:opacity-50">📤 {t("ส่งงาน", "Submit")}</button>}
+        {st === "in_progress" && <button disabled={busy} onClick={openWork} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-100 disabled:opacity-50">📤 {t("ส่งงาน", "Submit")}</button>}
         {st === "submitted" && (canApprove
           ? <span className="shrink-0 inline-flex items-center gap-1">
               <button disabled={busy} onClick={() => patch({ status: "approved" })} className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button>
@@ -215,21 +212,83 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               ? <UserPicker value={adding} onChange={addAssignee} disableCreate />
               : <p className="text-[11px] text-slate-400 italic">{t("เฉพาะหัวหน้า/ผู้สร้างงานเปลี่ยนผู้รับผิดชอบได้", "Only managers or task creators can change assignees")}</p>}
           </div>
-          {showImages && (
+          {/* ③ ไฟล์แนบ (compact) — โชว์เฉพาะที่มีอยู่ ฟอร์มแนบ/ส่งงานไปอยู่ในป๊อปอัป */}
+          {(showImages || showLinks) && (
+            <div className="space-y-2">
+              {imageAtts.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {imageAtts.slice(0, 8).map((a) => <img key={a.id} src={`/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=120`} alt={a.file_name ?? ""} className="h-12 w-12 rounded object-cover border border-slate-200" />)}
+                  {imageAtts.length > 8 && <span className="self-center text-[11px] text-slate-400">+{imageAtts.length - 8}</span>}
+                </div>
+              )}
+              {linkAtts.length > 0 && (
+                <div className="space-y-1">
+                  {linkAtts.map((a) => <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="block text-xs text-violet-700 truncate">🔗 {a.label || a.url}</a>)}
+                </div>
+              )}
+              <button onClick={openWork} className={`w-full h-9 rounded-lg text-sm font-medium ${canSubmit ? "bg-amber-500 text-white hover:bg-amber-600" : "text-violet-700 border border-violet-200 hover:bg-violet-50"}`}>
+                {canSubmit ? `📤 ${t("ส่งงาน (แนบรูป/ลิงก์)", "Submit (attach files/links)")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`}
+              </button>
+            </div>
+          )}
+          <div className="flex justify-between items-center">
+            <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" disabled={!canManageAssignees} checked={sub.required_before_next} onChange={(e) => patch({ required_before_next: e.target.checked })} />{t("ต้องเสร็จก่อนขั้นถัดไป", "Must complete before next step")}</label>
+            {canManageAssignees && <button onClick={del} className="text-xs text-red-500 hover:underline">{t("ลบงานย่อย", "Delete Subtask")}</button>}
+          </div>
+        </div>
+      )}
+      {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} onClose={() => setWorkOpen(false)} />}
+    </div>
+  );
+}
+
+// ป๊อปอัปแนบงาน/ส่งงาน — ฟอร์มแนบรูป (ImageAttach) + ลิงก์ + ปุ่มส่งงาน (รออนุมัติ)
+// แยกจากการ์ดให้การ์ด compact · ส่งงานได้เฉพาะ canSubmit (กำลังทำ) และต้องแนบ ≥1 ก่อน
+function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks, canSubmit, onClose }: {
+  sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn;
+  showImages: boolean; showLinks: boolean; canSubmit: boolean; onClose: () => void;
+}) {
+  const t = useT();
+  const [linkLabel, setLinkLabel] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
+  const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
+  const attachCount = sub.attachments?.length ?? 0;
+  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const submit = async () => {
+    if (attachCount === 0) { pushToast("error", t("กรุณาแนบลิงก์หรือรูปงานอย่างน้อย 1 ก่อนส่ง", "Please attach at least one file or link before submitting")); return; }
+    setBusy(true);
+    try { await updateSubtask(taskId, sub.id, { status: "submitted" }); await reload(); pushToast("success", t("ส่งงานแล้ว — รออนุมัติ", "Submitted — pending approval")); onClose(); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md"
+      title={canSubmit ? t("ส่งงาน — แนบรูป/ลิงก์", "Submit work — attach files/links") : t("แนบไฟล์งาน", "Attach work files")}
+      footer={
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          {canSubmit && <button onClick={submit} disabled={busy || attachCount === 0} className="h-9 px-4 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (รออนุมัติ)", "Submit (pending approval)")}</button>}
+        </div>
+      }>
+      <div className="space-y-4">
+        {canSubmit && attachCount === 0 && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
+        {showImages && (
           <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤800px)", "Work images (resized ≤800px)")}</p>
             <ImageAttach
-              images={(sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
+              images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
               onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
               onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
               pushToast={pushToast} />
           </div>
-          )}
-          {showLinks && (
+        )}
+        {showLinks && (
           <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("ลิงก์ส่งงาน", "Work links")}</p>
             <div className="space-y-1 mb-1.5">
-              {(sub.attachments ?? []).filter((a) => a.kind !== "image").map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
+              {linkAtts.map((a) => <div key={a.id} className="flex items-center gap-2 text-xs"><a href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="text-violet-700 truncate flex-1">🔗 {a.label || a.url}</a><button onClick={async () => { try { await deleteAttachment(taskId, a.id); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }} className="text-slate-300 hover:text-red-500">✕</button></div>)}
+              {linkAtts.length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มีลิงก์", "No links yet")}</p>}
             </div>
             <div className="flex gap-1.5">
               <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ", "Label")} />
@@ -237,15 +296,8 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               <button onClick={addLink} className="h-9 px-2 text-xs text-violet-700 border border-violet-200 rounded-lg shrink-0">{t("แนบ", "Attach")}</button>
             </div>
           </div>
-          )}
-          {/* ปุ่มส่งงานในกล่อง (เห็นง่ายตอนกำลังทำ) */}
-          {st === "in_progress" && <button disabled={busy} onClick={submitWork} className="w-full h-9 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (แนบงานก่อน → รออนุมัติ)", "Submit (attach files first → pending approval)")}</button>}
-          <div className="flex justify-between items-center">
-            <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" disabled={!canManageAssignees} checked={sub.required_before_next} onChange={(e) => patch({ required_before_next: e.target.checked })} />{t("ต้องเสร็จก่อนขั้นถัดไป", "Must complete before next step")}</label>
-            {canManageAssignees && <button onClick={del} className="text-xs text-red-500 hover:underline">{t("ลบงานย่อย", "Delete Subtask")}</button>}
-          </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </ERPModal>
   );
 }
