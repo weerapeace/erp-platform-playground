@@ -9,6 +9,8 @@ import { apiFetch } from "@/lib/api";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
+import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, DEFAULT_THEME, type BrandTheme } from "@/lib/brand-theme";
+import { BrandThemeStyles } from "@/components/brand-theme/styles";
 
 const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
@@ -141,544 +143,6 @@ function CardDeadline({ tone, label }: { tone: Tone; label: string }) {
 }
 
 
-type LuxurySealKind = "document" | "compass" | "calendar" | "check" | "sketch" | "message" | "comment" | "tag" | "quote" | "approve" | "sku" | "cancel";
-
-const STAT_SEALS: LuxurySealKind[] = ["document", "compass", "calendar", "check"];
-const STATUS_SEALS: LuxurySealKind[] = ["sketch", "message", "comment", "tag", "quote", "approve", "sku", "cancel"];
-
-function LuxurySealGlyph({ kind }: { kind: LuxurySealKind }) {
-  if (kind === "document") {
-    return (
-      <>
-        <path d="M18 12h16l6 6v24H18z" />
-        <path d="M34 12v8h8" />
-        <path d="M23 25h12M23 31h14M23 37h9" />
-      </>
-    );
-  }
-  if (kind === "compass") {
-    return (
-      <>
-        <circle cx="30" cy="30" r="9" />
-        <path d="M30 10v8M30 42v8M10 30h8M42 30h8M16 16l6 6M38 38l6 6M44 16l-6 6M22 38l-6 6" />
-        <path d="M33 27l-5 11-1-8-8-1z" />
-      </>
-    );
-  }
-  if (kind === "calendar") {
-    return (
-      <>
-        <rect x="16" y="16" width="28" height="28" rx="4" />
-        <path d="M22 11v9M38 11v9M16 24h28M23 31h4M33 31h4M23 38h4M33 38h4" />
-      </>
-    );
-  }
-  if (kind === "check") {
-    return (
-      <>
-        <circle cx="30" cy="30" r="17" />
-        <path d="M21 31l6 6 13-15" />
-      </>
-    );
-  }
-  if (kind === "sketch") {
-    return (
-      <>
-        <path d="M18 42V22l12-8 12 8v20" />
-        <path d="M24 42V29h12v13M23 25l7-5 7 5" />
-      </>
-    );
-  }
-  if (kind === "message") {
-    return (
-      <>
-        <path d="M15 20h30v20H15z" />
-        <path d="M16 21l14 11 14-11" />
-      </>
-    );
-  }
-  if (kind === "comment") {
-    return (
-      <>
-        <path d="M17 18h26v18H28l-9 7v-7h-2z" />
-        <path d="M23 26h14M23 32h9" />
-      </>
-    );
-  }
-  if (kind === "tag") {
-    return (
-      <>
-        <path d="M17 29l14-14h12v12L29 41z" />
-        <circle cx="38" cy="20" r="2.5" />
-        <path d="M24 31l7 7" />
-      </>
-    );
-  }
-  if (kind === "quote") {
-    return (
-      <>
-        <path d="M20 17h21v26H20z" />
-        <path d="M25 25h11M25 31h11M25 37h7" />
-        <path d="M17 22h6M17 29h6" />
-      </>
-    );
-  }
-  if (kind === "approve") {
-    return (
-      <>
-        <path d="M21 34l5 7 14-22" />
-        <path d="M17 27c3-4 7-6 13-6s10 2 13 6" />
-        <path d="M19 41h22" />
-      </>
-    );
-  }
-  if (kind === "sku") {
-    return (
-      <>
-        <path d="M30 13l16 9v17l-16 8-16-8V22z" />
-        <path d="M14 22l16 9 16-9M30 31v16" />
-        <path d="M22 18l16 9" />
-      </>
-    );
-  }
-  return (
-    <>
-      <circle cx="30" cy="30" r="17" />
-      <path d="M23 23l14 14M37 23L23 37" />
-    </>
-  );
-}
-
-function LuxurySealIcon({ kind, variant }: { kind: LuxurySealKind; variant: "stat" | "column" }) {
-  return (
-    <span aria-hidden="true" className={"gg-luxury-seal gg-luxury-seal--" + variant}>
-      <svg viewBox="0 0 60 60" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-        <LuxurySealGlyph kind={kind} />
-      </svg>
-    </span>
-  );
-}
-
-function GoodGoodsLuxuryStyles() {
-  return (
-    <style>{`
-      [data-good-goods-theme="true"] {
-        --gg-navy: #0e2742;
-        --gg-navy-soft: #173657;
-        --gg-ink: #14243a;
-        --gg-muted: #66758a;
-        --gg-silver: #b8c3cf;
-        --gg-silver-soft: #dfe6ed;
-        --gg-silver-blue: #7890aa;
-        background-color: #f7f8fb;
-        background-image:
-          radial-gradient(circle at 8% -10%, rgba(14, 39, 66, 0.14), transparent 30%),
-          radial-gradient(circle at 95% 2%, rgba(184, 195, 207, 0.2), transparent 32%),
-          linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(235, 240, 246, 0.86));
-      }
-
-      [data-good-goods-theme="true"]::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        z-index: 0;
-        pointer-events: none;
-        background-image:
-          linear-gradient(90deg, rgba(14, 39, 66, 0.035) 1px, transparent 1px),
-          linear-gradient(rgba(14, 39, 66, 0.025) 1px, transparent 1px),
-          radial-gradient(circle at 10px 10px, rgba(184, 195, 207, 0.28) 1px, transparent 1.6px);
-        background-size: 112px 112px, 112px 112px, 34px 34px;
-        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent 78%);
-      }
-
-      [data-good-goods-theme="true"] > div {
-        position: relative;
-        z-index: 1;
-      }
-
-      [data-good-goods-theme="true"] h1,
-      [data-good-goods-theme="true"] h2,
-      [data-good-goods-theme="true"] [data-gg-stat-card] .text-slate-900,
-      [data-good-goods-theme="true"] [data-gg-brand-card] .text-slate-800,
-      [data-good-goods-theme="true"] [data-gg-task-card] .text-slate-800 {
-        color: var(--gg-navy) !important;
-      }
-
-      [data-good-goods-theme="true"] p,
-      [data-good-goods-theme="true"] [data-gg-stat-card] .text-slate-500,
-      [data-good-goods-theme="true"] [data-gg-stat-card] .text-slate-400,
-      [data-good-goods-theme="true"] [data-gg-brand-card] .text-slate-400,
-      [data-good-goods-theme="true"] [data-gg-task-card] .text-slate-400 {
-        color: var(--gg-muted) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-live-badge],
-      [data-good-goods-theme="true"] [data-gg-stat-card],
-      [data-good-goods-theme="true"] [data-gg-sidebar],
-      [data-good-goods-theme="true"] [data-gg-panel],
-      [data-good-goods-theme="true"] [data-gg-task-card],
-      [data-good-goods-theme="true"] [data-gg-brand-card] {
-        border-color: rgba(184, 195, 207, 0.88) !important;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 249, 252, 0.9)) !important;
-        box-shadow: 0 18px 42px rgba(13, 32, 54, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-stat-card],
-      [data-good-goods-theme="true"] [data-gg-sidebar],
-      [data-good-goods-theme="true"] [data-gg-panel],
-      [data-good-goods-theme="true"] [data-gg-task-card],
-      [data-good-goods-theme="true"] [data-gg-brand-card],
-      [data-good-goods-theme="true"] [data-gg-column-header] {
-        position: relative;
-        overflow: hidden;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-stat-card]::after,
-      [data-good-goods-theme="true"] [data-gg-sidebar]::after,
-      [data-good-goods-theme="true"] [data-gg-panel]::after,
-      [data-good-goods-theme="true"] [data-gg-brand-card]::after,
-      [data-good-goods-theme="true"] [data-gg-task-card]::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        border-radius: inherit;
-        background-image:
-          linear-gradient(135deg, rgba(184, 195, 207, 0.32), transparent 22px),
-          linear-gradient(315deg, rgba(14, 39, 66, 0.06), transparent 28px);
-        background-repeat: no-repeat;
-        background-position: left top, right bottom;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-live-badge] {
-        color: var(--gg-navy) !important;
-        box-shadow: 0 8px 22px rgba(14, 39, 66, 0.08) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-live-badge] span {
-        background-color: var(--gg-silver-blue) !important;
-        box-shadow: 0 0 14px rgba(184, 195, 207, 0.8) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-action] {
-        border-color: rgba(184, 195, 207, 0.9) !important;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 244, 248, 0.92)) !important;
-        color: var(--gg-navy) !important;
-        box-shadow: 0 10px 24px rgba(13, 32, 54, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.96) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-action="primary"] {
-        border-color: rgba(184, 195, 207, 0.72) !important;
-        background: linear-gradient(180deg, #173657, #0b2139) !important;
-        color: white !important;
-        box-shadow: 0 16px 34px rgba(14, 39, 66, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-brand-count],
-      [data-good-goods-theme="true"] [data-gg-audit-count] {
-        background: rgba(239, 243, 247, 0.9) !important;
-        color: var(--gg-navy) !important;
-        box-shadow: inset 0 0 0 1px rgba(184, 195, 207, 0.72) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-all-button] {
-        border-color: rgba(184, 195, 207, 0.86) !important;
-        background: linear-gradient(180deg, #ffffff, #f1f5f9) !important;
-        color: var(--gg-navy) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-brand-card][data-gg-selected="true"] {
-        border-color: var(--gg-silver) !important;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(236, 241, 247, 0.94)) !important;
-        box-shadow: 0 0 0 1px rgba(184, 195, 207, 0.44), 0 22px 46px rgba(14, 39, 66, 0.14) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-brand-card][data-gg-selected="true"] [data-gg-brand-mark] {
-        background: linear-gradient(180deg, var(--gg-navy-soft), var(--gg-navy)) !important;
-        color: white !important;
-        box-shadow: inset 0 0 0 1px rgba(223, 230, 237, 0.32), 0 10px 20px rgba(14, 39, 66, 0.16) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-mini-stat],
-      [data-good-goods-theme="true"] [data-gg-empty],
-      [data-good-goods-theme="true"] [data-gg-more] {
-        background: rgba(247, 249, 252, 0.78) !important;
-        box-shadow: inset 0 0 0 1px rgba(184, 195, 207, 0.55) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-column-drop][data-gg-drop-target="true"] {
-        --tw-ring-color: rgba(184, 195, 207, 0.86) !important;
-        background: rgba(231, 237, 244, 0.72) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-connector] {
-        background: linear-gradient(90deg, rgba(184, 195, 207, 0.9), rgba(120, 144, 170, 0.58), transparent) !important;
-        box-shadow: 0 0 14px rgba(120, 144, 170, 0.38) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-column-header] {
-        border-color: rgba(184, 195, 207, 0.86) !important;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(232, 238, 244, 0.86)) !important;
-        box-shadow: 0 12px 26px rgba(14, 39, 66, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-column-header]::after {
-        content: "";
-        position: absolute;
-        left: 8px;
-        right: 8px;
-        bottom: 4px;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(184, 195, 207, 0.8), transparent);
-      }
-
-      [data-good-goods-theme="true"] [data-gg-column-dot] {
-        filter: saturate(0.75) brightness(0.95);
-        box-shadow: 0 0 14px rgba(184, 195, 207, 0.72) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-task-card] {
-        box-shadow: 4px 4px 0 rgba(14, 39, 66, 0.08), 0 14px 30px rgba(14, 39, 66, 0.08) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-task-card]:hover {
-        border-color: var(--gg-silver-blue) !important;
-        box-shadow: 5px 5px 0 rgba(14, 39, 66, 0.1), 0 18px 34px rgba(14, 39, 66, 0.12) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-cover] {
-        border-color: rgba(184, 195, 207, 0.72) !important;
-        background: linear-gradient(135deg, #ffffff 0%, rgba(223, 230, 237, 0.75) 58%, rgba(14, 39, 66, 0.08) 100%) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-audit] {
-        border-color: rgba(184, 195, 207, 0.42) !important;
-        background: radial-gradient(circle at top left, rgba(184, 195, 207, 0.18), transparent 34%), linear-gradient(180deg, #102a47, #071b30) !important;
-        box-shadow: 0 22px 48px rgba(7, 27, 48, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-audit] h2,
-      [data-good-goods-theme="true"] [data-gg-audit] .text-white {
-        color: #f7fbff !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-audit] p,
-      [data-good-goods-theme="true"] [data-gg-audit] .text-slate-300,
-      [data-good-goods-theme="true"] [data-gg-audit] .text-slate-400 {
-        color: #c9d4df !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-audit-row] {
-        border-color: rgba(184, 195, 207, 0.18) !important;
-        background: rgba(255, 255, 255, 0.06) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-audit-dot] {
-        background: var(--gg-silver) !important;
-        box-shadow: 0 0 14px rgba(223, 230, 237, 0.8) !important;
-      }
-
-
-      [data-good-goods-theme="true"] {
-        background-image:
-          radial-gradient(circle at 7% -12%, rgba(14, 39, 66, 0.12), transparent 28%),
-          radial-gradient(circle at 94% 0%, rgba(184, 195, 207, 0.22), transparent 30%),
-          linear-gradient(135deg, #fbfbfa 0%, #f2f5f8 52%, #e9eef5 100%) !important;
-      }
-
-      [data-good-goods-theme="true"]::before {
-        opacity: 0.98;
-        background-image:
-          url('/brand-themes/good-goods/ornament-top-left.webp'),
-          url('/brand-themes/good-goods/ornament-top-right.webp'),
-          url('/brand-themes/good-goods/ornament-bottom-left.webp'),
-          url('/brand-themes/good-goods/ornament-bottom-right.webp'),
-          url('/brand-themes/good-goods/header-cloud.webp'),
-          linear-gradient(90deg, rgba(14, 39, 66, 0.04) 1px, transparent 1px),
-          linear-gradient(rgba(14, 39, 66, 0.028) 1px, transparent 1px);
-        background-size: 148px 148px, 152px 148px, 150px 154px, 155px 162px, min(500px, 36vw) auto, 118px 118px, 118px 118px;
-        background-position: left top, right top, left bottom, right bottom, 58% 6px, left top, left top;
-        background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, repeat, repeat;
-        mix-blend-mode: multiply;
-        mask-image: none;
-      }
-
-      [data-good-goods-theme="true"]::after {
-        content: "";
-        position: fixed;
-        inset: 7px;
-        z-index: 0;
-        pointer-events: none;
-        border: 2px solid rgba(14, 39, 66, 0.78);
-        border-radius: 4px;
-        box-shadow:
-          inset 0 0 0 1px rgba(255, 255, 255, 0.82),
-          inset 0 0 0 3px rgba(184, 195, 207, 0.34),
-          0 0 0 1px rgba(184, 195, 207, 0.68);
-      }
-
-      [data-good-goods-theme="true"] [data-gg-live-badge] {
-        border-color: rgba(184, 195, 207, 0.72) !important;
-        background: linear-gradient(180deg, #173657, #0b2139) !important;
-        color: #f8fbff !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-live-badge] span {
-        background-color: #dce6f0 !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-stat-card] {
-        min-height: 104px;
-        padding-right: 5.35rem !important;
-        outline: 1px solid rgba(255, 255, 255, 0.88);
-        outline-offset: -5px;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-stat-card] > :not(.gg-luxury-seal),
-      [data-good-goods-theme="true"] [data-gg-column-header] > :not(.gg-luxury-seal),
-      [data-good-goods-theme="true"] [data-gg-panel] > *,
-      [data-good-goods-theme="true"] [data-gg-sidebar] > * {
-        position: relative;
-        z-index: 2;
-      }
-
-      [data-good-goods-theme="true"] .gg-luxury-seal {
-        pointer-events: none;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 999px;
-        color: #f8fbff;
-        border: 1px solid rgba(223, 230, 237, 0.95);
-        background:
-          radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.22), transparent 26%),
-          linear-gradient(180deg, #173657, #092039);
-        box-shadow:
-          inset 0 0 0 3px rgba(255, 255, 255, 0.08),
-          inset 0 0 0 6px rgba(184, 195, 207, 0.16),
-          0 10px 24px rgba(14, 39, 66, 0.22),
-          0 0 0 5px rgba(223, 230, 237, 0.42);
-      }
-
-      [data-good-goods-theme="true"] .gg-luxury-seal svg {
-        width: 64%;
-        height: 64%;
-        filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.18));
-      }
-
-      [data-good-goods-theme="true"] .gg-luxury-seal--stat {
-        position: absolute;
-        right: 1.5rem;
-        top: 50%;
-        z-index: 1;
-        width: 58px;
-        height: 58px;
-        transform: translateY(-50%);
-      }
-
-      [data-good-goods-theme="true"] .gg-luxury-seal--column {
-        position: absolute;
-        left: 50%;
-        top: -13px;
-        z-index: 1;
-        width: 36px;
-        height: 36px;
-        transform: translateX(-50%);
-        box-shadow:
-          inset 0 0 0 2px rgba(255, 255, 255, 0.08),
-          0 8px 18px rgba(14, 39, 66, 0.18),
-          0 0 0 4px rgba(223, 230, 237, 0.42);
-      }
-
-      [data-good-goods-theme="true"] [data-gg-sidebar] {
-        outline: 1px solid rgba(255, 255, 255, 0.88);
-        outline-offset: -5px;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-sidebar]::before {
-        content: "";
-        position: absolute;
-        inset: 0 0 auto 0;
-        height: 88px;
-        z-index: 0;
-        pointer-events: none;
-        border-radius: inherit inherit 0 0;
-        background:
-          radial-gradient(circle at 92% 12%, rgba(223, 230, 237, 0.16), transparent 24%),
-          repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 8px),
-          linear-gradient(180deg, #132f50, #0b2139);
-        box-shadow: inset 0 -1px 0 rgba(184, 195, 207, 0.56);
-      }
-
-      [data-good-goods-theme="true"] [data-gg-sidebar] > div:first-child h2,
-      [data-good-goods-theme="true"] [data-gg-sidebar] > div:first-child p {
-        color: #f7fbff !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-all-button] {
-        border-color: rgba(184, 195, 207, 0.78) !important;
-        background: linear-gradient(180deg, #173657, #0b2139) !important;
-        color: #f8fbff !important;
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11), 0 10px 22px rgba(14, 39, 66, 0.16) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-panel] {
-        min-height: 610px;
-        outline: 1px solid rgba(255, 255, 255, 0.9);
-        outline-offset: -5px;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-panel]::before {
-        content: "";
-        position: absolute;
-        right: -2px;
-        bottom: -4px;
-        z-index: 0;
-        width: min(780px, 56vw);
-        height: min(360px, 38vh);
-        pointer-events: none;
-        background: url('/brand-themes/good-goods/heritage-scene.webp') right bottom / contain no-repeat;
-        mix-blend-mode: multiply;
-        opacity: 0.86;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-column-header] {
-        padding-top: 2.35rem !important;
-        padding-bottom: 0.75rem !important;
-        outline: 1px solid rgba(255, 255, 255, 0.86);
-        outline-offset: -4px;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-column-header]::before {
-        content: "";
-        position: absolute;
-        left: 12px;
-        right: 12px;
-        top: 1.72rem;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(201, 182, 142, 0.72), transparent);
-      }
-
-      [data-good-goods-theme="true"] [data-gg-column-dot] {
-        height: 0 !important;
-        margin-bottom: 0 !important;
-        opacity: 0;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-connector] {
-        top: 2.25rem !important;
-        height: 1px !important;
-        background: linear-gradient(90deg, rgba(201, 182, 142, 0.68), rgba(184, 195, 207, 0.7), transparent) !important;
-      }
-
-      [data-good-goods-theme="true"] [data-gg-task-card] {
-        outline: 1px solid rgba(255, 255, 255, 0.82);
-        outline-offset: -4px;
-      }
-
-    `}</style>
-  );
-}
 
 function LoadingCard() {
   return (
@@ -832,7 +296,25 @@ export function DesignDashboard() {
     ...column,
     sheets: filteredSheets.filter((sheet) => sheet.status === column.key),
   }));
-  const luxuryTheme = selectedBrand?.name.trim().toLowerCase() === "good goods";
+
+  // ── Brand Theme (ระบบกลาง) — โหลดธีม published ของแบรนด์ที่เลือก · "ทั้งหมด"/ไม่มีธีม = default ERP ──
+  const [brandTheme, setBrandTheme] = useState<BrandTheme>(DEFAULT_THEME);
+  const selectedBrandId = selectedBrand?.id ?? null;
+  useEffect(() => {
+    if (!selectedBrandId) { setBrandTheme(DEFAULT_THEME); return; }
+    let alive = true;
+    apiFetch(`/api/brand-themes/${selectedBrandId}`).then((r) => r.json())
+      .then((j) => { if (alive) setBrandTheme(resolveTheme(j.published)); })
+      .catch(() => { if (alive) setBrandTheme(DEFAULT_THEME); });
+    return () => { alive = false; };
+  }, [selectedBrandId]);
+  const bgUrl = brandBgUrl(brandTheme.background_image_key, 1600);
+  const overlay = hexToRgba(brandTheme.background_overlay_color, brandTheme.background_opacity);
+  const rootStyle = {
+    ...themeToCssVars(brandTheme),
+    backgroundColor: brandTheme.background_color,
+    ...(bgUrl ? { backgroundImage: `linear-gradient(${overlay}, ${overlay}), url("${bgUrl}")`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" as const } : {}),
+  };
 
   function refreshDashboard() {
     setMoveMessage(null);
@@ -900,11 +382,8 @@ export function DesignDashboard() {
   }
 
   return (
-    <div
-      data-good-goods-theme={luxuryTheme ? "true" : undefined}
-      className={luxuryTheme ? "relative min-h-screen bg-[#f7f8fb]" : "min-h-screen bg-[radial-gradient(circle_at_top_left,#fef3c7_0,#f8fafc_28%,#eef2ff_100%)]"}
-    >
-      {luxuryTheme && <GoodGoodsLuxuryStyles />}
+    <div className="brand-themed relative min-h-screen" style={rootStyle}>
+      <BrandThemeStyles />
       <div className="w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -960,7 +439,6 @@ export function DesignDashboard() {
               ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
             ].map(([label, value, hint], index) => (
               <div key={label} data-gg-stat-card className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
-                {luxuryTheme && <LuxurySealIcon kind={STAT_SEALS[index % STAT_SEALS.length] ?? "document"} variant="stat" />}
                 <div className="text-xs font-medium text-slate-400">{label}</div>
                 <div className="mt-1 text-3xl font-semibold text-slate-900">{value}</div>
                 <div className="mt-1 text-xs text-slate-500">{hint}</div>
@@ -1101,7 +579,6 @@ export function DesignDashboard() {
                             <div data-gg-connector className="absolute left-[62%] top-8 h-px w-[76%] bg-gradient-to-r from-amber-300 via-amber-200 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.45)]" />
                           )}
                           <div data-gg-column-header className="relative mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%)` }}>
-                            {luxuryTheme && <LuxurySealIcon kind={STATUS_SEALS[index % STATUS_SEALS.length] ?? "sketch"} variant="column" />}
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
                             <div className="text-[11px] text-slate-400">{column.sheets.length} งาน</div>
