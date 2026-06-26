@@ -217,6 +217,15 @@ export type AppGroup = { id?: string; key: string; label: string; icon: string |
 export type MenuSectionRow = { app_key: string; name: string; icon: string | null; icon_url: string | null; sort_order: number };
 type SectionMeta = { icon: string | null; iconUrl: string | null; order: number };
 
+// ไอคอนแอป (รูปอัปโหลด icon_url ก่อน → ไม่งั้น emoji) — ใช้ในแถบแท็บแอปด้านบน
+function AppTabIcon({ icon, iconUrl }: { icon: string | null; iconUrl?: string | null }) {
+  if (iconUrl) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={`/api/r2-image?key=${encodeURIComponent(iconUrl)}&w=40`} alt="" className="w-[18px] h-[18px] rounded object-contain shrink-0" />;
+  }
+  return <span>{icon ?? "📦"}</span>;
+}
+
 // map section (default nav) → app key — สำหรับ "นำเข้าเมนูเริ่มต้น"
 function sectionToApp(label: string): string {
   if (label === "หน้าหลัก") return "home";
@@ -755,11 +764,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                 }`;
                 return href ? (
                   <Link key={a.key} href={href} onClick={() => setActiveApp(a.key)} className={cls}>
-                    <span>{a.icon ?? "📦"}</span><span>{a.label}</span>
+                    <AppTabIcon icon={a.icon} iconUrl={a.icon_url} /><span>{a.label}</span>
                   </Link>
                 ) : (
                   <button key={a.key} onClick={() => setActiveApp(a.key)} className={cls}>
-                    <span>{a.icon ?? "📦"}</span><span>{a.label}</span>
+                    <AppTabIcon icon={a.icon} iconUrl={a.icon_url} /><span>{a.label}</span>
                   </button>
                 );
               })}
