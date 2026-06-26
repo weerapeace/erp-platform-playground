@@ -390,6 +390,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   // ---- เฟส 3: แท็บในป๊อปอัพ + comment ลูกค้า + รอบเสนอราคา ----
   const [modalTab, setModalTab] = useState<"info" | "comments" | "cost" | "quotes">("info");
+  // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
+  const [editing, setEditing] = useState(false);
   const [comments, setComments] = useState<DesignSheetComment[]>([]);
   const [quotes, setQuotes] = useState<DesignSheetQuote[]>([]);
   const [cqLoading, setCqLoading] = useState(false);
@@ -959,6 +961,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }, [statusFilter, brandFilter, showArchived]);
 
   const patch = (p: Partial<FormState>) => setForm((f) => (f ? { ...f, ...p } : f));
+  // แก้ได้เต็มที่เมื่อ: มีสิทธิ์ + (กดแก้ไขอยู่ หรือเป็นงานสร้างใหม่) · ช่อง quick (สถานะ/Deadline/Note/รายละเอียด/ลิงก์) แก้ได้เสมอเมื่อมีสิทธิ์
+  const fullEdit = canEdit && (editing || !form?.id);
 
   // อัปโหลดรูปในรายละเอียดงาน (Tiptap) → R2 ผ่านระบบแนบไฟล์กลาง (entity=design_sheet_detail)
   const uploadDetailImage = async (file: File): Promise<string> => {
@@ -987,10 +991,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   };
 
-  const openCreate = () => { setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
+  const openCreate = () => { setEditing(true); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
-    setLoadingForm(true); setFormErr(null); setForm(empty());
+    setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false);
     setModalTab(tab); setNewCmDate(todayStr()); setNewQDate(todayStr()); setEditCid(null); setEditQid(null); setOpenImgCid(null); clearPend();
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
@@ -1209,18 +1213,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           <div className="space-y-1">
             <div className="flex items-center gap-1">
               <div className="flex-1 min-w-0">
-                <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!canEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
+                <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
                   options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
                   onChange={(val) => {
                     const it = priceItems.find((p) => p.id === val);
                     if (!it) { u({ item_id: null, group_code: null, price_basis: null }); return; }
                     applyItem(it);
                   }}
-                  onCreate={canEdit ? (q) => void createPriceItemInline(q, applyItem) : undefined}
+                  onCreate={fullEdit ? (q) => void createPriceItemInline(q, applyItem) : undefined}
                   createLabel="เพิ่มวัสดุใหม่" />
               </div>
               {/* ฐานราคาของวัสดุ (ปุ่ม compact มีสัญลักษณ์) จาก SKU ที่ผูก — ไม่โชว์กับชนิดชิ้น */}
-              {item && !rowIsPiece(r) && canEdit && (
+              {item && !rowIsPiece(r) && fullEdit && (
                 <BasisPicker value={r.price_basis ?? "manual"}
                   onChange={(v) => u({ price_basis: v, unit_price: itemBasisPrice(item, v) })}
                   options={[
@@ -1232,7 +1236,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     { value: "used", symbol: "♻️", label: "ที่ใช้ตีล่าสุด", price: item.last_used_price, note: "ยังไม่เคยใช้" },
                   ]} />
               )}
-              {inGroupMode && canEdit && (
+              {inGroupMode && fullEdit && (
                 <BasisPicker value={r.price_basis ?? "avg"}
                   onChange={(v) => u({ price_basis: v, unit_price: g ? groupBasisPrice(g, v) : r.unit_price })}
                   options={[
@@ -1298,7 +1302,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     { key: "note", header: "หมายเหตุ", minWidth: 120, getValue: (r) => r.note,
       render: (r, u) => <input value={r.note ?? ""} disabled={!canEdit} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-  ], [priceItems, priceGroups, canEdit, createPriceItemInline]);
+  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline]);
 
   // ส่วนรูปภาพ (คอลัมน์ซ้ายของ modal — เห็นตลอดทุกแท็บ): บันทึกแล้ว=ImageManager แกลเลอรี · ยังไม่บันทึก=ที่พักรูป (อัปตอนกดบันทึก)
   const imageSection = !form ? null : form.id ? (
@@ -1501,6 +1505,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             </div>
           )}
           <button onClick={requestClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
+          {canEdit && form?.id && !editing && (modalTab === "info" || modalTab === "cost") && (
+            <button onClick={() => setEditing(true)} className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50">✏️ แก้ไข</button>
+          )}
           {canEdit && modalTab === "info" && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>}
         </>}>
         {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && (
@@ -1545,7 +1552,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
             <label className="block">
               <span className="text-[11px] text-slate-500">ชื่องาน *</span>
-              <input value={form.name} onChange={(e) => patch({ name: e.target.value })} disabled={!canEdit} placeholder="เช่น กระเป๋าผ้าแคนวาสรุ่นใหม่"
+              <input value={form.name} onChange={(e) => patch({ name: e.target.value })} disabled={!fullEdit} placeholder="เช่น กระเป๋าผ้าแคนวาสรุ่นใหม่"
                 className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
             </label>
 
@@ -1553,19 +1560,19 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <label className="block">
                 <span className="text-[11px] text-slate-500">แบรนด์</span>
                 <div className="flex gap-1.5 mt-0.5">
-                  <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!canEdit}
+                  <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit}
                     className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
                     <option value="">— ไม่ระบุ —</option>
                     {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                   </select>
-                  {canEdit && <button type="button" title="เพิ่มแบรนด์ใหม่"
+                  {fullEdit && <button type="button" title="เพิ่มแบรนด์ใหม่"
                     onClick={() => { setNewBrandName(""); setNewBrandColor("#3b82f6"); setBrandModal(true); }}
                     className="h-8 w-8 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600">＋</button>}
                 </div>
               </label>
               <label className="block">
                 <span className="text-[11px] text-slate-500">วันที่สั่ง</span>
-                <input type="date" value={form.order_date} onChange={(e) => patch({ order_date: e.target.value })} disabled={!canEdit}
+                <input type="date" value={form.order_date} onChange={(e) => patch({ order_date: e.target.value })} disabled={!fullEdit}
                   className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
               </label>
               <label className="block">
@@ -1593,12 +1600,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     {form.parent_sku_codes.map((c) => (
                       <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono bg-blue-50 border border-blue-200 text-blue-700 rounded">
                         {c}
-                        {canEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="text-blue-300 hover:text-rose-500 leading-none">✕</button>}
+                        {fullEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="text-blue-300 hover:text-rose-500 leading-none">✕</button>}
                       </span>
                     ))}
                   </div>
                 )}
-                {canEdit && (
+                {fullEdit && (
                   <div className="flex gap-1 mt-1">
                     <input value={skuInput} onChange={(e) => setSkuInput(e.target.value.toUpperCase())}
                       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentCode(); } }}
@@ -1627,12 +1634,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       {form.parent_sku_drafts.map((d) => (
                         <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 border border-dashed border-amber-300 text-amber-700 rounded">
                           ✎ {d}
-                          {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
+                          {fullEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
                         </span>
                       ))}
                     </div>
                   )}
-                  {canEdit && (
+                  {fullEdit && (
                     <div className="flex gap-1 mt-1">
                       <input value={draftInput} onChange={(e) => setDraftInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentDraft(); } }}
@@ -1731,6 +1738,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   );
                 })}
               </div>
+              {/* ครอบส่วนแก้ไขด้วย fieldset disabled → โหมดดูล็อกทุกช่อง/ปุ่ม (เว้นแท็บ Parent ด้านบนไว้เลื่อนดู) */}
+              <fieldset disabled={!fullEdit} className="contents space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[11px] text-slate-400">
                   กำลังตีราคาของ: <b className="text-slate-600">{costParent === "" ? "ทั่วไป" : costParent}</b>
@@ -1770,7 +1779,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   setCostLines([...others, ...rows.map(recomputeRow)]); setCostDirty(true);
                 }}
                 rowId={(r) => r.key}
-                readonly={!canEdit}
+                readonly={!fullEdit}
                 groupByOptions={[{ key: "group", label: "ชนิดวัสดุ" }]}
                 onAdd={() => ({
                   key: `n${Date.now()}_${costLines.length}`,
@@ -1847,6 +1856,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   </div>
                 )}
               </div>
+              </fieldset>
             </div>}
 
             {/* แท็บรอบเสนอราคา (เฟส 3) */}
