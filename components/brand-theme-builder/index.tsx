@@ -15,6 +15,7 @@ import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, THEME_PRESETS, the
 import { BrandThemeStyles } from "@/components/brand-theme/styles";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { ColorInput } from "@/components/color-picker";
+import { ThemeKitModal, type KitApplyPatch } from "@/components/brand-theme-builder/theme-kit";
 
 type Tab = "preset" | "colors" | "background" | "page" | "header" | "sidebar" | "stat" | "workflow" | "task" | "audit" | "cards" | "buttons";
 const TABS: [Tab, string][] = [["preset", "🎨 พรีเซ็ต"], ["colors", "🌈 สี"], ["background", "🖼 พื้นหลัง"], ["page", "✨ ตกแต่งหน้า"], ["header", "🙆 หัว/Mascot"], ["sidebar", "📚 แถบแบรนด์"], ["stat", "📊 การ์ดสถิติ"], ["workflow", "🏷 ไอคอนสถานะ"], ["task", "🃏 การ์ดงาน"], ["audit", "🕘 แผงประวัติ"], ["cards", "🎴 สไตล์การ์ด"], ["buttons", "🔘 ปุ่ม"]];
@@ -63,6 +64,11 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
   const [busy, setBusy] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
   const [copyFrom, setCopyFrom] = useState("");
+  const [kitOpen, setKitOpen] = useState(false);
+  // ดึงผลจากชุดธีม (รูป+สี) เข้าแบบร่าง → โชว์ในพรีวิวทันที (ยังไม่เผยแพร่จนกดปุ่ม)
+  const applyKit = (patch: KitApplyPatch) => setDraft((d) => ({
+    ...d, ...(patch.colors ?? {}), slots: { ...(d.slots ?? {}), ...(patch.slots ?? {}) },
+  }));
 
   useEffect(() => {
     if (!open) return;
@@ -154,6 +160,8 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
         <div className="flex flex-col lg:flex-row gap-4">
           {/* ซ้าย: แผงตั้งค่า */}
           <div className="lg:w-[320px] lg:shrink-0">
+            <button onClick={() => setKitOpen(true)} disabled={loading}
+              className="mb-2 w-full h-9 px-3 text-sm font-medium rounded-lg border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-50">🧩 ชุดธีม — แม่แบบรูป+สี (ให้ AI เติม)</button>
             <div className="flex flex-wrap gap-1 mb-3">
               {TABS.map(([k, l]) => (
                 <button key={k} onClick={() => setTab(k)} className={`h-8 px-2.5 text-xs rounded-lg ${tab === k ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50 border border-slate-200"}`}>{l}</button>
@@ -378,6 +386,9 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
           </div>
         </div>
       )}
+
+      <ThemeKitModal open={kitOpen} onClose={() => setKitOpen(false)} draft={draft} statuses={statuses}
+        brandName={brandName} onApply={applyKit} />
 
       <ConfirmDialog open={resetConfirm} onClose={() => setResetConfirm(false)} onConfirm={() => void doReset()}
         title="รีเซ็ตธีม" variant="danger" confirmText="รีเซ็ต" cancelText="ยกเลิก"
