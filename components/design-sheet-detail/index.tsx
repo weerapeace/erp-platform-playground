@@ -1086,6 +1086,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         await reconcileDetailImages(form.id, form.detail);   // ลบรูปในรายละเอียดที่ถูกเอาออก (→ R2 trash)
         toast.success("บันทึกแล้ว");
         setForm(null);
+        if (detailOnly) onDetailClose?.();   // โหมด popup-เดี่ยว (Dashboard): ถอด overlay + refresh บอร์ดหลังบันทึก
       } else {
         // อัปโหลดรูปที่พักไว้ (ลาก/วาง/Ctrl+V ตอนยังไม่บันทึก) เข้าใบงานที่เพิ่งสร้าง
         if (pendImgs.length > 0) {
