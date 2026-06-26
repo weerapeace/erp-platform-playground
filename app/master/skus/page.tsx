@@ -94,7 +94,7 @@ type TabKey = (typeof TABS)[number]["key"];
 
 export default function SkusV2Page() {
   const toast = useToast();
-  const [tab, setTab] = useState<TabKey>("table");
+  const [tab, setTab] = useState<TabKey>("browse");   // เปิดมาเจอ "เลือกดูตามแท็ก" ก่อน (ตามที่เจ้าของขอ)
 
   // เพิ่มปุ่ม "คัดลอก" รายแถว — ก๊อปทุกฟิลด์ไปเป็น SKU ใหม่ + (copy) ท้ายชื่อ + รหัสใหม่
   const config = useMemo<MasterCRUDConfig>(() => ({
