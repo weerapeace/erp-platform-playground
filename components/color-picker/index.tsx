@@ -47,8 +47,6 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
   const [h, setH] = useState(hsv.h);
   const [s, setS] = useState(hsv.s);
   const [v, setV] = useState(hsv.v);
-  const svRef = useRef<HTMLDivElement>(null);
-  const hueRef = useRef<HTMLDivElement>(null);
   const [hexText, setHexText] = useState(normHex(value) ?? "#000000");
 
   // sync เมื่อ value นอก เปลี่ยน (และไม่ตรงกับสีปัจจุบัน)
@@ -60,28 +58,34 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (hex
 
   const emit = (nh: number, ns: number, nv: number) => { const hex = hsvToHex(nh, ns, nv); setHexText(hex); onChange(hex); };
 
-  // ลาก: คำนวณตำแหน่งจาก rect + ติด listener ที่ window จน pointerup
-  const drag = useCallback((el: HTMLElement | null, onPos: (px: number, py: number) => void) => (e: React.PointerEvent) => {
-    if (!el) return;
+  // ลาก: อ่าน element จาก e.currentTarget (ได้ตัวจริงเสมอ ไม่พึ่ง ref ที่ null ตอน render แรก)
+  //       + setPointerCapture + window listener จน pointerup → ลากได้ลื่นทั้งกล่อง แม้เมาส์ออกนอกกรอบ
+  const startDrag = (onPos: (px: number, py: number) => void) => (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const move = (cx: number, cy: number) => { const r = el.getBoundingClientRect(); onPos(clamp((cx - r.left) / r.width), clamp((cy - r.top) / r.height)); };
+    const el = e.currentTarget;
+    try { el.setPointerCapture(e.pointerId); } catch { /* บางเบราว์เซอร์ไม่รองรับ ก็ใช้ window listener แทน */ }
+    const move = (cx: number, cy: number) => {
+      const r = el.getBoundingClientRect();
+      onPos(clamp((cx - r.left) / r.width), clamp((cy - r.top) / r.height));
+    };
     move(e.clientX, e.clientY);
     const mv = (ev: PointerEvent) => move(ev.clientX, ev.clientY);
     const up = () => { window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
-  }, []);
+    window.addEventListener("pointermove", mv);
+    window.addEventListener("pointerup", up);
+  };
 
-  const onSv = drag(svRef.current, (px, py) => { const ns = px, nv = 1 - py; setS(ns); setV(nv); emit(h, ns, nv); });
-  const onHue = drag(hueRef.current, (px) => { const nh = px * 360; setH(nh); emit(nh, s, v); });
+  const onSv = startDrag((px, py) => { const ns = px, nv = 1 - py; setS(ns); setV(nv); emit(h, ns, nv); });
+  const onHue = startDrag((px) => { const nh = px * 360; setH(nh); emit(nh, s, v); });
 
   return (
     <div className="w-56 select-none">
-      <div ref={svRef} onPointerDown={onSv} className="relative h-32 w-full rounded-md cursor-crosshair"
+      <div onPointerDown={onSv} className="relative h-32 w-full rounded-md cursor-crosshair touch-none"
         style={{ background: `linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, ${hsvToHex(h, 1, 1)})` }}>
         <span className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow"
           style={{ left: `${s * 100}%`, top: `${(1 - v) * 100}%`, background: hsvToHex(h, s, v) }} />
       </div>
-      <div ref={hueRef} onPointerDown={onHue} className="relative mt-2 h-3 w-full rounded-full cursor-pointer"
+      <div onPointerDown={onHue} className="relative mt-2 h-3 w-full rounded-full cursor-pointer touch-none"
         style={{ background: "linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)" }}>
         <span className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow" style={{ left: `${(h / 360) * 100}%`, background: hsvToHex(h, 1, 1) }} />
       </div>
