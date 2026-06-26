@@ -19,10 +19,22 @@ export const revalidate = 0;
 
 export type PermCatalogItem = { key: string; label: string; category: string; is_dangerous: boolean };
 export type UserOverride = { permission_key: string; mode: "grant" | "revoke" };
+export type PermKeyOverride = { user_id: string; mode: "grant" | "revoke" };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "admin.users"); if (denied) return denied;
-  const userId = (new URL(request.url).searchParams.get("user_id") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+  const userId = (sp.get("user_id") ?? "").trim();
+  const permKeyList = (sp.get("permission_key") ?? "").trim();
+
+  // โหมด list: ส่ง permission_key (ไม่ส่ง user_id) → คืน override ทั้งหมดของสิทธิ์นั้น (ใช้ในป๊อปอัป "ใครเข้าแอปได้")
+  if (permKeyList && !userId) {
+    const { data, error } = await supabaseAdmin()
+      .from("erp_user_permissions").select("user_id, mode").eq("permission_key", permKeyList);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ overrides: (data ?? []) as PermKeyOverride[], error: null });
+  }
+
   if (!userId) return NextResponse.json({ error: "ต้องส่ง user_id" }, { status: 400 });
 
   const admin = supabaseAdmin();

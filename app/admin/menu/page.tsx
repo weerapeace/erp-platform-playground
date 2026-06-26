@@ -11,6 +11,7 @@ import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup as BaseAppGroup } from "@/components/playground-shell";
+import { AppAccessModal } from "./app-access-modal";
 
 type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; default_href?: string | null };
 const ALL = "__all__";
@@ -26,6 +27,7 @@ function Ico({ icon, iconUrl, size = 18 }: { icon?: string | null; iconUrl?: str
 
 export default function MenuManagerPage() {
   const allowed = usePermission("admin.users");
+  const canRoles = usePermission("admin.roles");
   const { user } = useAuth();
   const [rows, setRows] = useState<MenuRow[]>([]);
   const [apps, setApps] = useState<AppGroup[]>([]);
@@ -41,6 +43,7 @@ export default function MenuManagerPage() {
   const [addOpen, setAddOpen] = useState(false);        // เปิดตัวเพิ่มเมนูเข้าแอป
   const [addNew, setAddNew] = useState(false);          // สลับโหมดสร้างเมนูใหม่ในป๊อปอัป
   const [showAddApp, setShowAddApp] = useState(false);
+  const [accessApp, setAccessApp] = useState<AppGroup | null>(null);   // ป๊อปอัป "ใครเข้าแอปได้"
   const [uploadingApp, setUploadingApp] = useState(false);
   const [origin, setOrigin] = useState("");
   const dragId = useRef<string | null>(null);
@@ -286,9 +289,13 @@ export default function MenuManagerPage() {
                 <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-blue-100">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500 whitespace-nowrap">🔒 ใครเข้าแอปได้</span>
-                    <input defaultValue={selectedApp.permission_key ?? ""} list="perm-list" placeholder="ว่าง = ทุกคน"
-                      onBlur={(e) => { const v = e.target.value.trim() || null; if (v !== (selectedApp.permission_key ?? null)) void patchApp(selectedApp.id!, { permission_key: v }); }}
-                      className="w-44 h-8 px-2 text-xs border border-slate-200 rounded" />
+                    <button onClick={() => setAccessApp(selectedApp)}
+                      className="h-8 px-3 text-xs font-medium rounded border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:text-blue-700">
+                      ตั้งสิทธิ์ (role / รายคน) →
+                    </button>
+                    <span className={`text-[11px] px-2 py-0.5 rounded-full border ${selectedApp.permission_key ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                      {selectedApp.permission_key ? "🔒 ล็อก" : "🌐 ทุกคน"}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500 whitespace-nowrap">🏠 หน้าแรก</span>
@@ -443,6 +450,18 @@ export default function MenuManagerPage() {
               )}
             </div>
           </div>
+        )}
+
+        {/* ป๊อปอัป: ใครเข้าแอปนี้ได้ (role + รายคน) */}
+        {accessApp && (
+          <AppAccessModal
+            app={{ id: accessApp.id!, key: accessApp.key, label: accessApp.label, icon: accessApp.icon, icon_url: accessApp.icon_url, permission_key: accessApp.permission_key ?? null }}
+            actor={user?.name}
+            canEditRoles={canRoles}
+            onClose={() => setAccessApp(null)}
+            onChanged={(p) => setApps((as) => as.map((a) => (a.id === accessApp.id ? { ...a, permission_key: p.permission_key } : a)))}
+            onFlash={flash}
+          />
         )}
 
         <datalist id="perm-list">
