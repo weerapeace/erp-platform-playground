@@ -327,7 +327,7 @@ function WorkBoardPrintInner() {
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
           : (!board || (type === "plan" && !plan)) ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
-          : <PrintFrame html={html} />}
+          : <PrintFrame html={html} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
       </div>
     </div>
   );

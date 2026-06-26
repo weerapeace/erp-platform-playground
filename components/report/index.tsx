@@ -447,7 +447,7 @@ export function ReportLayoutControls({
   );
 }
 
-export function PrintFrame({ html, maxWidth = 840 }: { html: string; maxWidth?: number }) {
+export function PrintFrame({ html, maxWidth = 840, onPrint }: { html: string; maxWidth?: number; onPrint?: () => void }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [h, setH] = useState(400);
   // วัดความสูงเนื้อหาจริง — ซ้ำหลายรอบเผื่อฟอนต์/รูปจัดเสร็จช้า
@@ -457,7 +457,16 @@ export function PrintFrame({ html, maxWidth = 840 }: { html: string; maxWidth?: 
     const hh = Math.max(d.body?.scrollHeight ?? 0, d.documentElement?.scrollHeight ?? 0);
     if (hh > 0) setH(hh);
   };
-  const onLoad = () => { measure(); setTimeout(measure, 120); setTimeout(measure, 400); };
+  const onLoad = () => {
+    measure(); setTimeout(measure, 120); setTimeout(measure, 400);
+    // กด Ctrl/Cmd+P ขณะโฟกัสอยู่ใน iframe → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่าง)
+    const doc = ref.current?.contentDocument;
+    if (doc && onPrint) {
+      doc.addEventListener("keydown", (e: KeyboardEvent) => {
+        if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); onPrint(); }
+      });
+    }
+  };
   return (
     <div className="mx-auto bg-white shadow-lg print-document" style={{ maxWidth }}>
       <iframe ref={ref} srcDoc={html} onLoad={onLoad} scrolling="no" data-report-print-frame="true"
