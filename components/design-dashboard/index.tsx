@@ -9,6 +9,8 @@ import { apiFetch } from "@/lib/api";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
+import { usePermission } from "@/components/auth";
+import { RecordTasksButton } from "@/components/record-tasks";
 import { wfIconSlotId } from "@/lib/brand-theme";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provider";
@@ -157,6 +159,7 @@ function LoadingCard() {
 }
 
 export function DesignDashboard() {
+  const canEdit = usePermission("products.edit");
   const [sheets, setSheets] = useState<DesignSheetListItem[]>([]);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([]);
@@ -391,6 +394,7 @@ export function DesignDashboard() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <BrandSlot theme={brandTheme} id="header_right" className="shrink-0" />
+            <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
             <a data-gg-action href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
               กลับ Design Sheets
             </a>
