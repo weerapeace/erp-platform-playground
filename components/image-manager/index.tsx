@@ -109,6 +109,7 @@ export function ImageManager({
 
   // gallery: รูปที่โชว์ใหญ่ฝั่งขวา = รูปหลัก (หรือรูปแรก) · คงไว้ถ้าตัวที่เลือกยังอยู่
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(false);   // กดพรีวิวใหญ่ในแกลเลอรี → เปิดรูปเต็มจอ (lightbox)
   useEffect(() => {
     if (items.length === 0) { setSelectedId(null); return; }
     setSelectedId((cur) => (cur && items.some((a) => a.id === cur)) ? cur : (items.find((a) => a.is_primary)?.id ?? items[0].id));
@@ -309,7 +310,9 @@ export function ImageManager({
             {selected ? (
               isImage(selected.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={withImageWidth(selected.public_url, 1024) ?? selected.public_url} alt={selected.file_name} className="max-w-full max-h-[340px] object-contain" />
+                <img src={withImageWidth(selected.public_url, 1024) ?? selected.public_url} alt={selected.file_name}
+                  onClick={() => setZoom(true)} title="กดเพื่อดูรูปเต็มจอ"
+                  className="max-w-full max-h-[340px] object-contain cursor-zoom-in" />
               ) : (
                 <a href={selected.public_url} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-2 text-slate-500 hover:text-slate-700 py-6">
                   <span className="text-5xl">📄</span><span className="text-sm px-3 text-center break-all">{selected.file_name}</span>
@@ -345,6 +348,17 @@ export function ImageManager({
       )}
 
       {readonly && items.length === 0 && <p className="text-sm text-slate-400 text-center py-3">ไม่มีไฟล์แนบ</p>}
+
+      {/* lightbox: กดพรีวิวใหญ่ในแกลเลอรี → รูปเต็มจอ (แตะที่ใดก็ปิด) */}
+      {zoom && selected && isImage(selected.content_type) && typeof document !== "undefined" && createPortal(
+        <div onClick={() => setZoom(false)}
+          className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center p-4 cursor-zoom-out">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={withImageWidth(selected.public_url, 1600) ?? selected.public_url} alt={selected.file_name}
+            decoding="async" className="max-w-[94vw] max-h-[94vh] object-contain rounded-lg shadow-2xl" />
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
