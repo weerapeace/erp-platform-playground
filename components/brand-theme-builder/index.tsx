@@ -15,12 +15,44 @@ import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, THEME_PRESETS, the
 import { BrandThemeStyles } from "@/components/brand-theme/styles";
 import { ColorInput } from "@/components/color-picker";
 
-type Tab = "preset" | "colors" | "background" | "page" | "header" | "stat" | "workflow" | "task" | "cards" | "buttons";
-const TABS: [Tab, string][] = [["preset", "🎨 พรีเซ็ต"], ["colors", "🌈 สี"], ["background", "🖼 พื้นหลัง"], ["page", "✨ ตกแต่งหน้า"], ["header", "🙆 หัว/Mascot"], ["stat", "📊 การ์ดสถิติ"], ["workflow", "🏷 ไอคอนสถานะ"], ["task", "🃏 การ์ดงาน"], ["cards", "🎴 สไตล์การ์ด"], ["buttons", "🔘 ปุ่ม"]];
+type Tab = "preset" | "colors" | "background" | "page" | "header" | "sidebar" | "stat" | "workflow" | "task" | "audit" | "cards" | "buttons";
+const TABS: [Tab, string][] = [["preset", "🎨 พรีเซ็ต"], ["colors", "🌈 สี"], ["background", "🖼 พื้นหลัง"], ["page", "✨ ตกแต่งหน้า"], ["header", "🙆 หัว/Mascot"], ["sidebar", "📚 แถบแบรนด์"], ["stat", "📊 การ์ดสถิติ"], ["workflow", "🏷 ไอคอนสถานะ"], ["task", "🃏 การ์ดงาน"], ["audit", "🕘 แผงประวัติ"], ["cards", "🎴 สไตล์การ์ด"], ["buttons", "🔘 ปุ่ม"]];
 
-export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublished, statuses = [] }: {
+// ช่องอัปรูป slot + สวิตช์โชว์/ซ่อน + สไลเดอร์ขนาด/ความเข้ม (ของกลางระดับโมดูล — stable ไม่ remount ตอนลากสไลเดอร์)
+type SlotOpt = { scale?: number; opacity?: number };
+function SlotField({ id, label, value, hidden, opt, onImage, onToggle, onOpt }: {
+  id: string; label: string; value: string | null; hidden: boolean; opt?: SlotOpt;
+  onImage: (k: string | null) => void; onToggle: (hidden: boolean) => void; onOpt: (patch: SlotOpt) => void;
+}) {
+  const scale = opt?.scale ?? 1;
+  const opacity = opt?.opacity ?? 1;
+  return (
+    <div className="rounded-lg border border-slate-100 p-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="mb-0.5 text-[11px] text-slate-500">{label}</div>
+          <ImageInput value={value} folder="brand-theme" onChange={onImage} />
+        </div>
+        <label className="mt-5 flex shrink-0 items-center gap-1 text-[10px] text-slate-500">
+          <input type="checkbox" checked={!hidden} onChange={(e) => onToggle(!e.target.checked)} className="rounded border-slate-300" /> โชว์
+        </label>
+      </div>
+      {value && (
+        <div className="mt-1.5 grid grid-cols-2 gap-2">
+          <label className="block text-[10px] text-slate-400">ขนาด {Math.round(scale * 100)}%
+            <input type="range" min={50} max={150} value={Math.round(scale * 100)} onChange={(e) => onOpt({ scale: Number(e.target.value) / 100 })} className="w-full" /></label>
+          <label className="block text-[10px] text-slate-400">ความเข้ม {Math.round(opacity * 100)}%
+            <input type="range" min={20} max={100} value={Math.round(opacity * 100)} onChange={(e) => onOpt({ opacity: Number(e.target.value) / 100 })} className="w-full" /></label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublished, statuses = [], brands = [] }: {
   brandId: string; brandName: string; open: boolean; onClose: () => void; onPublished?: () => void;
   statuses?: { key: string; label: string }[];   // สถานะ workflow (สำหรับไอคอนสถานะ)
+  brands?: { id: string; name: string }[];        // แบรนด์อื่น (สำหรับคัดลอกธีมข้ามแบรนด์)
 }) {
   const toast = useToast();
   const { user } = useAuth();
@@ -29,6 +61,7 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [copyFrom, setCopyFrom] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -41,18 +74,12 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
   const set = <K extends keyof BrandTheme>(k: K, v: BrandTheme[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const setSlot = (id: string, key: string | null) => setDraft((d) => ({ ...d, slots: { ...(d.slots ?? {}), [id]: key } }));
   const setSlotHidden = (id: string, hidden: boolean) => setDraft((d) => ({ ...d, slotHidden: { ...(d.slotHidden ?? {}), [id]: hidden } }));
-  // ช่องอัปรูป slot + toggle โชว์/ซ่อน (reuse ImageInput กลาง)
-  const SlotField = ({ id, label }: { id: string; label: string }) => (
-    <div className="flex items-start gap-2">
-      <div className="min-w-0 flex-1">
-        <div className="mb-0.5 text-[11px] text-slate-500">{label}</div>
-        <ImageInput value={draft.slots?.[id] ?? null} folder="brand-theme" onChange={(k) => setSlot(id, k)} />
-      </div>
-      <label className="mt-5 flex shrink-0 items-center gap-1 text-[10px] text-slate-500">
-        <input type="checkbox" checked={!draft.slotHidden?.[id]} onChange={(e) => setSlotHidden(id, !e.target.checked)} className="rounded border-slate-300" /> โชว์
-      </label>
-    </div>
-  );
+  const setSlotOpt = (id: string, patch: SlotOpt) => setDraft((d) => ({ ...d, slotOpts: { ...(d.slotOpts ?? {}), [id]: { ...(d.slotOpts?.[id] ?? {}), ...patch } } }));
+  // props ของช่อง slot (ใช้กับของกลาง SlotField — stable ไม่ remount)
+  const slotProps = (id: string) => ({
+    value: draft.slots?.[id] ?? null, hidden: !!draft.slotHidden?.[id], opt: draft.slotOpts?.[id],
+    onImage: (k: string | null) => setSlot(id, k), onToggle: (h: boolean) => setSlotHidden(id, h), onOpt: (p: SlotOpt) => setSlotOpt(id, p),
+  });
   const slotsOf = (group: string) => SLOT_REGISTRY.filter((d) => d.group === group);
   const warns = themeWarnings(draft);
 
@@ -79,6 +106,17 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
       const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error ?? "รีเซ็ตไม่สำเร็จ");
       setDraft(resolveTheme(null)); toast.success("รีเซ็ตธีมเป็นค่าเริ่มต้นแล้ว"); onPublished?.();
     } catch (e) { toast.error(e instanceof Error ? e.message : "รีเซ็ตไม่สำเร็จ"); } finally { setBusy(false); }
+  };
+  // คัดลอกธีมจากแบรนด์อื่น → ตั้งเป็นแบบร่าง (ยังไม่เผยแพร่จนกว่าจะกดเผยแพร่)
+  const doCopyFrom = async () => {
+    if (!copyFrom) return;
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/api/brand-themes/${copyFrom}`); const j = await r.json();
+      const src = j.published ?? j.draft;
+      if (!src) { toast.error("แบรนด์นั้นยังไม่มีธีม"); return; }
+      setDraft(resolveTheme(src)); toast.success("คัดลอกธีมมาแล้ว · ตรวจดูแล้วกดเผยแพร่เพื่อใช้จริง");
+    } catch { toast.error("คัดลอกไม่สำเร็จ"); } finally { setBusy(false); }
   };
 
   // ช่องสี: ใช้ของกลาง ColorInput (ลากเลือกได้ + พิมพ์ hex/rgba)
@@ -120,15 +158,30 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
             </div>
 
             {tab === "preset" && (
-              <div className="grid grid-cols-2 gap-2">
-                {THEME_PRESETS.map((p) => (
-                  <button key={p.key} onClick={() => setDraft({ ...p.theme })} className="rounded-lg border border-slate-200 p-2 text-left hover:border-blue-300">
-                    <div className="flex gap-1 mb-1">
-                      {[p.theme.background_color, p.theme.primary_color, p.theme.accent_color, p.theme.card_background_color].map((c, i) => <span key={i} className="h-4 w-4 rounded-full border border-slate-200" style={{ background: c }} />)}
+              <div className="space-y-3">
+                {brands.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 p-2">
+                    <div className="mb-1 text-[11px] font-medium text-slate-600">📋 คัดลอกธีมจากแบรนด์อื่น</div>
+                    <div className="flex gap-2">
+                      <select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} className="h-8 min-w-0 flex-1 rounded border border-slate-200 bg-white px-2 text-xs">
+                        <option value="">— เลือกแบรนด์ —</option>
+                        {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                      <button onClick={() => void doCopyFrom()} disabled={!copyFrom || busy} className="h-8 shrink-0 rounded border border-blue-300 px-2.5 text-xs text-blue-700 hover:bg-blue-50 disabled:opacity-50">คัดลอกมา</button>
                     </div>
-                    <div className="text-xs font-medium text-slate-700">{p.label}</div>
-                  </button>
-                ))}
+                    <p className="mt-1 text-[10px] text-slate-400">ดึงธีมที่เผยแพร่ของแบรนด์นั้นมาเป็นแบบร่าง แล้วกด “เผยแพร่” เพื่อใช้กับ {brandName}</p>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {THEME_PRESETS.map((p) => (
+                    <button key={p.key} onClick={() => setDraft({ ...p.theme })} className="rounded-lg border border-slate-200 p-2 text-left hover:border-blue-300">
+                      <div className="flex gap-1 mb-1">
+                        {[p.theme.background_color, p.theme.primary_color, p.theme.accent_color, p.theme.card_background_color].map((c, i) => <span key={i} className="h-4 w-4 rounded-full border border-slate-200" style={{ background: c }} />)}
+                      </div>
+                      <div className="text-xs font-medium text-slate-700">{p.label}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {tab === "colors" && (
@@ -175,32 +228,44 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
             {tab === "page" && (
               <div className="space-y-3">
                 <p className="text-[11px] text-slate-400">รูปตกแต่งมุมหน้า/พื้นที่ว่าง (อยู่หลังเนื้อหา ไม่บังการกด · ซ่อนบนมือถือ)</p>
-                {slotsOf("page").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
+                {slotsOf("page").map((d) => <SlotField key={d.id} id={d.id} label={d.label} {...slotProps(d.id)} />)}
               </div>
             )}
             {tab === "header" && (
               <div className="space-y-3">
                 <p className="text-[11px] text-slate-400">Mascot/รูปบนหัวหน้า (ขนาดพอดี ไม่ดัน layout)</p>
-                {slotsOf("header").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
+                {slotsOf("header").map((d) => <SlotField key={d.id} id={d.id} label={d.label} {...slotProps(d.id)} />)}
+              </div>
+            )}
+            {tab === "sidebar" && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-400">รูปบน/ท้ายแถบแบรนด์ด้านซ้าย (banner/mascot)</p>
+                {slotsOf("sidebar").map((d) => <SlotField key={d.id} id={d.id} label={d.label} {...slotProps(d.id)} />)}
               </div>
             )}
             {tab === "stat" && (
               <div className="space-y-3">
                 <p className="text-[11px] text-slate-400">ไอคอนมุมการ์ดสถิติ 4 ใบ</p>
-                {slotsOf("stat").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
+                {slotsOf("stat").map((d) => <SlotField key={d.id} id={d.id} label={d.label} {...slotProps(d.id)} />)}
               </div>
             )}
             {tab === "workflow" && (
               <div className="space-y-3">
                 <p className="text-[11px] text-slate-400">ไอคอนต่อสถานะงาน (ตาม workflow จริง)</p>
                 {statuses.length === 0 && <p className="text-xs text-slate-300">— ไม่พบสถานะ —</p>}
-                {statuses.map((st) => <SlotField key={st.key} id={wfIconSlotId(st.key)} label={`ไอคอน: ${st.label}`} />)}
+                {statuses.map((st) => <SlotField key={st.key} id={wfIconSlotId(st.key)} label={`ไอคอน: ${st.label}`} {...slotProps(wfIconSlotId(st.key))} />)}
               </div>
             )}
             {tab === "task" && (
               <div className="space-y-3">
                 <p className="text-[11px] text-slate-400">ตกแต่งการ์ดงาน + รูปแทนตอนไม่มีรูป</p>
-                {slotsOf("task").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
+                {slotsOf("task").map((d) => <SlotField key={d.id} id={d.id} label={d.label} {...slotProps(d.id)} />)}
+              </div>
+            )}
+            {tab === "audit" && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-400">ไอคอน/Mascot บนแผงประวัติ (Audit log)</p>
+                {slotsOf("audit").map((d) => <SlotField key={d.id} id={d.id} label={d.label} {...slotProps(d.id)} />)}
               </div>
             )}
 

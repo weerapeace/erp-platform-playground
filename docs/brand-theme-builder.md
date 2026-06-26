@@ -42,10 +42,14 @@ import { BrandThemeStyles } from "@/components/brand-theme/styles";
 - **หน้า:** มุมซ้ายบน/ขวาบน/ซ้ายล่าง/ขวาล่าง (illustration) + รูปตอนไม่มีงาน (empty) — อยู่หลังเนื้อหา, `pointer-events-none`, ซ่อนบนมือถือ
 - **หัว:** Mascot ซ้าย/ขวา
 - **การ์ดสถิติ:** ไอคอนมุม 4 ใบ (งานทั้งหมด/กำลังเดิน/ใกล้ครบ/ปิดงาน)
+- **แถบแบรนด์ซ้าย (sidebar):** รูปบนหัว (banner) + รูปท้ายแถบ
 - **ไอคอนสถานะ workflow:** ต่อสถานะจริง — slotId = `wf_icon:<statusKey>`
 - **การ์ดงาน:** ตกแต่งมุม + รูปแทนตอนไม่มีรูป (placeholder)
+- **แผงประวัติ (audit):** ไอคอน/mascot บนหัวแผง audit log
 
-เก็บใน config: `slots` (slotId → R2 key) + `slotHidden` (slotId → ซ่อน) · render ด้วยของกลาง **`<BrandSlot theme={} id="..."/>`** (`components/brand-theme/slots.tsx`) — วางตาม safe-area registry, lazy, `?w=` ตามขนาด, รูปหายซ่อนเอง (fallback). เพิ่ม slot ใหม่ = เพิ่มใน `SLOT_REGISTRY` + เสียบ `<BrandSlot>` (ไม่ต้อง migrate DB).
+เก็บใน config: `slots` (slotId → R2 key) + `slotHidden` (slotId → ซ่อน) + `slotOpts` (slotId → `{scale, opacity}` ปรับขนาด/ความเข้มต่อรูป) · render ด้วยของกลาง **`<BrandSlot theme={} id="..."/>`** (`components/brand-theme/slots.tsx`) — วางตาม safe-area registry, lazy, `?w=` ตามขนาด, รูปหายซ่อนเอง (fallback), `slotStyle()` ใส่ transform scale + opacity (origin อิงตำแหน่ง slot). เพิ่ม slot ใหม่ = เพิ่มใน `SLOT_REGISTRY` + เสียบ `<BrandSlot>` (ไม่ต้อง migrate DB).
+
+**คัดลอกธีมข้ามแบรนด์:** Builder รับ prop `brands` → เลือกแบรนด์อื่นในแท็บพรีเซ็ต → ดึงธีมที่เผยแพร่ของแบรนด์นั้นมาเป็น "ร่าง" (GET `/api/brand-themes/{id}`) แล้วกดเผยแพร่ทับ (ไม่ต้องตั้งซ้ำ)
 
 ## รูปภาพ (image size policy)
 - พื้นหลัง: `/api/r2-image?key=...&w=1600` (desktop) · `w=900` (tablet) · `w=640` (mobile) — **ห้ามโหลด original** (ใช้ `brandBgUrl()`)

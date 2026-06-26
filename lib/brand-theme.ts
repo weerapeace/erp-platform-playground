@@ -45,11 +45,13 @@ export type BrandTheme = {
   // Component Slots — รูปตกแต่งตามตำแหน่งที่ระบบกำหนด (slotId → R2 key) + ซ่อนราย slot
   slots?: Record<string, string | null>;
   slotHidden?: Record<string, boolean>;
+  // ปรับแต่งต่อ slot — ขนาด (scale 0.5–1.5) + ความเข้ม (opacity 0–1)
+  slotOpts?: Record<string, { scale?: number; opacity?: number }>;
 };
 
 // ── Component Slot Registry — นิยาม slot ตกแต่ง (ตำแหน่ง/ขนาด/responsive ที่ระบบคุม ไม่ freeform) ──
 export type SlotKind = "deco" | "icon" | "illustration";
-export type SlotGroup = "page" | "header" | "stat" | "task";
+export type SlotGroup = "page" | "header" | "sidebar" | "stat" | "task" | "audit";
 export type SlotDef = {
   id: string; group: SlotGroup; label: string; kind: SlotKind;
   w: 96 | 160 | 256 | 320;
@@ -70,6 +72,9 @@ export const SLOT_REGISTRY: SlotDef[] = [
   { id: "task_corner", group: "task", label: "ตกแต่งมุมการ์ดงาน", kind: "icon", w: 96, pos: "absolute top-1 right-1", size: "w-6 h-6", hideOnMobile: true },
   { id: "task_placeholder", group: "task", label: "รูปแทนการ์ดที่ไม่มีรูป", kind: "icon", w: 160, pos: "", size: "" },
   { id: "page_empty", group: "page", label: "รูปตอนไม่มีงาน (empty)", kind: "illustration", w: 320, pos: "", size: "w-40" },
+  { id: "sidebar_top", group: "sidebar", label: "รูปบนหัวแถบแบรนด์ (banner)", kind: "deco", w: 320, pos: "", size: "mx-auto mb-2 h-16 w-auto" },
+  { id: "sidebar_bottom", group: "sidebar", label: "รูปท้ายแถบแบรนด์", kind: "deco", w: 256, pos: "", size: "mx-auto mt-3 h-12 w-auto" },
+  { id: "audit_badge", group: "audit", label: "ไอคอน/Mascot แผงประวัติ", kind: "icon", w: 96, pos: "", size: "h-10 w-10" },
 ];
 
 // อ่าน R2 key ของ slot (เคารพ slotHidden) · ไอคอนสถานะ workflow → `wf_icon:<statusKey>`
@@ -78,6 +83,22 @@ export function slotKey(theme: Partial<BrandTheme> | null | undefined, id: strin
   return theme.slots[id] ?? null;
 }
 export const wfIconSlotId = (statusKey: string) => `wf_icon:${statusKey}`;
+
+// สไตล์ปรับแต่งต่อ slot (ขนาด/ความเข้ม) → ใช้ transform scale + opacity · origin อิงตำแหน่ง slot
+export function slotStyle(theme: Partial<BrandTheme> | null | undefined, id: string): CSSProperties | undefined {
+  const o = theme?.slotOpts?.[id];
+  if (!o) return undefined;
+  const scale = o.scale ?? 1;
+  const opacity = o.opacity ?? 1;
+  if (scale === 1 && opacity === 1) return undefined;
+  const pos = SLOT_REGISTRY.find((d) => d.id === id)?.pos ?? "";
+  const ox = pos.includes("left") ? "left" : pos.includes("right") ? "right" : "center";
+  const oy = pos.includes("top") ? "top" : pos.includes("bottom") ? "bottom" : "center";
+  const style: CSSProperties = {};
+  if (opacity !== 1) style.opacity = opacity;
+  if (scale !== 1) { style.transform = `scale(${scale})`; style.transformOrigin = `${oy} ${ox}`; }
+  return style;
+}
 
 // ธีมเริ่มต้นของ ERP (ใช้เมื่อเลือก "ทั้งหมด" หรือแบรนด์ยังไม่มีธีม) — โทนสว่างมาตรฐาน slate/blue
 export const DEFAULT_THEME: BrandTheme = {

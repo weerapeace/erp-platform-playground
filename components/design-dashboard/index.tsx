@@ -472,6 +472,7 @@ export function DesignDashboard() {
 
         <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
           <aside data-gg-sidebar className="rounded-lg border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
+            <BrandSlot theme={brandTheme} id="sidebar_top" />
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-800">แบรนด์จากงานจริง</h2>
@@ -534,6 +535,7 @@ export function DesignDashboard() {
                 </div>
               )}
             </div>
+            <BrandSlot theme={brandTheme} id="sidebar_bottom" />
           </aside>
 
           <main className="min-w-0 space-y-4">
@@ -692,9 +694,12 @@ export function DesignDashboard() {
 
             <section data-gg-audit className="rounded-lg border border-white/70 bg-slate-900 p-4 text-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold">ประวัติจาก Audit Log กลาง</h2>
-                  <p className="mt-1 text-xs text-slate-300">อ่านจากประวัติจริงของใบงานออกแบบ</p>
+                <div className="flex items-center gap-3">
+                  <BrandSlot theme={brandTheme} id="audit_badge" />
+                  <div>
+                    <h2 className="text-sm font-semibold">ประวัติจาก Audit Log กลาง</h2>
+                    <p className="mt-1 text-xs text-slate-300">อ่านจากประวัติจริงของใบงานออกแบบ</p>
+                  </div>
                 </div>
                 <span data-gg-audit-count className="rounded-md bg-white/10 px-2 py-1 text-xs text-slate-200">{auditRows.length} รายการล่าสุด</span>
               </div>
@@ -746,6 +751,7 @@ export function DesignDashboard() {
       {themeBuilderOpen && selectedBrandId && (
         <BrandThemeBuilder brandId={selectedBrandId} brandName={selectedBrand?.name ?? "แบรนด์"}
           statuses={statusColumns.map((c) => ({ key: c.key, label: c.label }))}
+          brands={brandSummaries.filter((b) => b.id && b.id !== selectedBrandId).map((b) => ({ id: b.id as string, name: b.name }))}
           open={themeBuilderOpen} onClose={() => setThemeBuilderOpen(false)}
           onPublished={() => setThemeReloadKey((k) => k + 1)} />
       )}

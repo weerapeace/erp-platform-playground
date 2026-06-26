@@ -9,7 +9,7 @@
  *   <div className="relative"> ... <BrandSlot theme={theme} id="page_br" /> </div>
  */
 import { withImageWidth } from "@/lib/r2-image";
-import { slotKey, SLOT_REGISTRY, type BrandTheme } from "@/lib/brand-theme";
+import { slotKey, slotStyle, SLOT_REGISTRY, type BrandTheme } from "@/lib/brand-theme";
 
 const DEF: Record<string, (typeof SLOT_REGISTRY)[number]> = Object.fromEntries(SLOT_REGISTRY.map((d) => [d.id, d]));
 
@@ -31,7 +31,7 @@ export function BrandSlot({ theme, id, w, size, className = "", alt = "", round 
     round ? "rounded-full" : "", "object-contain pointer-events-none select-none z-10", className].filter(Boolean).join(" ");
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={alt} loading="lazy" decoding="async"
+    <img src={url} alt={alt} loading="lazy" decoding="async" style={slotStyle(theme, id)}
       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
       className={cls} />
   );
