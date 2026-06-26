@@ -1018,19 +1018,21 @@ export default function DesignSheetsPage() {
     finally { setLoadingForm(false); }
   };
 
-  // คัดลอกลิงก์มาที่ใบงานนี้ (เปิดลิงก์แล้วเด้ง modal ใบนี้อัตโนมัติ ผ่าน ?sheet=<id>)
+  // คัดลอกลิงก์มาที่ใบงานนี้ (เปิดลิงก์แล้วเด้ง modal ใบนี้อัตโนมัติ ผ่าน ?open=<id> — มาตรฐานเดียวกับ Design Dashboard)
   const copySheetLink = async () => {
     if (!form?.id || typeof window === "undefined") return;
-    const url = `${window.location.origin}${window.location.pathname}?sheet=${form.id}`;
+    const url = `${window.location.origin}${window.location.pathname}?open=${form.id}`;
     try { await navigator.clipboard.writeText(url); toast.success("คัดลอกลิงก์ใบงานนี้แล้ว — วางส่งให้คนอื่นเปิดได้เลย"); }
     catch { toast.error("คัดลอกลิงก์ไม่สำเร็จ"); }
   };
-  // เปิดหน้าด้วยลิงก์ ?sheet=<id> → เปิด modal ใบงานนั้นอัตโนมัติ (ครั้งเดียวตอนเข้าหน้า)
+  // เปิดหน้าด้วยลิงก์ ?open=<id> (หรือ ?sheet=<id> เดิม) → เปิด modal ใบงานนั้นอัตโนมัติ (ครั้งเดียวตอนเข้าหน้า)
+  // ?open= = พารามิเตอร์มาตรฐาน (การ์ดบน Design Dashboard ใช้ตัวนี้) · ?sheet= คงไว้ให้ลิงก์เก่ายังเปิดได้
   const autoOpenRef = useRef(false);
   useEffect(() => {
     if (autoOpenRef.current || typeof window === "undefined") return;
     autoOpenRef.current = true;
-    const id = new URLSearchParams(window.location.search).get("sheet");
+    const sp = new URLSearchParams(window.location.search);
+    const id = sp.get("open") || sp.get("sheet");
     if (id) void openEdit({ id } as DesignSheetListItem);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
