@@ -11,7 +11,8 @@ import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { isTerminal } from "./use-statuses";
-import { isOverdue, type CreativeTask, type Campaign, type MySubtask } from "./data";
+import { taskTypeLabel } from "./use-options";
+import { isOverdue, type CreativeTask, type Campaign, type MySubtask, type BrandOption } from "./data";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
 import { OverviewCustomizer, CARD_COLORS, heroStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
 
@@ -21,7 +22,7 @@ export type OvFilter = "all" | "mine" | "review" | "overdue";
 type Counts = { total: number; mine: number; overdue: number; review: number };
 
 export function OverviewDashboard({
-  userName, counts, myTasks, mySubs, campaigns, tasks, columns, filter, isAdmin,
+  userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
   theme, canUpload, onThemeChange,
   onFilter, onOpenTask, onCreate, onOpenKnowledge,
 }: {
@@ -31,6 +32,7 @@ export function OverviewDashboard({
   mySubs: MySubtask[];
   campaigns: Campaign[];
   tasks: CreativeTask[];
+  brands: BrandOption[];
   columns: ColumnDef<CreativeTask>[];
   filter: OvFilter;
   isAdmin: boolean;
@@ -44,14 +46,34 @@ export function OverviewDashboard({
 }) {
   const t = useT();
   const [customizing, setCustomizing] = useState(false);
+  const [typeFilter, setTypeFilter] = useState("");    // ประเภทงาน (Tab) — "" = ทั้งหมด
+  const [brandFilter, setBrandFilter] = useState("");  // แบรนด์ (ชิป) — "" = ทั้งหมด
 
-  // ตารางกรองตามการ์ดที่เลือก
+  // งานของฉัน = งานหลักของฉัน ∪ งานที่มีงานย่อย (subtask) ของฉัน
+  const myTaskIds = useMemo(() => {
+    const s = new Set(myTasks.map((tk) => tk.id));
+    for (const sub of mySubs) if (sub.task_id) s.add(sub.task_id);
+    return s;
+  }, [myTasks, mySubs]);
+  const mineCount = myTaskIds.size;
+
+  // ประเภทงานที่ "มีจริง" ในข้อมูล (no hardcode) → ทำ Tabs · เรียงตามชื่อ
+  const typeOptions = useMemo(() => {
+    const present = new Set<string>();
+    for (const tk of tasks) if (tk.task_type) present.add(tk.task_type);
+    return [...present].map((v) => ({ value: v, label: taskTypeLabel(v) || v })).sort((a, b) => a.label.localeCompare(b.label, "th"));
+  }, [tasks]);
+
+  // ตาราง: การ์ด (สถานะ/ของฉัน) × ประเภท × แบรนด์ — ซ้อนกันได้
   const filteredTasks = useMemo(() => {
-    if (filter === "mine") return myTasks;
-    if (filter === "review") return tasks.filter((tk) => tk.status === "need_review");
-    if (filter === "overdue") return tasks.filter(isOverdue);
-    return tasks;
-  }, [filter, tasks, myTasks]);
+    let arr = filter === "mine" ? tasks.filter((tk) => myTaskIds.has(tk.id))
+      : filter === "review" ? tasks.filter((tk) => tk.status === "need_review")
+      : filter === "overdue" ? tasks.filter(isOverdue)
+      : tasks;
+    if (typeFilter) arr = arr.filter((tk) => tk.task_type === typeFilter);
+    if (brandFilter) arr = arr.filter((tk) => tk.brand_id === brandFilter);
+    return arr;
+  }, [filter, typeFilter, brandFilter, tasks, myTaskIds]);
   const filterLabel = filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
 
   // นับงานที่ยังไม่ปิดต่อแคมเปญ + แคมเปญที่กำลังทำ
@@ -65,13 +87,13 @@ export function OverviewDashboard({
     .sort((a, b) => (openByCampaign[b.id] ?? 0) - (openByCampaign[a.id] ?? 0))
     .slice(0, 6), [campaigns, openByCampaign]);
 
-  const heroLine = counts.mine > 0
-    ? `${t("คุณมีงานในมือ", "You have")} ${counts.mine} ${t("งาน", "tasks on your plate")}${counts.overdue ? ` · ${t("เกินกำหนด", "overdue")} ${counts.overdue}` : ""}`
+  const heroLine = mineCount > 0
+    ? `${t("คุณมีงานในมือ", "You have")} ${mineCount} ${t("งาน", "tasks on your plate")}${counts.overdue ? ` · ${t("เกินกำหนด", "overdue")} ${counts.overdue}` : ""}`
     : t("ไม่มีงานค้างในมือคุณตอนนี้ 🎉", "Nothing on your plate right now 🎉");
 
   const cardMeta: { key: CardKey; value: number; label: string }[] = [
     { key: "all", value: counts.total, label: t("งานทั้งหมด", "All tasks") },
-    { key: "mine", value: counts.mine, label: t("งานของฉัน", "My tasks") },
+    { key: "mine", value: mineCount, label: t("งานของฉัน", "My tasks") },
     { key: "review", value: counts.review, label: t("รอตรวจ/อนุมัติ", "In review") },
     { key: "overdue", value: counts.overdue, label: t("เกินกำหนด", "Overdue") },
   ];
@@ -114,6 +136,26 @@ export function OverviewDashboard({
               🧩 {t("งานย่อยของฉัน", "My subtasks")} {mySubs.length} {t("รายการ", "items")} · {t('ดูในแท็บ "คิวงานของฉัน"', 'see the "My queue" tab')}
             </div>
           )}
+
+          {/* ตัวกรองด่วน: ประเภทงาน (Tabs, จากข้อมูลจริง) + แบรนด์ (ชิป) — ซ้อนกับการ์ดด้านบน */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1 overflow-x-auto pb-1">
+              <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} />
+              {typeOptions.map((o) => (
+                <FilterTab key={o.value} active={typeFilter === o.value} onClick={() => setTypeFilter(o.value)} label={o.label} />
+              ))}
+            </div>
+            {brands.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-slate-400 mr-0.5">{t("แบรนด์", "Brand")}:</span>
+                <BrandChip active={!brandFilter} onClick={() => setBrandFilter("")} label={t("ทั้งหมด", "All")} />
+                {brands.map((b) => (
+                  <BrandChip key={b.id} active={brandFilter === b.id} color={b.color} onClick={() => setBrandFilter(b.id)} label={b.name} />
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
             <DataTable<CreativeTask>
               data={filteredTasks} columns={columns}
@@ -197,6 +239,18 @@ function SummaryCard({ card, value, label, active, hint, onClick }: { card: Card
       </div>
       <p className="text-sm font-medium mt-1">{label}</p>
       <p className="text-[11px] opacity-70 mt-0.5">{hint}</p>
+    </button>
+  );
+}
+
+function FilterTab({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return <button onClick={onClick} className={`shrink-0 h-7 px-3 rounded-full text-xs font-medium transition-colors ${active ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{label}</button>;
+}
+
+function BrandChip({ active, color, onClick, label }: { active: boolean; color?: string | null; onClick: () => void; label: string }) {
+  return (
+    <button onClick={onClick} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-medium border transition-colors ${active ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+      {color && <span className="h-2 w-2 rounded-full" style={{ background: color || "#cbd5e1" }} />}{label}
     </button>
   );
 }

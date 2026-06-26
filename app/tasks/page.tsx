@@ -206,6 +206,7 @@ export default function TasksPage() {
                 mySubs={mySubs}
                 campaigns={campaigns}
                 tasks={tasks}
+                brands={brands}
                 columns={COLUMNS}
                 filter={ovFilter}
                 onFilter={setOvFilter}
