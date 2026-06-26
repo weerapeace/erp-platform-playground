@@ -13,11 +13,10 @@ import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, THEME_PRESETS, themeWarnings, isValidColor, type BrandTheme } from "@/lib/brand-theme";
 import { BrandThemeStyles } from "@/components/brand-theme/styles";
+import { ColorInput } from "@/components/color-picker";
 
 type Tab = "preset" | "colors" | "background" | "cards" | "buttons" | "icons";
 const TABS: [Tab, string][] = [["preset", "🎨 พรีเซ็ต"], ["colors", "🌈 สี"], ["background", "🖼 พื้นหลัง"], ["cards", "🃏 การ์ด"], ["buttons", "🔘 ปุ่ม"], ["icons", "⭐ ไอคอน"]];
-
-const toHex = (v: string): string => (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test((v ?? "").trim()) ? (v.length === 4 ? "#" + v.slice(1).split("").map((c) => c + c).join("") : v) : "#000000");
 
 export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublished }: {
   brandId: string; brandName: string; open: boolean; onClose: () => void; onPublished?: () => void;
@@ -66,16 +65,14 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
     } catch (e) { toast.error(e instanceof Error ? e.message : "รีเซ็ตไม่สำเร็จ"); } finally { setBusy(false); }
   };
 
-  // ช่องสี: swatch (hex) + ช่องพิมพ์ (รองรับ rgba)
+  // ช่องสี: ใช้ของกลาง ColorInput (ลากเลือกได้ + พิมพ์ hex/rgba)
   const Color = ({ label, k }: { label: string; k: keyof BrandTheme }) => {
     const v = String(draft[k] ?? "");
     return (
       <label className="block">
         <span className="text-[11px] text-slate-500">{label}</span>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          <input type="color" value={toHex(v)} onChange={(e) => set(k, e.target.value as BrandTheme[typeof k])} className="h-8 w-9 rounded border border-slate-200 p-0.5 cursor-pointer" />
-          <input value={v} onChange={(e) => set(k, e.target.value as BrandTheme[typeof k])}
-            className={`h-8 flex-1 min-w-0 px-2 text-xs font-mono border rounded ${isValidColor(v) ? "border-slate-200" : "border-rose-300 bg-rose-50"}`} />
+        <div className="mt-0.5">
+          <ColorInput value={v} onChange={(nv) => set(k, nv as BrandTheme[typeof k])} invalid={!isValidColor(v)} />
         </div>
       </label>
     );
