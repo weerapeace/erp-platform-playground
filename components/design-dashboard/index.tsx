@@ -11,6 +11,8 @@ import { withImageWidth } from "@/lib/r2-image";
 import { HoverPreview } from "@/components/hover-image";
 import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, DEFAULT_THEME, type BrandTheme } from "@/lib/brand-theme";
 import { BrandThemeStyles } from "@/components/brand-theme/styles";
+import { BrandSlot } from "@/components/brand-theme/slots";
+import { wfIconSlotId } from "@/lib/brand-theme";
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
 
 const WorkflowStatusManager = dynamic(
@@ -385,11 +387,20 @@ export function DesignDashboard() {
   }
 
   return (
-    <div className="brand-themed relative min-h-screen" style={rootStyle}>
+    <div className="brand-themed relative min-h-screen overflow-hidden" style={rootStyle}>
       <BrandThemeStyles />
-      <div className="w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
+      {/* เลเยอร์ตกแต่งมุมหน้า (อยู่หลัง content, ไม่บังคลิก, ซ่อนบนมือถือ) */}
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+        <BrandSlot theme={brandTheme} id="page_tl" />
+        <BrandSlot theme={brandTheme} id="page_tr" />
+        <BrandSlot theme={brandTheme} id="page_bl" />
+        <BrandSlot theme={brandTheme} id="page_br" />
+      </div>
+      <div className="relative z-10 w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
+          <div className="min-w-0 flex items-start gap-2">
+            <BrandSlot theme={brandTheme} id="header_left" className="shrink-0 mt-1" />
+            <div className="min-w-0">
             <div data-gg-live-badge className="mb-2 inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm">
               <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.8)]" />
               Live design sheets dashboard
@@ -398,8 +409,10 @@ export function DesignDashboard() {
             <p className="mt-1 max-w-3xl text-sm text-slate-500">
               ดึงใบงาน แบรนด์ และสถานะจากระบบจริงก่อน แล้วค่อยปรับหน้าตาเฉพาะแบรนด์ในขั้นถัดไป
             </p>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <BrandSlot theme={brandTheme} id="header_right" className="shrink-0" />
             <a data-gg-action href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
               กลับ Design Sheets
             </a>
@@ -447,7 +460,8 @@ export function DesignDashboard() {
               ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
               ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
             ].map(([label, value, hint], index) => (
-              <div key={label} data-gg-stat-card className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+              <div key={label} data-gg-stat-card className="relative overflow-hidden rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+                <BrandSlot theme={brandTheme} id={`stat_icon_${index}`} />
                 <div className="text-xs font-medium text-slate-400">{label}</div>
                 <div className="mt-1 text-3xl font-semibold text-slate-900">{value}</div>
                 <div className="mt-1 text-xs text-slate-500">{hint}</div>
@@ -562,7 +576,8 @@ export function DesignDashboard() {
                   {[0, 1, 2, 3, 4].map((item) => <LoadingCard key={item} />)}
                 </div>
               ) : filteredSheets.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-400">
+                <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-white/70 p-8 text-center text-sm text-slate-400">
+                  <BrandSlot theme={brandTheme} id="page_empty" />
                   ยังไม่มีใบงานสำหรับตัวกรองนี้
                 </div>
               ) : (
@@ -588,6 +603,7 @@ export function DesignDashboard() {
                             <div data-gg-connector className="absolute left-[62%] top-8 h-px w-[76%] bg-gradient-to-r from-amber-300 via-amber-200 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.45)]" />
                           )}
                           <div data-gg-column-header className="relative mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%)` }}>
+                            <BrandSlot theme={brandTheme} id={wfIconSlotId(column.key)} w={96} size="w-7 h-7" className="absolute left-1 top-1" />
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
                             <div className="text-[11px] text-slate-400">{column.sheets.length} งาน</div>
@@ -611,8 +627,9 @@ export function DesignDashboard() {
                                   onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
                                   aria-busy={isMoving}
                                   title="Drag to change status or click to open"
-                                  className={`block rounded-lg border border-slate-200 bg-white p-2 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300 ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : "cursor-grab active:cursor-grabbing"}`}
+                                  className={`relative block overflow-hidden rounded-lg border border-slate-200 bg-white p-2 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300 ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : "cursor-grab active:cursor-grabbing"}`}
                                 >
+                                  <BrandSlot theme={brandTheme} id="task_corner" />
                                   {coverUrl ? (
                                     <HoverPreview url={sheet.cover_url} previewW={640}>
                                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -626,7 +643,9 @@ export function DesignDashboard() {
                                       />
                                     </HoverPreview>
                                   ) : (
-                                    <div data-gg-cover className="mb-2 h-16 rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }} />
+                                    <div data-gg-cover className="mb-2 flex h-16 items-center justify-center overflow-hidden rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }}>
+                                      <BrandSlot theme={brandTheme} id="task_placeholder" size="max-h-14" />
+                                    </div>
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />

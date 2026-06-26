@@ -42,7 +42,42 @@ export type BrandTheme = {
   kanban_header_style?: "soft" | "solid" | "line";
   workflow_line_color: string;
   custom_css_variables?: Record<string, string>;   // ตัวแปรเพิ่มเองอิสระ
+  // Component Slots — รูปตกแต่งตามตำแหน่งที่ระบบกำหนด (slotId → R2 key) + ซ่อนราย slot
+  slots?: Record<string, string | null>;
+  slotHidden?: Record<string, boolean>;
 };
+
+// ── Component Slot Registry — นิยาม slot ตกแต่ง (ตำแหน่ง/ขนาด/responsive ที่ระบบคุม ไม่ freeform) ──
+export type SlotKind = "deco" | "icon" | "illustration";
+export type SlotGroup = "page" | "header" | "stat" | "task";
+export type SlotDef = {
+  id: string; group: SlotGroup; label: string; kind: SlotKind;
+  w: 96 | 160 | 256 | 320;
+  pos: string; size: string; hideOnMobile?: boolean;
+};
+
+export const SLOT_REGISTRY: SlotDef[] = [
+  { id: "page_tl", group: "page", label: "ตกแต่งมุมซ้ายบน", kind: "deco", w: 256, pos: "absolute top-0 left-0", size: "w-28 lg:w-44", hideOnMobile: true },
+  { id: "page_tr", group: "page", label: "ตกแต่งมุมขวาบน", kind: "deco", w: 256, pos: "absolute top-0 right-0", size: "w-28 lg:w-44", hideOnMobile: true },
+  { id: "page_bl", group: "page", label: "ตกแต่งมุมซ้ายล่าง", kind: "deco", w: 256, pos: "absolute bottom-0 left-0", size: "w-28 lg:w-44", hideOnMobile: true },
+  { id: "page_br", group: "page", label: "ตกแต่ง/illustration มุมขวาล่าง", kind: "illustration", w: 320, pos: "absolute bottom-0 right-0", size: "w-36 lg:w-60", hideOnMobile: true },
+  { id: "header_left", group: "header", label: "Mascot ซ้าย (หัวหน้า)", kind: "deco", w: 160, pos: "", size: "h-12 lg:h-16" },
+  { id: "header_right", group: "header", label: "Mascot ขวา (หัวหน้า)", kind: "deco", w: 160, pos: "", size: "h-12 lg:h-16", hideOnMobile: true },
+  { id: "stat_icon_0", group: "stat", label: "ไอคอน: งานทั้งหมด", kind: "icon", w: 96, pos: "absolute top-2 right-2", size: "w-7 h-7" },
+  { id: "stat_icon_1", group: "stat", label: "ไอคอน: กำลังเดินงาน", kind: "icon", w: 96, pos: "absolute top-2 right-2", size: "w-7 h-7" },
+  { id: "stat_icon_2", group: "stat", label: "ไอคอน: ใกล้ครบกำหนด", kind: "icon", w: 96, pos: "absolute top-2 right-2", size: "w-7 h-7" },
+  { id: "stat_icon_3", group: "stat", label: "ไอคอน: ปิดงานแล้ว", kind: "icon", w: 96, pos: "absolute top-2 right-2", size: "w-7 h-7" },
+  { id: "task_corner", group: "task", label: "ตกแต่งมุมการ์ดงาน", kind: "icon", w: 96, pos: "absolute top-1 right-1", size: "w-6 h-6", hideOnMobile: true },
+  { id: "task_placeholder", group: "task", label: "รูปแทนการ์ดที่ไม่มีรูป", kind: "icon", w: 160, pos: "", size: "" },
+  { id: "page_empty", group: "page", label: "รูปตอนไม่มีงาน (empty)", kind: "illustration", w: 320, pos: "", size: "w-40" },
+];
+
+// อ่าน R2 key ของ slot (เคารพ slotHidden) · ไอคอนสถานะ workflow → `wf_icon:<statusKey>`
+export function slotKey(theme: Partial<BrandTheme> | null | undefined, id: string): string | null {
+  if (!theme?.slots || theme.slotHidden?.[id]) return null;
+  return theme.slots[id] ?? null;
+}
+export const wfIconSlotId = (statusKey: string) => `wf_icon:${statusKey}`;
 
 // ธีมเริ่มต้นของ ERP (ใช้เมื่อเลือก "ทั้งหมด" หรือแบรนด์ยังไม่มีธีม) — โทนสว่างมาตรฐาน slate/blue
 export const DEFAULT_THEME: BrandTheme = {
