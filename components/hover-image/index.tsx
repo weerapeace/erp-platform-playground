@@ -11,7 +11,7 @@
  * - เดสก์ท็อป: ชี้เมาส์ = เด้งรูปพรีวิวลอยตามเมาส์
  * - แตะ/คลิกที่รูป = เด้งรูปใหญ่เต็มจอ (lightbox) แตะที่ใดก็ปิด → ใช้ได้ทั้งทัช (iPad) และเมาส์
  */
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { withImageWidth } from "@/lib/r2-image";
 
@@ -75,5 +75,38 @@ export function HoverImage({
         document.body,
       )}
     </span>
+  );
+}
+
+// HoverPreview — ครอบ children (เช่น แบนเนอร์รูปบนการ์ด) แล้วโชว์รูปพรีวิวใหญ่ตอน hover (ของกลาง)
+// บนทัช (ไม่มี hover) จะไม่เด้งพรีวิว — ให้ใช้คลิก/แตะการ์ดเปิดรายละเอียดแทน
+export function HoverPreview({ url, previewW = 640, children }: { url?: string | null; previewW?: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState<{ left: number; top: number } | null>(null);
+  const open = () => {
+    if (!url) return;
+    const r = ref.current?.getBoundingClientRect(); if (!r) return;
+    const pad = 8, vw = window.innerWidth, vh = window.innerHeight;
+    const w = Math.min(previewW, vw - pad * 2), h = w;
+    let left = r.right + pad;
+    if (left + w > vw) left = r.left - w - pad;
+    if (left < pad) left = Math.max(pad, (vw - w) / 2);
+    let top = r.top + r.height / 2 - h / 2;
+    if (top < pad) top = pad;
+    if (top + h > vh - pad) top = vh - h - pad;
+    setBox({ left, top });
+  };
+  return (
+    <div ref={ref} onMouseEnter={open} onMouseLeave={() => setBox(null)}>
+      {children}
+      {url && box && typeof document !== "undefined" && createPortal(
+        <div style={{ position: "fixed", left: box.left, top: box.top, zIndex: 9999, width: Math.min(previewW, window.innerWidth - 16) }}
+          className="pointer-events-none bg-white border border-slate-200 rounded-xl shadow-2xl p-1.5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={withImageWidth(url, previewW) ?? url} alt="" decoding="async" className="w-full max-h-[70vh] object-contain rounded-lg" />
+        </div>,
+        document.body,
+      )}
+    </div>
   );
 }
