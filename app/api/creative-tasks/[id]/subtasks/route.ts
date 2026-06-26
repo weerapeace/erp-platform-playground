@@ -62,8 +62,9 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
   const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("parent_sku_id").eq("task_id", taskId);
   const pIds = ((pl ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
   if (!pIds.length) return NextResponse.json({ parents: [], error: null });
-  const { data } = await admin.from("parent_skus_v2").select("code, name_th, name_platform, introduction, description, english_description").in("id", pIds);
+  const { data } = await admin.from("parent_skus_v2").select("id, code, name_th, name_platform, introduction, description, english_description").in("id", pIds);
   const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
+    id: (p.id as string) ?? "",
     code: (p.code as string) ?? "",
     name_th: (p.name_th as string) ?? "",
     name_platform: (p.name_platform as string) ?? "",

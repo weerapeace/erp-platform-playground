@@ -165,18 +165,11 @@ function StepCard({ step, index, onTitle, onReqBefore, onAssignees, onCfg, onRem
 
       {/* ค่าตั้งเฉพาะชนิด */}
       {step.type === "images" && (
-        <div className="space-y-2 pt-1 border-t border-slate-100">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            {chk(t("รับหลายรูป", "Multiple images"), c.accepts_multi_image, (v) => onCfg({ accepts_multi_image: v }))}
-            {chk(t("รับลิงก์", "Accept link"), c.accepts_link, (v) => onCfg({ accepts_link: v }))}
-            {chk(t("ต้องอนุมัติก่อนส่งต่อ", "Require approval"), c.requires_approval, (v) => onCfg({ requires_approval: v }))}
-            {chk(t("มีปุ่ม copy prompt", "Copy prompt button"), c.has_copy_prompt, (v) => onCfg({ has_copy_prompt: v }))}
-            <span className="text-[11px] text-emerald-600">→ {t("อนุมัติแล้วเพิ่มเข้าแกลเลอรีรูปสินค้า", "approved → product gallery")}</span>
-          </div>
-          {c.has_copy_prompt && (
-            <PromptEditor value={c.prompt_template ?? ""} rows={3} onChange={(v) => onCfg({ prompt_template: v })}
-              placeholder={t("prompt สำหรับสร้างรูป — กดปุ่มด้านล่างแทรกตัวแปร", "Image-gen prompt — click chips to insert variables")} />
-          )}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 border-t border-slate-100">
+          {chk(t("รับหลายรูป", "Multiple images"), c.accepts_multi_image, (v) => onCfg({ accepts_multi_image: v }))}
+          {chk(t("รับลิงก์", "Accept link"), c.accepts_link, (v) => onCfg({ accepts_link: v }))}
+          {chk(t("ต้องอนุมัติก่อนส่งต่อ", "Require approval"), c.requires_approval, (v) => onCfg({ requires_approval: v }))}
+          <span className="text-[11px] text-emerald-600">→ {t("อนุมัติแล้วเพิ่มเข้าแกลเลอรีรูปสินค้า", "approved → product gallery")}</span>
         </div>
       )}
 
@@ -198,18 +191,11 @@ function StepCard({ step, index, onTitle, onReqBefore, onAssignees, onCfg, onRem
       )}
 
       {step.type === "description_image" && (
-        <div className="space-y-2 pt-1 border-t border-slate-100">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-            {chk(t("รับหลายรูป", "Multiple images"), c.accepts_multi_image, (v) => onCfg({ accepts_multi_image: v }))}
-            {chk(t("รับลิงก์", "Accept link"), c.accepts_link, (v) => onCfg({ accepts_link: v }))}
-            {chk(t("ต้องอนุมัติ", "Require approval"), c.requires_approval, (v) => onCfg({ requires_approval: v }))}
-            {chk(t("มีปุ่ม copy prompt", "Copy prompt button"), c.has_copy_prompt, (v) => onCfg({ has_copy_prompt: v }))}
-            <span className="text-[11px] text-emerald-600">→ {t("อนุมัติแล้วเพิ่มเข้า media คำอธิบาย", "approved → description media")}</span>
-          </div>
-          {c.has_copy_prompt && (
-            <PromptEditor value={c.prompt_template ?? ""} rows={3} onChange={(v) => onCfg({ prompt_template: v })}
-              placeholder={t("prompt สำหรับสร้างรูป — กดปุ่มด้านล่างแทรกตัวแปร", "Image-gen prompt — click chips to insert variables")} />
-          )}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 border-t border-slate-100">
+          {chk(t("รับหลายรูป", "Multiple images"), c.accepts_multi_image, (v) => onCfg({ accepts_multi_image: v }))}
+          {chk(t("รับลิงก์", "Accept link"), c.accepts_link, (v) => onCfg({ accepts_link: v }))}
+          {chk(t("ต้องอนุมัติ", "Require approval"), c.requires_approval, (v) => onCfg({ requires_approval: v }))}
+          <span className="text-[11px] text-emerald-600">→ {t("อนุมัติแล้วเพิ่มเข้า media คำอธิบาย", "approved → description media")}</span>
         </div>
       )}
 
