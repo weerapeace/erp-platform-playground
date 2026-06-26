@@ -37,7 +37,7 @@ const TEMPLATE: ReportTemplate = {
   <table class="bw-size">
     <thead><tr><th class="lcol">หนัง / สี</th>{{#sizes}}<th>{{label}}</th>{{/sizes}}<th class="sum">รวม</th></tr></thead>
     <tbody>
-      {{#rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span>{{{leather}}}</td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
+      {{#rows}}<tr><td class="lcol">{{{lcol_html}}}</td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
       <tr class="trow"><td class="lcol">รวมทุก MO</td>{{#total_cells}}<td>{{v}}</td>{{/total_cells}}<td class="sum">{{grand}}</td></tr>
     </tbody>
   </table>
@@ -83,7 +83,9 @@ const TEMPLATE: ReportTemplate = {
 .bw-cdet .bkname { font-weight: 700; }
 .bw-cdet .bkcode { font-family: ui-monospace, monospace; color: #475569; font-size: 8.5px; }
 .bw-cdet .bkmiss { color: #94a3b8; font-size: 8px; }
-.bw-size .lsub { font-size: 8.5px; color: #475569; font-weight: 400; white-space: normal; }
+.bw-size .lmain { font-size: 11px; font-weight: 700; color: #111827; white-space: normal; line-height: 1.25; }
+.bw-size .sku-sub { font-size: 8.5px; font-weight: 400; color: #94a3b8; margin-top: 0.5mm; }
+.bw-size .sku-sub .mo { font-size: 8px; }
 .bw-spec { width: 100%; border-collapse: collapse; }
 .bw-spec td { padding: 1mm 2mm; border-bottom: 1px solid #e5e7eb; }
 .bw-spec td.k { width: 35mm; white-space: nowrap; }
@@ -168,12 +170,13 @@ function BeltWorkOrderInner() {
     const HIDE_SPEC = /รูปแบบเข็มขัด|ระยะถึงปลายสาย|ห่างโลโก้จากปลาย/;
     const detail = specFields.find((f) => /รูปแบบเข็มขัด/.test(f.label))?.value || "";
     const visibleSpecs = specFields.filter((f) => !HIDE_SPEC.test(f.label));
-    // บรรทัดหนัง (บน/ล่าง) ใต้รหัสในตารางจำนวนต่อไซส์
-    const leatherSub = (sp: ProductSpec | undefined) => {
-      const p = beltColorParts(sp); const parts: string[] = [];
+    // คอลัมน์แรกตารางไซส์: ชื่อหนัง (เด่น) + SKU/MO (ตัวเล็กรอง) — ไม่มีหนังก็โชว์ SKU เป็นตัวหลัก
+    const lcolHtml = (r: BeltWoRow) => {
+      const p = beltColorParts(skuSpecs[r.product_sku]); const parts: string[] = [];
       if (p.top && p.top !== "—") parts.push(`บน: ${escHtml(p.top)}`);
       if (p.bot && p.bot !== "—") parts.push(`ล่าง: ${escHtml(p.bot)}`);
-      return parts.length ? `<div class="lsub">${parts.join(" · ")}</div>` : "";
+      const skuLine = `${escHtml(r.label)} <span class="mo">· ${escHtml(r.mo_no.split("-").pop() || r.mo_no)}</span>`;
+      return parts.length ? `<div class="lmain">${parts.join(" · ")}</div><div class="sku-sub">${skuLine}</div>` : `<div class="lmain">${skuLine}</div>`;
     };
     // หัวเข็มขัด: รูป+ชื่อ+รหัส (จาก BOM) · ไม่มีใน BOM → fallback ชื่อจากสเปก
     const buckleCellOf = (r: BeltWoRow) => {
@@ -211,7 +214,7 @@ function BeltWorkOrderInner() {
         label: r.label,
         mo_short: r.mo_no.split("-").pop() || r.mo_no,
         total: r.total,
-        leather: leatherSub(skuSpecs[r.product_sku]),
+        lcol_html: lcolHtml(r),
         cells: sizes.map((s) => ({ v: r.by_size[s] || "" })),
       })),
       total_cells: sizes.map((s) => ({ v: bw.totals_by_size[s] || 0 })),
