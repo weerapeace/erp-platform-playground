@@ -5,12 +5,13 @@
 // ใช้ที่: หน้า /tasks และ drawer การ์ดงานบน Campaign Canvas
 // ============================================================
 
-import { useCallback, useEffect, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
 import { ImageInput } from "@/components/image-input";
+import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -82,20 +83,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [ef, setEf] = useState<EditForm | null>(null);
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
-  const [drawerW, setDrawerW] = useState(640);       // ความกว้าง drawer (ลากปรับได้ + จำไว้)
-  useEffect(() => { const v = Number(localStorage.getItem("taskDrawerWidth")); if (v && v >= 480) setDrawerW(v); }, []);
-  // ลากขอบซ้ายเพื่อปรับความกว้าง (drawer ชิดขวา → กว้าง = ระยะจากขวาถึงเมาส์)
-  const startResize = (e: ReactMouseEvent) => {
-    e.preventDefault();
-    const onMove = (ev: MouseEvent) => setDrawerW(Math.min(window.innerWidth * 0.97, Math.max(480, window.innerWidth - ev.clientX)));
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
-      document.body.style.userSelect = "";
-      setDrawerW((w) => { try { localStorage.setItem("taskDrawerWidth", String(Math.round(w))); } catch { /* ignore */ } return w; });
-    };
-    document.body.style.userSelect = "none";
-    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
-  };
+  const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 640); // ลากปรับความกว้าง (ของกลาง)
 
   const load = useCallback(async () => {
     try { setDetail(await getTask(taskId)); }

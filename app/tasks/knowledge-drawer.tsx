@@ -8,12 +8,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { listKnowledge, createKnowledge, updateKnowledge, deleteKnowledge, type KnowledgePage } from "./data";
 import { RichTextEditor } from "@/components/rich-text";
+import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useT } from "@/components/i18n";
 
 type ToastType = "success" | "error" | "info";
 
 export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () => void; canEdit: boolean; pushToast: (type: ToastType, m: string) => void }) {
   const t = useT();
+  const { width: drawerW, startResize } = useDrawerResize("knowledgeDrawerWidth", 860);
   const [pages, setPages] = useState<KnowledgePage[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,7 +53,9 @@ export function KnowledgeDrawer({ onClose, canEdit, pushToast }: { onClose: () =
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[860px] max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+        {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
+        <div onMouseDown={startResize} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <h3 className="text-base font-semibold text-slate-900">📚 {t("คลังความรู้","Knowledge")}</h3>
           <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
