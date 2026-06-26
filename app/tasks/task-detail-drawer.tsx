@@ -149,10 +149,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     finally { setBusy(false); }
   };
   const parentList = d.parent_skus ?? [];
-  // รูปปก: ของงานเอง ถ้าไม่มี → fallback รูปจาก Parent SKU ตัวแรกที่มีรูป
+  // รูปปก: Parent SKU มาก่อน (ถ้ามีรูป ใช้ทับรูปที่อัปเอง) · ไม่มีค่อยใช้รูปที่อัปเอง
   const parentImg = parentList.find((p) => p.image_key)?.image_key ?? null;
-  const coverKey = d.cover_image_r2_key || parentImg;
-  const coverFromParent = !d.cover_image_r2_key && !!parentImg;
+  const coverKey = parentImg || d.cover_image_r2_key;
+  const coverFromParent = !!parentImg;
 
   return (
     <>
@@ -189,7 +189,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             )}
             {coverEdit && (
               <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-3 space-y-2">
-                <p className="text-[11px] text-slate-500">{t("รูปปกของงาน — ไม่ใส่ = ใช้รูปจาก Parent SKU", "Task cover — leave empty to use Parent SKU image")}</p>
+                <p className="text-[11px] text-slate-500">{t("รูปปกสำรอง — ถ้า Parent SKU มีรูป จะใช้รูป Parent SKU แทน", "Fallback cover — Parent SKU image takes priority when it has one")}</p>
                 <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
                 <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-xs text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
               </div>
