@@ -13,7 +13,7 @@ import { useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { buildKitLayout, KIT_COLOR_FIELDS, kitAiPrompt, kitFilename, slotIdFromFilename, type KitLayout } from "@/lib/brand-theme-kit";
+import { buildKitLayout, KIT_COLOR_FIELDS, kitAiPrompt, kitFilename, slotIdFromFilename, zipStore, type KitLayout } from "@/lib/brand-theme-kit";
 import type { BrandTheme } from "@/lib/brand-theme";
 
 export type KitApplyPatch = { slots?: Record<string, string | null>; colors?: Partial<BrandTheme> };
@@ -86,6 +86,32 @@ function drawTemplate(ctx: CanvasRenderingContext2D, layout: KitLayout, draft: B
 }
 const PAD = 62;
 
+// ── โหมด ZIP รายชิ้น: ขนาด + การวาดเทมเพลตต่อ 1 ช่อง (1 ไฟล์) ──
+function pieceSize(id: string): { w: number; h: number } {
+  if (id.startsWith("wf_icon")) return { w: 320, h: 320 };
+  switch (id) {
+    case "header_left": case "header_right": return { w: 640, h: 320 };
+    case "sidebar_top": return { w: 800, h: 260 };
+    case "sidebar_bottom": return { w: 560, h: 220 };
+    case "page_tl": case "page_tr": case "page_bl": case "page_br": return { w: 560, h: 560 };
+    case "page_empty": return { w: 680, h: 500 };
+    case "task_placeholder": return { w: 480, h: 360 };
+    default: return { w: 320, h: 320 };   // stat icons / task_corner / audit_badge
+  }
+}
+function drawPiece(ctx: CanvasRenderingContext2D, w: number, h: number, label: string, filename: string) {
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
+  roundRect(ctx, 10, 10, w - 20, h - 20, 18);
+  ctx.setLineDash([12, 9]); ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#334155"; ctx.font = `500 ${Math.max(18, Math.round(w * 0.05))}px ${TH_FONT}`;
+  ctx.fillText(label, w / 2, h / 2 - 14);
+  ctx.fillStyle = "#94a3b8"; ctx.font = `400 ${Math.max(14, Math.round(w * 0.035))}px ${TH_FONT}`;
+  ctx.fillText(filename, w / 2, h / 2 + Math.round(w * 0.05));
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+}
+
 // เช็คว่ากรอบนี้ว่าง (ขาวเกือบหมด) → ข้าม ไม่ดึง
 function regionBlank(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): boolean {
   const d = ctx.getImageData(x, y, w, h).data;
@@ -135,6 +161,35 @@ export function ThemeKitModal({ open, onClose, draft, statuses = [], brandName, 
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     }, "image/png");
     toast.success("ดาวน์โหลดแม่แบบแล้ว — เอาไปให้ AI เติมรูป/สีได้เลย");
+  };
+
+  // ดาวน์โหลดแบบ ZIP รายชิ้น (1 ช่อง = 1 ไฟล์ ตั้งชื่อตาม slot) — ให้ AI ทำทีละรูปแล้วอัปกลับโหมด "รายรูป"
+  const downloadZip = async () => {
+    setBusy(true); setProgress("กำลังสร้าง ZIP...");
+    try {
+      const files: { name: string; data: Uint8Array }[] = [];
+      for (const c of imageCells) {
+        const { w, h } = pieceSize(c.id);
+        const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        const ctx = cv.getContext("2d"); if (!ctx) continue;
+        drawPiece(ctx, w, h, c.label, kitFilename(c.id));
+        const blob = await canvasToBlob(cv);
+        if (blob) files.push({ name: kitFilename(c.id), data: new Uint8Array(await blob.arrayBuffer()) });
+      }
+      const enc = new TextEncoder();
+      files.push({ name: "_colors.txt", data: enc.encode(KIT_COLOR_FIELDS.map((c) => `${String(c.key)} (${c.label}): ${String(draft[c.key] ?? "")}`).join("\r\n")) });
+      files.push({ name: "_README.txt", data: enc.encode(`${kitAiPrompt(brandName)}\r\n\r\n— เติมรูปในแต่ละไฟล์ (กรอบเส้นประ) แล้วอัปกลับในโหมด "รายรูป" (ชื่อไฟล์ตรงกับช่อง ไม่ต้องเปลี่ยน)\r\n— ช่องสีอยู่ในไฟล์ _colors.txt (แก้ค่า hex ได้)`) });
+      const zip = zipStore(files);
+      const ab = new ArrayBuffer(zip.byteLength);
+      new Uint8Array(ab).set(zip);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([ab], { type: "application/zip" }));
+      a.download = `theme-template-${brandName.replace(/[^a-z0-9ก-๙]+/gi, "-")}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast.success(`ดาวน์โหลด ZIP แล้ว (${files.length} ไฟล์)`);
+    } catch { toast.error("สร้าง ZIP ไม่สำเร็จ"); }
+    finally { setBusy(false); setProgress(""); }
   };
 
   const copyPrompt = async () => {
@@ -241,13 +296,15 @@ export function ThemeKitModal({ open, onClose, draft, statuses = [], brandName, 
           <div className="mb-2 text-sm font-medium text-slate-700">1) ดาวน์โหลดแม่แบบ</div>
           <div className="flex flex-wrap gap-2">
             <button onClick={downloadTemplate} disabled={busy}
-              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">⬇️ ดาวน์โหลดแม่แบบ (PNG)</button>
+              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">⬇️ แผ่นเดียว (PNG)</button>
+            <button onClick={() => void downloadZip()} disabled={busy}
+              className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 disabled:opacity-50">🗂 รายชิ้น (ZIP)</button>
             <button onClick={() => void copyPrompt()} disabled={busy}
               className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">📋 คัดลอกคำสั่ง AI</button>
             <button onClick={() => setShowFiles((s) => !s)}
               className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{showFiles ? "▼" : "▶"} รายชื่อไฟล์ต่อช่อง ({imageCells.length})</button>
           </div>
-          <p className="mt-2 text-[11px] text-slate-400">แผ่นมี {imageCells.length} ช่องรูป + {KIT_COLOR_FIELDS.length} ช่องสี · เอาไปให้ AI เติมในกรอบเส้นประโดยไม่ขยับเส้น</p>
+          <p className="mt-2 text-[11px] text-slate-400"><b>แผ่นเดียว</b> = รูปเดียว {imageCells.length} ช่อง + {KIT_COLOR_FIELDS.length} ช่องสี (ให้ AI เติมในกรอบ) · <b>รายชิ้น (ZIP)</b> = แยกเป็น {imageCells.length} ไฟล์ + _colors.txt (ทำทีละรูป คมชัดกว่า → อัปกลับโหมด “รายรูป”)</p>
           {showFiles && (
             <div className="mt-2 max-h-32 overflow-auto rounded border border-slate-100 bg-slate-50 p-2 text-[11px] font-mono text-slate-500">
               {imageCells.map((c) => <div key={c.id}>{kitFilename(c.id)} — <span className="font-sans">{c.label}</span></div>)}
