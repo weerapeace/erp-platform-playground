@@ -13,7 +13,8 @@ import { guardApi } from "@/lib/api-auth";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type BeltWoRow = { mo_no: string; product_sku: string; label: string; by_size: Record<string, number>; total: number };
+export type BeltWoRow = { mo_no: string; product_sku: string; label: string; by_size: Record<string, number>; total: number;
+  buckle_code: string | null; buckle_name: string | null; buckle_image: string | null };
 export type BeltWorkOrder = {
   mos: string[];
   brand: string | null;
@@ -87,6 +88,38 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // ── หัวเข็มขัด: ดึงจาก BOM ของแต่ละ SKU (ชิ้นส่วนชื่อขึ้นต้น "หัวเข็มขัด") → รหัส+ชื่อ+รูป ──
+  const buckleBySku = new Map<string, { code: string; name: string; image: string | null }>();
+  if (skuCodes.length) {
+    const { data: heads } = await admin.from("bom_headers").select("product_sku, bom_code, is_default, version").in("product_sku", skuCodes).eq("is_active", true);
+    const headList = (heads ?? []) as Record<string, unknown>[];
+    const bomBySku = new Map<string, string>();   // เลือก BOM ต่อ SKU: is_default ก่อน, ไม่มีก็ version ล่าสุด
+    for (const sku of skuCodes) {
+      const cands = headList.filter((h) => String(h.product_sku) === sku);
+      if (!cands.length) continue;
+      cands.sort((a, b) => (Number(!!b.is_default) - Number(!!a.is_default)) || ((Number(b.version) || 0) - (Number(a.version) || 0)));
+      bomBySku.set(sku, String(cands[0].bom_code));
+    }
+    const bomCodes = [...new Set([...bomBySku.values()])];
+    const buckleByBom = new Map<string, { code: string; name: string }>();
+    if (bomCodes.length) {
+      const { data: lines } = await admin.from("bom_lines").select("bom_code, component_sku, component_name, sequence")
+        .in("bom_code", bomCodes).eq("is_active", true).ilike("component_name", "หัวเข็มขัด%").order("sequence", { ascending: true });
+      for (const l of (lines ?? []) as Record<string, unknown>[]) { const bc = String(l.bom_code); if (!buckleByBom.has(bc)) buckleByBom.set(bc, { code: str(l.component_sku), name: str(l.component_name) }); }
+    }
+    const buckleCodes = [...new Set([...buckleByBom.values()].map((b) => b.code).filter(Boolean))];
+    const imgByCode = new Map<string, string | null>();
+    if (buckleCodes.length) {
+      const { data: bs } = await admin.from("skus_v2").select("code, cover_image_r2_key").in("code", buckleCodes);
+      for (const b of (bs ?? []) as Record<string, unknown>[]) { const k = b.cover_image_r2_key as string | null; imgByCode.set(str(b.code), k ? `/api/r2-image?key=${encodeURIComponent(k)}` : null); }
+    }
+    for (const sku of skuCodes) {
+      const bc = bomBySku.get(sku); if (!bc) continue;
+      const bk = buckleByBom.get(bc); if (!bk) continue;
+      buckleBySku.set(sku, { code: bk.code, name: bk.name, image: imgByCode.get(bk.code) ?? null });
+    }
+  }
+
   // ── ตารางไซส์รวม ──
   const sizeSet = new Set<string>();
   const totals: Record<string, number> = {};
@@ -116,7 +149,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     grand += total;
     if (m.due_date) dueSet.add(str(m.due_date));
-    rows.push({ mo_no: str(m.mo_no), product_sku: str(m.product_sku), label: str(m.product_name) || str(m.product_sku), by_size: by, total });
+    const bk = buckleBySku.get(str(m.product_sku));
+    rows.push({ mo_no: str(m.mo_no), product_sku: str(m.product_sku), label: str(m.product_name) || str(m.product_sku), by_size: by, total,
+      buckle_code: bk?.code ?? null, buckle_name: bk?.name ?? null, buckle_image: bk?.image ?? null });
   }
   rows.sort((a, b) => a.mo_no.localeCompare(b.mo_no));
 

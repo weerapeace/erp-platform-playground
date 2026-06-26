@@ -10,7 +10,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
-import type { BeltWorkOrder } from "@/app/api/mo/belt-work-order/route";
+import type { BeltWorkOrder, BeltWoRow } from "@/app/api/mo/belt-work-order/route";
 import type { ProductSpec } from "@/app/api/product-spec/route";
 import { buildBeltDiagramSvg, type BeltTailShape, type BeltLayout } from "@/lib/belt-diagram";
 
@@ -37,14 +37,14 @@ const TEMPLATE: ReportTemplate = {
   <table class="bw-size">
     <thead><tr><th class="lcol">หนัง / สี</th>{{#sizes}}<th>{{label}}</th>{{/sizes}}<th class="sum">รวม</th></tr></thead>
     <tbody>
-      {{#rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
+      {{#rows}}<tr><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span>{{{leather}}}</td>{{#cells}}<td>{{v}}</td>{{/cells}}<td class="sum">{{total}}</td></tr>{{/rows}}
       <tr class="trow"><td class="lcol">รวมทุก MO</td>{{#total_cells}}<td>{{v}}</td>{{/total_cells}}<td class="sum">{{grand}}</td></tr>
     </tbody>
   </table>
-  {{#has_color_detail}}<div class="bw-section">รายละเอียดหนัง / สี / หัวเข็มขัด</div>
+  {{#has_color_detail}}<div class="bw-section">รายละเอียดสี / หัวเข็มขัด / ขอบ-ด้าย</div>
   <table class="bw-cdet">
-    <thead><tr><th class="imgc">รูป</th><th class="lcol">รหัส / สี</th><th>หัวเข็มขัด</th><th>หนังบน</th><th>หนังล่าง</th><th>ขอบ</th><th>ด้าย</th></tr></thead>
-    <tbody>{{#color_rows}}<tr><td class="imgc">{{{img_cell}}}</td><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td><td>{{buckle}}</td><td>{{top}}</td><td>{{bot}}</td><td>{{edge}}</td><td>{{thread}}</td></tr>{{/color_rows}}</tbody>
+    <thead><tr><th class="imgc">รูปสินค้า</th><th class="lcol">รหัส / สี</th><th class="bkcol">หัวเข็มขัด (รหัส+รูป)</th><th>ขอบ</th><th>ด้าย</th></tr></thead>
+    <tbody>{{#color_rows}}<tr><td class="imgc">{{{img_cell}}}</td><td class="lcol">{{label}} <span class="mo">· {{mo_short}}</span></td><td class="bkcol">{{{buckle_cell}}}</td><td>{{edge}}</td><td>{{thread}}</td></tr>{{/color_rows}}</tbody>
   </table>{{/has_color_detail}}
   {{#has_spec}}<div class="bw-section">สเปก</div>
   <table class="bw-spec">{{#specs}}<tr><td class="k">{{label}}</td><td class="v">{{value}}</td></tr>{{/specs}}</table>{{/has_spec}}
@@ -78,6 +78,12 @@ const TEMPLATE: ReportTemplate = {
 .bw-cdet .mo { color: #94a3b8; font-size: 8px; font-weight: 400; }
 .bw-cdet .imgc { width: 16mm; text-align: center; padding: 1mm; }
 .bw-cdet img.thumb { width: 14mm; height: 14mm; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 3px; display: block; margin: 0 auto; background: #fff; }
+.bw-cdet .bkcol { width: 34mm; }
+.bw-cdet .bkimg { width: 13mm; height: 13mm; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 3px; float: left; margin: 0 2mm 0 0; background: #fff; }
+.bw-cdet .bkname { font-weight: 700; }
+.bw-cdet .bkcode { font-family: ui-monospace, monospace; color: #475569; font-size: 8.5px; }
+.bw-cdet .bkmiss { color: #94a3b8; font-size: 8px; }
+.bw-size .lsub { font-size: 8.5px; color: #475569; font-weight: 400; white-space: normal; }
 .bw-spec { width: 100%; border-collapse: collapse; }
 .bw-spec td { padding: 1mm 2mm; border-bottom: 1px solid #e5e7eb; }
 .bw-spec td.k { width: 35mm; white-space: nowrap; }
@@ -104,6 +110,8 @@ function beltBuckle(s: ProductSpec | undefined): string {
 const ORIGIN = () => (typeof window !== "undefined" ? window.location.origin : "");
 const beltImgCell = (url: string | null | undefined) =>
   url ? `<img class="thumb" src="${url.startsWith("/") ? ORIGIN() : ""}${url}${url.includes("?") ? "&" : "?"}w=160" alt="" />` : "—";
+const escHtml = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+const absImg = (url: string | null | undefined) => (url ? `${url.startsWith("/") ? ORIGIN() : ""}${url}${url.includes("?") ? "&" : "?"}w=120` : "");
 
 function BeltWorkOrderInner() {
   const sp = useSearchParams();
@@ -160,10 +168,28 @@ function BeltWorkOrderInner() {
     const HIDE_SPEC = /รูปแบบเข็มขัด|ระยะถึงปลายสาย|ห่างโลโก้จากปลาย/;
     const detail = specFields.find((f) => /รูปแบบเข็มขัด/.test(f.label))?.value || "";
     const visibleSpecs = specFields.filter((f) => !HIDE_SPEC.test(f.label));
+    // บรรทัดหนัง (บน/ล่าง) ใต้รหัสในตารางจำนวนต่อไซส์
+    const leatherSub = (sp: ProductSpec | undefined) => {
+      const p = beltColorParts(sp); const parts: string[] = [];
+      if (p.top && p.top !== "—") parts.push(`บน: ${escHtml(p.top)}`);
+      if (p.bot && p.bot !== "—") parts.push(`ล่าง: ${escHtml(p.bot)}`);
+      return parts.length ? `<div class="lsub">${parts.join(" · ")}</div>` : "";
+    };
+    // หัวเข็มขัด: รูป+ชื่อ+รหัส (จาก BOM) · ไม่มีใน BOM → fallback ชื่อจากสเปก
+    const buckleCellOf = (r: BeltWoRow) => {
+      const sp = skuSpecs[r.product_sku];
+      const name = r.buckle_name || beltBuckle(sp);
+      const code = r.buckle_code || "";
+      if (!name || name === "—") return `<span class="bkmiss">—</span>`;
+      const img = r.buckle_image ? `<img class="bkimg" src="${absImg(r.buckle_image)}" alt="" />` : "";
+      const miss = (!r.buckle_image && code) ? `<div class="bkmiss">ยังไม่มีรูป</div>` : "";
+      return `${img}<div class="bkname">${escHtml(name)}</div>${code ? `<div class="bkcode">${escHtml(code)}</div>` : ""}${miss}`;
+    };
     const colorRows = bw.rows.map((r) => {
-      const spec = skuSpecs[r.product_sku]; const p = beltColorParts(spec);
-      const imgUrl = spec?.image_url || spec?.parent?.image_url || null;
-      return { label: r.label, mo_short: r.mo_no.split("-").pop() || r.mo_no, img_cell: beltImgCell(imgUrl), buckle: beltBuckle(spec), top: p.top, bot: p.bot, edge: p.edge, thread: p.thread };
+      const sp = skuSpecs[r.product_sku]; const p = beltColorParts(sp);
+      const imgUrl = sp?.image_url || sp?.parent?.image_url || null;
+      return { label: r.label, mo_short: r.mo_no.split("-").pop() || r.mo_no, img_cell: beltImgCell(imgUrl), buckle_cell: buckleCellOf(r), edge: p.edge, thread: p.thread,
+        has_info: !!imgUrl || !!r.buckle_name || (p.edge !== "—") || (p.thread !== "—") };
     });
     // เฟส 3b: ดึงตัวเลขวาดรูปจากช่องสเปก (จับด้วยป้ายชื่อ) — ไม่เจอ → ใช้ค่า default ในตัววาด
     const bf = spec ? [...spec.model_attrs, ...spec.legacy, ...spec.sku_attrs] : [];
@@ -185,11 +211,12 @@ function BeltWorkOrderInner() {
         label: r.label,
         mo_short: r.mo_no.split("-").pop() || r.mo_no,
         total: r.total,
+        leather: leatherSub(skuSpecs[r.product_sku]),
         cells: sizes.map((s) => ({ v: r.by_size[s] || "" })),
       })),
       total_cells: sizes.map((s) => ({ v: bw.totals_by_size[s] || 0 })),
       grand: bw.grand_total,
-      has_color_detail: colorRows.some((r) => r.img_cell.includes("<img") || (r.buckle && r.buckle !== "—") || [r.top, r.bot, r.edge, r.thread].some((v) => v && v !== "—")),
+      has_color_detail: colorRows.some((r) => r.has_info),
       color_rows: colorRows,
       has_spec: visibleSpecs.length > 0,
       specs: visibleSpecs.map((f) => ({ label: f.label, value: f.value })),
