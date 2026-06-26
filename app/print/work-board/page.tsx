@@ -25,7 +25,7 @@ type PendingMO = {
 type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty: number; product_sku: string | null; product_name: string | null; image_url: string | null };
 type WorkOrder = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
-  stage: string; assignee_name: string | null; department_name: string | null;
+  stage: string; assignee_name: string | null; assignee_id?: string | null; department_name: string | null;
   qty: number; status: string; labor_cost?: number | null; image_url?: string | null; central_rate?: number;
 };
 type BoardResp = { departments: { id: string; name: string }[]; workOrders: WorkOrder[]; pending: PendingMO[]; pending_piece: PendingPiece[] };
@@ -201,10 +201,18 @@ function WorkBoardPrintInner() {
     const namesByDeptId = new Map<string, string[]>();
     for (const c of assignees.craftsmen) { if (!c.department_id) continue; const a = namesByDeptId.get(c.department_id) ?? []; a.push(c.nickname || c.name); namesByDeptId.set(c.department_id, a); }
     const staffHtmlOf = (deptName: string) => {
+      if (/เหมา/.test(deptName)) return "";   // งานเหมา = ใครก็ทำได้ ไม่ต้องโชว์รายชื่อพนักงาน
       const id = deptIdByName.get(deptName); if (!id) return "";
       const names = namesByDeptId.get(id) ?? []; const wage = assignees.dept_wages[id] ?? 0;
       if (names.length === 0 && wage === 0) return "";
       return `<div class="grp-staff">👥 ${names.length} คน${names.length ? ": " + names.join(", ") : ""}${wage > 0 ? ` · เงินเดือนรวม ฿${money(wage)}` : ""}</div>`;
+    };
+    // ชื่อช่างในคอลัมน์ → ใช้ชื่อเล่น (จาก employee id ก่อน, ไม่มีก็ดึงจากวงเล็บในชื่อเต็ม)
+    const nickById = new Map<string, string>();
+    for (const c of assignees.craftsmen) if (c.nickname) nickById.set(c.id, c.nickname);
+    const shortAssignee = (name: string | null | undefined, id: string | null | undefined) => {
+      const byId = id ? nickById.get(id) : null; if (byId) return byId;
+      if (!name) return ""; const m = name.match(/\(([^)]+)\)/); return m ? m[1] : name;
     };
 
     const pieceRowsOf = () => board.pending_piece.filter((p) => groupOk(p.mo_no)).map((p) => {
@@ -261,7 +269,7 @@ function WorkBoardPrintInner() {
           const rate = l.mo_no ? (rateByMo.get(l.mo_no) ?? 0) : 0; const qty = l.qty || 0; const labor = rate > 0 ? rate * qty : 0;
           gQty += qty; if (labor > 0) gLabor += labor;
           return { img_cell: imgCell(l.product_sku ? (imgBySku.get(l.product_sku) ?? null) : null),
-            assignee: l.assignee_name || "(ทั้งโต๊ะ)", sku: l.product_sku || "—", name: l.product_name || "—",
+            assignee: shortAssignee(l.assignee_name, l.assignee_id) || "(ทั้งโต๊ะ)", sku: l.product_sku || "—", name: l.product_name || "—",
             qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
         });
         totQty += gQty; totLabor += gLabor;
@@ -284,7 +292,7 @@ function WorkBoardPrintInner() {
       const gLabor = list.reduce((a, w) => a + (w.labor_cost || 0), 0);
       totQty += gQty; totLabor += gLabor;
       return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor),
-        rows: list.map((w) => ({ assignee: w.assignee_name || w.department_name || "—", sku: w.product_sku || "—", name: w.product_name || "—",
+        rows: list.map((w) => ({ assignee: shortAssignee(w.assignee_name, w.assignee_id) || w.department_name || "—", sku: w.product_sku || "—", name: w.product_name || "—",
           qty: num(w.qty || 0), labor_cell: (w.labor_cost != null && w.labor_cost > 0) ? money(w.labor_cost) : BLANK })) };
     });
     return buildReportHtml(TEMPLATE_PRODUCTION, {
