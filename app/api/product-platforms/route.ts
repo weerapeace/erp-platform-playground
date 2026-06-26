@@ -20,14 +20,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }] = await Promise.all([
-    admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id").eq("id", parentId).maybeSingle(),
+    admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key, category_id, brand_id").eq("id", parentId).maybeSingle(),
     admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
-    admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, validation").eq("parent_sku_id", parentId),
+    admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
     admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, cover_image_r2_key, is_active").eq("parent_sku_id", parentId).order("code", { ascending: true }),
     admin.from("product_image_slots").select("r2_key").eq("owner_id", parentId),
   ]);
   const pRow = (parent ?? {}) as Record<string, unknown>;
   const categoryId = (pRow.category_id as string) ?? null;
+  const brandId = (pRow.brand_id as string) ?? null;
+
+  // ร้านตามแบรนด์ (แบรนด์ × แพลตฟอร์ม) — โชว์ว่าแพลตฟอร์มไหนมีร้านพร้อม publish
+  const accounts: Record<string, { label: string | null; is_active: boolean }> = {};
+  if (brandId) {
+    const { data: accts } = await admin.from("platform_accounts").select("platform_id, label, is_active").eq("brand_id", brandId);
+    for (const a of ((accts ?? []) as Record<string, unknown>[])) accounts[String(a.platform_id)] = { label: (a.label as string) ?? null, is_active: a.is_active !== false };
+  }
 
   // หมวดหมู่กลาง + mapping ต่อแพลตฟอร์ม (จากหมวดเดียวกัน — ใช้ซ้ำได้)
   let categoryName: string | null = null;
@@ -68,7 +76,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({
     parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", description: pRow.description ?? "", category_id: categoryId, category_name: categoryName } : null,
-    platforms, drafts: draftMap, variants, mappings, images, error: null,
+    platforms, drafts: draftMap, variants, mappings, images, accounts, error: null,
   });
 }
 

@@ -106,7 +106,7 @@ export default function ParentSKUsV2Page() {
   return (
     <>
       <MasterCRUDPage config={config} />
-      {mgrId && <ProductPlatformManager parentSkuId={mgrId} onClose={() => setMgrId(null)} canEdit={can("products.platforms.edit")} />}
+      {mgrId && <ProductPlatformManager parentSkuId={mgrId} onClose={() => setMgrId(null)} canEdit={can("products.platforms.edit")} canPublish={can("products.platforms.publish")} />}
     </>
   );
 }

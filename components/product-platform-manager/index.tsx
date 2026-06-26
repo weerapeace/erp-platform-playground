@@ -16,16 +16,17 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null; theme_color: string | null };
-type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[] };
+type Draft = { title?: string | null; description?: string | null; category_path?: string | null; status?: string | null; image_keys?: string[]; platform_product_id?: string | null; review_link?: string | null; last_sync_status?: string | null; last_error?: string | null };
 type ParentInfo = { id: string; code: string; name_th: string; description: string; category_id: string | null; category_name: string | null };
 type ImageItem = { key: string; source: string };
+type Account = { label: string | null; is_active: boolean };
 type Variant = { id: string; code: string; name: string; color: string | null; price: number | null; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean };
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", tiktok_shop: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
-export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }: {
-  parentSkuId: string; onClose: () => void; canEdit?: boolean;
+export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, canPublish = false }: {
+  parentSkuId: string; onClose: () => void; canEdit?: boolean; canPublish?: boolean;
 }) {
   const { width, startResize } = useDrawerResize("platformMgrWidth", 780);
   const [loading, setLoading] = useState(true);
@@ -35,8 +36,10 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
   const [variants, setVariants] = useState<Variant[]>([]);
   const [mappings, setMappings] = useState<Record<string, string>>({});
   const [images, setImages] = useState<ImageItem[]>([]);
+  const [accounts, setAccounts] = useState<Record<string, Account>>({});
   const [active, setActive] = useState<string>("");
   const [catInput, setCatInput] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toast = useCallback((type: Toast["type"], msg: string) => {
     const id = Math.floor(performance.now()) + Math.floor(performance.now() % 1000);
@@ -56,6 +59,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
       setVariants((j.variants ?? []) as Variant[]);
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setImages((j.images ?? []) as ImageItem[]);
+      setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setActive((prev) => prev || (pfs[0]?.id ?? ""));
     } catch (e) { toast("error", (e as Error).message); }
     finally { setLoading(false); }
@@ -99,6 +103,32 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
       setMappings((m) => ({ ...m, [active]: catInput }));
       toast("success", "บันทึกเป็นค่ามาตรฐานของหมวดนี้แล้ว");
     } catch (e) { toast("error", (e as Error).message); }
+  };
+  // ลงขาย (mock connector) — เดี่ยว / ทุกที่พร้อม
+  const account = accounts[active];
+  const published = activeDraft.last_sync_status === "success" || activeDraft.status === "published";
+  const publishOnePlatform = async () => {
+    if (!ready) { toast("error", "ข้อมูลยังไม่ครบ — ดูเช็คลิสต์"); return; }
+    if (!account?.is_active) { toast("error", "แบรนด์นี้ยังไม่มีร้านสำหรับแพลตฟอร์มนี้"); return; }
+    setPublishing(true);
+    try {
+      const r = await apiFetch("/api/product-platforms/publish", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, platform_id: active }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      toast("success", `ลงขายแล้ว (จำลอง) · ${j.platform_product_id ?? ""}`);
+      await load();
+    } catch (e) { toast("error", (e as Error).message); } finally { setPublishing(false); }
+  };
+  const publishAll = async () => {
+    setPublishing(true);
+    try {
+      const r = await apiFetch("/api/product-platforms/publish", { method: "POST", body: JSON.stringify({ parent_sku_id: parentSkuId, all: true }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      const res = (j.results ?? []) as { ok: boolean }[];
+      const okN = res.filter((x) => x.ok).length;
+      const failN = res.length - okN;
+      toast(failN ? "info" : "success", `ลงขายสำเร็จ ${okN}${failN ? ` · ไม่สำเร็จ ${failN} (ดูในแต่ละแพลตฟอร์ม)` : ""}`);
+      await load();
+    } catch (e) { toast("error", (e as Error).message); } finally { setPublishing(false); }
   };
 
   const checks = useMemo(() => {
@@ -155,7 +185,9 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ready ? "text-emerald-700 bg-emerald-50 border-emerald-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}>{ready ? "✓ พร้อมลงขาย" : "⚠ ข้อมูลยังไม่ครบ"}</span>
-                  <span className="text-xs text-slate-400">ร่างสำหรับ {activePf.name_th}</span>
+                  {account?.is_active ? <span className="text-xs text-slate-400">ร้าน: {account.label || "—"}</span> : <span className="text-xs text-amber-600">⚠ แบรนด์นี้ยังไม่มีร้าน {activePf.name_th} <a href="/admin/platform-accounts" target="_blank" rel="noopener noreferrer" className="underline">ตั้งร้าน</a></span>}
+                  {published && <span className="text-xs text-emerald-600">✅ ลงขายแล้ว (จำลอง){activeDraft.platform_product_id ? ` · ${activeDraft.platform_product_id}` : ""}</span>}
+                  {activeDraft.last_sync_status === "failed" && <span className="text-xs text-rose-600" title={activeDraft.last_error ?? ""}>⚠ ส่งไม่สำเร็จ</span>}
                 </div>
 
                 <div className="space-y-2">
@@ -222,8 +254,11 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true }:
             )}
 
             <div className="border-t border-slate-200 px-5 py-3 flex items-center justify-between gap-2 shrink-0">
-              <span className="text-[11px] text-slate-400">เซฟร่างอัตโนมัติเมื่อพิมพ์เสร็จ · publish จริงเฟส 2 (ต่อ API)</span>
-              <button disabled title="เฟส 2 — กำลังต่อ API แพลตฟอร์ม" className="h-9 px-4 text-sm font-medium text-white bg-slate-300 rounded-lg cursor-not-allowed shrink-0">📤 ลงขาย (เร็ว ๆ นี้)</button>
+              <span className="text-[11px] text-slate-400">เซฟร่างอัตโนมัติ · ลงขายตอนนี้เป็นแบบจำลอง (mock) — ต่อ API จริงทีหลังต่อแพลตฟอร์ม</span>
+              <div className="flex items-center gap-2 shrink-0">
+                {canPublish && <button onClick={publishAll} disabled={publishing} className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">📦 ลงขายทุกที่พร้อม</button>}
+                <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ลงขายซ้ำ" : "📤 ลงขาย"}</button>
+              </div>
             </div>
           </>
         )}

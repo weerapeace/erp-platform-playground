@@ -11,7 +11,7 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 export type Permission =
   | "products.view" | "products.create" | "products.edit" | "products.delete"
   | "products.cost.view"
-  | "products.platforms.view" | "products.platforms.edit"
+  | "products.platforms.view" | "products.platforms.edit" | "products.platforms.publish" | "products.platforms.manage_accounts"
   | "pr.view" | "pr.create" | "pr.edit" | "pr.submit" | "pr.approve" | "pr.reject" | "pr.cancel"
   | "suppliers.view" | "suppliers.create" | "suppliers.edit"
   | "fields.view" | "admin.field_registry.edit" | "admin.field_registry.bulk_edit"
@@ -62,7 +62,7 @@ export type Role = "admin" | "manager" | "staff" | "viewer";
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: [
     "products.view", "products.create", "products.edit", "products.delete", "products.cost.view",
-    "products.platforms.view", "products.platforms.edit",
+    "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",
     "fields.view", "admin.field_registry.edit", "admin.field_registry.bulk_edit",
@@ -100,7 +100,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
   manager: [
     "products.view", "products.create", "products.edit", "products.cost.view",
-    "products.platforms.view", "products.platforms.edit",
+    "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",
     "fields.view", "numbering.view", "approval.view", "notifications.view", "saved_views.share",
