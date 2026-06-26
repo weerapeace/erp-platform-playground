@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { ImageAttach } from "@/components/image-attach";
 import { UserPicker } from "@/components/pickers";
+import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import type { UserPickerValue } from "@/components/pickers";
@@ -136,6 +137,24 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const showLinks = (cfg.accepts_link ?? ty?.accepts_link ?? true) !== false;
   const approveTarget = cfg.approve_target ?? ty?.approve_target ?? "none";
   const approveHint = APPROVE_TARGET_HINT[approveTarget];
+  const hasPrompt = (cfg.has_copy_prompt ?? ty?.has_copy_prompt) === true;
+  const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
+
+  // คัดลอก prompt (เติมข้อมูลสินค้าฝั่ง server) ไปคลิปบอร์ด
+  const copyPrompt = async () => {
+    try {
+      const j = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?prompt_subtask_id=${sub.id}`).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      await navigator.clipboard.writeText(j.prompt || "");
+      pushToast("success", t("คัดลอก prompt แล้ว — วางใน Codex/Claude ได้เลย", "Prompt copied"));
+    } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
+  };
+  // คัดลอกลิงก์รูป (ลิงก์เต็ม) — ใช้แทนการ copy ไฟล์รูปจริง
+  const copyImageLinks = async () => {
+    if (!imageAtts.length) { pushToast("info", t("ยังไม่มีรูป", "No images yet")); return; }
+    const urls = imageAtts.map((a) => `${location.origin}/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}`);
+    try { await navigator.clipboard.writeText(urls.join("\n")); pushToast("success", t("คัดลอกลิงก์รูปแล้ว", "Image links copied")); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); }
+  };
 
   const patch = async (p: Record<string, unknown>) => { setBusy(true); try { await updateSubtask(taskId, sub.id, p); await reload(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
   const addAssignee = async (v: UserPickerValue | null) => { if (!v || ids.includes(v.id)) return; setAdding(null); await patch({ assignee_ids: [...ids, v.id] }); };
@@ -178,6 +197,12 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
           {approveHint && <p className="text-[11px] text-emerald-600">↗ {approveHint}</p>}
           {(st === "revision_requested" || st === "canceled") && ((sub.config as Record<string, unknown> | undefined)?.review_note as string | undefined) && (
             <p className="text-[11px] text-orange-600">📝 {st === "canceled" ? t("เหตุผลยกเลิก", "Cancel reason") : t("ขอแก้", "Revision")}: {(sub.config as Record<string, unknown>).review_note as string}</p>
+          )}
+          {(hasPrompt || imageAtts.length > 0) && (
+            <div className="flex flex-wrap gap-1.5">
+              {hasPrompt && <button onClick={copyPrompt} className="text-xs font-medium text-violet-700 bg-violet-50 border border-violet-200 rounded-md px-2 py-1 hover:bg-violet-100">📋 {t("คัดลอก prompt", "Copy prompt")}</button>}
+              {imageAtts.length > 0 && <button onClick={copyImageLinks} className="text-xs font-medium text-slate-600 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">🔗 {t("คัดลอกลิงก์รูป", "Copy image links")}</button>}
+            </div>
           )}
           <ERPTextarea value={desc} rows={2} onChange={(e) => setDesc(e.target.value)} onBlur={() => { if ((desc.trim() || null) !== (sub.description || null)) patch({ description: desc.trim() || null }); }} placeholder={t("รายละเอียดงานย่อย...", "Subtask description...")} />
           <div>

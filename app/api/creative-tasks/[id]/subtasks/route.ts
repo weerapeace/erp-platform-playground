@@ -13,9 +13,41 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { subtaskAssigneesMap, setSubtaskAssignees, notify } from "@/lib/creative-tasks-server";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
+import { renderPrompt } from "@/lib/subtask-prompt";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// resolve ตัวแปร prompt จากงาน + สินค้า + รูปที่แนบ → คืน prompt พร้อมใช้ (ปุ่ม copy)
+async function resolvePrompt(admin: ReturnType<typeof supabaseAdmin>, taskId: string, subId: string): Promise<NextResponse> {
+  const { data: sub } = await admin.from("erp_creative_subtasks").select("config, description").eq("id", subId).eq("task_id", taskId).maybeSingle();
+  const cfg = ((sub?.config ?? {}) as Record<string, unknown>);
+  const { data: task } = await admin.from("erp_creative_tasks").select("title, brand_id, product_name, platforms, description").eq("id", taskId).maybeSingle();
+  const tk = (task ?? {}) as Record<string, unknown>;
+  let brand_name = "";
+  if (tk.brand_id) { const { data: b } = await admin.from("brands").select("name").eq("id", tk.brand_id as string).maybeSingle(); brand_name = ((b as { name?: string } | null)?.name) ?? ""; }
+  const { data: sl } = await admin.from("erp_creative_task_skus").select("sku_id").eq("task_id", taskId);
+  const skuIds = ((sl ?? []) as { sku_id: string }[]).map((r) => r.sku_id).filter(Boolean);
+  const skus = skuIds.length ? (((await admin.from("skus_v2").select("code, name_th, list_price").in("id", skuIds)).data) ?? []) as Record<string, unknown>[] : [];
+  const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("parent_sku_id").eq("task_id", taskId);
+  const pIds = ((pl ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
+  const parents = pIds.length ? (((await admin.from("parent_skus_v2").select("code, name_th").in("id", pIds)).data) ?? []) as Record<string, unknown>[] : [];
+  const { data: atts } = await admin.from("erp_creative_attachments").select("r2_key").eq("subtask_id", subId).eq("kind", "image");
+  const imageUrls = ((atts ?? []) as { r2_key: string }[]).map((a) => `/api/r2-image?key=${encodeURIComponent(a.r2_key)}`).filter(Boolean);
+  const price = skus[0]?.list_price != null ? Number(skus[0].list_price).toLocaleString("th-TH") : "";
+  const prompt = renderPrompt(cfg.prompt_template as string | undefined, {
+    brand_name,
+    task_name: (tk.title as string) ?? "",
+    parent_sku: parents.map((p) => p.code as string).filter(Boolean).join(", "),
+    sku_list: skus.map((s) => s.code as string).filter(Boolean).join(", "),
+    product_name: (tk.product_name as string) || (skus[0]?.name_th as string) || (parents[0]?.name_th as string) || "",
+    price,
+    platforms: Array.isArray(tk.platforms) ? (tk.platforms as string[]).join(", ") : "",
+    approved_image_urls: imageUrls.join("\n"),
+    notes: (sub?.description as string) || (tk.description as string) || "",
+  });
+  return NextResponse.json({ prompt, image_urls: imageUrls, error: null });
+}
 
 const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order"]);
 
@@ -34,6 +66,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
   const { id } = await params;
   const admin = supabaseAdmin();
+  const promptSubId = new URL(request.url).searchParams.get("prompt_subtask_id");
+  if (promptSubId) return resolvePrompt(admin, id, promptSubId);
   const { data, error } = await admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   const rows = (data ?? []) as Record<string, unknown>[];
