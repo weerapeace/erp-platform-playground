@@ -37,6 +37,16 @@ import { BrandThemeStyles } from "@/components/brand-theme/styles";
 ตัวแปรที่ได้: `--brand-primary/secondary/accent`, `--brand-bg`, `--brand-heading/text/muted`,
 `--brand-card-bg/border/radius/shadow`, `--brand-btn-bg/text`, `--brand-btn2-bg/text`, `--brand-wf-line` (+ custom)
 
+## Component Slots (รูปตกแต่งตามตำแหน่ง)
+ใส่รูป mascot/sticker/decoration ได้ตาม **slot ที่ระบบกำหนด** (ไม่ freeform กัน dashboard พัง) — นิยามใน `SLOT_REGISTRY` (`lib/brand-theme.ts`):
+- **หน้า:** มุมซ้ายบน/ขวาบน/ซ้ายล่าง/ขวาล่าง (illustration) + รูปตอนไม่มีงาน (empty) — อยู่หลังเนื้อหา, `pointer-events-none`, ซ่อนบนมือถือ
+- **หัว:** Mascot ซ้าย/ขวา
+- **การ์ดสถิติ:** ไอคอนมุม 4 ใบ (งานทั้งหมด/กำลังเดิน/ใกล้ครบ/ปิดงาน)
+- **ไอคอนสถานะ workflow:** ต่อสถานะจริง — slotId = `wf_icon:<statusKey>`
+- **การ์ดงาน:** ตกแต่งมุม + รูปแทนตอนไม่มีรูป (placeholder)
+
+เก็บใน config: `slots` (slotId → R2 key) + `slotHidden` (slotId → ซ่อน) · render ด้วยของกลาง **`<BrandSlot theme={} id="..."/>`** (`components/brand-theme/slots.tsx`) — วางตาม safe-area registry, lazy, `?w=` ตามขนาด, รูปหายซ่อนเอง (fallback). เพิ่ม slot ใหม่ = เพิ่มใน `SLOT_REGISTRY` + เสียบ `<BrandSlot>` (ไม่ต้อง migrate DB).
+
 ## รูปภาพ (image size policy)
 - พื้นหลัง: `/api/r2-image?key=...&w=1600` (desktop) · `w=900` (tablet) · `w=640` (mobile) — **ห้ามโหลด original** (ใช้ `brandBgUrl()`)
 - ไอคอน card/stat: `w=96`–`160` (`brandIconUrl()`) · lazy เมื่อเป็นรูปใน card

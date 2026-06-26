@@ -177,6 +177,11 @@ export const THEME_PRESETS: ThemePreset[] = [
       background_color: "#fff5f7", primary_color: "#db2777", secondary_color: "#f472b6", accent_color: "#f59e0b",
       heading_text_color: "#831843", body_text_color: "#9d4e6c", muted_text_color: "#c98aa6",
       card_border_color: "#fbcfe8", workflow_line_color: "#f9a8d4", button_primary_bg: "#db2777", button_primary_text: "#ffffff" }) },
+  { key: "cute_mascot", label: "Cute Mascot", theme: mk("Cute Mascot", {
+      background_color: "#fffdf5", primary_color: "#fb7185", secondary_color: "#fcd34d", accent_color: "#34d399",
+      heading_text_color: "#7c2d12", body_text_color: "#9a6a4a", muted_text_color: "#c4a484",
+      card_background_color: "#ffffff", card_border_color: "#fde68a", card_radius: "18px", card_shadow_style: "0 8px 20px rgba(251,113,133,0.12)",
+      workflow_line_color: "#fcd34d", button_primary_bg: "#fb7185", button_primary_text: "#ffffff" }) },
   { key: "minimal_gray", label: "Minimal Gray", theme: mk("Minimal Gray", {
       background_color: "#fafafa", primary_color: "#404040", secondary_color: "#737373", accent_color: "#525252",
       heading_text_color: "#262626", body_text_color: "#525252", muted_text_color: "#a3a3a3",
