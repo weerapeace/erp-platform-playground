@@ -13,6 +13,7 @@ import dynamic from "next/dynamic";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
+import { ERPInput } from "@/components/form";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { CanvasSketchControls } from "@/components/canvas-sketch";
 import { CampaignDrawer, CAMPAIGN_STATUS } from "../campaign-drawer";
@@ -63,6 +64,19 @@ function contentCardSkeleton(c: { id: string; content_no: string; title: string;
   ];
 }
 
+// การ์ดโฟลเดอร์บน Excalidraw: เก็บ path -- ดับเบิลคลิก = คัดลอก path (เปิด File Explorer แล้ววาง)
+function folderCardSkeleton(f: { path: string; label: string }): Record<string, unknown>[] {
+  const fid = Math.random().toString(36).slice(2, 9);
+  const gid = `folder-${fid}`;
+  const data = { kind: "folder", id: fid, path: f.path, label: f.label };
+  const text = `📁 ${f.label || "โฟลเดอร์"}\n${f.path}\n\n(ดับเบิลคลิก = คัดลอก path)`;
+  const W = 290, H = 120;
+  return [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ecfeff", strokeColor: "#0891b2", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+    { type: "text", x: 14, y: 14, width: W - 28, text, fontSize: 13, strokeColor: "#155e75", groupIds: [gid], customData: data },
+  ];
+}
+
 // การ์ดงานบน Excalidraw: ชื่อ + รายการ subtask (snapshot) -- customData (ดับเบิลคลิกการ์ดเปิด drawer จัดการสด)
 function taskCardSkeleton(t: CreatedTask): Record<string, unknown>[] {
   const gid = `task-${t.id}-${Math.random().toString(36).slice(2, 7)}`;
@@ -99,6 +113,8 @@ export default function CampaignCanvasPage() {
   const [contentOpen, setContentOpen] = useState(false); // modal สร้างคอนเทนต์
   const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "" });
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
+  const [folderOpen, setFolderOpen] = useState(false); // modal การ์ดโฟลเดอร์
+  const [fForm, setFForm] = useState({ label: "", path: "" });
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const { platforms: platformOpts } = useCreativeOptions();
   const [fs, setFs] = useState(false); // เต็มจอ
@@ -146,8 +162,24 @@ export default function CampaignCanvasPage() {
       pushToast("success", t(`สร้างคอนเทนต์ ${content_no} + วางการ์ดแล้ว`, `Created content ${content_no} and placed card`));
     } catch (e) { pushToast("error", (e as Error).message); }
   };
-  // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด
-  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); }, []);
+  // วางการ์ดโฟลเดอร์ (เก็บ path) บนกระดาน
+  const addFolderCard = () => {
+    const path = fForm.path.trim();
+    if (!path) { pushToast("error", t("กรุณาใส่ path โฟลเดอร์", "Please enter a folder path")); return; }
+    const label = fForm.label.trim() || path.split(/[\\/]/).filter(Boolean).pop() || "โฟลเดอร์";
+    sketchRef.current?.insert(folderCardSkeleton({ path, label }));
+    setFolderOpen(false); setFForm({ label: "", path: "" });
+    pushToast("success", t("วางการ์ดโฟลเดอร์แล้ว", "Folder card placed"));
+  };
+  // คัดลอก path โฟลเดอร์ไปคลิปบอร์ด (เปิด File Explorer แล้ววาง Ctrl+V → Enter)
+  const copyFolderPath = useCallback((path: string) => {
+    if (!path) return;
+    navigator.clipboard?.writeText(path)
+      .then(() => pushToast("success", t("คัดลอก path แล้ว — เปิด File Explorer แล้ววาง (Ctrl+V → Enter)", "Path copied — open File Explorer and paste (Ctrl+V → Enter)")))
+      .catch(() => pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")));
+  }, [pushToast, t]);
+  // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = คัดลอก path
+  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "folder") copyFolderPath(String(data.path ?? "")); }, [copyFolderPath]);
   // workflow/ลบงาน สำหรับ TaskDetailDrawer เต็มบน canvas
   const moveTask = useCallback(async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); }, [pushToast]);
   const removeTask = useCallback(async (tid: string) => { try { await deleteTask(tid); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setTaskView(null); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast, t]);
@@ -213,6 +245,7 @@ export default function CampaignCanvasPage() {
             <button onClick={() => setTaskOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">✅ Task Card</button>
             <button onClick={openDragPanel} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🧲 {t("ลากงานเข้า", "Drag tasks in")}</button>
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
+            <button onClick={() => setFolderOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-50">📁 {t("โฟลเดอร์", "Folder")}</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ {t("การ์ดบนกระดาน", "Cards on board")}</button>
             <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 {t("รายละเอียด", "Details")}</button>
             <button onClick={refreshBoard} disabled={refreshing} title={t("โหลดกระดานล่าสุด (ดึงงานคนอื่นมาด้วย)", "Reload latest board")} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{refreshing ? "⏳" : "🔄"} {t("รีเฟรช", "Refresh")}</button>
@@ -285,10 +318,26 @@ export default function CampaignCanvasPage() {
         </div>
       </ERPModal>
 
+      {/* ป๊อปอัปการ์ดโฟลเดอร์ — เก็บ path · ดับเบิลคลิกการ์ด = คัดลอก path */}
+      <ERPModal open={folderOpen} onClose={() => setFolderOpen(false)} title={t("เพิ่มการ์ดโฟลเดอร์", "Add Folder card")} size="md"
+        footer={<div className="flex justify-end gap-2"><button onClick={() => setFolderOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button><button onClick={addFolderCard} disabled={!fForm.path.trim()} className="h-9 px-4 text-sm text-white bg-cyan-600 rounded-lg hover:bg-cyan-700 disabled:opacity-50">📁 {t("วางการ์ด", "Place card")}</button></div>}>
+        <div className="space-y-3">
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">{t("ชื่อ (ไม่ใส่ = ใช้ชื่อโฟลเดอร์สุดท้าย)", "Label (empty = last folder name)")}</p>
+            <ERPInput value={fForm.label} onChange={(e) => setFForm((f) => ({ ...f, label: e.target.value }))} placeholder={t("เช่น วิดีโอ Pasio", "e.g. Pasio videos")} />
+          </div>
+          <div>
+            <p className="text-[11px] text-slate-400 mb-1">{t("ที่อยู่โฟลเดอร์ (path)", "Folder path")}</p>
+            <ERPInput value={fForm.path} onChange={(e) => setFForm((f) => ({ ...f, path: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter" && fForm.path.trim()) addFolderCard(); }} placeholder="Z:\Work In Process\[02]\Video\Pasio" />
+          </div>
+          <p className="text-[11px] text-cyan-700 bg-cyan-50 border border-cyan-100 rounded-lg px-3 py-2">{t("ดับเบิลคลิกการ์ดบนกระดาน = คัดลอก path · เปิด File Explorer แล้ววาง (Ctrl+V → Enter) · (สเต็ปถัดไป: เปิดโฟลเดอร์ทันที)", "Double-click the card = copy path · open File Explorer and paste (Ctrl+V → Enter)")}</p>
+        </div>
+      </ERPModal>
+
       {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
       <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title={t("การ์ดบนกระดาน", "Cards on board")} size="md"
         footer={<button onClick={() => setCardsOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
-        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); }} />
+        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "folder") copyFolderPath(String(c.data.path ?? "")); }} />
       </ERPModal>
 
       {/* สร้างงานจริง (ฟอร์มเดียวกับหน้างาน) -- ล็อกแคมเปญนี้ → วางการ์ดงานบนกระดาน */}
@@ -369,7 +418,8 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
   const tasks = cards.filter((c) => c.kind === "task");
   const skus = cards.filter((c) => c.kind === "sku");
   const contents = cards.filter((c) => c.kind === "content");
-  if (cards.length === 0) return <p className="text-sm text-slate-400 text-center py-6">{t("ยังไม่มีการ์ดบนกระดาน — กด ✅ Task / 📦 SKU / 📱 Content เพื่อเพิ่ม", "No cards on the board yet — click ✅ Task / 📦 SKU / 📱 Content to add")}</p>;
+  const folders = cards.filter((c) => c.kind === "folder");
+  if (cards.length === 0) return <p className="text-sm text-slate-400 text-center py-6">{t("ยังไม่มีการ์ดบนกระดาน — กด ✅ Task / 📦 SKU / 📱 Content / 📁 โฟลเดอร์ เพื่อเพิ่ม", "No cards on the board yet — click ✅ Task / 📦 SKU / 📱 Content / 📁 Folder to add")}</p>;
   return (
     <div className="space-y-4">
       <div>
@@ -412,6 +462,19 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
           </div>
         )}
       </div>
+      {folders.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">📁 {t("การ์ดโฟลเดอร์", "Folder cards")} ({folders.length})</p>
+          <div className="space-y-1.5">
+            {folders.map((c, i) => (
+              <button key={i} onClick={() => onOpen(c)} title={t("คัดลอก path", "Copy path")} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 hover:border-cyan-300 hover:bg-cyan-50/40 text-left">
+                <span className="text-sm text-slate-700 shrink-0">📁 {String(c.data.label ?? t("โฟลเดอร์", "Folder"))}</span>
+                <span className="font-mono text-[11px] text-slate-400 flex-1 truncate text-right">{String(c.data.path ?? "")}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
