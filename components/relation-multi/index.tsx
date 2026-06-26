@@ -431,8 +431,9 @@ function O2MColumnPicker({ allFields, titleField, imageField, current, onSave, o
 }
 
 // ---- เลือกรายการที่ "มีอยู่แล้ว" มาผูกเป็นลูก (ตั้งค่า FK) — ของกลาง ใช้ได้ทุก one2many ----
-function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, labels, alreadyIds, title, onAttached, onClose }: {
+function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, imageField, labels, alreadyIds, title, onAttached, onClose }: {
   moduleKey: string; fk: string; matchValue: string | number; titleField: string;
+  imageField?: string;
   labels: Record<string, string>; alreadyIds: Set<string>; title?: string;
   onAttached: () => void; onClose: () => void;
 }) {
@@ -443,6 +444,15 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, labels, alread
   const [saving, setSaving] = useState(false);
   // ฟิลด์ชื่อรอง (โชว์ใต้รหัส) — เลือกตัวแรกที่มีจริง
   const secField = ["name_th", "name", "color_th", "color"].find((k) => k !== titleField && rows.some((r) => r[k] != null && r[k] !== ""));
+  // คอลัมน์รูป: ใช้ที่ config ตั้งไว้ ไม่งั้นเดาจากคอลัมน์รูปยอดนิยมที่มีค่าจริง (ให้โชว์รูปได้ทุกที่)
+  const imgField = imageField || ["cover_image_r2_key", "image_key", "cover_url", "image_url", "cover_image", "image", "thumbnail_url", "photo_url"].find((k) => rows.some((r) => r[k] != null && r[k] !== ""));
+  // รับได้ทั้ง R2 key และ URL เต็ม · ย่อรูป (&w) เพื่อความเร็ว
+  const thumbSrc = (v: unknown): string | null => {
+    if (v == null || v === "") return null;
+    const s = String(v);
+    const base = /^(https?:|\/)/.test(s) ? s : `/api/r2-image?key=${encodeURIComponent(s)}`;
+    return base.includes("/api/r2-image") ? `${base}&w=72` : base;
+  };
 
   useEffect(() => {
     let alive = true;
@@ -498,6 +508,13 @@ function O2MAttachPicker({ moduleKey, fk, matchValue, titleField, labels, alread
               <button key={id} type="button" onClick={() => toggle(id)}
                 className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50">
                 <span className={`flex items-center justify-center w-4 h-4 rounded border flex-shrink-0 ${checked ? "bg-emerald-600 border-emerald-600 text-white" : "border-slate-300 bg-white"}`}>{checked && <span className="text-[10px] leading-none">✓</span>}</span>
+                {imgField && (() => {
+                  const src = thumbSrc(r[imgField]);
+                  return src
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    ? <img src={src} alt="" loading="lazy" className="w-9 h-9 rounded-md object-contain bg-slate-50 border border-slate-200 flex-shrink-0" />
+                    : <span className="w-9 h-9 rounded-md bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-300 text-sm flex-shrink-0">📦</span>;
+                })()}
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm text-slate-800 truncate">{String(r[titleField] ?? r.name ?? id)}</span>
                   {secField && r[secField] != null && r[secField] !== "" && <span className="block text-[11px] text-slate-400 truncate">{String(r[secField])}</span>}
@@ -779,7 +796,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   ) : null;
   const attachModal = attaching ? (
     <O2MAttachPicker moduleKey={moduleKey} fk={fk} matchValue={matchValue as string | number}
-      titleField={titleField} labels={labels} alreadyIds={new Set(rows.map((r) => String(r.id)))}
+      titleField={titleField} imageField={imageField} labels={labels} alreadyIds={new Set(rows.map((r) => String(r.id)))}
       title={title} onAttached={load} onClose={() => setAttaching(false)} />
   ) : null;
 
