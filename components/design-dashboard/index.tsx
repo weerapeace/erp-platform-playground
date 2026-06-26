@@ -745,6 +745,7 @@ export function DesignDashboard() {
       {/* Brand Theme Builder — ปรับธีมของแบรนด์ที่เลือก · เผยแพร่แล้วโหลดธีมใหม่ */}
       {themeBuilderOpen && selectedBrandId && (
         <BrandThemeBuilder brandId={selectedBrandId} brandName={selectedBrand?.name ?? "แบรนด์"}
+          statuses={statusColumns.map((c) => ({ key: c.key, label: c.label }))}
           open={themeBuilderOpen} onClose={() => setThemeBuilderOpen(false)}
           onPublished={() => setThemeReloadKey((k) => k + 1)} />
       )}

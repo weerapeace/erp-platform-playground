@@ -11,15 +11,16 @@ import { ImageInput } from "@/components/image-input";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, THEME_PRESETS, themeWarnings, isValidColor, type BrandTheme } from "@/lib/brand-theme";
+import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, THEME_PRESETS, themeWarnings, isValidColor, SLOT_REGISTRY, wfIconSlotId, type BrandTheme } from "@/lib/brand-theme";
 import { BrandThemeStyles } from "@/components/brand-theme/styles";
 import { ColorInput } from "@/components/color-picker";
 
-type Tab = "preset" | "colors" | "background" | "cards" | "buttons" | "icons";
-const TABS: [Tab, string][] = [["preset", "🎨 พรีเซ็ต"], ["colors", "🌈 สี"], ["background", "🖼 พื้นหลัง"], ["cards", "🃏 การ์ด"], ["buttons", "🔘 ปุ่ม"], ["icons", "⭐ ไอคอน"]];
+type Tab = "preset" | "colors" | "background" | "page" | "header" | "stat" | "workflow" | "task" | "cards" | "buttons";
+const TABS: [Tab, string][] = [["preset", "🎨 พรีเซ็ต"], ["colors", "🌈 สี"], ["background", "🖼 พื้นหลัง"], ["page", "✨ ตกแต่งหน้า"], ["header", "🙆 หัว/Mascot"], ["stat", "📊 การ์ดสถิติ"], ["workflow", "🏷 ไอคอนสถานะ"], ["task", "🃏 การ์ดงาน"], ["cards", "🎴 สไตล์การ์ด"], ["buttons", "🔘 ปุ่ม"]];
 
-export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublished }: {
+export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublished, statuses = [] }: {
   brandId: string; brandName: string; open: boolean; onClose: () => void; onPublished?: () => void;
+  statuses?: { key: string; label: string }[];   // สถานะ workflow (สำหรับไอคอนสถานะ)
 }) {
   const toast = useToast();
   const { user } = useAuth();
@@ -38,6 +39,21 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
   }, [open, brandId]);
 
   const set = <K extends keyof BrandTheme>(k: K, v: BrandTheme[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  const setSlot = (id: string, key: string | null) => setDraft((d) => ({ ...d, slots: { ...(d.slots ?? {}), [id]: key } }));
+  const setSlotHidden = (id: string, hidden: boolean) => setDraft((d) => ({ ...d, slotHidden: { ...(d.slotHidden ?? {}), [id]: hidden } }));
+  // ช่องอัปรูป slot + toggle โชว์/ซ่อน (reuse ImageInput กลาง)
+  const SlotField = ({ id, label }: { id: string; label: string }) => (
+    <div className="flex items-start gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="mb-0.5 text-[11px] text-slate-500">{label}</div>
+        <ImageInput value={draft.slots?.[id] ?? null} folder="brand-theme" onChange={(k) => setSlot(id, k)} />
+      </div>
+      <label className="mt-5 flex shrink-0 items-center gap-1 text-[10px] text-slate-500">
+        <input type="checkbox" checked={!draft.slotHidden?.[id]} onChange={(e) => setSlotHidden(id, !e.target.checked)} className="rounded border-slate-300" /> โชว์
+      </label>
+    </div>
+  );
+  const slotsOf = (group: string) => SLOT_REGISTRY.filter((d) => d.group === group);
   const warns = themeWarnings(draft);
 
   const saveDraft = async () => {
@@ -156,12 +172,35 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
                 <Color label="พื้นปุ่มรอง" k="button_secondary_bg" /><Color label="ตัวอักษรปุ่มรอง" k="button_secondary_text" />
               </div>
             )}
-            {tab === "icons" && (
+            {tab === "page" && (
               <div className="space-y-3">
-                <div><span className="text-[11px] text-slate-500">ไอคอนการ์ดสถิติ (ไม่บังคับ)</span>
-                  <div className="mt-1"><ImageInput value={draft.stat_icon_image_key ?? null} folder="brand-theme" onChange={(k) => set("stat_icon_image_key", k)} /></div></div>
-                <div><span className="text-[11px] text-slate-500">ไอคอนการ์ดงาน (ไม่บังคับ)</span>
-                  <div className="mt-1"><ImageInput value={draft.card_icon_image_key ?? null} folder="brand-theme" onChange={(k) => set("card_icon_image_key", k)} /></div></div>
+                <p className="text-[11px] text-slate-400">รูปตกแต่งมุมหน้า/พื้นที่ว่าง (อยู่หลังเนื้อหา ไม่บังการกด · ซ่อนบนมือถือ)</p>
+                {slotsOf("page").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
+              </div>
+            )}
+            {tab === "header" && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-400">Mascot/รูปบนหัวหน้า (ขนาดพอดี ไม่ดัน layout)</p>
+                {slotsOf("header").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
+              </div>
+            )}
+            {tab === "stat" && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-400">ไอคอนมุมการ์ดสถิติ 4 ใบ</p>
+                {slotsOf("stat").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
+              </div>
+            )}
+            {tab === "workflow" && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-400">ไอคอนต่อสถานะงาน (ตาม workflow จริง)</p>
+                {statuses.length === 0 && <p className="text-xs text-slate-300">— ไม่พบสถานะ —</p>}
+                {statuses.map((st) => <SlotField key={st.key} id={wfIconSlotId(st.key)} label={`ไอคอน: ${st.label}`} />)}
+              </div>
+            )}
+            {tab === "task" && (
+              <div className="space-y-3">
+                <p className="text-[11px] text-slate-400">ตกแต่งการ์ดงาน + รูปแทนตอนไม่มีรูป</p>
+                {slotsOf("task").map((d) => <SlotField key={d.id} id={d.id} label={d.label} />)}
               </div>
             )}
 
