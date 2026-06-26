@@ -175,14 +175,17 @@ export default function CampaignCanvasPage() {
   const openFolder = useCallback((path: string) => {
     if (!path) return;
     navigator.clipboard?.writeText(path).catch(() => {});
-    // เปิด protocol ผ่าน iframe ซ่อน — ไม่ทำให้หน้าเปลี่ยน (เลี่ยง "Leave site?" ของ beforeunload กระดาน)
+    // เปิด protocol ด้วยการ "คลิกลิงก์ <a>" จริง (top-frame) — Chrome จัดการเป็น external app
+    // ไม่ผ่าน navigation pipeline เลยไม่เด้ง "Leave site?" (ต่างจาก window.location.href)
+    // และไม่โดนบล็อกแบบ iframe (Chrome ห้าม subframe เปิด external protocol)
     // ใช้ erpfolder: (ไม่มี //) แบบ mailto: กัน Chrome ตีความส่วน path เป็น host แล้วเพี้ยน
     try {
-      const ifr = document.createElement("iframe");
-      ifr.style.display = "none";
-      ifr.src = "erpfolder:" + encodeURIComponent(path);
-      document.body.appendChild(ifr);
-      setTimeout(() => { try { ifr.remove(); } catch { /* noop */ } }, 2000);
+      const a = document.createElement("a");
+      a.href = "erpfolder:" + encodeURIComponent(path);
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { a.remove(); } catch { /* noop */ } }, 100);
     } catch { /* ไม่มี handler ก็ข้าม */ }
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
