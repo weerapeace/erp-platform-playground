@@ -13,7 +13,6 @@ import { StandaloneShell } from "@/components/standalone-shell";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { useSWRLite } from "@/lib/swr-lite";
-import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
@@ -25,7 +24,7 @@ import { OverviewDashboard } from "./overview-dashboard";
 import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
-  PRIORITY_RANK, isOverdue, withinThisWeek,
+  PRIORITY_RANK, isOverdue,
   listTasks, deleteTask,
   listCampaigns, listBrands, listMySubtasks,
   type CreativeTask, type CreativeStatus, type CreativePriority,
@@ -58,16 +57,6 @@ function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
   { accessorKey: "due_date", header: t("กำหนดส่ง", "Due date"), size: 110, cell: ({ row }) => { const row0 = row.original; if (!row0.due_date) return <span className="text-xs text-slate-400">—</span>; const od = isOverdue(row0); return <span className={`text-xs ${od ? "text-red-600 font-semibold" : "text-slate-500"}`}>{od && "⚠ "}{row0.due_date}</span>; } },
 ]; }
 
-function makeViews(t: Tfn) { return [
-  { id: "all", label: t("ทั้งหมด", "All") },
-  { id: "active", label: t("🔵 กำลังดำเนินการ", "🔵 In progress"), filter: (r: Record<string, unknown>) => !isTerminal(r.status as string) },
-  { id: "need_review", label: t("🟡 รอตรวจ/อนุมัติ", "🟡 Pending review"), filter: (r: Record<string, unknown>) => r.status === "need_review" },
-  { id: "overdue", label: t("⚠️ เกินกำหนด", "⚠️ Overdue"), filter: (r: Record<string, unknown>) => isOverdue(r as CreativeTask) },
-  { id: "this_week", label: t("🗓️ สัปดาห์นี้", "🗓️ This week"), filter: (r: Record<string, unknown>) => withinThisWeek(r as CreativeTask) },
-  { id: "blocked", label: t("🔴 ติดปัญหา", "🔴 Blocked"), filter: (r: Record<string, unknown>) => r.status === "blocked" },
-  { id: "done", label: t("✅ เสร็จ/ปิดงาน", "✅ Done"), filter: (r: Record<string, unknown>) => isTerminal(r.status as string) },
-]; }
-
 // ============================================================
 // Toast
 // ============================================================
@@ -94,10 +83,9 @@ export default function TasksPage() {
   const router = useRouter();
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
-  const VIEWS = useMemo(() => makeViews(t), [t]);
   const { statuses } = useCreativeStatuses();
-  const [view, setView] = useState<"overview" | "queue" | "table" | "kanban" | "canvas">("overview");
-  const [quick, setQuick] = useState<"" | "review" | "overdue">(""); // กรองด่วนจากการ์ดสถิติ
+  const [view, setView] = useState<"overview" | "queue" | "kanban" | "canvas">("overview");
+  const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -135,13 +123,13 @@ export default function TasksPage() {
     const sp = new URLSearchParams(window.location.search);
     const tid = sp.get("task"); if (tid) setDetailId(tid);
     const v = sp.get("view");
-    if (v === "table" || v === "queue" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
+    if (v === "queue" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
+    else if (v === "table") setView("overview");   // แท็บตารางถูกรวมเข้าภาพรวมแล้ว → ลิงก์เดิมมาที่ภาพรวม
   }, []);
 
   // หลังบันทึก/ลบ → บังคับโหลดงานใหม่ (focus revalidate มีในตัว hook แล้ว)
   const reload = useCallback(async () => { await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]); }, [tasksSWR, mineSWR, subsSWR]);
 
-  const tableTasks = useMemo(() => quick === "review" ? tasks.filter((tk) => tk.status === "need_review") : quick === "overdue" ? tasks.filter(isOverdue) : tasks, [tasks, quick]);
   const counts = useMemo(() => ({
     total: tasks.length,
     mine: myTasks.length,
@@ -165,10 +153,13 @@ export default function TasksPage() {
       {/* Header */}
       <div className="bg-white border-b border-slate-200 px-8 py-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">{t("งาน Creative", "Creative Tasks")}</h1>
-            <p className="text-slate-500 mt-1">{t("ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ", "Photo · Retouch · Banner · Video · Listing · Social — central table · workflow · approval")}</p>
-          </div>
+          {/* หน้าภาพรวมมี Hero ทักทายอยู่แล้ว → ซ่อนหัวข้อนี้กันซ้ำ (โชว์เฉพาะมุมมองอื่น) */}
+          {view !== "overview" ? (
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">{t("งาน Creative", "Creative Tasks")}</h1>
+              <p className="text-slate-500 mt-1">{t("ถ่ายรูป · แต่งรูป · Banner · Video · ลงสินค้า · Social — ตารางกลาง · Workflow · อนุมัติ", "Photo · Retouch · Banner · Video · Listing · Social — central table · workflow · approval")}</p>
+            </div>
+          ) : <div />}
           <div className="flex items-center gap-2 shrink-0">
             <a href="/tasks/campaigns" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📣 {t("แคมเปญ", "Campaigns")}</a>
             <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📱 {t("คอนเทนต์", "Content")}</a>
@@ -180,10 +171,10 @@ export default function TasksPage() {
         </div>
         {view !== "overview" && (
           <div className="flex gap-3 mt-4">
-            <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} onClick={() => { setQuick(""); setView("table"); }} active={view === "table" && quick === ""} />
+            <StatChip label={t("งานทั้งหมด", "All tasks")} value={counts.total} onClick={() => { setOvFilter("all"); setView("overview"); }} />
             <StatChip label={t("งานของฉัน", "My tasks")} value={counts.mine} tone="violet" onClick={() => setView("queue")} active={view === "queue"} />
-            <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" onClick={() => { setQuick("review"); setView("table"); }} active={view === "table" && quick === "review"} />
-            <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" onClick={() => { setQuick("overdue"); setView("table"); }} active={view === "table" && quick === "overdue"} />
+            <StatChip label={t("รอตรวจ", "In review")} value={counts.review} tone="amber" onClick={() => { setOvFilter("review"); setView("overview"); }} />
+            <StatChip label={t("เกินกำหนด", "Overdue")} value={counts.overdue} tone="red" onClick={() => { setOvFilter("overdue"); setView("overview"); }} />
           </div>
         )}
       </div>
@@ -191,9 +182,8 @@ export default function TasksPage() {
       <div className="px-8 py-6 space-y-5">
         {/* View toggle */}
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
-          <ViewToggleBtn active={view === "overview"} onClick={() => { setQuick(""); setView("overview"); }} icon="🏠" label={t("ภาพรวม", "Overview")} />
+          <ViewToggleBtn active={view === "overview"} onClick={() => setView("overview")} icon="🏠" label={t("ภาพรวม", "Overview")} />
           <ViewToggleBtn active={view === "queue"} onClick={() => setView("queue")} icon="🙋" label={t("คิวงานของฉัน", "My queue")} />
-          <ViewToggleBtn active={view === "table"} onClick={() => setView("table")} icon="📋" label={t("ตาราง", "Table")} />
           <ViewToggleBtn active={view === "kanban"} onClick={() => setView("kanban")} icon="🟦" label="Kanban" />
           <ViewToggleBtn active={view === "canvas"} onClick={() => setView("canvas")} icon="🟪" label="Canvas" />
         </div>
@@ -210,10 +200,12 @@ export default function TasksPage() {
                 mySubs={mySubs}
                 campaigns={campaigns}
                 tasks={tasks}
+                columns={COLUMNS}
+                filter={ovFilter}
+                onFilter={setOvFilter}
                 isAdmin={user?.role === "admin"}
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}
-                onGotoView={(v, q = "") => { setQuick(q); setView(v); }}
                 onOpenCampaign={(id) => router.push(`/tasks/campaigns/${id}`)}
                 onGotoHref={(href) => router.push(href)}
                 onOpenKnowledge={() => setKnowledgeOpen(true)}
@@ -221,23 +213,6 @@ export default function TasksPage() {
             )}
 
             {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
-
-            {view === "table" && (
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-                <DataTable<CreativeTask>
-                  data={tableTasks} columns={COLUMNS}
-                  title={`${t("รายการงาน", "Tasks")}${quick === "review" ? ` · ${t("รอตรวจ", "In review")}` : quick === "overdue" ? ` · ${t("เกินกำหนด", "Overdue")}` : ""} (${tableTasks.length})`}
-                  description={t("คลิกที่งานเพื่อดูรายละเอียด · ตารางกลางตัวเดียวกับทุกโมดูล", "Click a row to view details · shared table used across modules")}
-                  emptyMessage={t("ยังไม่มีงาน — กดปุ่ม สร้างงาน", "No tasks yet — click New task")}
-                  searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
-                  searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
-                  views={VIEWS} tableId="creative-tasks" exportFilename="งาน-creative"
-                  enableCards
-                  cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
-                  onRowClick={(row) => setDetailId(row.id)}
-                />
-              </div>
-            )}
 
             {view === "kanban" && (
               <div>
