@@ -17,7 +17,7 @@ import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
 import {
   PRIORITY_META, createTask, listCampaigns, listBrands, listTemplates,
-  type CreativePriority, type Campaign, type BrandOption, type TaskTemplate,
+  type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig,
 } from "./data";
 
 const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
@@ -35,7 +35,7 @@ const EMPTY_FORM: FormState = {
 };
 
 // แถวงานย่อยในขั้นที่ 2
-type SubRow = { include: boolean; title: string; description: string | null; required_before_next: boolean; assignees: { id: string; label: string }[] };
+type SubRow = { include: boolean; title: string; description: string | null; required_before_next: boolean; assignees: { id: string; label: string }[]; type: string; config: SubtaskStepConfig };
 
 export type CreatedTask = { id: string; task_no: string; title: string; subtasks: { title: string }[] };
 
@@ -82,10 +82,11 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     setSubs((tpl.steps ?? []).filter((s) => s.title?.trim()).map((s) => ({
       include: true, title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next,
       assignees: (s.assignee_ids ?? []).map((aid, i) => ({ id: aid, label: s.assignee_labels?.[i] ?? "ผู้ใช้" })),
+      type: s.type ?? "custom", config: s.config ?? {},
     })));
   };
 
-  const addBlankSub = () => { setSubs((p) => [...p, { include: true, title: "", description: null, required_before_next: false, assignees: [] }]); setDirty(true); };
+  const addBlankSub = () => { setSubs((p) => [...p, { include: true, title: "", description: null, required_before_next: false, assignees: [], type: "custom", config: {} }]); setDirty(true); };
   const patchSub = (i: number, p: Partial<SubRow>) => { setSubs((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...p } : r))); setDirty(true); };
   const removeSub = (i: number) => { setSubs((rows) => rows.filter((_, idx) => idx !== i)); setDirty(true); };
 
@@ -95,7 +96,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const save = async () => {
     if (!form.title.trim()) { setStep(1); setFormErr(t("กรุณากรอกชื่องาน","Please enter a task title")); return; }
     setSaving(true); setFormErr(null);
-    const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next }));
+    const subtasks = subs.filter((s) => s.include && s.title.trim()).map((s) => ({ title: s.title.trim(), description: s.description, assignee_ids: s.assignees.map((a) => a.id), required_before_next: s.required_before_next, type: s.type, config: s.config }));
     try {
       const { id, task_no } = await createTask({
         title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,

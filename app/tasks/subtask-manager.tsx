@@ -13,11 +13,20 @@ import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import type { UserPickerValue } from "@/components/pickers";
 import {
-  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment,
-  type CreativeSubtask,
+  listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes,
+  type CreativeSubtask, type SubtaskType,
 } from "./data";
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
+type TypeMeta = Record<string, SubtaskType>;
+
+// ป้ายปลายทางตอนอนุมัติ (อ่านง่าย)
+const APPROVE_TARGET_HINT: Record<string, string> = {
+  sku_media: "อนุมัติแล้ว → เพิ่มเข้าแกลเลอรีรูปสินค้า",
+  cover: "อนุมัติแล้ว → ตั้งเป็นรูปปกสินค้า",
+  sku_description: "อนุมัติแล้ว → บันทึกเข้า description สินค้า",
+  description_media: "อนุมัติแล้ว → เพิ่มเข้า media คำอธิบาย",
+};
 
 // ④ สถานะงานย่อย: ยังไม่เริ่ม → กำลังทำ → ส่งงาน(รออนุมัติ) → อนุมัติ (ไม่มี "โพสต์แล้ว" แล้ว)
 export const SUB_STEPS = [
@@ -36,10 +45,13 @@ export function SubtaskManager({ taskId, pushToast, canApprove = false, canManag
   const { user } = useAuth();
   const t = useT();
   const [subs, setSubs] = useState<CreativeSubtask[]>([]);
+  const [typeMeta, setTypeMeta] = useState<TypeMeta>({});
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"mine" | "all">("mine"); // ② เปิดมาโชว์ "ของฉัน" ก่อน
   const reload = useCallback(async () => { try { setSubs(await listSubtasks(taskId)); } catch (e) { pushToast("error", (e as Error).message); } finally { setLoading(false); } }, [taskId, pushToast]);
   useEffect(() => { reload(); }, [reload]);
+  // โหลด registry ชนิดงานย่อย (สำหรับ badge + fallback ค่าตั้ง legacy)
+  useEffect(() => { listSubtaskTypes().then((ts) => setTypeMeta(Object.fromEntries(ts.map((x) => [x.key, x])))).catch(() => {}); }, []);
   const done = subs.filter((s) => isSubDone(s.status)).length;
   const mine = useMemo(() => subs.filter((s) => s.assignees.some((a) => a.id === user?.id)), [subs, user?.id]);
   // ถ้าไม่มีงานย่อยของฉันเลย → เด้งไปแท็บทั้งหมดให้อัตโนมัติ (ครั้งแรกที่โหลดเสร็จ)
@@ -59,7 +71,7 @@ export function SubtaskManager({ taskId, pushToast, canApprove = false, canManag
       </div>
       {loading ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <div className="space-y-2">
-          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} />)}
+          {shown.length === 0 ? <p className="text-sm text-slate-400 italic">{tab === "mine" ? t("ไม่มีงานย่อยที่มอบให้คุณ", "No subtasks assigned to you") : t("ยังไม่มีงานย่อย", "No subtasks yet")}</p> : shown.map((s) => <SubtaskCard key={s.id} sub={s} taskId={taskId} reload={reload} pushToast={pushToast} canApprove={canApprove} canManageAssignees={canManageAssignees} typeMeta={typeMeta} />)}
         </div>
       )}
       <AddSubtaskForm onAdd={async (body) => { await addSubtask(taskId, body); await reload(); }} pushToast={pushToast} />
@@ -104,7 +116,7 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
 }
 
 // การ์ดงานย่อย — สถานะเป็นปุ่มกด (เริ่ม→ส่งงาน→อนุมัติ) + ผู้รับผิดชอบ + ไฟล์แนบ
-export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean }) {
+export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {} }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [desc, setDesc] = useState(sub.description ?? "");
@@ -115,6 +127,13 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const ids = sub.assignees.map((a) => a.id);
   const attachCount = sub.attachments?.length ?? 0;
   const st = sub.status;
+  // ชนิดงานย่อย + ความสามารถ (config ทับ registry · legacy ไม่มีค่า = อนุญาตหมด)
+  const ty = sub.subtask_type ? typeMeta[sub.subtask_type] : undefined;
+  const cfg = sub.config ?? {};
+  const showImages = (cfg.accepts_image ?? ty?.accepts_image ?? true) !== false;
+  const showLinks = (cfg.accepts_link ?? ty?.accepts_link ?? true) !== false;
+  const approveTarget = cfg.approve_target ?? ty?.approve_target ?? "none";
+  const approveHint = APPROVE_TARGET_HINT[approveTarget];
 
   const patch = async (p: Record<string, unknown>) => { setBusy(true); try { await updateSubtask(taskId, sub.id, p); await reload(); } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); } };
   const addAssignee = async (v: UserPickerValue | null) => { if (!v || ids.includes(v.id)) return; setAdding(null); await patch({ assignee_ids: [...ids, v.id] }); };
@@ -139,6 +158,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
           ? <span className="shrink-0 inline-flex items-center gap-1"><button disabled={busy} onClick={() => patch({ status: "approved" })} className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5 hover:bg-emerald-100 disabled:opacity-50">✓ {t("อนุมัติ", "Approve")}</button><button disabled={busy} onClick={() => patch({ status: "in_progress" })} title={t("ตีกลับให้แก้", "Send back for revision")} className="text-xs text-slate-500 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50">↩︎</button></span>
           : <span className="shrink-0 text-xs font-medium text-amber-600">⏳ {t("รออนุมัติ", "Pending approval")}</span>)}
         {isSubDone(st) && <span className="shrink-0 text-xs font-medium text-emerald-600">✓ {subStepLabel(st)}</span>}
+        {ty && <span className="shrink-0 text-sm leading-none" title={ty.label_th}>{ty.icon ?? "🧩"}</span>}
         <button onClick={() => setOpen((o) => !o)} className={`text-sm flex-1 text-left ${isSubDone(st) ? "line-through text-slate-400" : "text-slate-700"}`}>{sub.title}</button>
         {sub.required_before_next && <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
         <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <span key={a.id} title={a.label} className="h-5 w-5 rounded-full text-[10px] flex items-center justify-center border border-white" style={a.color ? { background: a.color, color: "#fff" } : { background: "#ede9fe", color: "#6d28d9" }}>{(a.label || "?").slice(0, 1)}</span>)}</div>
@@ -147,6 +167,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
       </div>
       {open && (
         <div className="px-3 pb-3 pt-1 space-y-3 border-t border-slate-100">
+          {approveHint && <p className="text-[11px] text-emerald-600">↗ {approveHint}</p>}
           <ERPTextarea value={desc} rows={2} onChange={(e) => setDesc(e.target.value)} onBlur={() => { if ((desc.trim() || null) !== (sub.description || null)) patch({ description: desc.trim() || null }); }} placeholder={t("รายละเอียดงานย่อย...", "Subtask description...")} />
           <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("ผู้รับผิดชอบ", "Assignee")}{canManageAssignees ? ` (${t("เลือกได้หลายคน", "multiple allowed")})` : ""}</p>
@@ -158,6 +179,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               ? <UserPicker value={adding} onChange={addAssignee} disableCreate />
               : <p className="text-[11px] text-slate-400 italic">{t("เฉพาะหัวหน้า/ผู้สร้างงานเปลี่ยนผู้รับผิดชอบได้", "Only managers or task creators can change assignees")}</p>}
           </div>
+          {showImages && (
           <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤800px)", "Work images (resized ≤800px)")}</p>
             <ImageAttach
@@ -166,6 +188,8 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
               pushToast={pushToast} />
           </div>
+          )}
+          {showLinks && (
           <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("ลิงก์ส่งงาน", "Work links")}</p>
             <div className="space-y-1 mb-1.5">
@@ -177,6 +201,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
               <button onClick={addLink} className="h-9 px-2 text-xs text-violet-700 border border-violet-200 rounded-lg shrink-0">{t("แนบ", "Attach")}</button>
             </div>
           </div>
+          )}
           {/* ปุ่มส่งงานในกล่อง (เห็นง่ายตอนกำลังทำ) */}
           {st === "in_progress" && <button disabled={busy} onClick={submitWork} className="w-full h-9 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 disabled:opacity-50">📤 {t("ส่งงาน (แนบงานก่อน → รออนุมัติ)", "Submit (attach files first → pending approval)")}</button>}
           <div className="flex justify-between items-center">

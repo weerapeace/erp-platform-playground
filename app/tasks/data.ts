@@ -55,6 +55,7 @@ export type CreativeSubtask = {
   attachments?: CreativeAttachment[];
   status: SubtaskStatus; due_date: string | null;
   required_before_next: boolean; sort_order: number;
+  subtask_type?: string | null; config?: SubtaskStepConfig;
 };
 
 export type CreativeComment = {
@@ -135,7 +136,7 @@ export async function getTask(id: string): Promise<TaskDetail> {
   return j.data as TaskDetail;
 }
 
-export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean }[] };
+export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: SubtaskStepConfig }[] };
 
 export async function createTask(body: CreateTaskBody): Promise<{ id: string; task_no: string }> {
   const res = await apiFetch("/api/creative-tasks", { method: "POST", body: JSON.stringify(body) });

@@ -81,7 +81,7 @@ type CreateBody = {
   start_date?: string | null; due_date?: string | null;
   asset_status?: string | null; platforms?: string[] | null;
   drive_folder_url?: string | null;
-  subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean }[];
+  subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: Record<string, unknown> }[];
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const steps = body.subtasks.filter((s) => s?.title?.trim());
     if (steps.length) {
       const { data: subs } = await admin.from("erp_creative_subtasks")
-        .insert(steps.map((s, i) => ({ task_id: row!.id, title: s.title.trim(), description: s.description ?? null, assignee_id: s.assignee_ids?.[0] || s.assignee_id || null, required_before_next: !!s.required_before_next, sort_order: i })))
+        .insert(steps.map((s, i) => ({ task_id: row!.id, title: s.title.trim(), description: s.description ?? null, assignee_id: s.assignee_ids?.[0] || s.assignee_id || null, required_before_next: !!s.required_before_next, sort_order: i, subtask_type: s.type ?? "custom", config: s.config ?? {} })))
         .select("id");
       const subIds = (subs ?? []) as { id: string }[];
       for (let i = 0; i < subIds.length; i++) {
