@@ -137,6 +137,228 @@ function CardDeadline({ tone, label }: { tone: Tone; label: string }) {
   );
 }
 
+function GoodGoodsLuxuryStyles() {
+  return (
+    <style>{`
+      [data-good-goods-theme="true"] {
+        --gg-navy: #0e2742;
+        --gg-navy-soft: #173657;
+        --gg-ink: #14243a;
+        --gg-muted: #66758a;
+        --gg-silver: #b8c3cf;
+        --gg-silver-soft: #dfe6ed;
+        --gg-silver-blue: #7890aa;
+        background-color: #f7f8fb;
+        background-image:
+          radial-gradient(circle at 8% -10%, rgba(14, 39, 66, 0.14), transparent 30%),
+          radial-gradient(circle at 95% 2%, rgba(184, 195, 207, 0.2), transparent 32%),
+          linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(235, 240, 246, 0.86));
+      }
+
+      [data-good-goods-theme="true"]::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(90deg, rgba(14, 39, 66, 0.035) 1px, transparent 1px),
+          linear-gradient(rgba(14, 39, 66, 0.025) 1px, transparent 1px),
+          radial-gradient(circle at 10px 10px, rgba(184, 195, 207, 0.28) 1px, transparent 1.6px);
+        background-size: 112px 112px, 112px 112px, 34px 34px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), transparent 78%);
+      }
+
+      [data-good-goods-theme="true"] > div {
+        position: relative;
+        z-index: 1;
+      }
+
+      [data-good-goods-theme="true"] h1,
+      [data-good-goods-theme="true"] h2,
+      [data-good-goods-theme="true"] [data-gg-stat-card] .text-slate-900,
+      [data-good-goods-theme="true"] [data-gg-brand-card] .text-slate-800,
+      [data-good-goods-theme="true"] [data-gg-task-card] .text-slate-800 {
+        color: var(--gg-navy) !important;
+      }
+
+      [data-good-goods-theme="true"] p,
+      [data-good-goods-theme="true"] [data-gg-stat-card] .text-slate-500,
+      [data-good-goods-theme="true"] [data-gg-stat-card] .text-slate-400,
+      [data-good-goods-theme="true"] [data-gg-brand-card] .text-slate-400,
+      [data-good-goods-theme="true"] [data-gg-task-card] .text-slate-400 {
+        color: var(--gg-muted) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-live-badge],
+      [data-good-goods-theme="true"] [data-gg-stat-card],
+      [data-good-goods-theme="true"] [data-gg-sidebar],
+      [data-good-goods-theme="true"] [data-gg-panel],
+      [data-good-goods-theme="true"] [data-gg-task-card],
+      [data-good-goods-theme="true"] [data-gg-brand-card] {
+        border-color: rgba(184, 195, 207, 0.88) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 249, 252, 0.9)) !important;
+        box-shadow: 0 18px 42px rgba(13, 32, 54, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-stat-card],
+      [data-good-goods-theme="true"] [data-gg-sidebar],
+      [data-good-goods-theme="true"] [data-gg-panel],
+      [data-good-goods-theme="true"] [data-gg-task-card],
+      [data-good-goods-theme="true"] [data-gg-brand-card],
+      [data-good-goods-theme="true"] [data-gg-column-header] {
+        position: relative;
+        overflow: hidden;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-stat-card]::after,
+      [data-good-goods-theme="true"] [data-gg-sidebar]::after,
+      [data-good-goods-theme="true"] [data-gg-panel]::after,
+      [data-good-goods-theme="true"] [data-gg-brand-card]::after,
+      [data-good-goods-theme="true"] [data-gg-task-card]::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border-radius: inherit;
+        background-image:
+          linear-gradient(135deg, rgba(184, 195, 207, 0.32), transparent 22px),
+          linear-gradient(315deg, rgba(14, 39, 66, 0.06), transparent 28px);
+        background-repeat: no-repeat;
+        background-position: left top, right bottom;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-live-badge] {
+        color: var(--gg-navy) !important;
+        box-shadow: 0 8px 22px rgba(14, 39, 66, 0.08) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-live-badge] span {
+        background-color: var(--gg-silver-blue) !important;
+        box-shadow: 0 0 14px rgba(184, 195, 207, 0.8) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-action] {
+        border-color: rgba(184, 195, 207, 0.9) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(240, 244, 248, 0.92)) !important;
+        color: var(--gg-navy) !important;
+        box-shadow: 0 10px 24px rgba(13, 32, 54, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.96) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-action="primary"] {
+        border-color: rgba(184, 195, 207, 0.72) !important;
+        background: linear-gradient(180deg, #173657, #0b2139) !important;
+        color: white !important;
+        box-shadow: 0 16px 34px rgba(14, 39, 66, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.16) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-brand-count],
+      [data-good-goods-theme="true"] [data-gg-audit-count] {
+        background: rgba(239, 243, 247, 0.9) !important;
+        color: var(--gg-navy) !important;
+        box-shadow: inset 0 0 0 1px rgba(184, 195, 207, 0.72) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-all-button] {
+        border-color: rgba(184, 195, 207, 0.86) !important;
+        background: linear-gradient(180deg, #ffffff, #f1f5f9) !important;
+        color: var(--gg-navy) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-brand-card][data-gg-selected="true"] {
+        border-color: var(--gg-silver) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(236, 241, 247, 0.94)) !important;
+        box-shadow: 0 0 0 1px rgba(184, 195, 207, 0.44), 0 22px 46px rgba(14, 39, 66, 0.14) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-brand-card][data-gg-selected="true"] [data-gg-brand-mark] {
+        background: linear-gradient(180deg, var(--gg-navy-soft), var(--gg-navy)) !important;
+        color: white !important;
+        box-shadow: inset 0 0 0 1px rgba(223, 230, 237, 0.32), 0 10px 20px rgba(14, 39, 66, 0.16) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-mini-stat],
+      [data-good-goods-theme="true"] [data-gg-empty],
+      [data-good-goods-theme="true"] [data-gg-more] {
+        background: rgba(247, 249, 252, 0.78) !important;
+        box-shadow: inset 0 0 0 1px rgba(184, 195, 207, 0.55) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-column-drop][data-gg-drop-target="true"] {
+        --tw-ring-color: rgba(184, 195, 207, 0.86) !important;
+        background: rgba(231, 237, 244, 0.72) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-connector] {
+        background: linear-gradient(90deg, rgba(184, 195, 207, 0.9), rgba(120, 144, 170, 0.58), transparent) !important;
+        box-shadow: 0 0 14px rgba(120, 144, 170, 0.38) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-column-header] {
+        border-color: rgba(184, 195, 207, 0.86) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(232, 238, 244, 0.86)) !important;
+        box-shadow: 0 12px 26px rgba(14, 39, 66, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.95) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-column-header]::after {
+        content: "";
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 4px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(184, 195, 207, 0.8), transparent);
+      }
+
+      [data-good-goods-theme="true"] [data-gg-column-dot] {
+        filter: saturate(0.75) brightness(0.95);
+        box-shadow: 0 0 14px rgba(184, 195, 207, 0.72) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-task-card] {
+        box-shadow: 4px 4px 0 rgba(14, 39, 66, 0.08), 0 14px 30px rgba(14, 39, 66, 0.08) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-task-card]:hover {
+        border-color: var(--gg-silver-blue) !important;
+        box-shadow: 5px 5px 0 rgba(14, 39, 66, 0.1), 0 18px 34px rgba(14, 39, 66, 0.12) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-cover] {
+        border-color: rgba(184, 195, 207, 0.72) !important;
+        background: linear-gradient(135deg, #ffffff 0%, rgba(223, 230, 237, 0.75) 58%, rgba(14, 39, 66, 0.08) 100%) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-audit] {
+        border-color: rgba(184, 195, 207, 0.42) !important;
+        background: radial-gradient(circle at top left, rgba(184, 195, 207, 0.18), transparent 34%), linear-gradient(180deg, #102a47, #071b30) !important;
+        box-shadow: 0 22px 48px rgba(7, 27, 48, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-audit] h2,
+      [data-good-goods-theme="true"] [data-gg-audit] .text-white {
+        color: #f7fbff !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-audit] p,
+      [data-good-goods-theme="true"] [data-gg-audit] .text-slate-300,
+      [data-good-goods-theme="true"] [data-gg-audit] .text-slate-400 {
+        color: #c9d4df !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-audit-row] {
+        border-color: rgba(184, 195, 207, 0.18) !important;
+        background: rgba(255, 255, 255, 0.06) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-audit-dot] {
+        background: var(--gg-silver) !important;
+        box-shadow: 0 0 14px rgba(223, 230, 237, 0.8) !important;
+      }
+    `}</style>
+  );
+}
+
 function LoadingCard() {
   return (
     <div className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
@@ -254,6 +476,7 @@ export default function DesignSheetsDashboardPage() {
     ...column,
     sheets: filteredSheets.filter((sheet) => sheet.status === column.key),
   }));
+  const luxuryTheme = selectedBrand?.name.trim().toLowerCase() === "good goods";
 
   function refreshDashboard() {
     setMoveMessage(null);
@@ -321,11 +544,15 @@ export default function DesignSheetsDashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#fef3c7_0,#f8fafc_28%,#eef2ff_100%)]">
+    <div
+      data-good-goods-theme={luxuryTheme ? "true" : undefined}
+      className={luxuryTheme ? "relative min-h-screen bg-[#f7f8fb]" : "min-h-screen bg-[radial-gradient(circle_at_top_left,#fef3c7_0,#f8fafc_28%,#eef2ff_100%)]"}
+    >
+      {luxuryTheme && <GoodGoodsLuxuryStyles />}
       <div className="w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="mb-2 inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm">
+            <div data-gg-live-badge className="mb-2 inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-white/80 px-2.5 py-1 text-xs font-medium text-emerald-700 shadow-sm">
               <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.8)]" />
               Live design sheets dashboard
             </div>
@@ -335,16 +562,17 @@ export default function DesignSheetsDashboardPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <a href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
+            <a data-gg-action href="/master/design-sheets" className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white">
               กลับ Design Sheets
             </a>
             <button
+              data-gg-action
               onClick={refreshDashboard}
               className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white"
             >
               รีเฟรชข้อมูล
             </button>
-            <button className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
+            <button data-gg-action="primary" className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
               อัปเดตหลายงาน
             </button>
           </div>
@@ -374,7 +602,7 @@ export default function DesignSheetsDashboardPage() {
               ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
               ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
             ].map(([label, value, hint]) => (
-              <div key={label} className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+              <div key={label} data-gg-stat-card className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
                 <div className="text-xs font-medium text-slate-400">{label}</div>
                 <div className="mt-1 text-3xl font-semibold text-slate-900">{value}</div>
                 <div className="mt-1 text-xs text-slate-500">{hint}</div>
@@ -384,16 +612,17 @@ export default function DesignSheetsDashboardPage() {
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
-          <aside className="rounded-lg border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
+          <aside data-gg-sidebar className="rounded-lg border border-white/70 bg-white/90 p-3 shadow-sm backdrop-blur">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-800">แบรนด์จากงานจริง</h2>
                 <p className="text-xs text-slate-400">คลิกเพื่อกรองบอร์ด</p>
               </div>
-              <span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
+              <span data-gg-brand-count className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">{brandSummaries.length} แบรนด์</span>
             </div>
 
             <button
+              data-gg-all-button
               onClick={() => setSelectedBrandKey("ALL")}
               className={`mb-2 flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition ${selectedBrandKey === "ALL" ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
             >
@@ -407,12 +636,14 @@ export default function DesignSheetsDashboardPage() {
                 return (
                   <button
                     key={brand.key}
+                    data-gg-brand-card
+                    data-gg-selected={selected ? "true" : undefined}
                     onClick={() => setSelectedBrandKey(brand.key)}
                     className="w-full rounded-lg border bg-white p-3 text-left shadow-[3px_3px_0_rgba(148,163,184,0.16)] transition hover:-translate-y-0.5"
                     style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}33, 0 18px 45px ${brand.color}18` : undefined }}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-white shadow-sm" style={{ backgroundColor: brand.color }}>
+                      <span data-gg-brand-mark className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-white shadow-sm" style={{ backgroundColor: brand.color }}>
                         {brand.name.slice(0, 2).toUpperCase()}
                       </span>
                       <div className="min-w-0 flex-1">
@@ -421,11 +652,11 @@ export default function DesignSheetsDashboardPage() {
                       </div>
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                      <div className="rounded-md bg-slate-50 px-2 py-1.5">
+                      <div data-gg-mini-stat className="rounded-md bg-slate-50 px-2 py-1.5">
                         <div className="text-slate-400">งานทั้งหมด</div>
                         <div className="font-semibold text-slate-700">{brand.total}</div>
                       </div>
-                      <div className="rounded-md bg-rose-50 px-2 py-1.5">
+                      <div data-gg-mini-stat className="rounded-md bg-rose-50 px-2 py-1.5">
                         <div className="text-rose-400">ใกล้ครบ</div>
                         <div className="font-semibold text-rose-700">{brand.urgent}</div>
                       </div>
@@ -442,7 +673,7 @@ export default function DesignSheetsDashboardPage() {
           </aside>
 
           <main className="min-w-0 space-y-4">
-            <section className="min-w-0 rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+            <section data-gg-panel className="min-w-0 rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-800">เส้นทางสถานะจาก Workflow กลาง</h2>
@@ -455,6 +686,7 @@ export default function DesignSheetsDashboardPage() {
                     <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> ปิดงาน</span>
                   </div>
                   <button
+                    data-gg-action
                     onClick={() => setStatusMgr(true)}
                     className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
                   >
@@ -481,6 +713,8 @@ export default function DesignSheetsDashboardPage() {
                       return (
                         <div
                           key={`${column.key}-${index}`}
+                          data-gg-column-drop
+                          data-gg-drop-target={isDropTarget ? "true" : undefined}
                           onDragOver={(event) => handleColumnDragOver(event, column)}
                           onDragEnter={(event) => handleColumnDragOver(event, column)}
                           onDragLeave={(event) => handleColumnDragLeave(event, column)}
@@ -488,10 +722,10 @@ export default function DesignSheetsDashboardPage() {
                           className={`relative rounded-xl transition-colors ${isDropTarget ? "bg-amber-50/70 ring-2 ring-amber-300 ring-offset-2" : ""}`}
                         >
                           {index < boardColumns.length - 1 && (
-                            <div className="absolute left-[62%] top-8 h-px w-[76%] bg-gradient-to-r from-amber-300 via-amber-200 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.45)]" />
+                            <div data-gg-connector className="absolute left-[62%] top-8 h-px w-[76%] bg-gradient-to-r from-amber-300 via-amber-200 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.45)]" />
                           )}
-                          <div className="relative mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%)` }}>
-                            <div className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
+                          <div data-gg-column-header className="relative mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%)` }}>
+                            <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
                             <div className="text-[11px] text-slate-400">{column.sheets.length} งาน</div>
                           </div>
@@ -505,6 +739,7 @@ export default function DesignSheetsDashboardPage() {
                                 <a
                                   key={sheet.id}
                                   href={`/master/design-sheets?open=${encodeURIComponent(sheet.id)}`}
+                                  data-gg-task-card
                                   draggable={!movingSheetId}
                                   onDragStart={(event) => handleCardDragStart(event, sheet)}
                                   onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
@@ -515,6 +750,7 @@ export default function DesignSheetsDashboardPage() {
                                   {coverUrl ? (
                                     // eslint-disable-next-line @next/next/no-img-element
                                     <img
+                                      data-gg-cover
                                       src={coverUrl}
                                       alt={sheet.name}
                                       loading="lazy"
@@ -522,7 +758,7 @@ export default function DesignSheetsDashboardPage() {
                                       className="mb-2 h-16 w-full rounded-md border border-slate-100 bg-slate-50 object-cover"
                                     />
                                   ) : (
-                                    <div className="mb-2 h-16 rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }} />
+                                    <div data-gg-cover className="mb-2 h-16 rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }} />
                                   )}
                                   <div className="flex items-center gap-1.5">
                                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
@@ -560,24 +796,24 @@ export default function DesignSheetsDashboardPage() {
               )}
             </section>
 
-            <section className="rounded-lg border border-white/70 bg-slate-900 p-4 text-white shadow-sm">
+            <section data-gg-audit className="rounded-lg border border-white/70 bg-slate-900 p-4 text-white shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold">ประวัติจาก Audit Log กลาง</h2>
                   <p className="mt-1 text-xs text-slate-300">อ่านจากประวัติจริงของใบงานออกแบบ</p>
                 </div>
-                <span className="rounded-md bg-white/10 px-2 py-1 text-xs text-slate-200">{auditRows.length} รายการล่าสุด</span>
+                <span data-gg-audit-count className="rounded-md bg-white/10 px-2 py-1 text-xs text-slate-200">{auditRows.length} รายการล่าสุด</span>
               </div>
               {auditRows.length === 0 ? (
-                <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                <div data-gg-audit-row className="mt-3 rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
                   ยังไม่มีประวัติที่โหลดได้ หรือระบบยังไม่เปิดสิทธิ์อ่านประวัติในหน้านี้
                 </div>
               ) : (
                 <div className="mt-3 grid gap-3 lg:grid-cols-3">
                   {auditRows.map((row) => (
-                    <div key={row.id} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                    <div key={row.id} data-gg-audit-row className="rounded-lg border border-white/10 bg-white/5 p-3">
                       <div className="mb-2 flex items-center gap-2">
-                        <span className="block h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.8)]" />
+                        <span data-gg-audit-dot className="block h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.8)]" />
                         <span className="text-[11px] text-slate-400">{formatDateTime(row.created_at)} • {row.actor_name || "ระบบ"}</span>
                       </div>
                       <div className="text-xs font-medium text-white">{auditText(row)}</div>
