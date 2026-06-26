@@ -109,11 +109,36 @@ export function ImageManager({
 
   // gallery: รูปที่โชว์ใหญ่ฝั่งขวา = รูปหลัก (หรือรูปแรก) · คงไว้ถ้าตัวที่เลือกยังอยู่
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [zoom, setZoom] = useState(false);   // กดพรีวิวใหญ่ในแกลเลอรี → เปิดรูปเต็มจอ (lightbox)
   useEffect(() => {
     if (items.length === 0) { setSelectedId(null); return; }
     setSelectedId((cur) => (cur && items.some((a) => a.id === cur)) ? cur : (items.find((a) => a.is_primary)?.id ?? items[0].id));
   }, [items]);
+
+  // ----- Lightbox (ดูรูปเต็มจอ) — กดรูปเล็ก/รูปใหญ่เพื่อขยาย, ←→ เลื่อน, Esc ปิด -----
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const imageItems = items.filter((a) => isImage(a.content_type));
+  const [lightboxId, setLightboxId] = useState<string | null>(null);
+  const lbIndex = imageItems.findIndex((a) => a.id === lightboxId);
+  const lbImage = lbIndex >= 0 ? imageItems[lbIndex] : null;
+  const openLightbox = (id: string) => setLightboxId(id);
+  const lbStep = useCallback((d: number) => {
+    setLightboxId((cur) => {
+      const idx = imageItems.findIndex((a) => a.id === cur);
+      if (idx < 0 || imageItems.length === 0) return cur;
+      return imageItems[(idx + d + imageItems.length) % imageItems.length].id;
+    });
+  }, [imageItems]);
+  useEffect(() => {
+    if (!lbImage) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxId(null);
+      else if (e.key === "ArrowLeft") lbStep(-1);
+      else if (e.key === "ArrowRight") lbStep(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lbImage, lbStep]);
 
   const upload = useCallback(async (files: FileList | File[]) => {
     const incoming = Array.from(files);
@@ -214,7 +239,8 @@ export function ImageManager({
 
   // รูปย่อ 1 ใบ (ใช้ทั้งกริดและแกลเลอรี) — pickable=true → กดเลือกมาโชว์ใหญ่ฝั่งขวา (โหมด gallery)
   const renderTile = (a: Attachment, pickable: boolean) => (
-    <div key={a.id} onClick={pickable ? () => setSelectedId(a.id) : undefined}
+    <div key={a.id} onClick={pickable ? () => { setSelectedId(a.id); if (isImage(a.content_type)) openLightbox(a.id); } : undefined}
+      title={pickable && isImage(a.content_type) ? "กดเพื่อดูเต็มจอ" : undefined}
       className={`relative group aspect-square rounded-lg overflow-hidden border bg-slate-50 ${pickable ? "cursor-pointer" : ""} ${pickable && selectedId === a.id ? "border-blue-500 ring-2 ring-blue-300" : "border-slate-200"}`}>
       {isImage(a.content_type) ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -311,7 +337,7 @@ export function ImageManager({
               isImage(selected.content_type) ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={withImageWidth(selected.public_url, 1024) ?? selected.public_url} alt={selected.file_name}
-                  onClick={() => setZoom(true)} title="กดเพื่อดูรูปเต็มจอ"
+                  onClick={() => openLightbox(selected.id)} title="กดเพื่อดูเต็มจอ"
                   className="max-w-full max-h-[340px] object-contain cursor-zoom-in" />
               ) : (
                 <a href={selected.public_url} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-2 text-slate-500 hover:text-slate-700 py-6">
@@ -349,13 +375,26 @@ export function ImageManager({
 
       {readonly && items.length === 0 && <p className="text-sm text-slate-400 text-center py-3">ไม่มีไฟล์แนบ</p>}
 
-      {/* lightbox: กดพรีวิวใหญ่ในแกลเลอรี → รูปเต็มจอ (แตะที่ใดก็ปิด) */}
-      {zoom && selected && isImage(selected.content_type) && typeof document !== "undefined" && createPortal(
-        <div onClick={() => setZoom(false)}
-          className="fixed inset-0 z-[10000] bg-black/80 flex items-center justify-center p-4 cursor-zoom-out">
+      {/* Lightbox: ดูรูปเต็มจอ (กดรูปเล็ก/รูปใหญ่เพื่อขยาย) */}
+      {mounted && lbImage && createPortal(
+        <div className="fixed inset-0 z-[10000] bg-black/90 flex items-center justify-center select-none"
+          onClick={() => setLightboxId(null)}>
+          <button onClick={() => setLightboxId(null)} title="ปิด (Esc)"
+            className="absolute top-3 right-3 h-10 w-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white text-xl">✕</button>
+          {imageItems.length > 1 && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); lbStep(-1); }} title="ก่อนหน้า (←)"
+                className="absolute left-3 top-1/2 -translate-y-1/2 h-12 w-12 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white text-2xl">‹</button>
+              <button onClick={(e) => { e.stopPropagation(); lbStep(1); }} title="ถัดไป (→)"
+                className="absolute right-3 top-1/2 -translate-y-1/2 h-12 w-12 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 text-white text-2xl">›</button>
+              <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-xs bg-white/10 px-2.5 py-1 rounded-full">{lbIndex + 1} / {imageItems.length}</span>
+            </>
+          )}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={withImageWidth(selected.public_url, 1600) ?? selected.public_url} alt={selected.file_name}
-            decoding="async" className="max-w-[94vw] max-h-[94vh] object-contain rounded-lg shadow-2xl" />
+          <img src={withImageWidth(lbImage.public_url, 1920) ?? lbImage.public_url} alt={lbImage.file_name}
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-[94vw] max-h-[92vh] object-contain rounded shadow-2xl" />
+          <span className="absolute bottom-4 right-4 text-white/60 text-[11px] truncate max-w-[40vw]">{lbImage.file_name}</span>
         </div>,
         document.body,
       )}
