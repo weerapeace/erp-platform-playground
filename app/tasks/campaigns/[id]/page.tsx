@@ -175,7 +175,8 @@ export default function CampaignCanvasPage() {
   const openFolder = useCallback((path: string) => {
     if (!path) return;
     navigator.clipboard?.writeText(path).catch(() => {});
-    try { window.location.href = "erpfolder://" + encodeURIComponent(path); } catch { /* ไม่มี handler ก็ข้าม */ }
+    // ใช้ erpfolder: (ไม่มี //) แบบ mailto: เพื่อเลี่ยง Chrome ตีความเป็น host แล้วแปลง path เพี้ยน
+    try { window.location.href = "erpfolder:" + encodeURIComponent(path); } catch { /* ไม่มี handler ก็ข้าม */ }
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
