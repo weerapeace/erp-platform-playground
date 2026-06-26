@@ -10,7 +10,7 @@ import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { ERPModal } from "@/components/modal";
 import { ImageAttach } from "@/components/image-attach";
-import { UserPicker } from "@/components/pickers";
+import { UserPicker, SkuPicker } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
 import { useAuth } from "@/components/auth";
@@ -341,15 +341,28 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [linkUrl, setLinkUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [parents, setParents] = useState<PlatformParent[] | null>(null);
-  const [editParentId, setEditParentId] = useState<string | null>(null); // เปิดตัวแก้สินค้ากลาง
+  const [skusByParent, setSkusByParent] = useState<Record<string, { id: string; code: string; name: string }[]>>({});
+  const [editParentId, setEditParentId] = useState<string | null>(null);                       // เปิดตัวแก้ Parent SKU กลาง
+  const [skuEditor, setSkuEditor] = useState<{ recordId: string | null; parentId: string } | null>(null); // เปิดตัวแก้ SKU กลาง (recordId null = สร้างใหม่)
+  const [pickForParent, setPickForParent] = useState<string | null>(null);                      // โชว์ SkuPicker เลือก SKU ที่มีอยู่
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
   const attachCount = sub.attachments?.length ?? 0;
 
-  // โหลดรายละเอียด Platform ของ Parent SKU (โหมดยืนยัน) — เรียกซ้ำได้หลังแก้สินค้า
+  // โหลดรายละเอียด Platform ของ Parent SKU + SKU ลูก (โหมดยืนยัน) — เรียกซ้ำได้หลังแก้สินค้า
   const loadPlatform = useCallback(async () => {
-    try { const j = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?platform=1`).then((r) => r.json()); setParents((j.parents as PlatformParent[]) ?? []); }
-    catch { setParents([]); }
+    try {
+      const j = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?platform=1`).then((r) => r.json());
+      const ps = (j.parents as PlatformParent[]) ?? [];
+      setParents(ps);
+      const entries = await Promise.all(ps.map(async (p) => {
+        try {
+          const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(p.id)}&limit=50`).then((r) => r.json());
+          return [p.id, ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? "") }))] as const;
+        } catch { return [p.id, [] as { id: string; code: string; name: string }[]] as const; }
+      }));
+      setSkusByParent(Object.fromEntries(entries));
+    } catch { setParents([]); }
   }, [taskId]);
   useEffect(() => { if (platformConfirm) loadPlatform(); }, [platformConfirm, loadPlatform]);
 
@@ -398,6 +411,29 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                   <button onClick={() => setEditParentId(p.id)} disabled={!p.id} className={`w-full mt-1 h-8 rounded-md text-xs font-medium border disabled:opacity-50 ${p.has_description ? "text-violet-700 border-violet-200 hover:bg-violet-50" : "text-white bg-violet-600 border-violet-600 hover:bg-violet-700"}`}>
                     ✏️ {p.has_description ? t("แก้รายละเอียดสินค้า", "Edit product details") : t("กรอกรายละเอียดสินค้า (รายละเอียด Platform)", "Fill product details (Platform)")}
                   </button>
+                  {/* SKU ลูก — เลือกที่มี/สร้างใหม่ + แก้รายละเอียด */}
+                  <div className="border-t border-slate-100 pt-2 mt-1 space-y-1.5">
+                    <p className="text-[11px] text-slate-400">{t("สินค้าย่อย (SKU)", "Child SKUs")} ({(skusByParent[p.id] ?? []).length})</p>
+                    {(skusByParent[p.id] ?? []).map((s) => (
+                      <div key={s.id} className="flex items-center gap-2 text-xs">
+                        <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+                        <span className="text-slate-700 truncate flex-1">{s.name}</span>
+                        <button onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️ {t("แก้", "Edit")}</button>
+                      </div>
+                    ))}
+                    {(skusByParent[p.id] ?? []).length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
+                    {pickForParent === p.id ? (
+                      <div className="flex items-start gap-1.5">
+                        <div className="flex-1"><SkuPicker value={null} onChange={(v) => { if (v) { setSkuEditor({ recordId: v.id, parentId: p.id }); setPickForParent(null); } }} /></div>
+                        <button onClick={() => setPickForParent(null)} className="text-xs text-slate-400 mt-2 shrink-0">{t("ยกเลิก", "Cancel")}</button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        <button onClick={() => setSkuEditor({ recordId: null, parentId: p.id })} className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-1 hover:bg-violet-50">➕ {t("สร้าง SKU ใหม่", "New SKU")}</button>
+                        <button onClick={() => setPickForParent(p.id)} className="text-xs text-slate-600 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">🔗 {t("เลือก SKU ที่มีอยู่", "Pick existing SKU")}</button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             {parents !== null && parents.length > 0 && !platformReady && <p className="text-xs text-rose-600">{t("ต้องมีรายละเอียด (Description) ครบทุกสินค้าก่อนถึงจะส่งงานได้", "All products need a Description before you can submit")}</p>}
@@ -436,6 +472,13 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       {editParentId && (
         <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={editParentId} startInEdit
           onClose={() => { setEditParentId(null); loadPlatform(); }} onChanged={loadPlatform} />
+      )}
+      {/* ตัวแก้ SKU กลาง — สร้าง/แก้ SKU ลูก (recordId null = สร้างใหม่ ใต้ parent ที่เลือก) */}
+      {skuEditor && (
+        <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" recordId={skuEditor.recordId} startInEdit
+          createTitle={t("สร้าง SKU ใหม่", "New SKU")}
+          createDefaults={skuEditor.recordId ? undefined : { parent_sku_id: skuEditor.parentId }}
+          onClose={() => { setSkuEditor(null); loadPlatform(); }} onChanged={loadPlatform} />
       )}
     </ERPModal>
   );
