@@ -1322,6 +1322,7 @@ export default function DesignSheetsPage() {
             <p className="text-sm text-slate-500 mt-0.5">งานออกแบบสินค้าใหม่ ตั้งแต่รับโจทย์จนตั้งเป็นสินค้าจริง — คลิกแถวเพื่อเปิดดู/แก้</p>
           </div>
           <div className="flex items-center gap-2">
+            <a href="/master/design-sheets/dashboard" className="h-9 px-3 text-sm font-medium border border-amber-200 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100">🗺️ แผนที่ภารกิจ</a>
             <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
             {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบงานออกแบบ</button>}
           </div>
