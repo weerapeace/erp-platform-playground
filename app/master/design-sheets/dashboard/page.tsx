@@ -137,6 +137,125 @@ function CardDeadline({ tone, label }: { tone: Tone; label: string }) {
   );
 }
 
+
+type LuxurySealKind = "document" | "compass" | "calendar" | "check" | "sketch" | "message" | "comment" | "tag" | "quote" | "approve" | "sku" | "cancel";
+
+const STAT_SEALS: LuxurySealKind[] = ["document", "compass", "calendar", "check"];
+const STATUS_SEALS: LuxurySealKind[] = ["sketch", "message", "comment", "tag", "quote", "approve", "sku", "cancel"];
+
+function LuxurySealGlyph({ kind }: { kind: LuxurySealKind }) {
+  if (kind === "document") {
+    return (
+      <>
+        <path d="M18 12h16l6 6v24H18z" />
+        <path d="M34 12v8h8" />
+        <path d="M23 25h12M23 31h14M23 37h9" />
+      </>
+    );
+  }
+  if (kind === "compass") {
+    return (
+      <>
+        <circle cx="30" cy="30" r="9" />
+        <path d="M30 10v8M30 42v8M10 30h8M42 30h8M16 16l6 6M38 38l6 6M44 16l-6 6M22 38l-6 6" />
+        <path d="M33 27l-5 11-1-8-8-1z" />
+      </>
+    );
+  }
+  if (kind === "calendar") {
+    return (
+      <>
+        <rect x="16" y="16" width="28" height="28" rx="4" />
+        <path d="M22 11v9M38 11v9M16 24h28M23 31h4M33 31h4M23 38h4M33 38h4" />
+      </>
+    );
+  }
+  if (kind === "check") {
+    return (
+      <>
+        <circle cx="30" cy="30" r="17" />
+        <path d="M21 31l6 6 13-15" />
+      </>
+    );
+  }
+  if (kind === "sketch") {
+    return (
+      <>
+        <path d="M18 42V22l12-8 12 8v20" />
+        <path d="M24 42V29h12v13M23 25l7-5 7 5" />
+      </>
+    );
+  }
+  if (kind === "message") {
+    return (
+      <>
+        <path d="M15 20h30v20H15z" />
+        <path d="M16 21l14 11 14-11" />
+      </>
+    );
+  }
+  if (kind === "comment") {
+    return (
+      <>
+        <path d="M17 18h26v18H28l-9 7v-7h-2z" />
+        <path d="M23 26h14M23 32h9" />
+      </>
+    );
+  }
+  if (kind === "tag") {
+    return (
+      <>
+        <path d="M17 29l14-14h12v12L29 41z" />
+        <circle cx="38" cy="20" r="2.5" />
+        <path d="M24 31l7 7" />
+      </>
+    );
+  }
+  if (kind === "quote") {
+    return (
+      <>
+        <path d="M20 17h21v26H20z" />
+        <path d="M25 25h11M25 31h11M25 37h7" />
+        <path d="M17 22h6M17 29h6" />
+      </>
+    );
+  }
+  if (kind === "approve") {
+    return (
+      <>
+        <path d="M21 34l5 7 14-22" />
+        <path d="M17 27c3-4 7-6 13-6s10 2 13 6" />
+        <path d="M19 41h22" />
+      </>
+    );
+  }
+  if (kind === "sku") {
+    return (
+      <>
+        <path d="M30 13l16 9v17l-16 8-16-8V22z" />
+        <path d="M14 22l16 9 16-9M30 31v16" />
+        <path d="M22 18l16 9" />
+      </>
+    );
+  }
+  return (
+    <>
+      <circle cx="30" cy="30" r="17" />
+      <path d="M23 23l14 14M37 23L23 37" />
+    </>
+  );
+}
+
+function LuxurySealIcon({ kind, variant }: { kind: LuxurySealKind; variant: "stat" | "column" }) {
+  return (
+    <span aria-hidden="true" className={"gg-luxury-seal gg-luxury-seal--" + variant}>
+      <svg viewBox="0 0 60 60" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <LuxurySealGlyph kind={kind} />
+      </svg>
+    </span>
+  );
+}
+
 function GoodGoodsLuxuryStyles() {
   return (
     <style>{`
@@ -355,6 +474,205 @@ function GoodGoodsLuxuryStyles() {
         background: var(--gg-silver) !important;
         box-shadow: 0 0 14px rgba(223, 230, 237, 0.8) !important;
       }
+
+
+      [data-good-goods-theme="true"] {
+        background-image:
+          radial-gradient(circle at 7% -12%, rgba(14, 39, 66, 0.12), transparent 28%),
+          radial-gradient(circle at 94% 0%, rgba(184, 195, 207, 0.22), transparent 30%),
+          linear-gradient(135deg, #fbfbfa 0%, #f2f5f8 52%, #e9eef5 100%) !important;
+      }
+
+      [data-good-goods-theme="true"]::before {
+        opacity: 0.98;
+        background-image:
+          url('/brand-themes/good-goods/ornament-top-left.webp'),
+          url('/brand-themes/good-goods/ornament-top-right.webp'),
+          url('/brand-themes/good-goods/ornament-bottom-left.webp'),
+          url('/brand-themes/good-goods/ornament-bottom-right.webp'),
+          url('/brand-themes/good-goods/header-cloud.webp'),
+          linear-gradient(90deg, rgba(14, 39, 66, 0.04) 1px, transparent 1px),
+          linear-gradient(rgba(14, 39, 66, 0.028) 1px, transparent 1px);
+        background-size: 148px 148px, 152px 148px, 150px 154px, 155px 162px, min(500px, 36vw) auto, 118px 118px, 118px 118px;
+        background-position: left top, right top, left bottom, right bottom, 58% 6px, left top, left top;
+        background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, repeat, repeat;
+        mix-blend-mode: multiply;
+        mask-image: none;
+      }
+
+      [data-good-goods-theme="true"]::after {
+        content: "";
+        position: fixed;
+        inset: 7px;
+        z-index: 0;
+        pointer-events: none;
+        border: 2px solid rgba(14, 39, 66, 0.78);
+        border-radius: 4px;
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.82),
+          inset 0 0 0 3px rgba(184, 195, 207, 0.34),
+          0 0 0 1px rgba(184, 195, 207, 0.68);
+      }
+
+      [data-good-goods-theme="true"] [data-gg-live-badge] {
+        border-color: rgba(184, 195, 207, 0.72) !important;
+        background: linear-gradient(180deg, #173657, #0b2139) !important;
+        color: #f8fbff !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-live-badge] span {
+        background-color: #dce6f0 !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-stat-card] {
+        min-height: 104px;
+        padding-right: 5.35rem !important;
+        outline: 1px solid rgba(255, 255, 255, 0.88);
+        outline-offset: -5px;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-stat-card] > :not(.gg-luxury-seal),
+      [data-good-goods-theme="true"] [data-gg-column-header] > :not(.gg-luxury-seal),
+      [data-good-goods-theme="true"] [data-gg-panel] > *,
+      [data-good-goods-theme="true"] [data-gg-sidebar] > * {
+        position: relative;
+        z-index: 2;
+      }
+
+      [data-good-goods-theme="true"] .gg-luxury-seal {
+        pointer-events: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        color: #f8fbff;
+        border: 1px solid rgba(223, 230, 237, 0.95);
+        background:
+          radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.22), transparent 26%),
+          linear-gradient(180deg, #173657, #092039);
+        box-shadow:
+          inset 0 0 0 3px rgba(255, 255, 255, 0.08),
+          inset 0 0 0 6px rgba(184, 195, 207, 0.16),
+          0 10px 24px rgba(14, 39, 66, 0.22),
+          0 0 0 5px rgba(223, 230, 237, 0.42);
+      }
+
+      [data-good-goods-theme="true"] .gg-luxury-seal svg {
+        width: 64%;
+        height: 64%;
+        filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.18));
+      }
+
+      [data-good-goods-theme="true"] .gg-luxury-seal--stat {
+        position: absolute;
+        right: 1.5rem;
+        top: 50%;
+        z-index: 1;
+        width: 58px;
+        height: 58px;
+        transform: translateY(-50%);
+      }
+
+      [data-good-goods-theme="true"] .gg-luxury-seal--column {
+        position: absolute;
+        left: 50%;
+        top: -13px;
+        z-index: 1;
+        width: 36px;
+        height: 36px;
+        transform: translateX(-50%);
+        box-shadow:
+          inset 0 0 0 2px rgba(255, 255, 255, 0.08),
+          0 8px 18px rgba(14, 39, 66, 0.18),
+          0 0 0 4px rgba(223, 230, 237, 0.42);
+      }
+
+      [data-good-goods-theme="true"] [data-gg-sidebar] {
+        outline: 1px solid rgba(255, 255, 255, 0.88);
+        outline-offset: -5px;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-sidebar]::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 88px;
+        z-index: 0;
+        pointer-events: none;
+        border-radius: inherit inherit 0 0;
+        background:
+          radial-gradient(circle at 92% 12%, rgba(223, 230, 237, 0.16), transparent 24%),
+          repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 8px),
+          linear-gradient(180deg, #132f50, #0b2139);
+        box-shadow: inset 0 -1px 0 rgba(184, 195, 207, 0.56);
+      }
+
+      [data-good-goods-theme="true"] [data-gg-sidebar] > div:first-child h2,
+      [data-good-goods-theme="true"] [data-gg-sidebar] > div:first-child p {
+        color: #f7fbff !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-all-button] {
+        border-color: rgba(184, 195, 207, 0.78) !important;
+        background: linear-gradient(180deg, #173657, #0b2139) !important;
+        color: #f8fbff !important;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.11), 0 10px 22px rgba(14, 39, 66, 0.16) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-panel] {
+        min-height: 610px;
+        outline: 1px solid rgba(255, 255, 255, 0.9);
+        outline-offset: -5px;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-panel]::before {
+        content: "";
+        position: absolute;
+        right: -2px;
+        bottom: -4px;
+        z-index: 0;
+        width: min(780px, 56vw);
+        height: min(360px, 38vh);
+        pointer-events: none;
+        background: url('/brand-themes/good-goods/heritage-scene.webp') right bottom / contain no-repeat;
+        mix-blend-mode: multiply;
+        opacity: 0.86;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-column-header] {
+        padding-top: 2.35rem !important;
+        padding-bottom: 0.75rem !important;
+        outline: 1px solid rgba(255, 255, 255, 0.86);
+        outline-offset: -4px;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-column-header]::before {
+        content: "";
+        position: absolute;
+        left: 12px;
+        right: 12px;
+        top: 1.72rem;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(201, 182, 142, 0.72), transparent);
+      }
+
+      [data-good-goods-theme="true"] [data-gg-column-dot] {
+        height: 0 !important;
+        margin-bottom: 0 !important;
+        opacity: 0;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-connector] {
+        top: 2.25rem !important;
+        height: 1px !important;
+        background: linear-gradient(90deg, rgba(201, 182, 142, 0.68), rgba(184, 195, 207, 0.7), transparent) !important;
+      }
+
+      [data-good-goods-theme="true"] [data-gg-task-card] {
+        outline: 1px solid rgba(255, 255, 255, 0.82);
+        outline-offset: -4px;
+      }
+
     `}</style>
   );
 }
@@ -601,8 +919,9 @@ export default function DesignSheetsDashboardPage() {
               ["กำลังเดินงาน", activeJobs, "ยังไม่จบหรือยกเลิก"],
               ["ใกล้ครบกำหนด", urgentJobs, "ควรไล่สถานะวันนี้"],
               ["ปิดงานแล้ว", finishedJobs, "อนุมัติ / ตั้ง SKU / ยกเลิก"],
-            ].map(([label, value, hint]) => (
+            ].map(([label, value, hint], index) => (
               <div key={label} data-gg-stat-card className="rounded-lg border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur">
+                {luxuryTheme && <LuxurySealIcon kind={STAT_SEALS[index % STAT_SEALS.length] ?? "document"} variant="stat" />}
                 <div className="text-xs font-medium text-slate-400">{label}</div>
                 <div className="mt-1 text-3xl font-semibold text-slate-900">{value}</div>
                 <div className="mt-1 text-xs text-slate-500">{hint}</div>
@@ -725,6 +1044,7 @@ export default function DesignSheetsDashboardPage() {
                             <div data-gg-connector className="absolute left-[62%] top-8 h-px w-[76%] bg-gradient-to-r from-amber-300 via-amber-200 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.45)]" />
                           )}
                           <div data-gg-column-header className="relative mb-3 rounded-lg border px-2 py-2 text-center shadow-sm" style={{ borderColor: `${column.color}33`, background: `linear-gradient(180deg, #ffffff 0%, ${column.color}14 100%)` }}>
+                            {luxuryTheme && <LuxurySealIcon kind={STATUS_SEALS[index % STATUS_SEALS.length] ?? "sketch"} variant="column" />}
                             <div data-gg-column-dot className="mx-auto mb-1 h-3 w-3 rounded-full shadow-[0_0_16px_rgba(245,158,11,0.65)]" style={{ backgroundColor: column.color }} />
                             <div className="truncate text-xs font-semibold text-slate-800" title={column.label}>{column.label}</div>
                             <div className="text-[11px] text-slate-400">{column.sheets.length} งาน</div>
