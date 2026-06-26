@@ -707,6 +707,7 @@ export function DesignDashboard() {
   const [search, setSearch] = useState("");
   const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
   const [createOpen, setCreateOpen] = useState(false);                   // เปิด popup สร้างงานใหม่
+  const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const id = new URLSearchParams(window.location.search).get("open");
@@ -1081,7 +1082,8 @@ export function DesignDashboard() {
                 <div className="overflow-x-auto pb-2">
                   <div className="grid min-w-[1120px] grid-flow-col auto-cols-[160px] gap-3">
                     {boardColumns.map((column, index) => {
-                      const shown = column.sheets.slice(0, 8);
+                      const expanded = expandedCols.has(column.key);
+                      const shown = expanded ? column.sheets : column.sheets.slice(0, 8);
                       const hiddenCount = Math.max(0, column.sheets.length - shown.length);
                       const isDropTarget = dropTargetStatus === column.key;
                       return (
@@ -1163,9 +1165,16 @@ export function DesignDashboard() {
                               </div>
                             )}
                             {hiddenCount > 0 && (
-                              <div className="rounded-lg border border-dashed border-slate-200 bg-white/70 p-2 text-center text-xs text-slate-500">
-                                อีก {hiddenCount.toLocaleString("th-TH")} งาน
-                              </div>
+                              <button type="button" onClick={() => setExpandedCols((s) => new Set(s).add(column.key))}
+                                className="w-full rounded-lg border border-dashed border-slate-200 bg-white/70 p-2 text-center text-xs text-blue-600 hover:border-blue-300 hover:bg-blue-50">
+                                ＋ ดูอีก {hiddenCount.toLocaleString("th-TH")} งาน
+                              </button>
+                            )}
+                            {expanded && column.sheets.length > 8 && (
+                              <button type="button" onClick={() => setExpandedCols((s) => { const n = new Set(s); n.delete(column.key); return n; })}
+                                className="w-full rounded-lg p-1.5 text-center text-[11px] text-slate-400 hover:text-slate-600">
+                                ย่อ ▲
+                              </button>
                             )}
                           </div>
                         </div>
