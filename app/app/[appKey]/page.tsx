@@ -22,7 +22,15 @@ const MasterPage = dynamic(() => import("@/components/master-page").then((m) => 
   ssr: false, loading: () => <div className="p-8 text-center text-slate-400 text-sm">กำลังโหลด…</div>,
 });
 
-type MenuItem = { id: string; label: string; href: string; icon: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null };
+type MenuItem = { id: string; label: string; href: string; icon: string | null; icon_url?: string | null; app_keys: string[]; is_active: boolean; show_in_sidebar: boolean; sort_order: number; permission_key: string | null };
+// ไอคอนเมนู: รูปอัปโหลด (icon_url) > อิโมจิ
+function MItemIcon({ it, cls }: { it: MenuItem; cls: string }) {
+  if (it.icon_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={`/api/r2-image?key=${encodeURIComponent(it.icon_url)}&w=64`} alt="" className={`${cls} object-contain shrink-0`} />;
+  }
+  return <span className={`text-xl flex-shrink-0`}>{it.icon ?? "•"}</span>;
+}
 type AppGroup = { key: string; label: string; icon: string | null; permission_key: string | null; default_href: string | null };
 
 export default function StandaloneApp() {
@@ -205,7 +213,7 @@ export default function StandaloneApp() {
           {barItems.map((it, i) => (
             <button key={it.href} onClick={() => goto(i)}
               className={`py-2.5 flex flex-col items-center gap-0.5 text-xs ${active === i ? "text-blue-700 font-semibold" : "text-slate-400"}`}>
-              <span className="text-xl">{it.icon ?? "•"}</span>
+              <MItemIcon it={it} cls="w-6 h-6" />
               <span className="truncate max-w-[72px]">{it.label}</span>
             </button>
           ))}
@@ -246,7 +254,7 @@ export default function StandaloneApp() {
               {drawerView === "menu" && items.map((it, i) => (
                 <button key={it.href} onClick={() => goto(i)}
                   className={`w-full px-3 py-3 rounded-lg text-left text-sm flex items-center gap-3 ${active === i ? "bg-blue-50 text-blue-700 font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
-                  <span className="text-xl flex-shrink-0">{it.icon ?? "•"}</span>
+                  <MItemIcon it={it} cls="w-6 h-6" />
                   <span className="truncate">{it.label}</span>
                 </button>
               ))}

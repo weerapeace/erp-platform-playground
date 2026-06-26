@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { ImageInput } from "@/components/image-input";
 import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup as BaseAppGroup } from "@/components/playground-shell";
 import { AppAccessModal } from "./app-access-modal";
 import type { MenuSection } from "@/app/api/menu/sections/route";
@@ -496,7 +497,7 @@ export default function MenuManagerPage() {
                           onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(g.section, it.id!); }}
                           className={`flex items-center gap-2.5 px-3 py-2 ${it.is_active ? "" : "opacity-55"}`}>
                           <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none" title="ลากเพื่อเรียงลำดับ">⠿</span>
-                          <Ico icon={it.icon} size={18} />
+                          <Ico icon={it.icon} iconUrl={it.icon_url} size={18} />
                           <div className="flex-1 min-w-0">
                             <div className="text-sm text-slate-800 truncate flex items-center gap-1.5">{it.label}{!it.is_active && <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-400">พักไว้</span>}</div>
                             <code className="text-[10px] text-slate-400">{it.href}</code>
@@ -519,6 +520,12 @@ export default function MenuManagerPage() {
                         {/* ตั้งค่าเพิ่ม (กาง) */}
                         {expanded === it.id && (
                           <div className="px-4 pb-3 pt-1 bg-slate-50/60 border-t border-slate-100 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+                            <label className="flex items-center gap-1.5 text-slate-600">ชื่อเมนู
+                              <input defaultValue={it.label} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.label) patch(it.id!, { label: v }); }} className="w-44 h-7 px-2 border border-slate-200 rounded" /></label>
+                            <div className="flex items-center gap-1.5 text-slate-600">ไอคอน
+                              <ImageInput compact value={it.icon_url ?? null} onChange={(key) => patch(it.id!, { icon_url: key })} folder="menu-icons" />
+                              <span className="text-slate-400">หรือ</span>
+                              <input defaultValue={it.icon ?? ""} onBlur={(e) => patch(it.id!, { icon: e.target.value })} placeholder="🛒" title="อิโมจิ (ใช้เมื่อไม่มีรูป)" className="w-12 h-7 px-1 text-center text-base border border-slate-200 rounded" /></div>
                             <label className="flex items-center gap-1.5 text-slate-600">หมวด
                               <input list="section-list" defaultValue={it.section} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== it.section) patch(it.id!, { section: v }); }} className="w-36 h-7 px-2 border border-slate-200 rounded" /></label>
                             <label className="flex items-center gap-1.5 text-slate-600"><input type="checkbox" checked={it.show_in_sidebar} onChange={(e) => patch(it.id!, { show_in_sidebar: e.target.checked })} /> แถบเมนูซ้าย</label>
@@ -562,7 +569,7 @@ export default function MenuManagerPage() {
                           <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">{g.name}</span>
                         </div>
                         {g.items.map((m) => (
-                          <div key={m.id} className="flex items-center gap-2 text-[13px] text-slate-600 px-2 py-1.5 rounded-md hover:bg-white"><Ico icon={m.icon} size={15} /><span className="truncate">{m.label}</span></div>
+                          <div key={m.id} className="flex items-center gap-2 text-[13px] text-slate-600 px-2 py-1.5 rounded-md hover:bg-white"><Ico icon={m.icon} iconUrl={m.icon_url} size={15} /><span className="truncate">{m.label}</span></div>
                         ))}
                       </div>
                     ))}

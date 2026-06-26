@@ -203,7 +203,7 @@ export const navGroups = [
 // แถวเมนูจากทะเบียน (DB) — ของกลาง
 export type MenuRow = {
   id?: string; section: string; section_order: number; sort_order: number;
-  icon: string | null; label: string; href: string;
+  icon: string | null; icon_url?: string | null; label: string; href: string;
   show_in_sidebar: boolean; show_in_launcher: boolean;
   permission_key: string | null; is_active: boolean;
   app_keys?: string[];   // โมดูลใหญ่ (App) ที่เมนูนี้สังกัด — many-to-many
