@@ -5,7 +5,7 @@
 // ใช้ที่: หน้า /tasks และ drawer การ์ดงานบน Campaign Canvas
 // ============================================================
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
@@ -80,6 +80,20 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
+  const [drawerW, setDrawerW] = useState(640);       // ความกว้าง drawer (ลากปรับได้ + จำไว้)
+  useEffect(() => { const v = Number(localStorage.getItem("taskDrawerWidth")); if (v && v >= 480) setDrawerW(v); }, []);
+  // ลากขอบซ้ายเพื่อปรับความกว้าง (drawer ชิดขวา → กว้าง = ระยะจากขวาถึงเมาส์)
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => setDrawerW(Math.min(window.innerWidth * 0.97, Math.max(480, window.innerWidth - ev.clientX)));
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      setDrawerW((w) => { try { localStorage.setItem("taskDrawerWidth", String(Math.round(w))); } catch { /* ignore */ } return w; });
+    };
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+  };
 
   const load = useCallback(async () => {
     try { setDetail(await getTask(taskId)); }
@@ -107,7 +121,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     return (
       <>
         <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-        <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex items-center justify-center"><span className="text-slate-400">{t("กำลังโหลด...", "Loading...")}</span></div>
+        <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center"><span className="text-slate-400">{t("กำลังโหลด...", "Loading...")}</span></div>
       </>
     );
   }
@@ -137,7 +151,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[600px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+        {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
+        <div onMouseDown={startResize} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />
         {/* header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0 flex-1 mr-2">
