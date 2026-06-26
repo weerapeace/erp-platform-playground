@@ -479,7 +479,10 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       if (activeApp === fb.app) return;
       if (appGroups.some((a) => a.key === fb.app)) target = fb.app;
     }
-    if (target && target !== activeApp) setActiveAppState(target);
+    // ใช้ setActiveApp (เซฟลง localStorage ด้วย) — กัน "เด้งกลับแอปเดิม" ตอนเปลี่ยนหน้า
+    // (Shell mount ใหม่ทุกหน้า → อ่าน activeApp จาก localStorage; ถ้า effect แก้แล้วไม่เซฟ
+    //  ค่าจะค้างที่แอปที่กดแท็บล่าสุด พอเข้าหน้าที่ใช้ได้หลายแอปเลยเด้งกลับ)
+    if (target && target !== activeApp) setActiveApp(target);
   }, [pathname, menuRows, appGroups, activeApp]);
 
   // กลุ่มเมนูที่จะแสดง: จากทะเบียน (ถ้ามี) ไม่งั้น default — แล้วกรองตามสิทธิ์ + show_in_sidebar
@@ -514,8 +517,10 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
       const matches = menuRows.filter((r) => r.is_active && r.href && (pathname === r.href || pathname.startsWith(r.href + "/")));
       if (matches.length > 0) {
         const best = matches.sort((a, b) => (b.href?.length ?? 0) - (a.href?.length ?? 0))[0];
-        const k = (best.app_keys ?? []).find((x) => appGroups.some((a) => a.key === x));
-        if (k) return k;
+        // หน้าที่อยู่หลายแอป (เช่น SKUs อยู่ทั้ง master+purchasing) → ยึดแอปที่เปิดอยู่ก่อน
+        // (ไม่งั้น favicon/ชื่อแท็บ/ตัวกันสิทธิ์จะเดาเป็น app_key ตัวแรกเสมอ = เด้งเป็น Master Data)
+        const valid = (best.app_keys ?? []).filter((x) => appGroups.some((a) => a.key === x));
+        if (valid.length) return (activeApp && valid.includes(activeApp)) ? activeApp : valid[0];
       }
     }
     const fb = ROUTE_APP_FALLBACK
