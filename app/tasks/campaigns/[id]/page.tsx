@@ -176,7 +176,7 @@ export default function CampaignCanvasPage() {
     if (!path) return;
     navigator.clipboard?.writeText(path).catch(() => {});
     try { window.location.href = "erpfolder://" + encodeURIComponent(path); } catch { /* ไม่มี handler ก็ข้าม */ }
-    pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด = ยังไม่ได้ลงไฟล์ตั้งค่า (path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens, install the .reg once (path copied as fallback)"));
+    pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
   const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "folder") openFolder(String(data.path ?? "")); }, [openFolder]);
@@ -332,9 +332,11 @@ export default function CampaignCanvasPage() {
           </div>
           <div className="text-[11px] text-cyan-800 bg-cyan-50 border border-cyan-100 rounded-lg px-3 py-2 space-y-1">
             <p className="font-medium">📌 {t("ดับเบิลคลิกการ์ด = เปิดโฟลเดอร์ใน File Explorer ทันที", "Double-click card = open folder in File Explorer instantly")}</p>
-            <p className="text-cyan-700">{t("ครั้งแรกต้องลงไฟล์ตั้งค่า 1 ครั้งต่อเครื่อง: ดาวน์โหลด → ดับเบิลคลิกไฟล์ → กด Yes", "First time only, install once per PC: download → double-click → Yes")}</p>
+            <p className="text-cyan-700">{t("ลงครั้งเดียวต่อเครื่อง (Windows):", "Install once per PC (Windows):")}</p>
+            <p>{t("1) ดาวน์โหลดไฟล์ตั้งค่า  2) ดับเบิลคลิก → กด Yes  3) ", "1) Download  2) double-click → Yes  3) ")}<b>{t("ปิด-เปิดเบราว์เซอร์ใหม่ 1 ครั้ง", "restart the browser once")}</b></p>
+            <p>{t("ครั้งแรกที่กดการ์ด Chrome จะถาม → กด ", "First click, Chrome asks → click ")}<b>Open</b>{t(" (ติ๊ก Always allow)", " (tick Always allow)")}</p>
             <a href="/erp-open-folder.reg" download className="inline-flex items-center gap-1 font-medium underline text-cyan-700 hover:text-cyan-900">⬇️ {t("ดาวน์โหลดไฟล์ตั้งค่า (.reg)", "Download setup file (.reg)")}</a>
-            <p className="text-cyan-600">{t("ยังไม่ลง = กดแล้วจะคัดลอก path ให้วางเองใน File Explorer (Ctrl+V → Enter)", "Not installed = clicking copies the path to paste manually (Ctrl+V → Enter)")}</p>
+            <p className="text-cyan-600">{t("ยังไม่ลง/ยังไม่ restart = กดแล้วจะคัดลอก path ให้วางเองใน File Explorer (Ctrl+V → Enter)", "Not installed/not restarted = clicking copies the path to paste manually (Ctrl+V → Enter)")}</p>
           </div>
         </div>
       </ERPModal>
