@@ -636,6 +636,9 @@ export function DesignDashboard() {
                                     <span className="font-mono text-[11px] text-slate-400">{sheet.code}</span>
                                   </div>
                                   <div className="mt-0.5 min-h-[32px] text-xs font-semibold text-slate-800">{sheet.name}</div>
+                                  {sheet.note && (
+                                    <div className="mt-1 line-clamp-2 rounded bg-amber-50/70 px-1.5 py-1 text-[11px] leading-snug text-slate-500" title={sheet.note}>📝 {sheet.note}</div>
+                                  )}
                                   <div className="mt-2 flex items-center justify-between gap-2">
                                     <span className="truncate text-[11px] text-slate-400">{sheet.brand_name ?? "ไม่ระบุ"}</span>
                                     <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
