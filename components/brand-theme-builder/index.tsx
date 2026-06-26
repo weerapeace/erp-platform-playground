@@ -13,6 +13,7 @@ import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { resolveTheme, themeToCssVars, brandBgUrl, hexToRgba, THEME_PRESETS, themeWarnings, isValidColor, SLOT_REGISTRY, wfIconSlotId, type BrandTheme } from "@/lib/brand-theme";
 import { BrandThemeStyles } from "@/components/brand-theme/styles";
+import { BrandSlot } from "@/components/brand-theme/slots";
 import { ColorInput } from "@/components/color-picker";
 
 type Tab = "preset" | "colors" | "background" | "page" | "header" | "sidebar" | "stat" | "workflow" | "task" | "audit" | "cards" | "buttons";
@@ -276,27 +277,100 @@ export function BrandThemeBuilder({ brandId, brandName, open, onClose, onPublish
             )}
           </div>
 
-          {/* ขวา: พรีวิวสด */}
+          {/* ขวา: พรีวิวสด — โชว์โซนตกแต่งตามแท็บที่เลือก (สะท้อนรูป + ขนาด/ความเข้ม ทันที) */}
           <div className="flex-1 min-w-0">
-            <div className="text-[11px] text-slate-400 mb-1">พรีวิว (อัปเดตทันที · ยังไม่บันทึกจนกดปุ่ม)</div>
-            <div className="brand-themed rounded-xl border border-slate-200 p-4 min-h-[300px]" style={previewStyle}>
+            <div className="mb-1 flex items-center gap-2 text-[11px] text-slate-400">
+              <span>พรีวิว (อัปเดตทันที · ยังไม่บันทึกจนกดปุ่ม)</span>
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">กำลังดู: {TABS.find(([k]) => k === tab)?.[1] ?? ""}</span>
+            </div>
+            <div className="brand-themed relative overflow-hidden rounded-xl border border-slate-200 p-4 min-h-[320px]" style={previewStyle}>
               <BrandThemeStyles />
-              <h2 className="text-lg font-semibold mb-3">{draft.theme_name || brandName}</h2>
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                {["งานทั้งหมด", "ใกล้ครบ"].map((l, i) => (
-                  <div key={l} data-gg-stat-card className="rounded-lg border border-white/70 bg-white/80 p-3">
-                    <div className="text-xs font-medium text-slate-400">{l}</div>
-                    <div className="text-2xl font-semibold text-slate-900">{i === 0 ? 19 : 3}</div>
+
+              {/* ตกแต่งมุมหน้า */}
+              {tab === "page" && (
+                <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+                  <BrandSlot theme={draft} id="page_tl" /><BrandSlot theme={draft} id="page_tr" />
+                  <BrandSlot theme={draft} id="page_bl" /><BrandSlot theme={draft} id="page_br" />
+                </div>
+              )}
+
+              <div className="relative z-10">
+                {/* หัว + mascot */}
+                <div className="mb-3 flex items-center gap-2">
+                  {tab === "header" && <BrandSlot theme={draft} id="header_left" className="shrink-0" />}
+                  <h2 className="min-w-0 text-lg font-semibold">{draft.theme_name || brandName}</h2>
+                  {tab === "header" && <BrandSlot theme={draft} id="header_right" className="ml-auto shrink-0" />}
+                </div>
+
+                <div className={tab === "sidebar" ? "flex gap-3" : ""}>
+                  {/* แถบแบรนด์ (mini) */}
+                  {tab === "sidebar" && (
+                    <div data-gg-sidebar className="w-28 shrink-0 rounded-lg border border-white/70 bg-white/80 p-2">
+                      <BrandSlot theme={draft} id="sidebar_top" />
+                      <div className="my-2 h-7 rounded bg-slate-100" />
+                      <div className="h-7 rounded bg-slate-100" />
+                      <BrandSlot theme={draft} id="sidebar_bottom" />
+                    </div>
+                  )}
+
+                  <div className="min-w-0 flex-1">
+                    {/* การ์ดสถิติ + ไอคอน */}
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      {["งานทั้งหมด", "ใกล้ครบ"].map((l, i) => (
+                        <div key={l} data-gg-stat-card className="relative overflow-hidden rounded-lg border border-white/70 bg-white/80 p-3">
+                          {tab === "stat" && <BrandSlot theme={draft} id={`stat_icon_${i}`} />}
+                          <div className="text-xs font-medium text-slate-400">{l}</div>
+                          <div className="text-2xl font-semibold text-slate-900">{i === 0 ? 19 : 3}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* หัวคอลัมน์สถานะ + ไอคอน */}
+                    {tab === "workflow" && (
+                      <div className="mb-3 flex gap-2 overflow-x-auto">
+                        {(statuses.length ? statuses.slice(0, 4) : [{ key: "_", label: "สถานะ" }]).map((st) => (
+                          <div key={st.key} data-gg-column-header className="relative shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-center" style={{ minWidth: 84 }}>
+                            <BrandSlot theme={draft} id={wfIconSlotId(st.key)} w={96} size="w-6 h-6" className="absolute left-1 top-1" />
+                            <div className="truncate text-[11px] font-semibold text-slate-700">{st.label}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* การ์ดงาน */}
+                    <div data-gg-task-card className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-3 mb-3">
+                      {tab === "task" && <BrandSlot theme={draft} id="task_corner" />}
+                      {tab === "task" && draft.slots?.task_placeholder && (
+                        <div className="mb-2 flex h-16 items-center justify-center rounded-md border border-slate-100 bg-slate-50">
+                          <BrandSlot theme={draft} id="task_placeholder" size="max-h-14" />
+                        </div>
+                      )}
+                      <div className="text-xs text-slate-400">DS-2026-0001</div>
+                      <div className="text-sm font-semibold text-slate-800">ตัวอย่างการ์ดงาน</div>
+                    </div>
+
+                    {/* แผงประวัติ + badge */}
+                    {tab === "audit" && (
+                      <div data-gg-audit className="mb-3 flex items-center gap-2 rounded-lg bg-slate-900 p-3 text-white">
+                        <BrandSlot theme={draft} id="audit_badge" />
+                        <div className="text-xs font-semibold">ประวัติจาก Audit Log กลาง</div>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <button data-gg-action="primary" className="h-9 px-3 text-sm rounded-md border">ปุ่มหลัก</button>
+                      <button data-gg-action className="h-9 px-3 text-sm rounded-md border">ปุ่มรอง</button>
+                    </div>
+
+                    {/* รูปตอนไม่มีงาน (empty) */}
+                    {tab === "page" && draft.slots?.page_empty && (
+                      <div className="mt-3 flex flex-col items-center gap-1 text-xs text-slate-400">
+                        <BrandSlot theme={draft} id="page_empty" />
+                        ตัวอย่างหน้าว่าง
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-              <div data-gg-task-card className="rounded-lg border border-slate-200 bg-white p-3 mb-3">
-                <div className="text-xs text-slate-400">DS-2026-0001</div>
-                <div className="text-sm font-semibold text-slate-800">ตัวอย่างการ์ดงาน</div>
-              </div>
-              <div className="flex gap-2">
-                <button data-gg-action="primary" className="h-9 px-3 text-sm rounded-md border">ปุ่มหลัก</button>
-                <button data-gg-action className="h-9 px-3 text-sm rounded-md border">ปุ่มรอง</button>
+                </div>
               </div>
             </div>
           </div>
