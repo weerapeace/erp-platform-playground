@@ -12,6 +12,7 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup as BaseAppGroup } from "@/components/playground-shell";
 import { AppAccessModal } from "./app-access-modal";
+import type { MenuSection } from "@/app/api/menu/sections/route";
 
 type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; default_href?: string | null };
 const ALL = "__all__";
@@ -31,6 +32,7 @@ export default function MenuManagerPage() {
   const { user } = useAuth();
   const [rows, setRows] = useState<MenuRow[]>([]);
   const [apps, setApps] = useState<AppGroup[]>([]);
+  const [sections, setSections] = useState<MenuSection[]>([]);   // หมวด (ไอคอน/ลำดับ ต่อแอป)
   const [modules, setModules] = useState<{ key: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -41,6 +43,8 @@ export default function MenuManagerPage() {
   const [showAppCfg, setShowAppCfg] = useState(false);  // กางตั้งค่าแอป (PWA)
   const [expanded, setExpanded] = useState<string | null>(null);  // เมนูที่กางตั้งค่าเพิ่ม
   const [editingSection, setEditingSection] = useState<string | null>(null);  // หมวดที่กำลังแก้ชื่อ
+  const [editingSecIcon, setEditingSecIcon] = useState<string | null>(null);  // หมวดที่กำลังแก้ไอคอน
+  const [uploadingSec, setUploadingSec] = useState(false);   // กำลังอัปโหลดรูปไอคอนหมวด
   const [dropSection, setDropSection] = useState<string | null>(null);  // หมวดที่กำลังลากของมาวาง (ไฮไลต์)
   const [addOpen, setAddOpen] = useState(false);        // เปิดตัวเพิ่มเมนูเข้าแอป
   const [addNew, setAddNew] = useState(false);          // สลับโหมดสร้างเมนูใหม่ในป๊อปอัป
@@ -49,6 +53,7 @@ export default function MenuManagerPage() {
   const [uploadingApp, setUploadingApp] = useState(false);
   const [origin, setOrigin] = useState("");
   const dragId = useRef<string | null>(null);
+  const dragSection = useRef<string | null>(null);   // หมวดที่กำลังลากเพื่อเรียงลำดับ
   const sectionEscRef = useRef(false);   // กด Escape ตอนแก้ชื่อหมวด = ยกเลิก (ไม่ commit ตอน blur)
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(null), 2000); };
@@ -57,15 +62,17 @@ export default function MenuManagerPage() {
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const [m, a, mod] = await Promise.all([
+      const [m, a, mod, sec] = await Promise.all([
         apiFetch("/api/menu?all=1").then((r) => r.json()),
         apiFetch("/api/menu/apps").then((r) => r.json()),
         apiFetch("/api/admin/modules").then((r) => r.json()),
+        apiFetch("/api/menu/sections").then((r) => r.json()),
       ]);
       if (m.error) throw new Error(m.error);
       setRows(m.data as MenuRow[]);
       setApps((a.data ?? []) as AppGroup[]);
       setModules(Array.isArray(mod.data) ? (mod.data as { key: string; label: string }[]) : []);
+      setSections(Array.isArray(sec.data) ? (sec.data as MenuSection[]) : []);
     } catch (e) { setErr(String(e)); }
     finally { setLoading(false); }
   }, []);
@@ -156,7 +163,14 @@ export default function MenuManagerPage() {
 
   // ---------- มุมมอง ----------
   const selectedApp = apps.find((a) => a.key === sel) ?? null;
-  const sections = useMemo(() => [...new Set(rows.map((r) => r.section))], [rows]);
+  const sectionNames = useMemo(() => [...new Set(rows.map((r) => r.section))], [rows]);
+
+  // หมวด (ไอคอน/ลำดับ) ของแอปที่เลือก → map ตามชื่อหมวด (เฉพาะเมื่อเลือกแอป ไม่ใช่ "ทุกเมนู")
+  const secByName = useMemo(() => {
+    const m = new Map<string, MenuSection>();
+    if (sel !== ALL) for (const s of sections) if (s.app_key === sel) m.set(s.name, s);
+    return m;
+  }, [sections, sel]);
 
   const groups = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -165,10 +179,11 @@ export default function MenuManagerPage() {
     if (s) visible = visible.filter((r) =>
       r.label.toLowerCase().includes(s) || (r.href ?? "").toLowerCase().includes(s) || (r.section ?? "").toLowerCase().includes(s));
     const m = new Map<string, { order: number; items: MenuRow[] }>();
-    for (const r of visible) { const g = m.get(r.section) ?? { order: r.section_order, items: [] }; g.items.push(r); m.set(r.section, g); }
+    // ลำดับหมวด: ใช้ sort_order จากทะเบียนหมวด (ต่อแอป) ถ้ามี ไม่งั้น fallback section_order ของ item
+    for (const r of visible) { const ord = secByName.get(r.section)?.sort_order ?? r.section_order; const g = m.get(r.section) ?? { order: ord, items: [] }; g.items.push(r); m.set(r.section, g); }
     return [...m.entries()].sort((a, b) => a[1].order - b[1].order)
       .map(([section, g]) => ({ section, items: g.items.sort((a, b) => a.sort_order - b.sort_order) }));
-  }, [rows, q, sel]);
+  }, [rows, q, sel, secByName]);
   const matchCount = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
 
   const notInApp = useMemo(() => {
@@ -218,7 +233,7 @@ export default function MenuManagerPage() {
     }
   };
 
-  // เปลี่ยนชื่อหมวดในที่เดียว — แก้ทุกเมนูที่อยู่ในหมวดนี้ (เฉพาะที่เห็นในแอปที่เลือก)
+  // เปลี่ยนชื่อหมวดในที่เดียว — แก้ทุกเมนูที่อยู่ในหมวดนี้ (เฉพาะที่เห็นในแอปที่เลือก) + ทะเบียนหมวด (ไอคอน/ลำดับตามไปด้วย)
   const renameSection = (group: { section: string; items: MenuRow[] }, raw: string) => {
     const newName = raw.trim();
     setEditingSection(null);
@@ -226,12 +241,67 @@ export default function MenuManagerPage() {
     const ids = new Set(group.items.map((r) => r.id));
     setRows((rs) => rs.map((r) => (ids.has(r.id) ? { ...r, section: newName } : r)));
     group.items.forEach((it) => patchSilently(it.id!, { section: newName }));
+    if (sel !== ALL) {
+      setSections((ss) => ss.map((s) => (s.app_key === sel && s.name === group.section ? { ...s, name: newName } : s)));
+      void apiFetch("/api/menu/sections", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "rename", app_key: sel, name: group.section, rename: newName }) })
+        .then((r) => r.json()).then((j) => { if (j.error) setErr(j.error); });
+    }
     flash("เปลี่ยนชื่อหมวดแล้ว");
   };
 
-  // ตัวอย่างเมนูที่ผู้ใช้เห็น (sidebar ของแอปที่เลือก)
-  const previewItems = sel === ALL ? [] : rows.filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(sel))
-    .sort((a, b) => (a.section_order - b.section_order) || (a.sort_order - b.sort_order));
+  // ---------- ทะเบียนหมวด (ไอคอน + ลำดับ ต่อแอป) ----------
+  // ตั้งไอคอน/ลำดับของหมวด (upsert) — เฉพาะตอนเลือกแอป
+  const setSecMeta = (name: string, patch: Partial<Pick<MenuSection, "icon" | "icon_url" | "sort_order">>) => {
+    if (sel === ALL) return;
+    setSections((ss) => {
+      const i = ss.findIndex((s) => s.app_key === sel && s.name === name);
+      if (i >= 0) { const c = [...ss]; c[i] = { ...c[i], ...patch }; return c; }
+      return [...ss, { app_key: sel, name, icon: null, icon_url: null, sort_order: 100, ...patch }];
+    });
+    void apiFetch("/api/menu/sections", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app_key: sel, name, patch }) })
+      .then((r) => r.json()).then((j) => { if (j.error) setErr(j.error); });
+  };
+
+  const uploadSecIcon = async (name: string, file: File) => {
+    setUploadingSec(true); setErr(null);
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("folder", "section-icons");
+      const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
+      if (j.error || !j.r2_key) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
+      setSecMeta(name, { icon_url: j.r2_key });
+      flash("อัปโหลดไอคอนหมวดแล้ว");
+    } catch (e) { setErr(String(e)); } finally { setUploadingSec(false); }
+  };
+
+  // ลากเรียงลำดับหมวด (เฉพาะตอนเลือกแอป) — เซ็ต sort_order ใหม่ทั้งแอป
+  const reorderSections = (targetSection: string) => {
+    const src = dragSection.current; dragSection.current = null; setDropSection(null);
+    if (!src || src === targetSection || sel === ALL) return;
+    const order = groups.map((g) => g.section);
+    const from = order.indexOf(src), to = order.indexOf(targetSection);
+    if (from < 0 || to < 0) return;
+    const re = [...order]; const [mv] = re.splice(from, 1); re.splice(to, 0, mv);
+    setSections((ss) => {
+      const others = ss.filter((s) => s.app_key !== sel);
+      const cur = new Map(ss.filter((s) => s.app_key === sel).map((s) => [s.name, s]));
+      const updated: MenuSection[] = re.map((name, i) => { const ex = cur.get(name); return ex ? { ...ex, sort_order: (i + 1) * 10 } : { app_key: sel, name, icon: null, icon_url: null, sort_order: (i + 1) * 10 }; });
+      return [...others, ...updated];
+    });
+    void apiFetch("/api/menu/sections", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "reorder", app_key: sel, order: re }) })
+      .then((r) => r.json()).then((j) => { if (j.error) setErr(j.error); });
+    flash("เรียงลำดับหมวดแล้ว");
+  };
+
+  // ตัวอย่างเมนูที่ผู้ใช้เห็น (sidebar ของแอปที่เลือก) — จัดกลุ่มตามหมวด + ไอคอน + ลำดับ
+  const previewGroups = useMemo(() => {
+    if (sel === ALL) return [] as { name: string; meta?: MenuSection; items: MenuRow[] }[];
+    const items = rows.filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(sel));
+    const m = new Map<string, MenuRow[]>();
+    for (const r of items) { const arr = m.get(r.section) ?? []; arr.push(r); m.set(r.section, arr); }
+    return [...m.entries()]
+      .map(([name, its]) => ({ name, meta: secByName.get(name), items: its.sort((a, b) => a.sort_order - b.sort_order) }))
+      .sort((a, b) => (a.meta?.sort_order ?? a.items[0]?.section_order ?? 999) - (b.meta?.sort_order ?? b.items[0]?.section_order ?? 999));
+  }, [rows, sel, secByName]);
 
   const appMenuForDefault = selectedApp
     ? rows.filter((r) => r.is_active && (r.app_keys ?? []).includes(selectedApp.key)).sort((a, b) => a.sort_order - b.sort_order)
@@ -254,7 +324,7 @@ export default function MenuManagerPage() {
             )}
           </div>
         </div>
-        <p className="text-sm text-slate-500 mb-4">เลือกแอป → จัดเมนูของแอปนั้น (ลากเรียง · <b>ลากข้ามหมวด</b>ได้ · <b>✏️ แก้ชื่อหมวด</b> · ซ่อน/แสดง · เพิ่มเมนู) · เลือก “ทุกเมนู” เพื่อจัดการรวม</p>
+        <p className="text-sm text-slate-500 mb-4">เลือกแอป → จัดเมนูของแอปนั้น (ลากเรียง · <b>ลากข้ามหมวด</b> · <b>✏️ แก้ชื่อ</b> · <b>🎨 ไอคอนหมวด</b> · <b>⠿ ลากเรียงหมวด</b> · ซ่อน/แสดง · เพิ่มเมนู) · เลือก “ทุกเมนู” เพื่อจัดการรวม</p>
 
         {err && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between gap-2">⚠ {err}<button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
 
@@ -381,7 +451,14 @@ export default function MenuManagerPage() {
                   onDragOver={(e) => { e.preventDefault(); if (dropSection !== g.section) setDropSection(g.section); }}
                   onDrop={(e) => { e.preventDefault(); handleDrop(g.section); }}
                   className={`bg-white border rounded-xl overflow-hidden ${dropSection === g.section ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200"}`}>
-                  <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-sm font-semibold text-slate-700 flex items-center gap-2">
+                  <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 text-sm font-semibold text-slate-700 flex items-center gap-2"
+                    onDragOver={(e) => { if (dragSection.current) { e.preventDefault(); if (dropSection !== g.section) setDropSection(g.section); } }}
+                    onDrop={(e) => { if (dragSection.current) { e.preventDefault(); e.stopPropagation(); reorderSections(g.section); } }}>
+                    {sel !== ALL && (
+                      <span draggable onDragStart={(e) => { dragSection.current = g.section; e.stopPropagation(); }} onDragEnd={() => { dragSection.current = null; setDropSection(null); }}
+                        className="cursor-grab text-slate-300 hover:text-slate-500 select-none" title="ลากเพื่อเรียงลำดับหมวด">⠿</span>
+                    )}
+                    {sel !== ALL && <Ico icon={secByName.get(g.section)?.icon} iconUrl={secByName.get(g.section)?.icon_url} size={16} />}
                     {editingSection === g.section ? (
                       <input autoFocus defaultValue={g.section}
                         onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); else if (e.key === "Escape") { sectionEscRef.current = true; setEditingSection(null); } }}
@@ -392,9 +469,26 @@ export default function MenuManagerPage() {
                         <span className="cursor-pointer hover:text-blue-700" onClick={() => setEditingSection(g.section)} title="กดเพื่อแก้ชื่อหมวด">{g.section}</span>
                         <span className="text-slate-400 font-normal">({g.items.length})</span>
                         <button onClick={() => setEditingSection(g.section)} title="แก้ชื่อหมวด" className="text-slate-300 hover:text-blue-600">✏️</button>
+                        {sel !== ALL && <button onClick={() => setEditingSecIcon((e) => (e === g.section ? null : g.section))} title="ไอคอนหมวด" className={`${editingSecIcon === g.section ? "text-blue-600" : "text-slate-300"} hover:text-blue-600`}>🎨</button>}
                       </>
                     )}
                   </div>
+                  {sel !== ALL && editingSecIcon === g.section && (
+                    <div className="px-4 py-2 bg-blue-50/40 border-b border-blue-100 flex items-center gap-3 flex-wrap">
+                      <div className="w-9 h-9 rounded border border-slate-200 bg-white flex items-center justify-center overflow-hidden">
+                        <Ico icon={secByName.get(g.section)?.icon} iconUrl={secByName.get(g.section)?.icon_url} size={secByName.get(g.section)?.icon_url ? 34 : 20} />
+                      </div>
+                      <label className="text-xs text-slate-600 flex items-center gap-1">emoji
+                        <input defaultValue={secByName.get(g.section)?.icon ?? ""} onBlur={(e) => setSecMeta(g.section, { icon: e.target.value.trim() || null })} placeholder="🏭" className="w-14 h-7 px-1 text-center text-base border border-slate-200 rounded" /></label>
+                      <label className={`h-7 px-2.5 leading-7 text-xs font-medium rounded cursor-pointer ${uploadingSec ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
+                        {uploadingSec ? "กำลังอัป…" : "⬆ อัปรูป"}
+                        <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={uploadingSec}
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadSecIcon(g.section, f); e.target.value = ""; }} /></label>
+                      {secByName.get(g.section)?.icon_url && <button onClick={() => setSecMeta(g.section, { icon_url: null })} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป</button>}
+                      <span className="text-[11px] text-slate-400">รูปจะชนะ emoji · แนะนำ ≥128px</span>
+                      <button onClick={() => setEditingSecIcon(null)} className="ml-auto text-xs text-slate-500 hover:text-slate-800">เสร็จ</button>
+                    </div>
+                  )}
                   <div className="divide-y divide-slate-100 min-h-[10px]">
                     {g.items.map((it) => (
                       <div key={it.id}>
@@ -460,9 +554,17 @@ export default function MenuManagerPage() {
                     <Ico icon={selectedApp?.icon} iconUrl={selectedApp?.icon_url} size={18} />
                     <span className="text-sm font-medium text-slate-700">{selectedApp?.label}</span>
                   </div>
-                  {previewItems.length === 0 ? <div className="text-[11px] text-slate-300 py-4 text-center">ยังไม่มีเมนูแสดง</div>
-                    : previewItems.map((m) => (
-                      <div key={m.id} className="flex items-center gap-2 text-[13px] text-slate-600 px-2 py-1.5 rounded-md hover:bg-white"><Ico icon={m.icon} size={15} /><span className="truncate">{m.label}</span></div>
+                  {previewGroups.length === 0 ? <div className="text-[11px] text-slate-300 py-4 text-center">ยังไม่มีเมนูแสดง</div>
+                    : previewGroups.map((g) => (
+                      <div key={g.name} className="mb-2">
+                        <div className="flex items-center gap-1.5 px-2 mb-0.5">
+                          <Ico icon={g.meta?.icon} iconUrl={g.meta?.icon_url} size={13} />
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate">{g.name}</span>
+                        </div>
+                        {g.items.map((m) => (
+                          <div key={m.id} className="flex items-center gap-2 text-[13px] text-slate-600 px-2 py-1.5 rounded-md hover:bg-white"><Ico icon={m.icon} size={15} /><span className="truncate">{m.label}</span></div>
+                        ))}
+                      </div>
                     ))}
                   <div className="text-[10px] text-slate-400 mt-2 leading-relaxed">เปลี่ยนทางซ้าย → เห็นผลตรงนี้ทันที (เฉพาะที่ติ๊ก “แถบเมนูซ้าย” + ใช้งานอยู่)</div>
                 </div>
@@ -524,7 +626,7 @@ export default function MenuManagerPage() {
         <datalist id="perm-list">
           {["admin.users", "products.view", "products.edit", "purchase_requests.view", "purchase_requests.approve", "sales.view", "inventory.view"].map((p) => <option key={p} value={p} />)}
         </datalist>
-        <datalist id="section-list">{sections.map((s) => <option key={s} value={s} />)}</datalist>
+        <datalist id="section-list">{sectionNames.map((s) => <option key={s} value={s} />)}</datalist>
         <p className="mt-3 text-[11px] text-slate-400">ผู้แก้: {user?.name ?? "—"} · ผูก “ใครเห็น” แล้วเมนูจะโชว์เฉพาะคนที่มีสิทธิ์นั้น · ทุกการเปลี่ยนบันทึกอัตโนมัติ</p>
       </div>
     </PlaygroundShell>

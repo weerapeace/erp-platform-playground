@@ -213,6 +213,10 @@ export type MenuRow = {
 // โมดูลใหญ่ (App) — tabs บนสุด
 export type AppGroup = { id?: string; key: string; label: string; icon: string | null; icon_url?: string | null; sort_order: number; permission_key: string | null; is_active: boolean };
 
+// หมวดเมนู (ไอคอน/ลำดับ ต่อแอป) — จาก /api/menu/sections
+export type MenuSectionRow = { app_key: string; name: string; icon: string | null; icon_url: string | null; sort_order: number };
+type SectionMeta = { icon: string | null; iconUrl: string | null; order: number };
+
 // map section (default nav) → app key — สำหรับ "นำเข้าเมนูเริ่มต้น"
 function sectionToApp(label: string): string {
   if (label === "หน้าหลัก") return "home";
@@ -242,17 +246,21 @@ export const DEFAULT_MENU_ITEMS: MenuRow[] = navGroups.flatMap((g, gi) =>
   })),
 );
 
-// จัด MenuRow[] (จากทะเบียน) → กลุ่มสำหรับ render sidebar (เรียงตาม section_order/sort_order)
-function groupMenuRows(rows: MenuRow[]): { label: string; items: { href: string; icon: string; labelTH: string; permission?: string | null }[] }[] {
+// จัด MenuRow[] (จากทะเบียน) → กลุ่มสำหรับ render sidebar
+// ลำดับ + ไอคอนหมวด: ใช้ทะเบียนหมวด (secMeta ต่อแอป) ถ้ามี ไม่งั้น fallback section_order ของ item (ไม่มีไอคอน)
+function groupMenuRows(rows: MenuRow[], secMeta?: Map<string, SectionMeta>): { label: string; icon?: string | null; iconUrl?: string | null; items: { href: string; icon: string; labelTH: string; permission?: string | null }[] }[] {
   const bySection = new Map<string, { order: number; items: MenuRow[] }>();
   for (const r of rows) {
-    const g = bySection.get(r.section) ?? { order: r.section_order, items: [] };
+    const meta = secMeta?.get(r.section);
+    const g = bySection.get(r.section) ?? { order: meta?.order ?? r.section_order, items: [] };
     g.items.push(r); bySection.set(r.section, g);
   }
   return [...bySection.entries()]
     .sort((a, b) => a[1].order - b[1].order)
     .map(([label, g]) => ({
       label,
+      icon: secMeta?.get(label)?.icon ?? null,
+      iconUrl: secMeta?.get(label)?.iconUrl ?? null,
       items: g.items.sort((a, b) => a.sort_order - b.sort_order)
         .map((r) => ({ href: r.href, icon: r.icon ?? "•", labelTH: r.label, permission: r.permission_key })),
     }));
@@ -407,6 +415,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   }, []);
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);
+  const [sections, setSections] = useState<MenuSectionRow[]>([]);   // ไอคอน/ลำดับหมวด (ต่อแอป)
   const [modules, setModules] = useState<{ key: string; label: string }[]>([]);
   const [activeApp, setActiveAppState] = useState<string | null>(null);
   const setActiveApp = (k: string | null) => {
@@ -421,6 +430,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     cachedGetJson<{ data?: MenuRow[] }>("/api/menu").then((j) => {
       if (alive && Array.isArray(j.data)) setMenuRows(j.data as MenuRow[]);
     }).catch(() => { if (alive) setMenuRows([]); });
+    cachedGetJson<{ data?: MenuSectionRow[] }>("/api/menu/sections").then((j) => {
+      if (alive && Array.isArray(j.data)) setSections(j.data as MenuSectionRow[]);
+    }).catch(() => { /* ไม่มีหมวด = ใช้ section_order เดิม ไม่มีไอคอน */ });
     cachedGetJson<{ data?: AppGroup[] }>("/api/menu/apps").then((j) => {
       if (!alive || !Array.isArray(j.data)) return;
       const apps = (j.data as AppGroup[]).filter((a) => a.is_active);
@@ -510,10 +522,15 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     if (rows && activeApp && appGroups.length > 0) {
       rows = rows.filter((r) => (r.app_keys ?? []).includes(activeApp));
     }
-    const groups = rows ? groupMenuRows(rows) : DEFAULT_GROUPS;
+    // ทะเบียนหมวด (ไอคอน/ลำดับ) ของแอปที่เปิดอยู่ → ใช้จัดลำดับ + แสดงไอคอนหัวหมวด
+    const secMeta = new Map<string, SectionMeta>();
+    if (activeApp) for (const s of sections) if (s.app_key === activeApp) secMeta.set(s.name, { icon: s.icon, iconUrl: s.icon_url, order: s.sort_order });
+    const groups = rows ? groupMenuRows(rows, secMeta) : DEFAULT_GROUPS;
     return groups
       .map((g) => ({
         label: g.label,
+        icon: (g as { icon?: string | null }).icon ?? null,
+        iconUrl: (g as { iconUrl?: string | null }).iconUrl ?? null,
         items: g.items.filter((it) => !it.permission || can(it.permission as Parameters<typeof can>[0])),
       }))
       .filter((g) => g.items.length > 0);
@@ -701,6 +718,10 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
             <div key={group.label}>
               {navExpanded
                 ? <div className="px-2 mb-1 flex items-center gap-1.5">
+                    {group.iconUrl
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={`/api/r2-image?key=${encodeURIComponent(group.iconUrl)}`} alt="" className="w-3.5 h-3.5 rounded object-contain shrink-0" />
+                      : group.icon ? <span className="text-xs leading-none shrink-0">{group.icon}</span> : null}
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{group.label}</span>
                   </div>
                 : <div className="mx-2 mb-1 border-t border-slate-100" />}
