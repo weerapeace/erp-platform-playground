@@ -2,10 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
+import type { DragEvent } from "react";
 import type { AuditLogEntry } from "@/app/api/audit-logs/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { apiFetch } from "@/lib/api";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
+import { withImageWidth } from "@/lib/r2-image";
 
 const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
@@ -17,6 +19,7 @@ type Tone = "danger" | "warn" | "good" | "done" | "normal";
 type ListResponse = { data: DesignSheetListItem[]; total: number; error: string | null };
 type StatusResponse = { data: WfStatusRow[]; error: string | null };
 type AuditResponse = { data: AuditLogEntry[]; total: number; error: string | null };
+type MoveMessage = { type: "success" | "error"; text: string };
 
 type BrandSummary = {
   key: string;
@@ -113,6 +116,10 @@ function auditText(row: AuditLogEntry): string {
   return `${auditActionLabel(row.action)} ${label}`;
 }
 
+function sheetCoverUrl(sheet: DesignSheetListItem): string | null {
+  return withImageWidth(sheet.cover_url, 220);
+}
+
 function CardDeadline({ tone, label }: { tone: Tone; label: string }) {
   const styles: Record<Tone, string> = {
     danger: "bg-rose-500 text-rose-700",
@@ -150,6 +157,10 @@ export default function DesignSheetsDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [statusMgr, setStatusMgr] = useState(false);
+  const [draggingSheetId, setDraggingSheetId] = useState<string | null>(null);
+  const [dropTargetStatus, setDropTargetStatus] = useState<string | null>(null);
+  const [movingSheetId, setMovingSheetId] = useState<string | null>(null);
+  const [moveMessage, setMoveMessage] = useState<MoveMessage | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -244,6 +255,71 @@ export default function DesignSheetsDashboardPage() {
     sheets: filteredSheets.filter((sheet) => sheet.status === column.key),
   }));
 
+  function refreshDashboard() {
+    setMoveMessage(null);
+    setRefreshKey((key) => key + 1);
+  }
+
+  async function moveSheetToStatus(sheetId: string, nextStatus: string) {
+    const sheet = sheets.find((item) => item.id === sheetId);
+    if (!sheet || sheet.status === nextStatus || movingSheetId) return;
+
+    const previousSheets = sheets;
+    const nextLabel = statusMeta.map[nextStatus]?.label ?? nextStatus;
+
+    setMovingSheetId(sheetId);
+    setMoveMessage(null);
+    setSheets((items) => items.map((item) => (
+      item.id === sheetId ? { ...item, status: nextStatus, updated_at: new Date().toISOString() } : item
+    )));
+
+    try {
+      const response = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheetId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const json = await response.json() as { error?: string | null };
+      if (!response.ok || json.error) throw new Error(json.error || "\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08");
+      setMoveMessage({ type: "success", text: `\u0e22\u0e49\u0e32\u0e22 ${sheet.code} \u0e44\u0e1b ${nextLabel} \u0e41\u0e25\u0e49\u0e27` });
+    } catch (e) {
+      setSheets(previousSheets);
+      setMoveMessage({ type: "error", text: e instanceof Error ? e.message : "\u0e22\u0e49\u0e32\u0e22\u0e2a\u0e16\u0e32\u0e19\u0e30\u0e44\u0e21\u0e48\u0e2a\u0e33\u0e40\u0e23\u0e47\u0e08" });
+    } finally {
+      setMovingSheetId(null);
+      setDraggingSheetId(null);
+      setDropTargetStatus(null);
+    }
+  }
+
+  function handleCardDragStart(event: DragEvent<HTMLAnchorElement>, sheet: DesignSheetListItem) {
+    event.dataTransfer.setData("text/plain", sheet.id);
+    event.dataTransfer.effectAllowed = "move";
+    setDraggingSheetId(sheet.id);
+    setMoveMessage(null);
+  }
+
+  function handleColumnDragOver(event: DragEvent<HTMLDivElement>, column: StatusColumn) {
+    if (column.old || movingSheetId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (dropTargetStatus !== column.key) setDropTargetStatus(column.key);
+  }
+
+  function handleColumnDragLeave(event: DragEvent<HTMLDivElement>, column: StatusColumn) {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    if (dropTargetStatus === column.key) setDropTargetStatus(null);
+  }
+
+  function handleColumnDrop(event: DragEvent<HTMLDivElement>, column: StatusColumn) {
+    if (column.old) return;
+    event.preventDefault();
+    const sheetId = event.dataTransfer.getData("text/plain");
+    setDropTargetStatus(null);
+    if (sheetId) void moveSheetToStatus(sheetId, column.key);
+  }
+
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,#fef3c7_0,#f8fafc_28%,#eef2ff_100%)]">
       <div className="w-full px-3 py-4 sm:px-5 lg:px-6 lg:py-5">
@@ -263,7 +339,7 @@ export default function DesignSheetsDashboardPage() {
               กลับ Design Sheets
             </a>
             <button
-              onClick={() => setRefreshKey((key) => key + 1)}
+              onClick={refreshDashboard}
               className="inline-flex h-9 items-center rounded-md border border-slate-200 bg-white/85 px-3 text-sm font-medium text-slate-600 shadow-sm hover:bg-white"
             >
               รีเฟรชข้อมูล
@@ -277,6 +353,12 @@ export default function DesignSheetsDashboardPage() {
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             โหลดข้อมูลจริงไม่สำเร็จ: {error}
+          </div>
+        )}
+
+        {moveMessage && (
+          <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${moveMessage.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+            {moveMessage.text}
           </div>
         )}
 
@@ -395,8 +477,16 @@ export default function DesignSheetsDashboardPage() {
                     {boardColumns.map((column, index) => {
                       const shown = column.sheets.slice(0, 8);
                       const hiddenCount = Math.max(0, column.sheets.length - shown.length);
+                      const isDropTarget = dropTargetStatus === column.key;
                       return (
-                        <div key={`${column.key}-${index}`} className="relative">
+                        <div
+                          key={`${column.key}-${index}`}
+                          onDragOver={(event) => handleColumnDragOver(event, column)}
+                          onDragEnter={(event) => handleColumnDragOver(event, column)}
+                          onDragLeave={(event) => handleColumnDragLeave(event, column)}
+                          onDrop={(event) => handleColumnDrop(event, column)}
+                          className={`relative rounded-xl transition-colors ${isDropTarget ? "bg-amber-50/70 ring-2 ring-amber-300 ring-offset-2" : ""}`}
+                        >
                           {index < boardColumns.length - 1 && (
                             <div className="absolute left-[62%] top-8 h-px w-[76%] bg-gradient-to-r from-amber-300 via-amber-200 to-transparent shadow-[0_0_12px_rgba(245,158,11,0.45)]" />
                           )}
@@ -408,13 +498,32 @@ export default function DesignSheetsDashboardPage() {
                           <div className="min-h-[128px] space-y-2">
                             {shown.map((sheet) => {
                               const brandColor = safeColor(sheet.brand_color);
+                              const coverUrl = sheetCoverUrl(sheet);
+                              const isDragging = draggingSheetId === sheet.id;
+                              const isMoving = movingSheetId === sheet.id;
                               return (
                                 <a
                                   key={sheet.id}
                                   href={`/master/design-sheets?open=${encodeURIComponent(sheet.id)}`}
-                                  className="block rounded-lg border border-slate-200 bg-white p-2 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300"
+                                  draggable={!movingSheetId}
+                                  onDragStart={(event) => handleCardDragStart(event, sheet)}
+                                  onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
+                                  aria-busy={isMoving}
+                                  title="Drag to change status or click to open"
+                                  className={`block rounded-lg border border-slate-200 bg-white p-2 shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 hover:border-amber-300 ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : "cursor-grab active:cursor-grabbing"}`}
                                 >
-                                  <div className="mb-2 h-12 rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }} />
+                                  {coverUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={coverUrl}
+                                      alt={sheet.name}
+                                      loading="lazy"
+                                      decoding="async"
+                                      className="mb-2 h-16 w-full rounded-md border border-slate-100 bg-slate-50 object-cover"
+                                    />
+                                  ) : (
+                                    <div className="mb-2 h-16 rounded-md border border-slate-100" style={{ background: `linear-gradient(135deg, #ffffff 0%, ${brandColor}18 70%, #fef3c7 100%)` }} />
+                                  )}
                                   <div className="flex items-center gap-1.5">
                                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />
                                     <span className="font-mono text-[11px] text-slate-400">{sheet.code}</span>
@@ -488,7 +597,7 @@ export default function DesignSheetsDashboardPage() {
           onClose={() => setStatusMgr(false)}
           entityType="design_sheet"
           actor={null}
-          onChanged={() => setRefreshKey((key) => key + 1)}
+          onChanged={refreshDashboard}
         />
       )}
     </div>
