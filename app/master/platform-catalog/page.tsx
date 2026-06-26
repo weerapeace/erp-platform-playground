@@ -3,8 +3,9 @@
 // สินค้าบนแพลตฟอร์ม (Platform Catalog) — ทิศอ่าน: ดูว่าแต่ละร้าน/แพลตฟอร์มมีสินค้าอะไร + ฟิลด์อะไร
 // เฟสนี้ = โครง (ตาราง+หน้า+API พร้อม) ยังไม่ดึงข้อมูลจริง · นำเข้า (อัปไฟล์ export/ต่อ API) เฟสถัดไป
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/components/auth";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
@@ -15,6 +16,11 @@ type FieldRow = { field_key: string; field_label: string | null; data_type: stri
 type Listing = { id: string; external_product_id: string | null; title: string | null; sku_code: string | null; matched_parent_sku_id: string | null; price: number | null; status: string | null };
 
 export default function PlatformCatalogPage() {
+  const { can } = useAuth();
+  const canEdit = can("products.platforms.edit");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
@@ -47,6 +53,29 @@ export default function PlatformCatalogPage() {
   }, [platformId, brandId]);
   useEffect(() => { load(); }, [load]);
 
+  // อัปไฟล์ export (xlsx/csv) → แกะหัวคอลัมน์+แถวฝั่ง client → ส่งเข้า import API
+  const importFile = async (file: File) => {
+    if (!platformId) { setNote("เลือกแพลตฟอร์มก่อน"); return; }
+    setImporting(true); setNote("กำลังอ่านไฟล์...");
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
+      const headers = ((aoa[0] ?? []) as unknown[]).map((h) => String(h ?? "").trim()).filter(Boolean);
+      if (headers.length === 0) { setNote("ไม่พบหัวคอลัมน์ในไฟล์"); return; }
+      const rows = (aoa.slice(1) as unknown[][])
+        .filter((r) => r.some((c) => String(c ?? "").trim() !== ""))
+        .map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
+      const r = await apiFetch("/api/platform-catalog/import", { method: "POST", body: JSON.stringify({ platform_id: platformId, brand_id: brandId || undefined, headers, rows }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setNote(`นำเข้าแล้ว: ${j.listings} สินค้า · ${j.fields} ฟิลด์ · จับคู่ ERP ได้ ${j.matched}`);
+      await load();
+    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+    finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
   const activePf = platforms.find((p) => p.id === platformId);
   const cols: MiniColumn<Listing>[] = [
     { key: "ext", header: "รหัสบนแพลตฟอร์ม", width: "1.2fr", cell: (l) => <span className="font-mono text-xs">{l.external_product_id || "—"}</span> },
@@ -77,9 +106,11 @@ export default function PlatformCatalogPage() {
           {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
         <div className="flex-1" />
-        <button disabled title="เฟสถัดไป" className="h-9 px-3 text-sm text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed">⬆️ อัปไฟล์ export (เร็ว ๆ นี้)</button>
+        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); }} />
+        <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center"} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "⬆️ อัปไฟล์ export"}</button>
         <button disabled title="เฟสถัดไป — ต้องมี API key" className="h-9 px-3 text-sm text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed">🔗 ดึงจาก API (เร็ว ๆ นี้)</button>
       </div>
+      {note && <p className="text-xs text-slate-500 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{note}</p>}
 
       <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit text-sm mb-3">
         <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({summary.total})</button>
@@ -88,11 +119,11 @@ export default function PlatformCatalogPage() {
 
       {loading ? <p className="text-slate-400 text-sm py-8 text-center">กำลังโหลด...</p> : tab === "catalog" ? (
         listings.length === 0
-          ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่มีข้อมูลสินค้าบนแพลตฟอร์มนี้<br />นำเข้าได้เฟสถัดไป (อัปไฟล์ export จาก Seller Center หรือต่อ API)</div>
+          ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่มีข้อมูลสินค้าบนแพลตฟอร์มนี้<br />กด “⬆️ อัปไฟล์ export” ด้านบน เพื่อนำเข้าไฟล์ Excel/CSV จาก Seller Center</div>
           : <MiniTable rows={listings} columns={cols} rowKey={(l) => l.id} searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""}`} dense />
       ) : (
         fields.length === 0
-          ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่ทราบฟิลด์ของแพลตฟอร์มนี้<br />จะรู้อัตโนมัติเมื่ออัปไฟล์ export (หัวคอลัมน์ = ฟิลด์) เฟสถัดไป</div>
+          ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่ทราบฟิลด์ของแพลตฟอร์มนี้<br />อัปไฟล์ export แล้วระบบจะอ่านหัวคอลัมน์เป็นฟิลด์ให้อัตโนมัติ</div>
           : <MiniTable rows={fields} columns={fcols} rowKey={(f) => f.field_key} searchText={(f) => `${f.field_key} ${f.field_label ?? ""}`} dense />
       )}
     </div>
