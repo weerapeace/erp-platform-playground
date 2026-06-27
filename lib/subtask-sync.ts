@@ -8,7 +8,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { writeAudit } from "@/lib/audit";
 
-export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[] } | null;
+export type ImageSyncTargets = { parent_ids?: string[]; sku_ids?: string[]; sku_images?: Record<string, string[]> } | null;
 export type SubtaskForSync = { id: string; task_id: string; subtask_type?: string | null; config?: Record<string, unknown> | null; description?: string | null; image_sync_targets?: ImageSyncTargets };
 export type SyncResult = { pushed: number; skipped: string[] };
 
@@ -49,7 +49,10 @@ const ALLOWED_DESC_FIELDS = new Set(["description", "english_description", "plat
 export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts: { actorId?: string | null }): Promise<SyncResult> {
   const cfg = (subtask.config ?? {}) as Record<string, any>;
   const target = String(cfg.approve_target ?? "none");
-  const selTargets = buildSelectedTargets(subtask.image_sync_targets ?? null);
+  const sel = subtask.image_sync_targets ?? null;
+  const selTargets = buildSelectedTargets(sel);
+  // รูปร่างต่อ SKU (กล่อง dropzone ใต้ SKU) → เข้าแกลเลอรีของ SKU นั้นตอนอนุมัติ
+  const skuImageEntries = Object.entries((sel?.sku_images ?? {})).filter(([, keys]) => Array.isArray(keys) && keys.length) as [string, string[]][];
   const isMediaType = target === "sku_media" || target === "description_media" || target === "cover";
 
   let pushed = 0; const skipped: string[] = [];
@@ -57,36 +60,49 @@ export async function applySubtaskSync(admin: any, subtask: SubtaskForSync, opts
   const now = new Date().toISOString();
   const base = { subtask_id: subtask.id, task_id: subtask.task_id, type_key: subtask.subtask_type ?? null, created_by: opts.actorId ?? null, created_at: now, active: true };
 
-  // ===== รูปงาน → สินค้า : ขับเคลื่อนด้วย "การติ๊กเลือก" ในป๊อปอัปส่งงาน =====
-  // ทำเมื่องานเป็นชนิดรูป (sku_media/description_media/cover) หรือมีการเลือกปลายทางไว้
-  // ถ้าไม่ติ๊กเลือกอะไร → ไม่ดันเข้าสินค้า (แนบรูปปกติ ตามที่เจ้าของกำหนด)
-  if (isMediaType || selTargets.length) {
-    if (!selTargets.length) return { pushed: 0, skipped: ["no_selection"] };
-    const { data: atts } = await admin.from("erp_creative_attachments").select("r2_key").eq("subtask_id", subtask.id).eq("kind", "image");
-    const imageKeys = ((atts ?? []) as { r2_key: string }[]).map((a) => a.r2_key).filter(Boolean);
-    if (!imageKeys.length) return { pushed: 0, skipped: ["no_images"] };
-
-    if (target === "cover") {
-      for (const tg of selTargets) {
-        const { data: cur } = await admin.from(tg.table).select("cover_image_r2_key").eq("id", tg.id).maybeSingle();
-        const prev = (cur?.cover_image_r2_key as string | null) ?? null;
-        await admin.from(tg.table).update({ cover_image_r2_key: imageKeys[0] }).eq("id", tg.id);
-        ledger.push({ ...base, target_kind: "cover", target_table: tg.table, target_id: tg.id, ref: "cover_image_r2_key", prev_value: prev, new_value: imageKeys[0] }); pushed++;
+  // helper: เพิ่มรูปเข้าแกลเลอรี + ตั้งปกถ้าว่าง (พร้อมจด ledger ให้ถอดกลับได้)
+  const pushGallery = async (ownerType: "product_sku" | "parent_sku", table: "skus_v2" | "parent_skus_v2", ownerId: string, keys: string[], setCoverIfEmpty: boolean) => {
+    const { data: mx } = await admin.from("product_image_slots").select("slot").eq("owner_type", ownerType).eq("owner_id", ownerId).eq("image_group", "gallery").order("slot", { ascending: false }).limit(1);
+    let slot = (mx?.[0]?.slot as number) ?? -1;
+    for (const key of keys) {
+      slot += 1;
+      const { data: ins, error } = await admin.from("product_image_slots").insert({ owner_type: ownerType, owner_id: ownerId, image_group: "gallery", slot, r2_key: key }).select("id").single();
+      if (!error && ins?.id) { ledger.push({ ...base, target_kind: "media", target_table: "product_image_slots", target_id: ins.id, ref: key, mode: "gallery" }); pushed++; }
+    }
+    if (setCoverIfEmpty && keys[0]) {
+      const { data: cur } = await admin.from(table).select("cover_image_r2_key").eq("id", ownerId).maybeSingle();
+      if (!(cur?.cover_image_r2_key as string | null)) {
+        await admin.from(table).update({ cover_image_r2_key: keys[0] }).eq("id", ownerId);
+        ledger.push({ ...base, target_kind: "cover", target_table: table, target_id: ownerId, ref: "cover_image_r2_key", prev_value: null, new_value: keys[0] });
       }
-    } else {
-      const group = target === "description_media" ? "description" : "gallery"; // ดีฟอลต์ = แกลเลอรีสินค้า
-      for (const tg of selTargets) {
-        const { data: mx } = await admin.from("product_image_slots").select("slot").eq("owner_type", tg.ownerType).eq("owner_id", tg.id).eq("image_group", group).order("slot", { ascending: false }).limit(1);
-        let slot = (mx?.[0]?.slot as number) ?? -1;
-        for (const key of imageKeys) {
-          slot += 1;
-          const { data: ins, error } = await admin.from("product_image_slots").insert({ owner_type: tg.ownerType, owner_id: tg.id, image_group: group, slot, r2_key: key }).select("id").single();
-          if (!error && ins?.id) { ledger.push({ ...base, target_kind: "media", target_table: "product_image_slots", target_id: ins.id, ref: key, mode: group }); pushed++; }
+    }
+  };
+
+  // ===== รูป → สินค้า : (1) รูปงานตามการติ๊กเลือก  (2) รูปร่างต่อ SKU =====
+  if (isMediaType || selTargets.length || skuImageEntries.length) {
+    // (1) รูปงานที่แนบ → ปลายทางที่ติ๊ก (ถ้ามีติ๊ก + มีรูปงาน)
+    if (selTargets.length) {
+      const { data: atts } = await admin.from("erp_creative_attachments").select("r2_key").eq("subtask_id", subtask.id).eq("kind", "image");
+      const imageKeys = ((atts ?? []) as { r2_key: string }[]).map((a) => a.r2_key).filter(Boolean);
+      if (imageKeys.length) {
+        if (target === "cover") {
+          for (const tg of selTargets) {
+            const { data: cur } = await admin.from(tg.table).select("cover_image_r2_key").eq("id", tg.id).maybeSingle();
+            const prev = (cur?.cover_image_r2_key as string | null) ?? null;
+            await admin.from(tg.table).update({ cover_image_r2_key: imageKeys[0] }).eq("id", tg.id);
+            ledger.push({ ...base, target_kind: "cover", target_table: tg.table, target_id: tg.id, ref: "cover_image_r2_key", prev_value: prev, new_value: imageKeys[0] }); pushed++;
+          }
+        } else {
+          for (const tg of selTargets) await pushGallery(tg.ownerType, tg.table, tg.id, imageKeys, false);
         }
       }
     }
+    // (2) รูปร่างต่อ SKU → แกลเลอรีของ SKU นั้น + ตั้งปกถ้าว่าง
+    for (const [skuId, keys] of skuImageEntries) await pushGallery("product_sku", "skus_v2", skuId, keys.filter(Boolean), true);
+
     if (ledger.length) await admin.from("erp_subtask_sync").insert(ledger);
-    await writeAudit(admin, { action: "subtask:sync", entityType: "creative_subtask", entityId: subtask.id, actorId: opts.actorId ?? null, actorName: null, metadata: { target, mode: "selection", pushed, skipped } });
+    if (!pushed) skipped.push("no_images");
+    await writeAudit(admin, { action: "subtask:sync", entityType: "creative_subtask", entityId: subtask.id, actorId: opts.actorId ?? null, actorName: null, metadata: { target, mode: "selection", pushed, sku_image_skus: skuImageEntries.length, skipped } });
     return { pushed, skipped };
   }
 

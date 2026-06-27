@@ -352,6 +352,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [extraParents, setExtraParents] = useState<PlatformParent[]>([]);  // Parent ที่เลือกเพิ่มเอง (นอกเหนือที่ผูกกับงาน)
   const [addParentOpen, setAddParentOpen] = useState(false);
   const [linkedSkuIds, setLinkedSkuIds] = useState<string[]>([]);          // SKU ที่ผูกกับงาน (ใช้ติ๊กล่วงหน้า)
+  const [skuDraftImages, setSkuDraftImages] = useState<Record<string, { r2_key: string; file_name: string }[]>>({}); // รูปร่างต่อ SKU (เข้าตอนอนุมัติ)
   const syncInit = useRef(false);
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
@@ -398,9 +399,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   useEffect(() => {
     if (!showImages || syncInit.current || parents === null) return;
     const ex = sub.image_sync_targets;
-    if (ex && ((ex.parent_ids?.length ?? 0) > 0 || (ex.sku_ids?.length ?? 0) > 0)) {
+    if (ex && ((ex.parent_ids?.length ?? 0) > 0 || (ex.sku_ids?.length ?? 0) > 0 || Object.keys(ex.sku_images ?? {}).length > 0)) {
       setSyncParentIds(new Set(ex.parent_ids ?? []));
       setSyncSkuIds(new Set(ex.sku_ids ?? []));
+      setSkuDraftImages(Object.fromEntries(Object.entries(ex.sku_images ?? {}).map(([k, keys]) => [k, (keys as string[]).map((r) => ({ r2_key: r, file_name: "" }))])));
     } else {
       setSyncParentIds(new Set(parents.map((p) => p.id).filter(Boolean)));
       setSyncSkuIds(new Set(linkedSkuIds));
@@ -408,10 +410,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     syncInit.current = true;
   }, [showImages, parents, linkedSkuIds, sub.image_sync_targets]);
 
-  // เซฟปลายทางที่เลือกลงงานย่อย (best-effort) — ทั้งผู้ส่งและผู้ตรวจปรับได้ก่อนอนุมัติ
-  const persistTargets = useCallback((pids: Set<string>, sids: Set<string>) => {
-    updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...pids], sku_ids: [...sids] } }).catch(() => {});
-  }, [taskId, sub.id]);
+  // เซฟปลายทาง + รูปร่างต่อ SKU ลงงานย่อย (best-effort) — ทั้งผู้ส่งและผู้ตรวจปรับได้ก่อนอนุมัติ
+  const persistTargets = useCallback((pids: Set<string>, sids: Set<string>, skuImgs: Record<string, { r2_key: string; file_name: string }[]> = skuDraftImages) => {
+    const sku_images = Object.fromEntries(Object.entries(skuImgs).map(([k, arr]) => [k, arr.map((x) => x.r2_key)]).filter(([, ks]) => (ks as string[]).length));
+    updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...pids], sku_ids: [...sids], sku_images } }).catch(() => {});
+  }, [taskId, sub.id, skuDraftImages]);
   const toggleSyncParent = (pid: string) => { const n = new Set(syncParentIds); n.has(pid) ? n.delete(pid) : n.add(pid); setSyncParentIds(n); persistTargets(n, syncSkuIds); };
   const toggleSyncSku = (sid: string) => { const n = new Set(syncSkuIds); n.has(sid) ? n.delete(sid) : n.add(sid); setSyncSkuIds(n); persistTargets(syncParentIds, n); };
   const addSyncParent = async (p: ParentSkuPickerValue) => {
@@ -426,20 +429,20 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   };
   const displayParents = useMemo(() => [...(parents ?? []), ...extraParents], [parents, extraParents]);
 
-  // image-sync section: ใส่รูปเข้า SKU ทันที (อัปแล้วเข้าแกลเลอรีสินค้าเลย)
+  // image-sync section: กล่องร่างรูปต่อ SKU — ลากเข้า = เก็บร่าง (เข้าแกลเลอรีตอนอนุมัติ)
   const [uploadingSku, setUploadingSku] = useState<string | null>(null);
-  const addSkuImage = async (parentId: string, skuId: string, files: FileList | File[]) => {
-    const f = Array.from(files).find((x) => x.type.startsWith("image/"));
-    if (!f) return;
+  const addSkuDraftImages = async (skuId: string, files: FileList | File[]) => {
+    const imgs = Array.from(files).filter((x) => x.type.startsWith("image/"));
+    if (!imgs.length) return;
     setUploadingSku(skuId);
     try {
-      const up = await uploadResizedImage(f, { folder: "skus", max: 1200 });
-      const res = await apiFetch("/api/product-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner_type: "product_sku", owner_id: skuId, r2_key: up.r2_key }) });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      const coverKey = (j.cover as string) ?? up.r2_key;
-      setSkusByParent((m) => ({ ...m, [parentId]: (m[parentId] ?? []).map((s) => s.id === skuId ? { ...s, image_key: coverKey } : s) }));
-      pushToast("success", t("ใส่รูปให้ SKU แล้ว", "Image added to SKU"));
-    } catch (e) { pushToast("error", (e as Error).message); } finally { setUploadingSku(null); }
+      const ups: { r2_key: string; file_name: string }[] = [];
+      for (const f of imgs) { const up = await uploadResizedImage(f, { folder: "skus", max: 1200 }); ups.push({ r2_key: up.r2_key, file_name: up.file_name }); }
+      setSkuDraftImages((prev) => { const next = { ...prev, [skuId]: [...(prev[skuId] ?? []), ...ups] }; persistTargets(syncParentIds, syncSkuIds, next); return next; });
+    } catch (e) { pushToast("error", t("อัปรูปไม่สำเร็จ: ", "Upload failed: ") + (e as Error).message); } finally { setUploadingSku(null); }
+  };
+  const removeSkuDraftImage = (skuId: string, idx: number) => {
+    setSkuDraftImages((prev) => { const next = { ...prev, [skuId]: (prev[skuId] ?? []).filter((_, i) => i !== idx) }; persistTargets(syncParentIds, syncSkuIds, next); return next; });
   };
 
   const platformReady = parents !== null && parents.length > 0 && parents.every((p) => p.has_description);
@@ -455,7 +458,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     setBusy(true);
     try {
       const body: Record<string, unknown> = { status: "submitted" };
-      if (showImages) body.image_sync_targets = { parent_ids: [...syncParentIds], sku_ids: [...syncSkuIds] }; // บันทึกปลายทางรูปตอนส่ง
+      if (showImages) {
+        const sku_images = Object.fromEntries(Object.entries(skuDraftImages).map(([k, arr]) => [k, arr.map((x) => x.r2_key)]).filter(([, ks]) => (ks as string[]).length));
+        body.image_sync_targets = { parent_ids: [...syncParentIds], sku_ids: [...syncSkuIds], sku_images }; // บันทึกปลายทาง + รูปร่างต่อ SKU ตอนส่ง
+      }
       await updateSubtask(taskId, sub.id, body); await reload(); pushToast("success", t("ส่งงานแล้ว — รออนุมัติ", "Submitted — pending approval")); onClose();
     }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
@@ -532,19 +538,34 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                         <button type="button" onClick={() => setEditParentId(p.id)} title={t("แก้/เพิ่ม SKU ในตัวแก้สินค้า", "Manage SKUs in product editor")} className="text-[11px] text-violet-600 hover:underline shrink-0">✏️ {t("แก้สินค้า", "Edit product")}</button>
                       </div>
                       <div className="pl-6 mt-1.5 space-y-1">
-                        {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; return (
-                          <div key={s.id} className="flex items-center gap-2 text-xs">
-                            <input type="checkbox" checked={son} onChange={() => toggleSyncSku(s.id)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
-                            <HoverImage url={thumb} size={26} rounded="rounded" fallback="📦" />
-                            <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-                            <span className="text-slate-700 truncate flex-1">{s.name}</span>
-                            <label title={t("ใส่รูปให้ SKU นี้", "Add photo to this SKU")}
-                              onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void addSkuImage(p.id, s.id, e.dataTransfer.files); }}
-                              className="shrink-0 inline-flex items-center gap-0.5 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 cursor-pointer hover:bg-amber-50">
-                              {uploadingSku === s.id ? "⏳" : <>📷 {t("ใส่รูป", "Photo")}</>}
-                              <input type="file" accept="image/*" hidden onChange={(e) => { if (e.target.files) void addSkuImage(p.id, s.id, e.target.files); e.target.value = ""; }} />
-                            </label>
-                            <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️</button>
+                        {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); const thumb = s.image_key ? `/api/r2-image?key=${encodeURIComponent(s.image_key)}` : null; const drafts = skuDraftImages[s.id] ?? []; return (
+                          <div key={s.id} className="space-y-1">
+                            <div className="flex items-center gap-2 text-xs">
+                              <input type="checkbox" checked={son} onChange={() => toggleSyncSku(s.id)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600 cursor-pointer" />
+                              <HoverImage url={thumb} size={26} rounded="rounded" fallback="📦" />
+                              <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+                              <span className="text-slate-700 truncate flex-1">{s.name}</span>
+                              <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️</button>
+                            </div>
+                            {/* กล่องร่างรูปของ SKU นี้ — ลากรูปมาใส่ (เข้าแกลเลอรีตอนอนุมัติ) */}
+                            <div className="ml-6" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void addSkuDraftImages(s.id, e.dataTransfer.files); }}>
+                              <div className="rounded-md border border-dashed border-amber-200 bg-amber-50/30 px-2 py-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {drafts.map((im, j) => (
+                                    <div key={j} className="relative group">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key)}&w=64`} alt="" className="h-10 w-10 object-cover rounded border border-slate-200" />
+                                      <button type="button" onClick={() => removeSkuDraftImage(s.id, j)} className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center bg-white rounded-full text-red-500 text-[9px] shadow opacity-0 group-hover:opacity-100">✕</button>
+                                    </div>
+                                  ))}
+                                  <label className="h-10 px-2 inline-flex items-center gap-1 rounded border border-dashed border-amber-300 text-amber-700 text-[11px] cursor-pointer hover:bg-amber-50">
+                                    {uploadingSku === s.id ? "⏳" : <>📥 {t("ลากรูปมาใส่ / เลือกไฟล์", "Drop or pick images")}</>}
+                                    <input type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void addSkuDraftImages(s.id, e.target.files); e.target.value = ""; }} />
+                                  </label>
+                                </div>
+                                {drafts.length > 0 && <p className="text-[10px] text-amber-600 mt-0.5">{t(`ร่าง ${drafts.length} รูป — เข้าแกลเลอรี SKU ตอนอนุมัติ`, `${drafts.length} draft — added on approval`)}</p>}
+                              </div>
+                            </div>
                           </div>
                         ); })}
                         {(skusByParent[p.id] ?? []).length === 0 && <p className="text-[11px] text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
