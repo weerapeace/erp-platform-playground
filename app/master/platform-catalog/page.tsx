@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
+import { detectProfile, profilesForPlatform, getProfile, type ImportMatrix } from "@/lib/platform-import-profiles";
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
@@ -22,6 +23,8 @@ export default function PlatformCatalogPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // ไฟล์ที่อ่านแล้วรอยืนยันชนิด (เดาให้ + ให้ผู้ใช้ยืนยันก่อนนำเข้า)
+  const [pending, setPending] = useState<{ fileName: string; matrix: ImportMatrix; profileId: string } | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
@@ -59,7 +62,7 @@ export default function PlatformCatalogPage() {
   }, [platformId, brandId]);
   useEffect(() => { load(); }, [load]);
 
-  // อัปไฟล์ export (xlsx/csv) → แกะหัวคอลัมน์+แถวฝั่ง client → ส่งเข้า import API
+  // ขั้นที่ 1: อ่านไฟล์ (xlsx/csv) เป็น matrix ดิบ → เดาชนิดไฟล์ → ขึ้นให้ยืนยัน (ยังไม่ส่ง)
   const importFile = async (file: File) => {
     if (!platformId) { setNote("เลือกแพลตฟอร์มก่อน"); return; }
     setImporting(true); setNote("กำลังอ่านไฟล์...");
@@ -68,19 +71,32 @@ export default function PlatformCatalogPage() {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       const sheet = wb.Sheets[wb.SheetNames[0]];
-      const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
-      const headers = ((aoa[0] ?? []) as unknown[]).map((h) => String(h ?? "").trim()).filter(Boolean);
-      if (headers.length === 0) { setNote("ไม่พบหัวคอลัมน์ในไฟล์"); return; }
-      const rows = (aoa.slice(1) as unknown[][])
-        .filter((r) => r.some((c) => String(c ?? "").trim() !== ""))
-        .map((r) => Object.fromEntries(headers.map((h, i) => [h, r[i] ?? ""])));
-      const r = await apiFetch("/api/platform-catalog/import", { method: "POST", body: JSON.stringify({ platform_id: platformId, brand_id: brandId || undefined, headers, rows }) });
-      const j = await r.json(); if (j.error) throw new Error(j.error);
-      setNote(`นำเข้าแล้ว: ${j.listings} สินค้า · ${j.fields} ฟิลด์ · จับคู่ ERP ได้ ${j.matched}`);
-      await load();
-    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+      const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" }) as ImportMatrix;
+      if (matrix.length === 0) { setNote("ไฟล์ว่างเปล่า"); return; }
+      const code = platforms.find((p) => p.id === platformId)?.code ?? "";
+      const guessed = detectProfile(code, matrix);
+      setPending({ fileName: file.name, matrix, profileId: guessed.id });
+      setNote(null);
+    } catch (e) { setNote("อ่านไฟล์ไม่สำเร็จ: " + (e as Error).message); }
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
   };
+
+  // ขั้นที่ 2: ผู้ใช้ยืนยันชนิดไฟล์แล้ว → ส่ง matrix + profile_id เข้า API
+  const confirmImport = async () => {
+    if (!pending) return;
+    setImporting(true); setNote("กำลังนำเข้า...");
+    try {
+      const r = await apiFetch("/api/platform-catalog/import", { method: "POST", body: JSON.stringify({ platform_id: platformId, brand_id: brandId || undefined, profile_id: pending.profileId, matrix: pending.matrix }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      setNote(`นำเข้าแล้ว (${j.profile}): ${j.products} สินค้า · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · ${j.fields} ฟิลด์ · จับคู่ ERP ได้ ${j.matched}`);
+      setPending(null);
+      await load();
+    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+    finally { setImporting(false); }
+  };
+
+  const platformCode = platforms.find((p) => p.id === platformId)?.code ?? "";
+  const profileOptions = profilesForPlatform(platformCode);
 
   const saveMapping = async (platform_field_key: string, source_key: string) => {
     setMappings((m) => { const n = { ...m }; if (source_key) n[platform_field_key] = source_key; else delete n[platform_field_key]; return n; });
@@ -126,6 +142,29 @@ export default function PlatformCatalogPage() {
         <button disabled title="เฟสถัดไป — ต้องมี API key" className="h-9 px-3 text-sm text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed">🔗 ดึงจาก API (เร็ว ๆ นี้)</button>
       </div>
       {note && <p className="text-xs text-slate-500 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{note}</p>}
+
+      {pending && (() => {
+        const prof = getProfile(pending.profileId);
+        const isOrders = prof?.kind === "orders";
+        return (
+          <div className="mb-3 border border-violet-200 bg-violet-50/60 rounded-xl p-3">
+            <div className="flex items-center gap-2 text-sm text-slate-700 mb-2">
+              <span>📄</span><span className="font-medium truncate">{pending.fileName}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-slate-600">ระบบตรวจว่าไฟล์นี้คือ:</span>
+              <select value={pending.profileId} onChange={(e) => setPending({ ...pending, profileId: e.target.value })} className="h-9 border border-violet-200 rounded-md px-2 text-sm bg-white max-w-full">
+                {profileOptions.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+              <span className="text-[11px] text-slate-400">เดาผิด? เปลี่ยนได้</span>
+              <div className="flex-1" />
+              <button onClick={() => { setPending(null); setNote(null); }} className="h-9 px-3 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-white">ยกเลิก</button>
+              <button onClick={confirmImport} disabled={importing || isOrders} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "นำเข้า"}</button>
+            </div>
+            {isOrders && <p className="text-xs text-amber-600 mt-2">ไฟล์นี้เป็นไฟล์ออเดอร์ — กรุณาไปนำเข้าที่หน้า “รับออเดอร์” แทน</p>}
+          </div>
+        );
+      })()}
 
       <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit text-sm mb-3">
         <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({summary.total})</button>
