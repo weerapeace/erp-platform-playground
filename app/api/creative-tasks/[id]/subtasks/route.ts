@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { subtaskAssigneesMap, setSubtaskAssignees, notify } from "@/lib/creative-tasks-server";
+import { subtaskAssigneesMap, setSubtaskAssignees, addSubtaskAssignee, removeSubtaskAssignee, notify } from "@/lib/creative-tasks-server";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
 import { renderPrompt } from "@/lib/subtask-prompt";
 
@@ -174,6 +174,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (Array.isArray(body.assignee_ids)) {
     await setSubtaskAssignees(admin, subtaskId, body.assignee_ids as string[]);
     patch.assignee_id = (body.assignee_ids as string[])[0] || null; // sync legacy single field
+  }
+
+  // ⑦ "เริ่มงาน" = คนกดกลายเป็นผู้รับผิดชอบ (เพิ่มตัวเอง ไม่แตะคนอื่น) — รวมหลายคนได้ถ้าหลายคนกดเริ่ม
+  //    "ยกเลิกเริ่มงาน" (กลับเป็นยังไม่เริ่ม) = ถอดตัวเองออก · ส่งงาน/อนุมัติแล้วยกเลิกไม่ได้
+  if (patch.status === "in_progress" && user?.id && !Array.isArray(body.assignee_ids)) {
+    await addSubtaskAssignee(admin, subtaskId, user.id);
+  } else if (patch.status === "todo" && user?.id && !Array.isArray(body.assignee_ids)) {
+    const { data: cur } = await admin.from("erp_creative_subtasks").select("status").eq("id", subtaskId).eq("task_id", id).maybeSingle();
+    const curStatus = (cur as { status?: string } | null)?.status;
+    if (curStatus === "submitted" || curStatus === "approved")
+      return NextResponse.json({ error: "ส่งงานแล้ว ยกเลิกการเริ่มงานไม่ได้" }, { status: 400 });
+    await removeSubtaskAssignee(admin, subtaskId, user.id);
   }
   let row: Record<string, unknown> | null = null;
   if (Object.keys(patch).length > 1) {

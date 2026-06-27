@@ -18,6 +18,10 @@ import { OverviewCustomizer, CARD_COLORS, heroStyle, type OverviewTheme, type Ca
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
+// ป้าย/จุดสีสถานะงานย่อย (ให้ตรงกับ SUB_STEPS ในงานย่อย) — ใช้ตอนกดการ์ด "งานของฉัน" โชว์งานย่อย
+const SUB_LABEL: Record<string, string> = { todo: "ยังไม่เริ่ม", in_progress: "กำลังทำ", submitted: "รออนุมัติ", approved: "อนุมัติแล้ว", revision_requested: "ขอแก้", canceled: "ยกเลิก", doing: "กำลังทำ", done: "อนุมัติแล้ว", posted: "อนุมัติแล้ว" };
+const SUB_DOT: Record<string, string> = { todo: "bg-slate-400", in_progress: "bg-blue-500", submitted: "bg-amber-500", approved: "bg-emerald-500", revision_requested: "bg-orange-500", canceled: "bg-slate-300", doing: "bg-blue-500", done: "bg-emerald-500", posted: "bg-emerald-500" };
+
 export type OvFilter = "all" | "mine" | "review" | "overdue";
 type Counts = { total: number; mine: number; overdue: number; review: number };
 
@@ -144,9 +148,31 @@ export function OverviewDashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         <div className="lg:col-span-2 min-w-0 space-y-2">
           {mySubs.length > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-100 text-xs text-amber-800">
-              🧩 {t("งานย่อยของฉัน", "My subtasks")} {mySubs.length} {t("รายการ", "items")} · {t('ดูในแท็บ "คิวงานของฉัน"', 'see the "My queue" tab')}
-            </div>
+            filter === "mine" ? (
+              // กดการ์ด "งานของฉัน" → โชว์งานย่อยของฉันเต็มๆ (เหมือนแท็บคิวงานของฉัน) กดเปิดงานแม่ได้
+              <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+                <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({mySubs.length})</p>
+                <div className="space-y-1.5">
+                  {mySubs.map((s) => (
+                    <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
+                      className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left">
+                      <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-slate-700">{s.title}</span>
+                        <span className="ml-2 text-[10px] text-slate-400">{SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
+                        {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
+                        <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+                      </div>
+                      {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-100 text-xs text-amber-800">
+                🧩 {t("งานย่อยของฉัน", "My subtasks")} {mySubs.length} {t("รายการ", "items")} · {t('กดการ์ด "งานของฉัน" เพื่อดูงานย่อย', 'tap the "My tasks" card to see subtasks')}
+              </div>
+            )
           )}
 
           {/* ตัวกรองด่วน: ประเภทงาน (Tabs, จากข้อมูลจริง) + แบรนด์ (ชิป) — ซ้อนกับการ์ดด้านบน */}
