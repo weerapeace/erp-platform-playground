@@ -8,6 +8,7 @@ import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 import { downscaleImageWidth } from "@/lib/image-resize";
 import { AssetPicker } from "@/components/asset-picker";
+import { ConfirmDialog } from "@/components/modal";
 
 // ============================================================
 // ImageThumbnail — รูปเล็กในตาราง + hover ขยาย (component กลาง)
@@ -217,6 +218,23 @@ export function ImageManager({
     } catch { /* ignore */ }
   };
 
+  // ล้างรูปทั้งหมด — ลบทุกใบออกจาก entity นี้ + ย้ายไฟล์ R2 เข้าถังขยะ (กู้คืนได้ 30 วัน)
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing]   = useState(false);
+  const clearAll = async () => {
+    setClearOpen(false);
+    setClearing(true); setError(null);
+    try {
+      for (const a of [...items]) {
+        const res = await apiFetch(`/api/attachments/${a.id}?actor=${encodeURIComponent(actor ?? "")}`, { method: "DELETE" });
+        const j = await res.json().catch(() => ({}));
+        if (j.error) throw new Error(j.error);
+      }
+      await fetchList();
+    } catch (err) { setError(err instanceof Error ? err.message : "ล้างรูปไม่สำเร็จ"); }
+    finally { setClearing(false); }
+  };
+
   // ลากเรียงลำดับรูป (โหมด gallery) — optimistic แล้วยิงเก็บ sort_order
   const dragIdx = useRef<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
@@ -336,7 +354,15 @@ export function ImageManager({
           </p>
           {description && <p className="mt-0.5 text-[11px] text-slate-400">{description}</p>}
         </div>
-        {imageOnly && <span className="text-[11px] text-slate-400 whitespace-nowrap">ไม่เกิน {maxSizeMb}MB/รูป</span>}
+        <div className="flex items-center gap-2 shrink-0">
+          {layout === "gallery" && !readonly && items.length > 0 && (
+            <button type="button" onClick={() => setClearOpen(true)} disabled={clearing || uploading}
+              title="ลบรูปทั้งหมดออกจากสินค้านี้ (ลบไฟล์ออกจากคลัง/R2 ด้วย)"
+              className="h-7 px-2.5 text-[11px] border border-rose-200 text-rose-600 bg-rose-50 rounded-md hover:bg-rose-100 disabled:opacity-50 whitespace-nowrap flex items-center gap-1">
+              {clearing ? <span className="w-3 h-3 border-2 border-rose-300 border-t-rose-600 rounded-full animate-spin" /> : "🗑"} ล้างทั้งหมด</button>
+          )}
+          {imageOnly && <span className="text-[11px] text-slate-400 whitespace-nowrap">ไม่เกิน {maxSizeMb}MB/รูป</span>}
+        </div>
       </div>
       <div className="hidden">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">รูปภาพ & ไฟล์แนบ {items.length > 0 && `(${items.length})`}</p>
@@ -428,6 +454,10 @@ export function ImageManager({
         </div>,
         document.body,
       )}
+
+      <ConfirmDialog open={clearOpen} onClose={() => setClearOpen(false)} onConfirm={() => void clearAll()}
+        title="ล้างรูปทั้งหมด?" message={`ลบรูปทั้งหมด ${items.length} รูป ออกจากสินค้านี้ และลบไฟล์ออกจากคลัง/R2 ด้วย (กู้คืนได้ 30 วัน)`}
+        confirmText="ล้างทั้งหมด" variant="danger" />
     </div>
   );
 }

@@ -103,6 +103,27 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
     } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
   };
 
+  // ล้างรูป Description ทั้งหมด — เอาออกจาก Description ทุกใบ + ลบไฟล์ออกจากคลัง (ถังขยะ 30 วัน)
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing]   = useState(false);
+  const clearAll = async () => {
+    setClearOpen(false);
+    if (!parentId) return;
+    const all = [...images];
+    setClearing(true);
+    let removed = 0;
+    for (const a of all) {
+      try {
+        await apiFetch(`/api/assets/description?parent_id=${parentId}&asset_id=${a.id}`, { method: "DELETE" });
+        await apiFetch(`/api/assets/${a.id}`, { method: "DELETE" });
+        removed++;
+      } catch { /* ข้ามใบที่พลาด ทำต่อ */ }
+    }
+    setClearing(false);
+    if (removed) toast.success(`ล้างรูป Description ${removed} รูปแล้ว`);
+    await load();
+  };
+
   const saveOrder = async (ids: string[]) => {
     if (!parentId) return;
     try {
@@ -142,9 +163,15 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
       onDrop={(e) => { if (dragIdx.current == null) { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) void upload(e.dataTransfer.files); } }}>
       <div className="flex items-center justify-between mb-2">
         <p className="text-[13px] font-medium text-slate-700">📂 รูป Description <span className="text-slate-400 font-normal">({images.length})</span></p>
-        {!readonly && <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
-          className="h-8 px-3 text-[12px] border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
-          {busy ? <><span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />กำลังอัป {progress?.done}/{progress?.total}</> : "＋ เพิ่มรูป"}</button>}
+        <div className="flex items-center gap-1.5">
+          {!readonly && images.length > 0 && <button type="button" onClick={() => setClearOpen(true)} disabled={busy || clearing}
+            title="ลบรูป Description ทั้งหมด (ลบไฟล์ออกจากคลัง/R2 ด้วย)"
+            className="h-8 px-2.5 text-[12px] border border-rose-200 text-rose-600 bg-rose-50 rounded-lg hover:bg-rose-100 disabled:opacity-50 flex items-center gap-1">
+            {clearing ? <span className="w-3.5 h-3.5 border-2 border-rose-300 border-t-rose-600 rounded-full animate-spin" /> : "🗑"} ล้างทั้งหมด</button>}
+          {!readonly && <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
+            className="h-8 px-3 text-[12px] border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
+            {busy ? <><span className="w-3.5 h-3.5 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />กำลังอัป {progress?.done}/{progress?.total}</> : "＋ เพิ่มรูป"}</button>}
+        </div>
         <input ref={inputRef} type="file" accept="image/*" multiple className="hidden"
           onChange={(e) => { if (e.target.files?.length) void upload(e.target.files); e.currentTarget.value = ""; }} />
       </div>
@@ -216,6 +243,10 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
         onConfirm={() => { if (delTarget) void removeFromLibrary(delTarget); }}
         title="ลบรูปนี้?" message="รูปจะถูกเอาออกจาก Description และลบออกจากคลังไฟล์กลางด้วย (กู้คืนได้ 30 วัน) — ถ้ารูปยังถูกใช้ที่อื่นจะคงไว้ในคลัง"
         confirmText="ลบ" variant="danger" />
+
+      <ConfirmDialog open={clearOpen} onClose={() => setClearOpen(false)} onConfirm={() => void clearAll()}
+        title="ล้างรูป Description ทั้งหมด?" message={`ลบรูป Description ทั้งหมด ${images.length} รูป ออกจากสินค้านี้ และลบไฟล์ออกจากคลัง/R2 ด้วย (กู้คืนได้ 30 วัน)`}
+        confirmText="ล้างทั้งหมด" variant="danger" />
     </div>
   );
 }
