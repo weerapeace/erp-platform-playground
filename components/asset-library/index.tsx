@@ -15,7 +15,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
-import { type AssetRow, type AssetDetail, type AssetUsage } from "@/app/api/assets/shared";
+import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
 
@@ -271,7 +271,7 @@ export function AssetLibrary() {
         />
       )}
       {artworkAddOpen && (
-        <ArtworkAddModal actor={actor} artTypes={artTypes}
+        <ArtworkAddModal actor={actor} artTypes={artTypes} collections={collections}
           onClose={() => setArtworkAddOpen(false)}
           onDone={async () => { setArtworkAddOpen(false); await load(); await loadMeta(); }} />
       )}
@@ -487,6 +487,9 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const [masterPath, setMasterPath] = useState("");
   const [masterUrl, setMasterUrl] = useState("");
   const [artType, setArtType] = useState("");
+  const [sizes, setSizes] = useState<AssetSize[]>([]);
+  const [parentCodes, setParentCodes] = useState<string[]>([]);
+  const [rule] = useArtworkPathRule();
   const [saving, setSaving] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
   const [replacing, setReplacing] = useState(false);
@@ -499,6 +502,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       const det = j.data as AssetDetail;
       setD(det); setTitle(det.title); setTags(det.tags ?? []); setCollectionIds(det.collection_ids ?? []);
       setMasterPath(det.master_path ?? ""); setMasterUrl(det.master_url ?? ""); setArtType(det.artwork_type ?? ""); setKeywords(det.keywords ?? "");
+      setSizes(det.sizes ?? []); setParentCodes(det.parent_sku_codes ?? []);
     } catch (e) { toast.error(e instanceof Error ? e.message : "เปิดไฟล์ไม่สำเร็จ"); onClose(); }
   }, [id, toast, onClose]);
   useEffect(() => { void loadDetail(); }, [loadDetail]);
@@ -508,7 +512,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
     try {
       const res = await apiFetch(`/api/assets/${id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_type: artType, keywords }),
+        body: JSON.stringify({ title, tags, collection_ids: collectionIds, master_path: masterPath, master_url: masterUrl, artwork_type: artType, keywords, sizes, parent_sku_codes: parentCodes }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกแล้ว"); await loadDetail(); onChanged();
@@ -573,6 +577,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   };
 
   const trashed = d?.status === "trashed";
+  const pathWarn = !trashed && !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
 
   return (
     <ERPModal open onClose={onClose} title={d?.file_name ?? "รายละเอียดไฟล์"} size="xl"
@@ -641,7 +646,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
                 </div>
               </div>
               <div className="text-[12px] text-slate-500">แท็ก
-                <div className="mt-1">{trashed ? <span className="text-[11px] text-slate-400">{tags.join(", ") || "—"}</span> : <TagChips value={tags} onChange={setTags} />}</div>
+                <div className="mt-1">{trashed ? <span className="text-[11px] text-slate-400">{tags.join(", ") || "—"}</span> : <TagPickerField value={tags} onChange={setTags} />}</div>
               </div>
             </div>
 
@@ -649,6 +654,13 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
               <input value={keywords} onChange={(e) => setKeywords(e.target.value)} disabled={trashed}
                 placeholder="คำพ้อง/ชื่ออื่น เช่น flower ดอกไม้ summer"
                 className="mt-1 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" /></label>
+
+            {d.source === "artwork" && (
+              <>
+                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📐 ขนาด (กว้าง × ยาว)</p><SizesEditor value={sizes} onChange={setSizes} disabled={trashed} /></div>
+                <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">📦 Parent SKU ที่ใช้</p><ParentSkuField value={parentCodes} onChange={setParentCodes} disabled={trashed} /></div>
+              </>
+            )}
 
             <table className="w-full text-[12px] mt-3">
               <tbody>
@@ -664,7 +676,8 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
               <p className="text-[12px] font-medium text-slate-600 mb-1.5">📁 ไฟล์ต้นฉบับ <span className="text-[10px] text-slate-400 font-normal">— คลังเก็บแค่ “ที่อยู่/ลิงก์” ไม่ได้เก็บไฟล์ใหญ่ (อยู่ NAS หรือ Drive ก็ได้)</span></p>
               <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)} disabled={trashed}
                 placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
-                className="w-full h-8 px-2 text-[12px] border border-slate-200 rounded-lg font-mono disabled:bg-slate-50" />
+                className={`w-full h-8 px-2 text-[12px] border rounded-lg font-mono disabled:bg-slate-50 ${pathWarn ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`} />
+              {pathWarn && <p className="text-[11px] text-amber-600 mt-1">⚠ ไม่ได้อยู่ในโฟลเดอร์มาตรฐาน — ควรเก็บใต้ <b className="font-mono">{rule.base_paths.join(" หรือ ")}</b></p>}
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
                 <button onClick={copyPath} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-slate-200 rounded-md hover:bg-slate-50 disabled:opacity-40">📋 คัดลอก path</button>
                 <button onClick={openFolder} disabled={!masterPath} className="h-7 px-2.5 text-[11px] border border-indigo-200 text-indigo-700 bg-indigo-50 rounded-md hover:bg-indigo-100 disabled:opacity-40">📂 เปิดโฟลเดอร์</button>
@@ -801,8 +814,8 @@ function BulkMoveModal({ count, collections, onClose, onApply }: {
   );
 }
 
-// ── เพิ่ม Artwork ลงบัตร (รูปตัวอย่าง + path ต้นฉบับ + ชนิด + แท็ก จบในป๊อปอัปเดียว) ──
-function ArtworkAddModal({ actor, artTypes, onClose, onDone }: { actor: string | null; artTypes: LookupItem[]; onClose: () => void; onDone: () => void }) {
+// ── เพิ่ม Artwork ลงบัตร (รูป + ชนิด + ชื่อ + แท็ก + ไซส์ + location + อัลบั้ม + Parent SKU + keyword) ──
+function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { actor: string | null; artTypes: LookupItem[]; collections: AssetCollection[]; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -812,9 +825,15 @@ function ArtworkAddModal({ actor, artTypes, onClose, onDone }: { actor: string |
   const [masterUrl, setMasterUrl] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [keywords, setKeywords] = useState("");
+  const [sizes, setSizes] = useState<AssetSize[]>([]);
+  const [parentCodes, setParentCodes] = useState<string[]>([]);
+  const [collectionId, setCollectionId] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [ruleOpen, setRuleOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [rule, , reloadRule] = useArtworkPathRule();
+  const pathWarn = !!masterPath.trim() && !pathMatchesRule(masterPath, rule.base_paths);
 
   const pick = (f: File | null) => {
     setFile(f);
@@ -836,6 +855,9 @@ function ArtworkAddModal({ actor, artTypes, onClose, onDone }: { actor: string |
       if (masterUrl.trim()) fd.append("master_url", masterUrl.trim());
       if (keywords.trim()) fd.append("keywords", keywords.trim());
       if (tags.length) fd.append("tags", tags.join(","));
+      if (sizes.length) fd.append("sizes", JSON.stringify(sizes));
+      if (parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(parentCodes));
+      if (collectionId) fd.append("collection_id", collectionId);
       if (actor) fd.append("actor", actor);
       if (file.type.startsWith("image/")) {
         const dim = await new Promise<{ w: number; h: number } | null>((res) => {
@@ -854,7 +876,7 @@ function ArtworkAddModal({ actor, artTypes, onClose, onDone }: { actor: string |
   };
 
   return (
-    <ERPModal open onClose={onClose} title="เพิ่ม Artwork ลงคลัง" size="lg"
+    <ERPModal open onClose={onClose} title="เพิ่ม Artwork ลงคลัง" size="xl"
       footer={
         <div className="flex items-center justify-between w-full">
           <span className="text-[12px] text-slate-400">รูปตัวอย่างเล็กพอ — ไฟล์ใหญ่ .ai/.psd เก็บที่ NAS</span>
@@ -883,27 +905,62 @@ function ArtworkAddModal({ actor, artTypes, onClose, onDone }: { actor: string |
           <label className="text-[12px] text-slate-500">ชื่อ
             <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="เช่น ลายดอกไม้ PIX32"
               className="mt-0.5 w-full h-9 px-3 text-sm border border-slate-200 rounded-lg" /></label>
-          <label className="text-[12px] text-slate-500">ชนิด
-            <select value={artType} onChange={(e) => setArtType(e.target.value)}
-              className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-              {artType && !artTypes.some((t) => t.name === artType) && <option value={artType}>{artType}</option>}
-              {artTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
-            </select></label>
-          <div className="text-[12px] text-slate-500">แท็ก
-            <div className="mt-0.5"><TagChips value={tags} onChange={setTags} /></div></div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[12px] text-slate-500">ชนิด
+              <select value={artType} onChange={(e) => setArtType(e.target.value)}
+                className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                {artType && !artTypes.some((t) => t.name === artType) && <option value={artType}>{artType}</option>}
+                {artTypes.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select></label>
+            <label className="text-[12px] text-slate-500">Group Album
+              <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)}
+                className="mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                <option value="">— ไม่ระบุ —</option>
+                {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select></label>
+          </div>
+          <div className="text-[12px] text-slate-500">แท็ก <span className="text-[10px] text-slate-400">— กดเลือกในป๊อปอัป</span>
+            <div className="mt-0.5"><TagPickerField value={tags} onChange={setTags} /></div></div>
         </div>
       </div>
-      <p className="text-[11px] text-slate-400 mt-3 mb-1">ที่อยู่ไฟล์ต้นฉบับ — ใส่อย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์ Google Drive)</p>
-      <label className="block text-[12px] text-slate-500">path NAS
-        <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)}
-          placeholder="\\nas\Artwork\PIX\PIX32-02_v3.ai  หรือ  Z:\Artwork\…"
-          className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg font-mono" /></label>
-      <label className="block text-[12px] text-slate-500 mt-2">ลิงก์ Google Drive / Synology (เปิดได้ทุกที่)
-        <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="https://drive.google.com/…  หรือ  ลิงก์ Synology Drive"
-          className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
-      <label className="block text-[12px] text-slate-500 mt-2">คำค้นเพิ่มเติม (keyword) <span className="text-[10px] text-slate-400">— คำพ้อง/ชื่ออื่น พิมพ์แล้วเจอ</span>
+
+      {/* ขนาด (หลายไซส์ + ชื่อกำกับ + หน่วย) */}
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        <p className="text-[12px] font-medium text-slate-600 mb-1.5">📐 ขนาด (กว้าง × ยาว) <span className="text-[10px] text-slate-400 font-normal">— เพิ่มได้หลายไซส์ ใส่ชื่อกำกับ + เลือกหน่วยต่อไซส์</span></p>
+        <SizesEditor value={sizes} onChange={setSizes} />
+      </div>
+
+      {/* Parent SKU ที่ใช้ */}
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        <p className="text-[12px] font-medium text-slate-600 mb-1.5">📦 Parent SKU ที่ใช้ artwork นี้</p>
+        <ParentSkuField value={parentCodes} onChange={setParentCodes} />
+      </div>
+
+      {/* location ไฟล์ต้นฉบับ + tooltip + จับผิดโฟลเดอร์ */}
+      <div className="mt-3 pt-3 border-t border-slate-100">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[12px] font-medium text-slate-600">📁 ที่เก็บไฟล์ต้นฉบับ <span className="text-[10px] text-slate-400 font-normal">— ใส่อย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์)</span></p>
+          <button type="button" onClick={() => setRuleOpen(true)} className="text-[11px] text-indigo-600 hover:underline">⚙️ ตั้งโฟลเดอร์มาตรฐาน</button>
+        </div>
+        <label className="block text-[12px] text-slate-500">path NAS / โฟลเดอร์
+          <span className="ml-1 text-slate-300" title="ใส่ที่อยู่เต็มของไฟล์/โฟลเดอร์ต้นฉบับบนเครื่อง เช่น G:\Shared drives\Louis Montini\[4] Assets\4. Artworks\PIX32-02_v3.ai">ⓘ</span>
+          <input value={masterPath} onChange={(e) => setMasterPath(e.target.value)}
+            title="ที่อยู่เต็มของไฟล์ต้นฉบับ — ควรอยู่ใต้โฟลเดอร์มาตรฐานที่ตั้งไว้"
+            placeholder={rule.base_paths[0] ? `${rule.base_paths[0]}\\…` : "\\\\nas\\Artwork\\PIX\\PIX32-02_v3.ai  หรือ  Z:\\Artwork\\…"}
+            className={`mt-0.5 w-full h-9 px-3 text-[12px] border rounded-lg font-mono focus:outline-none focus:ring-2 ${pathWarn ? "border-amber-300 focus:ring-amber-400 bg-amber-50/40" : "border-slate-200 focus:ring-indigo-500"}`} /></label>
+        {pathWarn && (
+          <p className="text-[11px] text-amber-600 mt-1">⚠ ที่อยู่นี้ไม่ได้อยู่ในโฟลเดอร์มาตรฐาน — ควรเก็บไว้ใต้ <b className="font-mono">{rule.base_paths.join(" หรือ ")}</b> (เพิ่มได้ แต่เช็คว่าตั้งใจ)</p>
+        )}
+        <label className="block text-[12px] text-slate-500 mt-2">ลิงก์ Google Drive / Synology <span className="text-slate-300" title="ลิงก์ที่เปิดได้จากที่ไหนก็ได้ (นอกออฟฟิศ) — ไม่ใส่ก็ได้ถ้ามี path NAS แล้ว">ⓘ</span>
+          <input value={masterUrl} onChange={(e) => setMasterUrl(e.target.value)} placeholder="https://drive.google.com/…  หรือ  ลิงก์ Synology Drive"
+            className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
+      </div>
+
+      <label className="block text-[12px] text-slate-500 mt-3">คำค้นเพิ่มเติม (keyword) <span className="text-[10px] text-slate-400">— คำพ้อง/ชื่ออื่น พิมพ์แล้วเจอ</span>
         <input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="เช่น flower ดอกไม้ summer ฤดูร้อน"
           className="mt-0.5 w-full h-9 px-3 text-[12px] border border-slate-200 rounded-lg" /></label>
+
+      {ruleOpen && <ArtworkPathRuleModal rule={rule} onClose={() => setRuleOpen(false)} onSaved={reloadRule} />}
     </ERPModal>
   );
 }
@@ -1003,6 +1060,179 @@ function ManageTypesModal({ types, onClose, onChanged }: { types: LookupItem[]; 
         <button onClick={add} disabled={busy || !newName.trim()} className="h-8 px-3 text-[12px] font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">＋ เพิ่ม</button>
       </div>
       <p className="text-[10px] text-slate-400 mt-2">แก้ชื่อ: พิมพ์ทับในช่องแล้วคลิกที่อื่นเพื่อบันทึก · ลบแล้วงานเดิมยังเก็บชื่อชนิดไว้</p>
+    </ERPModal>
+  );
+}
+
+// ── ตัวแก้ "หลายไซส์" (กว้าง×ยาว + ชื่อกำกับ + หน่วยต่อไซส์) ──
+const SIZE_UNITS: { v: AssetSize["unit"]; label: string }[] = [
+  { v: "cm", label: "ซม." }, { v: "mm", label: "มม." }, { v: "in", label: "นิ้ว" }, { v: "px", label: "px" },
+];
+function SizesEditor({ value, onChange, disabled }: { value: AssetSize[]; onChange: (v: AssetSize[]) => void; disabled?: boolean }) {
+  const set = (i: number, patch: Partial<AssetSize>) => onChange(value.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const numOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
+  return (
+    <div className="flex flex-col gap-1.5">
+      {value.map((s, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <input value={s.label} onChange={(e) => set(i, { label: e.target.value })} disabled={disabled}
+            placeholder="ชื่อไซส์ เช่น ป้ายใหญ่" className="flex-1 min-w-0 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
+          <input type="number" value={s.w ?? ""} onChange={(e) => set(i, { w: numOrNull(e.target.value) })} disabled={disabled}
+            placeholder="กว้าง" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
+          <span className="text-slate-400 text-xs">×</span>
+          <input type="number" value={s.h ?? ""} onChange={(e) => set(i, { h: numOrNull(e.target.value) })} disabled={disabled}
+            placeholder="ยาว" className="w-16 h-8 px-2 text-[12px] border border-slate-200 rounded-lg disabled:bg-slate-50" />
+          <select value={s.unit} onChange={(e) => set(i, { unit: e.target.value as AssetSize["unit"] })} disabled={disabled}
+            className="h-8 px-1 text-[12px] border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
+            {SIZE_UNITS.map((u) => <option key={u.v} value={u.v}>{u.label}</option>)}
+          </select>
+          {!disabled && <button type="button" onClick={() => onChange(value.filter((_, j) => j !== i))} className="text-slate-300 hover:text-rose-500 text-sm px-1">✕</button>}
+        </div>
+      ))}
+      {disabled && value.length === 0 && <span className="text-[11px] text-slate-400">—</span>}
+      {!disabled && <button type="button" onClick={() => onChange([...value, { label: "", w: null, h: null, unit: "cm" }])}
+        className="self-start text-[12px] text-indigo-600 hover:underline">＋ เพิ่มไซส์</button>}
+    </div>
+  );
+}
+
+// ── เลือก Parent SKU ที่ใช้ (multi) — ค้นจาก /api/sku-browser?entity=parent-skus ──
+function ParentSkuField({ value, onChange, disabled }: { value: string[]; onChange: (v: string[]) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {value.map((c) => (
+          <span key={c} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono bg-violet-50 border border-violet-200 text-violet-700 rounded">
+            {c}{!disabled && <button type="button" onClick={() => onChange(value.filter((x) => x !== c))} className="text-violet-300 hover:text-rose-500 leading-none">✕</button>}
+          </span>
+        ))}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่ผูก Parent SKU</span>}
+        {!disabled && <button type="button" onClick={() => setOpen(true)}
+          className="text-[11px] px-2 py-0.5 rounded-full border border-violet-300 text-violet-700 hover:bg-violet-50">＋ เลือก Parent SKU</button>}
+      </div>
+      {open && <ParentSkuPickerModal selected={value} onClose={() => setOpen(false)}
+        onConfirm={(codes) => { onChange([...new Set([...value, ...codes])]); setOpen(false); }} />}
+    </div>
+  );
+}
+
+function ParentSkuPickerModal({ selected, onClose, onConfirm }: { selected: string[]; onClose: () => void; onConfirm: (codes: string[]) => void }) {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<{ id: string; code: string; name: string; image: string | null }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const search = useCallback(async (term: string) => {
+    setLoading(true);
+    try {
+      const p = new URLSearchParams({ entity: "parent-skus", search: term, limit: "40" });
+      const j = await apiFetch(`/api/sku-browser?${p.toString()}`).then((r) => r.json());
+      setRows(((j.cards ?? []) as { id: string; code: string; name: string; image: string | null }[]).map((c) => ({ id: c.id, code: c.code, name: c.name, image: c.image })));
+    } catch { /* ignore */ } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { const t = setTimeout(() => { if (q.trim()) void search(q.trim()); else setRows([]); }, 250); return () => clearTimeout(t); }, [q, search]);
+  const toggle = (code: string) => setPicked((s) => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n; });
+  return (
+    <ERPModal open onClose={onClose} title="เลือก Parent SKU ที่ใช้ artwork นี้" size="md"
+      footer={<div className="flex justify-end gap-2 w-full">
+        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={() => onConfirm([...picked])} disabled={picked.size === 0}
+          className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">เพิ่ม {picked.size || ""}</button>
+      </div>}>
+      <input value={q} onChange={(e) => setQ(e.target.value)} autoFocus placeholder="พิมพ์รหัส/ชื่อ Parent SKU…"
+        className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      <div className="max-h-[46vh] overflow-auto flex flex-col gap-1">
+        {loading ? <div className="py-8 text-center text-slate-400 text-sm">กำลังค้น…</div>
+          : rows.length === 0 ? <div className="py-8 text-center text-slate-400 text-sm">{q.trim() ? "ไม่พบ" : "พิมพ์เพื่อค้นหา Parent SKU"}</div>
+          : rows.map((r) => {
+              const already = selected.includes(r.code);
+              const on = already || picked.has(r.code);
+              return (
+                <button key={r.id} type="button" disabled={already} onClick={() => toggle(r.code)}
+                  className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border text-left disabled:opacity-60 ${on ? "bg-indigo-50 border-indigo-300" : "border-slate-200 hover:bg-slate-50"}`}>
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0 ${on ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300 text-transparent"}`}>✓</span>
+                  {r.image ? <img src={withImageWidth(r.image, 80) ?? r.image} alt="" className="w-8 h-8 rounded object-cover border border-slate-200" />
+                    : <div className="w-8 h-8 rounded bg-slate-100 flex items-center justify-center text-slate-300 text-xs">📦</div>}
+                  <span className="font-mono text-[12px] text-slate-700">{r.code}</span>
+                  <span className="text-[12px] text-slate-500 truncate flex-1">{r.name}</span>
+                  {already && <span className="text-[10px] text-slate-400 shrink-0">เลือกแล้ว</span>}
+                </button>
+              );
+            })}
+      </div>
+    </ERPModal>
+  );
+}
+
+// ── เลือกแท็กแบบ "ปุ่มกด" (เก็บความรกของชิป/ตัวช่วยไว้ในป๊อปอัป) ──
+function TagPickerField({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {value.map((t) => (
+          <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-indigo-600 text-white">
+            {t}<button type="button" onClick={() => onChange(value.filter((x) => x !== t))} className="hover:bg-white/25 rounded-full w-3.5 h-3.5 leading-none flex items-center justify-center">✕</button>
+          </span>
+        ))}
+        {value.length === 0 && <span className="text-[11px] text-slate-400">ยังไม่มีแท็ก</span>}
+        <button type="button" onClick={() => setOpen(true)}
+          className="text-[11px] px-2 py-0.5 rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50">🏷️ เลือกแท็ก</button>
+      </div>
+      {open && (
+        <ERPModal open onClose={() => setOpen(false)} title="เลือก / เพิ่มแท็ก" size="sm"
+          footer={<div className="flex justify-end w-full"><button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">เสร็จ</button></div>}>
+          <TagChips value={value} onChange={onChange} />
+        </ERPModal>
+      )}
+    </div>
+  );
+}
+
+// ── กฎ "โฟลเดอร์มาตรฐาน" (global) — เก็บใน ui_config key=artwork_path_rule ──
+type PathRule = { base_paths: string[] };
+function useArtworkPathRule(): [PathRule, boolean, () => void] {
+  const [rule, setRule] = useState<PathRule>({ base_paths: [] });
+  const [loaded, setLoaded] = useState(false);
+  const reload = useCallback(() => {
+    apiFetch("/api/ui-config?key=artwork_path_rule").then((r) => r.json())
+      .then((j) => { const v = (j.value ?? {}) as { base_paths?: unknown }; setRule({ base_paths: Array.isArray(v.base_paths) ? v.base_paths.map(String) : [] }); })
+      .catch(() => {}).finally(() => setLoaded(true));
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+  return [rule, loaded, reload];
+}
+function pathMatchesRule(path: string, basePaths: string[]): boolean {
+  if (!path.trim() || basePaths.length === 0) return true;   // ไม่ได้ตั้งกฎ / ยังไม่กรอก = ไม่เตือน
+  const norm = (s: string) => s.replace(/\\/g, "/").toLowerCase().trim().replace(/\/+$/, "");
+  const p = norm(path);
+  return basePaths.some((b) => b.trim() && p.startsWith(norm(b)));
+}
+
+// ตั้งค่าโฟลเดอร์มาตรฐาน (admin) — หลาย path ได้ (บรรทัดละ 1)
+function ArtworkPathRuleModal({ rule, onClose, onSaved }: { rule: PathRule; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [text, setText] = useState(rule.base_paths.join("\n"));
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const base_paths = text.split("\n").map((s) => s.trim()).filter(Boolean);
+      const res = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "artwork_path_rule", value: { base_paths } }) });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      toast.success("บันทึกโฟลเดอร์มาตรฐานแล้ว"); onSaved(); onClose();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); } finally { setBusy(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} title="ตั้งค่าโฟลเดอร์มาตรฐานของ Artwork" size="md"
+      footer={<div className="flex justify-end gap-2 w-full">
+        <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={save} disabled={busy} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{busy ? "บันทึก…" : "บันทึก"}</button>
+      </div>}>
+      <p className="text-[12px] text-slate-500 mb-2">artwork ทุกอันควรเก็บใต้โฟลเดอร์เหล่านี้ — ถ้า path ที่กรอกไม่ขึ้นต้นด้วยอันใดอันหนึ่ง ระบบจะ <b className="text-amber-600">เตือน</b> (ไม่บล็อก). ใส่ได้หลายโฟลเดอร์ บรรทัดละ 1</p>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} spellCheck={false}
+        placeholder={"G:\\Shared drives\\Louis Montini\\[4] Assets\\4. Artworks\n\\\\nas\\Artwork"}
+        className="w-full px-3 py-2 text-[12px] font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
     </ERPModal>
   );
 }

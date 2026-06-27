@@ -12,7 +12,11 @@ import { r2PutObject, isR2Configured } from "@/lib/r2";
 import { detectAssetType, extOf, sha256Hex, ASSET_MAX_BYTES } from "@/lib/assets";
 import {
   type AssetRow, buildRow, sanitizeToken, loadTags, loadUsageCounts, attachTags, rowOf, actorId,
+  normalizeSizes, normalizeCodes,
 } from "./shared";
+
+/** parse JSON อย่างปลอดภัย (form ส่ง sizes/parent_sku_codes มาเป็น JSON string) */
+function safeJson(s: string): unknown { try { return JSON.parse(s); } catch { return null; } }
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -113,6 +117,8 @@ export async function POST(request: NextRequest) {
   const masterPath   = form.get("master_path") ? String(form.get("master_path")) : null;
   const masterUrl    = form.get("master_url")  ? String(form.get("master_url"))  : null;
   const keywords     = form.get("keywords")    ? String(form.get("keywords"))    : null;
+  const sizes        = normalizeSizes(safeJson(String(form.get("sizes") ?? "")));            // หลายไซส์ (artwork)
+  const parentCodes  = normalizeCodes(safeJson(String(form.get("parent_sku_codes") ?? "")));  // Parent SKU ที่ใช้
 
   const admin  = supabaseAdmin();
   const buffer = await file.arrayBuffer();
@@ -149,6 +155,7 @@ export async function POST(request: NextRequest) {
     height: Number.isFinite(heightRaw) ? heightRaw : null,
     checksum, collection_id: collectionId, uploaded_by: actor, status: "active",
     source, artwork_type: artworkType, master_path: masterPath, master_url: masterUrl, keywords,
+    sizes, parent_sku_codes: parentCodes,
   }).select("*").single();
   if (error || !ins)
     return NextResponse.json({ error: "บันทึกข้อมูลไฟล์ไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });

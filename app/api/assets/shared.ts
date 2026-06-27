@@ -11,6 +11,26 @@ import type { AssetType } from "@/lib/assets";
 
 export type Db = ReturnType<typeof supabaseAdmin>;
 
+// ไซส์ artwork: กว้าง×ยาว + ชื่อกำกับ + หน่วย (เลือกได้ต่อไซส์)
+export type AssetSizeUnit = "cm" | "mm" | "in" | "px";
+export type AssetSize = { label: string; w: number | null; h: number | null; unit: AssetSizeUnit };
+
+/** normalize sizes jsonb → AssetSize[] (กัน data เพี้ยน) */
+export function normalizeSizes(v: unknown): AssetSize[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => {
+    const o = (x ?? {}) as Record<string, unknown>;
+    const unit = ["cm", "mm", "in", "px"].includes(String(o.unit)) ? (o.unit as AssetSizeUnit) : "cm";
+    const num = (n: unknown) => (n == null || n === "" ? null : Number(n));
+    return { label: String(o.label ?? ""), w: num(o.w), h: num(o.h), unit };
+  }).filter((s) => s.label || s.w != null || s.h != null);
+}
+/** normalize parent_sku_codes jsonb → string[] */
+export function normalizeCodes(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((x) => String(x ?? "").trim()).filter(Boolean))];
+}
+
 export type AssetRow = {
   id: string;
   title: string;
@@ -34,6 +54,8 @@ export type AssetRow = {
   source: string;               // upload | odoo_product | artwork
   artwork_type: string | null;  // โลโก้/ลายพิมพ์/แพทเทิร์น/ม็อกอัป/... (เฉพาะ artwork)
   keywords: string | null;      // คำค้นเพิ่มเติม (คำพ้อง/ชื่ออื่น) — รวมเข้า search
+  sizes: AssetSize[];           // หลายไซส์ (กว้าง×ยาว+ชื่อ+หน่วย) — artwork
+  parent_sku_codes: string[];   // Parent SKU ที่ใช้ artwork นี้
   tags: string[];
   usage_count: number;
 };
@@ -57,6 +79,7 @@ type AssetDbRow = {
   uploaded_by: string | null; created_at: string;
   master_path: string | null; master_url: string | null;
   source: string; artwork_type: string | null; keywords: string | null;
+  sizes?: unknown; parent_sku_codes?: unknown;
 };
 
 export const urlFor = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
@@ -89,6 +112,8 @@ export function buildRow(r: AssetDbRow, tags: string[], usageCount: number): Ass
     source: r.source,
     artwork_type: r.artwork_type,
     keywords: r.keywords,
+    sizes: normalizeSizes(r.sizes),
+    parent_sku_codes: normalizeCodes(r.parent_sku_codes),
     tags,
     usage_count: usageCount,
   };
