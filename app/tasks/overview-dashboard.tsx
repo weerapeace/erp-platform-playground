@@ -107,8 +107,7 @@ export function OverviewDashboard({
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
         <div className="relative p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-white/80 text-sm">{t("ภาพรวมงาน Creative", "Creative work overview")}</p>
-            <h2 className="text-xl sm:text-2xl font-bold mt-0.5 drop-shadow-sm">{userName ? `${t("สวัสดี", "Hi")} ${userName} 👋` : `${t("สวัสดี", "Hi")} 👋`}</h2>
+            <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm">{userName ? `${t("สวัสดี", "Hi")} ${userName} 👋` : `${t("สวัสดี", "Hi")} 👋`}</h2>
             <p className="text-white/90 text-sm mt-1 drop-shadow-sm">{heroLine}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -117,6 +116,16 @@ export function OverviewDashboard({
             <button onClick={onCreate} className="h-11 px-5 bg-white text-violet-700 font-semibold rounded-xl shadow hover:bg-violet-50">＋ {t("สร้างงานใหม่", "New task")}</button>
           </div>
         </div>
+      </div>
+
+      {/* ทางลัด — แถบปุ่มเล็กแนวนอน ใต้ Hero (กว้างเท่ากล่องม่วง) */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-slate-400 mr-0.5">{t("ทางลัด", "Shortcuts")}</span>
+        <ShortcutPill icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
+        <ShortcutPill icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
+        <ShortcutPill icon="🔁" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
+        <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
+        {isAdmin && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
       </div>
 
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
@@ -209,18 +218,6 @@ export function OverviewDashboard({
         </div>
       </div>
 
-      {/* ทางลัด */}
-      <div>
-        <p className="text-sm font-semibold text-slate-500 mb-2">{t("ทางลัด", "Shortcuts")}</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
-          <ShortcutBtn icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
-          <ShortcutBtn icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
-          <ShortcutBtn icon="🔁" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
-          <ShortcutBtn icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
-          {isAdmin && <ShortcutBtn icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
-        </div>
-      </div>
-
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
     </div>
   );
@@ -255,9 +252,10 @@ function BrandChip({ active, color, onClick, label }: { active: boolean; color?:
   );
 }
 
-function ShortcutBtn({ icon, label, href, onClick }: { icon: string; label: string; href?: string; onClick?: () => void }) {
-  const cls = "flex flex-col items-center justify-center gap-1.5 h-24 rounded-xl bg-white border border-slate-200 shadow-sm hover:border-violet-300 hover:bg-violet-50/40 transition-colors";
-  const inner = <><span className="text-2xl">{icon}</span><span className="text-xs font-medium text-slate-600 text-center px-2">{label}</span></>;
+// ทางลัดแบบปุ่ม pill เล็ก (แนวนอน ใต้ Hero)
+function ShortcutPill({ icon, label, href, onClick }: { icon: string; label: string; href?: string; onClick?: () => void }) {
+  const cls = "inline-flex items-center gap-1.5 h-9 px-3 rounded-full bg-white border border-slate-200 text-sm font-medium text-slate-600 shadow-sm hover:border-violet-300 hover:bg-violet-50/40 transition-colors";
+  const inner = <><span className="text-base">{icon}</span><span>{label}</span></>;
   return href
     ? <a href={href} className={cls}>{inner}</a>
     : <button onClick={onClick} className={cls}>{inner}</button>;
