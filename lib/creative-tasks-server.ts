@@ -50,19 +50,6 @@ export async function setSubtaskAssignees(admin: Admin, subtaskId: string, userI
   if (clean.length) await admin.from("erp_creative_subtask_assignees").insert(clean.map((user_id) => ({ subtask_id: subtaskId, user_id })));
 }
 
-/** เพิ่มผู้รับผิดชอบ subtask 1 คน (ไม่แตะคนอื่น) — ใช้ตอน "เริ่มงาน" = คนกดกลายเป็นผู้รับผิดชอบ · idempotent */
-export async function addSubtaskAssignee(admin: Admin, subtaskId: string, userId: string | null | undefined): Promise<void> {
-  if (!userId) return;
-  const { data } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId).eq("user_id", userId).maybeSingle();
-  if (!data) await admin.from("erp_creative_subtask_assignees").insert({ subtask_id: subtaskId, user_id: userId });
-}
-
-/** ถอดผู้รับผิดชอบ subtask 1 คน (ไม่แตะคนอื่น) — ใช้ตอน "ยกเลิกเริ่มงาน" */
-export async function removeSubtaskAssignee(admin: Admin, subtaskId: string, userId: string | null | undefined): Promise<void> {
-  if (!userId) return;
-  await admin.from("erp_creative_subtask_assignees").delete().eq("subtask_id", subtaskId).eq("user_id", userId);
-}
-
 /** ผู้รับผิดชอบของหลาย subtask → Map<subtask_id, {id,label,color,avatar_url}[]> */
 export async function subtaskAssigneesMap(admin: Admin, subtaskIds: string[]): Promise<Map<string, { id: string; label: string; color: string | null; avatar_url: string | null }[]>> {
   const map = new Map<string, { id: string; label: string; color: string | null; avatar_url: string | null }[]>();

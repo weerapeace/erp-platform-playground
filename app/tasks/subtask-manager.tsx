@@ -182,7 +182,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {st === "todo" && <button disabled={busy} onClick={() => patch({ status: "in_progress" })} className="shrink-0 inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md px-2 py-0.5 hover:bg-blue-100 disabled:opacity-50">▶ {t("เริ่มงาน", "Start")}</button>}
         {st === "in_progress" && <span className="shrink-0 inline-flex items-center gap-1">
           <button disabled={busy} onClick={openWork} className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 hover:bg-amber-100 disabled:opacity-50">📤 {t("ส่งงาน", "Submit")}</button>
-          <button disabled={busy} onClick={async () => { await patch({ status: "todo" }); pushToast("info", t("ยกเลิกการเริ่มงานแล้ว", "Start canceled")); }} title={t("กดผิด? ยกเลิกการเริ่มงาน (เอาตัวเองออกจากผู้รับผิดชอบ)", "Misclick? Cancel start (remove yourself from assignees)")} className="text-xs text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">↩︎ {t("ยกเลิกเริ่ม", "Un-start")}</button>
+          <button disabled={busy} onClick={async () => { await patch({ status: "todo" }); pushToast("info", t("ยกเลิกการเริ่มงานแล้ว", "Start canceled")); }} title={t("กดผิด? ยกเลิกการเริ่มงาน (ล้างผู้รับผิดชอบ)", "Misclick? Cancel start (clears assignee)")} className="text-xs text-slate-400 border border-slate-200 rounded-md px-1.5 py-0.5 hover:bg-slate-50 disabled:opacity-50">↩︎ {t("ยกเลิกเริ่ม", "Un-start")}</button>
         </span>}
         {st === "submitted" && (canApprove
           ? <span className="shrink-0 inline-flex items-center gap-1">
