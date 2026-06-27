@@ -21,9 +21,12 @@
 | `groupBy(row) => string` | ใส่แล้ว **มีปุ่มจัดกลุ่ม** + หัวกลุ่มติ๊กเลือกทั้งกลุ่ม |
 | `selectable` + `selected` + `onSelectedChange` | เลือกหลายแถว (controlled) |
 | `title`, `actions`, `footnote`, `emptyText`, `maxHeightClass` | ส่วนหัว/ท้าย/สถานะว่าง |
+| `resizable` | เปิดให้ **ลากขอบหัวคอลัมน์ปรับความกว้าง** ได้ (opt-in — ไม่ใส่ = เหมือนเดิม) · คอลัมน์ที่ลากแล้วกลายเป็น px คอลัมน์อื่นยังแบ่งพื้นที่เหลือ |
+| `storageKey` | ใส่คู่กับ `resizable` เพื่อ **จำความกว้างไว้ในเครื่อง** (localStorage) · มีลิงก์ "รีเซ็ตความกว้าง" ในแถบเครื่องมือ |
 
 คอลัมน์: `{ key, header, cell:(row)=>node, align?, width?, sortValue?, sortLabel? }`
 `width` = grid track (`"6rem"`, `"1fr"`, `"1.5fr"`).
+เมื่อ `resizable` คอลัมน์จะ `overflow-hidden` (เนื้อหายาวถูกตัด ไม่ล้นทับคอลัมน์อื่น) — cell ที่อยากได้ "…" ให้หุ้มด้วย `className="block truncate"`.
 
 ## ตัวอย่าง
 ดูตัวจริงที่ `app/master/work-board/purchase-needs.tsx` (consumer ตัวแรก)

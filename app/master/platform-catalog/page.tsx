@@ -30,6 +30,7 @@ export default function PlatformCatalogPage() {
   // ชนิดไฟล์ที่ผู้ใช้สร้างเอง (custom, active) — รวมกับโปรไฟล์มาตรฐานตอนเดา/เลือก
   const [customProfiles, setCustomProfiles] = useState<ImportProfile[]>([]);
   const [showManager, setShowManager] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
@@ -148,9 +149,9 @@ export default function PlatformCatalogPage() {
 
   const activePf = platforms.find((p) => p.id === platformId);
   const cols: MiniColumn<Listing>[] = [
-    { key: "ext", header: "รหัสบนแพลตฟอร์ม", width: "1.2fr", cell: (l) => <span className="font-mono text-xs">{l.external_product_id || "—"}</span> },
-    { key: "title", header: "ชื่อสินค้า", width: "2fr", sortValue: (l) => l.title ?? "", cell: (l) => <span className="truncate">{l.title || "—"}</span> },
-    { key: "sku", header: "SKU", width: "1fr", cell: (l) => <span className="font-mono text-xs">{l.sku_code || "—"}</span> },
+    { key: "ext", header: "รหัสบนแพลตฟอร์ม", width: "1.2fr", cell: (l) => <span className="block truncate font-mono text-xs">{l.external_product_id || "—"}</span> },
+    { key: "title", header: "ชื่อสินค้า", width: "2fr", sortValue: (l) => l.title ?? "", cell: (l) => <span className="block truncate" title={l.title ?? ""}>{l.title || "—"}</span> },
+    { key: "sku", header: "SKU", width: "1fr", cell: (l) => <span className="block truncate font-mono text-xs" title={l.sku_code ?? ""}>{l.sku_code || "—"}</span> },
     { key: "price", header: "ราคา", width: "0.8fr", align: "right", sortValue: (l) => l.price ?? -1, cell: (l) => l.price != null ? <span>{l.price.toLocaleString()}฿</span> : "—" },
     { key: "match", header: "จับคู่ ERP", width: "5rem", align: "center", cell: (l) => l.matched_parent_sku_id ? <span className="text-emerald-600">✓</span> : <span className="text-slate-300">—</span> },
   ];
@@ -164,8 +165,26 @@ export default function PlatformCatalogPage() {
 
   return (
     <div className="max-w-5xl mx-auto p-6">
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">🛒 สินค้าบนแพลตฟอร์ม</h1>
-      <p className="text-sm text-slate-500 mb-4">ดูว่าแต่ละร้าน/แพลตฟอร์มมีสินค้าอะไร + ฟิลด์อะไร — สำหรับจับคู่กับสินค้าเรา และทำ field mapping</p>
+      <div className="flex items-start justify-between gap-3 mb-1">
+        <h1 className="text-xl font-semibold text-slate-900">🛒 สินค้าบนแพลตฟอร์ม</h1>
+        <button onClick={() => setShowHelp((v) => !v)} className="shrink-0 h-8 px-3 text-sm text-sky-700 border border-sky-200 bg-sky-50 rounded-lg hover:bg-sky-100">{showHelp ? "ซ่อนวิธีใช้" : "ℹ️ วิธีใช้"}</button>
+      </div>
+      <p className="text-sm text-slate-500 mb-3">ดูว่าแต่ละร้าน/แพลตฟอร์มมีสินค้าอะไร + ฟิลด์อะไร — สำหรับจับคู่กับสินค้าเรา และทำ field mapping</p>
+
+      {showHelp && (
+        <div className="mb-4 border border-sky-200 bg-sky-50/60 rounded-xl p-4 text-sm text-slate-700 space-y-2">
+          <p className="font-medium text-slate-800">หน้านี้ใช้ทำอะไร?</p>
+          <p>รวบรวมว่าสินค้าของเราตอนนี้อยู่บนร้าน/แพลตฟอร์มไหนบ้าง (เช่น Shopee) โดย<b>อัปไฟล์ export จาก Seller Center</b> เข้ามา ระบบจะอ่านให้อัตโนมัติแล้วจับคู่กับสินค้าใน ERP</p>
+          <ol className="list-decimal ml-5 space-y-1">
+            <li><b>เลือกแพลตฟอร์ม + แบรนด์/ร้าน</b> ที่มุมซ้ายบนก่อน (อัปไฟล์ชุดเดียวกันให้เลือกแบรนด์เดิมทุกครั้ง)</li>
+            <li>กด <b>⬆️ อัปไฟล์ export</b> แล้วเลือกไฟล์ Excel/CSV — <b>เลือกได้หลายไฟล์พร้อมกัน</b> (เช่น Shopee 5 ไฟล์: ข้อมูลพื้นฐาน/ราคา-สต๊อก/รูป/ขนส่ง/เวลาเตรียม)</li>
+            <li>ระบบ<b>เดาชนิดไฟล์ให้</b> → ขึ้นรายการ “รอนำเข้า” ตรวจดูแล้วกด <b>นำเข้าทั้งหมด</b> (ข้อมูลจากทุกไฟล์จะรวมเป็นสินค้าเดียวกันตามรหัส)</li>
+            <li>ดูผลที่แท็บ <b>รายการสินค้า</b> — เครื่องหมาย <span className="text-emerald-600">✓</span> ที่ช่อง “จับคู่ ERP” = ตรงกับสินค้าเราแล้ว</li>
+          </ol>
+          <p className="pt-1"><b>แท็บอื่น:</b> “ฟิลด์ของ…” = คอลัมน์ทั้งหมดที่อ่านได้จากไฟล์ · “จับคู่ฟิลด์” = บอกว่าจะส่งข้อมูล ERP ตัวไหนไปลงช่องไหนของแพลตฟอร์ม</p>
+          <p><b>ปุ่ม ⚙️</b> = จัดการ “ชนิดไฟล์นำเข้า” เพิ่ม/แก้เองได้ถ้าแพลตฟอร์มเปลี่ยนคอลัมน์ · <b>ในตารางลากขอบหัวคอลัมน์เพื่อปรับความกว้างได้</b> (จำค่าไว้ให้)</p>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <select value={platformId} onChange={(e) => setPlatformId(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm bg-white">
@@ -221,7 +240,7 @@ export default function PlatformCatalogPage() {
       {loading ? <p className="text-slate-400 text-sm py-8 text-center">กำลังโหลด...</p> : tab === "catalog" ? (
         listings.length === 0
           ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่มีข้อมูลสินค้าบนแพลตฟอร์มนี้<br />กด “⬆️ อัปไฟล์ export” ด้านบน เพื่อนำเข้าไฟล์ Excel/CSV จาก Seller Center</div>
-          : <MiniTable rows={listings} columns={cols} rowKey={(l) => l.id} searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""}`} dense />
+          : <MiniTable rows={listings} columns={cols} rowKey={(l) => l.id} searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""}`} resizable storageKey="platform-catalog-listings" dense />
       ) : tab === "fields" ? (
         fields.length === 0
           ? <div className="border border-dashed border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">ยังไม่ทราบฟิลด์ของแพลตฟอร์มนี้<br />อัปไฟล์ export แล้วระบบจะอ่านหัวคอลัมน์เป็นฟิลด์ให้อัตโนมัติ</div>

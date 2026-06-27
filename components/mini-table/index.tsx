@@ -23,7 +23,7 @@
  *     actions={<button>...</button>}
  *   />
  */
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 export type MiniColumn<T> = {
   key: string;
@@ -71,6 +71,10 @@ export type MiniTableProps<T> = {
   maxHeightClass?: string;              // เช่น "max-h-[calc(100vh-210px)]"
   className?: string;
   footnote?: ReactNode;
+
+  // ปรับความกว้างคอลัมน์ได้ (ลากขอบหัวคอลัมน์) — opt-in · ใส่ storageKey เพื่อจำค่าไว้ในเครื่อง
+  resizable?: boolean;
+  storageKey?: string;
 };
 
 type Dir = "asc" | "desc";
@@ -83,6 +87,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     title, actions, countUnit = "รายการ",
     emptyText = "ไม่มีข้อมูล", noMatchText,
     dense, maxHeightClass = "", className = "", footnote,
+    resizable, storageKey,
   } = props;
 
   const sortable = columns.filter((c) => c.sortValue);
@@ -90,6 +95,33 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const [sortKey, setSortKey] = useState<string>("");   // "" = ลำดับเดิม
   const [dir, setDir] = useState<Dir>("asc");
   const [grouped, setGrouped] = useState(defaultGrouped);
+
+  // ความกว้างที่ผู้ใช้ลากปรับ (px ต่อ key) — โหลด/บันทึกจาก localStorage ถ้ามี storageKey
+  const [widths, setWidths] = useState<Record<string, number>>({});
+  const lsKey = storageKey ? `minitable:w:${storageKey}` : "";
+  useEffect(() => {
+    if (!resizable || !lsKey) return;
+    try { const s = localStorage.getItem(lsKey); if (s) setWidths(JSON.parse(s)); } catch { /* ignore */ }
+  }, [resizable, lsKey]);
+  useEffect(() => {
+    if (!resizable || !lsKey) return;
+    try { localStorage.setItem(lsKey, JSON.stringify(widths)); } catch { /* ignore */ }
+  }, [widths, resizable, lsKey]);
+
+  // ลากขอบหัวคอลัมน์เพื่อปรับความกว้าง
+  const dragRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
+  const startResize = (key: string) => (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const headerCell = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
+    dragRef.current = { key, startX: e.clientX, startW: headerCell.getBoundingClientRect().width };
+    const onMove = (ev: MouseEvent) => {
+      const d = dragRef.current; if (!d) return;
+      setWidths((prev) => ({ ...prev, [d.key]: Math.max(48, Math.round(d.startW + (ev.clientX - d.startX))) }));
+    };
+    const onUp = () => { dragRef.current = null; document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); document.body.style.cursor = ""; };
+    document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp); document.body.style.cursor = "col-resize";
+  };
+  const resetWidths = () => setWidths({});
 
   const sel = selected ?? EMPTY;
   const setSel = (next: Set<string>) => onSelectedChange?.(next);
@@ -133,8 +165,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const toggleKey = (k: string) => { const n = new Set(sel); n.has(k) ? n.delete(k) : n.add(k); setSel(n); };
   const setKeys = (keys: string[], on: boolean) => { const n = new Set(sel); keys.forEach((k) => (on ? n.add(k) : n.delete(k))); setSel(n); };
 
-  // grid template — เพิ่มช่อง checkbox นำหน้าถ้าเลือกได้
-  const tmpl = (selectable ? "2.25rem " : "") + columns.map((c) => c.width ?? "1fr").join(" ");
+  // grid template — เพิ่มช่อง checkbox นำหน้าถ้าเลือกได้ · คอลัมน์ที่ลากปรับแล้วใช้ px
+  const colTrack = (c: MiniColumn<T>) => (resizable && widths[c.key] != null ? `${widths[c.key]}px` : (c.width ?? "1fr"));
+  const tmpl = (selectable ? "2.25rem " : "") + columns.map(colTrack).join(" ");
   const padY = dense ? "py-1.5" : "py-2";
   const alignCls = (a?: string) => (a === "right" ? "text-right justify-end" : a === "center" ? "text-center justify-center" : "");
 
@@ -148,13 +181,17 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       {columns.map((c) => {
         const canSort = !!c.sortValue;
         const active = sortKey === c.key;
-        if (!canSort) return <span key={c.key} className={`flex items-center gap-1 ${alignCls(c.align)}`}>{c.header}</span>;
+        const handle = resizable ? <span onMouseDown={startResize(c.key)} title="ลากเพื่อปรับความกว้าง" className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-rose-300/70" /> : null;
+        const wrapCls = `flex items-center gap-1 ${resizable ? "relative overflow-hidden pr-2" : ""} ${alignCls(c.align)}`;
+        const head = resizable ? <span className="truncate">{c.header}</span> : c.header;   // truncate เฉพาะตอน resizable (กันกระทบตารางเดิม)
+        if (!canSort) return <span key={c.key} className={wrapCls}>{head}{handle}</span>;
         return (
-          <span key={c.key} className={`flex items-center gap-1 ${alignCls(c.align)}`}>
-            <button type="button" onClick={() => toggleSort(c.key)} title="คลิกเพื่อเรียง" className={`inline-flex items-center gap-1 hover:text-slate-900 ${active ? "text-rose-600" : ""}`}>
-              {c.header}
-              <span className="text-[9px] leading-none">{active ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
+          <span key={c.key} className={wrapCls}>
+            <button type="button" onClick={() => toggleSort(c.key)} title="คลิกเพื่อเรียง" className={`inline-flex items-center gap-1 min-w-0 hover:text-slate-900 ${active ? "text-rose-600" : ""}`}>
+              {head}
+              <span className="text-[9px] leading-none shrink-0">{active ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
             </button>
+            {handle}
           </span>
         );
       })}
@@ -173,7 +210,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
             <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className="w-4 h-4 accent-rose-600" />
           </span>
         )}
-        {columns.map((c) => <div key={c.key} className={`min-w-0 text-sm text-slate-800 ${alignCls(c.align)}`}>{c.cell(r)}</div>)}
+        {columns.map((c) => <div key={c.key} className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)}`}>{c.cell(r)}</div>)}
       </div>
     );
   };
@@ -213,6 +250,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
             <button onClick={() => setGrouped((g) => !g)} className={`h-8 px-3 text-sm rounded-lg border ${grouped ? "bg-rose-50 border-rose-200 text-rose-600" : "bg-white border-slate-200 text-slate-500"}`}>
               {grouped ? `▦ ${groupLabel}` : "▤ ไม่จัดกลุ่ม"}
             </button>
+          )}
+          {resizable && Object.keys(widths).length > 0 && (
+            <button onClick={resetWidths} title="คืนความกว้างคอลัมน์เป็นค่าเริ่มต้น" className="h-8 px-2 text-xs text-slate-400 hover:text-slate-600 underline">รีเซ็ตความกว้าง</button>
           )}
         </div>
       )}
