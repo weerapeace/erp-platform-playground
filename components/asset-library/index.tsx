@@ -578,6 +578,7 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
   const [saving, setSaving] = useState(false);
   const [confirmTrash, setConfirmTrash] = useState(false);
   const [replacing, setReplacing] = useState(false);
+  const [zoom, setZoom] = useState(false);   // กดรูป → ดูเต็มจอ
   const replaceRef = useRef<HTMLInputElement>(null);
 
   const loadDetail = useCallback(async () => {
@@ -692,8 +693,13 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
       ) : (
         <div className="flex gap-4 flex-wrap">
           <div className="flex-1 min-w-[200px] bg-slate-100 rounded-xl flex items-center justify-center min-h-[240px] overflow-hidden">
-            {isImage(d) ? <img src={withImageWidth(d.url, 768) ?? d.url} alt={d.title} className="max-w-full max-h-[360px] object-contain" />
-              : <div className="text-center"><div className="text-5xl">{TYPE_ICON[d.asset_type]}</div><p className="text-[11px] text-slate-400 mt-2">{(d.ext ?? "").toUpperCase()}</p></div>}
+            {isImage(d) ? (
+              <button type="button" onClick={() => setZoom(true)} title="กดเพื่อดูรูปใหญ่"
+                className="group relative w-full h-full min-h-[240px] flex items-center justify-center cursor-zoom-in">
+                <img src={withImageWidth(d.url, 768) ?? d.url} alt={d.title} className="max-w-full max-h-[360px] object-contain" />
+                <span className="absolute bottom-2 right-2 text-[11px] px-2 py-0.5 rounded-md bg-black/55 text-white opacity-0 group-hover:opacity-100 transition pointer-events-none">🔍 ดูรูปใหญ่</span>
+              </button>
+            ) : <div className="text-center"><div className="text-5xl">{TYPE_ICON[d.asset_type]}</div><p className="text-[11px] text-slate-400 mt-2">{(d.ext ?? "").toUpperCase()}</p></div>}
           </div>
 
           <div className="flex-1 min-w-[240px]">
@@ -780,6 +786,14 @@ function DetailModal({ id, actor, collections, artTypes, onClose, onChanged }: {
 
       <ConfirmDialog open={confirmTrash} onClose={() => setConfirmTrash(false)} onConfirm={trash}
         title="ย้ายไฟล์ลงถังขยะ?" message="กู้คืนได้ภายใน 30 วัน" confirmText="ย้ายลงถังขยะ" variant="danger" />
+
+      {zoom && d && isImage(d) && (
+        <div className="fixed inset-0 z-[300] bg-black/85 flex items-center justify-center p-6" onClick={() => setZoom(false)}>
+          <img src={d.url} alt={d.title} className="max-w-full max-h-full object-contain rounded-lg" />
+          <button onClick={() => setZoom(false)} title="ปิด"
+            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/90 text-slate-700 text-lg flex items-center justify-center hover:bg-white">✕</button>
+        </div>
+      )}
     </ERPModal>
   );
 }
