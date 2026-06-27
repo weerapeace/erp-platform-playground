@@ -28,10 +28,12 @@ async function rowsByIds(admin: Admin, orderedIds: string[]): Promise<AssetRow[]
   return orderedIds.map((id) => map.get(id)).filter((x): x is AssetRow => !!x);
 }
 
-// asset_ids ที่ผูกกับ (module, record_id) เรียงตามวันที่อัป (เฟส 2 = sort_order)
+// asset_ids ที่ผูกกับ (module, record_id) เรียงตาม sort_order (null ไปท้าย) แล้ว created_at
 async function usageIds(admin: Admin, module: string, recordId: string): Promise<string[]> {
-  const { data } = await admin.from("asset_usages").select("asset_id, created_at")
-    .eq("module", module).eq("record_id", recordId).order("created_at", { ascending: true });
+  const { data } = await admin.from("asset_usages").select("asset_id, sort_order, created_at")
+    .eq("module", module).eq("record_id", recordId)
+    .order("sort_order", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: true });
   return (data ?? []).map((u) => (u as { asset_id: string }).asset_id);
 }
 
@@ -71,7 +73,8 @@ export async function GET(request: NextRequest) {
     const skuList = (skus ?? []) as { id: string; code: string; name_th: string | null }[];
     const skuIds = skuList.map((s) => s.id);
     const { data: su } = skuIds.length
-      ? await admin.from("asset_usages").select("asset_id, record_id, created_at").eq("module", "product_sku").in("record_id", skuIds).order("created_at", { ascending: true })
+      ? await admin.from("asset_usages").select("asset_id, record_id, sort_order, created_at").eq("module", "product_sku").in("record_id", skuIds)
+          .order("sort_order", { ascending: true, nullsFirst: false }).order("created_at", { ascending: true })
       : { data: [] };
     const bySku = new Map<string, string[]>();
     for (const u of (su ?? []) as { asset_id: string; record_id: string }[]) {
@@ -94,4 +97,24 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ error: "bad mode" }, { status: 400 });
+}
+
+// ---- POST: บันทึกลำดับรูปในโฟลเดอร์ (per module + record_id) ----
+const REORDER_MODULES = new Set(["parent_sku", "product_sku", "parent_sku_description"]);
+export async function POST(request: NextRequest) {
+  const denied = await guardApi(request, "assets.edit");
+  if (denied) return denied;
+  let body: { module?: string; record_id?: string; ordered_asset_ids?: string[] };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const { module, record_id, ordered_asset_ids } = body;
+  if (!module || !REORDER_MODULES.has(module) || !record_id || !Array.isArray(ordered_asset_ids))
+    return NextResponse.json({ error: "ข้อมูลไม่ครบ" }, { status: 400 });
+
+  const admin = supabaseAdmin();
+  for (let i = 0; i < ordered_asset_ids.length; i++) {
+    const { error } = await admin.from("asset_usages").update({ sort_order: i })
+      .eq("module", module).eq("record_id", record_id).eq("asset_id", ordered_asset_ids[i]);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, error: null });
 }

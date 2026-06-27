@@ -7,9 +7,10 @@
  * อ่านจาก /api/assets/brand-tree (ผูกสินค้าผ่าน asset_usages เดิม — auto, ไม่ต้องจัดอัลบั้มมือ)
  * คลิกรูป → onOpenAsset(id) เปิด DetailModal ตัวเดียวกับหน้าคลัง
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
+import { useToast } from "@/components/toast";
 import type { AssetRow } from "@/app/api/assets/shared";
 
 type Brand = { brand_id: string | null; brand_name: string; brand_color: string | null; parent_count: number; image_count: number };
@@ -34,11 +35,42 @@ function Thumb({ a, onOpen }: { a: AssetRow; onOpen: () => void }) {
   );
 }
 
-function Grid({ items, onOpen }: { items: AssetRow[]; onOpen: (id: string) => void }) {
+// กริดรูป + ลากเรียงลำดับ (onReorder คืน asset_ids ตามลำดับใหม่)
+function ReorderableGrid({ items, onOpen, onReorder }: { items: AssetRow[]; onOpen: (id: string) => void; onReorder?: (orderedIds: string[]) => void }) {
+  const [order, setOrder] = useState<string[]>(() => items.map((i) => i.id));
+  useEffect(() => { setOrder(items.map((i) => i.id)); }, [items]);
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const dragIdx = useRef<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+
   if (items.length === 0) return <p className="text-[12px] text-slate-400 py-2">— ยังไม่มีรูป —</p>;
+
+  const drop = (toIdx: number) => {
+    const from = dragIdx.current; dragIdx.current = null; setOverIdx(null);
+    if (from == null || from === toIdx) return;
+    const next = [...order];
+    const [moved] = next.splice(from, 1);
+    next.splice(toIdx, 0, moved);
+    setOrder(next);
+    onReorder?.(next);
+  };
+
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
-      {items.map((a) => <Thumb key={a.id} a={a} onOpen={() => onOpen(a.id)} />)}
+      {order.map((id, idx) => {
+        const a = byId.get(id); if (!a) return null;
+        return (
+          <div key={id}
+            draggable={!!onReorder}
+            onDragStart={() => { dragIdx.current = idx; }}
+            onDragOver={(e) => { if (onReorder) { e.preventDefault(); if (overIdx !== idx) setOverIdx(idx); } }}
+            onDrop={(e) => { e.preventDefault(); drop(idx); }}
+            onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
+            className={`rounded-lg ${onReorder ? "cursor-grab active:cursor-grabbing" : ""} ${overIdx === idx ? "ring-2 ring-indigo-400" : ""}`}>
+            <Thumb a={a} onOpen={() => onOpen(a.id)} />
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -62,6 +94,19 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
   const [detail, setDetail] = useState<ParentDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [openSku, setOpenSku] = useState<Set<string>>(new Set());
+  const toast = useToast();
+
+  // บันทึกลำดับรูปในโฟลเดอร์ (optimistic — UI ขยับแล้ว, ยิงเก็บเงียบ ๆ)
+  const saveOrder = useCallback(async (module: string, recordId: string, ids: string[]) => {
+    if (!recordId) return;
+    try {
+      const res = await apiFetch("/api/assets/brand-tree", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ module, record_id: recordId, ordered_asset_ids: ids }),
+      });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "บันทึกลำดับไม่สำเร็จ");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกลำดับไม่สำเร็จ"); }
+  }, [toast]);
 
   const loadBrands = useCallback(async () => {
     setLoadingBrands(true);
@@ -102,8 +147,9 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
         {loadingDetail ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
           <div className="flex flex-col gap-5">
             <section>
-              <p className="text-[13px] font-medium text-slate-700 mb-2">🖼️ รูปที่ลงใน Parent SKU <span className="text-slate-400 font-normal">({fmt(detail.parentImages.length)})</span></p>
-              <Grid items={detail.parentImages} onOpen={onOpenAsset} />
+              <p className="text-[13px] font-medium text-slate-700 mb-2">🖼️ รูปที่ลงใน Parent SKU <span className="text-slate-400 font-normal">({fmt(detail.parentImages.length)})</span>
+                {detail.parentImages.length > 1 && <span className="text-[11px] text-slate-300 ml-1">· ลากรูปเพื่อจัดลำดับ</span>}</p>
+              <ReorderableGrid items={detail.parentImages} onOpen={onOpenAsset} onReorder={(ids) => saveOrder("parent_sku", detail.parent?.id ?? "", ids)} />
             </section>
 
             <section>
@@ -121,7 +167,7 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
                           <span className="text-[12px] text-slate-500 truncate flex-1">{s.name}</span>
                           <span className="text-[11px] text-slate-400">{fmt(s.images.length)} รูป</span>
                         </button>
-                        {open && <div className="px-3 pb-3"><Grid items={s.images} onOpen={onOpenAsset} /></div>}
+                        {open && <div className="px-3 pb-3"><ReorderableGrid items={s.images} onOpen={onOpenAsset} onReorder={(ids) => saveOrder("product_sku", s.id, ids)} /></div>}
                       </div>
                     );
                   })}
@@ -133,7 +179,7 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
               <p className="text-[13px] font-medium text-slate-700 mb-2">📂 Description <span className="text-slate-400 font-normal">({fmt(detail.description.length)})</span></p>
               {detail.description.length === 0
                 ? <p className="text-[12px] text-slate-400">— ยังไม่มีรูป Description — <span className="text-slate-300">(เพิ่มได้ที่ฟอร์ม Parent SKU — เร็ว ๆ นี้)</span></p>
-                : <Grid items={detail.description} onOpen={onOpenAsset} />}
+                : <ReorderableGrid items={detail.description} onOpen={onOpenAsset} onReorder={(ids) => saveOrder("parent_sku_description", detail.parent?.id ?? "", ids)} />}
             </section>
           </div>
         )}
