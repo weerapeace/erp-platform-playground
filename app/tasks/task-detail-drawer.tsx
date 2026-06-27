@@ -121,7 +121,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [ef, setEf] = useState<EditForm | null>(null);
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
-  const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 640); // ลากปรับความกว้าง (ของกลาง)
+  const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
+  const twoCol = drawerW >= 820;   // กว้างพอ → ซ้าย/ขวาเรียงข้างกัน · แคบ → เรียงบน-ล่าง (อิงความกว้าง drawer จริง ไม่ใช่ viewport)
 
   const load = useCallback(async () => {
     try { setDetail(await getTask(taskId)); }
@@ -164,7 +165,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(d.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(d.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
 
-  const brandColor = brands.find((b) => b.id === d.brand_id)?.color ?? d.brand_color;
+  const brandSel = brands.find((b) => b.id === d.brand_id);
+  const brandColor = brandSel?.color ?? d.brand_color;
+  const brandLogo = brandSel?.logo_url ?? null;   // R2 key ของโลโก้แบรนด์ (โชว์ผ่าน /api/r2-image)
   const campaignName = campaigns.find((c) => c.id === d.campaign_id)?.name ?? d.campaign_label;
   // quick edit: เซฟทันที (keepOpen=true สำหรับ multi เช่น Parent SKU ที่เพิ่ม/ลบหลายรอบ)
   const saveQuick = async (patch: Record<string, unknown>, keepOpen = false) => {
@@ -200,168 +203,217 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* รูปปกของงาน — ไม่มี = ใช้รูปจาก Parent SKU · กดเปลี่ยน/เพิ่มได้ */}
-          <div>
-            {coverKey ? (
-              <div className="relative rounded-xl overflow-hidden border border-slate-200">
-                <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=900`} alt="" className="w-full max-h-56 object-cover" />
-                {coverFromParent && <span className="absolute top-2 left-2 text-[10px] bg-black/55 text-white px-1.5 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
-                <button type="button" onClick={() => setCoverEdit((v) => !v)} className="absolute top-2 right-2 text-xs bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded-md px-2 py-0.5">✎ {t("เปลี่ยนรูปปก", "Change cover")}</button>
-              </div>
-            ) : (
-              <button type="button" onClick={() => setCoverEdit(true)} className="w-full h-20 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-colors">🖼️ {t("เพิ่มรูปปก", "Add cover image")}</button>
-            )}
-            {coverEdit && (
-              <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-3 space-y-2">
-                <p className="text-[11px] text-slate-500">{t("รูปปกสำรอง — ถ้า Parent SKU มีรูป จะใช้รูป Parent SKU แทน", "Fallback cover — Parent SKU image takes priority when it has one")}</p>
-                <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
-                <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-xs text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
-              </div>
-            )}
-          </div>
-          {/* status row */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <StatusBadge status={d.status} />
-            <PriorityBadge priority={d.priority} />
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[d.approval_status].cls}`}>{t("อนุมัติ", "Approval")}: {APPROVAL_META[d.approval_status].label}</span>
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[d.asset_status].cls}`}>{ASSET_META[d.asset_status].label}</span>
-          </div>
-          {/* progress */}
-          <div>
-            <div className="flex justify-between text-xs text-slate-400 mb-1"><span>{t("ความคืบหน้า", "Progress")}</span><span>{d.progress_percent}%</span></div>
-            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500" style={{ width: `${d.progress_percent}%` }} /></div>
-            {d.blocker_status === "blocked" && d.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ {t("ติดปัญหา", "Blocked")}: {d.blocker_reason}</p>}
-          </div>
-          {/* meta / แก้ไข */}
-          {editing && ef ? (
-            <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
-                <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
-                <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
-                <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
-                <div><label className="text-xs text-slate-400">{t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")}</label><UserPicker value={ef.reviewer} onChange={(v) => setEf({ ...ef, reviewer: v })} disableCreate /></div>
-                <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ (หลายคน) แก้ที่ช่อง \"ผู้รับผิดชอบ\" ในโหมดดู — รวมคนที่กดเริ่มงานย่อยอัตโนมัติ", "Edit assignees (multiple) in the \"Assignees\" field in view mode — auto-includes whoever started subtasks")}</div>
-              </div>
-              <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
-                <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = ef.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
-                <button onClick={saveEdit} disabled={busy} className="h-8 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
-              </div>
+        <div className="flex-1 overflow-y-auto">
+          {/* บนสุด (เต็มกว้าง): รูปปก + สถานะ + ความคืบหน้า */}
+          <div className="p-5 pb-4 space-y-4">
+            {/* รูปปกของงาน — ไม่มี = ใช้รูปจาก Parent SKU · กดเปลี่ยน/เพิ่มได้ */}
+            <div>
+              {coverKey ? (
+                <div className="relative rounded-xl overflow-hidden border border-slate-200">
+                  <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=900`} alt="" className="w-full max-h-56 object-cover" />
+                  {coverFromParent && <span className="absolute top-2 left-2 text-[10px] bg-black/55 text-white px-1.5 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
+                  <button type="button" onClick={() => setCoverEdit((v) => !v)} className="absolute top-2 right-2 text-xs bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded-md px-2 py-0.5">✎ {t("เปลี่ยนรูปปก", "Change cover")}</button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => setCoverEdit(true)} className="w-full h-20 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-colors">🖼️ {t("เพิ่มรูปปก", "Add cover image")}</button>
+              )}
+              {coverEdit && (
+                <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-3 space-y-2">
+                  <p className="text-[11px] text-slate-500">{t("รูปปกสำรอง — ถ้า Parent SKU มีรูป จะใช้รูป Parent SKU แทน", "Fallback cover — Parent SKU image takes priority when it has one")}</p>
+                  <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
+                  <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-xs text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-              <QuickField label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null}
-                active={qf === "task_type"} onOpen={() => setQf("task_type")} onClose={() => setQf(null)}
-                editor={<ERPSelect value={d.task_type ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...taskTypes]} onChange={(e) => saveQuick({ task_type: e.target.value || null })} />} />
-              <QuickField label={t("แบรนด์", "Brand")} value={d.brand_label} dot={brandColor}
-                active={qf === "brand"} onOpen={() => setQf("brand")} onClose={() => setQf(null)}
-                editor={<ERPSelect value={d.brand_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => saveQuick({ brand_id: e.target.value || null })} />} />
-              <MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
-                onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} />
-              <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label}
-                active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
-                editor={<UserPicker value={d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ reviewer_id: v?.id ?? null })} disableCreate />} />
-              <QuickField label={t("กำหนดส่ง", "Due Date")} value={d.due_date} highlight={isOverdue(d)}
-                active={qf === "due_date"} onOpen={() => setQf("due_date")} onClose={() => setQf(null)}
-                editor={<ERPInput type="date" defaultValue={d.due_date ?? ""} onChange={(e) => saveQuick({ due_date: e.target.value || null })} />} />
-              <QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
-                active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
-                editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} />
-              <QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
-                active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
-                editor={
-                  <div className="space-y-1.5">
-                    <div className="flex flex-wrap gap-1">
-                      {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{p.code || p.name}<button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
-                      {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+            {/* status row */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <StatusBadge status={d.status} />
+              <PriorityBadge priority={d.priority} />
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${APPROVAL_META[d.approval_status].cls}`}>{t("อนุมัติ", "Approval")}: {APPROVAL_META[d.approval_status].label}</span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${ASSET_META[d.asset_status].cls}`}>{ASSET_META[d.asset_status].label}</span>
+            </div>
+            {/* progress */}
+            <div>
+              <div className="flex justify-between text-xs text-slate-400 mb-1"><span>{t("ความคืบหน้า", "Progress")}</span><span>{d.progress_percent}%</span></div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500" style={{ width: `${d.progress_percent}%` }} /></div>
+              {d.blocker_status === "blocked" && d.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ {t("ติดปัญหา", "Blocked")}: {d.blocker_reason}</p>}
+            </div>
+          </div>
+
+          {/* 2 คอลัมน์: ซ้าย (เนื้องาน ~2/3) · ขวา (ข้อมูล ~1/3) — เรียงข้างกันเมื่อ drawer กว้างพอ */}
+          <div className={`flex ${twoCol ? "flex-row" : "flex-col"} items-stretch border-t border-slate-100`}>
+            {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
+            <div className="flex-1 min-w-0 w-full p-5 space-y-4">
+              {/* รายละเอียดงาน (ถ้ามี) */}
+              {d.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600 whitespace-pre-wrap"><p className="text-xs text-slate-400 mb-1">{t("รายละเอียดงาน", "Description")}</p>{d.description}</div>}
+
+              {/* งานย่อย (การ์ด) — ของกลางจัดการสด · ถ้าไม่มีจะมีปุ่มเพิ่มในตัว */}
+              <SubtaskManager taskId={d.id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
+
+              {/* สินค้าที่เกี่ยวข้อง (SKU m2m) */}
+              {(() => {
+                const list = (d.skus && d.skus.length) ? d.skus : (d.sku_code ? [{ id: "_", code: d.sku_code, name: d.sku_name || d.product_name, color: d.sku_color, price: d.sku_price }] : []);
+                return list.length > 0 ? (
+                  <div className="bg-slate-50 rounded-lg p-3 text-sm">
+                    <p className="text-xs text-slate-400 mb-1.5">{t("สินค้าที่เกี่ยวข้อง", "Related Products")} ({list.length})</p>
+                    <div className="space-y-1.5">
+                      {list.map((s, i) => (
+                        <div key={s.id || i} className="flex items-center gap-2 flex-wrap">
+                          {s.code && <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{s.code}</span>}
+                          <span className="text-slate-700">{s.name}</span>
+                          {s.color && <span className="text-xs text-slate-400">{t("สี", "Color")}: {s.color}</span>}
+                          {s.price != null && <span className="text-xs text-slate-400">{Number(s.price).toLocaleString()}฿</span>}
+                        </div>
+                      ))}
                     </div>
-                    <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
                   </div>
-                } />
+                ) : null;
+              })()}
+
+              {/* ลิงก์ผลงาน */}
+              {(d.drive_folder_url || d.final_asset_url || d.published_url) && (
+                <div className="flex flex-wrap gap-2">
+                  {d.drive_folder_url && <a href={d.drive_folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">📁 {t("โฟลเดอร์ Drive", "Drive Folder")}</a>}
+                  {d.final_asset_url && <a href={d.final_asset_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🖼 {t("ไฟล์จริง", "Final Asset")}</a>}
+                  {d.published_url && <a href={d.published_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🔗 {t("ลิงก์ที่เผยแพร่", "Published Link")}</a>}
+                </div>
+              )}
+
+              {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) */}
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปแนบ", "Images")}</p>
+                <ImageAttach
+                  images={d.attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
+                  onAttach={async (r) => { await addAttachment(d.id, { kind: "image", ...r }); await load(); }}
+                  onDelete={async (aid) => { await deleteAttachment(d.id, aid); await load(); }}
+                  pushToast={pushToast} />
+              </div>
+
+              {/* ลิงก์แนบ */}
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์แนบ", "Attachments")} ({d.attachments.filter((a) => a.kind !== "image").length})</p>
+                <div className="space-y-1.5 mb-2">
+                  {d.attachments.filter((a) => a.kind !== "image").map((a) => (
+                    <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm text-violet-700 hover:bg-violet-50">
+                      🔗 <span className="truncate">{a.label || a.url}</span>
+                    </a>
+                  ))}
+                  {d.attachments.filter((a) => a.kind !== "image").length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีลิงก์แนบ", "No attachments yet")}</p>}
+                </div>
+                <div className="flex gap-2">
+                  <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ (ไม่บังคับ)", "Label (optional)")} />
+                  <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder={t("วางลิงก์ Drive/URL", "Paste Drive/URL link")} />
+                  <button onClick={addLink} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">{t("แนบ", "Attach")}</button>
+                </div>
+              </div>
             </div>
-          )}
-          {/* SKU cards (m2m — ใส่ได้หลายรายการ) */}
-          {(() => {
-            const list = (d.skus && d.skus.length) ? d.skus : (d.sku_code ? [{ id: "_", code: d.sku_code, name: d.sku_name || d.product_name, color: d.sku_color, price: d.sku_price }] : []);
-            return list.length > 0 ? (
-              <div className="bg-slate-50 rounded-lg p-3 text-sm">
-                <p className="text-xs text-slate-400 mb-1.5">{t("สินค้าที่เกี่ยวข้อง", "Related Products")} ({list.length})</p>
-                <div className="space-y-1.5">
-                  {list.map((s, i) => (
-                    <div key={s.id || i} className="flex items-center gap-2 flex-wrap">
-                      {s.code && <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{s.code}</span>}
-                      <span className="text-slate-700">{s.name}</span>
-                      {s.color && <span className="text-xs text-slate-400">{t("สี", "Color")}: {s.color}</span>}
-                      {s.price != null && <span className="text-xs text-slate-400">{Number(s.price).toLocaleString()}฿</span>}
+
+            {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
+            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 p-5 space-y-3 bg-slate-50/40 border-slate-100`}>
+              {editing && ef ? (
+                <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-xs text-slate-400">{t("ประเภทงาน", "Task Type")}</label><ERPSelect value={ef.task_type} options={taskTypes} onChange={(e) => setEf({ ...ef, task_type: e.target.value })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
+                    <div><label className="text-xs text-slate-400">{t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")}</label><UserPicker value={ef.reviewer} onChange={(v) => setEf({ ...ef, reviewer: v })} disableCreate /></div>
+                    <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ (หลายคน) แก้ที่ช่อง \"ผู้รับผิดชอบ\" ในโหมดดู — รวมคนที่กดเริ่มงานย่อยอัตโนมัติ", "Edit assignees (multiple) in the \"Assignees\" field in view mode — auto-includes whoever started subtasks")}</div>
+                  </div>
+                  <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
+                    <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = ef.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
+                    <button onClick={saveEdit} disabled={busy} className="h-8 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* กำหนดส่ง — เด่น (ซ่อนถ้าไม่มี · กดแก้/เพิ่มได้) */}
+                  {qf === "due_date" ? (
+                    <div><p className="text-xs text-slate-400 mb-0.5">{t("กำหนดส่ง", "Due date")}</p>
+                      <div className="flex items-start gap-1"><div className="flex-1"><ERPInput type="date" defaultValue={d.due_date ?? ""} onChange={(e) => saveQuick({ due_date: e.target.value || null })} /></div>
+                        <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
+                    </div>
+                  ) : d.due_date ? (
+                    <button type="button" onClick={() => setQf("due_date")} className={`w-full text-left rounded-xl border px-3 py-2.5 transition-colors ${isOverdue(d) ? "border-red-200 bg-red-50 hover:bg-red-100" : "border-slate-200 bg-white hover:bg-slate-50"}`}>
+                      <p className="text-[10px] text-slate-400">{t("กำหนดส่ง", "Due date")}</p>
+                      <p className={`text-base font-bold ${isOverdue(d) ? "text-red-600" : "text-slate-800"}`}>{isOverdue(d) && "⚠ "}{d.due_date}</p>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setQf("due_date")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เพิ่มกำหนดส่ง", "Add due date")}</button>
+                  )}
+
+                  {/* แบรนด์ — โลโก้เด่น */}
+                  {qf === "brand" ? (
+                    <div><p className="text-xs text-slate-400 mb-0.5">{t("แบรนด์", "Brand")}</p>
+                      <div className="flex items-start gap-1"><div className="flex-1"><ERPSelect value={d.brand_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => saveQuick({ brand_id: e.target.value || null })} /></div>
+                        <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
+                    </div>
+                  ) : d.brand_id ? (
+                    <button type="button" onClick={() => setQf("brand")} className="w-full flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50">
+                      {brandLogo
+                        ? <img src={`/api/r2-image?key=${encodeURIComponent(brandLogo)}&w=120`} alt="" className="h-10 w-10 rounded-lg object-contain bg-white border border-slate-100 shrink-0" />
+                        : <span className="h-10 w-10 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0" style={{ background: brandColor || "#cbd5e1" }}>{(d.brand_label || "?").slice(0, 1)}</span>}
+                      <div className="min-w-0 text-left"><p className="text-[10px] text-slate-400">{t("แบรนด์", "Brand")}</p><p className="text-sm font-semibold text-slate-800 truncate">{d.brand_label}</p></div>
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setQf("brand")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เลือกแบรนด์", "Set brand")}</button>
+                  )}
+
+                  {/* แพลตฟอร์มที่ลง */}
+                  {d.platforms && d.platforms.length > 0 && (
+                    <div><p className="text-[10px] text-slate-400 mb-1">Platform</p>
+                      <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>
+                    </div>
+                  )}
+
+                  {/* ข้อมูลอื่น — กดที่ค่าเพื่อแก้ */}
+                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <QuickField label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null}
+                      active={qf === "task_type"} onOpen={() => setQf("task_type")} onClose={() => setQf(null)}
+                      editor={<ERPSelect value={d.task_type ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...taskTypes]} onChange={(e) => saveQuick({ task_type: e.target.value || null })} />} />
+                    <MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
+                      onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} />
+                    <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label}
+                      active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
+                      editor={<UserPicker value={d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ reviewer_id: v?.id ?? null })} disableCreate />} />
+                    <QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
+                      active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
+                      editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} />
+                    <QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
+                      active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
+                      editor={
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap gap-1">
+                            {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{p.code || p.name}<button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+                            {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+                          </div>
+                          <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
+                        </div>
+                      } />
+                  </div>
+                </>
+              )}
+
+              {/* ความคิดเห็น */}
+              <div className="border-t border-slate-100 pt-3">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
+                <div className="space-y-2 mb-3">
+                  {d.comments.map((c) => (
+                    <div key={c.id} className="bg-white border border-slate-100 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
+                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
                     </div>
                   ))}
+                  {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
+                </div>
+                <div className="flex gap-2">
+                  <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
+                  <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">{t("ส่ง", "Send")}</button>
                 </div>
               </div>
-            ) : null;
-          })()}
-          {/* platforms */}
-          {!editing && d.platforms && d.platforms.length > 0 && <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>}
-          {/* description */}
-          {d.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600"><p className="text-xs text-slate-400 mb-1">{t("รายละเอียด", "Description")}</p>{d.description}</div>}
-          {/* links */}
-          {(d.drive_folder_url || d.final_asset_url || d.published_url) && (
-            <div className="flex flex-wrap gap-2">
-              {d.drive_folder_url && <a href={d.drive_folder_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">📁 {t("โฟลเดอร์ Drive", "Drive Folder")}</a>}
-              {d.final_asset_url && <a href={d.final_asset_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🖼 {t("ไฟล์จริง", "Final Asset")}</a>}
-              {d.published_url && <a href={d.published_url} target="_blank" rel="noopener noreferrer" className="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-violet-700 hover:bg-violet-50">🔗 {t("ลิงก์ที่เผยแพร่", "Published Link")}</a>}
-            </div>
-          )}
-
-          {/* subtasks — ใช้ของกลางจัดการสด */}
-          <SubtaskManager taskId={d.id} pushToast={pushToast} canApprove={canApproveSub} canManageAssignees={canManageAssignees} />
-
-          {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปแนบ", "Images")}</p>
-            <ImageAttach
-              images={d.attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
-              onAttach={async (r) => { await addAttachment(d.id, { kind: "image", ...r }); await load(); }}
-              onDelete={async (aid) => { await deleteAttachment(d.id, aid); await load(); }}
-              pushToast={pushToast} />
-          </div>
-
-          {/* attachments (ลิงก์) */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์แนบ", "Attachments")} ({d.attachments.filter((a) => a.kind !== "image").length})</p>
-            <div className="space-y-1.5 mb-2">
-              {d.attachments.filter((a) => a.kind !== "image").map((a) => (
-                <a key={a.id} href={a.url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm text-violet-700 hover:bg-violet-50">
-                  🔗 <span className="truncate">{a.label || a.url}</span>
-                </a>
-              ))}
-              {d.attachments.filter((a) => a.kind !== "image").length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีลิงก์แนบ", "No attachments yet")}</p>}
-            </div>
-            <div className="flex gap-2">
-              <ERPInput value={linkLabel} onChange={(e) => setLinkLabel(e.target.value)} placeholder={t("ชื่อ (ไม่บังคับ)", "Label (optional)")} />
-              <ERPInput value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder={t("วางลิงก์ Drive/URL", "Paste Drive/URL link")} />
-              <button onClick={addLink} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">{t("แนบ", "Attach")}</button>
-            </div>
-          </div>
-
-          {/* comments */}
-          <div className="border-t border-slate-100 pt-4">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
-            <div className="space-y-2 mb-3">
-              {d.comments.map((c) => (
-                <div key={c.id} className="bg-slate-50 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
-                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
-                </div>
-              ))}
-              {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
-            </div>
-            <div className="flex gap-2">
-              <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
-              <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">{t("ส่ง", "Send")}</button>
             </div>
           </div>
         </div>

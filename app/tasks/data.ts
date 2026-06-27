@@ -88,7 +88,7 @@ export type Campaign = {
   owner_id: string | null; owner_label: string | null; note: string | null; detail_html?: string | null;
 };
 
-export type BrandOption = { id: string; name: string; color: string | null };
+export type BrandOption = { id: string; name: string; color: string | null; logo_url?: string | null };
 
 // ---- helpers ----
 function today(): string { return new Date().toISOString().slice(0, 10); }
@@ -255,9 +255,9 @@ export async function deleteKnowledge(id: string): Promise<void> {
 export async function listBrands(): Promise<BrandOption[]> {
   const j = await jsonOrThrow(await apiFetch("/api/brands"));
   // กรองเฉพาะแบรนด์ของเรา (ไม่ใช่ "งานลูกค้า") — ใช้ทุกฟอร์มที่เลือกแบรนด์ใน Creative
-  return ((j.data as { id: string; name: string; color: string | null; is_customer_job?: boolean }[]) ?? [])
+  return ((j.data as { id: string; name: string; color: string | null; is_customer_job?: boolean; logo_url?: string | null }[]) ?? [])
     .filter((b) => !b.is_customer_job)
-    .map((b) => ({ id: b.id, name: b.name, color: b.color }));
+    .map((b) => ({ id: b.id, name: b.name, color: b.color, logo_url: b.logo_url ?? null }));
 }
 
 // ============================================================
