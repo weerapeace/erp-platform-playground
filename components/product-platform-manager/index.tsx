@@ -8,6 +8,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
@@ -46,6 +47,9 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const [publishing, setPublishing] = useState(false);
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null } | null>(null); // แก้/เพิ่มสี (SKU)
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // F: render ผ่าน portal ไป body (เหมือน Drawer กลาง) → เปิดทับ drawer แม่ที่ค้างอยู่ ไม่ซ้อนหลัง
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   const toast = useCallback((type: Toast["type"], msg: string) => {
     const id = Math.floor(performance.now()) + Math.floor(performance.now() % 1000);
     setToasts((q) => [...q, { id, type, msg }]);
@@ -163,7 +167,8 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   const activePf = platforms.find((p) => p.id === active);
   const iconOf = (p: Platform) => p.icon_key || PLATFORM_ICON[p.code] || "🏬";
 
-  return (
+  if (!mounted) return null;
+  return createPortal(
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
       <div style={{ width }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
@@ -288,6 +293,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
           createDefaults={skuEditor.recordId ? undefined : { parent_sku_id: parent.id }}
           onClose={() => { setSkuEditor(null); load(); }} onChanged={load} />
       )}
-    </>
+    </>,
+    document.body,
   );
 }
