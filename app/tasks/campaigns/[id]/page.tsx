@@ -85,7 +85,7 @@ const ASSET_FIELD_OPTS: { key: AssetFieldKey; labelTh: string; labelEn: string }
   { key: "description", labelTh: "คำอธิบาย", labelEn: "Description" },
 ];
 
-// การ์ดรูปจากคลังกลางบน Excalidraw (สีชมพู): รูป(บน) + ข้อความตามที่ติ๊ก(ล่าง) · customData = snapshot (ดับเบิลคลิกเปิด)
+// การ์ดรูปจากคลังกลางบน Excalidraw — "รูปล้วน" ไม่มีกรอบ (+ ข้อความใต้รูปถ้าติ๊กไว้) · customData = snapshot (ดับเบิลคลิกเปิด)
 function assetCardSkeleton(a: AssetRow, fields: AssetFieldKey[]): Record<string, unknown>[] {
   const gid = `asset-${a.id}-${Math.random().toString(36).slice(2, 7)}`;
   const data = { kind: "asset", id: a.id, title: a.title, url: a.url, master_path: a.master_path ?? null, master_url: a.master_url ?? null, tags: a.tags ?? [], width: a.width ?? null, height: a.height ?? null, description: a.description ?? null };
@@ -97,13 +97,12 @@ function assetCardSkeleton(a: AssetRow, fields: AssetFieldKey[]): Record<string,
   if (fields.includes("size") && a.width && a.height) lines.push(`📐 ${a.width}×${a.height}`);
   if (fields.includes("description") && a.description) lines.push(a.description);
   const text = lines.join("\n");
-  const W = 230, imgH = 170, txtY = imgH + 18;
-  const H = imgH + (text ? 20 + Math.max(lines.length, 1) * 18 : 18);
+  const W = 230, imgH = 170;
+  // ไม่มี rectangle ครอบ — แค่รูป + ข้อความ (จัดกลุ่มให้ลาก/ลบทั้งชุด)
   const els: Record<string, unknown>[] = [
-    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#db2777", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
-    { type: "image", _imageUrl: withImageWidth(a.url, 480) ?? a.url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data },
+    { type: "image", _imageUrl: withImageWidth(a.url, 480) ?? a.url, x: 0, y: 0, width: W, height: imgH, groupIds: [gid], customData: data },
   ];
-  if (text) els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 13, strokeColor: "#9d174d", groupIds: [gid], customData: data });
+  if (text) els.push({ type: "text", x: 0, y: imgH + 10, width: W, text, fontSize: 13, strokeColor: "#475569", groupIds: [gid], customData: data });
   return els;
 }
 
@@ -395,7 +394,7 @@ export default function CampaignCanvasPage() {
       </ERPModal>
 
       {/* ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง */}
-      {parentRecId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={parentRecId} startInEdit onClose={() => setParentRecId(null)} onChanged={() => {}} />}
+      {parentRecId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={parentRecId} onClose={() => setParentRecId(null)} onChanged={() => {}} />}
       {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={user?.role === "admin" || user?.role === "manager"} pushToast={pushToast} />}
 
       {/* เลือกรูปจากคลังกลาง (ของกลาง AssetPicker) → กล่องเลือกข้อมูลที่จะดึง → วางการ์ด */}

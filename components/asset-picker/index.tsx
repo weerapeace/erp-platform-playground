@@ -43,11 +43,23 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [type, setType] = useState(typeFilter ?? "");
+  const [source, setSource] = useState("");          // ที่มา: ""=อัปเอง · artwork · odoo_product · all
+  const [collectionId, setCollectionId] = useState(""); // อัลบั้ม
+  const [tagId, setTagId] = useState("");            // แท็ก
+  const [collections, setCollections] = useState<{ id: string; name: string; count: number }[]>([]);
+  const [tags, setTags] = useState<{ id: string; name: string; count: number }[]>([]);
   const [selected, setSelected] = useState<Map<string, AssetRow>>(new Map());
   const [actor, setActor] = useState<string | null>(null);
 
   useEffect(() => { supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {}); }, []);
-  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(""); setType(typeFilter ?? ""); } }, [open, typeFilter]);
+  useEffect(() => { if (open) { setSelected(new Map()); setTab("library"); setSearch(""); setType(typeFilter ?? ""); setSource(""); setCollectionId(""); setTagId(""); } }, [open, typeFilter]);
+
+  // โหลดรายการอัลบั้ม + แท็ก (ไว้ทำตัวกรอง) — ครั้งเดียวตอนเปิด
+  useEffect(() => {
+    if (!open) return;
+    apiFetch("/api/assets/collections").then((r) => r.json()).then((j) => setCollections(j.data ?? [])).catch(() => {});
+    apiFetch("/api/assets/tags").then((r) => r.json()).then((j) => setTags(j.data ?? [])).catch(() => {});
+  }, [open]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,12 +67,16 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
       const p = new URLSearchParams({ status: "active", limit: "120" });
       if (search) p.set("search", search);
       if (type) p.set("type", type);
-      p.set("source", search ? "all" : "upload");   // ค้นหา → รวมรูปสินค้าด้วย / ไม่ค้น → เฉพาะรูปอัปเอง
+      if (collectionId) p.set("collection_id", collectionId);
+      if (tagId) p.set("tag", tagId);
+      // ที่มา: เลือกเอง → ใช้ค่านั้น · ไม่เลือก → ค้น/กรองอัลบั้ม/แท็ก = รวมทุกที่มา ไม่งั้นเฉพาะรูปอัปเอง
+      const eff = source || ((search || collectionId || tagId) ? "all" : "upload");
+      p.set("source", eff);
       const res = await apiFetch(`/api/assets?${p.toString()}`);
       const j = await res.json();
       setRows(j.data ?? []);
     } catch { /* ignore */ } finally { setLoading(false); }
-  }, [search, type]);
+  }, [search, type, source, collectionId, tagId]);
   useEffect(() => { if (open) void load(); }, [open, load]);
 
   const pick = (a: AssetRow) => {
@@ -110,6 +126,30 @@ export function AssetPicker({ open, onClose, onSelect, multiple = false, typeFil
               <button key={f.key} onClick={() => setType(f.key)}
                 className={`h-8 px-2.5 text-[12px] rounded-lg border ${type === f.key ? "bg-indigo-50 border-indigo-300 text-indigo-700" : "bg-white border-slate-200 text-slate-600"}`}>{f.label}</button>
             ))}
+          </div>
+          {/* ตัวกรอง: ที่มา (หมวด) · อัลบั้ม · แท็ก */}
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <select value={source} onChange={(e) => setSource(e.target.value)} title="ที่มา"
+              className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="">📤 รูปอัปเอง</option>
+              <option value="artwork">🎨 Artwork</option>
+              <option value="odoo_product">🛍️ รูปสินค้า</option>
+              <option value="all">ทุกที่มา</option>
+            </select>
+            <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)} title="อัลบั้ม"
+              className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="">📚 ทุกอัลบั้ม</option>
+              {collections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}
+            </select>
+            <select value={tagId} onChange={(e) => setTagId(e.target.value)} title="แท็ก"
+              className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="">🏷 ทุกแท็ก</option>
+              {tags.map((tg) => <option key={tg.id} value={tg.id}>{tg.name} ({tg.count})</option>)}
+            </select>
+            {(source || collectionId || tagId) && (
+              <button onClick={() => { setSource(""); setCollectionId(""); setTagId(""); }}
+                className="h-8 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">ล้างตัวกรอง</button>
+            )}
           </div>
           {loading ? (
             <div className="py-12 text-center text-slate-400 text-sm">กำลังโหลด…</div>
