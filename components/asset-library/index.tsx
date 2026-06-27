@@ -63,7 +63,9 @@ export function AssetLibrary() {
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
+  const searching = search.trim().length > 0;
   const byBrand = source === "by-brand";
+  const showBrandView = byBrand && !searching;   // ค้นหา = โชว์ผลค้นหาทั่วทั้งคลังแทนมุมมองแบรนด์
 
   useEffect(() => {
     supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {});
@@ -71,17 +73,20 @@ export function AssetLibrary() {
 
   // ── โหลดรายการไฟล์ ──
   const load = useCallback(async () => {
-    if (source === "by-brand") { setRows([]); setTotal(0); setLoading(false); return; }   // มุมมองแบรนด์ใช้ API แยก
+    const isSearch = search.trim().length > 0;
+    // มุมมองแบรนด์: ถ้าไม่ได้ค้นหา ปล่อยให้ BrandAlbumBrowser จัดการ (API แยก)
+    if (source === "by-brand" && !isSearch) { setRows([]); setTotal(0); setLoading(false); return; }
     setLoading(true);
     try {
       const p = new URLSearchParams();
-      if (search) p.set("search", search);
+      if (isSearch) p.set("search", search.trim());
       if (type) p.set("type", type);
-      if (collectionId) p.set("collection_id", collectionId);
-      if (tag) p.set("tag", tag);
+      if (!isSearch && collectionId) p.set("collection_id", collectionId);
+      if (!isSearch && tag) p.set("tag", tag);
       p.set("status", trash ? "trashed" : "active");
-      p.set("source", source);
-      if (artworkType) p.set("artwork_type", artworkType);
+      // ค้นหา = หาทั้งหมดทุกที่มา (อัปเอง/Artwork/รูปสินค้า) ไม่ต้องเลือกเมนูซ้าย · ไม่ค้นหา = ตามที่มาที่เลือก
+      p.set("source", isSearch ? "all" : source);
+      if (!isSearch && artworkType) p.set("artwork_type", artworkType);
       const res = await apiFetch(`/api/assets?${p.toString()}`);
       const j = await res.json();
       if (j.error) throw new Error(j.error);
@@ -102,7 +107,7 @@ export function AssetLibrary() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const t = setTimeout(() => { void load(); }, 250); return () => clearTimeout(t); }, [load]);   // debounce กันยิงทุกคีย์
   useEffect(() => { void loadMeta(); }, [loadMeta]);
   useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
   useEffect(() => { setArtworkType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด artwork
@@ -241,13 +246,17 @@ export function AssetLibrary() {
 
         {/* grid */}
         <main className="flex-1 min-w-0">
-          {byBrand ? (
+          {searching && (
+            <p className="text-[12px] text-slate-500 mb-2">🔍 ผลค้นหา “<b>{search.trim()}</b>” ทั้งคลัง · {total.toLocaleString("th-TH")} ไฟล์</p>
+          )}
+          {showBrandView ? (
             <BrandAlbumBrowser onOpenAsset={(id) => setDetailId(id)} reloadKey={brandReload} />
           ) : loading ? (
             <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
           ) : rows.length === 0 ? (
             <div className="text-center py-16 text-slate-400 text-sm">
-              {trash ? "ถังขยะว่าง"
+              {searching ? `ไม่พบไฟล์ที่ตรงกับ “${search.trim()}”`
+                : trash ? "ถังขยะว่าง"
                 : source === "artwork" ? "ยังไม่มี Artwork — กด “เพิ่ม Artwork” เพื่อลงบัตรงานออกแบบ (รูปตัวอย่าง + path ไฟล์ต้นฉบับ)"
                 : source === "odoo_product" ? "ยังไม่มีรูปสินค้านำเข้า"
                 : "ยังไม่มีไฟล์ในคลัง — กด “อัปโหลด” เพื่อเริ่มเก็บไฟล์"}
