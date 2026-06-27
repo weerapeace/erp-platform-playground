@@ -24,8 +24,9 @@ export default function PlatformCatalogPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  // ไฟล์ที่อ่านแล้วรอยืนยันชนิด (เดาให้ + ให้ผู้ใช้ยืนยันก่อนนำเข้า)
-  const [pending, setPending] = useState<{ fileName: string; matrix: ImportMatrix; profileId: string } | null>(null);
+  // คิวไฟล์ที่อ่านแล้วรอยืนยันชนิด (เลือกได้หลายไฟล์ เดาให้ทุกไฟล์ → ยืนยัน → นำเข้าตามลำดับ)
+  const [queue, setQueue] = useState<{ id: number; fileName: string; matrix: ImportMatrix; profileId: string }[]>([]);
+  const qid = useRef(0);
   // ชนิดไฟล์ที่ผู้ใช้สร้างเอง (custom, active) — รวมกับโปรไฟล์มาตรฐานตอนเดา/เลือก
   const [customProfiles, setCustomProfiles] = useState<ImportProfile[]>([]);
   const [showManager, setShowManager] = useState(false);
@@ -78,38 +79,60 @@ export default function PlatformCatalogPage() {
   }, [platformId, brandId]);
   useEffect(() => { load(); }, [load]);
 
-  // ขั้นที่ 1: อ่านไฟล์ (xlsx/csv) เป็น matrix ดิบ → เดาชนิดไฟล์ → ขึ้นให้ยืนยัน (ยังไม่ส่ง)
-  const importFile = async (file: File) => {
+  // ขั้นที่ 1: อ่านไฟล์ (xlsx/csv) เป็น matrix ดิบ → เดาชนิดไฟล์ → เข้าคิว (รับได้หลายไฟล์)
+  const importFiles = async (files: File[]) => {
     if (!platformId) { setNote("เลือกแพลตฟอร์มก่อน"); return; }
-    setImporting(true); setNote("กำลังอ่านไฟล์...");
+    setImporting(true); setNote(`กำลังอ่านไฟล์... (${files.length})`);
     try {
       const XLSX = await import("xlsx");
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" }) as ImportMatrix;
-      if (matrix.length === 0) { setNote("ไฟล์ว่างเปล่า"); return; }
       const code = platforms.find((p) => p.id === platformId)?.code ?? "";
-      const guessed = detectProfile(code, matrix, customProfiles);
-      setPending({ fileName: file.name, matrix, profileId: guessed.id });
+      const items: { id: number; fileName: string; matrix: ImportMatrix; profileId: string }[] = [];
+      for (const file of files) {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const matrix = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "" }) as ImportMatrix;
+        if (matrix.length === 0) continue;
+        const guessed = detectProfile(code, matrix, customProfiles);
+        items.push({ id: ++qid.current, fileName: file.name, matrix, profileId: guessed.id });
+      }
+      if (items.length === 0) { setNote("ไม่พบข้อมูลในไฟล์ที่เลือก"); return; }
+      setQueue((q) => [...q, ...items]);
       setNote(null);
     } catch (e) { setNote("อ่านไฟล์ไม่สำเร็จ: " + (e as Error).message); }
     finally { setImporting(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 
-  // ขั้นที่ 2: ผู้ใช้ยืนยันชนิดไฟล์แล้ว → ส่ง matrix + profile_id เข้า API
-  const confirmImport = async () => {
-    if (!pending) return;
-    setImporting(true); setNote("กำลังนำเข้า...");
-    try {
-      const r = await apiFetch("/api/platform-catalog/import", { method: "POST", body: JSON.stringify({ platform_id: platformId, brand_id: brandId || undefined, profile_id: pending.profileId, matrix: pending.matrix }) });
-      const j = await r.json(); if (j.error) throw new Error(j.error);
-      setNote(`นำเข้าแล้ว (${j.profile}): ${j.products} สินค้า · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · ${j.fields} ฟิลด์ · จับคู่ ERP ได้ ${j.matched}`);
-      setPending(null);
-      await load();
-    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
-    finally { setImporting(false); }
+  // ขั้นที่ 2: ยืนยันแล้ว → นำเข้าทีละไฟล์ตามลำดับ (ไฟล์ระดับสินค้าก่อนระดับตัวเลือก เพื่อให้ใส่ชื่อ/รหัสก่อน)
+  const confirmImportAll = async () => {
+    if (queue.length === 0) return;
+    const items = [...queue].sort((a, b) => {
+      const la = getProfile(a.profileId, customProfiles)?.level === "variation" ? 1 : 0;
+      const lb = getProfile(b.profileId, customProfiles)?.level === "variation" ? 1 : 0;
+      return la - lb;
+    });
+    setImporting(true);
+    let okFiles = 0, skipped = 0; const errors: string[] = [];
+    const sum = { products: 0, created: 0, updated: 0, matched: 0 };
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const prof = getProfile(it.profileId, customProfiles);
+      if (prof?.kind === "orders") { skipped++; continue; }
+      setNote(`กำลังนำเข้า ${i + 1}/${items.length}: ${it.fileName} ...`);
+      try {
+        const r = await apiFetch("/api/platform-catalog/import", { method: "POST", body: JSON.stringify({ platform_id: platformId, brand_id: brandId || undefined, profile_id: it.profileId, matrix: it.matrix }) });
+        const j = await r.json(); if (j.error) throw new Error(j.error);
+        okFiles++; sum.products += j.products ?? 0; sum.created += j.created ?? 0; sum.updated += j.updated ?? 0; sum.matched += j.matched ?? 0;
+      } catch (e) { errors.push(`${it.fileName}: ${(e as Error).message}`); }
+    }
+    setQueue([]); setImporting(false);
+    let msg = `นำเข้าเสร็จ ${okFiles} ไฟล์ · รวม ${sum.products} สินค้า (เพิ่มใหม่ ${sum.created} · อัปเดต ${sum.updated}) · จับคู่ ERP ได้ ${sum.matched}`;
+    if (skipped) msg += ` · ข้ามไฟล์ออเดอร์ ${skipped} (ให้ไปนำเข้าที่หน้ารับออเดอร์)`;
+    if (errors.length) msg += ` · ผิดพลาด ${errors.length} ไฟล์: ${errors.join(" | ")}`;
+    setNote(msg);
+    await load();
   };
+  const setQueueProfile = (id: number, profileId: string) => setQueue((q) => q.map((it) => it.id === id ? { ...it, profileId } : it));
+  const removeFromQueue = (id: number) => setQueue((q) => q.filter((it) => it.id !== id));
 
   const platformCode = platforms.find((p) => p.id === platformId)?.code ?? "";
   const profileOptions = profilesForPlatform(platformCode, customProfiles);
@@ -153,35 +176,41 @@ export default function PlatformCatalogPage() {
           {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
         <div className="flex-1" />
-        <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); }} />
-        <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center"} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "⬆️ อัปไฟล์ export"}</button>
+        <input ref={fileRef} type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) importFiles(fs); }} />
+        <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "⬆️ อัปไฟล์ export"}</button>
         <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
         <button disabled title="เฟสถัดไป — ต้องมี API key" className="h-9 px-3 text-sm text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed">🔗 ดึงจาก API (เร็ว ๆ นี้)</button>
       </div>
       {note && <p className="text-xs text-slate-500 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{note}</p>}
 
-      {pending && (() => {
-        const prof = getProfile(pending.profileId);
-        const isOrders = prof?.kind === "orders";
-        return (
-          <div className="mb-3 border border-violet-200 bg-violet-50/60 rounded-xl p-3">
-            <div className="flex items-center gap-2 text-sm text-slate-700 mb-2">
-              <span>📄</span><span className="font-medium truncate">{pending.fileName}</span>
+      {queue.length > 0 && (
+        <div className="mb-3 border border-violet-200 bg-violet-50/60 rounded-xl p-3">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-slate-700">ไฟล์รอนำเข้า ({queue.length}) — ตรวจชนิดไฟล์ก่อนกดนำเข้า</span>
+            <div className="flex gap-2">
+              <button onClick={() => { setQueue([]); setNote(null); }} disabled={importing} className="h-8 px-3 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-white disabled:opacity-50">ล้างทั้งหมด</button>
+              <button onClick={confirmImportAll} disabled={importing} className="h-8 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : `นำเข้าทั้งหมด (${queue.length})`}</button>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-slate-600">ระบบตรวจว่าไฟล์นี้คือ:</span>
-              <select value={pending.profileId} onChange={(e) => setPending({ ...pending, profileId: e.target.value })} className="h-9 border border-violet-200 rounded-md px-2 text-sm bg-white max-w-full">
-                {profileOptions.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-              <span className="text-[11px] text-slate-400">เดาผิด? เปลี่ยนได้</span>
-              <div className="flex-1" />
-              <button onClick={() => { setPending(null); setNote(null); }} className="h-9 px-3 text-sm text-slate-500 border border-slate-200 rounded-lg hover:bg-white">ยกเลิก</button>
-              <button onClick={confirmImport} disabled={importing || isOrders} className="h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "นำเข้า"}</button>
-            </div>
-            {isOrders && <p className="text-xs text-amber-600 mt-2">ไฟล์นี้เป็นไฟล์ออเดอร์ — กรุณาไปนำเข้าที่หน้า “รับออเดอร์” แทน</p>}
           </div>
-        );
-      })()}
+          <div className="space-y-1.5">
+            {queue.map((it) => {
+              const isOrders = getProfile(it.profileId, customProfiles)?.kind === "orders";
+              return (
+                <div key={it.id} className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+                  <span className="text-sm text-slate-700 truncate max-w-[16rem]" title={it.fileName}>📄 {it.fileName}</span>
+                  <span className="text-slate-300">→</span>
+                  <select value={it.profileId} onChange={(e) => setQueueProfile(it.id, e.target.value)} disabled={importing} className="h-8 border border-violet-200 rounded-md px-2 text-sm bg-white max-w-full">
+                    {profileOptions.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                  {isOrders && <span className="text-[11px] text-amber-600">ไฟล์ออเดอร์ — จะถูกข้าม</span>}
+                  <div className="flex-1" />
+                  <button onClick={() => removeFromQueue(it.id)} disabled={importing} className="text-slate-400 hover:text-rose-600 text-sm disabled:opacity-50" title="เอาออกจากคิว">✕</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit text-sm mb-3">
         <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({summary.total})</button>
