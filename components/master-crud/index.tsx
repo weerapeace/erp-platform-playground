@@ -17,6 +17,7 @@ import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { useAuth, usePermission, AccessDenied, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
+import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
 import { cachedJson, primeCache } from "@/lib/client-cache";
 import { resolveRelationLabels } from "@/lib/relation";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
@@ -2619,7 +2620,22 @@ export function MasterRecordDrawer({
         : undefined,
     };
   }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults, actor]);
-  return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose, onChanged, startInEdit }} />;
+
+  // ผูก drawer กับปุ่มย้อนกลับเบราว์เซอร์ (ของกลาง): กด Back ปิด drawer ทีละชั้น ไม่หลุดออกจากหน้า
+  // ปุ่มปิด/Esc/แตะนอก → requestClose() (วิ่งผ่านประวัติ) → ปิดชั้นบนสุด
+  const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
+  const histRef = useRef<DrawerHistoryHandle | null>(null);
+  useEffect(() => {
+    const h = pushDrawerHistory(() => onCloseRef.current());
+    histRef.current = h;
+    return () => h.dispose();
+  }, []);
+  const handleClose = useCallback(() => {
+    if (histRef.current) histRef.current.requestClose();
+    else onCloseRef.current();
+  }, []);
+
+  return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose: handleClose, onChanged, startInEdit }} />;
 }
 
 // ============================================================
