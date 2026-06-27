@@ -141,8 +141,9 @@ export function SkuTagBrowser() {
     return () => clearTimeout(t);
   }, []);
   // ต้นไม้แท็ก + ฟิลด์ทะเบียน + รีเซ็ตการเดิน — เปลี่ยนเมื่อสลับ entity (SKU/Parent)
+  // คงคำค้นไว้ (ไม่ setSearch("")) → พิมพ์ WK44 แล้วสลับ SKU↔Parent ยังค้นต่อในอีกฝั่ง
   useEffect(() => {
-    setGroupPath([]); setTagFilter(EMPTY_FILTER); setSearch("");
+    setGroupPath([]); setTagFilter(EMPTY_FILTER);
     apiFetch(`/api/sku-browser?entity=${entity}`).then((r) => r.json()).then((j) => setTree(j.tree ?? { groups: [], tags: [] })).catch(() => {});
     apiFetch(`/api/admin/field-registry-v2?module=${entity === "parent-skus" ? "parent-skus-v2" : "skus-v2"}`).then((r) => r.json())
       .then((j) => {
