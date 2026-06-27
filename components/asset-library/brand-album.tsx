@@ -148,10 +148,12 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
     </div>
   );
 
-  // กล่องดูรูปใหญ่
+  // กล่องดูรูปใหญ่ (กดรูปในแกลเลอรี → ขยายเต็มจอ + ดาวน์โหลดได้)
   const lightboxNode = lightbox && (
     <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
       <img src={lightbox.url} alt={lightbox.title} className="max-w-full max-h-full object-contain rounded-lg" />
+      <a href={lightbox.url} download={lightbox.title || "image"} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+        className="absolute top-4 left-4 h-9 px-3 rounded-lg bg-white/90 text-slate-700 text-sm font-medium flex items-center gap-1 hover:bg-white">⬇ ดาวน์โหลด</a>
       <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/90 text-slate-700 text-lg flex items-center justify-center hover:bg-white">✕</button>
     </div>
   );
