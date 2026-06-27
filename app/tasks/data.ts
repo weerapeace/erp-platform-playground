@@ -57,6 +57,7 @@ export type CreativeSubtask = {
   status: SubtaskStatus; due_date: string | null;
   required_before_next: boolean; sort_order: number;
   subtask_type?: string | null; config?: SubtaskStepConfig;
+  image_sync_targets?: { parent_ids?: string[]; sku_ids?: string[] } | null; // ปลายทางรูปที่เลือกตอนส่งงาน
 };
 
 export type CreativeComment = {

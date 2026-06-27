@@ -5,12 +5,12 @@
 // ใช้ที่: TaskDetailDrawer (/tasks) และ drawer การ์ดงานบน Campaign Canvas
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { ERPModal } from "@/components/modal";
 import { ImageAttach } from "@/components/image-attach";
-import { UserPicker, SkuPicker } from "@/components/pickers";
+import { UserPicker, SkuPicker, ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
 import { useAuth } from "@/components/auth";
@@ -345,26 +345,74 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [editParentId, setEditParentId] = useState<string | null>(null);                       // เปิดตัวแก้ Parent SKU กลาง
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null; parentId: string } | null>(null); // เปิดตัวแก้ SKU กลาง (recordId null = สร้างใหม่)
   const [pickForParent, setPickForParent] = useState<string | null>(null);                      // โชว์ SkuPicker เลือก SKU ที่มีอยู่
+  // ── ปลายทางรูป (โหมดแนบรูป): ติ๊กเลือก Parent/SKU ที่จะดันรูปเข้าตอนอนุมัติ ──
+  const [syncParentIds, setSyncParentIds] = useState<Set<string>>(new Set());
+  const [syncSkuIds, setSyncSkuIds] = useState<Set<string>>(new Set());
+  const [extraParents, setExtraParents] = useState<PlatformParent[]>([]);  // Parent ที่เลือกเพิ่มเอง (นอกเหนือที่ผูกกับงาน)
+  const [addParentOpen, setAddParentOpen] = useState(false);
+  const [linkedSkuIds, setLinkedSkuIds] = useState<string[]>([]);          // SKU ที่ผูกกับงาน (ใช้ติ๊กล่วงหน้า)
+  const syncInit = useRef(false);
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
   const attachCount = sub.attachments?.length ?? 0;
 
-  // โหลดรายละเอียด Platform ของ Parent SKU + SKU ลูก (โหมดยืนยัน) — เรียกซ้ำได้หลังแก้สินค้า
+  // โหลดรายละเอียด Platform ของ Parent SKU + SKU ลูก — ใช้ทั้งโหมดยืนยันคำอธิบาย และโหมดแนบรูป (เลือกปลายทาง)
   const loadPlatform = useCallback(async () => {
     try {
       const j = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?platform=1`).then((r) => r.json());
       const ps = (j.parents as PlatformParent[]) ?? [];
       setParents(ps);
+      setLinkedSkuIds((j.linked_sku_ids as string[]) ?? []);
       const entries = await Promise.all(ps.map(async (p) => {
         try {
           const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(p.id)}&limit=50`).then((r) => r.json());
           return [p.id, ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? "") }))] as const;
         } catch { return [p.id, [] as { id: string; code: string; name: string }[]] as const; }
       }));
-      setSkusByParent(Object.fromEntries(entries));
+      setSkusByParent((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
     } catch { setParents([]); }
   }, [taskId]);
-  useEffect(() => { if (platformConfirm) loadPlatform(); }, [platformConfirm, loadPlatform]);
+  useEffect(() => { if (platformConfirm || showImages) loadPlatform(); }, [platformConfirm, showImages, loadPlatform]);
+
+  // โหลด SKU ลูกของ parent เดียว (ใช้รีเฟรชหลังสร้าง/แก้ SKU — ครอบ parent ที่เลือกเพิ่มด้วย)
+  const reloadSkusFor = useCallback(async (pid: string) => {
+    try {
+      const sj = await apiFetch(`/api/pickers/skus?parent_sku_id=${encodeURIComponent(pid)}&limit=50`).then((r) => r.json());
+      setSkusByParent((m) => ({ ...m, [pid]: ((sj.data ?? []) as Record<string, unknown>[]).map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.name_th ?? "") })) }));
+    } catch { /* noop */ }
+  }, []);
+
+  // ติ๊กล่วงหน้า: ใช้ค่าที่เคยเลือกถ้ามี ไม่งั้น prefill ด้วย Parent/SKU ที่ผูกกับงาน
+  useEffect(() => {
+    if (!showImages || syncInit.current || parents === null) return;
+    const ex = sub.image_sync_targets;
+    if (ex && ((ex.parent_ids?.length ?? 0) > 0 || (ex.sku_ids?.length ?? 0) > 0)) {
+      setSyncParentIds(new Set(ex.parent_ids ?? []));
+      setSyncSkuIds(new Set(ex.sku_ids ?? []));
+    } else {
+      setSyncParentIds(new Set(parents.map((p) => p.id).filter(Boolean)));
+      setSyncSkuIds(new Set(linkedSkuIds));
+    }
+    syncInit.current = true;
+  }, [showImages, parents, linkedSkuIds, sub.image_sync_targets]);
+
+  // เซฟปลายทางที่เลือกลงงานย่อย (best-effort) — ทั้งผู้ส่งและผู้ตรวจปรับได้ก่อนอนุมัติ
+  const persistTargets = useCallback((pids: Set<string>, sids: Set<string>) => {
+    updateSubtask(taskId, sub.id, { image_sync_targets: { parent_ids: [...pids], sku_ids: [...sids] } }).catch(() => {});
+  }, [taskId, sub.id]);
+  const toggleSyncParent = (pid: string) => { const n = new Set(syncParentIds); n.has(pid) ? n.delete(pid) : n.add(pid); setSyncParentIds(n); persistTargets(n, syncSkuIds); };
+  const toggleSyncSku = (sid: string) => { const n = new Set(syncSkuIds); n.has(sid) ? n.delete(sid) : n.add(sid); setSyncSkuIds(n); persistTargets(syncParentIds, n); };
+  const addSyncParent = async (p: ParentSkuPickerValue) => {
+    if (!p) return;
+    const exists = (parents ?? []).some((x) => x.id === p.id) || extraParents.some((x) => x.id === p.id);
+    if (!exists) {
+      setExtraParents((prev) => [...prev, { id: p.id, code: p.code, name_th: p.name, name_platform: "", introduction: "", description: "", english_description: "", has_description: false }]);
+      await reloadSkusFor(p.id);
+    }
+    const n = new Set(syncParentIds); n.add(p.id); setSyncParentIds(n); persistTargets(n, syncSkuIds);
+    setAddParentOpen(false);
+  };
+  const displayParents = useMemo(() => [...(parents ?? []), ...extraParents], [parents, extraParents]);
 
   const platformReady = parents !== null && parents.length > 0 && parents.every((p) => p.has_description);
   const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : attachCount > 0);
@@ -377,7 +425,11 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       pushToast("error", t("กรุณาแนบลิงก์หรือรูปงานอย่างน้อย 1 ก่อนส่ง", "Please attach at least one file or link before submitting")); return;
     }
     setBusy(true);
-    try { await updateSubtask(taskId, sub.id, { status: "submitted" }); await reload(); pushToast("success", t("ส่งงานแล้ว — รออนุมัติ", "Submitted — pending approval")); onClose(); }
+    try {
+      const body: Record<string, unknown> = { status: "submitted" };
+      if (showImages) body.image_sync_targets = { parent_ids: [...syncParentIds], sku_ids: [...syncSkuIds] }; // บันทึกปลายทางรูปตอนส่ง
+      await updateSubtask(taskId, sub.id, body); await reload(); pushToast("success", t("ส่งงานแล้ว — รออนุมัติ", "Submitted — pending approval")); onClose();
+    }
     catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
 
@@ -451,6 +503,60 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                   pushToast={pushToast} />
               </div>
             )}
+            {/* ── ส่งรูปเข้าสินค้า (เลือกได้) — ติ๊ก Parent/SKU ที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ ── */}
+            {showImages && (
+              <div className="border-t border-slate-100 pt-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <p className="text-[11px] font-medium text-slate-500">📤 {t("ส่งรูปเข้าสินค้า (เลือกได้)", "Send images to products (optional)")}</p>
+                  <span className="text-[10px] text-slate-400 shrink-0">{(syncParentIds.size + syncSkuIds.size) > 0 ? t(`เลือก ${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`, `${syncParentIds.size} Parent · ${syncSkuIds.size} SKU`) : t("ไม่เลือก = แนบรูปเฉย ๆ", "None = attach only")}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mb-2">{t("ติ๊กสินค้าที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ · ไม่ติ๊ก = ไม่ส่งเข้าสินค้า", "Tick products to add the images to their gallery on approval · none = attach only")}</p>
+                {displayParents.length === 0 && parents !== null ? (
+                  <p className="text-xs text-slate-400 italic mb-2">{t("งานนี้ยังไม่ผูก Parent SKU — กดเลือกด้านล่างได้", "No Parent SKU linked — add one below")}</p>
+                ) : displayParents.map((p) => {
+                  const pon = syncParentIds.has(p.id);
+                  return (
+                    <div key={p.id} className={`rounded-lg border p-2.5 mb-1.5 ${pon ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`}>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={pon} onChange={() => toggleSyncParent(p.id)} className="h-4 w-4 rounded border-slate-300 text-amber-600" />
+                        <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded shrink-0">{p.code}</span>
+                        <span className="text-sm text-slate-700 truncate flex-1">{p.name_platform || p.name_th || "—"}</span>
+                      </label>
+                      <div className="pl-6 mt-1.5 space-y-1">
+                        {(skusByParent[p.id] ?? []).map((s) => { const son = syncSkuIds.has(s.id); return (
+                          <label key={s.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                            <input type="checkbox" checked={son} onChange={() => toggleSyncSku(s.id)} className="h-3.5 w-3.5 rounded border-slate-300 text-amber-600" />
+                            <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
+                            <span className="text-slate-700 truncate flex-1">{s.name}</span>
+                            <button type="button" onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️</button>
+                          </label>
+                        ); })}
+                        {(skusByParent[p.id] ?? []).length === 0 && <p className="text-[11px] text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
+                        {pickForParent === p.id ? (
+                          <div className="flex items-start gap-1.5">
+                            <div className="flex-1"><SkuPicker value={null} onChange={(v) => { if (v) { setSkuEditor({ recordId: v.id, parentId: p.id }); setPickForParent(null); } }} /></div>
+                            <button type="button" onClick={() => setPickForParent(null)} className="text-xs text-slate-400 mt-2 shrink-0">{t("ยกเลิก", "Cancel")}</button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            <button type="button" onClick={() => setSkuEditor({ recordId: null, parentId: p.id })} className="text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">➕ {t("สร้าง SKU ใหม่", "New SKU")}</button>
+                            <button type="button" onClick={() => setPickForParent(p.id)} className="text-[11px] text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 hover:bg-slate-50">🔗 {t("เลือก SKU ที่มีอยู่", "Pick SKU")}</button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {addParentOpen ? (
+                  <div className="flex items-start gap-1.5">
+                    <div className="flex-1"><ParentSkuPicker value={null} onChange={(v) => { if (v) addSyncParent(v); }} /></div>
+                    <button type="button" onClick={() => setAddParentOpen(false)} className="text-xs text-slate-400 mt-2 shrink-0">{t("ยกเลิก", "Cancel")}</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setAddParentOpen(true)} className="text-xs text-amber-700 border border-amber-200 rounded-md px-2 py-1 hover:bg-amber-50">➕ {t("เลือก Parent SKU เพิ่ม", "Add Parent SKU")}</button>
+                )}
+              </div>
+            )}
             {showLinks && (
               <div>
                 <p className="text-[11px] text-slate-400 mb-1">{t("ลิงก์ส่งงาน", "Work links")}</p>
@@ -478,7 +584,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
         <MasterRecordDrawer moduleKey="skus-v2" apiPath="skus" recordId={skuEditor.recordId} startInEdit
           createTitle={t("สร้าง SKU ใหม่", "New SKU")}
           createDefaults={skuEditor.recordId ? undefined : { parent_sku_id: skuEditor.parentId }}
-          onClose={() => { setSkuEditor(null); loadPlatform(); }} onChanged={loadPlatform} />
+          onClose={() => { const pid = skuEditor.parentId; setSkuEditor(null); reloadSkusFor(pid); }}
+          onChanged={() => { reloadSkusFor(skuEditor.parentId); }} />
       )}
     </ERPModal>
   );

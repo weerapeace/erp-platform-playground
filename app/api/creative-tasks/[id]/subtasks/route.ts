@@ -59,9 +59,12 @@ async function resolvePrompt(admin: ReturnType<typeof supabaseAdmin>, taskId: st
 
 // รายละเอียด Platform ของ Parent SKU ที่ผูกกับงาน — ใช้ "ยืนยัน" ตอนส่งงานเขียนคำอธิบาย (ไม่ต้องแนบไฟล์)
 async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: string): Promise<NextResponse> {
+  // SKU ที่ผูกกับงาน (ใช้ prefill ปลายทางรูปในป๊อปอัปส่งงาน)
+  const { data: sl } = await admin.from("erp_creative_task_skus").select("sku_id").eq("task_id", taskId);
+  const linkedSkuIds = ((sl ?? []) as { sku_id: string }[]).map((r) => r.sku_id).filter(Boolean);
   const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("parent_sku_id").eq("task_id", taskId);
   const pIds = ((pl ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
-  if (!pIds.length) return NextResponse.json({ parents: [], error: null });
+  if (!pIds.length) return NextResponse.json({ parents: [], linked_sku_ids: linkedSkuIds, error: null });
   const { data } = await admin.from("parent_skus_v2").select("id, code, name_th, name_platform, introduction, description, english_description").in("id", pIds);
   const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
     id: (p.id as string) ?? "",
@@ -73,10 +76,10 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
     english_description: (p.english_description as string) ?? "",
     has_description: !!((p.description as string) ?? "").trim(),
   }));
-  return NextResponse.json({ parents, error: null });
+  return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, error: null });
 }
 
-const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order"]);
+const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order", "image_sync_targets"]);
 
 // อ่าน role ของผู้ใช้ปัจจุบัน (admin/manager/...) — ใช้คุมสิทธิ์ละเอียดของงานย่อย
 async function currentRole(request: NextRequest): Promise<string> {
