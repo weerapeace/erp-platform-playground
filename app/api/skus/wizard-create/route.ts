@@ -30,7 +30,7 @@ const SAFE_COLS = new Set([
 const NUMERIC_COLS = new Set(["list_price", "standard_price", "fake_price", "rmb_cost", "moq", "fabric_width_cm", "color_index"]);
 const UUID_COLS = new Set(["parent_sku_id", "uom_id", "purchase_uom_id", "seller_partner_id", "material_group_id", "product_group"]);
 
-type Row = { values?: Record<string, unknown>; family_tag_ids?: string[] };
+type Row = { values?: Record<string, unknown>; family_tag_ids?: string[]; images?: string[] };
 
 // แปลงค่าให้ตรงชนิดคอลัมน์ · คืน undefined = ข้าม (ไม่เขียน)
 function coerce(col: string, v: unknown): unknown {
@@ -73,6 +73,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     out.barcode = String(r.values!.barcode ?? "").trim() || out.code;     // ว่าง = ใช้ code
     if (!out.name_th) out.name_th = out.code;
     if (out.list_price == null && out.standard_price != null) out.list_price = out.standard_price;  // เริ่มต้น list = standard
+    const imgs = (r.images ?? []).filter(Boolean);
+    if (imgs.length) out.cover_image_r2_key = imgs[0];   // รูปแรก = รูปปก
     return out;
   });
 
@@ -81,11 +83,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const byCode = new Map((inserted ?? []).map((s) => [s.code as string, s.id as string]));
   const links: { src_id: string; tgt_id: string }[] = [];
+  const slots: { owner_type: string; owner_id: string; image_group: string; slot: number; r2_key: string }[] = [];
   rows.forEach((r) => {
     const id = byCode.get(String(r.values!.code).trim());
-    if (id) for (const tagId of (r.family_tag_ids ?? [])) if (tagId) links.push({ src_id: id, tgt_id: tagId });
+    if (!id) return;
+    for (const tagId of (r.family_tag_ids ?? [])) if (tagId) links.push({ src_id: id, tgt_id: tagId });
+    // รูปต่อ SKU → แกลเลอรีสินค้า (product_image_slots) · รูปแรกเป็นรูปปกแล้ว (cover ด้านบน)
+    (r.images ?? []).filter(Boolean).forEach((key, i) => slots.push({ owner_type: "product_sku", owner_id: id, image_group: "gallery", slot: i, r2_key: key }));
   });
   if (links.length > 0) await admin.from("skus_v2_product_family_m2m").insert(links);
+  if (slots.length > 0) await admin.from("product_image_slots").insert(slots);
 
   await writeAudit(admin, {
     action: "create", entityType: "skus_v2", entityId: inserted?.[0]?.id ?? null,
@@ -93,5 +100,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     metadata: { via: "sku_wizard", count: payload.length, codes },
   });
 
-  return NextResponse.json({ created: payload.length, ids: (inserted ?? []).map((s) => s.id), error: null });
+  return NextResponse.json({ created: payload.length, ids: (inserted ?? []).map((s) => s.id), skus: (inserted ?? []).map((s) => ({ id: s.id, code: s.code })), error: null });
 }

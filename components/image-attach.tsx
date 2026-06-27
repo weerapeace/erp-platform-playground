@@ -26,11 +26,24 @@ async function resizeImage(file: File, max = 800): Promise<{ blob: Blob; type: s
   } finally { URL.revokeObjectURL(url); }
 }
 
-export function ImageAttach({ images, onAttach, onDelete, pushToast }: {
+// ของกลาง: ย่อรูป (≤max) แล้วอัปขึ้น R2 → คืน r2_key (ใช้ซ้ำได้ทั้ง ImageAttach + ฟอร์มสร้าง SKU)
+export async function uploadResizedImage(file: File, opts?: { folder?: string; max?: number }): Promise<{ r2_key: string; file_name: string; content_type: string; size_bytes: number }> {
+  const { blob, type } = await resizeImage(file, opts?.max ?? 800);
+  const name = file.name.replace(/\.[^.]+$/, "") + (type === "image/png" ? ".png" : ".jpg");
+  const fd = new FormData();
+  fd.append("file", new File([blob], name, { type }));
+  fd.append("folder", opts?.folder ?? "creative-tasks");
+  const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+  const j = await res.json(); if (j.error) throw new Error(j.error);
+  return { r2_key: j.r2_key as string, file_name: file.name, content_type: (j.content_type as string) || type, size_bytes: (j.size as number) ?? blob.size };
+}
+
+export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 800 }: {
   images: Img[];
   onAttach: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   pushToast: ToastFn;
+  maxSize?: number;   // ด้านยาวสุดที่ย่อก่อนอัป (ดีฟอลต์ 800)
 }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -41,14 +54,8 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast }: {
     setBusy(true);
     for (const f of imgs) {
       try {
-        const { blob, type } = await resizeImage(f, 800);
-        const name = f.name.replace(/\.[^.]+$/, "") + (type === "image/png" ? ".png" : ".jpg");
-        const fd = new FormData();
-        fd.append("file", new File([blob], name, { type }));
-        fd.append("folder", "creative-tasks");
-        const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-        const j = await res.json(); if (j.error) throw new Error(j.error);
-        await onAttach({ r2_key: j.r2_key as string, file_name: f.name, content_type: (j.content_type as string) || type, size_bytes: (j.size as number) ?? blob.size });
+        const r = await uploadResizedImage(f, { folder: "creative-tasks", max: maxSize });
+        await onAttach(r);
       } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
     }
     setBusy(false);
@@ -73,7 +80,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast }: {
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files); }}
         className="border border-dashed border-slate-300 rounded-lg p-2.5 text-center text-xs text-slate-400">
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
-        {busy ? "⏳ กำลังอัปโหลด..." : <>📎 ลากรูปมาวาง · วาง Ctrl+V · <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">เลือกไฟล์</button> <span className="text-slate-300">(ย่อ ≤800px ให้อัตโนมัติ)</span></>}
+        {busy ? "⏳ กำลังอัปโหลด..." : <>📎 ลากรูปมาวาง · วาง Ctrl+V · <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">เลือกไฟล์</button> <span className="text-slate-300">(ย่อ ≤{maxSize}px ให้อัตโนมัติ)</span></>}
       </div>
       {images.length > 0 && (
         <div className="grid grid-cols-4 gap-2 mt-2">

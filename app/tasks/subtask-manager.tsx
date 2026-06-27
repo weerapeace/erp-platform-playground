@@ -9,8 +9,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { ERPModal } from "@/components/modal";
-import { ImageAttach } from "@/components/image-attach";
+import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
 import { UserPicker, SkuPicker, ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
+import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
 import { useAuth } from "@/components/auth";
@@ -414,6 +415,17 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   };
   const displayParents = useMemo(() => [...(parents ?? []), ...extraParents], [parents, extraParents]);
 
+  // image-sync section: ฟอร์ม inline สร้าง SKU + popup เลือกหลาย SKU
+  const [newSkuParent, setNewSkuParent] = useState<string | null>(null);
+  const [multiPickParent, setMultiPickParent] = useState<string | null>(null);
+  // เพิ่ม SKU เข้ารายการของ parent + ติ๊กเป็นเป้าหมายรูปให้อัตโนมัติ
+  const addSkusToParent = (parentId: string, skus: { id: string; code: string; name: string }[]) => {
+    if (!skus.length) return;
+    setSkusByParent((m) => { const cur = m[parentId] ?? []; const seen = new Set(cur.map((s) => s.id)); return { ...m, [parentId]: [...cur, ...skus.filter((s) => !seen.has(s.id))] }; });
+    const nextSku = new Set(syncSkuIds); skus.forEach((s) => nextSku.add(s.id)); setSyncSkuIds(nextSku);
+    persistTargets(syncParentIds, nextSku);
+  };
+
   const platformReady = parents !== null && parents.length > 0 && parents.every((p) => p.has_description);
   const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : attachCount > 0);
 
@@ -495,12 +507,12 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
             {canSubmit && attachCount === 0 && <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("แนบรูปหรือลิงก์อย่างน้อย 1 ก่อนกดส่งงาน", "Attach at least one image or link before submitting")}</p>}
             {showImages && (
               <div>
-                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤800px)", "Work images (resized ≤800px)")}</p>
+                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน (ย่อ ≤1200px)", "Work images (resized ≤1200px)")}</p>
                 <ImageAttach
                   images={imageAtts.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
                   onAttach={async (r) => { await addAttachment(taskId, { kind: "image", subtask_id: sub.id, ...r }); await reload(); }}
                   onDelete={async (aid) => { try { await deleteAttachment(taskId, aid); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
-                  pushToast={pushToast} />
+                  pushToast={pushToast} maxSize={1200} />
               </div>
             )}
             {/* ── ส่งรูปเข้าสินค้า (เลือกได้) — ติ๊ก Parent/SKU ที่จะให้รูปเข้าแกลเลอรีตอนอนุมัติ ── */}
@@ -532,17 +544,15 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                           </label>
                         ); })}
                         {(skusByParent[p.id] ?? []).length === 0 && <p className="text-[11px] text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
-                        {pickForParent === p.id ? (
-                          <div className="flex items-start gap-1.5">
-                            <div className="flex-1"><SkuPicker value={null} onChange={(v) => { if (v) { setSkuEditor({ recordId: v.id, parentId: p.id }); setPickForParent(null); } }} /></div>
-                            <button type="button" onClick={() => setPickForParent(null)} className="text-xs text-slate-400 mt-2 shrink-0">{t("ยกเลิก", "Cancel")}</button>
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5 pt-0.5">
-                            <button type="button" onClick={() => setSkuEditor({ recordId: null, parentId: p.id })} className="text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">➕ {t("สร้าง SKU ใหม่", "New SKU")}</button>
-                            <button type="button" onClick={() => setPickForParent(p.id)} className="text-[11px] text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 hover:bg-slate-50">🔗 {t("เลือก SKU ที่มีอยู่", "Pick SKU")}</button>
-                          </div>
+                        {newSkuParent === p.id && (
+                          <NewSkuInline parentId={p.id} pushToast={pushToast}
+                            onCancel={() => setNewSkuParent(null)}
+                            onCreated={(skus) => { addSkusToParent(p.id, skus); setNewSkuParent(null); }} />
                         )}
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          <button type="button" onClick={() => setNewSkuParent(newSkuParent === p.id ? null : p.id)} className="text-[11px] text-violet-700 border border-violet-200 rounded-md px-2 py-0.5 hover:bg-violet-50">➕ {t("สร้าง SKU ใหม่", "New SKU")}</button>
+                          <button type="button" onClick={() => setMultiPickParent(p.id)} className="text-[11px] text-slate-600 border border-slate-200 rounded-md px-2 py-0.5 hover:bg-slate-50">🔗 {t("เลือก SKU ที่มีอยู่", "Pick SKU")}</button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -587,6 +597,118 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
           onClose={() => { const pid = skuEditor.parentId; setSkuEditor(null); reloadSkusFor(pid); }}
           onChanged={() => { reloadSkusFor(skuEditor.parentId); }} />
       )}
+      {/* เลือก SKU ที่มีอยู่ หลายตัว → ติ๊กเป็นเป้าหมายรูป */}
+      {multiPickParent && (
+        <SkuMultiPickerModal open onClose={() => setMultiPickParent(null)}
+          excludeIds={(skusByParent[multiPickParent] ?? []).map((s) => s.id)}
+          onConfirm={(skus) => { addSkusToParent(multiPickParent, skus.map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.code ?? "") }))); setMultiPickParent(null); }} />
+      )}
     </ERPModal>
+  );
+}
+
+// ── ฟอร์ม inline สร้าง SKU ใหม่ใต้ Parent (หลายตัว) — รหัส/สี/Sale/Fake + รูปต่อ SKU (ลากวาง/สลับ) + flashfill ──
+type NewSkuRow = { code: string; color: string; list_price: string; fake_price: string; images: { r2_key: string; file_name: string }[] };
+
+function NewSkuInline({ parentId, onCancel, onCreated, pushToast }: {
+  parentId: string; onCancel: () => void;
+  onCreated: (skus: { id: string; code: string; name: string }[]) => void; pushToast: ToastFn;
+}) {
+  const t = useT();
+  const [rows, setRows] = useState<NewSkuRow[]>([{ code: "", color: "", list_price: "", fake_price: "", images: [] }]);
+  const [busy, setBusy] = useState(false);
+  const [upRow, setUpRow] = useState<number | null>(null);
+
+  const setCell = (i: number, key: keyof NewSkuRow, v: string) => setRows((rs) => rs.map((r, idx) => idx === i ? { ...r, [key]: v } : r));
+  const addRow = () => setRows((rs) => [...rs, { code: "", color: "", list_price: "", fake_price: "", images: [] }]);
+  const delRow = (i: number) => setRows((rs) => rs.length > 1 ? rs.filter((_, idx) => idx !== i) : rs);
+  // flashfill: ก๊อปค่าช่องของแถวแรกลงทุกแถวด้านล่าง
+  const fillDown = (key: "code" | "color" | "list_price" | "fake_price") => setRows((rs) => rs.length < 2 ? rs : rs.map((r, idx) => idx === 0 ? r : { ...r, [key]: rs[0][key] }));
+
+  const addImages = async (i: number, files: FileList | File[]) => {
+    const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (!imgs.length) return;
+    setUpRow(i);
+    try {
+      for (const f of imgs) {
+        const r = await uploadResizedImage(f, { folder: "skus", max: 1200 });
+        setRows((rs) => rs.map((row, idx) => idx === i ? { ...row, images: [...row.images, { r2_key: r.r2_key, file_name: r.file_name }] } : row));
+      }
+    } catch (e) { pushToast("error", "อัปรูปไม่สำเร็จ: " + (e as Error).message); } finally { setUpRow(null); }
+  };
+  const moveImg = (i: number, j: number, dir: -1 | 1) => setRows((rs) => rs.map((row, idx) => {
+    if (idx !== i) return row; const arr = [...row.images]; const k = j + dir; if (k < 0 || k >= arr.length) return row;
+    [arr[j], arr[k]] = [arr[k], arr[j]]; return { ...row, images: arr };
+  }));
+  const delImg = (i: number, j: number) => setRows((rs) => rs.map((row, idx) => idx === i ? { ...row, images: row.images.filter((_, x) => x !== j) } : row));
+
+  const save = async () => {
+    const valid = rows.filter((r) => r.code.trim());
+    if (!valid.length) { pushToast("error", t("กรอกรหัส SKU อย่างน้อย 1 ตัว", "Enter at least one SKU code")); return; }
+    setBusy(true);
+    try {
+      const body = { rows: valid.map((r) => ({
+        values: { code: r.code.trim(), name_th: r.code.trim(), color: r.color.trim() || undefined, list_price: r.list_price || undefined, fake_price: r.fake_price || undefined, parent_sku_id: parentId },
+        images: r.images.map((im) => im.r2_key),
+      })) };
+      const res = await apiFetch("/api/skus/wizard-create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      const created = ((j.skus ?? []) as { id: string; code: string }[]).map((s) => ({ id: String(s.id), code: String(s.code), name: String(s.code) }));
+      onCreated(created);
+      pushToast("success", t(`สร้าง ${created.length} SKU แล้ว`, `Created ${created.length} SKU(s)`));
+    } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
+  };
+
+  const COLS: [("code" | "color" | "list_price" | "fake_price"), string][] = [["code", t("รหัส SKU", "SKU code")], ["color", t("สี", "Color")], ["list_price", "Sale Price"], ["fake_price", "Fake Price"]];
+
+  return (
+    <div className="rounded-lg border border-violet-200 bg-violet-50/30 p-2 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-medium text-violet-700">➕ {t("สร้าง SKU ใหม่ (กรอกได้หลายตัว)", "New SKU (add multiple)")}</p>
+        <button type="button" onClick={onCancel} className="text-[11px] text-slate-400 hover:text-slate-600">✕ {t("ปิด", "Close")}</button>
+      </div>
+      {/* หัวคอลัมน์ + ปุ่ม flashfill */}
+      <div className="grid grid-cols-[1.3fr_1fr_0.9fr_0.9fr_auto] gap-1 text-[10px] text-slate-400 items-center">
+        {COLS.map(([k, lbl]) => (
+          <div key={k} className="flex items-center gap-1">{lbl}{rows.length > 1 && <button type="button" title={t("เติมลงล่าง", "Fill down")} onClick={() => fillDown(k)} className="text-violet-500 hover:text-violet-700">↓</button>}</div>
+        ))}
+        <div />
+      </div>
+      {rows.map((r, i) => (
+        <div key={i} className="space-y-1 border-t border-violet-100 pt-1.5">
+          <div className="grid grid-cols-[1.3fr_1fr_0.9fr_0.9fr_auto] gap-1 items-center">
+            <input value={r.code} onChange={(e) => setCell(i, "code", e.target.value)} placeholder={t("รหัส", "code")} className="h-7 px-1.5 text-xs border border-slate-200 rounded" />
+            <input value={r.color} onChange={(e) => setCell(i, "color", e.target.value)} placeholder={t("สี", "color")} className="h-7 px-1.5 text-xs border border-slate-200 rounded" />
+            <input value={r.list_price} onChange={(e) => setCell(i, "list_price", e.target.value)} inputMode="decimal" placeholder="0" className="h-7 px-1.5 text-xs border border-slate-200 rounded" />
+            <input value={r.fake_price} onChange={(e) => setCell(i, "fake_price", e.target.value)} inputMode="decimal" placeholder="0" className="h-7 px-1.5 text-xs border border-slate-200 rounded" />
+            <button type="button" onClick={() => delRow(i)} disabled={rows.length < 2} className="text-slate-300 hover:text-red-500 disabled:opacity-30 text-xs px-1">✕</button>
+          </div>
+          {/* รูปต่อ SKU — ลากวาง/เลือกไฟล์ + สลับลำดับ (รูปแรก = ปก) */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {r.images.map((im, j) => (
+              <div key={j} className="relative group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key)}&w=80`} alt="" className={`h-12 w-12 object-cover rounded border ${j === 0 ? "border-amber-400" : "border-slate-200"}`} />
+                {j === 0 && <span className="absolute -top-1 -left-1 bg-amber-500 text-white text-[8px] px-1 rounded-full">{t("ปก", "cover")}</span>}
+                <div className="absolute inset-x-0 bottom-0 hidden group-hover:flex justify-center gap-1 bg-black/45 rounded-b">
+                  <button type="button" onClick={() => moveImg(i, j, -1)} disabled={j === 0} className="text-white text-[10px] disabled:opacity-30">◀</button>
+                  <button type="button" onClick={() => delImg(i, j)} className="text-white text-[10px]">✕</button>
+                  <button type="button" onClick={() => moveImg(i, j, 1)} disabled={j === r.images.length - 1} className="text-white text-[10px] disabled:opacity-30">▶</button>
+                </div>
+              </div>
+            ))}
+            <label className="h-12 w-12 flex items-center justify-center rounded border border-dashed border-slate-300 text-slate-400 text-lg cursor-pointer hover:border-violet-300"
+              onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void addImages(i, e.dataTransfer.files); }}>
+              {upRow === i ? "⏳" : "+"}
+              <input type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void addImages(i, e.target.files); e.target.value = ""; }} />
+            </label>
+          </div>
+        </div>
+      ))}
+      <div className="flex items-center justify-between pt-1">
+        <button type="button" onClick={addRow} className="text-[11px] text-violet-700 hover:underline">+ {t("เพิ่มแถว", "Add row")}</button>
+        <button type="button" onClick={save} disabled={busy} className="h-7 px-3 text-xs font-medium text-white bg-violet-600 rounded-md hover:bg-violet-700 disabled:opacity-50">{busy ? "⏳" : t("สร้าง", "Create")}</button>
+      </div>
+    </div>
   );
 }
