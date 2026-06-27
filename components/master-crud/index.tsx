@@ -2253,6 +2253,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             <button type="button" onClick={() => setCoverDeleteOpen(true)} title="ลบรูป (ย้ายไปถังขยะ R2)"
               className="absolute top-2 right-2 z-10 h-8 w-8 flex items-center justify-center rounded-lg bg-white/90 border border-slate-200 text-rose-500 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-rose-50 hover:border-rose-300">🗑</button>
           ) : null;
+          // layout=gallery (เช่น Parent SKU) → ย้าย "รูปสินค้า" + Description ขึ้นคอลัมน์ซ้ายให้เห็นเด่น (ไม่ต้องเลื่อนหา)
+          const galleryLeft = config.mediaGallery?.layout === "gallery";
 
           // กลุ่ม B: ถ้าจัด Layout ไว้ "และไม่มีรูปปก" → รูป/field เต็มกว้างตาม Layout
           // (โมดูลที่มีรูปปก เช่น Parent SKU/SKU → ใช้เลย์เอาต์ "รูปซ้าย" ด้านล่างเสมอ)
@@ -2300,7 +2302,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
           return (
             <div className="flex flex-col md:flex-row md:flex-wrap gap-5">
               {/* ซ้าย: รูป + core */}
-              <div className="md:w-72 md:flex-shrink-0 md:order-1 space-y-4">
+              <div className={`md:flex-shrink-0 md:order-1 space-y-4 ${galleryLeft ? "md:w-96" : "md:w-72"}`}>
                 {/* รูปใหญ่ */}
                 <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
                   {coverKey
@@ -2320,10 +2322,37 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><span className="w-1.5 h-1.5 rounded-full bg-slate-300" />ปิดอยู่</span>}
                   </div>
                 </div>
+
+                {/* layout=gallery: รูปสินค้า + Description อยู่ในคอลัมน์ซ้าย (เห็นเด่น ไม่ต้องเลื่อน) */}
+                {galleryLeft && config.mediaGallery && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    {editingId ? (
+                      <ImageManager
+                        entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
+                        entityId={String(editingId)}
+                        actor={user?.name ?? user?.email ?? undefined}
+                        readonly={drawerMode === "view" || !canEdit}
+                        title={config.mediaGallery.title}
+                        description={config.mediaGallery.description}
+                        maxItems={config.mediaGallery.maxItems ?? 9}
+                        maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
+                        imageOnly={config.mediaGallery.imageOnly ?? true}
+                        layout="gallery"
+                      />
+                    ) : (
+                      <div className="text-xs text-slate-400 text-center py-3">บันทึกรายการก่อน แล้วค่อยเพิ่มรูป</div>
+                    )}
+                  </div>
+                )}
+                {galleryLeft && config.extraFormSection && (
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
+                  </div>
+                )}
               </div>
 
-              {/* ขวา: tabs (หมวดที่เหลือ) */}
-              {config.mediaGallery && (
+              {/* ขวา: tabs (หมวดที่เหลือ) — gallery/description ปกติ (โมดูลที่ไม่ใช่ gallery layout) */}
+              {config.mediaGallery && !galleryLeft && (
                 <div className="w-full md:order-3 rounded-xl border border-slate-200 bg-white p-3">
                   {editingId ? (
                     <ImageManager
@@ -2346,8 +2375,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 </div>
               )}
 
-              {/* section พิเศษต่อโมดูล (เช่น รูป Description ของ Parent SKU) */}
-              {config.extraFormSection && (
+              {/* section พิเศษต่อโมดูล (โมดูลที่ไม่ใช่ gallery layout — gallery layout ย้ายไปคอลัมน์ซ้ายแล้ว) */}
+              {config.extraFormSection && !galleryLeft && (
                 <div className="w-full md:order-4 rounded-xl border border-slate-200 bg-white p-3">
                   {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
                 </div>

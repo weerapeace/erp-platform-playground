@@ -106,10 +106,10 @@ export async function GET(request: NextRequest) {
 
     // นับรูปต่อ SKU (lazy — โหลดรูปจริงตอนกางโฟลเดอร์ผ่าน mode=sku) · นับรวม 2 แหล่ง (แกลเลอรี+Odoo)
     const skuCounts = async () => {
-      const { data: skus } = await admin.from("skus_v2").select("id, code, name_th").eq("parent_sku_id", parentId).order("code");
-      const skuList = (skus ?? []) as { id: string; code: string; name_th: string | null }[];
+      const { data: skus } = await admin.from("skus_v2").select("id, code, name_th, color, color_th").eq("parent_sku_id", parentId).order("code");
+      const skuList = (skus ?? []) as { id: string; code: string; name_th: string | null; color: string | null; color_th: string | null }[];
       const cnt = await countImages(admin, "skus_v2", skuList.map((s) => s.id), "product_sku");
-      return skuList.map((s) => ({ id: s.id, code: s.code, name: s.name_th ?? "", img_count: cnt.get(s.id) ?? 0 })).filter((s) => s.img_count > 0);
+      return skuList.map((s) => ({ id: s.id, code: s.code, name: s.name_th ?? "", color: s.color_th || s.color || "", img_count: cnt.get(s.id) ?? 0 })).filter((s) => s.img_count > 0);
     };
 
     // ดึงขนาน: ข้อมูล parent + แกลเลอรีจริงของ Parent (รูปหลักก่อน) + นับ SKU + รูป Description

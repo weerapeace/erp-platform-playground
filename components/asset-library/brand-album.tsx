@@ -14,7 +14,7 @@ import { withImageWidth } from "@/lib/r2-image";
 type Brand = { brand_id: string | null; brand_name: string; brand_color: string | null; parent_count: number; image_count: number };
 type ParentRow = { parent_id: string; code: string; name_th: string | null; parent_img: number; sku_count: number; sku_img: number; desc_img: number };
 type Img = { id: string; url: string; title: string };
-type SkuFolder = { id: string; code: string; name: string; img_count: number };   // lazy — รูปโหลดตอนกาง (mode=sku)
+type SkuFolder = { id: string; code: string; name: string; color: string; img_count: number };   // lazy — รูปโหลดตอนกาง (mode=sku)
 type ParentDetail = { parent: { id: string; code: string; name: string } | null; parentImages: Img[]; skus: SkuFolder[]; description: Img[] };
 
 const fmt = (n: number | null | undefined) => Number(n ?? 0).toLocaleString("th-TH");
@@ -159,6 +159,7 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
                           <span className="text-slate-400 text-xs w-3">{open ? "▾" : "▸"}</span>
                           <span className="text-base">📂</span>
                           <span className="font-mono text-[12px] text-slate-700">{s.code}</span>
+                          {s.color && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-pink-50 text-pink-600 border border-pink-200 shrink-0">🎨 {s.color}</span>}
                           <span className="text-[12px] text-slate-500 truncate flex-1">{s.name}</span>
                           <span className="text-[11px] text-slate-400">{fmt(s.img_count)} รูป</span>
                         </button>
