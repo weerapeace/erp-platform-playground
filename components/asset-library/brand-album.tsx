@@ -7,7 +7,7 @@
  * รูป = "แกลเลอรีจริง" ของสินค้า (รูปภาพเพิ่มเติม + Odoo รวมกัน) เรียงรูปหลักก่อนตามที่ตั้งในฟอร์ม Parent SKU
  * คลิกรูป → ดูรูปใหญ่ (lightbox). จัดรูป/ตั้งรูปหลัก/ลำดับ ทำที่ฟอร์ม Parent SKU
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
 
@@ -49,7 +49,7 @@ function Crumb({ label, onClick, last }: { label: string; onClick?: () => void; 
     : <span className="text-slate-700 font-medium">{label}</span>;
 }
 
-export function BrandAlbumBrowser({ reloadKey }: { reloadKey?: number }) {
+export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: number; openParentId?: string | null }) {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -108,9 +108,19 @@ export function BrandAlbumBrowser({ reloadKey }: { reloadKey?: number }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // เปิด Parent ตรงจากการค้นหา (กดโฟลเดอร์ในผลค้นหา → กระโดดเข้ารายละเอียด Parent เลย)
+  const lastOpened = useRef<string | null>(null);
+  useEffect(() => {
+    if (openParentId && openParentId !== lastOpened.current) {
+      lastOpened.current = openParentId;
+      void openParent(openParentId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openParentId]);
+
   const crumbs = (
     <div className="flex items-center gap-1.5 text-[13px] mb-3 flex-wrap">
-      <Crumb label="🏷️ ทุกแบรนด์" onClick={backToBrands} last={!brand} />
+      <Crumb label="🏷️ ทุกแบรนด์" onClick={backToBrands} last={!brand && !detail && !loadingDetail} />
       {brand && <><span className="text-slate-300">›</span><Crumb label={brand.brand_name} onClick={backToParents} last={!detail} /></>}
       {detail?.parent && <><span className="text-slate-300">›</span><Crumb label={`${detail.parent.code} · ${detail.parent.name}`} last /></>}
     </div>
@@ -124,12 +134,12 @@ export function BrandAlbumBrowser({ reloadKey }: { reloadKey?: number }) {
     </div>
   );
 
-  // ── ระดับ 3: รายละเอียด Parent ──
-  if (brand && detail) {
+  // ── ระดับ 3: รายละเอียด Parent (เปิดจาก brand หรือจากการค้นหาตรงๆ) ──
+  if (detail || loadingDetail) {
     return (
       <div>
         {crumbs}
-        {loadingDetail ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
+        {loadingDetail || !detail ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
           <div className="flex flex-col gap-5">
             <section>
               <p className="text-[13px] font-medium text-slate-700 mb-2">🖼️ รูปที่ลงใน Parent SKU <span className="text-slate-400 font-normal">({fmt(detail.parentImages.length)}) · รูปหลักก่อน</span></p>

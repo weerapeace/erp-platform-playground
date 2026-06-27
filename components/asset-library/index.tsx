@@ -63,6 +63,8 @@ export function AssetLibrary() {
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
+  const [searchFolders, setSearchFolders] = useState<{ id: string; code: string; name: string }[]>([]);   // โฟลเดอร์ Parent ที่ตรงคำค้น
+  const [brandOpenParent, setBrandOpenParent] = useState<string | null>(null);   // กดโฟลเดอร์จากผลค้นหา → เปิด parent ในมุมมองแบรนด์
   const searching = search.trim().length > 0;
   const byBrand = source === "by-brand";
   const showBrandView = byBrand && !searching;   // ค้นหา = โชว์ผลค้นหาทั่วทั้งคลังแทนมุมมองแบรนด์
@@ -111,6 +113,20 @@ export function AssetLibrary() {
   useEffect(() => { void loadMeta(); }, [loadMeta]);
   useEffect(() => { setSelected(new Set()); }, [type, collectionId, tag, trash, source]);
   useEffect(() => { setArtworkType(""); }, [source]);   // เปลี่ยนหมวด → ล้างฟิลเตอร์ชนิด artwork
+
+  // ค้นหา → หาโฟลเดอร์สินค้า (Parent SKU) ที่ตรงคำค้นด้วย (กดแล้วกระโดดเข้ามุมมองแบรนด์)
+  useEffect(() => {
+    const q = search.trim();
+    if (!q) { setSearchFolders([]); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      apiFetch(`/api/sku-browser?entity=parent-skus&search=${encodeURIComponent(q)}&limit=12`).then((r) => r.json())
+        .then((j) => { if (alive) setSearchFolders(((j.cards ?? []) as { id: string; code: string; name: string }[]).map((c) => ({ id: c.id, code: c.code, name: c.name }))); })
+        .catch(() => {});
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [search]);
+  const openFolder = (parentId: string) => { setBrandOpenParent(parentId); setSearch(""); setSource("by-brand"); };
 
   // ── เลือกไฟล์ ──
   const toggleSel = (id: string) =>
@@ -249,8 +265,26 @@ export function AssetLibrary() {
           {searching && (
             <p className="text-[12px] text-slate-500 mb-2">🔍 ผลค้นหา “<b>{search.trim()}</b>” ทั้งคลัง · {total.toLocaleString("th-TH")} ไฟล์</p>
           )}
+          {searching && searchFolders.length > 0 && (
+            <div className="mb-4">
+              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📂 โฟลเดอร์สินค้า (Parent SKU) ที่ตรงคำค้น</p>
+              <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+                {searchFolders.map((f) => (
+                  <button key={f.id} onClick={() => openFolder(f.id)}
+                    className="flex items-center gap-2 text-left rounded-xl border border-slate-200 bg-white p-2.5 hover:border-indigo-300 hover:shadow-sm transition">
+                    <span className="text-xl shrink-0">📂</span>
+                    <span className="min-w-0">
+                      <span className="font-mono text-[12px] text-slate-700">{f.code}</span>
+                      <span className="block text-[11px] text-slate-500 truncate">{f.name}</span>
+                    </span>
+                    <span className="text-slate-300 ml-auto">›</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {showBrandView ? (
-            <BrandAlbumBrowser reloadKey={brandReload} />
+            <BrandAlbumBrowser reloadKey={brandReload} openParentId={brandOpenParent} />
           ) : loading ? (
             <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
           ) : rows.length === 0 ? (
