@@ -39,6 +39,16 @@ const CONFIG: MasterCRUDConfig = {
   activeField: "is_active",
   serverMode:  true,   // F19: server-side pagination (12,609 rows) — กัน Worker 1102
   exportEntityType: "skus_v2",
+  // รูปสินค้า SKU — แกลเลอรี (รูปหลักใหญ่ + รูปย่อย + อัป ≤9) แบบเดียวกับ Parent → ไปโผล่ใน album
+  mediaGallery: {
+    entityType: "skus_v2",
+    title: "รูปสินค้า",
+    description: "รูปหลักโชว์ใหญ่ · กด ⭐ ตั้งรูปหลัก · ลากเรียงลำดับ · เพิ่มได้สูงสุด 9 รูป",
+    maxItems: 9,
+    maxSizeBytes: 2 * 1024 * 1024,
+    imageOnly: true,
+    layout: "gallery",
+  },
   permissions: {
     view:   "products.view",
     create: "products.create",

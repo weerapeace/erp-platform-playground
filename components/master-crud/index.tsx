@@ -2305,11 +2305,12 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
               <div className={`md:flex-shrink-0 md:order-1 space-y-4 ${galleryLeft ? "md:w-96" : "md:w-72"}`}>
                 {/* รูปหลัก: layout=gallery → "รูปสินค้า" (แกลเลอรีจริง รูปหลักใหญ่+รูปย่อย+อัป แบบ Design Sheet) แทนรูปปก · ไม่งั้น = รูปปกเดิม */}
                 {galleryLeft && config.mediaGallery && editingId ? (
+                  // quick edit: จัดรูปได้เลยไม่ต้องกด "แก้ไข" (readonly = แค่ไม่มีสิทธิ์)
                   <ImageManager
                     entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
                     entityId={String(editingId)}
                     actor={user?.name ?? user?.email ?? undefined}
-                    readonly={drawerMode === "view" || !canEdit}
+                    readonly={!canEdit}
                     title={config.mediaGallery.title}
                     description={config.mediaGallery.description}
                     maxItems={config.mediaGallery.maxItems ?? 9}
@@ -2594,15 +2595,22 @@ export function MasterRecordDrawer({
   cellRenderers?: MasterCRUDConfig["cellRenderers"];
   navIds?: string[];
 }) {
-  const config: MasterCRUDConfig = useMemo(() => ({
-    apiBase: apiBase ?? "/api/master-v2/",
-    apiPath: apiPath ?? moduleKey,        // v2 API รับ moduleKey ตรงๆ ได้ (RelationPeek ใช้แบบนี้อยู่แล้ว)
-    moduleKey, tableId: `embed-${moduleKey}`,
-    title: title ?? createTitle ?? prettifyModuleKey(moduleKey),
-    icon, activeField: "is_active", serverMode: true,
-    permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
-    mediaGallery, extraRowActions, cellRenderers, createDefaults,
-  }), [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults]);
+  const config: MasterCRUDConfig = useMemo(() => {
+    // สินค้า (Parent/SKU) → ใช้แกลเลอรี "รูปสินค้า" อัตโนมัติทุกที่ที่เปิด drawer (ของกลาง) แม้ผู้เรียกไม่ได้ส่งมา
+    const productEntity = moduleKey === "parent-skus-v2" ? "parent_skus_v2" : moduleKey === "skus-v2" ? "skus_v2" : null;
+    const mg: MasterCRUDConfig["mediaGallery"] = mediaGallery
+      ? { ...mediaGallery, layout: mediaGallery.layout ?? (productEntity ? "gallery" : undefined) }
+      : (productEntity ? { entityType: productEntity, title: "รูปสินค้า", maxItems: 9, imageOnly: true, layout: "gallery" } : undefined);
+    return {
+      apiBase: apiBase ?? "/api/master-v2/",
+      apiPath: apiPath ?? moduleKey,        // v2 API รับ moduleKey ตรงๆ ได้ (RelationPeek ใช้แบบนี้อยู่แล้ว)
+      moduleKey, tableId: `embed-${moduleKey}`,
+      title: title ?? createTitle ?? prettifyModuleKey(moduleKey),
+      icon, activeField: "is_active", serverMode: true,
+      permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
+      mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
+    };
+  }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults]);
   return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose, onChanged, startInEdit }} />;
 }
 

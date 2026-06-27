@@ -217,6 +217,23 @@ export function ImageManager({
     } catch { /* ignore */ }
   };
 
+  // ลากเรียงลำดับรูป (โหมด gallery) — optimistic แล้วยิงเก็บ sort_order
+  const dragIdx = useRef<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+  const saveOrder = async (orderedIds: string[]) => {
+    try { await apiFetch("/api/attachments/reorder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entity_type: entityType, entity_id: entityId, ordered_ids: orderedIds }) }); }
+    catch { /* ignore */ }
+  };
+  const dropReorder = (toIdx: number) => {
+    const from = dragIdx.current; dragIdx.current = null; setOverIdx(null);
+    if (from == null || from === toIdx) return;
+    const next = [...items];
+    const [m] = next.splice(from, 1);
+    next.splice(toIdx, 0, m);
+    setItems(next);
+    void saveOrder(next.map((a) => a.id));
+  };
+
   // แนบไฟล์เดิมจากคลังกลาง (ไม่อัปซ้ำ)
   const attachFromLibrary = async (assets: { id: string }[]) => {
     if (assets.length === 0) return;
@@ -348,9 +365,20 @@ export function ImageManager({
           </div>
           {items.length > 0 && (
             <div className="grid grid-cols-4 gap-1.5">
-              {items.map(a => renderTile(a, true))}
+              {items.map((a, idx) => (
+                <div key={a.id}
+                  draggable={!readonly}
+                  onDragStart={() => { dragIdx.current = idx; }}
+                  onDragOver={(e) => { if (!readonly) { e.preventDefault(); if (overIdx !== idx) setOverIdx(idx); } }}
+                  onDrop={(e) => { e.preventDefault(); dropReorder(idx); }}
+                  onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
+                  className={`${!readonly ? "cursor-grab active:cursor-grabbing" : ""} ${overIdx === idx ? "ring-2 ring-blue-400 rounded-lg" : ""}`}>
+                  {renderTile(a, true)}
+                </div>
+              ))}
             </div>
           )}
+          {!readonly && items.length > 1 && <p className="text-[10px] text-slate-400 -mt-1">ลากรูปย่อยเพื่อจัดลำดับ · กด ⭐ ตั้งรูปหลัก</p>}
           {renderUpload(false)}
           {libraryBtn}
         </div>
