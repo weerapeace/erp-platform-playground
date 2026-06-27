@@ -48,7 +48,8 @@ export async function GET(request: NextRequest) {
   if (mode === "brands") {
     const { data, error } = await admin.rpc("erp_artwork_brands");
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ brands: data ?? [], error: null });
+    // cache สั้น (เปลี่ยนไม่บ่อย) → สลับกลับเข้ามุมมองไม่ต้องนับใหม่ทุกครั้ง
+    return NextResponse.json({ brands: data ?? [], error: null }, { headers: { "Cache-Control": "private, max-age=60" } });
   }
 
   if (mode === "parents") {
@@ -63,37 +64,38 @@ export async function GET(request: NextRequest) {
     const parentId = sp.get("parent_id");
     if (!parentId) return NextResponse.json({ error: "missing parent_id" }, { status: 400 });
 
-    const { data: p } = await admin.from("parent_skus_v2").select("id, code, name_th").eq("id", parentId).maybeSingle();
+    // นับรูปต่อ SKU (lazy — ไม่ดึงรูป SKU พร้อมกัน, โหลดตอนกางโฟลเดอร์ผ่าน mode=sku)
+    const skuCounts = async () => {
+      const { data: skus } = await admin.from("skus_v2").select("id, code, name_th").eq("parent_sku_id", parentId).order("code");
+      const skuList = (skus ?? []) as { id: string; code: string; name_th: string | null }[];
+      const skuIds = skuList.map((s) => s.id);
+      const { data: su } = skuIds.length
+        ? await admin.from("asset_usages").select("record_id").eq("module", "product_sku").in("record_id", skuIds)
+        : { data: [] };
+      const cnt = new Map<string, number>();
+      for (const u of (su ?? []) as { record_id: string }[]) cnt.set(u.record_id, (cnt.get(u.record_id) ?? 0) + 1);
+      return skuList.map((s) => ({ id: s.id, code: s.code, name: s.name_th ?? "", img_count: cnt.get(s.id) ?? 0 })).filter((s) => s.img_count > 0);
+    };
 
-    // 1) รูป Parent เอง
-    const parentImages = await rowsByIds(admin, await usageIds(admin, "parent_sku", parentId));
-
-    // 2) โฟลเดอร์ SKUs — ย่อยราย SKU (เฉพาะที่มีรูป)
-    const { data: skus } = await admin.from("skus_v2").select("id, code, name_th").eq("parent_sku_id", parentId).order("code");
-    const skuList = (skus ?? []) as { id: string; code: string; name_th: string | null }[];
-    const skuIds = skuList.map((s) => s.id);
-    const { data: su } = skuIds.length
-      ? await admin.from("asset_usages").select("asset_id, record_id, sort_order, created_at").eq("module", "product_sku").in("record_id", skuIds)
-          .order("sort_order", { ascending: true, nullsFirst: false }).order("created_at", { ascending: true })
-      : { data: [] };
-    const bySku = new Map<string, string[]>();
-    for (const u of (su ?? []) as { asset_id: string; record_id: string }[]) {
-      const arr = bySku.get(u.record_id) ?? []; arr.push(u.asset_id); bySku.set(u.record_id, arr);
-    }
-    const allSkuAssetIds = [...new Set((su ?? []).map((u) => (u as { asset_id: string }).asset_id))];
-    const skuRowMap = new Map((await rowsByIds(admin, allSkuAssetIds)).map((r) => [r.id, r]));
-    const skusOut = skuList.map((s) => ({
-      id: s.id, code: s.code, name: s.name_th ?? "",
-      images: (bySku.get(s.id) ?? []).map((id) => skuRowMap.get(id)).filter((x): x is AssetRow => !!x),
-    })).filter((s) => s.images.length > 0);
-
-    // 3) โฟลเดอร์ Description
-    const description = await rowsByIds(admin, await usageIds(admin, "parent_sku_description", parentId));
+    // ดึงขนาน: ข้อมูล parent + รูป Parent + นับ SKU + รูป Description
+    const [p, parentImages, skus, description] = await Promise.all([
+      admin.from("parent_skus_v2").select("id, code, name_th").eq("id", parentId).maybeSingle().then((r) => r.data),
+      usageIds(admin, "parent_sku", parentId).then((ids) => rowsByIds(admin, ids)),
+      skuCounts(),
+      usageIds(admin, "parent_sku_description", parentId).then((ids) => rowsByIds(admin, ids)),
+    ]);
 
     return NextResponse.json({
       parent: p ? { id: p.id, code: p.code, name: (p.name_th as string) ?? "" } : null,
-      parentImages, skus: skusOut, description, error: null,
+      parentImages, skus, description, error: null,
     });
+  }
+
+  if (mode === "sku") {
+    const skuId = sp.get("sku_id");
+    if (!skuId) return NextResponse.json({ error: "missing sku_id" }, { status: 400 });
+    const images = await rowsByIds(admin, await usageIds(admin, "product_sku", skuId));
+    return NextResponse.json({ images, error: null });
   }
 
   return NextResponse.json({ error: "bad mode" }, { status: 400 });

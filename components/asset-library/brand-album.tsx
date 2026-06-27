@@ -15,19 +15,20 @@ import type { AssetRow } from "@/app/api/assets/shared";
 
 type Brand = { brand_id: string | null; brand_name: string; brand_color: string | null; parent_count: number; image_count: number };
 type ParentRow = { parent_id: string; code: string; name_th: string | null; parent_img: number; sku_count: number; sku_img: number; desc_img: number };
-type SkuFolder = { id: string; code: string; name: string; images: AssetRow[] };
+type SkuFolder = { id: string; code: string; name: string; img_count: number };   // lazy — รูปโหลดตอนกาง (mode=sku)
 type ParentDetail = { parent: { id: string; code: string; name: string } | null; parentImages: AssetRow[]; skus: SkuFolder[]; description: AssetRow[] };
 
 const fmt = (n: number | null | undefined) => Number(n ?? 0).toLocaleString("th-TH");
+const reorderByIds = (arr: AssetRow[], ids: string[]) => { const m = new Map(arr.map((a) => [a.id, a])); return ids.map((id) => m.get(id)).filter((x): x is AssetRow => !!x); };
 
 function Thumb({ a, onOpen }: { a: AssetRow; onOpen: () => void }) {
   const [broken, setBroken] = useState(false);
   return (
     <button onClick={onOpen} title={a.title}
       className="group relative rounded-lg border border-slate-200 overflow-hidden bg-white text-left hover:border-indigo-300 hover:shadow-sm transition">
-      <div className="h-24 bg-slate-100 flex items-center justify-center overflow-hidden">
+      <div className="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
         {a.asset_type === "image" && !broken
-          ? <img src={withImageWidth(a.url, 240) ?? a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)} className="w-full h-full object-cover" />
+          ? <img src={withImageWidth(a.url, 200) ?? a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)} className="w-full h-full object-cover" />
           : <span className="text-2xl">🖼️</span>}
       </div>
       <p className="px-1.5 py-1 text-[10px] text-slate-600 truncate">{a.title}</p>
@@ -56,7 +57,7 @@ function ReorderableGrid({ items, onOpen, onReorder }: { items: AssetRow[]; onOp
   };
 
   return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))" }}>
+    <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
       {order.map((id, idx) => {
         const a = byId.get(id); if (!a) return null;
         return (
@@ -94,6 +95,8 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
   const [detail, setDetail] = useState<ParentDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [openSku, setOpenSku] = useState<Set<string>>(new Set());
+  const [skuImages, setSkuImages] = useState<Record<string, AssetRow[]>>({});   // lazy cache รูปต่อ SKU
+  const [skuLoading, setSkuLoading] = useState<Set<string>>(new Set());
   const toast = useToast();
 
   // บันทึกลำดับรูปในโฟลเดอร์ (optimistic — UI ขยับแล้ว, ยิงเก็บเงียบ ๆ)
@@ -117,18 +120,42 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
 
   const openBrand = async (b: Brand) => {
     setBrand(b); setDetail(null); setParents([]); setLoadingParents(true);
+    try { window.history.pushState({ __brandNav: { level: "parents" } }, ""); } catch { /* ignore */ }
     try { const j = await apiFetch(`/api/assets/brand-tree?mode=parents&brand_id=${b.brand_id ?? "none"}`).then((r) => r.json()); setParents(j.parents ?? []); }
     catch { /* ignore */ } finally { setLoadingParents(false); }
   };
   const openParent = async (pid: string) => {
-    setDetail(null); setLoadingDetail(true); setOpenSku(new Set());
+    setDetail(null); setLoadingDetail(true); setOpenSku(new Set()); setSkuImages({});
+    try { window.history.pushState({ __brandNav: { level: "parent" } }, ""); } catch { /* ignore */ }
     try { const j = await apiFetch(`/api/assets/brand-tree?mode=parent&parent_id=${pid}`).then((r) => r.json()); setDetail(j as ParentDetail); }
     catch { /* ignore */ } finally { setLoadingDetail(false); }
   };
-  const toggleSku = (id: string) => setOpenSku((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  // กางโฟลเดอร์ SKU → โหลดรูปครั้งแรกแบบ lazy (ไม่ดึงรูปทุก SKU พร้อมกัน = เร็วขึ้น)
+  const toggleSku = (s: SkuFolder) => {
+    const isOpen = openSku.has(s.id);
+    setOpenSku((prev) => { const n = new Set(prev); if (isOpen) n.delete(s.id); else n.add(s.id); return n; });
+    if (!isOpen && skuImages[s.id] === undefined) {
+      setSkuLoading((p) => new Set(p).add(s.id));
+      apiFetch(`/api/assets/brand-tree?mode=sku&sku_id=${s.id}`).then((r) => r.json())
+        .then((j) => setSkuImages((m) => ({ ...m, [s.id]: (j.images ?? []) as AssetRow[] })))
+        .catch(() => setSkuImages((m) => ({ ...m, [s.id]: [] })))
+        .finally(() => setSkuLoading((p) => { const n = new Set(p); n.delete(s.id); return n; }));
+    }
+  };
 
   const backToBrands = () => { setBrand(null); setParents([]); setDetail(null); };
   const backToParents = () => setDetail(null);
+
+  // ปุ่ม Back เบราว์เซอร์ย้อนทีละชั้น (Parent → แบรนด์ → ทุกแบรนด์) — พฤติกรรมย้อนกลับของกลางเหมือนหน้าอื่น
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const s = (e.state as { __brandNav?: { level?: string } } | null)?.__brandNav;
+      if (!s) { setBrand(null); setParents([]); setDetail(null); }   // ถึงราก = ทุกแบรนด์
+      else if (s.level === "parents") setDetail(null);               // กลับชั้นแบรนด์ (parents ยังอยู่)
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   // breadcrumb
   const crumbs = (
@@ -158,16 +185,24 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
                 <div className="flex flex-col gap-1.5">
                   {detail.skus.map((s) => {
                     const open = openSku.has(s.id);
+                    const imgs = skuImages[s.id];
                     return (
                       <div key={s.id} className="rounded-lg border border-slate-200 bg-white">
-                        <button onClick={() => toggleSku(s.id)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 rounded-lg">
+                        <button onClick={() => toggleSku(s)} className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 rounded-lg">
                           <span className="text-slate-400 text-xs w-3">{open ? "▾" : "▸"}</span>
                           <span className="text-base">📂</span>
                           <span className="font-mono text-[12px] text-slate-700">{s.code}</span>
                           <span className="text-[12px] text-slate-500 truncate flex-1">{s.name}</span>
-                          <span className="text-[11px] text-slate-400">{fmt(s.images.length)} รูป</span>
+                          <span className="text-[11px] text-slate-400">{fmt(s.img_count)} รูป</span>
                         </button>
-                        {open && <div className="px-3 pb-3"><ReorderableGrid items={s.images} onOpen={onOpenAsset} onReorder={(ids) => saveOrder("product_sku", s.id, ids)} /></div>}
+                        {open && (
+                          <div className="px-3 pb-3">
+                            {skuLoading.has(s.id) || imgs === undefined
+                              ? <p className="text-[12px] text-slate-400 py-2">กำลังโหลด…</p>
+                              : <ReorderableGrid items={imgs} onOpen={onOpenAsset}
+                                  onReorder={(ids) => { setSkuImages((m) => ({ ...m, [s.id]: reorderByIds(m[s.id] ?? [], ids) })); void saveOrder("product_sku", s.id, ids); }} />}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
