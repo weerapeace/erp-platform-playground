@@ -36,6 +36,8 @@ type FieldMap = Partial<Record<
   string[]
 >>;
 
+export type ImportFieldKey = keyof FieldMap;
+
 export type ImportProfile = {
   id: string;                 // ระบุไม่ซ้ำ เช่น "shopee_sales_info"
   platformCode: string;       // "shopee" | "*" (generic ใช้ได้ทุกแพลตฟอร์ม)
@@ -49,7 +51,22 @@ export type ImportProfile = {
   // เงื่อนไขเดาว่าไฟล์นี้คือโปรไฟล์นี้ (ไม่มี = ใช้เป็น fallback สุดท้ายเท่านั้น)
   detect?: { metaRow?: number; metaCol?: number; metaEquals?: string; headerIncludes?: string[] };
   map: FieldMap;
+  isCustom?: boolean;         // มาจาก DB (ผู้ใช้สร้าง) — ไว้แยกใน UI
+  dbId?: string;              // uuid ในตาราง platform_import_profiles (ไว้แก้/ลบ)
 };
+
+// ฟิลด์มาตรฐานที่จับคู่ได้ (ไว้โชว์เป็นตัวเลือกในหน้าจัดการชนิดไฟล์)
+export const IMPORT_TARGET_FIELDS: { key: ImportFieldKey; label: string }[] = [
+  { key: "external_product_id", label: "รหัสสินค้าบนแพลตฟอร์ม" },
+  { key: "external_variation_id", label: "รหัสตัวเลือกบนแพลตฟอร์ม" },
+  { key: "parent_sku", label: "รหัส Parent SKU (ของเรา)" },
+  { key: "variation_sku", label: "รหัส SKU / สี (ของเรา)" },
+  { key: "variation_name", label: "ชื่อตัวเลือก / สี" },
+  { key: "title", label: "ชื่อสินค้า" },
+  { key: "price", label: "ราคา" },
+  { key: "stock", label: "สต๊อก / คลัง" },
+  { key: "status", label: "สถานะ" },
+];
 
 // ---------- helpers ----------
 const cell = (m: ImportMatrix, r: number, c: number): string => {
@@ -132,14 +149,50 @@ export const GENERIC_CATALOG_PROFILE: ImportProfile = {
 
 const ALL_PROFILES: ImportProfile[] = [...SHOPEE_PROFILES, GENERIC_CATALOG_PROFILE];
 
-// โปรไฟล์ทั้งหมดของแพลตฟอร์มหนึ่ง (เฉพาะเจาะจง + generic) — ใช้ทำ dropdown ให้ผู้ใช้เปลี่ยนเอง
-export function profilesForPlatform(platformCode: string): ImportProfile[] {
-  const specific = ALL_PROFILES.filter((p) => p.platformCode === platformCode);
-  return [...specific, GENERIC_CATALOG_PROFILE];
+// โปรไฟล์ทั้งหมดของแพลตฟอร์มหนึ่ง (custom + เฉพาะเจาะจง + generic) — ใช้ทำ dropdown ให้ผู้ใช้เปลี่ยนเอง
+// extra = custom profiles จาก DB (แปลงด้วย dbRowToProfile) · custom ที่ id ซ้ำ built-in = override
+export function profilesForPlatform(platformCode: string, extra: ImportProfile[] = []): ImportProfile[] {
+  const customs = extra.filter((p) => p.platformCode === platformCode);
+  const customIds = new Set(customs.map((p) => p.id));
+  const builtin = ALL_PROFILES.filter((p) => p.platformCode === platformCode && !customIds.has(p.id));
+  const generic = customIds.has(GENERIC_CATALOG_PROFILE.id) ? [] : [GENERIC_CATALOG_PROFILE];
+  return [...customs, ...builtin, ...generic];
 }
 
-export function getProfile(id: string): ImportProfile | null {
-  return ALL_PROFILES.find((p) => p.id === id) ?? null;
+export function getProfile(id: string, extra: ImportProfile[] = []): ImportProfile | null {
+  return extra.find((p) => p.id === id) ?? ALL_PROFILES.find((p) => p.id === id) ?? null;
+}
+
+// แปลงแถวจากตาราง platform_import_profiles → ImportProfile (platformCode ส่งมาจาก erp_platforms.code)
+export type DbProfileRow = {
+  id: string; profile_key: string; label: string; kind?: string | null; level?: string | null; section?: string | null;
+  header_row_index?: number | null; label_row_index?: number | null; data_start_row_index?: number | null;
+  detect?: unknown; field_map?: unknown; is_active?: boolean | null;
+};
+export function dbRowToProfile(row: DbProfileRow, platformCode: string): ImportProfile {
+  const rawMap = (row.field_map && typeof row.field_map === "object") ? row.field_map as Record<string, unknown> : {};
+  const map: FieldMap = {};
+  for (const k of Object.keys(rawMap)) {
+    const v = rawMap[k];
+    const arr = Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : (v ? [String(v).trim()] : []);
+    if (arr.length) (map as Record<string, string[]>)[k] = arr;
+  }
+  const d = (row.detect && typeof row.detect === "object") ? row.detect as Record<string, unknown> : {};
+  const headerIncludes = Array.isArray(d.headerIncludes) ? d.headerIncludes.map(String).filter(Boolean) : undefined;
+  const metaEquals = d.metaEquals != null && String(d.metaEquals) !== "" ? String(d.metaEquals) : undefined;
+  const detect = (metaEquals || (headerIncludes && headerIncludes.length))
+    ? { metaRow: d.metaRow != null ? Number(d.metaRow) : undefined, metaCol: d.metaCol != null ? Number(d.metaCol) : undefined, metaEquals, headerIncludes }
+    : undefined;
+  return {
+    id: row.profile_key, platformCode, label: row.label,
+    kind: row.kind === "orders" ? "orders" : "catalog",
+    level: row.level === "variation" ? "variation" : "product",
+    section: row.section || row.profile_key,
+    headerRowIndex: row.header_row_index ?? 0,
+    labelRowIndex: row.label_row_index ?? null,
+    dataStartRowIndex: row.data_start_row_index ?? 1,
+    detect, map, isCustom: true, dbId: row.id,
+  };
 }
 
 function matchesDetect(p: ImportProfile, m: ImportMatrix): boolean {
@@ -155,9 +208,9 @@ function matchesDetect(p: ImportProfile, m: ImportMatrix): boolean {
   return true;
 }
 
-// เดาว่าไฟล์นี้คือโปรไฟล์ไหน (จาก matrix ดิบ) — ไม่เจอเฉพาะเจาะจง → generic
-export function detectProfile(platformCode: string, m: ImportMatrix): ImportProfile {
-  for (const p of ALL_PROFILES) {
+// เดาว่าไฟล์นี้คือโปรไฟล์ไหน (จาก matrix ดิบ) — custom (extra) มาก่อน built-in → ไม่เจอ → generic
+export function detectProfile(platformCode: string, m: ImportMatrix, extra: ImportProfile[] = []): ImportProfile {
+  for (const p of [...extra, ...ALL_PROFILES]) {
     if (p.platformCode === platformCode && matchesDetect(p, m)) return p;
   }
   return GENERIC_CATALOG_PROFILE;

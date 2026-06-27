@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectProfile, getProfile, profilesForPlatform, extractFields, parseRecords, GENERIC_CATALOG_PROFILE, type ImportMatrix } from "@/lib/platform-import-profiles";
+import { detectProfile, getProfile, profilesForPlatform, extractFields, parseRecords, dbRowToProfile, GENERIC_CATALOG_PROFILE, type ImportMatrix, type DbProfileRow } from "@/lib/platform-import-profiles";
 
 // ตัวอย่างย่อจากไฟล์ Shopee จริง (mass_update_*) — หัวตาราง 6 แถว ข้อมูลเริ่มแถวที่ 6
 const shopeeSales: ImportMatrix = [
@@ -80,5 +80,57 @@ describe("extractFields", () => {
     const price = fields.find((f) => f.key === "et_title_variation_price");
     expect(price?.label).toBe("ราคา");
     expect(price?.sample).toBe("109");
+  });
+});
+
+// ---------- ระดับ 2: ชนิดไฟล์ที่ผู้ใช้สร้างเอง (custom จาก DB) ----------
+const customRow: DbProfileRow = {
+  id: "uuid-1", profile_key: "shopee_promo", label: "Shopee — โปรโมชั่น",
+  kind: "catalog", level: "variation", section: "promo",
+  header_row_index: 0, label_row_index: 1, data_start_row_index: 2,
+  detect: { headerIncludes: ["promo_sku"] },
+  field_map: { variation_sku: ["promo_sku"], price: ["promo_price"], title: "promo_name" },
+  is_active: true,
+};
+
+describe("dbRowToProfile", () => {
+  it("แปลงแถว DB → ImportProfile (รวม field_map ที่เป็น string เดี่ยว)", () => {
+    const p = dbRowToProfile(customRow, "shopee");
+    expect(p).toMatchObject({ id: "shopee_promo", platformCode: "shopee", level: "variation", section: "promo", dataStartRowIndex: 2, isCustom: true, dbId: "uuid-1" });
+    expect(p.map.variation_sku).toEqual(["promo_sku"]);
+    expect(p.map.title).toEqual(["promo_name"]); // string เดี่ยว → array
+    expect(p.detect?.headerIncludes).toEqual(["promo_sku"]);
+  });
+});
+
+describe("custom profiles (extra) merge", () => {
+  const custom = dbRowToProfile(customRow, "shopee");
+  const promoFile: ImportMatrix = [
+    ["promo_sku", "promo_price", "promo_name"],
+    ["รหัส", "ราคาโปร", "ชื่อ"],
+    ["IG-P002-H02L", "99", "แท่นวางโฟม เหลือง"],
+  ];
+  it("detectProfile หยิบ custom ก่อน เมื่อ signature ตรง", () => {
+    expect(detectProfile("shopee", promoFile, [custom]).id).toBe("shopee_promo");
+  });
+  it("getProfile หา custom ได้จาก extra", () => {
+    expect(getProfile("shopee_promo", [custom])?.isCustom).toBe(true);
+  });
+  it("profilesForPlatform รวม custom + มาตรฐาน + generic", () => {
+    const ids = profilesForPlatform("shopee", [custom]).map((p) => p.id);
+    expect(ids[0]).toBe("shopee_promo"); // custom มาก่อน
+    expect(ids).toContain("shopee_sales_info");
+    expect(ids).toContain(GENERIC_CATALOG_PROFILE.id);
+  });
+  it("custom override built-in id เดียวกัน (ไม่ซ้ำในรายการ)", () => {
+    const override = dbRowToProfile({ ...customRow, id: "uuid-2", profile_key: "shopee_sales_info", label: "ราคา/สต๊อก (ปรับเอง)" }, "shopee");
+    const list = profilesForPlatform("shopee", [override]);
+    expect(list.filter((p) => p.id === "shopee_sales_info")).toHaveLength(1);
+    expect(list.find((p) => p.id === "shopee_sales_info")?.isCustom).toBe(true);
+  });
+  it("parseRecords ใช้ custom profile แตกข้อมูลได้", () => {
+    const recs = parseRecords(custom, promoFile);
+    expect(recs).toHaveLength(1);
+    expect(recs[0]).toMatchObject({ variation_sku: "IG-P002-H02L", price: 99, title: "แท่นวางโฟม เหลือง" });
   });
 });

@@ -13,7 +13,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { getProfile, GENERIC_CATALOG_PROFILE, extractFields, parseRecords, type ImportMatrix, type ImportRecord } from "@/lib/platform-import-profiles";
+import { getProfile, GENERIC_CATALOG_PROFILE, dbRowToProfile, extractFields, parseRecords, type ImportMatrix, type ImportProfile, type ImportRecord, type DbProfileRow } from "@/lib/platform-import-profiles";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,10 +31,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const matrix = Array.isArray(body.matrix) ? body.matrix : [];
   if (matrix.length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลในไฟล์" }, { status: 400 });
 
-  const profile = getProfile((body.profile_id ?? "").trim()) ?? GENERIC_CATALOG_PROFILE;
-  if (profile.kind !== "catalog") return NextResponse.json({ error: "ไฟล์นี้ไม่ใช่ไฟล์สินค้า (เป็นไฟล์ออเดอร์ ให้ไปนำเข้าที่หน้ารับออเดอร์)" }, { status: 400 });
-
   const admin = supabaseAdmin();
+
+  // โหลดชนิดไฟล์ที่ผู้ใช้สร้างเอง (custom) มารวมกับโปรไฟล์มาตรฐานในโค้ด
+  const [{ data: pf }, { data: customRows }] = await Promise.all([
+    admin.from("erp_platforms").select("code").eq("id", platform_id).maybeSingle(),
+    admin.from("platform_import_profiles").select("id, profile_key, label, kind, level, section, header_row_index, label_row_index, data_start_row_index, detect, field_map, is_active").eq("platform_id", platform_id).eq("is_active", true),
+  ]);
+  const code = String((pf as { code?: string } | null)?.code ?? "");
+  const extra: ImportProfile[] = ((customRows ?? []) as DbProfileRow[]).map((r) => dbRowToProfile(r, code));
+  const profile = getProfile((body.profile_id ?? "").trim(), extra) ?? GENERIC_CATALOG_PROFILE;
+  if (profile.kind !== "catalog") return NextResponse.json({ error: "ไฟล์นี้ไม่ใช่ไฟล์สินค้า (เป็นไฟล์ออเดอร์ ให้ไปนำเข้าที่หน้ารับออเดอร์)" }, { status: 400 });
 
   // 1) ฟิลด์ของไฟล์ → platform_field_schemas (อัปเดตป้าย/ตัวอย่าง, สะสมจากหลายไฟล์)
   const fields = extractFields(profile, matrix);

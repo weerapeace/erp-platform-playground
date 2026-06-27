@@ -8,7 +8,8 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
-import { detectProfile, profilesForPlatform, getProfile, type ImportMatrix } from "@/lib/platform-import-profiles";
+import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
+import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 
 const PLATFORM_ICON: Record<string, string> = { shopee: "🛍️", lazada: "🛒", tiktok: "🎵", website: "🌐", instagram: "📸", facebook: "👍", line_oa: "💬", youtube: "▶️", pinterest: "📌", x: "✖️" };
 
@@ -25,6 +26,9 @@ export default function PlatformCatalogPage() {
   const [note, setNote] = useState<string | null>(null);
   // ไฟล์ที่อ่านแล้วรอยืนยันชนิด (เดาให้ + ให้ผู้ใช้ยืนยันก่อนนำเข้า)
   const [pending, setPending] = useState<{ fileName: string; matrix: ImportMatrix; profileId: string } | null>(null);
+  // ชนิดไฟล์ที่ผู้ใช้สร้างเอง (custom, active) — รวมกับโปรไฟล์มาตรฐานตอนเดา/เลือก
+  const [customProfiles, setCustomProfiles] = useState<ImportProfile[]>([]);
+  const [showManager, setShowManager] = useState(false);
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [platformId, setPlatformId] = useState("");
@@ -44,6 +48,18 @@ export default function PlatformCatalogPage() {
       if (pfs[0]) setPlatformId(pfs[0].id);
     } catch { /* ignore */ }
   })(); }, []);
+
+  // โหลดชนิดไฟล์ที่ผู้ใช้สร้างเอง (เฉพาะที่เปิดใช้งาน) สำหรับใช้เดา/เลือกตอนนำเข้า
+  const loadCustomProfiles = useCallback(async () => {
+    if (!platformId) { setCustomProfiles([]); return; }
+    try {
+      const j = await apiFetch(`/api/platform-import-profiles?platform_id=${platformId}`).then((r) => r.json());
+      const code = (j.platformCode as string) ?? platforms.find((p) => p.id === platformId)?.code ?? "";
+      const rows = ((j.custom ?? []) as (DbProfileRow & { is_active?: boolean })[]).filter((r) => r.is_active !== false);
+      setCustomProfiles(rows.map((r) => dbRowToProfile(r, code)));
+    } catch { setCustomProfiles([]); }
+  }, [platformId, platforms]);
+  useEffect(() => { loadCustomProfiles(); }, [loadCustomProfiles]);
 
   const load = useCallback(async () => {
     if (!platformId) return;
@@ -74,7 +90,7 @@ export default function PlatformCatalogPage() {
       const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" }) as ImportMatrix;
       if (matrix.length === 0) { setNote("ไฟล์ว่างเปล่า"); return; }
       const code = platforms.find((p) => p.id === platformId)?.code ?? "";
-      const guessed = detectProfile(code, matrix);
+      const guessed = detectProfile(code, matrix, customProfiles);
       setPending({ fileName: file.name, matrix, profileId: guessed.id });
       setNote(null);
     } catch (e) { setNote("อ่านไฟล์ไม่สำเร็จ: " + (e as Error).message); }
@@ -96,7 +112,7 @@ export default function PlatformCatalogPage() {
   };
 
   const platformCode = platforms.find((p) => p.id === platformId)?.code ?? "";
-  const profileOptions = profilesForPlatform(platformCode);
+  const profileOptions = profilesForPlatform(platformCode, customProfiles);
 
   const saveMapping = async (platform_field_key: string, source_key: string) => {
     setMappings((m) => { const n = { ...m }; if (source_key) n[platform_field_key] = source_key; else delete n[platform_field_key]; return n; });
@@ -139,6 +155,7 @@ export default function PlatformCatalogPage() {
         <div className="flex-1" />
         <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); }} />
         <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center"} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "⬆️ อัปไฟล์ export"}</button>
+        <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
         <button disabled title="เฟสถัดไป — ต้องมี API key" className="h-9 px-3 text-sm text-slate-400 border border-slate-200 rounded-lg cursor-not-allowed">🔗 ดึงจาก API (เร็ว ๆ นี้)</button>
       </div>
       {note && <p className="text-xs text-slate-500 mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">{note}</p>}
@@ -207,6 +224,8 @@ export default function PlatformCatalogPage() {
             </div>
           )
       )}
+
+      {showManager && <PlatformImportProfileManager platformId={platformId} platformCode={platformCode} onClose={() => setShowManager(false)} onChanged={loadCustomProfiles} />}
     </div>
   );
 }
