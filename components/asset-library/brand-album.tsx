@@ -25,8 +25,8 @@ function Thumb({ a, onOpen }: { a: AssetRow; onOpen: () => void }) {
   const [broken, setBroken] = useState(false);
   return (
     <button onClick={onOpen} title={a.title}
-      className="group relative rounded-lg border border-slate-200 overflow-hidden bg-white text-left hover:border-indigo-300 hover:shadow-sm transition">
-      <div className="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
+      className="group relative block w-full rounded-lg border border-slate-200 overflow-hidden bg-white text-left hover:border-indigo-300 hover:shadow-sm transition">
+      <div className="aspect-square w-full bg-slate-100 flex items-center justify-center overflow-hidden">
         {a.asset_type === "image" && !broken
           ? <img src={withImageWidth(a.url, 200) ?? a.url} alt={a.title} loading="lazy" onError={() => setBroken(true)} className="w-full h-full object-cover" />
           : <span className="text-2xl">🖼️</span>}

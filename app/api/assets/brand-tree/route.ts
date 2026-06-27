@@ -57,7 +57,8 @@ export async function GET(request: NextRequest) {
     const brandId = raw && raw !== "none" ? raw : null;
     const { data, error } = await admin.rpc("erp_artwork_parents", { p_brand_id: brandId });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ parents: data ?? [], error: null });
+    // cache 60s — ลิสต์ Parent ต่อแบรนด์เปลี่ยนไม่บ่อย + เป็น query หนักสุด (เปิดแบรนด์ใหญ่ซ้ำจะไว)
+    return NextResponse.json({ parents: data ?? [], error: null }, { headers: { "Cache-Control": "private, max-age=60" } });
   }
 
   if (mode === "parent") {
