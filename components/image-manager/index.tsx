@@ -271,17 +271,20 @@ export function ImageManager({
         <span className="absolute top-1 left-1 text-[10px] bg-blue-600 text-white px-1.5 rounded-full">หลัก</span>
       )}
       {!readonly && (
-        <div onClick={(e) => e.stopPropagation()} className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5">
-          {isImage(a.content_type) && (
-            <ImageMarkupButton sourceUrl={a.public_url} fileName={a.file_name} entityType={entityType} entityId={entityId} actor={actor} onSaved={fetchList}
-              triggerClassName="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50 text-blue-600" />
-          )}
-          {!a.is_primary && (
-            <button onClick={() => setPrimary(a.id)} title="ตั้งเป็นรูปหลัก"
-              className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50">⭐</button>
-          )}
-          <button onClick={() => remove(a.id)} title="ลบ"
-            className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-red-50 text-red-600">🗑</button>
+        // overlay กดทะลุได้ (pointer-events-none) → กดรูปเปิดดูใหญ่ · ปุ่มเท่านั้นที่กดได้ (pointer-events-auto) + กันเปิดรูปใหญ่
+        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 pointer-events-none">
+          <div className="flex items-center gap-1.5 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+            {isImage(a.content_type) && (
+              <ImageMarkupButton sourceUrl={a.public_url} fileName={a.file_name} entityType={entityType} entityId={entityId} actor={actor} onSaved={fetchList}
+                triggerClassName="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50 text-blue-600" />
+            )}
+            {!a.is_primary && (
+              <button onClick={() => setPrimary(a.id)} title="ตั้งเป็นรูปหลัก"
+                className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50">⭐</button>
+            )}
+            <button onClick={() => remove(a.id)} title="ลบ"
+              className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-red-50 text-red-600">🗑</button>
+          </div>
         </div>
       )}
     </div>
