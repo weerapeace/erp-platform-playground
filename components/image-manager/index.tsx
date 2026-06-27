@@ -6,6 +6,7 @@ import type { Attachment, AttachmentsResponse } from "@/app/api/attachments/rout
 import { ImageMarkupButton } from "@/components/image-markup-editor";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
+import { downscaleImageWidth } from "@/lib/image-resize";
 import { AssetPicker } from "@/components/asset-picker";
 
 // ============================================================
@@ -152,14 +153,12 @@ export function ImageManager({
       setError("รับเฉพาะไฟล์รูปภาพเท่านั้น");
       return;
     }
-    const tooLarge = incoming.find(file => file.size > maxSizeBytes);
-    if (tooLarge) {
-      setError(`ไฟล์ ${tooLarge.name} ใหญ่เกิน ${maxSizeMb}MB`);
-      return;
-    }
     setUploading(true); setError(null);
     try {
-      for (const file of incoming) {
+      for (const orig of incoming) {
+        // ย่อรูป "ด้านกว้าง ≤ 1200px" ตอนอัป (คงสัดส่วน · เฉพาะรูป) — ไฟล์อื่นคงเดิม · เช็กขนาดหลังย่อ
+        const file = imageOnly ? await downscaleImageWidth(orig, 1200) : orig;
+        if (file.size > maxSizeBytes) { setError(`ไฟล์ ${orig.name} ใหญ่เกิน ${maxSizeMb}MB (แม้ย่อแล้ว)`); continue; }
         const fd = new FormData();
         fd.append("file", file);
         fd.append("entity_type", entityType);

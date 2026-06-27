@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
+import { downscaleImageWidth } from "@/lib/image-resize";
 import { useToast } from "@/components/toast";
 import type { AssetRow } from "@/app/api/assets/shared";
 
@@ -42,8 +43,9 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
     if (!parentId) return;
     setBusy(true);
     let ok = 0;
-    for (const file of Array.from(files)) {
+    for (const orig of Array.from(files)) {
       try {
+        const file = await downscaleImageWidth(orig, 1200);   // ย่อด้านกว้าง ≤ 1200px ตอนอัป
         const fd = new FormData();
         fd.append("file", file); fd.append("source", "upload");
         if (actor) fd.append("actor", actor);

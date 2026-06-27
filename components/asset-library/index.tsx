@@ -15,6 +15,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
+import { downscaleImageWidth } from "@/lib/image-resize";
 import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
 import { BrandAlbumBrowser } from "./brand-album";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
@@ -441,12 +442,13 @@ function UploadModal({ actor, collections, onClose, onDone }: {
       if (next[i].status === "done" || next[i].status === "dup") { done++; continue; }
       next[i] = { ...next[i], status: "uploading" }; setItems([...next]);
       try {
+        const upFile = await downscaleImageWidth(next[i].file, 1200);   // ย่อด้านกว้าง ≤ 1200px ตอนอัป
         const fd = new FormData();
-        fd.append("file", next[i].file);
+        fd.append("file", upFile);
         if (tagsStr.trim()) fd.append("tags", tagsStr.trim());
         if (collectionId) fd.append("collection_id", collectionId);
         if (actor) fd.append("actor", actor);
-        const d = await imgDims(next[i].file);
+        const d = await imgDims(upFile);
         if (d) { fd.append("width", String(d.w)); fd.append("height", String(d.h)); }
         const res = await apiFetch("/api/assets", { method: "POST", body: fd });
         const j = await res.json();
@@ -901,8 +903,9 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
     if (!masterPath.trim() && !masterUrl.trim()) { toast.error("ใส่ที่อยู่ไฟล์ต้นฉบับอย่างน้อย 1 อย่าง (path NAS หรือ ลิงก์ Google Drive)"); return; }
     setBusy(true);
     try {
+      const upFile = await downscaleImageWidth(file, 1200);   // ย่อด้านกว้าง ≤ 1200px ตอนอัป
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", upFile);
       fd.append("source", "artwork");
       fd.append("artwork_type", artType);
       if (title.trim()) fd.append("title", title.trim());
@@ -914,9 +917,9 @@ function ArtworkAddModal({ actor, artTypes, collections, onClose, onDone }: { ac
       if (parentCodes.length) fd.append("parent_sku_codes", JSON.stringify(parentCodes));
       if (collectionId) fd.append("collection_id", collectionId);
       if (actor) fd.append("actor", actor);
-      if (file.type.startsWith("image/")) {
+      if (upFile.type.startsWith("image/")) {
         const dim = await new Promise<{ w: number; h: number } | null>((res) => {
-          const img = new Image(); const u = URL.createObjectURL(file);
+          const img = new Image(); const u = URL.createObjectURL(upFile);
           img.onload = () => { res({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(u); };
           img.onerror = () => { res(null); URL.revokeObjectURL(u); };
           img.src = u;
