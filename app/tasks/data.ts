@@ -398,6 +398,8 @@ export type RecurringRule = {
   frequency: string; interval_n: number; assignee_id: string | null; assignee_label?: string | null;
   brand_id: string | null; brand_label?: string | null; campaign_id: string | null;
   start_date: string; end_date: string | null; next_run: string | null; last_run: string | null; is_active: boolean;
+  // section งาน — ค่าที่ติดไปกับงานที่ระบบสร้าง (ตั้งบนกฎได้โดยตรง)
+  description?: string | null; task_type?: string | null; priority?: string | null; platforms?: string[] | null; due_day?: number | null;
 };
 
 export async function listTemplates(search?: string): Promise<TaskTemplate[]> {

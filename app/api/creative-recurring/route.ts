@@ -37,7 +37,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ data: items, generated, error: null });
 }
 
-type Body = { name?: string; template_id?: string | null; frequency?: string; interval_n?: number; assignee_id?: string | null; brand_id?: string | null; campaign_id?: string | null; start_date?: string | null; end_date?: string | null; weekday?: number | null; day_of_month?: number | null };
+type Body = { name?: string; template_id?: string | null; frequency?: string; interval_n?: number; assignee_id?: string | null; brand_id?: string | null; campaign_id?: string | null; start_date?: string | null; end_date?: string | null; weekday?: number | null; day_of_month?: number | null;
+  description?: string | null; task_type?: string | null; priority?: string | null; platforms?: string[] | null; due_day?: number | null };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.create"); if (denied) return denied;
@@ -54,6 +55,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     weekday: body.weekday ?? null, day_of_month: body.day_of_month ?? null,
     assignee_id: body.assignee_id || null, brand_id: body.brand_id || null, campaign_id: body.campaign_id || null,
     start_date: start, end_date: body.end_date || null, next_run: start, created_by: user?.id ?? null,
+    // section งาน — ติดไปกับงานที่ระบบสร้าง
+    description: body.description?.trim() || null, task_type: body.task_type || null, priority: body.priority || null,
+    platforms: Array.isArray(body.platforms) ? body.platforms : [], due_day: body.due_day ?? null,
   }).select("id, name").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "create", entityType: "creative_recurring", entityId: data.id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name } });

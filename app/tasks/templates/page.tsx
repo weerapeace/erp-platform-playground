@@ -20,6 +20,7 @@ import {
   type TaskTemplate, type RecurringRule, type Campaign, type BrandOption, type SubtaskType,
 } from "../data";
 import { useCreativeOptions, taskTypeLabel } from "../use-options";
+import { BulletTextarea } from "@/components/bullet-textarea";
 import { SubtaskTypePicker, type EditStep } from "./subtask-type-picker";
 import { BrandPromptsTab } from "./brand-prompts";
 import { useT } from "@/components/i18n";
@@ -179,9 +180,10 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
 // ============================================================
 // Recurring tab
 // ============================================================
-const EMPTY_REC = { name: "", template_id: "", frequency: "weekly", interval_n: "1", brand_id: "", campaign_id: "", start_date: "", end_date: "" };
+const EMPTY_REC = { name: "", template_id: "", frequency: "weekly", interval_n: "1", brand_id: "", campaign_id: "", start_date: "", end_date: "", description: "", task_type: "", priority: "normal", platforms: [] as string[], due_day: "" };
 function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) => void }) {
   const t = useT();
+  const { taskTypes, platforms: platformOpts } = useCreativeOptions();
   const [items, setItems] = useState<RecurringRule[]>([]);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [brands, setBrands] = useState<BrandOption[]>([]);
@@ -204,10 +206,19 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
     if (!form.name.trim()) { pushToast("error", t("กรุณาใส่ชื่อกฎ", "Please enter a rule name")); return; }
     setSaving(true);
     try {
-      await createRecurring({ name: form.name.trim(), template_id: form.template_id || null, frequency: form.frequency, interval_n: Number(form.interval_n) || 1, assignee_id: assignee?.id ?? null, brand_id: form.brand_id || null, campaign_id: form.campaign_id || null, start_date: form.start_date || null, end_date: form.end_date || null });
+      await createRecurring({ name: form.name.trim(), template_id: form.template_id || null, frequency: form.frequency, interval_n: Number(form.interval_n) || 1, assignee_id: assignee?.id ?? null, brand_id: form.brand_id || null, campaign_id: form.campaign_id || null, start_date: form.start_date || null, end_date: form.end_date || null,
+        description: form.description.trim() || null, task_type: form.task_type || null, priority: form.priority || null, platforms: form.platforms, due_day: form.due_day ? Number(form.due_day) : null });
       setOpen(false); pushToast("success", t("สร้างกฎงานประจำแล้ว", "Recurring rule created")); await load(true);
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
+  };
+  // คัดลอกงานประจำ — สร้างกฎใหม่จากค่าเดิม (ชื่อ + " (สำเนา)")
+  const copyRule = async (r: RecurringRule) => {
+    try {
+      await createRecurring({ name: `${r.name} (${t("สำเนา", "copy")})`, template_id: r.template_id, frequency: r.frequency, interval_n: r.interval_n, assignee_id: r.assignee_id, brand_id: r.brand_id, campaign_id: r.campaign_id, start_date: r.start_date, end_date: r.end_date,
+        description: r.description ?? null, task_type: r.task_type ?? null, priority: r.priority ?? null, platforms: r.platforms ?? [], due_day: r.due_day ?? null });
+      pushToast("success", t("คัดลอกงานประจำแล้ว", "Recurring rule copied")); await load(false);
+    } catch (e) { pushToast("error", (e as Error).message); }
   };
   const runNow = async (r: RecurringRule) => { try { const n = await runRecurringNow(r.id); pushToast("success", n > 0 ? `${t("สร้าง", "Created")} ${n} ${t("งานแล้ว", "tasks")}` : t("ไม่มีงานใหม่", "No new tasks")); await load(false); } catch (e) { pushToast("error", (e as Error).message); } };
   const onDelete = async () => { if (!delId) return; try { await deleteRecurring(delId.id); pushToast("info", t("ลบแล้ว", "Deleted")); await load(false); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelId(null); } };
@@ -235,6 +246,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
                   </div>
                 </div>
                 <button onClick={() => runNow(r)} className="h-8 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">▶ {t("สร้างเดี๋ยวนี้", "Run Now")}</button>
+                <button onClick={() => copyRule(r)} title={t("คัดลอกงานประจำ", "Copy recurring rule")} className="h-8 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">⧉ {t("คัดลอก", "Copy")}</button>
                 <button onClick={() => setDelId(r)} className="text-xs text-slate-300 hover:text-red-500 shrink-0">{t("ลบ", "Delete")}</button>
               </div>
             ))}
@@ -250,12 +262,28 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
           <ERPFormField label={t("ชื่อกฎ/ชื่องาน", "Rule name / Task name")} required span={2}><ERPInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ทำ Content Calendar รายสัปดาห์", "e.g. Weekly Content Calendar")} /></ERPFormField>
           <ERPFormField label={t("ใช้เทมเพลต", "Use Template")}><ERPSelect value={form.template_id} options={[{ value: "", label: `— ${t("ไม่ใช้", "None")} —` }, ...templates.map((tpl) => ({ value: tpl.id, label: tpl.name }))]} onChange={(e) => setForm((f) => ({ ...f, template_id: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("ผู้รับผิดชอบ", "Assignee")}><UserPicker value={assignee} onChange={setAssignee} disableCreate /></ERPFormField>
-          <ERPFormField label={t("ความถี่", "Frequency")}><ERPSelect value={form.frequency} options={FREQ} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("ทุก ๆ (รอบ)", "Every (cycles)")}><ERPInput type="number" value={String(form.interval_n)} onChange={(e) => setForm((f) => ({ ...f, interval_n: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ความถี่", "Frequency")} hint={t("ตั้งว่าให้สร้างงานซ้ำแบบไหน: รายวัน / รายสัปดาห์ / รายเดือน", "How often to repeat: daily / weekly / monthly")}><ERPSelect value={form.frequency} options={FREQ} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ทุก ๆ (รอบ)", "Every (cycles)")} hint={t("เว้นกี่รอบถึงสร้างครั้งถัดไป เช่น 2 + รายสัปดาห์ = ทุก 2 สัปดาห์", "Gap between runs, e.g. 2 + weekly = every 2 weeks")}><ERPInput type="number" value={String(form.interval_n)} onChange={(e) => setForm((f) => ({ ...f, interval_n: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แบรนด์", "Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setForm((f) => ({ ...f, brand_id: e.target.value }))} /></ERPFormField>
           <ERPFormField label={t("แคมเปญ", "Campaign")}><ERPSelect value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => setForm((f) => ({ ...f, campaign_id: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("เริ่ม", "Start")}><ERPInput type="date" value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} /></ERPFormField>
-          <ERPFormField label={t("สิ้นสุด (ถ้ามี)", "End (if any)")}><ERPInput type="date" value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("เริ่ม", "Start")} hint={t("วันแรกที่เริ่มสร้างงานตามรอบ (ว่าง = วันนี้)", "First date to start generating tasks (blank = today)")}><ERPInput type="date" value={form.start_date} onChange={(e) => setForm((f) => ({ ...f, start_date: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("สิ้นสุด (ถ้ามี)", "End (if any)")} hint={t("วันที่หยุดสร้างงาน — เว้นว่างได้ถ้าทำไปเรื่อยๆ", "Date to stop generating — leave blank to run forever")}><ERPInput type="date" value={form.end_date} onChange={(e) => setForm((f) => ({ ...f, end_date: e.target.value }))} /></ERPFormField>
+        </ERPFormSection>
+
+        {/* section งาน — ค่าที่จะติดไปกับงานทุกใบที่ระบบสร้าง */}
+        <ERPFormSection title={t("รายละเอียดงาน (ติดไปกับงานที่สร้าง)", "Task details (applied to generated tasks)")} columns={2}>
+          <ERPFormField label={t("ประเภทงาน", "Task Type")}><ERPSelect value={form.task_type} options={[{ value: "", label: `— ${t("ไม่ระบุ", "None")} —` }, ...taskTypes]} onChange={(e) => setForm((f) => ({ ...f, task_type: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("ความสำคัญ", "Priority")}><ERPSelect value={form.priority} options={PRIORITY_OPTIONS} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))} /></ERPFormField>
+          <ERPFormField label={t("กำหนดส่ง", "Due date")} hint={t("วันที่ของเดือนที่ให้เป็นกำหนดส่ง (1–31) · ว่าง = ใช้วันถึงรอบ", "Day of month for the due date (1–31) · blank = use run date")}><ERPInput type="number" value={form.due_day} placeholder={t("เช่น 25 = วันที่ 25 ของเดือน", "e.g. 25 = the 25th")} onChange={(e) => setForm((f) => ({ ...f, due_day: e.target.value }))} /></ERPFormField>
+          <ERPFormField label="Platform">
+            <div className="flex flex-wrap gap-1.5">
+              {platformOpts.map((p) => { const on = form.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setForm((f) => ({ ...f, platforms: on ? f.platforms.filter((x) => x !== p.value) : [...f.platforms, p.value] }))} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}
+              {platformOpts.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มีช่องทาง", "No platforms")}</span>}
+            </div>
+          </ERPFormField>
+          <ERPFormField label={t("รายละเอียด", "Description")} span={2} hint={t("กด Enter เพื่อขึ้นหัวข้อย่อยถัดไป", "Press Enter to continue the bullet list")}>
+            <BulletTextarea value={form.description} onChange={(v) => setForm((f) => ({ ...f, description: v }))} placeholder={t("อธิบายงาน / สิ่งที่ต้องทำ (ทำหัวข้อย่อยได้)", "Describe the work / checklist (supports bullets)")} />
+          </ERPFormField>
         </ERPFormSection>
         <p className="text-xs text-slate-400 mt-2">{t("เมื่อถึงรอบ ระบบจะสร้างงานจากเทมเพลต (พร้อมขั้นตอน) ให้ผู้รับผิดชอบอัตโนมัติเมื่อมีคนเปิดหน้านี้ หรือกด \"สร้างเดี๋ยวนี้\"", "When due, the system auto-creates tasks from the template (with subtasks) for the assignee when someone opens this page, or when \"Run Now\" is clicked.")}</p>
       </ERPModal>

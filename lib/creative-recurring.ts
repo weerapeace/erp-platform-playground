@@ -14,6 +14,8 @@ export type RecurringRule = {
   brand_id: string | null; campaign_id: string | null;
   start_date: string; end_date: string | null; next_run: string | null; last_run: string | null;
   created_by: string | null;
+  // section งาน — ตั้งบนกฎ (ทับค่าจากเทมเพลต)
+  description?: string | null; task_type?: string | null; priority?: string | null; platforms?: string[] | null; due_day?: number | null;
 };
 export type TemplateStepDef = { title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[] };
 export type Template = {
@@ -32,6 +34,14 @@ function addMonths(d: Date, n: number): Date {
   return nd;
 }
 
+/** กำหนดส่ง = วันที่ `day` ของเดือนเดียวกับวันถึงรอบ (เกินสิ้นเดือน → ปัดเป็นวันสุดท้าย) */
+function withDayOfMonth(dateStr: string, day: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(Math.max(1, day), last));
+  return iso(d);
+}
+
 /** เลื่อนวันถัดไปตามความถี่ */
 export function advance(dateStr: string, frequency: string, interval: number): string {
   const n = Math.max(1, interval || 1);
@@ -41,13 +51,17 @@ export function advance(dateStr: string, frequency: string, interval: number): s
   return iso(addMonths(d, n)); // monthly
 }
 
-async function createTaskFromRule(admin: Admin, rule: RecurringRule, tpl: Template | null, dueDate: string): Promise<string | null> {
+async function createTaskFromRule(admin: Admin, rule: RecurringRule, tpl: Template | null, runDate: string): Promise<string | null> {
   const taskNo = await nextTaskNo(admin);
+  // ค่าจากกฎมาก่อน (section งาน) ถ้าไม่ตั้งค่อย fallback ไปเทมเพลต
+  const dueDate = rule.due_day ? withDayOfMonth(runDate, rule.due_day) : runDate;
   const { data, error } = await admin.from("erp_creative_tasks").insert({
-    task_no: taskNo, title: `${rule.name} — ${dueDate}`, task_type: tpl?.task_type ?? null,
+    task_no: taskNo, title: `${rule.name} — ${runDate}`, task_type: rule.task_type ?? tpl?.task_type ?? null,
+    description: rule.description ?? null,
     brand_id: rule.brand_id ?? tpl?.brand_id ?? null, campaign_id: rule.campaign_id ?? null,
-    priority: tpl?.default_priority ?? "normal", status: "backlog", progress_percent: 0,
-    assignee_id: rule.assignee_id ?? null, due_date: dueDate, platforms: tpl?.platforms ?? [],
+    priority: rule.priority ?? tpl?.default_priority ?? "normal", status: "backlog", progress_percent: 0,
+    assignee_id: rule.assignee_id ?? null, due_date: dueDate,
+    platforms: (rule.platforms && rule.platforms.length) ? rule.platforms : (tpl?.platforms ?? []),
     created_by: rule.created_by ?? null,
   }).select("id").single();
   if (error || !data) return null;
