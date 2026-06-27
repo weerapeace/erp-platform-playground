@@ -6,7 +6,7 @@
 // เก็บใน user_ui_prefs key=tasks_overview_theme (บันทึกอัตโนมัติ) · อัปรูปผ่าน /api/admin/upload (ต้อง files.upload)
 // ============================================================
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
@@ -69,6 +69,30 @@ export function pageStyle(p: PageTheme): React.CSSProperties {
 
 const CARD_LABEL: Record<CardKey, string> = { all: "งานทั้งหมด", mine: "งานของฉัน", review: "รอตรวจ/อนุมัติ", overdue: "เกินกำหนด" };
 
+// ===== ธีมสำเร็จรูป (preset) — กดปุ่มเดียวเปลี่ยนทั้งหน้า =====
+function makePreset(c1: string, c2: string, pageColor: string | null, cardColors: [string, string, string, string]): OverviewTheme {
+  return {
+    hero: { ...DEFAULT_THEME.hero, mode: "gradient", color1: c1, color2: c2, textColor: "#ffffff" },
+    cards: {
+      all:     { ...DEFAULT_THEME.cards.all,     color: cardColors[0] },
+      mine:    { ...DEFAULT_THEME.cards.mine,    color: cardColors[1] },
+      review:  { ...DEFAULT_THEME.cards.review,  color: cardColors[2] },
+      overdue: { ...DEFAULT_THEME.cards.overdue, color: cardColors[3] },
+    },
+    page: pageColor ? { mode: "color", color: pageColor, imageUrl: null } : { mode: "none", color: "#f8fafc", imageUrl: null },
+  };
+}
+
+export type ThemePreset = { key: string; name: string; c1: string; c2: string; theme: OverviewTheme };
+export const PRESETS: ThemePreset[] = [
+  { key: "violet",   name: "ม่วงมินิมอล", c1: "#7c3aed", c2: "#4f46e5", theme: makePreset("#7c3aed", "#4f46e5", null,      ["slate", "violet", "amber", "red"]) },
+  { key: "pastel",   name: "พาสเทล",       c1: "#f9a8d4", c2: "#a5b4fc", theme: makePreset("#f9a8d4", "#a5b4fc", "#fdf4ff", ["pink", "indigo", "amber", "rose"]) },
+  { key: "ocean",    name: "โอเชียน",      c1: "#0ea5e9", c2: "#14b8a6", theme: makePreset("#0ea5e9", "#14b8a6", "#f0f9ff", ["blue", "teal", "amber", "rose"]) },
+  { key: "sunset",   name: "ซันเซ็ต",      c1: "#fb7185", c2: "#f59e0b", theme: makePreset("#fb7185", "#f59e0b", "#fff7ed", ["rose", "amber", "violet", "red"]) },
+  { key: "forest",   name: "ฟอเรสต์",      c1: "#10b981", c2: "#0d9488", theme: makePreset("#10b981", "#0d9488", "#f0fdf4", ["emerald", "teal", "amber", "rose"]) },
+  { key: "graphite", name: "กราไฟต์",      c1: "#334155", c2: "#0f172a", theme: makePreset("#334155", "#0f172a", "#f1f5f9", ["slate", "blue", "amber", "red"]) },
+];
+
 async function uploadImage(file: File): Promise<string> {
   const fd = new FormData(); fd.append("file", file); fd.append("folder", "overview-theme");
   const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
@@ -86,6 +110,24 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
   const t = useT();
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // ธีมที่ผู้ใช้บันทึกเอง (เก็บใน user_ui_prefs key=tasks_overview_themes)
+  const [saved, setSaved] = useState<{ name: string; theme: OverviewTheme }[]>([]);
+  const [newName, setNewName] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    apiFetch("/api/user-prefs?key=tasks_overview_themes").then((r) => r.json())
+      .then((j) => { if (j && !j.error && Array.isArray(j.value)) setSaved(j.value); }).catch(() => {});
+  }, [open]);
+  const persistSaved = (list: { name: string; theme: OverviewTheme }[]) => {
+    setSaved(list);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_overview_themes", value: list }) });
+  };
+  const saveCurrent = () => {
+    const name = newName.trim(); if (!name) return;
+    persistSaved([...saved.filter((s) => s.name !== name), { name, theme }]);
+    setNewName("");
+  };
 
   const setHero = (p: Partial<HeroTheme>) => onChange({ ...theme, hero: { ...theme.hero, ...p } });
   const setCard = (k: CardKey, p: Partial<CardTheme>) => onChange({ ...theme, cards: { ...theme.cards, [k]: { ...theme.cards[k], ...p } } });
@@ -104,6 +146,39 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
       </>}>
       {err && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">⚠ {err}<button onClick={() => setErr(null)} className="text-red-400 hover:text-red-700">✕</button></div>}
       <p className="text-[11px] text-slate-400 mb-4">{t("ทุกการเปลี่ยนบันทึกอัตโนมัติ (เห็นผลทันที) · เป็นการแต่งของคุณคนเดียว ไม่กระทบคนอื่น", "Saves automatically (live) · personal to you")}</p>
+
+      {/* ===== ธีมสำเร็จรูป (preset) ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-2">{t("ธีมสำเร็จรูป (กดเปลี่ยนทั้งหน้า)", "Preset themes (one-click)")}</div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {PRESETS.map((p) => (
+            <button key={p.key} onClick={() => onChange(p.theme)} title={p.name}
+              className="rounded-lg border border-slate-200 overflow-hidden text-left hover:border-violet-300 hover:shadow-sm transition">
+              <div className="h-10" style={{ background: `linear-gradient(135deg, ${p.c1}, ${p.c2})` }} />
+              <div className="px-2 py-1 text-xs font-medium text-slate-700">{p.name}</div>
+            </button>
+          ))}
+        </div>
+        {/* ธีมที่บันทึกเอง */}
+        <div className="mt-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("ตั้งชื่อธีมนี้แล้วบันทึก", "Name this theme to save")}
+              className="h-8 px-2 text-sm border border-slate-200 rounded flex-1 min-w-[160px]" />
+            <button onClick={saveCurrent} disabled={!newName.trim()} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded hover:bg-violet-700 disabled:opacity-40">💾 {t("บันทึกธีมของฉัน", "Save my theme")}</button>
+          </div>
+          {saved.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap mt-2">
+              <span className="text-[11px] text-slate-400">{t("ธีมของฉัน", "My themes")}:</span>
+              {saved.map((s) => (
+                <span key={s.name} className="inline-flex items-center gap-1 text-xs rounded-full border border-slate-200 bg-white pl-2.5 pr-1 py-0.5">
+                  <button onClick={() => onChange(s.theme)} className="text-slate-700 hover:text-violet-700">{s.name}</button>
+                  <button onClick={() => persistSaved(saved.filter((x) => x.name !== s.name))} className="text-slate-300 hover:text-red-500" title={t("ลบ", "Delete")}>✕</button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* ===== Hero ===== */}
       <section className="mb-5">
