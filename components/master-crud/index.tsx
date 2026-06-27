@@ -441,6 +441,8 @@ export type MasterCRUDConfig = {
     maxSizeBytes?: number;
     imageOnly?: boolean;
   };
+  /** section พิเศษในฟอร์ม (เช่น รูป Description ของ Parent SKU) — render เมื่อเปิดฟอร์ม */
+  extraFormSection?: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode;
   /**
    * F19: server-side pagination — ดึงทีละหน้าจาก server (กัน Worker 1102 ถาวร)
    * เหมาะกับ dataset ใหญ่ (>500 rows เช่น parent-skus, skus)
@@ -2338,6 +2340,13 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       บันทึกรายการก่อน แล้วค่อยเพิ่มรูปภาพเพิ่มเติม
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* section พิเศษต่อโมดูล (เช่น รูป Description ของ Parent SKU) */}
+              {config.extraFormSection && (
+                <div className="w-full md:order-4 rounded-xl border border-slate-200 bg-white p-3">
+                  {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
                 </div>
               )}
 

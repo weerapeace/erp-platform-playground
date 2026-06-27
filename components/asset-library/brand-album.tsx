@@ -178,7 +178,7 @@ export function BrandAlbumBrowser({ onOpenAsset, reloadKey }: { onOpenAsset: (id
             <section>
               <p className="text-[13px] font-medium text-slate-700 mb-2">📂 Description <span className="text-slate-400 font-normal">({fmt(detail.description.length)})</span></p>
               {detail.description.length === 0
-                ? <p className="text-[12px] text-slate-400">— ยังไม่มีรูป Description — <span className="text-slate-300">(เพิ่มได้ที่ฟอร์ม Parent SKU — เร็ว ๆ นี้)</span></p>
+                ? <p className="text-[12px] text-slate-400">— ยังไม่มีรูป Description — <span className="text-slate-300">(เพิ่มได้ที่ฟอร์ม Parent SKU → ช่อง “รูป Description”)</span></p>
                 : <ReorderableGrid items={detail.description} onOpen={onOpenAsset} onReorder={(ids) => saveOrder("parent_sku_description", detail.parent?.id ?? "", ids)} />}
             </section>
           </div>

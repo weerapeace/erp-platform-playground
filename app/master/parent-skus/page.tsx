@@ -25,6 +25,10 @@ const ProductPlatformManager = dynamic(
   () => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager),
   { ssr: false },
 );
+const ParentDescriptionImages = dynamic(
+  () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
+  { ssr: false },
+);
 
 const FAMILY_LABEL: Record<string, string> = {
   general: "🏷️ ทั่วไป",
@@ -93,16 +97,21 @@ const CONFIG: MasterCRUDConfig = {
 };
 
 export default function ParentSKUsV2Page() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [mgrId, setMgrId] = useState<string | null>(null);
-  // เพิ่ม row action "ลงขายหลายแพลตฟอร์ม" (เปิด ProductPlatformManager) — config สร้างใน component เพื่อ setState ได้
+  const actor = user?.name ?? user?.email ?? undefined;
+  // เพิ่ม row action "ลงขายหลายแพลตฟอร์ม" + ช่อง "รูป Description" ในฟอร์ม — config สร้างใน component เพื่อ setState/actor
   const config = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
     extraRowActions: [
       ...(CONFIG.extraRowActions ?? []),
       { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
     ],
-  }), []);
+    // section พิเศษในฟอร์ม: รูป Description (มีลำดับ) → โฟลเดอร์ Description ในมุมมอง "ดูตามแบรนด์"
+    extraFormSection: ({ recordId, readonly }) => (
+      <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+    ),
+  }), [actor]);
   return (
     <>
       <MasterCRUDPage config={config} />
