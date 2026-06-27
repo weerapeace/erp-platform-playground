@@ -60,11 +60,12 @@ const CONFIG: MasterCRUDConfig = {
   exportEntityType: "parent_skus_v2",
   mediaGallery: {
     entityType: "parent_skus_v2",
-    title: "รูปภาพเพิ่มเติม",
-    description: "เพิ่มได้สูงสุด 9 รูป · รูปละไม่เกิน 2MB · ลบแล้วจะย้ายไฟล์ใน R2 เข้าถังเก็บกลาง",
+    title: "รูปสินค้า",
+    description: "รูปหลักโชว์ใหญ่ด้านบน · กด ⭐ ตั้งเป็นรูปหลัก · เพิ่มได้สูงสุด 9 รูป",
     maxItems: 9,
     maxSizeBytes: 2 * 1024 * 1024,
     imageOnly: true,
+    layout: "gallery",   // รูปหลักใหญ่บน + รูปย่อยล่าง (แบบ Design Sheet) ตามที่เจ้าของขอ
   },
   permissions: {
     view:   "products.view",

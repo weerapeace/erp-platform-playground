@@ -440,6 +440,8 @@ export type MasterCRUDConfig = {
     maxItems?: number;
     maxSizeBytes?: number;
     imageOnly?: boolean;
+    /** เลย์เอาต์: grid (ค่าเริ่มต้น) หรือ gallery (รูปหลักใหญ่บน + รูปย่อยล่าง แบบ Design Sheet) */
+    layout?: "grid" | "gallery";
   };
   /** section พิเศษในฟอร์ม (เช่น รูป Description ของ Parent SKU) — render เมื่อเปิดฟอร์ม */
   extraFormSection?: (ctx: { recordId: string | null; readonly: boolean }) => React.ReactNode;
@@ -2334,6 +2336,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                       maxItems={config.mediaGallery.maxItems ?? 9}
                       maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
                       imageOnly={config.mediaGallery.imageOnly ?? true}
+                      layout={config.mediaGallery.layout ?? "grid"}
                     />
                   ) : (
                     <div className="text-xs text-slate-400 text-center py-3">
