@@ -30,6 +30,8 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
   const inputRef = useRef<HTMLInputElement>(null);
   const dragIdx = useRef<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState(false);   // ลากไฟล์จากนอกมาวาง
+  const [hovering, setHovering] = useState(false);    // ชี้อยู่ในกล่อง → รับ Ctrl+V
 
   const load = useCallback(async () => {
     if (!parentId) return;
@@ -62,6 +64,18 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
     if (ok) { toast.success(`เพิ่มรูป Description ${ok} รูป`); await load(); }
   };
 
+  // วางจาก clipboard (Ctrl+V) — เฉพาะตอนเมาส์ชี้อยู่ในกล่องนี้ (กันชนกับ ImageManager ในหน้าเดียวกัน)
+  const uploadRef = useRef(upload); uploadRef.current = upload;
+  useEffect(() => {
+    if (readonly || !hovering || !parentId) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+      if (files.length) { e.preventDefault(); void uploadRef.current(files); }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [readonly, hovering, parentId]);
+
   const remove = async (assetId: string) => {
     if (!parentId) return;
     try {
@@ -87,7 +101,11 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
   if (!parentId) return <div className="text-xs text-slate-400 text-center py-3">บันทึก Parent SKU ก่อน แล้วค่อยเพิ่มรูป Description</div>;
 
   return (
-    <div>
+    <div
+      onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}
+      onDragOver={(e) => { if (!readonly && dragIdx.current == null) { e.preventDefault(); setDragOver(true); } }}
+      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false); }}
+      onDrop={(e) => { if (dragIdx.current == null) { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) void upload(e.dataTransfer.files); } }}>
       <div className="flex items-center justify-between mb-2">
         <p className="text-[13px] font-medium text-slate-700">📂 รูป Description <span className="text-slate-400 font-normal">({images.length})</span></p>
         {!readonly && <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}
@@ -96,14 +114,18 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
           onChange={(e) => { if (e.target.files?.length) void upload(e.target.files); e.currentTarget.value = ""; }} />
       </div>
       {loading ? <div className="text-xs text-slate-400 py-3 text-center">กำลังโหลด…</div>
-        : images.length === 0 ? <div className="text-xs text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded-lg">ยังไม่มีรูป Description{!readonly && " — กด “＋ เพิ่มรูป”"}</div>
-        : (
-          <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))" }}>
+        : images.length === 0 ? (
+          <div onClick={() => { if (!readonly) inputRef.current?.click(); }}
+            className={`text-xs text-center py-5 border border-dashed rounded-lg transition-colors ${dragOver ? "border-indigo-400 bg-indigo-50 text-indigo-600" : "border-slate-200 text-slate-400"} ${!readonly ? "cursor-pointer hover:bg-slate-50" : ""}`}>
+            {dragOver ? "วางรูปที่นี่" : <>ยังไม่มีรูป Description{!readonly && " — ลากรูปมาวาง · คลิก · หรือกด Ctrl+V"}</>}
+          </div>
+        ) : (
+          <div className={`grid gap-2 rounded-lg ${dragOver ? "ring-2 ring-indigo-300 p-1" : ""}`} style={{ gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))" }}>
             {images.map((a, idx) => (
               <div key={a.id} draggable={!readonly}
                 onDragStart={() => { dragIdx.current = idx; }}
-                onDragOver={(e) => { if (!readonly) { e.preventDefault(); if (overIdx !== idx) setOverIdx(idx); } }}
-                onDrop={(e) => { e.preventDefault(); drop(idx); }}
+                onDragOver={(e) => { if (!readonly) { e.preventDefault(); if (dragIdx.current != null && overIdx !== idx) setOverIdx(idx); } }}
+                onDrop={(e) => { e.preventDefault(); if (dragIdx.current != null) drop(idx); else if (e.dataTransfer.files?.length) { setDragOver(false); void upload(e.dataTransfer.files); } }}
                 onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
                 className={`relative group rounded-lg border overflow-hidden bg-white ${overIdx === idx ? "ring-2 ring-indigo-400" : "border-slate-200"} ${!readonly ? "cursor-grab active:cursor-grabbing" : ""}`}>
                 <div className="h-20 bg-slate-100 flex items-center justify-center overflow-hidden">
@@ -118,7 +140,7 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
             ))}
           </div>
         )}
-      {!readonly && images.length > 1 && <p className="text-[10px] text-slate-300 mt-1">ลากรูปเพื่อจัดลำดับ · เลข = ลำดับ</p>}
+      {!readonly && images.length > 0 && <p className="text-[10px] text-slate-300 mt-1">ลากรูปย่อยจัดลำดับ · ลากไฟล์มาวาง / Ctrl+V เพื่อเพิ่ม{busy ? " · กำลังอัป…" : ""}</p>}
     </div>
   );
 }
