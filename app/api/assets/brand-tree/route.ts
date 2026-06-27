@@ -133,6 +133,35 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ images, error: null });
   }
 
+  // รวมรูป "ทั้งหมด" ของ Parent (รูป Parent + ทุก SKU ลูก + Description) แบบแบน → ใช้ทำ zip ดาวน์โหลด
+  if (mode === "all-images") {
+    const parentId = sp.get("parent_id");
+    if (!parentId) return NextResponse.json({ error: "missing parent_id" }, { status: 400 });
+
+    const [{ data: p }, { data: skus }] = await Promise.all([
+      admin.from("parent_skus_v2").select("code").eq("id", parentId).maybeSingle(),
+      admin.from("skus_v2").select("id, code").eq("parent_sku_id", parentId).order("code"),
+    ]);
+    const skuList = (skus ?? []) as { id: string; code: string }[];
+
+    const [parentImgs, descImgs, ...skuImgsArr] = await Promise.all([
+      galleryFor(admin, "parent_skus_v2", parentId, "parent_sku"),
+      usageGallery(admin, "parent_sku_description", parentId),
+      ...skuList.map((s) => galleryFor(admin, "skus_v2", s.id, "product_sku")),
+    ]);
+
+    const clean = (t: string) => (t || "").replace(/[\\/:*?"<>|]+/g, "_").trim();
+    const guessExt = (t: string) => (/\.[a-z0-9]{2,5}$/i.test(t || "") ? "" : ".jpg");   // เดานามสกุลถ้าชื่อไม่มี
+    const pad = (i: number) => String(i + 1).padStart(2, "0");
+    const out: { url: string; name: string }[] = [];
+    parentImgs.forEach((im, i) => out.push({ url: im.url, name: `Parent/${pad(i)}_${clean(im.title) || "image"}${guessExt(im.title)}` }));
+    skuList.forEach((s, si) => (skuImgsArr[si] ?? []).forEach((im, i) =>
+      out.push({ url: im.url, name: `SKU_${clean(s.code)}/${pad(i)}_${clean(im.title) || "image"}${guessExt(im.title)}` })));
+    descImgs.forEach((im, i) => out.push({ url: im.url, name: `Description/${pad(i)}_${clean(im.title) || "image"}${guessExt(im.title)}` }));
+
+    return NextResponse.json({ images: out, code: (p as { code?: string } | null)?.code ?? "", error: null });
+  }
+
   return NextResponse.json({ error: "bad mode" }, { status: 400 });
 }
 

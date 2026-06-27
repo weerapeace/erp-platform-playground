@@ -16,6 +16,7 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
 import { downscaleImageWidth } from "@/lib/image-resize";
+import { downloadImagesAsZip } from "@/lib/zip";
 import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
 import { BrandAlbumBrowser } from "./brand-album";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
@@ -128,6 +129,25 @@ export function AssetLibrary() {
     return () => { alive = false; clearTimeout(t); };
   }, [search]);
   const openFolder = (parentId: string) => { setBrandOpenParent(parentId); setSearch(""); setSource("by-brand"); };
+
+  // ดาวน์โหลดรูปในผลค้นหา (เฉพาะที่เป็นรูปภาพ) เป็นไฟล์ zip
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipMsg, setZipMsg] = useState("");
+  const downloadSearchZip = async () => {
+    if (zipBusy) return;
+    const clean = (t: string) => (t || "").replace(/[\\/:*?"<>|]+/g, "_").trim();
+    const guessExt = (t: string) => (/\.[a-z0-9]{2,5}$/i.test(t || "") ? "" : ".jpg");
+    const imgs = rows.filter((r) => isImage(r)).map((r, i) => ({ url: r.url, name: `${String(i + 1).padStart(2, "0")}_${clean(r.title) || "image"}${guessExt(r.title)}` }));
+    if (imgs.length === 0) { toast.error("ไม่มีรูปในผลค้นหานี้"); return; }
+    setZipBusy(true); setZipMsg("");
+    try {
+      const n = await downloadImagesAsZip(imgs, `ค้นหา-${search.trim() || "รูป"}`,
+        (done, total) => setZipMsg(total ? `กำลังโหลดรูป ${Math.min(done + 1, total)}/${total}…` : "กำลังบีบไฟล์…"));
+      if (n > 0) toast.success(`ดาวน์โหลด ${n} รูปเป็น zip แล้ว`);
+      else toast.error("ดาวน์โหลดรูปไม่สำเร็จ");
+    } catch { toast.error("ดาวน์โหลดไม่สำเร็จ"); }
+    finally { setZipBusy(false); setZipMsg(""); }
+  };
 
   // ── เลือกไฟล์ ──
   const toggleSel = (id: string) =>
@@ -264,21 +284,29 @@ export function AssetLibrary() {
         {/* grid */}
         <main className="flex-1 min-w-0">
           {searching && (
-            <p className="text-[12px] text-slate-500 mb-2">🔍 ผลค้นหา “<b>{search.trim()}</b>” ทั้งคลัง · {total.toLocaleString("th-TH")} ไฟล์</p>
+            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <p className="text-[12px] text-slate-500">🔍 ผลค้นหา “<b>{search.trim()}</b>” ทั้งคลัง · {total.toLocaleString("th-TH")} ไฟล์</p>
+              {rows.some((r) => isImage(r)) && (
+                <button onClick={downloadSearchZip} disabled={zipBusy} title="โหลดรูปทั้งหมดในผลค้นหานี้เป็นไฟล์ zip"
+                  className="h-7 px-2.5 text-[11px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
+                  {zipBusy ? (zipMsg || "กำลังเตรียม…") : "⬇ ดาวน์โหลดรูปผลค้นหา (zip)"}
+                </button>
+              )}
+            </div>
           )}
           {searching && searchFolders.length > 0 && (
             <div className="mb-4">
-              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📂 โฟลเดอร์สินค้า (Parent SKU) ที่ตรงคำค้น</p>
-              <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+              <p className="text-[12px] font-medium text-slate-600 mb-1.5">📂 อัลบั้มสินค้า (Parent SKU) ที่ตรงคำค้น — กดเพื่อเปิดดูรูปทั้งหมดแบบ “ดูตามแบรนด์”</p>
+              <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
                 {searchFolders.map((f) => (
                   <button key={f.id} onClick={() => openFolder(f.id)}
-                    className="flex items-center gap-2 text-left rounded-xl border border-slate-200 bg-white p-2.5 hover:border-indigo-300 hover:shadow-sm transition">
+                    className="flex items-center gap-2 text-left rounded-xl border border-slate-200 bg-white p-2.5 hover:border-indigo-400 hover:bg-indigo-50/40 hover:shadow-sm transition">
                     <span className="text-xl shrink-0">📂</span>
-                    <span className="min-w-0">
+                    <span className="min-w-0 flex-1">
                       <span className="font-mono text-[12px] text-slate-700">{f.code}</span>
                       <span className="block text-[11px] text-slate-500 truncate">{f.name}</span>
                     </span>
-                    <span className="text-slate-300 ml-auto">›</span>
+                    <span className="text-[10px] text-indigo-600 font-medium shrink-0 whitespace-nowrap">เปิดอัลบั้ม ›</span>
                   </button>
                 ))}
               </div>

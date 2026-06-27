@@ -10,6 +10,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { withImageWidth } from "@/lib/r2-image";
+import { downloadImagesAsZip } from "@/lib/zip";
+import { useToast } from "@/components/toast";
 
 type Brand = { brand_id: string | null; brand_name: string; brand_color: string | null; parent_count: number; image_count: number };
 type ParentRow = { parent_id: string; code: string; name_th: string | null; parent_img: number; sku_count: number; sku_img: number; desc_img: number };
@@ -50,6 +52,7 @@ function Crumb({ label, onClick, last }: { label: string; onClick?: () => void; 
 }
 
 export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: number; openParentId?: string | null }) {
+  const toast = useToast();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loadingBrands, setLoadingBrands] = useState(true);
   const [brand, setBrand] = useState<Brand | null>(null);
@@ -61,6 +64,25 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
   const [skuImages, setSkuImages] = useState<Record<string, Img[]>>({});   // lazy cache รูปต่อ SKU
   const [skuLoading, setSkuLoading] = useState<Set<string>>(new Set());
   const [lightbox, setLightbox] = useState<Img | null>(null);   // ดูรูปใหญ่
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipMsg, setZipMsg] = useState("");
+
+  // ดาวน์โหลดรูปทั้งหมดของ Parent นี้ (รูป Parent + ทุก SKU + Description) เป็นไฟล์ zip
+  const downloadAllZip = useCallback(async () => {
+    const pid = detail?.parent?.id; const code = detail?.parent?.code || "images";
+    if (!pid || zipBusy) return;
+    setZipBusy(true); setZipMsg("กำลังรวบรวมรูป…");
+    try {
+      const j = await apiFetch(`/api/assets/brand-tree?mode=all-images&parent_id=${pid}`).then((r) => r.json());
+      const imgs = (j.images ?? []) as { url: string; name: string }[];
+      if (imgs.length === 0) { toast.error("ยังไม่มีรูปให้ดาวน์โหลด"); return; }
+      const n = await downloadImagesAsZip(imgs, `${code}-รูปทั้งหมด`,
+        (done, total) => setZipMsg(total ? `กำลังโหลดรูป ${Math.min(done + 1, total)}/${total}…` : "กำลังบีบไฟล์…"));
+      if (n > 0) toast.success(`ดาวน์โหลด ${n} รูปเป็น zip แล้ว`);
+      else toast.error("ดาวน์โหลดรูปไม่สำเร็จ");
+    } catch { toast.error("ดาวน์โหลดไม่สำเร็จ"); }
+    finally { setZipBusy(false); setZipMsg(""); }
+  }, [detail, zipBusy, toast]);
 
   const loadBrands = useCallback(async () => {
     setLoadingBrands(true);
@@ -141,6 +163,13 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
         {crumbs}
         {loadingDetail || !detail ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div> : (
           <div className="flex flex-col gap-5">
+            <div className="flex items-center justify-between gap-2 flex-wrap -mb-1">
+              <p className="text-[12px] text-slate-400">กดรูปเพื่อดูใหญ่ · กดโฟลเดอร์ SKU เพื่อกางดูรูป</p>
+              <button onClick={downloadAllZip} disabled={zipBusy} title="โหลดรูปทั้งหมดของสินค้านี้เป็นไฟล์ zip"
+                className="h-8 px-3 text-[12px] font-medium rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
+                {zipBusy ? (zipMsg || "กำลังเตรียม…") : "⬇ ดาวน์โหลดทั้งหมด (zip)"}
+              </button>
+            </div>
             <section>
               <p className="text-[13px] font-medium text-slate-700 mb-2">🖼️ รูปที่ลงใน Parent SKU <span className="text-slate-400 font-normal">({fmt(detail.parentImages.length)}) · รูปหลักก่อน</span></p>
               <Grid items={detail.parentImages} onOpen={setLightbox} />
