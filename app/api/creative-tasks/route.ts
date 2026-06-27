@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
-import { nextTaskNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees } from "@/lib/creative-tasks-server";
+import { nextTaskNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -42,19 +42,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
 
-  // mine=1 → เฉพาะงานที่ฉันรับผิดชอบ (assignee = user จริงที่ login อยู่)
-  let myUserId: string | null = null;
+  // mine=1 → เฉพาะงานที่ฉันรับผิดชอบ = ตั้งเอง (m2m) ∪ คนที่กดเริ่มงานย่อย
+  let myTaskIds: string[] | null = null;
   if (mine) {
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-    myUserId = user?.id ?? null;
-    if (!myUserId) return NextResponse.json({ data: [], total: 0, error: null });
+    if (!user?.id) return NextResponse.json({ data: [], total: 0, error: null });
+    myTaskIds = await taskIdsForUser(admin, user.id);
+    if (myTaskIds.length === 0) return NextResponse.json({ data: [], total: 0, error: null });
   }
 
   let q = admin.from("erp_creative_tasks").select(SELECT, { count: "exact" })
     .order(orderCol, { ascending: orderAsc })
     .range(offset, offset + limit - 1);
   if (!includeInactive) q = q.eq("is_active", true);
-  if (myUserId) q = q.eq("assignee_id", myUserId);
+  if (myTaskIds) q = q.in("id", myTaskIds);
   if (search)   { const t = `%${search}%`; q = q.or(`title.ilike.${t},task_no.ilike.${t},product_name.ilike.${t}`); }
   if (status)   q = q.eq("status", status);
   if (priority) q = q.eq("priority", priority);
@@ -67,8 +68,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ data: [], total: 0, error: friendlyDbError(error.message) }, { status: 500 });
 
   const rows = (data ?? []) as Array<Record<string, unknown>>;
-  const empMap = await employeeLabelMap(admin, rows.flatMap((r) => [r.assignee_id as string, r.reviewer_id as string, r.approver_id as string]));
-  const items = rows.map((r) => flattenTask(r, empMap));
+  const [empMap, aMap] = await Promise.all([
+    employeeLabelMap(admin, rows.flatMap((r) => [r.assignee_id as string, r.reviewer_id as string, r.approver_id as string])),
+    taskAssigneesMap(admin, rows.map((r) => String(r.id))),
+  ]);
+  const items = rows.map((r) => {
+    const it = flattenTask(r, empMap);
+    const arr = aMap.get(String(r.id)) ?? [];
+    it.assignees = arr;   // ผู้รับผิดชอบหลายคน (ตั้งเอง ∪ คนเริ่มงานย่อย)
+    if (arr.length) it.assignee_label = arr.map((a) => a.label).filter(Boolean).join(", ");  // back-compat + ค้นหาได้
+    return it;
+  });
   return NextResponse.json({ data: items, total: count ?? items.length, error: null });
 }
 
@@ -77,7 +87,7 @@ type CreateBody = {
   brand_id?: string | null; campaign_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
   sku_ids?: string[]; parent_sku_ids?: string[];
   priority?: string; status?: string; progress_percent?: number | null;
-  assignee_id?: string | null; reviewer_id?: string | null; approver_id?: string | null;
+  assignee_id?: string | null; assignee_ids?: string[]; reviewer_id?: string | null; approver_id?: string | null;
   start_date?: string | null; due_date?: string | null;
   asset_status?: string | null; platforms?: string[] | null;
   drive_folder_url?: string | null; cover_image_r2_key?: string | null;
@@ -103,7 +113,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     brand_id: body.brand_id || null, campaign_id: body.campaign_id || null, sku_id: body.sku_id || null,
     parent_sku_id: body.parent_sku_id || null,
     product_name: body.product_name?.trim() || null, priority: body.priority || "normal", status,
-    progress_percent: progress, assignee_id: body.assignee_id || null, reviewer_id: body.reviewer_id || null,
+    progress_percent: progress, assignee_id: body.assignee_ids?.[0] || body.assignee_id || null, reviewer_id: body.reviewer_id || null,
     approver_id: body.approver_id || null, start_date: body.start_date || null, due_date: body.due_date || null,
     asset_status: body.asset_status || "missing", platforms: body.platforms ?? [],
     drive_folder_url: body.drive_folder_url?.trim() || null, cover_image_r2_key: body.cover_image_r2_key || null,
@@ -118,6 +128,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ({ data: row, error } = await admin.from("erp_creative_tasks").insert(insertRow(taskNo)).select("id, task_no").single());
   }
   if (error || !row) return NextResponse.json({ error: friendlyDbError(error?.message ?? "insert failed") }, { status: 400 });
+
+  // ผู้รับผิดชอบงานหลัก (m2m) — ตั้งหลายคน หรือ mirror จาก assignee_id เดี่ยว (ให้ตารางเชื่อมตรงกับ assignee_id)
+  const taskAssignees = [...new Set((Array.isArray(body.assignee_ids) ? body.assignee_ids : (body.assignee_id ? [body.assignee_id] : [])).filter(Boolean))] as string[];
+  if (taskAssignees.length) await setTaskAssignees(admin, row.id, taskAssignees);
 
   // งานย่อยเริ่มต้น (ถ้าส่งมาจาก template) — รองรับ description + ผู้รับผิดชอบหลายคน
   if (Array.isArray(body.subtasks) && body.subtasks.length > 0) {

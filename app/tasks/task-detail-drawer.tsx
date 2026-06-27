@@ -15,17 +15,19 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
+import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, platformLabel, useCreativeOptions } from "./use-options";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue,
   getTask, updateTask, addComment, addAttachment, deleteAttachment,
-  type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption,
+  type TaskDetail, type CreativeTask, type CreativePriority, type Campaign, type BrandOption, type SubtaskAssignee,
 } from "./data";
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
-type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[]; assignee: UserPickerValue | null; reviewer: UserPickerValue | null };
+// ผู้รับผิดชอบ (หลายคน) จัดการแยกที่ MultiAssigneeField ในโหมดดู — ฟอร์มแก้ไขเต็มไม่มี assignee แล้ว (กันรีเซ็ตหลายคน)
+type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[]; reviewer: UserPickerValue | null };
 
 export function StatusBadge({ status }: { status: string }) {
   const m = statusMeta(status);
@@ -64,6 +66,42 @@ function QuickField({ label, value, dot, highlight, active, onOpen, onClose, edi
   );
 }
 
+// ผู้รับผิดชอบงานหลัก "หลายคน" (m2m) = ตั้งเอง ∪ คนเริ่มงานย่อย · คลิกเพื่อแก้ (เฉพาะ ผจก./คนสร้างงาน)
+function MultiAssigneeField({ list, canEdit, onSave }: { list: SubtaskAssignee[]; canEdit: boolean; onSave: (ids: string[]) => void }) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState<UserPickerValue | null>(null);
+  const ids = list.map((a) => a.id);
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-slate-400 mb-0.5">{t("ผู้รับผิดชอบ", "Assignees")}</p>
+      {!editing ? (
+        <button type="button" onClick={() => canEdit && setEditing(true)} title={canEdit ? t("คลิกเพื่อแก้", "Click to edit") : undefined}
+          className={`min-w-0 text-left group rounded-md -mx-1 px-1 py-0.5 ${canEdit ? "hover:bg-violet-50/60" : "cursor-default"} transition-colors w-full`}>
+          {list.length ? (
+            <span className="flex flex-wrap items-center gap-1">{list.map((a) => <AssigneeChip key={a.id} a={a} />)}
+              {canEdit && <span className="text-[10px] text-violet-400 opacity-0 group-hover:opacity-100">✎</span>}</span>
+          ) : <span className="text-sm text-slate-300">— {canEdit && <span className="text-[10px] text-violet-400">✎</span>}</span>}
+        </button>
+      ) : (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1">
+            {list.map((a) => (
+              <span key={a.id} className="inline-flex items-center gap-1 text-xs rounded-full pl-0.5 pr-1.5 py-0.5" style={{ background: (a.color || "#8b5cf6") + "1f" }}>
+                <AssigneeAvatar a={a} size={18} /><span className="text-slate-700">{a.label}</span>
+                <button onClick={() => onSave(ids.filter((x) => x !== a.id))} className="text-slate-400 hover:text-red-500">✕</button>
+              </span>
+            ))}
+            {list.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
+          </div>
+          <UserPicker value={adding} onChange={(v) => { if (v && !ids.includes(v.id)) onSave([...ids, v.id]); setAdding(null); }} disableCreate />
+          <button onClick={() => setEditing(false)} className="text-[11px] text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose, onChanged, onMove, onDelete, pushToast }: {
   taskId: string; brands?: BrandOption[]; campaigns?: Campaign[];
   onClose: () => void; onChanged: () => Promise<void> | void;
@@ -95,14 +133,13 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const startEdit = () => {
     const d = detail; if (!d) return;
     setEf({ task_type: d.task_type ?? "", priority: d.priority, brand_id: d.brand_id ?? "", due_date: d.due_date ?? "", platforms: d.platforms ?? [],
-      assignee: d.assignee_id ? ({ id: d.assignee_id, name: d.assignee_label ?? "" } as UserPickerValue) : null,
       reviewer: d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null });
     setEditing(true);
   };
   const saveEdit = async () => {
     if (!ef || !detail) return; setBusy(true);
     try {
-      await updateTask(detail.id, { task_type: ef.task_type || null, priority: ef.priority, brand_id: ef.brand_id || null, due_date: ef.due_date || null, platforms: ef.platforms, assignee_id: ef.assignee?.id ?? null, reviewer_id: ef.reviewer?.id ?? null });
+      await updateTask(detail.id, { task_type: ef.task_type || null, priority: ef.priority, brand_id: ef.brand_id || null, due_date: ef.due_date || null, platforms: ef.platforms, reviewer_id: ef.reviewer?.id ?? null });
       setEditing(false); await refresh(); pushToast("success", t("บันทึกแล้ว", "Saved"));
     } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
@@ -204,8 +241,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
                 <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
                 <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
-                <div><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบ", "Assignee")}</label><UserPicker value={ef.assignee} onChange={(v) => setEf({ ...ef, assignee: v })} disableCreate /></div>
                 <div><label className="text-xs text-slate-400">{t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")}</label><UserPicker value={ef.reviewer} onChange={(v) => setEf({ ...ef, reviewer: v })} disableCreate /></div>
+                <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ (หลายคน) แก้ที่ช่อง \"ผู้รับผิดชอบ\" ในโหมดดู — รวมคนที่กดเริ่มงานย่อยอัตโนมัติ", "Edit assignees (multiple) in the \"Assignees\" field in view mode — auto-includes whoever started subtasks")}</div>
               </div>
               <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
                 <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = ef.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
@@ -223,9 +260,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               <QuickField label={t("แบรนด์", "Brand")} value={d.brand_label} dot={brandColor}
                 active={qf === "brand"} onOpen={() => setQf("brand")} onClose={() => setQf(null)}
                 editor={<ERPSelect value={d.brand_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => saveQuick({ brand_id: e.target.value || null })} />} />
-              <QuickField label={t("ผู้รับผิดชอบ", "Assignee")} value={d.assignee_label}
-                active={qf === "assignee"} onOpen={() => setQf("assignee")} onClose={() => setQf(null)}
-                editor={<UserPicker value={d.assignee_id ? ({ id: d.assignee_id, name: d.assignee_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assignee_id: v?.id ?? null })} disableCreate />} />
+              <MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
+                onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} />
               <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label}
                 active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
                 editor={<UserPicker value={d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ reviewer_id: v?.id ?? null })} disableCreate />} />

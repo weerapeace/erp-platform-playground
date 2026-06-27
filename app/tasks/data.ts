@@ -35,6 +35,7 @@ export type CreativeTask = {
   status: CreativeStatus;
   progress_percent: number;
   assignee_id: string | null; assignee_label: string | null;
+  assignees?: SubtaskAssignee[];   // ผู้รับผิดชอบหลายคน (ตั้งเอง ∪ คนเริ่มงานย่อย) — m2m
   reviewer_id: string | null; reviewer_label: string | null;
   approver_id: string | null; approver_label: string | null;
   start_date: string | null; due_date: string | null; completed_at: string | null;

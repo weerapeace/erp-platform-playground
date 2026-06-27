@@ -86,6 +86,72 @@ export async function subtaskAssigneesMap(admin: Admin, subtaskIds: string[]): P
   return map;
 }
 
+// ============================================================
+// ผู้รับผิดชอบ "งานหลัก" (m2m) — ของกลางในโมดูล
+// junction = erp_creative_task_assignees(task_id, user_id) เก็บเฉพาะ "ตั้งเอง (explicit)"
+// "ผู้รับผิดชอบที่แสดง" = ตั้งเอง ∪ คนที่กดเริ่มงานย่อย (คำนวณตอนอ่าน — ไม่ denormalize)
+// ============================================================
+export type AssigneeInfo = { id: string; label: string; color: string | null; avatar_url: string | null };
+
+// ข้อมูลผู้ใช้หลายคน (ชื่อ/สี/รูป) → Map<id, info> · ใช้ภายใน
+async function usersInfo(admin: Admin, ids: (string | null | undefined)[]): Promise<Map<string, AssigneeInfo>> {
+  const uniq = [...new Set(ids.filter(Boolean).map(String))];
+  const map = new Map<string, AssigneeInfo>();
+  if (!uniq.length) return map;
+  const labels = await userLabelMap(admin, uniq);
+  const { data } = await admin.from("user_profiles").select("id, color, avatar_url").in("id", uniq);
+  const cm = new Map<string, { color: string | null; avatar_url: string | null }>();
+  for (const c of (data ?? []) as { id: string; color: string | null; avatar_url: string | null }[]) cm.set(String(c.id), { color: c.color, avatar_url: c.avatar_url });
+  for (const id of uniq) map.set(id, { id, label: labels.get(id) ?? "", color: cm.get(id)?.color ?? null, avatar_url: cm.get(id)?.avatar_url ?? null });
+  return map;
+}
+
+/** ตั้งผู้รับผิดชอบงานหลัก (explicit) แบบแทนที่ทั้งชุด */
+export async function setTaskAssignees(admin: Admin, taskId: string, userIds: (string | null | undefined)[]): Promise<void> {
+  await admin.from("erp_creative_task_assignees").delete().eq("task_id", taskId);
+  const clean = [...new Set(userIds.filter(Boolean).map(String))];
+  if (clean.length) await admin.from("erp_creative_task_assignees").insert(clean.map((user_id) => ({ task_id: taskId, user_id })));
+}
+
+/** ผู้รับผิดชอบงานหลัก = ตั้งเอง (explicit) ∪ คนที่กดเริ่มงานย่อย → Map<task_id, AssigneeInfo[]> */
+export async function taskAssigneesMap(admin: Admin, taskIds: string[]): Promise<Map<string, AssigneeInfo[]>> {
+  const map = new Map<string, AssigneeInfo[]>();
+  if (!taskIds.length) return map;
+  const ids = [...new Set(taskIds.map(String))];
+  const byTask = new Map<string, Set<string>>();
+  const add = (tid: string, uid: string) => { if (!tid || !uid) return; const s = byTask.get(tid) ?? new Set<string>(); s.add(uid); byTask.set(tid, s); };
+  // ตั้งเอง (explicit)
+  const { data: ex } = await admin.from("erp_creative_task_assignees").select("task_id, user_id").in("task_id", ids);
+  for (const r of (ex ?? []) as { task_id: string; user_id: string }[]) add(String(r.task_id), String(r.user_id));
+  // คนเริ่มงานย่อย (subtask assignees ของงานนั้น)
+  const { data: subs } = await admin.from("erp_creative_subtasks").select("id, task_id").in("task_id", ids);
+  const subToTask = new Map<string, string>();
+  for (const s of (subs ?? []) as { id: string; task_id: string }[]) subToTask.set(String(s.id), String(s.task_id));
+  const subIds = [...subToTask.keys()];
+  if (subIds.length) {
+    const { data: sa } = await admin.from("erp_creative_subtask_assignees").select("subtask_id, user_id").in("subtask_id", subIds);
+    for (const r of (sa ?? []) as { subtask_id: string; user_id: string }[]) { const tid = subToTask.get(String(r.subtask_id)); if (tid) add(tid, String(r.user_id)); }
+  }
+  const allIds = [...new Set([...byTask.values()].flatMap((s) => [...s]))];
+  const info = await usersInfo(admin, allIds);
+  for (const [tid, set] of byTask) map.set(tid, [...set].map((uid) => info.get(uid) ?? { id: uid, label: "", color: null, avatar_url: null }));
+  return map;
+}
+
+/** task ids ที่ user เป็นผู้รับผิดชอบ (ตั้งเอง) หรือเป็นคนเริ่มงานย่อย — ใช้กรอง "งานของฉัน" */
+export async function taskIdsForUser(admin: Admin, userId: string): Promise<string[]> {
+  const set = new Set<string>();
+  const { data: ex } = await admin.from("erp_creative_task_assignees").select("task_id").eq("user_id", userId);
+  for (const r of (ex ?? []) as { task_id: string }[]) set.add(String(r.task_id));
+  const { data: sa } = await admin.from("erp_creative_subtask_assignees").select("subtask_id").eq("user_id", userId);
+  const subIds = [...new Set(((sa ?? []) as { subtask_id: string }[]).map((r) => String(r.subtask_id)))];
+  if (subIds.length) {
+    const { data: subs } = await admin.from("erp_creative_subtasks").select("task_id").in("id", subIds);
+    for (const r of (subs ?? []) as { task_id: string }[]) set.add(String(r.task_id));
+  }
+  return [...set];
+}
+
 type UserRow = { id: string; display_name: string | null; username: string | null; email: string | null };
 
 /** ชื่อแสดงผู้ใช้: display_name > username > email */

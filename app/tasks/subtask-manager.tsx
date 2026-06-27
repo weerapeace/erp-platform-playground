@@ -14,10 +14,10 @@ import { UserPicker, ParentSkuPicker, type ParentSkuPickerValue } from "@/compon
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import { cachedJson } from "@/lib/client-cache";
-import { avatarSrc } from "@/lib/r2-image";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import type { UserPickerValue } from "@/components/pickers";
+import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import {
   listSubtasks, addSubtask, updateSubtask, deleteSubtask, addAttachment, deleteAttachment, listSubtaskTypes,
   type CreativeSubtask, type SubtaskType, type SubtaskAssignee,
@@ -26,16 +26,8 @@ import {
 // ตัวแก้สินค้ากลาง (ของกลาง) — เปิดแก้ Parent SKU จากป๊อปอัปส่งงาน · dynamic กัน import วน + ลด bundle
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
-// อวตารผู้รับผิดชอบ (ของกลางในโมดูล) — รูปจริงที่พนักงานตั้งไว้ ไม่มี → วงกลมตัวอักษร+สีธีม
-function AssigneeAvatar({ a, size = 20 }: { a: SubtaskAssignee; size?: number }) {
-  const src = avatarSrc(a.avatar_url, size * 2);
-  if (src) return <img src={src} alt={a.label} title={a.label} className="rounded-full object-cover border border-white shrink-0" style={{ width: size, height: size }} />;
-  return <span title={a.label} className="rounded-full flex items-center justify-center border border-white font-medium shrink-0" style={{ width: size, height: size, fontSize: size * 0.5, background: a.color || "#ede9fe", color: a.color ? "#fff" : "#6d28d9" }}>{(a.label || "?").slice(0, 1)}</span>;
-}
-// ชิปผู้รับผิดชอบแบบอ่านอย่างเดียว (รูป + ชื่อ + ธีมสีจาง)
-function AssigneeChip({ a }: { a: SubtaskAssignee }) {
-  return <span className="inline-flex items-center gap-1 text-xs rounded-full pl-0.5 pr-2 py-0.5" style={{ background: (a.color || "#8b5cf6") + "1f" }}><AssigneeAvatar a={a} size={18} /><span className="text-slate-700">{a.label}</span></span>;
-}
+// อวตาร/ชิปผู้รับผิดชอบ — ของกลาง (แยกไฟล์เบา) · re-export กันโค้ดเดิมที่เคยอ้างจากไฟล์นี้
+export { AssigneeAvatar, AssigneeChip };
 
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 type TypeMeta = Record<string, SubtaskType>;

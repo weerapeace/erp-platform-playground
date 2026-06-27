@@ -19,6 +19,7 @@ import { CanvasBoard } from "./canvas-board";
 import { CreateTaskModal } from "./create-task-modal";
 import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
+import { AssigneeStack } from "./assignee-avatar";
 import { apiFetch } from "@/lib/api";
 import { applyTaskTransition } from "./task-actions";
 import { OverviewDashboard } from "./overview-dashboard";
@@ -58,7 +59,7 @@ function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
     },
   },
   { accessorKey: "brand_label", header: t("แบรนด์", "Brand"), size: 120, meta: { filterable: true }, cell: ({ row }) => row.original.brand_label ? <span className="inline-flex items-center gap-1.5 text-sm text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.original.brand_color || "#cbd5e1" }} />{row.original.brand_label}</span> : <span className="text-slate-300">—</span> },
-  { accessorKey: "assignee_label", header: t("ผู้รับผิดชอบ", "Assignee"), size: 130, meta: { filterable: true }, cell: ({ getValue }) => (getValue() as string) || <span className="text-slate-300">—</span> },
+  { accessorKey: "assignee_label", header: t("ผู้รับผิดชอบ", "Assignee"), size: 150, meta: { filterable: true }, cell: ({ row }) => { const a = row.original.assignees; return a && a.length ? <AssigneeStack list={a} /> : ((row.original.assignee_label as string) || <span className="text-slate-300">—</span>); } },
   { accessorKey: "priority", header: t("ความสำคัญ", "Priority"), size: 100, cell: ({ getValue }) => <PriorityBadge priority={getValue() as CreativePriority} /> },
   { accessorKey: "status", header: t("สถานะ", "Status"), size: 120, cell: ({ getValue }) => <StatusBadge status={getValue() as CreativeStatus} /> },
   { accessorKey: "progress_percent", header: t("คืบหน้า", "Progress"), size: 90, cell: ({ getValue }) => { const v = (getValue() as number) ?? 0; return <div className="flex items-center gap-1.5"><div className="h-1.5 w-12 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-400" style={{ width: `${v}%` }} /></div><span className="text-[11px] text-slate-400">{v}%</span></div>; } },
