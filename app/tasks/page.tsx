@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StandaloneShell } from "@/components/standalone-shell";
+import { HoverImage } from "@/components/hover-image";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { useSWRLite } from "@/lib/swr-lite";
@@ -40,15 +41,21 @@ function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
   { accessorKey: "task_no", header: t("เลขที่งาน", "Task no."), size: 140, cell: ({ getValue }) => <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">{(getValue() as string) || "—"}</span> },
   {
     accessorKey: "title", header: t("ชื่องาน", "Title"),
-    cell: ({ row }) => (
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-slate-800 line-clamp-1">{row.original.title}</div>
-        <div className="text-xs text-slate-400 line-clamp-1">
-          {row.original.task_type && <span>{taskTypeLabel(row.original.task_type)}</span>}
-          {row.original.sku_code && <span> · 📦 {row.original.sku_code}</span>}
+    cell: ({ row }) => {
+      const cover = row.original.cover_image_r2_key ? `/api/r2-image?key=${encodeURIComponent(row.original.cover_image_r2_key)}` : null;
+      return (
+        <div className="flex items-center gap-2 min-w-0">
+          <HoverImage url={cover} size={34} previewSize={320} rounded="rounded-md" fallback="🎨" />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-slate-800 line-clamp-1">{row.original.title}</div>
+            <div className="text-xs text-slate-400 line-clamp-1">
+              {row.original.task_type && <span>{taskTypeLabel(row.original.task_type)}</span>}
+              {row.original.sku_code && <span> · 📦 {row.original.sku_code}</span>}
+            </div>
+          </div>
         </div>
-      </div>
-    ),
+      );
+    },
   },
   { accessorKey: "brand_label", header: t("แบรนด์", "Brand"), size: 120, meta: { filterable: true }, cell: ({ row }) => row.original.brand_label ? <span className="inline-flex items-center gap-1.5 text-sm text-slate-700"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.original.brand_color || "#cbd5e1" }} />{row.original.brand_label}</span> : <span className="text-slate-300">—</span> },
   { accessorKey: "assignee_label", header: t("ผู้รับผิดชอบ", "Assignee"), size: 130, meta: { filterable: true }, cell: ({ getValue }) => (getValue() as string) || <span className="text-slate-300">—</span> },

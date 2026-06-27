@@ -10,7 +10,7 @@ import dynamic from "next/dynamic";
 import { ERPInput, ERPTextarea } from "@/components/form";
 import { ERPModal } from "@/components/modal";
 import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
-import { UserPicker, SkuPicker, ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
+import { UserPicker, ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import { apiFetch } from "@/lib/api";
 import { avatarSrc } from "@/lib/r2-image";
@@ -345,7 +345,6 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [skusByParent, setSkusByParent] = useState<Record<string, { id: string; code: string; name: string }[]>>({});
   const [editParentId, setEditParentId] = useState<string | null>(null);                       // เปิดตัวแก้ Parent SKU กลาง
   const [skuEditor, setSkuEditor] = useState<{ recordId: string | null; parentId: string } | null>(null); // เปิดตัวแก้ SKU กลาง (recordId null = สร้างใหม่)
-  const [pickForParent, setPickForParent] = useState<string | null>(null);                      // โชว์ SkuPicker เลือก SKU ที่มีอยู่
   // ── ปลายทางรูป (โหมดแนบรูป): ติ๊กเลือก Parent/SKU ที่จะดันรูปเข้าตอนอนุมัติ ──
   const [syncParentIds, setSyncParentIds] = useState<Set<string>>(new Set());
   const [syncSkuIds, setSyncSkuIds] = useState<Set<string>>(new Set());
@@ -446,6 +445,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   };
 
   return (
+    <>
     <ERPModal open onClose={onClose} size="md"
       title={platformConfirm ? t("ส่งงาน — ตรวจรายละเอียด Platform", "Submit — review platform details") : canSubmit ? t("ส่งงาน — แนบรูป/ลิงก์", "Submit work — attach files/links") : t("แนบไฟล์งาน", "Attach work files")}
       footer={
@@ -475,29 +475,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                   <button onClick={() => setEditParentId(p.id)} disabled={!p.id} className={`w-full mt-1 h-8 rounded-md text-xs font-medium border disabled:opacity-50 ${p.has_description ? "text-violet-700 border-violet-200 hover:bg-violet-50" : "text-white bg-violet-600 border-violet-600 hover:bg-violet-700"}`}>
                     ✏️ {p.has_description ? t("แก้รายละเอียดสินค้า", "Edit product details") : t("กรอกรายละเอียดสินค้า (รายละเอียด Platform)", "Fill product details (Platform)")}
                   </button>
-                  {/* SKU ลูก — เลือกที่มี/สร้างใหม่ + แก้รายละเอียด */}
-                  <div className="border-t border-slate-100 pt-2 mt-1 space-y-1.5">
-                    <p className="text-[11px] text-slate-400">{t("สินค้าย่อย (SKU)", "Child SKUs")} ({(skusByParent[p.id] ?? []).length})</p>
-                    {(skusByParent[p.id] ?? []).map((s) => (
-                      <div key={s.id} className="flex items-center gap-2 text-xs">
-                        <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{s.code}</span>
-                        <span className="text-slate-700 truncate flex-1">{s.name}</span>
-                        <button onClick={() => setSkuEditor({ recordId: s.id, parentId: p.id })} className="text-violet-600 hover:underline shrink-0">✏️ {t("แก้", "Edit")}</button>
-                      </div>
-                    ))}
-                    {(skusByParent[p.id] ?? []).length === 0 && <p className="text-xs text-slate-400 italic">{t("ยังไม่มี SKU", "No SKUs yet")}</p>}
-                    {pickForParent === p.id ? (
-                      <div className="flex items-start gap-1.5">
-                        <div className="flex-1"><SkuPicker value={null} onChange={(v) => { if (v) { setSkuEditor({ recordId: v.id, parentId: p.id }); setPickForParent(null); } }} /></div>
-                        <button onClick={() => setPickForParent(null)} className="text-xs text-slate-400 mt-2 shrink-0">{t("ยกเลิก", "Cancel")}</button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        <button onClick={() => setSkuEditor({ recordId: null, parentId: p.id })} className="text-xs text-violet-700 border border-violet-200 rounded-md px-2 py-1 hover:bg-violet-50">➕ {t("สร้าง SKU ใหม่", "New SKU")}</button>
-                        <button onClick={() => setPickForParent(p.id)} className="text-xs text-slate-600 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">🔗 {t("เลือก SKU ที่มีอยู่", "Pick existing SKU")}</button>
-                      </div>
-                    )}
-                  </div>
+                  {/* สร้าง/แก้ SKU ทำในตัวแก้สินค้า (ปุ่มด้านบน) — ที่นี่แค่ตรวจคำอธิบาย */}
+                  <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-2 mt-1">💡 {t('ถ้าต้องการสร้าง/แก้ SKU ของสินค้านี้ ให้กดปุ่ม "กรอกรายละเอียดสินค้า" ด้านบนได้เลย', 'To create/edit SKUs for this product, use the "Fill product details" button above')}</p>
                 </div>
               ))}
             {parents !== null && parents.length > 0 && !platformReady && <p className="text-xs text-rose-600">{t("ต้องมีรายละเอียด (Description) ครบทุกสินค้าก่อนถึงจะส่งงานได้", "All products need a Description before you can submit")}</p>}
@@ -584,6 +563,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
           </>
         )}
       </div>
+    </ERPModal>
+      {/* overlay ต่อไปนี้อยู่ "นอก" ERPModal — กันเลย์เอาต์เด้งตอนเปิด drawer ซ้อนบนป๊อปอัป */}
       {/* ตัวแก้สินค้ากลาง — กรอก/แก้รายละเอียด Platform ของ Parent SKU แล้วเซฟกลับ · ปิดแล้วเช็ครายละเอียดใหม่ */}
       {editParentId && (
         <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={editParentId} startInEdit
@@ -603,7 +584,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
           excludeIds={(skusByParent[multiPickParent] ?? []).map((s) => s.id)}
           onConfirm={(skus) => { addSkusToParent(multiPickParent, skus.map((s) => ({ id: String(s.id), code: String(s.code ?? ""), name: String(s.name ?? s.code ?? "") }))); setMultiPickParent(null); }} />
       )}
-    </ERPModal>
+    </>
   );
 }
 

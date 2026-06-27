@@ -11,7 +11,7 @@ import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { isTerminal } from "./use-statuses";
-import { taskTypeLabel } from "./use-options";
+import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { isOverdue, type CreativeTask, type Campaign, type MySubtask, type BrandOption } from "./data";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
 import { OverviewCustomizer, CARD_COLORS, heroStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
@@ -57,12 +57,15 @@ export function OverviewDashboard({
   }, [myTasks, mySubs]);
   const mineCount = myTaskIds.size;
 
+  // โหลดตัวเลือกประเภทงานจาก DB → ใช้ label สด (ผูกเป็น dependency ให้ชิปอัปเดตเมื่อโหลดเสร็จ)
+  const { taskTypes } = useCreativeOptions();
+  const typeLabelMap = useMemo(() => Object.fromEntries(taskTypes.map((o) => [o.value, o.label])), [taskTypes]);
   // ประเภทงานที่ "มีจริง" ในข้อมูล (no hardcode) → ทำ Tabs · เรียงตามชื่อ
   const typeOptions = useMemo(() => {
     const present = new Set<string>();
     for (const tk of tasks) if (tk.task_type) present.add(tk.task_type);
-    return [...present].map((v) => ({ value: v, label: taskTypeLabel(v) || v })).sort((a, b) => a.label.localeCompare(b.label, "th"));
-  }, [tasks]);
+    return [...present].map((v) => ({ value: v, label: typeLabelMap[v] || taskTypeLabel(v) || v })).sort((a, b) => a.label.localeCompare(b.label, "th"));
+  }, [tasks, typeLabelMap]);
 
   // ตาราง: การ์ด (สถานะ/ของฉัน) × ประเภท × แบรนด์ — ซ้อนกันได้
   const filteredTasks = useMemo(() => {
