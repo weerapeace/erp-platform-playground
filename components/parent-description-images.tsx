@@ -33,7 +33,7 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
   const [images, setImages] = useState<AssetRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);   // อัปโหลดอยู่ → โชว์ animation
-  const [lightbox, setLightbox] = useState<AssetRow | null>(null);   // กดรูป → ดูใหญ่
+  const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);   // กดรูป → ดูใหญ่ (เลื่อนซ้าย/ขวาได้)
   const [delTarget, setDelTarget] = useState<AssetRow | null>(null); // ยืนยันก่อนลบจากคลัง
   const inputRef = useRef<HTMLInputElement>(null);
   const dragIdx = useRef<number | null>(null);
@@ -116,9 +116,23 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
     setImages(next); void saveOrder(next.map((a) => a.id));
   };
 
+  // จอซูม: เลื่อนรูปด้วยปุ่มคีย์บอร์ด (← → / Esc)
+  useEffect(() => {
+    if (lightboxIdx == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      const n = images.length; if (n === 0) return;
+      if (e.key === "Escape") setLightboxIdx(null);
+      else if (e.key === "ArrowLeft") setLightboxIdx((i) => (i == null ? i : (i - 1 + n) % n));
+      else if (e.key === "ArrowRight") setLightboxIdx((i) => (i == null ? i : (i + 1) % n));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxIdx, images.length]);
+
   if (!parentId) return <div className="text-xs text-slate-400 text-center py-3">บันทึก Parent SKU ก่อน แล้วค่อยเพิ่มรูป Description</div>;
 
   const upRemaining = progress ? Math.max(0, progress.total - progress.done) : 0;
+  const lightbox = lightboxIdx != null && lightboxIdx < images.length ? images[lightboxIdx] : null;
 
   return (
     <div
@@ -150,7 +164,7 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
                 onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
                 className={`relative group rounded-lg border overflow-hidden bg-white ${overIdx === idx ? "ring-2 ring-indigo-400" : "border-slate-200"} ${!readonly ? "cursor-grab active:cursor-grabbing" : ""}`}>
                 <div className="h-20 bg-slate-100 flex items-center justify-center overflow-hidden cursor-zoom-in"
-                  onClick={() => a.asset_type === "image" && setLightbox(a)} title="กดเพื่อดูรูปใหญ่">
+                  onClick={() => a.asset_type === "image" && setLightboxIdx(idx)} title="กดเพื่อดูรูปใหญ่">
                   {a.asset_type === "image"
                     ? <img src={withImageWidth(a.url, 200) ?? a.url} alt={a.title} loading="lazy" draggable={false} className="w-full h-full object-cover" />
                     : <span className="text-xl">🖼️</span>}
@@ -176,16 +190,25 @@ export function ParentDescriptionImages({ parentId, readonly, actor }: { parentI
         )}
       {!readonly && images.length > 0 && <p className="text-[10px] text-slate-300 mt-1">ลากรูปย่อยจัดลำดับ · ลากไฟล์มาวาง / Ctrl+V เพื่อเพิ่ม · กดรูปเพื่อดูใหญ่</p>}
 
-      {/* ดูรูปใหญ่ + ขนาด */}
+      {/* ดูรูปใหญ่ + ขนาด + เลื่อนซ้าย/ขวา */}
       {lightbox && (
-        <div className="fixed inset-0 z-[300] bg-black/85 flex items-center justify-center p-6" onClick={() => setLightbox(null)}>
-          <img src={lightbox.url} alt={lightbox.title} className="max-w-full max-h-full object-contain rounded-lg" />
+        <div className="fixed inset-0 z-[300] bg-black/85 flex items-center justify-center p-6" onClick={() => setLightboxIdx(null)}>
+          <img src={lightbox.url} alt={lightbox.title} className="max-w-full max-h-full object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
           <div className="absolute top-4 left-4 px-3 py-1.5 rounded-lg bg-white/90 text-slate-700 text-xs">
             {lightbox.width && lightbox.height ? `${lightbox.width} × ${lightbox.height} px · ` : ""}{formatBytes(lightbox.size_bytes)}
           </div>
+          {images.length > 1 && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); const n = images.length; setLightboxIdx((i) => (i == null ? i : (i - 1 + n) % n)); }}
+                title="รูปก่อนหน้า (←)" className="absolute left-3 top-1/2 -translate-y-1/2 h-12 w-12 rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl flex items-center justify-center">‹</button>
+              <button onClick={(e) => { e.stopPropagation(); const n = images.length; setLightboxIdx((i) => (i == null ? i : (i + 1) % n)); }}
+                title="รูปถัดไป (→)" className="absolute right-3 top-1/2 -translate-y-1/2 h-12 w-12 rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl flex items-center justify-center">›</button>
+              <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-xs bg-white/15 px-2.5 py-1 rounded-full">{(lightboxIdx ?? 0) + 1} / {images.length}</span>
+            </>
+          )}
           <a href={lightbox.url} download={lightbox.title || "image"} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
             className="absolute top-4 right-16 h-9 px-3 rounded-lg bg-white/90 text-slate-700 text-sm font-medium flex items-center hover:bg-white">⬇ ดาวน์โหลด</a>
-          <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/90 text-slate-700 text-lg flex items-center justify-center hover:bg-white">✕</button>
+          <button onClick={() => setLightboxIdx(null)} className="absolute top-4 right-4 w-9 h-9 rounded-full bg-white/90 text-slate-700 text-lg flex items-center justify-center hover:bg-white">✕</button>
         </div>
       )}
 
