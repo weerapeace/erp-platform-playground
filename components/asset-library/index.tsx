@@ -250,7 +250,7 @@ export function AssetLibrary() {
             <p className="text-[12px] text-slate-500 mb-2">🔍 ผลค้นหา “<b>{search.trim()}</b>” ทั้งคลัง · {total.toLocaleString("th-TH")} ไฟล์</p>
           )}
           {showBrandView ? (
-            <BrandAlbumBrowser onOpenAsset={(id) => setDetailId(id)} reloadKey={brandReload} />
+            <BrandAlbumBrowser reloadKey={brandReload} />
           ) : loading ? (
             <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
           ) : rows.length === 0 ? (

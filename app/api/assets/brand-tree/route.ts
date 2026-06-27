@@ -37,6 +37,45 @@ async function usageIds(admin: Admin, module: string, recordId: string): Promise
   return (data ?? []).map((u) => (u as { asset_id: string }).asset_id);
 }
 
+// รูปแสดงในมุมมองแบรนด์ (อ่านอย่างเดียว) — ไม่ต้องเป็น asset จริงก็แสดงได้
+type GalleryImg = { id: string; url: string; title: string };
+
+// แกลเลอรี "จริง" ของ entity = รูปภาพเพิ่มเติม (erp_playground_attachments: รูปหลักก่อน → ลำดับที่ตั้งในฟอร์ม) + รูป Odoo (asset_usages) รวม dedup
+async function galleryFor(admin: Admin, entityType: string, entityId: string, usageModule: string): Promise<GalleryImg[]> {
+  const { data: att } = await admin.from("erp_playground_attachments")
+    .select("id, file_name, public_url, file_path, is_primary, sort_order, created_at")
+    .eq("entity_type", entityType).eq("entity_id", entityId)
+    .order("is_primary", { ascending: false }).order("sort_order", { ascending: true }).order("created_at", { ascending: true });
+  type Att = { id: string; file_name: string | null; public_url: string | null; file_path: string };
+  const attList = ((att ?? []) as Att[]).map((a) => ({
+    id: "att:" + a.id,
+    url: a.public_url || `/api/r2-image?key=${encodeURIComponent(a.file_path)}`,
+    title: a.file_name ?? "",
+    key: a.file_path,
+  }));
+  const seen = new Set(attList.map((a) => a.key));
+  const odoo = (await rowsByIds(admin, await usageIds(admin, usageModule, entityId)))
+    .filter((r) => !seen.has(r.r2_key))
+    .map((r) => ({ id: r.id, url: r.url, title: r.title, key: r.r2_key }));
+  return [...attList, ...odoo].map(({ id, url, title }) => ({ id, url, title }));
+}
+
+// แกลเลอรีจาก asset_usages อย่างเดียว (เช่น Description) → GalleryImg
+async function usageGallery(admin: Admin, module: string, recordId: string): Promise<GalleryImg[]> {
+  return (await rowsByIds(admin, await usageIds(admin, module, recordId))).map((r) => ({ id: r.id, url: r.url, title: r.title }));
+}
+
+// นับจำนวนรูปต่อ entity (รวม 2 แหล่ง) สำหรับ badge/กรอง
+async function countImages(admin: Admin, entityType: string, entityIds: string[], usageModule: string): Promise<Map<string, number>> {
+  const cnt = new Map<string, number>();
+  if (entityIds.length === 0) return cnt;
+  const { data: att } = await admin.from("erp_playground_attachments").select("entity_id").eq("entity_type", entityType).in("entity_id", entityIds);
+  for (const a of (att ?? []) as { entity_id: string }[]) cnt.set(a.entity_id, (cnt.get(a.entity_id) ?? 0) + 1);
+  const { data: au } = await admin.from("asset_usages").select("record_id").eq("module", usageModule).in("record_id", entityIds);
+  for (const u of (au ?? []) as { record_id: string }[]) cnt.set(u.record_id, (cnt.get(u.record_id) ?? 0) + 1);
+  return cnt;
+}
+
 export async function GET(request: NextRequest) {
   const denied = await guardApi(request, "assets.view");
   if (denied) return denied;
@@ -65,25 +104,20 @@ export async function GET(request: NextRequest) {
     const parentId = sp.get("parent_id");
     if (!parentId) return NextResponse.json({ error: "missing parent_id" }, { status: 400 });
 
-    // นับรูปต่อ SKU (lazy — ไม่ดึงรูป SKU พร้อมกัน, โหลดตอนกางโฟลเดอร์ผ่าน mode=sku)
+    // นับรูปต่อ SKU (lazy — โหลดรูปจริงตอนกางโฟลเดอร์ผ่าน mode=sku) · นับรวม 2 แหล่ง (แกลเลอรี+Odoo)
     const skuCounts = async () => {
       const { data: skus } = await admin.from("skus_v2").select("id, code, name_th").eq("parent_sku_id", parentId).order("code");
       const skuList = (skus ?? []) as { id: string; code: string; name_th: string | null }[];
-      const skuIds = skuList.map((s) => s.id);
-      const { data: su } = skuIds.length
-        ? await admin.from("asset_usages").select("record_id").eq("module", "product_sku").in("record_id", skuIds)
-        : { data: [] };
-      const cnt = new Map<string, number>();
-      for (const u of (su ?? []) as { record_id: string }[]) cnt.set(u.record_id, (cnt.get(u.record_id) ?? 0) + 1);
+      const cnt = await countImages(admin, "skus_v2", skuList.map((s) => s.id), "product_sku");
       return skuList.map((s) => ({ id: s.id, code: s.code, name: s.name_th ?? "", img_count: cnt.get(s.id) ?? 0 })).filter((s) => s.img_count > 0);
     };
 
-    // ดึงขนาน: ข้อมูล parent + รูป Parent + นับ SKU + รูป Description
+    // ดึงขนาน: ข้อมูล parent + แกลเลอรีจริงของ Parent (รูปหลักก่อน) + นับ SKU + รูป Description
     const [p, parentImages, skus, description] = await Promise.all([
       admin.from("parent_skus_v2").select("id, code, name_th").eq("id", parentId).maybeSingle().then((r) => r.data),
-      usageIds(admin, "parent_sku", parentId).then((ids) => rowsByIds(admin, ids)),
+      galleryFor(admin, "parent_skus_v2", parentId, "parent_sku"),
       skuCounts(),
-      usageIds(admin, "parent_sku_description", parentId).then((ids) => rowsByIds(admin, ids)),
+      usageGallery(admin, "parent_sku_description", parentId),
     ]);
 
     return NextResponse.json({
@@ -95,7 +129,7 @@ export async function GET(request: NextRequest) {
   if (mode === "sku") {
     const skuId = sp.get("sku_id");
     if (!skuId) return NextResponse.json({ error: "missing sku_id" }, { status: 400 });
-    const images = await rowsByIds(admin, await usageIds(admin, "product_sku", skuId));
+    const images = await galleryFor(admin, "skus_v2", skuId, "product_sku");
     return NextResponse.json({ images, error: null });
   }
 
