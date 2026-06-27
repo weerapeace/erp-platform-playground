@@ -25,6 +25,9 @@ import { applyTaskTransition } from "../../task-actions";
 import { useCreativeOptions } from "../../use-options";
 import { getCampaign, updateCampaign, deleteTask, createContent, listBrands, listSubtasks, POST_TYPES, type CampaignDetail, type CreativeTask, type BrandOption } from "../../data";
 import { ContentDrawer } from "../../content/content";
+import { AssetPicker } from "@/components/asset-picker";
+import type { AssetRow } from "@/app/api/assets/shared";
+import { withImageWidth } from "@/lib/r2-image";
 
 // โหลดของกลาง Excalidraw แบบ dynamic -- ไม่ดึงเข้า server bundle (กัน Worker เกินขนาด)
 const CanvasSketch = dynamic(() => import("@/components/canvas-sketch").then((m) => m.CanvasSketch), {
@@ -68,6 +71,39 @@ function parentSkuCardSkeleton(s: ParentSkuVal): Record<string, unknown>[] {
   ];
   if (hasImg) els.push({ type: "image", _imageUrl: s.image_url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data });
   els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 14, strokeColor: "#0f766e", groupIds: [gid], customData: data });
+  return els;
+}
+
+// ตัวเลือก "ดึงข้อมูลอะไรของรูปมาด้วย" บนการ์ดรูปจากคลังกลาง (ติ๊กได้)
+type AssetFieldKey = "title" | "location" | "link" | "tags" | "size" | "description";
+const ASSET_FIELD_OPTS: { key: AssetFieldKey; labelTh: string; labelEn: string }[] = [
+  { key: "title", labelTh: "ชื่อไฟล์", labelEn: "Name" },
+  { key: "location", labelTh: "ที่เก็บต้นฉบับ (location)", labelEn: "Source location" },
+  { key: "link", labelTh: "ลิงก์เปิดไฟล์", labelEn: "File link" },
+  { key: "tags", labelTh: "แท็ก", labelEn: "Tags" },
+  { key: "size", labelTh: "ขนาดรูป", labelEn: "Dimensions" },
+  { key: "description", labelTh: "คำอธิบาย", labelEn: "Description" },
+];
+
+// การ์ดรูปจากคลังกลางบน Excalidraw (สีชมพู): รูป(บน) + ข้อความตามที่ติ๊ก(ล่าง) · customData = snapshot (ดับเบิลคลิกเปิด)
+function assetCardSkeleton(a: AssetRow, fields: AssetFieldKey[]): Record<string, unknown>[] {
+  const gid = `asset-${a.id}-${Math.random().toString(36).slice(2, 7)}`;
+  const data = { kind: "asset", id: a.id, title: a.title, url: a.url, master_path: a.master_path ?? null, master_url: a.master_url ?? null, tags: a.tags ?? [], width: a.width ?? null, height: a.height ?? null, description: a.description ?? null };
+  const lines: string[] = [];
+  if (fields.includes("title")) lines.push(`🖼️ ${a.title}`);
+  if (fields.includes("location") && a.master_path) lines.push(`📍 ${a.master_path}`);
+  if (fields.includes("link") && a.master_url) lines.push(`🔗 ${a.master_url}`);
+  if (fields.includes("tags") && a.tags?.length) lines.push(`🏷 ${a.tags.join(", ")}`);
+  if (fields.includes("size") && a.width && a.height) lines.push(`📐 ${a.width}×${a.height}`);
+  if (fields.includes("description") && a.description) lines.push(a.description);
+  const text = lines.join("\n");
+  const W = 230, imgH = 170, txtY = imgH + 18;
+  const H = imgH + (text ? 20 + Math.max(lines.length, 1) * 18 : 18);
+  const els: Record<string, unknown>[] = [
+    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ffffff", strokeColor: "#db2777", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
+    { type: "image", _imageUrl: withImageWidth(a.url, 480) ?? a.url, x: 10, y: 10, width: W - 20, height: imgH, groupIds: [gid], customData: data },
+  ];
+  if (text) els.push({ type: "text", x: 14, y: txtY, width: W - 28, text, fontSize: 13, strokeColor: "#9d174d", groupIds: [gid], customData: data });
   return els;
 }
 
@@ -139,6 +175,11 @@ export default function CampaignCanvasPage() {
   const [parentSel, setParentSel] = useState<ParentSkuVal[]>([]);
   const [parentRecId, setParentRecId] = useState<string | null>(null); // ดับเบิลคลิกการ์ด Parent SKU → ตัวแก้สินค้ากลาง
   const [knowledgeOpen, setKnowledgeOpen] = useState(false); // คลังความรู้
+  const [assetOpen, setAssetOpen] = useState(false);     // AssetPicker เลือกรูปจากคลังกลาง
+  const [assetSel, setAssetSel] = useState<AssetRow[]>([]); // รูปที่เลือกไว้รอวาง
+  const [assetFields, setAssetFields] = useState<AssetFieldKey[]>(["title"]); // ติ๊กว่าจะดึงข้อมูลอะไรมาด้วย
+  const [assetOptOpen, setAssetOptOpen] = useState(false);  // กล่องเลือกข้อมูลที่จะดึง (หลังเลือกรูป)
+  const [assetView, setAssetView] = useState<Record<string, unknown> | null>(null); // การ์ดรูปที่กดดู
   const [brands, setBrands] = useState<BrandOption[]>([]);
   const { platforms: platformOpts } = useCreativeOptions();
   const { user } = useAuth();
@@ -184,6 +225,18 @@ export default function CampaignCanvasPage() {
     void sketchRef.current.insert(all);
     setParentOpen(false); setParentSel([]);
   };
+  // เลือกรูปจากคลังเสร็จ → เด้งกล่องถามว่าจะดึงข้อมูลอะไรมาด้วย
+  const onAssetPicked = (assets: AssetRow[]) => { setAssetSel(assets); setAssetOpen(false); setAssetOptOpen(true); };
+  const toggleAssetField = (k: AssetFieldKey) => setAssetFields((f) => f.includes(k) ? f.filter((x) => x !== k) : [...f, k]);
+  const confirmAssets = () => {
+    if (!assetSel.length || !sketchRef.current) return;
+    const all: Record<string, unknown>[] = [];
+    assetSel.forEach((a, i) => { const dx = i * 250; for (const el of assetCardSkeleton(a, assetFields)) all.push({ ...el, x: (Number(el.x) || 0) + dx }); });
+    void sketchRef.current.insert(all);
+    const n = assetSel.length;
+    setAssetOptOpen(false); setAssetSel([]);
+    pushToast("success", t(`วางการ์ดรูป ${n} รูปแล้ว`, `Placed ${n} image card(s)`));
+  };
   const onTaskCreated = (tk: CreatedTask) => { sketchRef.current?.insert(taskCardSkeleton(tk)); pushToast("success", t(`สร้างงาน ${tk.task_no} + วางการ์ดแล้ว`, `Created task ${tk.task_no} and placed card`)); };
   const createContentCard = async () => {
     if (!cForm.title.trim()) { pushToast("error", t("กรุณาใส่ชื่อคอนเทนต์", "Please enter a content title")); return; }
@@ -214,7 +267,7 @@ export default function CampaignCanvasPage() {
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
-  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); }, [openFolder]);
+  const onCardOpen = useCallback((data: Record<string, unknown>) => { if (data.kind === "sku") setSkuView(data); else if (data.kind === "task") setTaskView(data); else if (data.kind === "content") setContentView(data); else if (data.kind === "parent_sku") setParentRecId(String(data.id ?? "")); else if (data.kind === "folder") openFolder(String(data.path ?? "")); else if (data.kind === "asset") setAssetView(data); }, [openFolder]);
   // workflow/ลบงาน สำหรับ TaskDetailDrawer เต็มบน canvas
   const moveTask = useCallback(async (task: CreativeTask, toKey: string) => { await applyTaskTransition(task, toKey, { pushToast }); }, [pushToast]);
   const removeTask = useCallback(async (tid: string) => { try { await deleteTask(tid); pushToast("info", t("ลบงานแล้ว", "Task deleted")); setTaskView(null); } catch (e) { pushToast("error", (e as Error).message); } }, [pushToast, t]);
@@ -282,6 +335,7 @@ export default function CampaignCanvasPage() {
             <button onClick={openDragPanel} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">🧲 {t("ลากงานเข้า", "Drag tasks in")}</button>
             <button onClick={() => setContentOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-50">📱 Content Card</button>
             <button onClick={() => setFolderOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-cyan-700 border border-cyan-200 rounded-lg hover:bg-cyan-50">📁 {t("โฟลเดอร์", "Folder")}</button>
+            <button onClick={() => { setAssetSel([]); setAssetOpen(true); }} className="h-9 px-3 inline-flex items-center text-sm font-medium text-pink-700 border border-pink-200 rounded-lg hover:bg-pink-50">🖼️ {t("รูปจากคลัง", "Library image")}</button>
             <button onClick={openCards} className="h-9 px-3 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂️ {t("การ์ดบนกระดาน", "Cards on board")}</button>
             <button onClick={() => setKnowledgeOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-emerald-700 border border-emerald-200 rounded-lg hover:bg-emerald-50">📚 {t("ความรู้", "Knowledge")}</button>
             <button onClick={() => setDrawerOpen(true)} className="h-9 px-3 inline-flex items-center text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📋 {t("รายละเอียด", "Details")}</button>
@@ -344,6 +398,38 @@ export default function CampaignCanvasPage() {
       {parentRecId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={parentRecId} startInEdit onClose={() => setParentRecId(null)} onChanged={() => {}} />}
       {knowledgeOpen && <KnowledgeDrawer onClose={() => setKnowledgeOpen(false)} canEdit={user?.role === "admin" || user?.role === "manager"} pushToast={pushToast} />}
 
+      {/* เลือกรูปจากคลังกลาง (ของกลาง AssetPicker) → กล่องเลือกข้อมูลที่จะดึง → วางการ์ด */}
+      <AssetPicker open={assetOpen} onClose={() => setAssetOpen(false)} multiple typeFilter="image"
+        title={t("เลือกรูปจากคลังกลาง", "Pick images from library")} contextLabel={name} onSelect={onAssetPicked} />
+
+      <ERPModal open={assetOptOpen} onClose={() => setAssetOptOpen(false)} title={t("จะดึงข้อมูลอะไรมาด้วย", "What info to include")} size="sm"
+        footer={<div className="flex justify-end gap-2">
+          <button onClick={() => { setAssetOptOpen(false); setAssetOpen(true); }} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("← เลือกรูปใหม่", "← Re-pick")}</button>
+          <button onClick={confirmAssets} disabled={!assetSel.length} className="h-9 px-4 text-sm text-white bg-pink-600 rounded-lg disabled:opacity-50">🖼️ {t("วางการ์ด", "Place cards")}{assetSel.length ? ` (${assetSel.length})` : ""}</button>
+        </div>}>
+        <div className="space-y-3">
+          <p className="text-xs text-slate-400">{t("เลือกแล้ว", "Selected")} {assetSel.length} {t("รูป — ติ๊กว่าจะให้โชว์ข้อมูลอะไรใต้รูปบนการ์ด", "image(s) — tick which info to show under each card")}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {assetSel.slice(0, 8).map((a) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={a.id} src={withImageWidth(a.url, 80) ?? a.url} alt="" className="h-12 w-12 rounded object-cover border border-slate-200" />
+            ))}
+            {assetSel.length > 8 && <span className="h-12 px-2 flex items-center text-xs text-slate-400">+{assetSel.length - 8}</span>}
+          </div>
+          <div className="grid grid-cols-1 gap-1.5 border-t border-slate-100 pt-3">
+            {ASSET_FIELD_OPTS.map((o) => { const on = assetFields.includes(o.key); return (
+              <button key={o.key} onClick={() => toggleAssetField(o.key)} className={`w-full flex items-center gap-2 h-9 px-3 rounded-lg border text-left text-sm ${on ? "bg-pink-50 border-pink-300 text-pink-800" : "border-slate-200 text-slate-600"}`}>
+                <input type="checkbox" readOnly checked={on} className="h-4 w-4 rounded border-slate-300 text-pink-600 pointer-events-none" />
+                {t(o.labelTh, o.labelEn)}
+              </button>
+            ); })}
+          </div>
+          <p className="text-[11px] text-slate-400">{t("location / ลิงก์ / คำอธิบาย จะโชว์เฉพาะรูปที่มีข้อมูลนั้น", "location / link / description show only for images that have them")}</p>
+        </div>
+      </ERPModal>
+
+      {assetView && <AssetCardDrawer data={assetView} onClose={() => setAssetView(null)} pushToast={pushToast} />}
+
       {skuView && <SkuDrawer data={skuView} onClose={() => setSkuView(null)} />}
       {taskView && <TaskDetailDrawer taskId={String(taskView.id ?? "")} onClose={() => setTaskView(null)} onChanged={() => {}} onMove={moveTask} onDelete={removeTask} pushToast={pushToast} />}
 
@@ -393,7 +479,7 @@ export default function CampaignCanvasPage() {
       {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
       <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title={t("การ์ดบนกระดาน", "Cards on board")} size="md"
         footer={<button onClick={() => setCardsOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>}>
-        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "parent_sku") setParentRecId(String(c.data.id ?? "")); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); }} />
+        <CardsSummary cards={cards} onOpen={(c) => { setCardsOpen(false); if (c.kind === "task") setTaskView(c.data); else if (c.kind === "sku") setSkuView(c.data); else if (c.kind === "content") setContentView(c.data); else if (c.kind === "parent_sku") setParentRecId(String(c.data.id ?? "")); else if (c.kind === "folder") openFolder(String(c.data.path ?? "")); else if (c.kind === "asset") setAssetView(c.data); }} />
       </ERPModal>
 
       {/* สร้างงานจริง (ฟอร์มเดียวกับหน้างาน) -- ล็อกแคมเปญนี้ → วางการ์ดงานบนกระดาน */}
@@ -426,6 +512,45 @@ export default function CampaignCanvasPage() {
         {toasts.map((t) => <div key={t.id} className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white ${t.type === "success" ? "bg-emerald-600" : t.type === "error" ? "bg-red-600" : "bg-slate-800"}`}>{t.message}</div>)}
       </div>
     </StandaloneShell>
+  );
+}
+
+// Drawer รูปจากคลัง (snapshot บนการ์ด): รูปใหญ่ + ข้อมูล + คัดลอก location / เปิดลิงก์
+function AssetCardDrawer({ data, onClose, pushToast }: { data: Record<string, unknown>; onClose: () => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
+  const title = String(data.title ?? "");
+  const url = data.url ? String(data.url) : null;
+  const masterPath = data.master_path ? String(data.master_path) : null;
+  const masterUrl = data.master_url ? String(data.master_url) : null;
+  const tags = Array.isArray(data.tags) ? (data.tags as string[]) : [];
+  const w = data.width != null ? Number(data.width) : null;
+  const h = data.height != null ? Number(data.height) : null;
+  const desc = data.description ? String(data.description) : null;
+  const copyPath = () => { if (!masterPath) return; navigator.clipboard?.writeText(masterPath).catch(() => {}); pushToast("info", t("คัดลอกที่อยู่ไฟล์แล้ว", "Path copied")); };
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-[420px] max-w-[95vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+          <h3 className="text-base font-semibold text-slate-900 truncate">🖼️ {t("รูปจากคลัง", "Library image")}</h3>
+          <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {url
+            // eslint-disable-next-line @next/next/no-img-element
+            ? <img src={withImageWidth(url, 800) ?? url} alt={title} className="w-full rounded-xl border border-slate-200 object-contain bg-slate-50" />
+            : <div className="w-full h-40 rounded-xl border border-dashed border-slate-200 flex items-center justify-center text-slate-300 text-sm">{t("ไม่มีรูป", "No image")}</div>}
+          <div><p className="text-xs text-slate-400 mb-0.5">{t("ชื่อไฟล์", "Name")}</p><p className="text-base font-medium text-slate-800">{title || "—"}</p></div>
+          {w && h ? <div><p className="text-xs text-slate-400 mb-0.5">{t("ขนาด", "Dimensions")}</p><p className="text-sm text-slate-700">{w}×{h}</p></div> : null}
+          {tags.length > 0 && <div><p className="text-xs text-slate-400 mb-1">{t("แท็ก", "Tags")}</p><div className="flex flex-wrap gap-1">{tags.map((tg) => <span key={tg} className="text-xs bg-pink-50 text-pink-700 rounded-full px-2 py-0.5">{tg}</span>)}</div></div>}
+          {desc && <div><p className="text-xs text-slate-400 mb-0.5">{t("คำอธิบาย", "Description")}</p><p className="text-sm text-slate-700 whitespace-pre-wrap">{desc}</p></div>}
+          {masterPath && <div><p className="text-xs text-slate-400 mb-0.5">📍 {t("ที่เก็บต้นฉบับ (location)", "Source location")}</p><p className="text-xs font-mono text-slate-600 break-all">{masterPath}</p><button onClick={copyPath} className="mt-1.5 h-8 px-3 text-xs text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("คัดลอกที่อยู่", "Copy path")}</button></div>}
+          {masterUrl && <a href={masterUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-pink-700 underline hover:text-pink-900">🔗 {t("เปิดไฟล์ต้นฉบับ", "Open source file")}</a>}
+          {url && <a href={url} target="_blank" rel="noopener noreferrer" className="block text-sm text-slate-500 underline hover:text-slate-700">{t("เปิดรูปเต็มในแท็บใหม่", "Open full image in new tab")}</a>}
+          <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-3">* {t("ข้อมูลนี้เป็น snapshot ณ ตอนวางการ์ดบนกระดาน", "This data is a snapshot from when the card was placed")}</p>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -476,6 +601,7 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
   const parentSkus = cards.filter((c) => c.kind === "parent_sku");
   const contents = cards.filter((c) => c.kind === "content");
   const folders = cards.filter((c) => c.kind === "folder");
+  const assets = cards.filter((c) => c.kind === "asset");
   if (cards.length === 0) return <p className="text-sm text-slate-400 text-center py-6">{t("ยังไม่มีการ์ดบนกระดาน — กด ✅ Task / 📦 SKU / 📱 Content / 📁 โฟลเดอร์ เพื่อเพิ่ม", "No cards on the board yet — click ✅ Task / 📦 SKU / 📱 Content / 📁 Folder to add")}</p>;
   return (
     <div className="space-y-4">
@@ -532,6 +658,18 @@ function CardsSummary({ cards, onOpen }: { cards: { kind: string; data: Record<s
           </div>
         )}
       </div>
+      {assets.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">🖼️ {t("การ์ดรูปจากคลัง", "Library image cards")} ({assets.length})</p>
+          <div className="space-y-1.5">
+            {assets.map((c, i) => (
+              <button key={i} onClick={() => onOpen(c)} className="w-full flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 hover:border-pink-300 hover:bg-pink-50/40 text-left">
+                <span className="text-sm text-slate-700 flex-1 truncate">🖼️ {String(c.data.title ?? t("รูป", "Image"))}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {folders.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">📁 {t("การ์ดโฟลเดอร์", "Folder cards")} ({folders.length})</p>
