@@ -13,6 +13,7 @@ import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
 import { UserPicker, ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
+import { cachedJson } from "@/lib/client-cache";
 import { avatarSrc } from "@/lib/r2-image";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
@@ -373,6 +374,17 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     } catch { setParents([]); }
   }, [taskId]);
   useEffect(() => { if (platformConfirm || showImages) loadPlatform(); }, [platformConfirm, showImages, loadPlatform]);
+
+  // อุ่นแคชตัวแก้สินค้า (Parent/SKU) ล่วงหน้าตั้งแต่เปิดป๊อปอัป — drawer "กรอกรายละเอียดสินค้า"/"แก้สินค้า"
+  // ต้องรอ schema(field-registry) + relations โหลดก่อนถึงจะเปิด · prefetch ระหว่างผู้ใช้อ่านป๊อป → กดแล้วเปิดเร็ว
+  useEffect(() => {
+    if (!platformConfirm && !showImages) return;
+    void cachedJson("/api/admin/field-registry-v2?module=parent-skus-v2").catch(() => {});
+    void cachedJson("/api/admin/field-registry-v2?module=skus-v2").catch(() => {});
+    void cachedJson("/api/master-v2/product_families?limit=500&include_inactive=true").catch(() => {});
+    void cachedJson("/api/admin/reverse-relations?module=parent-skus-v2").catch(() => {});
+    void cachedJson("/api/admin/reverse-relations?module=skus-v2").catch(() => {});
+  }, [platformConfirm, showImages]);
 
   // โหลด SKU ลูกของ parent เดียว (ใช้รีเฟรชหลังสร้าง/แก้ SKU — ครอบ parent ที่เลือกเพิ่มด้วย)
   const reloadSkusFor = useCallback(async (pid: string) => {
