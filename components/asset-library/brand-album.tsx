@@ -57,7 +57,7 @@ function ReorderableGrid({ items, onOpen, onReorder }: { items: AssetRow[]; onOp
   };
 
   return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
+    <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, 104px)" }}>
       {order.map((id, idx) => {
         const a = byId.get(id); if (!a) return null;
         return (
