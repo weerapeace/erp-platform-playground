@@ -2303,15 +2303,30 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             <div className="flex flex-col md:flex-row md:flex-wrap gap-5">
               {/* ซ้าย: รูป + core */}
               <div className={`md:flex-shrink-0 md:order-1 space-y-4 ${galleryLeft ? "md:w-96" : "md:w-72"}`}>
-                {/* รูปใหญ่ */}
-                <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
-                  {coverKey
-                    ? <ImageGallery r2Key={coverKey} />
-                    : drawerMode === "edit"
-                      ? renderField(effectiveFields.find(f => f.key === "cover_image_r2_key")!)
-                      : <div className="text-slate-300 text-sm">ไม่มีรูป</div>}
-                  {coverDeleteBtn}
-                </div>
+                {/* รูปหลัก: layout=gallery → "รูปสินค้า" (แกลเลอรีจริง รูปหลักใหญ่+รูปย่อย+อัป แบบ Design Sheet) แทนรูปปก · ไม่งั้น = รูปปกเดิม */}
+                {galleryLeft && config.mediaGallery && editingId ? (
+                  <ImageManager
+                    entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
+                    entityId={String(editingId)}
+                    actor={user?.name ?? user?.email ?? undefined}
+                    readonly={drawerMode === "view" || !canEdit}
+                    title={config.mediaGallery.title}
+                    description={config.mediaGallery.description}
+                    maxItems={config.mediaGallery.maxItems ?? 9}
+                    maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
+                    imageOnly={config.mediaGallery.imageOnly ?? true}
+                    layout="gallery"
+                  />
+                ) : (
+                  <div className="relative group rounded-xl border border-slate-200 overflow-hidden bg-slate-50 aspect-square flex items-center justify-center">
+                    {coverKey
+                      ? <ImageGallery r2Key={coverKey} />
+                      : drawerMode === "edit"
+                        ? renderField(effectiveFields.find(f => f.key === "cover_image_r2_key")!)
+                        : <div className="text-slate-300 text-sm">ไม่มีรูป</div>}
+                    {coverDeleteBtn}
+                  </div>
+                )}
 
                 {/* code + status — บอกว่ากำลังดูใบไหน (ข้อมูลหลักย้ายไปเป็นแท็บทางขวา) */}
                 <div>
@@ -2323,27 +2338,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                   </div>
                 </div>
 
-                {/* layout=gallery: รูปสินค้า + Description อยู่ในคอลัมน์ซ้าย (เห็นเด่น ไม่ต้องเลื่อน) */}
-                {galleryLeft && config.mediaGallery && (
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    {editingId ? (
-                      <ImageManager
-                        entityType={config.mediaGallery.entityType ?? config.exportEntityType ?? config.moduleKey ?? config.apiPath}
-                        entityId={String(editingId)}
-                        actor={user?.name ?? user?.email ?? undefined}
-                        readonly={drawerMode === "view" || !canEdit}
-                        title={config.mediaGallery.title}
-                        description={config.mediaGallery.description}
-                        maxItems={config.mediaGallery.maxItems ?? 9}
-                        maxSizeBytes={config.mediaGallery.maxSizeBytes ?? 2 * 1024 * 1024}
-                        imageOnly={config.mediaGallery.imageOnly ?? true}
-                        layout="gallery"
-                      />
-                    ) : (
-                      <div className="text-xs text-slate-400 text-center py-3">บันทึกรายการก่อน แล้วค่อยเพิ่มรูป</div>
-                    )}
-                  </div>
-                )}
+                {/* layout=gallery: ช่อง "รูป Description" อยู่ใต้แกลเลอรีในคอลัมน์ซ้าย (เห็นเด่น ไม่ต้องเลื่อน) */}
                 {galleryLeft && config.extraFormSection && (
                   <div className="rounded-xl border border-slate-200 bg-white p-3">
                     {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
