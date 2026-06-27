@@ -16,6 +16,7 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 import { ASSET_TYPE_LABEL, formatBytes, type AssetType } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
 import { type AssetRow, type AssetDetail, type AssetUsage, type AssetSize } from "@/app/api/assets/shared";
+import { BrandAlbumBrowser } from "./brand-album";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import type { AssetTag } from "@/app/api/assets/tags/route";
 
@@ -61,6 +62,8 @@ export function AssetLibrary() {
   const [bulkTrashOpen, setBulkTrashOpen] = useState(false);
   const [bulkTagOpen, setBulkTagOpen] = useState(false);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const [brandReload, setBrandReload] = useState(0);   // bump เพื่อรีเฟรชมุมมอง "ดูตามแบรนด์"
+  const byBrand = source === "by-brand";
 
   useEffect(() => {
     supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {});
@@ -68,6 +71,7 @@ export function AssetLibrary() {
 
   // ── โหลดรายการไฟล์ ──
   const load = useCallback(async () => {
+    if (source === "by-brand") { setRows([]); setTotal(0); setLoading(false); return; }   // มุมมองแบรนด์ใช้ API แยก
     setLoading(true);
     try {
       const p = new URLSearchParams();
@@ -165,6 +169,7 @@ export function AssetLibrary() {
       </div>
 
       {/* type filter + trash toggle */}
+      {!byBrand && (
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {source === "artwork"
           ? <>
@@ -191,10 +196,15 @@ export function AssetLibrary() {
             : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
         >🗑️ ถังขยะ</button>
       </div>
+      )}
 
       <div className="flex gap-4 items-start">
         {/* sidebar */}
         <aside className="w-44 shrink-0 hidden md:block">
+          <p className="text-[11px] font-medium text-slate-400 mb-1.5">มุมมอง</p>
+          <div className="flex flex-col gap-0.5 mb-4">
+            <SideItem active={source === "by-brand"} onClick={() => setSource("by-brand")} label="ดูตามแบรนด์" icon="🏷️" />
+          </div>
           <p className="text-[11px] font-medium text-slate-400 mb-1.5">ที่มา</p>
           <div className="flex flex-col gap-0.5 mb-4">
             <SideItem active={source === "upload"} onClick={() => setSource("upload")} label="รูปที่อัปเอง" icon="📤" />
@@ -231,7 +241,9 @@ export function AssetLibrary() {
 
         {/* grid */}
         <main className="flex-1 min-w-0">
-          {loading ? (
+          {byBrand ? (
+            <BrandAlbumBrowser onOpenAsset={(id) => setDetailId(id)} reloadKey={brandReload} />
+          ) : loading ? (
             <div className="text-center py-16 text-slate-400 text-sm">กำลังโหลด…</div>
           ) : rows.length === 0 ? (
             <div className="text-center py-16 text-slate-400 text-sm">
@@ -283,7 +295,7 @@ export function AssetLibrary() {
         <DetailModal
           id={detailId} actor={actor} collections={collections} artTypes={artTypes}
           onClose={() => setDetailId(null)}
-          onChanged={async () => { await load(); await loadMeta(); }}
+          onChanged={async () => { setBrandReload((k) => k + 1); await load(); await loadMeta(); }}
         />
       )}
       {newColOpen && (
