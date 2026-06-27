@@ -16,6 +16,8 @@ import { useSWRLite } from "@/lib/swr-lite";
 import type { ColumnDef } from "@tanstack/react-table";
 import { KanbanBoard } from "./kanban-board";
 import { CanvasBoard } from "./canvas-board";
+import { CalendarBoard } from "./calendar-board";
+import { WorkloadBoard } from "./workload-board";
 import { CreateTaskModal } from "./create-task-modal";
 import { KnowledgeDrawer } from "./knowledge-drawer";
 import { TaskDetailDrawer, StatusBadge, PriorityBadge } from "./task-detail-drawer";
@@ -92,7 +94,7 @@ export default function TasksPage() {
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const { statuses } = useCreativeStatuses();
-  const [view, setView] = useState<"overview" | "queue" | "kanban" | "canvas">("overview");
+  const [view, setView] = useState<"overview" | "queue" | "calendar" | "workload" | "kanban" | "canvas">("overview");
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
   const [ovTheme, setOvTheme] = useState<OverviewTheme>(DEFAULT_THEME); // ธีมหน้าภาพรวม "ของฉัน" (per-user)
 
@@ -132,7 +134,7 @@ export default function TasksPage() {
     const sp = new URLSearchParams(window.location.search);
     const tid = sp.get("task"); if (tid) setDetailId(tid);
     const v = sp.get("view");
-    if (v === "queue" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
+    if (v === "queue" || v === "calendar" || v === "workload" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
     else if (v === "table") setView("overview");   // แท็บตารางถูกรวมเข้าภาพรวมแล้ว → ลิงก์เดิมมาที่ภาพรวม
   }, []);
 
@@ -198,6 +200,8 @@ export default function TasksPage() {
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit">
           <ViewToggleBtn active={view === "overview"} onClick={() => setView("overview")} icon="🏠" label={t("ภาพรวม", "Overview")} />
           <ViewToggleBtn active={view === "queue"} onClick={() => setView("queue")} icon="🙋" label={t("คิวงานของฉัน", "My queue")} />
+          <ViewToggleBtn active={view === "calendar"} onClick={() => setView("calendar")} icon="📅" label={t("ปฏิทิน", "Calendar")} />
+          <ViewToggleBtn active={view === "workload"} onClick={() => setView("workload")} icon="👥" label={t("ภาระงาน", "Workload")} />
           <ViewToggleBtn active={view === "kanban"} onClick={() => setView("kanban")} icon="🟦" label="Kanban" />
           <ViewToggleBtn active={view === "canvas"} onClick={() => setView("canvas")} icon="🟪" label="Canvas" />
         </div>
@@ -229,6 +233,15 @@ export default function TasksPage() {
             )}
 
             {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
+
+            {view === "calendar" && (
+              <div>
+                <p className="text-xs text-slate-400 mb-2">💡 {t("งานเรียงตามกำหนดส่ง · คลิกงานเพื่อดูรายละเอียด", "Tasks by due date · click a task to view details")}</p>
+                <CalendarBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} />
+              </div>
+            )}
+
+            {view === "workload" && <WorkloadBoard tasks={tasks} onCardClick={(id) => setDetailId(id)} />}
 
             {view === "kanban" && (
               <div>
