@@ -143,6 +143,8 @@ export default function TasksPage() {
 
   // ธีมหน้าภาพรวม "ของฉัน" — โหลดครั้งเดียว + บันทึกอัตโนมัติเมื่อแต่ง
   useEffect(() => { apiFetch("/api/user-prefs?key=tasks_overview_theme").then((r) => r.json()).then((j) => { if (j && !j.error) setOvTheme(mergeTheme(j.value)); }).catch(() => {}); }, []);
+  // sweep แจ้งเตือน "ใกล้/เกินกำหนด" ให้ผู้รับผิดชอบ (lazy ตอนเปิดหน้า, กันซ้ำวันละครั้ง) — fire-and-forget
+  useEffect(() => { void apiFetch("/api/creative-tasks/reminders").catch(() => {}); }, []);
   const saveTheme = useCallback((th: OverviewTheme) => {
     setOvTheme(th);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_overview_theme", value: th }) });

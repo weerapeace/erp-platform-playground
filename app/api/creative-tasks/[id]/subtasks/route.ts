@@ -172,8 +172,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "คุณไม่มีสิทธิ์ยกเลิกงานย่อยนี้" }, { status: 403 });
 
   if (Array.isArray(body.assignee_ids)) {
+    const { data: curA } = await admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId);
+    const oldSet = new Set(((curA ?? []) as { user_id: string }[]).map((r) => r.user_id));
     await setSubtaskAssignees(admin, subtaskId, body.assignee_ids as string[]);
     patch.assignee_id = (body.assignee_ids as string[])[0] || null; // sync legacy single field
+    // แจ้งเตือนเฉพาะคนที่เพิ่งถูกเพิ่ม (ไม่เตือนตัวเอง/คนเดิม)
+    const added = (body.assignee_ids as string[]).filter((uid) => uid && !oldSet.has(uid) && uid !== user?.id);
+    if (added.length) {
+      const { data: sub } = await admin.from("erp_creative_subtasks").select("title").eq("id", subtaskId).maybeSingle();
+      const subTitle = ((sub as { title?: string } | null)?.title) ?? "งานย่อย";
+      const taskLabel = `${parent?.task_no ? parent.task_no + " " : ""}${parent?.title ?? ""}`.trim();
+      await Promise.all(added.map((uid) => notify(admin, { userId: uid, eventType: "subtask_assigned", priority: "normal", title: `มอบหมายงานย่อย: ${subTitle}`, body: taskLabel || null, linkUrl: `/tasks?task=${id}`, entityId: id })));
+    }
   }
 
   // ⑦ "เริ่มงาน" = คนกดเป็นผู้รับผิดชอบ "คนเดียว" (ลบคนอื่นออก — งานย่อย 1 งาน = ผู้ทำ 1 คน)

@@ -155,8 +155,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     // m2m: ผู้รับผิดชอบงานหลักหลายคน — แทนที่ทั้งชุด + sync ฟิลด์เดี่ยว legacy (assignee_id = ตัวแรก)
     const mAssignees = Array.isArray(body.assignee_ids) ? [...new Set((body.assignee_ids as string[]).filter(Boolean))] : null;
     if (mAssignees) {
+      const { data: cur } = await admin.from("erp_creative_task_assignees").select("user_id").eq("task_id", id);
+      const oldSet = new Set(((cur ?? []) as { user_id: string }[]).map((r) => r.user_id));
       await setTaskAssignees(admin, id, mAssignees);
       patch.assignee_id = mAssignees[0] ?? null;
+      // แจ้งเตือนเฉพาะคนที่เพิ่งถูกเพิ่ม (ไม่เตือนตัวเอง/คนเดิม)
+      const added = mAssignees.filter((uid) => !oldSet.has(uid) && uid !== user?.id);
+      for (const uid of added) await notify(admin, { userId: uid, eventType: "task_assigned", priority: "normal", title: `มอบหมายงาน: ${current.title}`, body: String(current.task_no ?? ""), linkUrl: `/tasks?task=${id}`, entityId: id });
     }
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้ไข" }, { status: 400 });
     // เปลี่ยนผู้รับผิดชอบ → แจ้งคนใหม่
