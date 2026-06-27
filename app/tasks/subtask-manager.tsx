@@ -385,6 +385,10 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     void cachedJson("/api/master-v2/product_families?limit=500&include_inactive=true").catch(() => {});
     void cachedJson("/api/admin/reverse-relations?module=parent-skus-v2").catch(() => {});
     void cachedJson("/api/admin/reverse-relations?module=skus-v2").catch(() => {});
+    // อุ่น "ตัว drawer" (โค้ดก้อนใหญ่ ~270KB) ล่วงหน้าด้วย — วัดจริงพบว่ากดครั้งแรกเสียเวลา ~430ms
+    // ไปกับการโหลด+แปลงโค้ดก้อนนี้ พอ prefetch ระหว่างผู้ใช้อ่านป๊อป → กด "แก้สินค้า" เปิดเร็วทันที
+    void import("@/components/master-crud").catch(() => {});
+    void import("@/components/parent-description-images").catch(() => {});
   }, [platformConfirm, showImages]);
 
   // โหลด SKU ลูกของ parent เดียว (ใช้รีเฟรชหลังสร้าง/แก้ SKU — ครอบ parent ที่เลือกเพิ่มด้วย)
