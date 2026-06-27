@@ -14,18 +14,20 @@ import { useT } from "@/components/i18n";
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
 
-export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null };
-export type CardTheme = { icon: string; iconUrl: string | null; color: string };
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme> };
+export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string };
+export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
+export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme };
 
 export const DEFAULT_THEME: OverviewTheme = {
-  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null },
+  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff" },
   cards: {
-    all: { icon: "📋", iconUrl: null, color: "slate" },
-    mine: { icon: "🙋", iconUrl: null, color: "violet" },
-    review: { icon: "🟡", iconUrl: null, color: "amber" },
-    overdue: { icon: "⚠️", iconUrl: null, color: "red" },
+    all: { icon: "📋", iconUrl: null, color: "slate", bgUrl: null, label: null },
+    mine: { icon: "🙋", iconUrl: null, color: "violet", bgUrl: null, label: null },
+    review: { icon: "🟡", iconUrl: null, color: "amber", bgUrl: null, label: null },
+    overdue: { icon: "⚠️", iconUrl: null, color: "red", bgUrl: null, label: null },
   },
+  page: { mode: "none", color: "#f8fafc", imageUrl: null },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -48,7 +50,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) } };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -56,6 +58,13 @@ export function heroStyle(h: HeroTheme): React.CSSProperties {
   if (h.mode === "image" && h.imageUrl) return { backgroundImage: `url(/api/r2-image?key=${encodeURIComponent(h.imageUrl)})`, backgroundSize: "cover", backgroundPosition: "center" };
   if (h.mode === "solid") return { background: h.color1 };
   return { background: `linear-gradient(135deg, ${h.color1}, ${h.color2})` };
+}
+
+// สไตล์พื้นหลังทั้งหน้า (page background)
+export function pageStyle(p: PageTheme): React.CSSProperties {
+  if (p.mode === "image" && p.imageUrl) return { backgroundImage: `url(/api/r2-image?key=${encodeURIComponent(p.imageUrl)})`, backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" };
+  if (p.mode === "color") return { background: p.color };
+  return {};
 }
 
 const CARD_LABEL: Record<CardKey, string> = { all: "งานทั้งหมด", mine: "งานของฉัน", review: "รอตรวจ/อนุมัติ", overdue: "เกินกำหนด" };
@@ -80,6 +89,7 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
 
   const setHero = (p: Partial<HeroTheme>) => onChange({ ...theme, hero: { ...theme.hero, ...p } });
   const setCard = (k: CardKey, p: Partial<CardTheme>) => onChange({ ...theme, cards: { ...theme.cards, [k]: { ...theme.cards[k], ...p } } });
+  const setPage = (p: Partial<PageTheme>) => onChange({ ...theme, page: { ...theme.page, ...p } });
 
   const doUpload = async (file: File, apply: (key: string) => void, tag: string) => {
     setBusy(tag); setErr(null);
@@ -128,31 +138,76 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
             ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลดไฟล์ถึงจะใส่รูปได้", "Need file-upload permission for images")}</span>
           )}
         </div>
+        {/* ข้อความ + สีตัวอักษร Hero */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+          <label className="text-xs text-slate-500">{t("ข้อความทักทาย (เว้นว่าง = ใช้ค่าเริ่มต้น)", "Greeting text (blank = default)")}
+            <input value={theme.hero.title ?? ""} onChange={(e) => setHero({ title: e.target.value || null })} placeholder={t("เช่น สวัสดีทีมครีเอทีฟ 👋", "e.g. Hi creative team 👋")} className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded" /></label>
+          <label className="text-xs text-slate-500">{t("ข้อความรอง (เว้นว่าง = สรุปงานอัตโนมัติ)", "Subtitle (blank = auto summary)")}
+            <input value={theme.hero.subtitle ?? ""} onChange={(e) => setHero({ subtitle: e.target.value || null })} placeholder={t("เช่น ลุยงานวันนี้กันเลย!", "e.g. Let's get to work!")} className="mt-1 w-full h-8 px-2 text-sm border border-slate-200 rounded" /></label>
+          <label className="flex items-center gap-2 text-xs text-slate-600">{t("สีตัวอักษร", "Text color")}
+            <input type="color" value={theme.hero.textColor} onChange={(e) => setHero({ textColor: e.target.value })} className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" /></label>
+        </div>
+      </section>
+
+      {/* ===== พื้นหลังทั้งหน้า ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-2">{t("พื้นหลังทั้งหน้า", "Page background")}</div>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          {([["none", t("ไม่มี", "None")], ["color", t("สีเดียว", "Solid")], ["image", t("รูปภาพ", "Image")]] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setPage({ mode: m })} className={`h-8 px-3 text-sm rounded-lg border ${theme.page.mode === m ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+          ))}
+          {theme.page.mode === "color" && (
+            <label className="flex items-center gap-2 text-xs text-slate-600">{t("สี", "Color")}
+              <input type="color" value={theme.page.color} onChange={(e) => setPage({ color: e.target.value })} className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" /></label>
+          )}
+          {theme.page.mode === "image" && (
+            canUpload ? (
+              <div className="flex items-center gap-2">
+                <label className={`h-8 px-3 leading-8 text-xs font-medium rounded cursor-pointer ${busy === "page" ? "bg-slate-200 text-slate-400" : "bg-violet-600 text-white hover:bg-violet-700"}`}>
+                  {busy === "page" ? t("กำลังอัป…", "Uploading…") : t("⬆ อัปโหลดรูป", "⬆ Upload")}
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === "page"}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setPage({ imageUrl: k }), "page"); e.target.value = ""; }} /></label>
+                {theme.page.imageUrl && <button onClick={() => setPage({ imageUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูป", "Remove")}</button>}
+              </div>
+            ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลดไฟล์ถึงจะใส่รูปได้", "Need file-upload permission for images")}</span>
+          )}
+        </div>
+        <p className="text-[11px] text-slate-400">{t("รูปพื้นหลังจะอยู่หลังการ์ด/ตาราง (มีฉากจางทับให้อ่านง่าย)", "Background sits behind cards/table (with a soft scrim for readability)")}</p>
       </section>
 
       {/* ===== Cards ===== */}
       <section>
-        <div className="text-sm font-semibold text-slate-700 mb-2">{t("การ์ดสรุป (ไอคอน + สี)", "Summary cards (icon + color)")}</div>
+        <div className="text-sm font-semibold text-slate-700 mb-2">{t("การ์ดสรุป (ไอคอน · รูปเต็ม · ชื่อ · สี)", "Summary cards (icon · full image · label · color)")}</div>
         <div className="space-y-2">
           {CARD_KEYS.map((k) => {
             const c = theme.cards[k];
             return (
-              <div key={k} className={`flex items-center gap-3 p-2.5 rounded-lg border ${CARD_COLORS[c.color]?.box ?? CARD_COLORS.slate.box}`}>
+              <div key={k} className={`flex flex-wrap items-center gap-2 p-2.5 rounded-lg border ${CARD_COLORS[c.color]?.box ?? CARD_COLORS.slate.box}`}>
                 <div className="w-9 h-9 rounded-lg bg-white/70 border border-white flex items-center justify-center overflow-hidden shrink-0">
-                  {c.iconUrl
+                  {c.bgUrl
+                    // eslint-disable-next-line @next/next/no-img-element
+                    ? <img src={`/api/r2-image?key=${encodeURIComponent(c.bgUrl)}&w=120`} alt="" className="w-full h-full object-cover" />
+                    : c.iconUrl
                     // eslint-disable-next-line @next/next/no-img-element
                     ? <img src={`/api/r2-image?key=${encodeURIComponent(c.iconUrl)}`} alt="" className="w-7 h-7 object-contain" />
                     : <span className="text-lg">{c.icon}</span>}
                 </div>
-                <span className="text-sm font-medium w-28 shrink-0">{t(CARD_LABEL[k], k)}</span>
-                <input value={c.icon} onChange={(e) => setCard(k, { icon: e.target.value })} placeholder="emoji" className="w-14 h-7 px-1 text-center text-base border border-slate-200 rounded bg-white" title={t("ไอคอน emoji", "emoji icon")} />
+                <input value={c.label ?? ""} onChange={(e) => setCard(k, { label: e.target.value || null })} placeholder={t(CARD_LABEL[k], k)} className="text-sm font-medium w-28 shrink-0 h-7 px-1.5 border border-slate-200 rounded bg-white" title={t("ชื่อการ์ด (เว้นว่าง = ค่าเริ่มต้น)", "Card label (blank = default)")} />
+                <input value={c.icon} onChange={(e) => setCard(k, { icon: e.target.value })} placeholder="emoji" className="w-12 h-7 px-1 text-center text-base border border-slate-200 rounded bg-white" title={t("ไอคอน emoji", "emoji icon")} />
                 {canUpload && (
                   <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `c:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                    {busy === `c:${k}` ? "…" : t("⬆ รูป", "⬆ Img")}
+                    {busy === `c:${k}` ? "…" : t("⬆ ไอคอน", "⬆ Icon")}
                     <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === `c:${k}`}
                       onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (key) => setCard(k, { iconUrl: key }), `c:${k}`); e.target.value = ""; }} /></label>
                 )}
-                {c.iconUrl && <button onClick={() => setCard(k, { iconUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูป", "×")}</button>}
+                {c.iconUrl && <button onClick={() => setCard(k, { iconUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">×</button>}
+                {canUpload && (
+                  <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === `cb:${k}` ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                    {busy === `cb:${k}` ? "…" : (c.bgUrl ? t("เปลี่ยนรูปเต็ม", "Full") : t("⬆ รูปเต็ม", "⬆ Full"))}
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={busy === `cb:${k}`}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (key) => setCard(k, { bgUrl: key }), `cb:${k}`); e.target.value = ""; }} /></label>
+                )}
+                {c.bgUrl && <button onClick={() => setCard(k, { bgUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบรูปเต็ม", "× full")}</button>}
                 <div className="flex items-center gap-1 ml-auto flex-wrap">
                   {COLOR_NAMES.map((name) => (
                     <button key={name} onClick={() => setCard(k, { color: name })} title={name}

@@ -14,7 +14,7 @@ import { isTerminal } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { isOverdue, type CreativeTask, type Campaign, type MySubtask, type BrandOption } from "./data";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
-import { OverviewCustomizer, CARD_COLORS, heroStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
+import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
@@ -107,15 +107,18 @@ export function OverviewDashboard({
 
   const heroImage = theme.hero.mode === "image" && !!theme.hero.imageUrl;
 
+  const hasPageBg = theme.page.mode !== "none";
   return (
-    <div className="space-y-6">
+    <div className={`relative ${hasPageBg ? "rounded-2xl p-3 sm:p-4" : ""}`} style={pageStyle(theme.page)}>
+      {theme.page.mode === "image" && <div className="absolute inset-0 rounded-2xl bg-white/45 pointer-events-none" />}
+      <div className="relative space-y-6">
       {/* Hero (ธีมแต่งได้) */}
       <div className="relative rounded-2xl overflow-hidden shadow-sm text-white" style={heroStyle(theme.hero)}>
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
         <div className="relative p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm">{userName ? `${t("สวัสดี", "Hi")} ${userName} 👋` : `${t("สวัสดี", "Hi")} 👋`}</h2>
-            <p className="text-white/90 text-sm mt-1 drop-shadow-sm">{heroLine}</p>
+            <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm" style={{ color: theme.hero.textColor }}>{theme.hero.title || (userName ? `${t("สวัสดี", "Hi")} ${userName} 👋` : `${t("สวัสดี", "Hi")} 👋`)}</h2>
+            <p className="text-sm mt-1 drop-shadow-sm opacity-90" style={{ color: theme.hero.textColor }}>{theme.hero.subtitle || heroLine}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
@@ -138,7 +141,7 @@ export function OverviewDashboard({
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cardMeta.map((m) => (
-          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={m.label}
+          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label}
             active={filter === m.key} hint={filter === m.key ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
             onClick={() => onFilter(m.key)} />
         ))}
@@ -248,12 +251,34 @@ export function OverviewDashboard({
       </div>
 
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
+      </div>
     </div>
   );
 }
 
 function SummaryCard({ card, value, label, active, hint, onClick }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void }) {
   const c = CARD_COLORS[card.color] ?? CARD_COLORS.slate;
+  // โหมดรูปเต็ม — รูปพื้นหลังการ์ด + ฉากดำจาง + ตัวอักษรขาว
+  if (card.bgUrl) {
+    return (
+      <button onClick={onClick} className={`relative text-left rounded-xl border overflow-hidden p-4 min-h-[92px] transition-all hover:shadow-sm ${active ? `ring-2 ${c.ring} border-transparent` : "border-slate-200"}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/api/r2-image?key=${encodeURIComponent(card.bgUrl)}&w=400`} alt="" className="absolute inset-0 w-full h-full object-cover" />
+        <div className="absolute inset-0 bg-black/40" />
+        <div className="relative text-white">
+          <div className="flex items-center justify-between">
+            {card.iconUrl
+              // eslint-disable-next-line @next/next/no-img-element
+              ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="w-6 h-6 object-contain drop-shadow" />
+              : <span className="text-lg drop-shadow">{card.icon}</span>}
+            <span className="text-2xl font-bold tabular-nums drop-shadow">{value}</span>
+          </div>
+          <p className="text-sm font-medium mt-1 drop-shadow">{label}</p>
+          <p className="text-[11px] opacity-85 mt-0.5">{hint}</p>
+        </div>
+      </button>
+    );
+  }
   return (
     <button onClick={onClick} className={`text-left rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
       <div className="flex items-center justify-between">
