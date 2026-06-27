@@ -2345,7 +2345,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
                 {/* layout=gallery: ช่อง "รูป Description" อยู่ใต้แกลเลอรีในคอลัมน์ซ้าย (เห็นเด่น ไม่ต้องเลื่อน) */}
                 {galleryLeft && config.extraFormSection && (
                   <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: drawerMode === "view" || !canEdit })}
+                    {/* quick edit: เพิ่ม/จัดรูป Description ได้เลยในโหมดดู (เหมือนแกลเลอรีรูปสินค้า) — กั้นด้วยสิทธิ์อย่างเดียว */}
+                    {config.extraFormSection({ recordId: editingId ? String(editingId) : null, readonly: !canEdit })}
                   </div>
                 )}
               </div>
