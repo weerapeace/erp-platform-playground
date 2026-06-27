@@ -37,6 +37,8 @@ import { formatAmount, currencyLabel } from "@/lib/money";
 import { computedTextValue, textComputeDescribe } from "@/lib/computed-text";
 import dynamic from "next/dynamic";
 import type { StudioField } from "@/components/master-crud/studio-panel";
+// ช่อง "รูป Description" ของ Parent SKU — ใส่อัตโนมัติใน MasterRecordDrawer (โหลดเฉพาะตอนใช้)
+const ParentDescriptionImages = dynamic(() => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages), { ssr: false });
 
 // F20: lazy-load Studio (dnd-kit ~30kb) — โหลดเฉพาะตอนกด "ออกแบบหน้า"
 // → ลด bundle ของ master page → startup เร็วขึ้น → กัน Worker 1102
@@ -2595,6 +2597,8 @@ export function MasterRecordDrawer({
   cellRenderers?: MasterCRUDConfig["cellRenderers"];
   navIds?: string[];
 }) {
+  const { user } = useAuth();
+  const actor = user?.name ?? user?.email ?? undefined;
   const config: MasterCRUDConfig = useMemo(() => {
     // สินค้า (Parent/SKU) → ใช้แกลเลอรี "รูปสินค้า" อัตโนมัติทุกที่ที่เปิด drawer (ของกลาง) แม้ผู้เรียกไม่ได้ส่งมา
     const productEntity = moduleKey === "parent-skus-v2" ? "parent_skus_v2" : moduleKey === "skus-v2" ? "skus_v2" : null;
@@ -2609,8 +2613,12 @@ export function MasterRecordDrawer({
       icon, activeField: "is_active", serverMode: true,
       permissions: permissions ?? { view: "products.view", create: "products.create", edit: "products.edit" },
       mediaGallery: mg, extraRowActions, cellRenderers, createDefaults,
+      // Parent SKU → ใส่ช่อง "รูป Description" ให้อัตโนมัติ (เหมือนหน้า master page โดยตรง)
+      extraFormSection: moduleKey === "parent-skus-v2"
+        ? ({ recordId, readonly }) => <ParentDescriptionImages parentId={recordId} readonly={readonly} actor={actor} />
+        : undefined,
     };
-  }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults]);
+  }, [apiBase, apiPath, moduleKey, title, createTitle, icon, permissions, mediaGallery, extraRowActions, cellRenderers, createDefaults, actor]);
   return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose, onChanged, startInEdit }} />;
 }
 
