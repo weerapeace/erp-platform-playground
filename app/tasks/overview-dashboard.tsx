@@ -12,7 +12,7 @@ import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { isTerminal } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
-import { isOverdue, type CreativeTask, type Campaign, type MySubtask, type BrandOption } from "./data";
+import { isOverdue, updateTask, PRIORITY_META, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
 import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
 
@@ -28,7 +28,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
   theme, canUpload, onThemeChange,
-  onFilter, onOpenTask, onCreate, onOpenKnowledge,
+  onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged,
 }: {
   userName?: string;
   counts: Counts;
@@ -47,6 +47,7 @@ export function OverviewDashboard({
   onOpenTask: (id: string) => void;
   onCreate: () => void;
   onOpenKnowledge: () => void;
+  onChanged?: () => void | Promise<void>;
 }) {
   const t = useT();
   const [customizing, setCustomizing] = useState(false);
@@ -82,6 +83,20 @@ export function OverviewDashboard({
     return arr;
   }, [filter, typeFilter, brandFilter, tasks, myTaskIds]);
   const filterLabel = filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
+
+  // แก้หลายงานพร้อมกัน (bulk) — เฉพาะฟิลด์ที่แก้ตรงได้ปลอดภัย (ไม่รวมสถานะ เพราะต้องผ่าน workflow)
+  const bulkEditFields = useMemo(() => [
+    { key: "priority", label: t("ความสำคัญ", "Priority"), type: "select" as const, options: (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label })) },
+    { key: "task_type", label: t("ประเภทงาน", "Task type"), type: "select" as const, options: taskTypes },
+    { key: "brand_id", label: t("แบรนด์", "Brand"), type: "select" as const, options: brands.map((b) => ({ value: b.id, label: b.name })) },
+    { key: "due_date", label: t("กำหนดส่ง (YYYY-MM-DD)", "Due date (YYYY-MM-DD)"), type: "text" as const },
+  ], [t, taskTypes, brands]);
+  const onBulkEdit = async (edits: { row: CreativeTask; changes: Record<string, unknown> }[]) => {
+    let success = 0, failed = 0;
+    for (const e of edits) { try { await updateTask(e.row.id, e.changes); success++; } catch { failed++; } }
+    if (onChanged) await onChanged();
+    return { success, failed };
+  };
 
   // นับงานที่ยังไม่ปิดต่อแคมเปญ + แคมเปญที่กำลังทำ
   const openByCampaign = useMemo(() => {
@@ -213,6 +228,7 @@ export function OverviewDashboard({
               searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
               searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
               tableId="creative-tasks" exportFilename="งาน-creative"
+              selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
               enableCards
               cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
               onRowClick={(row) => onOpenTask(row.id)}

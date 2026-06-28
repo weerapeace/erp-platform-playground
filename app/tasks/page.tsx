@@ -266,6 +266,7 @@ export default function TasksPage() {
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}
                 onOpenKnowledge={() => setKnowledgeOpen(true)}
+                onChanged={reload}
               />
             )}
 
