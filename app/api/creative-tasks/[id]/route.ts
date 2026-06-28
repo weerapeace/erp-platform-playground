@@ -23,7 +23,7 @@ export const revalidate = 0;
 // ฟิลด์ที่แก้ผ่าน PATCH ธรรมดาได้ (กันเขียนทับคอลัมน์ระบบ)
 const EDITABLE = new Set([
   "title", "description", "task_type", "brand_id", "campaign_id", "sku_id", "product_name",
-  "priority", "progress_percent", "assignee_id", "reviewer_id", "approver_id", "assigned_by_id",
+  "priority", "progress_percent", "assignee_id", "reviewer_id", "approver_id", "assigned_by_id", "assigned_to_id",
   "start_date", "due_date", "asset_status", "platforms",
   "drive_folder_url", "final_asset_url", "published_url", "blocker_reason",
   "cover_image_r2_key",
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const subRows = (subtasks ?? []) as Record<string, unknown>[];
   // empMap (จาก row) กับ aMap (จาก subRows) อิสระต่อกัน → ยิงพร้อมกัน ลด round-trip ตอนเปิดงาน
   const [empMap, aMap, taMap] = await Promise.all([
-    employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string, row.assigned_by_id as string]),
+    employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string, row.assigned_by_id as string, row.assigned_to_id as string]),
     subtaskAssigneesMap(admin, subRows.map((s) => String(s.id))),
     taskAssigneesMap(admin, [id]),
   ]);
@@ -186,7 +186,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   const [empMap, taMap] = await Promise.all([
-    employeeLabelMap(admin, [updated.assignee_id, updated.reviewer_id, updated.approver_id, updated.assigned_by_id] as string[]),
+    employeeLabelMap(admin, [updated.assignee_id, updated.reviewer_id, updated.approver_id, updated.assigned_by_id, updated.assigned_to_id] as string[]),
     taskAssigneesMap(admin, [id]),
   ]);
   const out = flattenTask(updated as Record<string, unknown>, empMap);
