@@ -36,7 +36,7 @@ type PayrollImportPeriod = {
 type DuplicateMode = "skip" | "replace" | "error";
 type ReviewDecision = "absence" | "skip" | "normal";
 // การตัดสินจากป๊อปอัป "ตรวจ/แก้" รายแถว: นอกจาก absence/skip/normal ยังแก้เวลาเอง (recompute) หรือ ราชการ ได้
-type RowDecision = ReviewDecision | { kind: "official" | "recompute"; scans?: string[]; note?: string };
+type RowDecision = ReviewDecision | { kind: "official" | "recompute"; scans?: string[]; note?: string; earlyLeaveMinutes?: number };
 
 type AttendanceDraftRow = {
   id: string;
@@ -246,14 +246,28 @@ function outcomeFor(previewRow: AttendancePreviewRow, decision: RowDecision | un
   // recompute: แก้เวลาเอง → คำนวณสาย/ออกก่อน/ขาด ใหม่ด้วยกฎเดิมของแถวนั้น
   const scans = cleanTimes(decision.scans ?? baseRaw);
   const recomputed = calculateAttendanceDay({ rawScans: scans, scheduleStatus: previewRow.scheduleStatus }, previewRow.ruleConfig);
+  // ถ้ากรอก "ออกก่อน" เอง → ใช้ค่านั้นแทนที่ระบบคำนวณ
+  const finalResult = decision.earlyLeaveMinutes != null
+    ? { ...recomputed, earlyOutMinutes: Math.max(0, Math.round(decision.earlyLeaveMinutes)) }
+    : recomputed;
   const payloads = buildAttendanceManualEntryPayloads(
-    { ...previewRow, rawScans: scans, result: { ...recomputed, importStatus: recomputed.importStatus } },
+    { ...previewRow, rawScans: scans, result: { ...finalResult, importStatus: finalResult.importStatus } },
     { default_hours_per_day: hoursPerDay },
   );
-  const summary = recomputed.totalLateMinutes ? `สาย ${recomputed.totalLateMinutes} นาที`
-    : recomputed.earlyOutMinutes ? `ออกก่อน ${recomputed.earlyOutMinutes} นาที`
-    : recomputed.absent ? "ขาด" : "ปกติ";
+  const summary = finalResult.totalLateMinutes ? `สาย ${finalResult.totalLateMinutes} นาที`
+    : finalResult.earlyOutMinutes ? `ออกก่อน ${finalResult.earlyOutMinutes} นาที`
+    : finalResult.absent ? "ขาด" : "ปกติ";
   return { status: "ready", payloads, note: `${decision.note?.trim() ? decision.note.trim() + " · " : ""}ตรวจแล้ว (${summary})`, rawScans: scans };
+}
+
+// สรุปผล (สาย/ออกก่อน/ขาด/ปกติ) สำหรับโชว์ "ผลเดิม → ผลใหม่" ในป๊อปอัป
+function resultSummary(r?: { totalLateMinutes?: number; earlyOutMinutes?: number; absent?: boolean } | null): string {
+  if (!r) return "-";
+  const parts: string[] = [];
+  if (r.absent) parts.push("ขาด");
+  if (r.totalLateMinutes) parts.push(`สาย ${r.totalLateMinutes} นาที`);
+  if (r.earlyOutMinutes) parts.push(`ออกก่อน ${r.earlyOutMinutes} นาที`);
+  return parts.length ? parts.join(" / ") : "ปกติ";
 }
 
 function flagText(flags: string[]): string {
@@ -1117,7 +1131,8 @@ function SummaryBox({ label, value, tone = "text-slate-700", active, onClick }: 
     : <div className={cls}>{inner}</div>;
 }
 
-// ป๊อปอัป "ตรวจ/แก้รายการเวลา" รายแถว — แก้เวลา เข้า/พัก/ออก, ราชการ, ปกติ/ขาด/ข้าม
+// ป๊อปอัป "ตรวจ/แก้รายการเวลา" รายแถว — แก้เวลา เข้า/พัก/ออก + ปุ่ม "ปกติ" เติมเวลามาตรฐาน
+// + ขาดงาน/ราชการ (checkbox) + ออกก่อนเอง + โชว์ผลเดิม→ผลใหม่ + ยืนยันก่อนลง
 function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
   row: DisplayImportRow;
   previewRow?: AttendancePreviewRow;
@@ -1125,21 +1140,58 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
   onApply: (decision: RowDecision) => void;
 }) {
   const result = previewRow?.result;
+  const cfg = previewRow?.ruleConfig;
+  // เวลามาตรฐาน "ไม่โดนหัก" ของคนนี้ (จากกฎเวลาในสัญญา) — ปุ่ม "ปกติ" จะเติมค่านี้
+  const stdIn = cfg?.morningCheckInCutoff || "07:50";
+  const stdNoon = cfg?.noonCheckInCutoff || "12:50";
+  const stdOut = cfg?.checkoutRequiredAt || "17:00";
+
   const [morningIn, setMorningIn] = useState(result?.morningIn || row.rawScans[0] || "");
   const [noonIn, setNoonIn] = useState(result?.noonIn || "");
   const [finalOut, setFinalOut] = useState(result?.finalOut || (row.rawScans.length > 1 ? row.rawScans[row.rawScans.length - 1] : ""));
   const [official, setOfficial] = useState(false);
+  const [absent, setAbsent] = useState(false);
+  const [earlyH, setEarlyH] = useState("");
+  const [earlyM, setEarlyM] = useState("");
   const [note, setNote] = useState("");
   const flags = previewRow?.result.flags ?? [];
+  const lockTimes = absent || official;   // ขาดงาน/ราชการ → ไม่ต้องกรอกเวลา
 
-  const saveTimes = () => onApply(official
-    ? { kind: "official", scans: [morningIn, noonIn, finalOut], note }
-    : { kind: "recompute", scans: [morningIn, noonIn, finalOut], note });
+  const earlyOverride = (() => {
+    const total = (parseInt(earlyH || "0", 10) || 0) * 60 + (parseInt(earlyM || "0", 10) || 0);
+    return total > 0 ? total : undefined;
+  })();
+
+  // ผลใหม่ (คำนวณสดตามที่กรอก) → โชว์เทียบกับผลเดิม
+  const newResult = useMemo(() => {
+    if (absent) return { absent: true, totalLateMinutes: 0, earlyOutMinutes: 0 };
+    if (official) return { absent: false, totalLateMinutes: 0, earlyOutMinutes: 0 };
+    if (!previewRow) return null;
+    const r = calculateAttendanceDay({ rawScans: cleanTimes([morningIn, noonIn, finalOut]), scheduleStatus: previewRow.scheduleStatus }, previewRow.ruleConfig);
+    return { absent: r.absent, totalLateMinutes: r.totalLateMinutes, earlyOutMinutes: earlyOverride ?? r.earlyOutMinutes };
+  }, [absent, official, previewRow, morningIn, noonIn, finalOut, earlyOverride]);
+
+  const saveMain = () => {
+    if (absent) { if (confirm("ยืนยันบันทึกเป็น “ขาดงาน”?")) onApply("absence"); return; }
+    if (official) { onApply({ kind: "official", scans: [morningIn, noonIn, finalOut], note }); return; }
+    onApply({ kind: "recompute", scans: [morningIn, noonIn, finalOut], note, earlyLeaveMinutes: earlyOverride });
+  };
+
+  const timeField = (label: string, value: string, set: (v: string) => void, placeholder: string, std: string) => (
+    <label className="text-xs text-slate-500">
+      <span className="flex items-center justify-between">{label}
+        <button type="button" disabled={lockTimes} onClick={() => set(std)} title={`ใส่เวลาปกติ ${std}`}
+          className="text-[10px] font-medium text-blue-600 hover:underline disabled:text-slate-300">ปกติ</button>
+      </span>
+      <input value={value} onChange={(event) => set(event.target.value)} placeholder={placeholder} disabled={lockTimes}
+        className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm disabled:bg-slate-50 disabled:text-slate-300" />
+    </label>
+  );
 
   return createPortal(
     <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl max-h-[92vh] overflow-y-auto" onClick={(event) => event.stopPropagation()}>
+        <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-slate-800">ตรวจ/แก้รายการเวลา</div>
             <div className="text-xs text-slate-500">{formatDate(row.date)} · {row.employeeLabel !== "-" ? row.employeeLabel : (row.scannerName || row.scannerCode)}</div>
@@ -1147,34 +1199,47 @@ function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
           <button onClick={onClose} className="text-lg text-slate-400 hover:text-slate-700">✕</button>
         </div>
         <div className="space-y-3 px-4 py-3">
-          <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">กรอกเวลาให้ครบ แล้วกด “บันทึกตามเวลาที่กรอก” ระบบจะคิดสาย/ออกก่อนให้เอง · หรือใช้ปุ่มลัด (ปกติ/ขาด/ข้าม) ด้านล่าง</div>
+          <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">กรอกเวลาให้ครบ (ปุ่ม “ปกติ” ท้ายช่อง = เติมเวลามาตรฐานไม่โดนหัก) แล้วกดบันทึก · ถ้าขาด/ราชการ ติ๊กช่องด้านล่าง</div>
           <div className="grid grid-cols-3 gap-2">
-            <label className="text-xs text-slate-500">สแกนเข้า
-              <input value={morningIn} onChange={(event) => setMorningIn(event.target.value)} placeholder="08:00" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
+            {timeField("สแกนเข้า", morningIn, setMorningIn, "08:00", stdIn)}
+            {timeField("กลับจากพัก", noonIn, setNoonIn, "13:00", stdNoon)}
+            {timeField("สแกนออก", finalOut, setFinalOut, "17:00", stdOut)}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" checked={absent} onChange={(event) => { setAbsent(event.target.checked); if (event.target.checked) setOfficial(false); }} /> ขาดงาน (ไม่มาทำงาน)
             </label>
-            <label className="text-xs text-slate-500">กลับจากพัก
-              <input value={noonIn} onChange={(event) => setNoonIn(event.target.value)} placeholder="13:00" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
-            </label>
-            <label className="text-xs text-slate-500">สแกนออก
-              <input value={finalOut} onChange={(event) => setFinalOut(event.target.value)} placeholder="17:00" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" checked={official} onChange={(event) => { setOfficial(event.target.checked); if (event.target.checked) setAbsent(false); }} /> ราชการ / ออกนอกสถานที่ (นับมาทำงาน ไม่หัก)
             </label>
           </div>
-          <label className="flex items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" checked={official} onChange={(event) => setOfficial(event.target.checked)} /> ราชการ / ออกนอกสถานที่ (นับมาทำงาน ไม่หัก)
-          </label>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            ออกก่อน (กำหนดเอง)
+            <input value={earlyH} onChange={(event) => setEarlyH(event.target.value)} disabled={lockTimes} placeholder="0" className="h-8 w-12 rounded border border-slate-200 px-2 text-center text-sm disabled:bg-slate-50" /> ชม.
+            <input value={earlyM} onChange={(event) => setEarlyM(event.target.value)} disabled={lockTimes} placeholder="0" className="h-8 w-12 rounded border border-slate-200 px-2 text-center text-sm disabled:bg-slate-50" /> นาที
+            <span className="text-[10px] text-slate-400">(กรอก = ใช้แทนที่ระบบคิด)</span>
+          </div>
           <label className="block text-xs text-slate-500">หมายเหตุ
             <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="เช่น ลืมสแกนออก / รถติด" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
           </label>
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            <div>สแกนดิบ: <span className="font-mono text-slate-700">{row.rawScans.join(" ") || "-"}</span></div>
-            {flags.length > 0 && <div className="mt-1">ปัญหาที่เจอ: {flagText(flags)}</div>}
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">ผลเดิม:</span> <span className="text-slate-600">{resultSummary(result)}</span>
+              <span className="text-slate-300">→</span>
+              <span className="text-slate-400">ผลใหม่:</span> <span className="font-semibold text-slate-800">{resultSummary(newResult)}</span>
+            </div>
+            <div className="mt-1 text-slate-400">สแกนดิบ: <span className="font-mono text-slate-600">{row.rawScans.join(" ") || "-"}</span></div>
+            {flags.length > 0 && <div className="mt-0.5 text-slate-400">ปัญหาที่เจอ: {flagText(flags)}</div>}
           </div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 px-4 py-3">
-          <button onClick={() => onApply("skip")} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">ข้าม ไม่หัก</button>
-          <button onClick={() => onApply("absence")} className="h-9 rounded-lg border border-amber-200 px-3 text-xs font-medium text-amber-700 hover:bg-amber-50">ขาดงาน</button>
-          <button onClick={() => onApply("normal")} className="h-9 rounded-lg border border-emerald-200 px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-50">ปกติ ไม่หัก</button>
-          <button onClick={saveTimes} className="h-9 rounded-lg bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800">บันทึกตามเวลาที่กรอก</button>
+        <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-white px-4 py-3">
+          <button onClick={() => { if (confirm("ข้ามรายการนี้ (ไม่คิดอะไร ไม่บันทึกเข้าเงินเดือน)?")) onApply("skip"); }}
+            title="ไม่นับรายการนี้เลย" className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">ข้ามรายการนี้</button>
+          <button onClick={() => { if (confirm("ตั้งเป็น “ปกติ ไม่หัก” (มาทำงาน ไม่คิดสาย/ออกก่อน)?")) onApply("normal"); }}
+            className="h-9 rounded-lg border border-emerald-200 px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-50">ปกติ ไม่หัก</button>
+          <button onClick={saveMain} className="h-9 rounded-lg bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800">
+            {absent ? "บันทึกเป็นขาดงาน" : "บันทึกค่าที่ตรวจแล้ว"}
+          </button>
         </div>
       </div>
     </div>,
