@@ -20,7 +20,7 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 import { ImageInput } from "@/components/image-input";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden } from "./drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, drawerBgStyle } from "./drawer-theme";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -240,7 +240,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto" style={{ background: dth.bg ?? undefined, zoom: drawerZoom(dth.size) }}>
+        <div className="flex-1 overflow-y-auto" style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size) }}>
           {/* บนสุด: สถานะ + ความคืบหน้า (รูปปกย้ายไปคอลัมน์ขวา) */}
           <div className="p-5 pb-4 space-y-4">
             {/* status row */}
@@ -253,7 +253,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             {/* progress */}
             <div>
               <div className="flex justify-between text-xs text-slate-400 mb-1"><span>{t("ความคืบหน้า", "Progress")}</span><span>{d.progress_percent}%</span></div>
-              <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-violet-500" style={{ width: `${d.progress_percent}%` }} /></div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full" style={{ width: `${d.progress_percent}%`, background: dth.accent }} /></div>
               {d.blocker_status === "blocked" && d.blocker_reason && <p className="text-xs text-red-600 mt-1">⚠ {t("ติดปัญหา", "Blocked")}: {d.blocker_reason}</p>}
             </div>
           </div>
@@ -261,8 +261,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) — โชว์จำนวนงานย่อย / คอนเทนต์ */}
           <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100">
             {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0], ["reference", t("📎 อ้างอิง", "📎 Reference"), (d.reference_html ?? "").trim() ? 1 : 0]] as const).map(([k, label, count]) => (
-              <button key={k} onClick={() => setTab(k)} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}>
-                {label}{count > 0 && <span className={`text-[11px] rounded-full px-1.5 ${tab === k ? "bg-violet-200 text-violet-800" : "bg-slate-200 text-slate-600"}`}>{count}</span>}
+              <button key={k} onClick={() => setTab(k)} style={tab === k ? { background: `${dth.accent}1f`, color: dth.accent } : undefined} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "" : "text-slate-500 hover:bg-slate-50"}`}>
+                {label}{count > 0 && <span className="text-[11px] rounded-full px-1.5" style={tab === k ? { background: `${dth.accent}33`, color: dth.accent } : { background: "#e2e8f0", color: "#475569" }}>{count}</span>}
               </button>
             ))}
           </div>
@@ -271,7 +271,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           {tab === "task" && (<>
           <div className={`flex ${twoCol ? (dth.swap ? "flex-row-reverse" : "flex-row") : "flex-col"} items-stretch`}>
             {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
-            <div className="flex-1 min-w-0 w-full p-5 space-y-4">
+            <div className={`flex-1 min-w-0 w-full ${densityCls(dth.density)}`}>
               {/* รายละเอียดงาน (ถ้ามี) */}
               {d.description && <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-600 whitespace-pre-wrap"><p className="text-xs text-slate-400 mb-1">{t("รายละเอียดงาน", "Description")}</p>{d.description}</div>}
 
@@ -351,7 +351,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
 
             {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
-            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 p-5 space-y-3 bg-slate-50/40 border-slate-100`}>
+            <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 ${densityCls(dth.density)} bg-slate-50/40 border-slate-100`}>
               {/* รูปปก (เล็ก) — โชว์ทั้งโหมดดู/แก้ */}
               {!isHidden(dth, "cover") && (
               <div>
@@ -397,7 +397,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   </div>
                   <div className="flex justify-end gap-2">
                     <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
-                    <button onClick={saveEdit} disabled={busy} className="h-8 px-4 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
+                    <button onClick={saveEdit} disabled={busy} style={{ background: dth.accent }} className="h-8 px-4 text-sm text-white rounded-lg disabled:opacity-50">{busy ? "..." : t("บันทึก", "Save")}</button>
                   </div>
                 </div>
               ) : (
@@ -492,7 +492,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
             <div className="flex gap-2">
               <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
-              <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">{t("ส่ง", "Send")}</button>
+              <button onClick={sendComment} style={{ background: dth.accent }} className="h-9 px-4 text-sm font-medium text-white rounded-lg shrink-0">{t("ส่ง", "Send")}</button>
             </div>
             {/* แจ้งเตือนถึง (@mention) — คนที่เลือกจะได้แจ้งเตือนเมื่อส่งคอมเมนต์ */}
             <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
@@ -516,7 +516,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 placeholder={t("พิมพ์ข้อมูลอ้างอิง…", "Type reference notes…")}
                 onUploadImage={async (f) => { const r = await uploadResizedImage(f, { folder: "creative-tasks", max: 1600 }); return r2ImageUrl(r.r2_key) ?? ""; }} />
               <div className="flex justify-end">
-                <button onClick={saveRef} disabled={refSaving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกอ้างอิง", "Save reference")}</button>
+                <button onClick={saveRef} disabled={refSaving} style={{ background: dth.accent }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกอ้างอิง", "Save reference")}</button>
               </div>
             </div>
           )}
@@ -544,12 +544,13 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           ) : actions.length === 0 ? (
             <p className="text-sm text-slate-400 text-center w-full">{isClosed ? `${t("งานปิดแล้ว", "Task closed")} (${statusMeta(d.status).label})` : t("ไม่มีการกระทำ", "No actions available")} — {t("ดูได้อย่างเดียว", "Read only")}</p>
           ) : actions.map((a, i) => {
+            const isPrimary = !["approve", "reject", "revise", "block"].includes(a.kind) && i === 0;
             const cls = a.kind === "approve" ? "bg-emerald-600 text-white hover:bg-emerald-700"
               : a.kind === "reject" ? "text-red-600 border border-red-200 hover:bg-red-50"
               : a.kind === "revise" ? "text-orange-700 border border-orange-200 hover:bg-orange-50"
               : a.kind === "block" ? "text-red-600 border border-red-200 hover:bg-red-50"
-              : i === 0 ? "flex-1 bg-violet-600 text-white hover:bg-violet-700" : "text-slate-600 border border-slate-200 hover:bg-slate-50";
-            return <button key={a.to_key} disabled={busy} onClick={() => handleMove(a.to_key)} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
+              : isPrimary ? "flex-1 text-white" : "text-slate-600 border border-slate-200 hover:bg-slate-50";
+            return <button key={a.to_key} disabled={busy} onClick={() => handleMove(a.to_key)} style={isPrimary ? { background: dth.accent } : undefined} className={`h-9 px-4 text-sm font-medium rounded-lg disabled:opacity-50 ${cls}`}>{a.label}</button>;
           })}
         </div>
       </div>

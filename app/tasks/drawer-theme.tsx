@@ -8,18 +8,28 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { uploadResizedImage } from "@/components/image-attach";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 
-export type DrawerTheme = { accent: string; bg: string | null; size: "sm" | "md" | "lg"; swap: boolean; hidden: string[] };
-export const DEFAULT_DRAWER_THEME: DrawerTheme = { accent: "#7c3aed", bg: null, size: "md", swap: false, hidden: [] };
+export type DrawerDensity = "compact" | "normal" | "spacious";
+export type DrawerTheme = { accent: string; bg: string | null; bgImage: string | null; size: "sm" | "md" | "lg"; density: DrawerDensity; swap: boolean; hidden: string[] };
+export const DEFAULT_DRAWER_THEME: DrawerTheme = { accent: "#7c3aed", bg: null, bgImage: null, size: "md", density: "normal", swap: false, hidden: [] };
 
 export function mergeDrawerTheme(v: unknown): DrawerTheme {
   const o = (v ?? {}) as Partial<DrawerTheme>;
-  return { accent: o.accent ?? DEFAULT_DRAWER_THEME.accent, bg: o.bg ?? null, size: o.size ?? "md", swap: !!o.swap, hidden: Array.isArray(o.hidden) ? o.hidden : [] };
+  return { accent: o.accent ?? DEFAULT_DRAWER_THEME.accent, bg: o.bg ?? null, bgImage: o.bgImage ?? null, size: o.size ?? "md", density: o.density ?? "normal", swap: !!o.swap, hidden: Array.isArray(o.hidden) ? o.hidden : [] };
 }
 // ขนาดเนื้อหา → zoom (สเกลทั้ง drawer body แบบสัดส่วน · รองรับ Chromium)
 export function drawerZoom(size: DrawerTheme["size"]): number { return size === "sm" ? 0.92 : size === "lg" ? 1.1 : 1; }
 export const isHidden = (theme: DrawerTheme, key: string) => theme.hidden.includes(key);
+// ระยะห่าง/ความแน่น → คลาส padding + space ของ pane
+export function densityCls(d: DrawerDensity): string { return d === "compact" ? "p-3 space-y-3" : d === "spacious" ? "p-6 space-y-7" : "p-5 space-y-5"; }
+// สไตล์พื้นหลัง drawer (รูป + ฉากขาวจางให้อ่านง่าย · หรือสีเดียว)
+export function drawerBgStyle(theme: DrawerTheme): React.CSSProperties {
+  if (theme.bgImage) { const u = r2ImageUrl(theme.bgImage); return u ? { backgroundImage: `linear-gradient(rgba(255,255,255,0.86),rgba(255,255,255,0.86)), url(${u})`, backgroundSize: "cover", backgroundAttachment: "local" } : {}; }
+  return theme.bg ? { background: theme.bg } : {};
+}
 
 export function useDrawerTheme(which: "task" | "content") {
   const prefKey = `tasks_drawer_theme_${which}`;
@@ -39,8 +49,16 @@ export function useDrawerTheme(which: "task" | "content") {
 export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTheme; update: (p: Partial<DrawerTheme>) => void; sections: { key: string; label: string }[] }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [bgBusy, setBgBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const toggleHidden = (key: string) => update({ hidden: theme.hidden.includes(key) ? theme.hidden.filter((x) => x !== key) : [...theme.hidden, key] });
+  const onPickBg = async (file: File | null | undefined) => {
+    if (!file) return;
+    setBgBusy(true);
+    try { const up = await uploadResizedImage(file, { folder: "drawer-bg", max: 1600 }); update({ bgImage: up.r2_key }); }
+    catch { alert(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
+    finally { setBgBusy(false); }
+  };
   return (
     <div className="relative" ref={ref}>
       <button onClick={() => setOpen((o) => !o)} title={t("แต่งหน้า drawer (ของฉัน)", "Customize drawer (yours)")} className="h-8 px-2 text-xs text-slate-400 hover:text-violet-600 rounded-md hover:bg-slate-50">🎨</button>
@@ -59,11 +77,27 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
                 <button key={s} onClick={() => update({ size: s })} className={`h-7 px-2.5 text-xs rounded border ${theme.size === s ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{s === "sm" ? t("เล็ก", "S") : s === "lg" ? t("ใหญ่", "L") : t("กลาง", "M")}</button>
               ))}
             </div>
-            {/* พื้นหลัง */}
+            {/* ความแน่น (ระยะห่าง) */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 w-20">{t("ความแน่น", "Density")}</span>
+              {(["compact", "normal", "spacious"] as const).map((d) => (
+                <button key={d} onClick={() => update({ density: d })} className={`h-7 px-2.5 text-xs rounded border ${theme.density === d ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{d === "compact" ? t("แน่น", "Compact") : d === "spacious" ? t("โปร่ง", "Spacious") : t("ปกติ", "Normal")}</button>
+              ))}
+            </div>
+            {/* พื้นหลัง (สี) */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500 w-20">{t("พื้นหลัง", "Background")}</span>
-              <input type="color" value={theme.bg ?? "#ffffff"} onChange={(e) => update({ bg: e.target.value })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
-              <button onClick={() => update({ bg: null })} className={`h-7 px-2.5 text-xs rounded border ${theme.bg === null ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t("ขาว", "White")}</button>
+              <input type="color" value={theme.bg ?? "#ffffff"} onChange={(e) => update({ bg: e.target.value, bgImage: null })} className="w-9 h-7 p-0 border border-slate-200 rounded cursor-pointer" />
+              <button onClick={() => update({ bg: null, bgImage: null })} className={`h-7 px-2.5 text-xs rounded border ${theme.bg === null && !theme.bgImage ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{t("ขาว", "White")}</button>
+            </div>
+            {/* พื้นหลัง (รูป) */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 w-20">{t("รูปพื้นหลัง", "BG image")}</span>
+              <label className={`h-7 px-2.5 text-xs rounded border inline-flex items-center cursor-pointer ${theme.bgImage ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"} ${bgBusy ? "opacity-60 pointer-events-none" : ""}`}>
+                {bgBusy ? t("กำลังอัป…", "Uploading…") : theme.bgImage ? t("เปลี่ยนรูป", "Change") : t("อัปโหลด", "Upload")}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => { void onPickBg(e.target.files?.[0]); e.target.value = ""; }} />
+              </label>
+              {theme.bgImage && <button onClick={() => update({ bgImage: null })} className="h-7 px-2 text-xs rounded border border-slate-200 text-slate-500 hover:bg-slate-50">{t("เอาออก", "Remove")}</button>}
             </div>
             {/* สีหลัก (แถบบน) */}
             <div className="flex items-center gap-2">

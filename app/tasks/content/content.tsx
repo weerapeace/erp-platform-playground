@@ -31,7 +31,7 @@ import {
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden } from "../drawer-theme";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden, densityCls, drawerBgStyle } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 
@@ -509,9 +509,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         </div>
 
         {/* ===== จอกว้าง: 2 ฝั่งปรับขนาดได้ · มือถือ: เรียงบน-ล่าง เลื่อนรวด ===== */}
-        <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ background: dth.bg ?? undefined, zoom: drawerZoom(dth.size), flexDirection: isWide && dth.swap ? "row-reverse" : undefined }}>
+        <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size), flexDirection: isWide && dth.swap ? "row-reverse" : undefined }}>
           {/* ───── ฝั่งซ้าย: ข้อมูล + แนบงาน ───── */}
-          <div className={isWide ? "overflow-y-auto p-5 space-y-5 min-w-0" : "p-4 space-y-5"} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
+          <div className={isWide ? `overflow-y-auto ${densityCls(dth.density)} min-w-0` : densityCls(dth.density)} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* status + schedule + assignee */}
             <div className="grid grid-cols-2 gap-3">
               <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
@@ -643,7 +643,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           )}
 
           {/* ───── ฝั่งขวา: แคปชั่นแยกแพลตฟอร์ม ───── */}
-          <div className={isWide ? "flex-1 overflow-y-auto p-5 space-y-3 min-w-0 bg-slate-50/40" : "p-4 space-y-3 bg-slate-50/40 border-t border-slate-200"}>
+          <div className={isWide ? `flex-1 overflow-y-auto ${densityCls(dth.density)} min-w-0 bg-slate-50/40` : `${densityCls(dth.density)} bg-slate-50/40 border-t border-slate-200`}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
               <div className="flex items-center gap-3">
@@ -662,7 +662,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
           {!d.is_template && <button onClick={saveAsTemplate} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 mr-auto">💾 {t("บันทึกเป็นเทมเพลต", "Save as Template")}</button>}
           <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
-          <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
+          <button onClick={save} disabled={saving} style={{ background: dth.accent }} className="h-9 px-5 text-sm font-medium text-white rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
         </div>
       </div>
 
