@@ -15,11 +15,12 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
   CONTENT_STATUS_META, POST_TYPES,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
-  listCampaigns, listBrands, listHashtags, createHashtag, getTask,
+  listCampaigns, listBrands, listHashtags, createHashtag, getTask, listSubtasks,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors,
   listContentAttachments, addContentAttachment, deleteContentAttachment,
   getPlatformSettings, savePlatformSettings, getLinkPreview,
@@ -318,6 +319,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   // แนบงาน (รูป/วิดีโอ/ลิงก์) + ตั้งค่าแพลตฟอร์มกลาง
   const [attachments, setAttachments] = useState<ContentAttachment[]>([]);
   const [pset, setPset] = useState<PlatformSettings>({});
+  // รูป/ลิงก์ที่ "ส่งมาแล้ว" จากงานย่อยที่อนุมัติแล้ว (ของงานที่ผูกไว้) — ไว้หยิบไปโพสต์
+  const [taskMedia, setTaskMedia] = useState<{ images: { key: string; label: string | null }[]; links: { label: string | null; url: string | null }[] }>({ images: [], links: [] });
+  const [tmLb, setTmLb] = useState(-1);   // ดูรูปจากงานเต็มจอ
   // แบ่ง 2 ฝั่ง ปรับขนาดได้ (ลากเส้นกลาง) — จำสัดส่วนใน localStorage
   const bodyRef = useRef<HTMLDivElement>(null);
   const leftPctRef = useRef(46);
@@ -347,6 +351,34 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   useEffect(() => { loadAttachments(); }, [loadAttachments]);
   const loadPset = useCallback(async () => { try { setPset(await getPlatformSettings()); } catch { /* ว่าง */ } }, []);
   useEffect(() => { loadPset(); }, [loadPset]);
+
+  // ดึงรูป/ลิงก์จากงานย่อยที่ "อนุมัติแล้ว" ของงานที่ผูกไว้ (รวมรูปแนบงาน + รูปต่อ SKU, ตัดซ้ำ)
+  const loadTaskMedia = useCallback(async () => {
+    if (!d?.task_id) { setTaskMedia({ images: [], links: [] }); return; }
+    try {
+      const subs = await listSubtasks(d.task_id);
+      const seen = new Set<string>();
+      const images: { key: string; label: string | null }[] = [];
+      const links: { label: string | null; url: string | null }[] = [];
+      for (const s of subs.filter((x) => x.status === "approved")) {
+        for (const a of (s.attachments ?? [])) {
+          if (a.kind === "image" && a.r2_key) { if (!seen.has(a.r2_key)) { seen.add(a.r2_key); images.push({ key: a.r2_key, label: s.title }); } }
+          else if (a.kind !== "image" && a.url) { links.push({ label: a.label ?? s.title, url: a.url }); }
+        }
+        for (const arr of Object.values(s.image_sync_targets?.sku_images ?? {})) for (const k of (arr as string[])) { if (k && !seen.has(k)) { seen.add(k); images.push({ key: k, label: s.title }); } }
+      }
+      setTaskMedia({ images, links });
+    } catch { /* ว่าง */ }
+  }, [d?.task_id]);
+  useEffect(() => { loadTaskMedia(); }, [loadTaskMedia]);
+
+  // ก๊อปลิงก์รูป (URL เต็ม) ไปใช้ลงโพสต์
+  const copyImageUrl = async (key: string) => {
+    const rel = r2ImageUrl(key); if (!rel) return;
+    const abs = typeof window !== "undefined" ? window.location.origin + rel : rel;
+    try { await navigator.clipboard.writeText(abs); pushToast("success", t("ก๊อปลิงก์รูปแล้ว", "Image link copied")); }
+    catch { pushToast("error", t("ก๊อปไม่สำเร็จ", "Copy failed")); }
+  };
 
   // ปรับสัดส่วน 2 ฝั่งด้วยการลากเส้นแบ่ง
   useEffect(() => {
@@ -498,9 +530,42 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
             </div>
 
-            {/* แนบงาน: รูป / วิดีโอ / ลิงก์พรีวิว */}
+            {/* รูป/ลิงก์จากงาน (ส่งมาแล้ว) — หยิบไปโพสต์ได้เลย */}
+            {d.task_id && (
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปจากงาน (ส่งมาแล้ว) — หยิบไปโพสต์", "From the task (submitted) — grab to post")}</p>
+                {taskMedia.images.length === 0 && taskMedia.links.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">{t("ยังไม่มีรูป/ลิงก์จากงานย่อยที่อนุมัติแล้ว", "No media from approved subtasks yet")}</p>
+                ) : (
+                  <>
+                    {taskMedia.images.length > 0 && (
+                      <div className="grid grid-cols-4 gap-2">
+                        {taskMedia.images.map((im, i) => (
+                          <div key={im.key} className="relative group">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={r2ImageUrl(im.key, 320) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(i)} title={t("กดดูเต็มจอ", "Click to view full")} className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+                            <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
+                              <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>
+                              <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {taskMedia.links.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {taskMedia.links.map((l, i) => <a key={i} href={l.url ?? "#"} target="_blank" rel="noreferrer" className="block text-xs text-violet-700 hover:underline truncate">🔗 {l.label || l.url}</a>)}
+                      </div>
+                    )}
+                  </>
+                )}
+                <p className="text-[11px] text-slate-300 mt-1">{t("ดึงจากงานย่อยที่อนุมัติแล้ว · กดรูป=ดูเต็มจอ · 🔗 ก๊อปลิงก์ · ⬇ ดาวน์โหลดไปโพสต์", "From approved subtasks · click=view · 🔗 copy link · ⬇ download")}</p>
+              </div>
+            )}
+
+            {/* แนบงานเพิ่มเอง: รูป / วิดีโอ / ลิงก์พรีวิว (เผื่อแนบนอกเหนือจากงาน) */}
             <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("แนบงาน (รูป · วิดีโอ · ลิงก์)", "Attach work (image · video · link)")}</p>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("แนบเพิ่มเอง (รูป · วิดีโอ · ลิงก์)", "Attach extra (image · video · link)")}</p>
               <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
             </div>
 
@@ -575,6 +640,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
       {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
+      <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
     </>
   );
 }
