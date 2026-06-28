@@ -180,10 +180,10 @@ export function OverviewDashboard({
           <img src={`/api/r2-image?key=${encodeURIComponent(theme.hero.petUrl)}&w=200`} alt="" className="absolute bottom-1 right-3 h-16 w-16 object-contain drop-shadow-lg pointer-events-none select-none" />
         )}
         <div className="relative p-5 sm:p-6">
-          {/* แถวบน: เมนูเลือกมุมมอง (ซ้าย) + ปุ่ม (ขวา) */}
-          <div className="flex items-center justify-between gap-3 mb-4">
+          {/* แถวบน: เมนูเลือกมุมมอง (ซ้าย) + ปุ่ม (ขวา) — มือถือ: ห่อบรรทัด */}
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
             <div className="min-w-0">{viewSwitcher}</div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
               <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
                 className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
               {onQuickCreate && <button onClick={onQuickCreate} title={t("เพิ่มงานเร็ว ๆ", "Quick add a task")}

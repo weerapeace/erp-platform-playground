@@ -18,6 +18,7 @@ const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) =
 const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 import { ImageInput } from "@/components/image-input";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -137,7 +138,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
-  const twoCol = drawerW >= 820;   // กว้างพอ → ซ้าย/ขวาเรียงข้างกัน · แคบ → เรียงบน-ล่าง (อิงความกว้าง drawer จริง ไม่ใช่ viewport)
+  const wideScreen = useMediaQuery("(min-width: 860px)");   // จอกว้างพอ (แท็บเล็ตแนวนอน/เดสก์ท็อป)
+  const twoCol = drawerW >= 820 && wideScreen;   // กว้างพอ → ซ้าย/ขวาเรียงข้างกัน · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
 
   const load = useCallback(async () => {
     try { setDetail(await getTask(taskId)); }

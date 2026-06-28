@@ -30,6 +30,7 @@ import {
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { apiFetch } from "@/lib/api";
+import { useMediaQuery } from "@/lib/use-media-query";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 
@@ -120,7 +121,7 @@ export function ContentPageView() {
 
   return (
     <StandaloneShell title={t("คอนเทนต์ Social", "Social Content")} icon="📱" accent="violet">
-      <div className="bg-white border-b border-slate-200 px-8 py-6">
+      <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-6">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{t("คอนเทนต์ Social", "Social Content")}</h1>
@@ -138,7 +139,7 @@ export function ContentPageView() {
         </div>
       </div>
 
-      <div className="px-8 py-6">
+      <div className="px-4 sm:px-8 py-6">
         {loading ? <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
           : view === "templates" ? (
             <div>
@@ -328,6 +329,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [taskMedia, setTaskMedia] = useState<{ images: { key: string; label: string | null }[]; links: { label: string | null; url: string | null }[] }>({ images: [], links: [] });
   const [tmLb, setTmLb] = useState(-1);   // ดูรูปจากงานเต็มจอ
   // แบ่ง 2 ฝั่ง ปรับขนาดได้ (ลากเส้นกลาง) — จำสัดส่วนใน localStorage
+  const isWide = useMediaQuery("(min-width: 1024px)");   // จอกว้าง → 2 ฝั่ง · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
   const bodyRef = useRef<HTMLDivElement>(null);
   const leftPctRef = useRef(46);
   const [leftPct, setLeftPctState] = useState(46);
@@ -494,10 +496,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           </div>
         </div>
 
-        {/* ===== 2 ฝั่ง ปรับขนาดได้: ซ้าย = งาน/แนบไฟล์/สินค้า · ขวา = แคปชั่น ===== */}
-        <div ref={bodyRef} className="flex-1 flex min-h-0">
+        {/* ===== จอกว้าง: 2 ฝั่งปรับขนาดได้ · มือถือ: เรียงบน-ล่าง เลื่อนรวด ===== */}
+        <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"}>
           {/* ───── ฝั่งซ้าย: ข้อมูล + แนบงาน ───── */}
-          <div className="overflow-y-auto p-5 space-y-5 min-w-0" style={{ flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 }}>
+          <div className={isWide ? "overflow-y-auto p-5 space-y-5 min-w-0" : "p-4 space-y-5"} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* status + schedule */}
             <div className="grid grid-cols-2 gap-3">
               <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
@@ -620,13 +622,15 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             {(status === "published") && <div><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
           </div>
 
-          {/* ───── เส้นแบ่งลากได้ ───── */}
-          <div onMouseDown={startDrag} title={t("ลากเพื่อปรับขนาด", "Drag to resize")} className="w-1.5 shrink-0 cursor-col-resize bg-slate-100 hover:bg-violet-300 active:bg-violet-400 transition-colors relative">
-            <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
-          </div>
+          {/* ───── เส้นแบ่งลากได้ (เฉพาะจอกว้าง) ───── */}
+          {isWide && (
+            <div onMouseDown={startDrag} title={t("ลากเพื่อปรับขนาด", "Drag to resize")} className="w-1.5 shrink-0 cursor-col-resize bg-slate-100 hover:bg-violet-300 active:bg-violet-400 transition-colors relative">
+              <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
+            </div>
+          )}
 
           {/* ───── ฝั่งขวา: แคปชั่นแยกแพลตฟอร์ม ───── */}
-          <div className="flex-1 overflow-y-auto p-5 space-y-3 min-w-0 bg-slate-50/40">
+          <div className={isWide ? "flex-1 overflow-y-auto p-5 space-y-3 min-w-0 bg-slate-50/40" : "p-4 space-y-3 bg-slate-50/40 border-t border-slate-200"}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
               <div className="flex items-center gap-3">
