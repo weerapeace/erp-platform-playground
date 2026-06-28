@@ -7,7 +7,8 @@
 // ข้อมูลจาก /api/creative-tasks (ดู app/tasks/data.ts)
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase-browser";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { HoverImage } from "@/components/hover-image";
 import { useAuth } from "@/components/auth";
@@ -148,8 +149,21 @@ export default function TasksPage() {
     else if (v === "table") setView("overview");   // แท็บตารางถูกรวมเข้าภาพรวมแล้ว → ลิงก์เดิมมาที่ภาพรวม
   }, []);
 
-  // หลังบันทึก/ลบ → บังคับโหลดงานใหม่ (focus revalidate มีในตัว hook แล้ว)
-  const reload = useCallback(async () => { await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]); }, [tasksSWR, mineSWR, subsSWR]);
+  // เรียลไทม์ (ของกลาง Supabase broadcast — ไม่แตะ RLS ตารางงาน): มีคนแก้ → ทุกจอ revalidate เอง ไม่ต้อง refresh
+  const chRef = useRef<ReturnType<typeof supabaseBrowser.channel> | null>(null);
+  const revalidateAll = useCallback(() => { void tasksSWR.revalidate(true); void mineSWR.revalidate(true); void subsSWR.revalidate(true); }, [tasksSWR, mineSWR, subsSWR]);
+  useEffect(() => {
+    const ch = supabaseBrowser.channel("creative-board", { config: { broadcast: { self: false } } });
+    ch.on("broadcast", { event: "changed" }, () => revalidateAll()).subscribe();
+    chRef.current = ch;
+    return () => { try { supabaseBrowser.removeChannel(ch); } catch { /* noop */ } chRef.current = null; };
+  }, [revalidateAll]);
+
+  // หลังบันทึก/ลบ → โหลดงานใหม่ + กระจาย broadcast ให้จออื่นอัปเดตทันที
+  const reload = useCallback(async () => {
+    await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]);
+    try { chRef.current?.send({ type: "broadcast", event: "changed", payload: {} }); } catch { /* noop */ }
+  }, [tasksSWR, mineSWR, subsSWR]);
 
   // ธีมหน้าภาพรวม "ของฉัน" — มีธีมส่วนตัวใช้เลย · ไม่มี → ใช้ธีมเริ่มต้นของทีม (ถ้าแอดมินตั้งไว้)
   useEffect(() => {
