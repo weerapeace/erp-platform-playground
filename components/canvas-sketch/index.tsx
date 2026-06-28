@@ -478,6 +478,24 @@ export function CanvasSketch({
     if (editable) queueSave();
   };
 
+  // ทำ "หัวข้อย่อย" (•) หรือ "เลขลำดับ" (1. 2. 3.) ให้กล่องข้อความที่เลือก — workaround (Excalidraw ไม่มี list ในตัว)
+  const listifySelected = (mode: "bullet" | "number") => {
+    const api = apiRef.current; if (!api) return;
+    const sel = api.getAppState().selectedElementIds || {};
+    api.updateScene({ elements: (api.getSceneElements() as any[]).map((e) => {
+      if (e.type !== "text" || !sel[e.id] || e.isDeleted) return e;
+      let i = 0;
+      const text = String(e.text ?? "").split("\n").map((ln: string) => {
+        const s = ln.replace(/^\s*(?:[•\-]\s+|\d+\.\s+)/, "");   // ลบ bullet/เลขเดิมก่อน (กดซ้ำ = สลับ/อัปเดต)
+        if (!s.trim()) return s;
+        i++;
+        return mode === "bullet" ? `• ${s}` : `${i}. ${s}`;
+      }).join("\n");
+      return { ...e, text, originalText: text, version: (e.version ?? 0) + 1 };
+    }) });
+    if (editable) queueSave();
+  };
+
   // ถอนโฟกัสจากปุ่ม/ช่องของเรา → คืนให้กระดาน เพื่อให้คีย์ลัด (R/A/T/P) ทำงาน
   const blurActive = () => { try { (document.activeElement as HTMLElement)?.blur?.(); } catch { /* noop */ } };
 
@@ -537,6 +555,13 @@ export function CanvasSketch({
             <button onClick={() => { setFont(selFont - 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">−</button>
             <input type="number" value={selFont} onChange={(e) => { const v = parseInt(e.target.value || "0", 10); if (v) setFont(v); }} className="w-12 h-6 text-center border border-slate-200 rounded" />
             <button onClick={() => { setFont(selFont + 2); blurActive(); }} className="h-5 w-5 rounded hover:bg-slate-100">＋</button>
+          </span>
+        )}
+        {editable && serverCanEdit && selFont != null && (
+          <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
+            <span className="text-slate-400">รายการ</span>
+            <button onClick={() => { listifySelected("bullet"); blurActive(); }} title="ทำหัวข้อย่อย (•) ให้ข้อความที่เลือก" className="h-5 px-1.5 rounded hover:bg-slate-100">• –</button>
+            <button onClick={() => { listifySelected("number"); blurActive(); }} title="ใส่เลขลำดับ (1. 2. 3.) ให้ข้อความที่เลือก" className="h-5 px-1.5 rounded hover:bg-slate-100">1.</button>
           </span>
         )}
         {editable && serverCanEdit && selFont != null && (
