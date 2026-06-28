@@ -12,8 +12,8 @@ import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from 
 import { StandaloneShell } from "@/components/standalone-shell";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
-import { SkuPicker, ParentSkuPicker } from "@/components/pickers";
-import type { SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
+import { SkuPicker, ParentSkuPicker, UserPicker } from "@/components/pickers";
+import type { SkuPickerValue, ParentSkuPickerValue, UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -192,6 +192,7 @@ export function ContentPageView() {
                   <div className="flex items-center gap-2 text-xs text-slate-400 mt-2 flex-wrap">
                     {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
                     {c.post_type && <span>· {POST_TYPE_LABEL[c.post_type] ?? c.post_type}</span>}
+                    {c.assignee_label && <span>· 🙋 {c.assignee_label}</span>}
                     {c.scheduled_at && <span>· 🗓 {c.scheduled_at.slice(0, 16).replace("T", " ")}</span>}
                   </div>
                 </div>
@@ -309,6 +310,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [status, setStatus] = useState<ContentStatus>("draft");
   const [scheduledAt, setScheduledAt] = useState("");
   const [publishedUrl, setPublishedUrl] = useState("");
+  const [assignee, setAssignee] = useState<UserPickerValue | null>(null);   // ผู้รับผิดชอบคอนเทนต์
   const [saving, setSaving] = useState(false);
   // แม่แบบ + ส่วนลด
   const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
@@ -347,6 +349,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     try {
       const detail = await getContent(contentId);
       setD(detail); setStatus(detail.status); setScheduledAt(detail.scheduled_at ? detail.scheduled_at.slice(0, 16) : ""); setPublishedUrl(detail.published_url ?? "");
+      setAssignee(detail.assignee_id ? ({ id: detail.assignee_id, name: detail.assignee_label ?? "" } as UserPickerValue) : null);
       setLinks(Array.isArray(detail.product_links) ? detail.product_links : []);
       setDiscountValue(detail.discount_value != null ? String(detail.discount_value) : "");
       setDiscountPct(!!detail.discount_is_percent);
@@ -469,7 +472,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     setSaving(true);
     try {
       await updateContent(contentId, {
-        status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null,
+        status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null, assignee_id: assignee?.id ?? null,
         sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
         discount_value: discountValue === "" ? null : Number(discountValue), discount_is_percent: discountPct,
         product_links: links.filter((l) => l.url.trim()), captions: caps.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags, caption_type: c.caption_type ?? "short" })),
@@ -509,10 +512,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ background: dth.bg ?? undefined, zoom: drawerZoom(dth.size), flexDirection: isWide && dth.swap ? "row-reverse" : undefined }}>
           {/* ───── ฝั่งซ้าย: ข้อมูล + แนบงาน ───── */}
           <div className={isWide ? "overflow-y-auto p-5 space-y-5 min-w-0" : "p-4 space-y-5"} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
-            {/* status + schedule */}
+            {/* status + schedule + assignee */}
             <div className="grid grid-cols-2 gap-3">
               <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
               <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
+              <div className="col-span-2"><label className="text-xs text-slate-400">{t("ผู้รับผิดชอบคอนเทนต์", "Content assignee")}</label><UserPicker value={assignee} onChange={setAssignee} disableCreate /></div>
             </div>
 
             {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}

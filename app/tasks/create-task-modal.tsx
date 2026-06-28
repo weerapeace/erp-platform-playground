@@ -109,6 +109,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   };
 
   const addBlankSub = () => { setSubs((p) => [...p, { include: true, title: "", description: null, required_before_next: false, assignees: [], type: "custom", config: {} }]); setDirty(true); };
+  const addContentItem = () => { setContentItems((p) => [...p, { title: "", platforms: [] }]); setDirty(true); };
+  const patchContentItem = (i: number, patch: Partial<TemplateContentItem>) => { setContentItems((p) => p.map((c, j) => j === i ? { ...c, ...patch } : c)); setDirty(true); };
+  const removeContentItem = (i: number) => { setContentItems((p) => p.filter((_, j) => j !== i)); setDirty(true); };
   const patchSub = (i: number, p: Partial<SubRow>) => { setSubs((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...p } : r))); setDirty(true); };
   const removeSub = (i: number) => { setSubs((rows) => rows.filter((_, idx) => idx !== i)); setDirty(true); };
 
@@ -246,10 +249,39 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           {subs.length === 0 ? (
             <div className="border border-dashed border-slate-200 rounded-lg p-6 text-center text-sm text-slate-400">{t("ยังไม่มีงานย่อย — เลือกเทมเพลตในขั้นแรก หรือกด ปุ่ม เพิ่มงานย่อย (ข้ามได้ถ้าไม่ต้องการ)","No subtasks yet — choose a Template in step 1, or click Add subtask (optional)")}</div>
           ) : (
-            <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
               {subs.map((row, i) => <SubRowEditor key={i} row={row} onChange={(p) => patchSub(i, p)} onRemove={() => removeSub(i)} />)}
             </div>
           )}
+
+          {/* คอนเทนต์ social (สร้างพร้อมงาน) + ผู้รับผิดชอบต่อคอนเทนต์ */}
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-slate-600">📱 {t("คอนเทนต์ social (สร้างพร้อมงาน)", "Social content (created with the task)")}</p>
+              <button onClick={addContentItem} className="h-8 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">＋ {t("เพิ่มคอนเทนต์", "Add content")}</button>
+            </div>
+            {contentItems.length === 0 ? (
+              <div className="border border-dashed border-slate-200 rounded-lg p-4 text-center text-xs text-slate-400">{t("ยังไม่มีคอนเทนต์ (ข้ามได้ · มาเพิ่มทีหลังที่แท็บคอนเทนต์ได้)", "No content yet (optional · can add later in the Content tab)")}</div>
+            ) : (
+              <div className="space-y-2">
+                {contentItems.map((c, i) => (
+                  <div key={i} className="border border-slate-200 rounded-lg p-2.5 space-y-1.5 bg-violet-50/10">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">📱</span>
+                      <input value={c.title} onChange={(e) => patchContentItem(i, { title: e.target.value })} placeholder={t("ชื่อคอนเทนต์ เช่น โพสต์เปิดตัว 7.7", "Content title")} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
+                      <button onClick={() => removeContentItem(i)} className="text-slate-300 hover:text-red-500 text-sm px-1" title={t("ลบ", "Remove")}>✕</button>
+                    </div>
+                    <div className="pl-7 flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] text-slate-400">{t("ผู้รับผิดชอบ:", "Assignee:")}</span>
+                      {c.assignee_id
+                        ? <span className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{c.assignee_label || t("ผู้ใช้", "User")}<button onClick={() => patchContentItem(i, { assignee_id: null, assignee_label: null })} className="text-slate-400 hover:text-red-500">✕</button></span>
+                        : <div className="w-56"><UserPicker value={null} onChange={(v) => { if (v) patchContentItem(i, { assignee_id: v.id, assignee_label: v.name }); }} disableCreate /></div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

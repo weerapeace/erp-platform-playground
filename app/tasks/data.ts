@@ -308,6 +308,7 @@ export type ContentItem = {
   product_links: { platform: string; url: string }[]; note: string | null; is_template?: boolean; updated_at: string;
   discount_value?: number | null; discount_is_percent?: boolean;
   brand_shop_channels?: { label: string; value: string }[];
+  assignee_id?: string | null; assignee_label?: string | null;   // ผู้รับผิดชอบคอนเทนต์
 };
 
 // ดึงสีของ SKU ลูกทั้งหมดใต้ Parent SKU (รวมไม่ซ้ำ เช่น ["ดำ","น้ำตาล","แดง"])
@@ -460,7 +461,7 @@ export async function listBrandPrompts(brandId: string): Promise<BrandPrompt[]> 
 export async function saveBrandPrompt(brand_id: string, subtask_type: string, prompt_template: string | null): Promise<void> {
   await jsonOrThrow(await apiFetch("/api/brand-prompts", { method: "PATCH", body: JSON.stringify({ brand_id, subtask_type, prompt_template }) }));
 }
-export type TemplateContentItem = { title: string; post_type?: string | null; platforms?: string[] };
+export type TemplateContentItem = { title: string; post_type?: string | null; platforms?: string[]; assignee_id?: string | null; assignee_label?: string | null };
 export type TaskTemplate = {
   id: string; name: string; task_type: string | null; default_priority: string;
   brand_id: string | null; brand_label?: string | null; brand_color?: string | null; description: string | null;
