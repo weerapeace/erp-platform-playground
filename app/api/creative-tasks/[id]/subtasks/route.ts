@@ -187,18 +187,33 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   }
 
   // ⑦ "เริ่มงาน" = คนกดเป็นผู้รับผิดชอบ "คนเดียว" (ลบคนอื่นออก — งานย่อย 1 งาน = ผู้ทำ 1 คน)
-  //    "ยกเลิกเริ่มงาน" (กลับเป็นยังไม่เริ่ม) = เคลียร์ผู้รับผิดชอบ · ส่งงาน/อนุมัติแล้วยกเลิกไม่ได้
+  //    "ยกเลิกเริ่มงาน" (กลับเป็นยังไม่เริ่ม) = คืนผู้รับผิดชอบ "ทั้งหมด" ที่มีอยู่ก่อนเริ่ม · ส่งงาน/อนุมัติแล้วยกเลิกไม่ได้
   if (patch.status === "in_progress" && user?.id && !Array.isArray(body.assignee_ids)) {
-    // เริ่มงาน = คนกดเป็นผู้ทำคนเดียว (ลบคนอื่น) · คง assignee_id = "ผู้รับผิดชอบเริ่มต้น" ที่หัวหน้ามอบไว้
+    // เก็บ "ผู้รับผิดชอบเดิมทั้งหมด" ก่อนเริ่ม ไว้ใน config.pre_start_assignees → ใช้คืนทั้งหมดตอนยกเลิกเริ่ม
+    const [{ data: curRow }, { data: curA }] = await Promise.all([
+      admin.from("erp_creative_subtasks").select("config").eq("id", subtaskId).eq("task_id", id).maybeSingle(),
+      admin.from("erp_creative_subtask_assignees").select("user_id").eq("subtask_id", subtaskId),
+    ]);
+    const before = ((curA ?? []) as { user_id: string }[]).map((r) => r.user_id).filter(Boolean);
+    const prevCfg = (((curRow as { config?: Record<string, unknown> } | null)?.config) ?? {}) as Record<string, unknown>;
+    patch.config = { ...prevCfg, pre_start_assignees: before };
+    // เริ่มงาน = คนกดเป็นผู้ทำคนเดียว (ลบคนอื่น)
     await setSubtaskAssignees(admin, subtaskId, [user.id]);
   } else if (patch.status === "todo" && user?.id && !Array.isArray(body.assignee_ids)) {
-    const { data: cur } = await admin.from("erp_creative_subtasks").select("status, assignee_id").eq("id", subtaskId).eq("task_id", id).maybeSingle();
+    const { data: cur } = await admin.from("erp_creative_subtasks").select("status, assignee_id, config").eq("id", subtaskId).eq("task_id", id).maybeSingle();
     const curStatus = (cur as { status?: string } | null)?.status;
     if (curStatus === "submitted" || curStatus === "approved")
       return NextResponse.json({ error: "ส่งงานแล้ว ยกเลิกการเริ่มงานไม่ได้" }, { status: 400 });
-    // ยกเลิกเริ่ม = กลับไปเป็น "ผู้รับผิดชอบเริ่มต้น" (assignee_id ที่หัวหน้ามอบ) ถ้ามี · ไม่มีก็ว่าง
+    // ยกเลิกเริ่ม = คืน "ผู้รับผิดชอบทั้งหมด" ที่เก็บไว้ตอนเริ่ม · ไม่มี snapshot → ใช้ assignee_id เดิม · ไม่มีเลย → ว่าง
+    const prevCfg = (((cur as { config?: Record<string, unknown> } | null)?.config) ?? {}) as Record<string, unknown>;
+    const snapshot = Array.isArray(prevCfg.pre_start_assignees) ? (prevCfg.pre_start_assignees as string[]).filter(Boolean) : null;
     const def = (cur as { assignee_id?: string | null } | null)?.assignee_id ?? null;
-    await setSubtaskAssignees(admin, subtaskId, def ? [def] : []);
+    const restore = snapshot && snapshot.length ? snapshot : (def ? [def] : []);
+    await setSubtaskAssignees(admin, subtaskId, restore);
+    // ล้าง snapshot หลังคืนค่าแล้ว
+    const restCfg: Record<string, unknown> = { ...prevCfg };
+    delete restCfg.pre_start_assignees;
+    patch.config = restCfg;
   }
   let row: Record<string, unknown> | null = null;
   if (Object.keys(patch).length > 1) {
