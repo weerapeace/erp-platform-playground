@@ -6,7 +6,7 @@
 // ของกลาง: reuse ข้อมูลที่หน้า /tasks โหลดอยู่แล้ว + DataTable กลาง · ธีมต่อคนจาก user_ui_prefs
 // ============================================================
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -30,7 +30,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
-  theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField,
+  theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField, viewSwitcher,
   onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange,
 }: {
   userName?: string;
@@ -49,6 +49,7 @@ export function OverviewDashboard({
   statuses: Status[];
   onMoveStatus: (taskId: string, toKey: string) => void;
   onSetField: (taskId: string, field: string, value: string | null) => void;
+  viewSwitcher?: ReactNode;   // เมนูเลือกมุมมอง (☰) — ฝังใน Hero
   onFilter: (f: OvFilter) => void;
   onOpenTask: (id: string) => void;
   onCreate: () => void;
@@ -159,33 +160,35 @@ export function OverviewDashboard({
     <div className={`relative ${hasPageBg ? "rounded-2xl p-3 sm:p-4" : ""}`} style={pageStyle(theme.page)}>
       {theme.page.mode === "image" && <div className="absolute inset-0 rounded-2xl bg-white/45 pointer-events-none" />}
       <div className="relative space-y-6">
-      {/* Hero (ธีมแต่งได้) */}
+      {/* Hero (ธีมแต่งได้) — บนสุด: เมนูมุมมอง ☰ + ทักทาย + ปุ่ม + ทางลัด รวมในตัว */}
       <div className="relative rounded-2xl overflow-hidden shadow-sm text-white" style={heroStyle(theme.hero)}>
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
-        <div className="relative p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm" style={{ color: theme.hero.textColor }}>{theme.hero.title || defaultTitle}</h2>
-            <p className="text-sm mt-1 drop-shadow-sm opacity-90" style={{ color: theme.hero.textColor }}>{theme.hero.subtitle || heroLine}</p>
+        <div className="relative p-5 sm:p-6">
+          {/* แถวบน: เมนูเลือกมุมมอง (ซ้าย) + ปุ่ม (ขวา) */}
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="min-w-0">{viewSwitcher}</div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
+                className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
+              <button onClick={onCreate} style={{ color: theme.accent }} className="h-10 px-4 bg-white font-semibold rounded-xl shadow hover:bg-slate-50">＋ {t("สร้างงานใหม่", "New task")}</button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
-              className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
-            <button onClick={onCreate} style={{ color: theme.accent }} className="h-11 px-5 bg-white font-semibold rounded-xl shadow hover:bg-slate-50">＋ {t("สร้างงานใหม่", "New task")}</button>
-          </div>
+          {/* ทักทาย */}
+          <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm" style={{ color: theme.hero.textColor }}>{theme.hero.title || defaultTitle}</h2>
+          <p className="text-sm mt-1 drop-shadow-sm opacity-90" style={{ color: theme.hero.textColor }}>{theme.hero.subtitle || heroLine}</p>
+          {/* ทางลัด — ในตัว Hero */}
+          {theme.show.shortcuts && (
+            <div className="flex items-center gap-2 flex-wrap mt-4">
+              <span className="text-xs font-semibold text-white/70 mr-0.5">{t("ทางลัด", "Shortcuts")}</span>
+              <ShortcutPill icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
+              <ShortcutPill icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
+              <ShortcutPill icon="🔁" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
+              <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
+              {isAdmin && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
+            </div>
+          )}
         </div>
       </div>
-
-      {/* ทางลัด — แถบปุ่มเล็กแนวนอน ใต้ Hero (กว้างเท่ากล่องม่วง) */}
-      {theme.show.shortcuts && (
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs font-semibold text-slate-400 mr-0.5">{t("ทางลัด", "Shortcuts")}</span>
-        <ShortcutPill icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
-        <ShortcutPill icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
-        <ShortcutPill icon="🔁" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
-        <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
-        {isAdmin && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
-      </div>
-      )}
 
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -215,60 +218,68 @@ export function OverviewDashboard({
         </button>
       </div>
 
-      {/* สองคอลัมน์: ตาราง (ซ้าย 2/3) + แคมเปญที่กำลังทำ (ขวา 1/3) · ซ่อนแคมเปญ → ตารางเต็มกว้าง */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        <div className={`${theme.show.campaigns ? "lg:col-span-2" : "lg:col-span-3"} min-w-0 space-y-2`}>
-          {mySubs.length > 0 && (
-            filter === "mine" ? (
-              // กดการ์ด "งานของฉัน" → โชว์งานย่อยของฉันเต็มๆ (เหมือนแท็บคิวงานของฉัน) กดเปิดงานแม่ได้
-              <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
-                <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({mySubs.length})</p>
-                <div className="space-y-1.5">
-                  {mySubs.map((s) => (
-                    <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
-                      className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left">
-                      <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm text-slate-700">{s.title}</span>
-                        <span className="ml-2 text-[10px] text-slate-400">{SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
-                        {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
-                        <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
-                      </div>
-                      {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-100 text-xs text-amber-800">
-                🧩 {t("งานย่อยของฉัน", "My subtasks")} {mySubs.length} {t("รายการ", "items")} · {t('กดการ์ด "งานของฉัน" เพื่อดูงานย่อย', 'tap the "My tasks" card to see subtasks')}
-              </div>
-            )
-          )}
-
-          {/* ตัวกรองด่วน: ประเภทงาน (Tabs, จากข้อมูลจริง) + แบรนด์ (ชิป) — ซ้อนกับการ์ดด้านบน */}
-          {theme.show.filters && (
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} accent={theme.accent} />
-              {typeOptions.map((o) => (
-                <FilterTab key={o.value} active={typeFilter === o.value} onClick={() => setTypeFilter(o.value)} label={o.label} accent={theme.accent} />
+      {/* งานย่อยของฉัน — แบนเนอร์ / รายการเต็ม (เมื่อกดการ์ด "งานของฉัน") */}
+      {mySubs.length > 0 && (
+        filter === "mine" ? (
+          <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
+            <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({mySubs.length})</p>
+            <div className="space-y-1.5">
+              {mySubs.map((s) => (
+                <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
+                  className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm text-slate-700">{s.title}</span>
+                    <span className="ml-2 text-[10px] text-slate-400">{SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
+                    {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
+                    <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+                  </div>
+                  {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
+                </button>
               ))}
             </div>
-            {brands.length > 0 && (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs text-slate-400 mr-0.5">{t("แบรนด์", "Brand")}:</span>
-                <BrandChip active={!brandFilter} onClick={() => setBrandFilter("")} label={t("ทั้งหมด", "All")} accent={theme.accent} />
-                {brands.map((b) => (
-                  <BrandChip key={b.id} active={brandFilter === b.id} color={b.color} onClick={() => setBrandFilter(b.id)} label={b.name} accent={theme.accent} />
-                ))}
-              </div>
-            )}
           </div>
-          )}
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-100 text-xs text-amber-800">
+            🧩 {t("งานย่อยของฉัน", "My subtasks")} {mySubs.length} {t("รายการ", "items")} · {t('กดการ์ด "งานของฉัน" เพื่อดูงานย่อย', 'tap the "My tasks" card to see subtasks')}
+          </div>
+        )
+      )}
 
-          {/* สลับมุมมอง: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง — เก็บไว้ในธีมของฉัน */}
-          <div className="flex items-center justify-end">
+      {/* ── Section 1 — ตัวกรอง: ประเภทงาน + แบรนด์ ── */}
+      {theme.show.filters && (
+        <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 space-y-2">
+          <div className="text-xs font-semibold text-slate-500">🔎 {t("ตัวกรอง", "Filters")}</div>
+          <div className="flex items-center gap-1 overflow-x-auto pb-1">
+            <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} accent={theme.accent} />
+            {typeOptions.map((o) => (
+              <FilterTab key={o.value} active={typeFilter === o.value} onClick={() => setTypeFilter(o.value)} label={o.label} accent={theme.accent} />
+            ))}
+          </div>
+          {brands.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-slate-400 mr-0.5">{t("แบรนด์", "Brand")}:</span>
+              <BrandChip active={!brandFilter} onClick={() => setBrandFilter("")} label={t("ทั้งหมด", "All")} accent={theme.accent} />
+              {brands.map((b) => (
+                <BrandChip key={b.id} active={brandFilter === b.id} color={b.color} onClick={() => setBrandFilter(b.id)} label={b.name} accent={theme.accent} />
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Section 2 — งาน: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง ── */}
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          {theme.kanban.view === "kanban"
+            ? <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
+            : <span />}
+          <div className="flex items-center gap-2">
+            {theme.kanban.view === "kanban" && (
+              <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
+                placeholder={t("ค้นหาในบอร์ด...", "Search board...")}
+                className="h-8 w-40 max-w-[40vw] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+            )}
             <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
               {([["kanban", "📋", t("การ์ด", "Cards")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
                 const on = theme.kanban.view === v;
@@ -277,44 +288,38 @@ export function OverviewDashboard({
               })}
             </div>
           </div>
-
-          {theme.kanban.view === "kanban" ? (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
-                <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
-                <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
-                  placeholder={t("ค้นหาในบอร์ด...", "Search board...")}
-                  className="h-8 w-44 max-w-[50%] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
-              </div>
-              <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent}
-                onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-              <DataTable<CreativeTask>
-                data={filteredTasks} columns={columns}
-                title={`${filterLabel} (${filteredTasks.length})`}
-                emptyMessage={t("ไม่มีงานในตัวกรองนี้", "No tasks in this filter")}
-                searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
-                searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
-                tableId="creative-tasks" exportFilename="งาน-creative"
-                selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
-                enableCards
-                cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
-                onRowClick={(row) => onOpenTask(row.id)}
-              />
-            </div>
-          )}
         </div>
+        {theme.kanban.view === "kanban" ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent}
+              onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <DataTable<CreativeTask>
+              data={filteredTasks} columns={columns}
+              title={`${filterLabel} (${filteredTasks.length})`}
+              emptyMessage={t("ไม่มีงานในตัวกรองนี้", "No tasks in this filter")}
+              searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
+              searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
+              tableId="creative-tasks" exportFilename="งาน-creative"
+              selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
+              enableCards
+              cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
+              onRowClick={(row) => onOpenTask(row.id)}
+            />
+          </div>
+        )}
+      </section>
 
-        {/* แคมเปญที่กำลังทำ */}
-        {theme.show.campaigns && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
+      {/* ── Section 3 — แคมเปญที่กำลังทำ (เต็มกว้าง) ── */}
+      {theme.show.campaigns && (
+        <section className="bg-white rounded-xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
             <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
             <a href="/tasks/campaigns" style={{ color: theme.accent }} className="text-xs font-medium hover:underline">{t("ดูทั้งหมด", "See all")} →</a>
           </div>
-          <div className="p-2">
+          <div className="p-3">
             {activeCampaigns.length === 0 ? (
               <div className="py-8 text-center">
                 <div className="text-3xl mb-1">📣</div>
@@ -322,7 +327,7 @@ export function OverviewDashboard({
                 <a href="/tasks/campaigns" className="mt-3 inline-flex items-center h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</a>
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {activeCampaigns.map((c) => {
                   const st = CSTATUS[c.status];
                   const open = openByCampaign[c.id] ?? 0;
@@ -343,9 +348,8 @@ export function OverviewDashboard({
               </div>
             )}
           </div>
-        </div>
-        )}
-      </div>
+        </section>
+      )}
 
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} isAdmin={isAdmin} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
       <MetricCardsManager open={metricsOpen} metrics={metrics ?? []} onChange={onMetricsChange} onClose={() => setMetricsOpen(false)}

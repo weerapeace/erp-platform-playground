@@ -97,7 +97,6 @@ export default function TasksPage() {
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const { statuses } = useCreativeStatuses();
   const [view, setView] = useState<"overview" | "queue" | "calendar" | "workload" | "report" | "kanban" | "canvas">("overview");
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
   const [ovTheme, setOvTheme] = useState<OverviewTheme>(DEFAULT_THEME); // ธีมหน้าภาพรวม "ของฉัน" (per-user)
   const [ovMetrics, setOvMetrics] = useState<MetricDef[]>([]); // การ์ดเมตริกของฉัน (per-user)
@@ -217,39 +216,8 @@ export default function TasksPage() {
       )}
 
       <div className="px-8 py-6 space-y-5">
-        {/* View menu (เมนูมุมมอง — ยุบเป็นดรอปดาวน์ให้สะอาด) */}
-        {(() => {
-          const VIEWS = [
-            { k: "overview", icon: "🏠", label: t("ภาพรวม", "Overview") },
-            { k: "queue", icon: "🙋", label: t("คิวงานของฉัน", "My queue") },
-            { k: "calendar", icon: "📅", label: t("ปฏิทิน", "Calendar") },
-            { k: "workload", icon: "👥", label: t("ภาระงาน", "Workload") },
-            { k: "report", icon: "📊", label: t("รายงาน", "Report") },
-            { k: "kanban", icon: "🟦", label: "Kanban" },
-            { k: "canvas", icon: "🟪", label: "Canvas" },
-          ] as const;
-          const cur = VIEWS.find((v) => v.k === view) ?? VIEWS[0];
-          return (
-            <div className="relative w-fit">
-              <button onClick={() => setViewMenuOpen((o) => !o)} className="inline-flex items-center gap-2 h-9 px-3.5 bg-slate-100 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-200">
-                <span>≡</span><span>{cur.icon} {cur.label}</span><span className="text-slate-400">▾</span>
-              </button>
-              {viewMenuOpen && (
-                <>
-                  <div className="fixed inset-0 z-20" onClick={() => setViewMenuOpen(false)} />
-                  <div className="absolute left-0 z-30 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
-                    {VIEWS.map((v) => (
-                      <button key={v.k} onClick={() => { setView(v.k); setViewMenuOpen(false); }}
-                        className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${view === v.k ? "bg-violet-50 text-violet-700 font-medium" : "text-slate-700 hover:bg-slate-50"}`}>
-                        <span>{v.icon}</span>{v.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })()}
+        {/* เมนูมุมมอง — บนภาพรวมย้ายเข้า Hero แล้ว (ส่งเป็น viewSwitcher) · มุมมองอื่นโชว์ตรงนี้ */}
+        {view !== "overview" && <ViewSwitcher view={view} setView={setView} t={t} />}
 
         {loading ? (
           <div className="py-20 text-center text-slate-400">{t("กำลังโหลดข้อมูล...", "Loading data...")}</div>
@@ -271,6 +239,7 @@ export default function TasksPage() {
                 canUpload={can("files.upload")}
                 onThemeChange={saveTheme}
                 statuses={statuses}
+                viewSwitcher={<ViewSwitcher view={view} setView={setView} t={t} onHero />}
                 onMoveStatus={(taskId, to) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to); }}
                 onSetField={async (taskId, field, value) => { try { await updateTask(taskId, { [field]: value }); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
                 isAdmin={user?.role === "admin"}
@@ -340,6 +309,49 @@ function ViewToggleBtn({ active, onClick, icon, label }: { active: boolean; onCl
 function StatChip({ label, value, tone = "slate", onClick, active }: { label: string; value: number; tone?: "slate" | "violet" | "red" | "amber"; onClick?: () => void; active?: boolean }) {
   const cls = { slate: "bg-slate-50 text-slate-700 border-slate-200", violet: "bg-violet-50 text-violet-700 border-violet-200", red: "bg-red-50 text-red-700 border-red-200", amber: "bg-amber-50 text-amber-700 border-amber-200" }[tone];
   return <button onClick={onClick} className={`px-3 py-1.5 rounded-lg border text-sm transition-all ${cls} ${active ? "ring-2 ring-violet-400" : "hover:brightness-95"}`}><span className="font-bold">{value}</span> <span className="opacity-70">{label}</span></button>;
+}
+
+// เมนูเลือกมุมมอง (☰ ดรอปดาวน์) — โชว์ในแถบบน (มุมมองอื่น) หรือฝังใน Hero (onHero) ของหน้าภาพรวม
+function ViewSwitcher({ view, setView, t, onHero }: {
+  view: string;
+  setView: (v: "overview" | "queue" | "calendar" | "workload" | "report" | "kanban" | "canvas") => void;
+  t: Tfn;
+  onHero?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const VIEWS = [
+    { k: "overview", icon: "🏠", label: t("ภาพรวม", "Overview") },
+    { k: "queue", icon: "🙋", label: t("คิวงานของฉัน", "My queue") },
+    { k: "calendar", icon: "📅", label: t("ปฏิทิน", "Calendar") },
+    { k: "workload", icon: "👥", label: t("ภาระงาน", "Workload") },
+    { k: "report", icon: "📊", label: t("รายงาน", "Report") },
+    { k: "kanban", icon: "🟦", label: "Kanban" },
+    { k: "canvas", icon: "🟪", label: "Canvas" },
+  ] as const;
+  const cur = VIEWS.find((v) => v.k === view) ?? VIEWS[0];
+  const btnCls = onHero
+    ? "inline-flex items-center gap-2 h-9 px-3.5 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-semibold backdrop-blur-sm"
+    : "inline-flex items-center gap-2 h-9 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold";
+  return (
+    <div className="relative w-fit">
+      <button onClick={() => setOpen((o) => !o)} className={btnCls}>
+        <span>≡</span><span>{cur.icon} {cur.label}</span><span className={onHero ? "text-white/70" : "text-slate-400"}>▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-30 mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+            {VIEWS.map((v) => (
+              <button key={v.k} onClick={() => { setView(v.k); setOpen(false); }}
+                className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${view === v.k ? "bg-violet-50 text-violet-700 font-medium" : "text-slate-700 hover:bg-slate-50"}`}>
+                <span>{v.icon}</span>{v.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 // ============================================================
