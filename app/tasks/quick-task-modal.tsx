@@ -24,11 +24,10 @@ export function QuickTaskModal({ open, onClose, onCreated, pushToast, me, locked
   const t = useT();
   const [title, setTitle] = useState("");
   const [assignee, setAssignee] = useState<UserPickerValue | null>(null);
-  const [assignedTo, setAssignedTo] = useState<UserPickerValue | null>(null);
   const [assigner, setAssigner] = useState<UserPickerValue | null>(me ?? null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { if (open) { setTitle(""); setAssignee(null); setAssignedTo(null); setAssigner(me ?? null); } }, [open, me]);
+  useEffect(() => { if (open) { setTitle(""); setAssignee(null); setAssigner(me ?? null); } }, [open, me]);
 
   const save = async () => {
     const ttl = title.trim();
@@ -38,7 +37,6 @@ export function QuickTaskModal({ open, onClose, onCreated, pushToast, me, locked
       const { id, task_no } = await createTask({
         title: ttl,
         assignee_id: assignee?.id ?? null, assignee_ids: assignee ? [assignee.id] : [],
-        assigned_to_id: assignedTo?.id ?? null,
         assigned_by_id: assigner?.id ?? null,
         campaign_id: lockedCampaignId || null,
       });
@@ -60,12 +58,8 @@ export function QuickTaskModal({ open, onClose, onCreated, pushToast, me, locked
           <ERPTextarea value={title} rows={3} onChange={(e) => setTitle(e.target.value)} placeholder={t("เช่น แก้แบนเนอร์หน้าร้าน Shopee ให้เสร็จวันนี้", "e.g. Fix the Shopee storefront banner today")} />
         </div>
         <div>
-          <label className="text-xs text-slate-500">{t("ผู้รับผิดชอบ", "Responsible")}</label>
+          <label className="text-xs text-slate-500">{t("ผู้รับผิดชอบ", "Assignee")}</label>
           <UserPicker value={assignee} onChange={setAssignee} disableCreate />
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">{t("มอบหมายให้", "Assigned to")}</label>
-          <UserPicker value={assignedTo} onChange={setAssignedTo} disableCreate />
         </div>
         <div>
           <label className="text-xs text-slate-500">{t("ผู้มอบหมาย", "Assigned by")} <span className="text-slate-400">({t("ดีฟอลต์ = ฉัน", "default = me")})</span></label>
