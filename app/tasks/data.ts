@@ -81,6 +81,7 @@ export type TaskDetail = CreativeTask & {
   attachments: CreativeAttachment[];
   skus?: TaskSkuRef[];
   parent_skus?: TaskParentRef[];
+  content_count?: number;
 };
 
 export type Campaign = {

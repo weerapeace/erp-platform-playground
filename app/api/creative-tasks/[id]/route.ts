@@ -44,12 +44,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (error) return NextResponse.json({ error: friendlyDbError(error) }, { status: 500 });
   if (!row) return NextResponse.json({ error: "ไม่พบงาน" }, { status: 404 });
 
-  const [{ data: subtasks }, { data: comments }, { data: attachments }, { data: skuLinks }, { data: parentLinks }] = await Promise.all([
+  const [{ data: subtasks }, { data: comments }, { data: attachments }, { data: skuLinks }, { data: parentLinks }, { count: contentCount }] = await Promise.all([
     admin.from("erp_creative_subtasks").select("*").eq("task_id", id).order("sort_order", { ascending: true }),
     admin.from("erp_creative_comments").select("*").eq("task_id", id).order("created_at", { ascending: true }),
     admin.from("erp_creative_attachments").select("*").eq("task_id", id).order("created_at", { ascending: true }),
     admin.from("erp_creative_task_skus").select("sku:skus_v2!sku_id(id, code, name_th, color, color_th, list_price, cover_image_r2_key)").eq("task_id", id),
     admin.from("erp_creative_task_parent_skus").select("parent:parent_skus_v2!parent_sku_id(id, code, name_th, cover_image_r2_key)").eq("task_id", id),
+    admin.from("erp_creative_content").select("id", { count: "exact", head: true }).eq("task_id", id).eq("is_active", true),
   ]);
 
   const skus = ((skuLinks ?? []) as Record<string, unknown>[]).map((l) => { const s = (Array.isArray(l.sku) ? l.sku[0] : l.sku) as Record<string, unknown> | null; return s ? { id: s.id, code: s.code, name: s.name_th, color: (s.color_th as string) ?? (s.color as string) ?? null, price: s.list_price, image_key: s.cover_image_r2_key } : null; }).filter(Boolean);
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const subs = subRows.map((s) => ({ ...s, assignees: aMap.get(String(s.id)) ?? [], attachments: subAtt.get(String(s.id)) ?? [] }));
 
-  return NextResponse.json({ data: { ...task, subtasks: subs, comments: comments ?? [], attachments: taskAtt, skus, parent_skus }, error: null });
+  return NextResponse.json({ data: { ...task, subtasks: subs, comments: comments ?? [], attachments: taskAtt, skus, parent_skus, content_count: contentCount ?? 0 }, error: null });
 }
 
 // ---- PATCH ----

@@ -27,9 +27,9 @@ export function KanbanSettingsControls({ cfg, onChange }: { cfg: KanbanTheme; on
       <div>
         <div className="text-xs font-medium text-slate-500 mb-1">{t("ข้อมูลบนการ์ด", "Card fields")}</div>
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-          {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["progress", t("ความคืบหน้า", "Progress")], ["brandBorder", t("กรอบสีตามแบรนด์", "Brand color border")]] as const).map(([k, label]) => (
+          {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["progress", t("ความคืบหน้า", "Progress")], ["sku", t("สินค้า/SKU", "Product/SKU")], ["taskNo", t("เลขที่งาน", "Task no.")], ["brandBorder", t("กรอบสีตามแบรนด์", "Brand color border")], ["compact", t("การ์ดกะทัดรัด", "Compact card")]] as const).map(([k, label]) => (
             <label key={k} className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={cfg[k]} onChange={(e) => set({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
+              <input type="checkbox" checked={k === "sku" || k === "taskNo" ? cfg[k] !== false : !!cfg[k]} onChange={(e) => set({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
             </label>
           ))}
         </div>

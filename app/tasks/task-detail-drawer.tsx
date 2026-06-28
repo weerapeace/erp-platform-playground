@@ -22,6 +22,7 @@ import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
 import { TaskContentTab } from "./task-content-tab";
+import { HoverImage } from "@/components/hover-image";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
 import {
@@ -232,10 +233,12 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
           </div>
 
-          {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) */}
+          {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) — โชว์จำนวนงานย่อย / คอนเทนต์ */}
           <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100">
-            {([["task", t("📋 งาน", "📋 Task")], ["content", t("📱 คอนเทนต์", "📱 Content")]] as const).map(([k, label]) => (
-              <button key={k} onClick={() => setTab(k)} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors ${tab === k ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}>{label}</button>
+            {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0]] as const).map(([k, label, count]) => (
+              <button key={k} onClick={() => setTab(k)} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}>
+                {label}{count > 0 && <span className={`text-[11px] rounded-full px-1.5 ${tab === k ? "bg-violet-200 text-violet-800" : "bg-slate-200 text-slate-600"}`}>{count}</span>}
+              </button>
             ))}
           </div>
 
@@ -252,13 +255,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
               {/* สินค้าที่เกี่ยวข้อง (SKU m2m) */}
               {(() => {
-                const list = (d.skus && d.skus.length) ? d.skus : (d.sku_code ? [{ id: "_", code: d.sku_code, name: d.sku_name || d.product_name, color: d.sku_color, price: d.sku_price }] : []);
+                const list = (d.skus && d.skus.length) ? d.skus : (d.sku_code ? [{ id: "_", code: d.sku_code, name: d.sku_name || d.product_name, color: d.sku_color, price: d.sku_price, image_key: d.sku_image_key }] : []);
                 return list.length > 0 ? (
                   <div className="bg-slate-50 rounded-lg p-3 text-sm">
                     <p className="text-xs text-slate-400 mb-1.5">{t("สินค้าที่เกี่ยวข้อง", "Related Products")} ({list.length})</p>
                     <div className="space-y-1.5">
                       {list.map((s, i) => (
                         <div key={s.id || i} className="flex items-center gap-2 flex-wrap">
+                          <HoverImage url={r2ImageUrl(s.image_key)} size={36} rounded="rounded-md" />
                           {s.code && <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{s.code}</span>}
                           <span className="text-slate-700">{s.name}</span>
                           {s.color && <span className="text-xs text-slate-400">{t("สี", "Color")}: {s.color}</span>}

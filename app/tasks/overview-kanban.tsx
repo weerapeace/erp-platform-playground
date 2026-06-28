@@ -46,22 +46,24 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
   // กรอบสีตามแบรนด์ (ถ้าเปิด + แบรนด์มีสี hex)
   const bc = task.brand_color;
   const brandBorder = cfg.brandBorder && bc && /^#[0-9a-fA-F]{6}$/.test(String(bc));
+  const compact = cfg.compact === true;
+  const showSku = cfg.sku !== false, showTaskNo = cfg.taskNo !== false;
   return (
     <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
       style={brandBorder ? { borderColor: String(bc), borderLeftWidth: 3 } : undefined}>
       {coverUrl && (
-        <HoverPreview url={cover} previewW={640}>
+        <HoverPreview url={r2ImageUrl(cover)} previewW={640}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={coverUrl} alt="" loading="lazy" decoding="async" className="h-20 w-full object-cover bg-slate-50 border-b border-slate-100" />
+          <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${compact ? "h-12" : "h-20"} w-full object-cover bg-slate-50 border-b border-slate-100`} />
         </HoverPreview>
       )}
-      <div className="p-2.5">
-        <div className="flex items-center justify-between gap-2 mb-1.5">
+      <div className={compact ? "p-2" : "p-2.5"}>
+        <div className={`flex items-center justify-between gap-2 ${compact ? "mb-1" : "mb-1.5"}`}>
           {cfg.priority && pr ? <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${pr.cls}`}>{pr.label}</span> : <span />}
-          <span className="font-mono text-[10px] text-slate-400">{task.task_no}</span>
+          {showTaskNo && <span className="font-mono text-[10px] text-slate-400">{task.task_no}</span>}
         </div>
         <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{task.title}</p>
-        {task.sku_code && <p className="text-[11px] text-slate-400 line-clamp-1 mt-1">📦 {task.sku_code}{task.sku_name ? ` · ${task.sku_name}` : ""}</p>}
+        {showSku && task.sku_code && <p className="text-[11px] text-slate-400 line-clamp-1 mt-1">📦 {task.sku_code}{task.sku_name ? ` · ${task.sku_name}` : ""}</p>}
         {cfg.brand && task.brand_label && (
           <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-slate-500">
             <span className="h-2 w-2 rounded-full" style={{ background: task.brand_color || "#cbd5e1" }} />{task.brand_label}

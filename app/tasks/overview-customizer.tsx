@@ -22,7 +22,7 @@ export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: b
 // มุมมองงานหลัก: Kanban การ์ด (ลากเปลี่ยนสถานะ) หรือ ตาราง · ปรับการจัดกลุ่ม + ข้อมูลบนการ์ดได้
 export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
 export type KanbanView = "kanban" | "table" | "calendar";
-export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean };
+export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; compact?: boolean };
 export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number };
 
 export const DEFAULT_THEME: OverviewTheme = {
@@ -36,7 +36,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   page: { mode: "none", color: "#f8fafc", imageUrl: null },
   show: { shortcuts: true, campaigns: true, filters: true },
   accent: "#7c3aed",   // สีหลัก (ปุ่ม/ไฮไลต์) ของหน้า
-  kanban: { view: "kanban", groupBy: "status", cover: true, brand: true, assignee: true, due: true, priority: true, progress: true, brandBorder: false },
+  kanban: { view: "kanban", groupBy: "status", cover: true, brand: true, assignee: true, due: true, priority: true, progress: true, brandBorder: false, sku: true, taskNo: true, compact: false },
   cardIconSize: 18,    // ขนาดไอคอนการ์ดสรุป (px)
 };
 
