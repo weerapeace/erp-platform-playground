@@ -30,7 +30,11 @@ import {
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { apiFetch } from "@/lib/api";
+import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
+
+// drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 
 const POST_TYPE_LABEL = Object.fromEntries(POST_TYPES.map((p) => [p.value, p.label]));
 type Toast = { id: number; type: "success" | "error" | "info"; message: string };
@@ -316,6 +320,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
   const [parentColors, setParentColors] = useState<string[]>([]);
   const [pullBusy, setPullBusy] = useState(false);
+  const [openParentId, setOpenParentId] = useState<string | null>(null);   // เปิด drawer Parent SKU
   // แนบงาน (รูป/วิดีโอ/ลิงก์) + ตั้งค่าแพลตฟอร์มกลาง
   const [attachments, setAttachments] = useState<ContentAttachment[]>([]);
   const [pset, setPset] = useState<PlatformSettings>({});
@@ -507,7 +512,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
-                <div><label className="text-xs text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label>
+                    {parent?.id && <button onClick={() => setOpenParentId(parent.id)} className="text-[11px] text-violet-700 hover:underline">↗ {t("เปิดดูสินค้า", "Open")}</button>}
+                  </div>
+                  <ParentSkuPicker value={parent} onChange={setParent} />
+                </div>
               </div>
               <div className="mt-2">
                 <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
@@ -641,6 +652,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
       <ImageLightbox images={taskMedia.images.map((im) => ({ url: r2ImageUrl(im.key, 1600) ?? "", label: im.label }))} index={tmLb} onClose={() => setTmLb(-1)} onIndex={setTmLb} />
+      {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
     </>
   );
 }
@@ -785,6 +797,7 @@ function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
 function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
   const t = useT();
+  const [tplOpen, setTplOpen] = useState(false);   // พับปุ่มเลือกแม่แบบไว้ก่อน
   const useCaption = setting?.use_caption !== false;
   const useHashtags = setting?.use_hashtags !== false;
   const postUrl = (setting?.post_url ?? "").trim();
@@ -806,12 +819,19 @@ function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, p
           <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
         </div>
       </div>
-      {/* เลือกแม่แบบ */}
-      <div className="flex flex-wrap gap-1.5 mb-2">
-        {templates.map((tp) => { const on = typeKey === tp.key; return (
-          <button key={tp.key} onClick={() => onChange({ caption_type: tp.key })} className={`px-2.5 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"}`}>{tp.label}</button>
-        ); })}
-        {templates.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มีแม่แบบ — กด 📝 แม่แบบ", "No templates yet — click 📝 Templates")}</span>}
+      {/* เลือกแม่แบบ (พับไว้ — กดกางเมื่อจะเปลี่ยน) */}
+      <div className="mb-2">
+        <button onClick={() => setTplOpen((o) => !o)} className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-violet-700">
+          📑 {t("แม่แบบ", "Template")}: <span className="font-medium text-slate-700">{tpl?.label ?? t("ไม่มี", "none")}</span> <span className="text-[10px]">{tplOpen ? "▲" : "▼"}</span>
+        </button>
+        {tplOpen && (
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {templates.map((tp) => { const on = typeKey === tp.key; return (
+              <button key={tp.key} onClick={() => { onChange({ caption_type: tp.key }); setTplOpen(false); }} className={`px-2.5 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"}`}>{tp.label}</button>
+            ); })}
+            {templates.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มีแม่แบบ — กด 📝 แม่แบบ", "No templates yet — click 📝 Templates")}</span>}
+          </div>
+        )}
       </div>
       {useCaption
         ? <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />

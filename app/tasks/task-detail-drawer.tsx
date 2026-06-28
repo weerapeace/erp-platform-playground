@@ -13,6 +13,8 @@ import { ImageAttach } from "@/components/image-attach";
 import dynamic from "next/dynamic";
 // คลังไฟล์กลาง (DAM) — เลือกรูปที่มีอยู่แล้วมาแนบ · dynamic กันลาก bundle ใหญ่
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
+// drawer สินค้ากลาง — กด Parent SKU แล้วเปิดดูได้ · dynamic กัน import วน
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
 import { ImageInput } from "@/components/image-input";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useAuth } from "@/components/auth";
@@ -130,6 +132,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
+  const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
   const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
@@ -430,7 +433,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                         editor={
                           <div className="space-y-1.5">
                             <div className="flex flex-wrap gap-1">
-                              {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5">{p.code || p.name}<button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
+                              {parentList.map((p) => <span key={p.id} className="inline-flex items-center gap-1 text-xs bg-slate-100 rounded-full pl-2 pr-1 py-0.5"><button type="button" onClick={() => setOpenParentId(p.id)} title={t("เปิดดูสินค้า", "Open product")} className="hover:text-violet-700 hover:underline">{p.code || p.name}</button><button type="button" onClick={() => saveQuick({ parent_sku_ids: parentList.filter((x) => x.id !== p.id).map((x) => x.id) }, true)} className="text-slate-400 hover:text-red-500">✕</button></span>)}
                               {parentList.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มี", "None")}</span>}
                             </div>
                             <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
@@ -502,6 +505,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           })}
         </div>
       </div>
+      {openParentId && <MasterRecordDrawer moduleKey="parent-skus-v2" apiPath="parent-skus" recordId={openParentId} onClose={() => setOpenParentId(null)} onChanged={() => {}} />}
     </>
   );
 }
