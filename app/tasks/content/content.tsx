@@ -31,6 +31,7 @@ import {
 import { useCreativeOptions, platformLabel } from "../use-options";
 import { apiFetch } from "@/lib/api";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden } from "../drawer-theme";
 import dynamic from "next/dynamic";
 import { useT } from "@/components/i18n";
 
@@ -330,6 +331,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [tmLb, setTmLb] = useState(-1);   // ดูรูปจากงานเต็มจอ
   // แบ่ง 2 ฝั่ง ปรับขนาดได้ (ลากเส้นกลาง) — จำสัดส่วนใน localStorage
   const isWide = useMediaQuery("(min-width: 1024px)");   // จอกว้าง → 2 ฝั่ง · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
+  const { theme: dth, update: dthUpdate } = useDrawerTheme("content");   // ธีม drawer คอนเทนต์ (ต่อคน)
+  const CONTENT_SECTIONS = [
+    { key: "product", label: t("สินค้า", "Product") }, { key: "price", label: t("ราคา/ส่วนลด", "Price") },
+    { key: "task_media", label: t("รูปจากงาน", "From task") }, { key: "attach", label: t("แนบเพิ่มเอง", "Attach") },
+    { key: "links", label: t("ลิงก์สินค้า", "Links") }, { key: "platform_notes", label: t("หมายเหตุแพลตฟอร์ม", "Platform notes") },
+  ];
   const bodyRef = useRef<HTMLDivElement>(null);
   const leftPctRef = useRef(46);
   const [leftPct, setLeftPctState] = useState(46);
@@ -488,16 +495,18 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
       <div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+        <div className="h-1 shrink-0" style={{ background: dth.accent }} />
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0"><h3 className="text-base font-semibold text-slate-900 truncate">{d.title}</h3><span className="font-mono text-xs text-slate-500">{d.content_no}</span></div>
           <div className="flex items-center gap-1">
+            <DrawerThemeButton theme={dth} update={dthUpdate} sections={CONTENT_SECTIONS} />
             {onDelete && <button onClick={() => onDelete(d)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>}
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
           </div>
         </div>
 
         {/* ===== จอกว้าง: 2 ฝั่งปรับขนาดได้ · มือถือ: เรียงบน-ล่าง เลื่อนรวด ===== */}
-        <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"}>
+        <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ background: dth.bg ?? undefined, zoom: drawerZoom(dth.size), flexDirection: isWide && dth.swap ? "row-reverse" : undefined }}>
           {/* ───── ฝั่งซ้าย: ข้อมูล + แนบงาน ───── */}
           <div className={isWide ? "overflow-y-auto p-5 space-y-5 min-w-0" : "p-4 space-y-5"} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* status + schedule */}
@@ -507,7 +516,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             </div>
 
             {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
-            <div>
+            {!isHidden(dth, "product") && (<div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("สินค้า", "Product")}</p>
                 {d.task_id && <button onClick={pullFromTask} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button>}
@@ -526,10 +535,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
                 <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">{t("— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)", "— Select SKU (single color) or Parent SKU (all child colors)")}</span>}</div>
               </div>
-            </div>
+            </div>)}
 
             {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
-            <div>
+            {!isHidden(dth, "price") && (<div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ราคา / ส่วนลด", "Price / Discount")}</p>
               <div className="flex items-end gap-2 flex-wrap">
                 <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
@@ -541,10 +550,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 </div>
                 <div><label className="text-xs text-slate-400">{t("ราคาขายจริง", "Selling Price")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
               </div>
-            </div>
+            </div>)}
 
             {/* รูป/ลิงก์จากงาน (ส่งมาแล้ว) — หยิบไปโพสต์ได้เลย */}
-            {d.task_id && (
+            {d.task_id && !isHidden(dth, "task_media") && (
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปจากงาน (ส่งมาแล้ว) — หยิบไปโพสต์", "From the task (submitted) — grab to post")}</p>
                 {taskMedia.images.length === 0 && taskMedia.links.length === 0 ? (
@@ -577,13 +586,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
             )}
 
             {/* แนบงานเพิ่มเอง: รูป / วิดีโอ / ลิงก์พรีวิว (เผื่อแนบนอกเหนือจากงาน) */}
-            <div>
+            {!isHidden(dth, "attach") && (<div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("แนบเพิ่มเอง (รูป · วิดีโอ · ลิงก์)", "Attach extra (image · video · link)")}</p>
               <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
-            </div>
+            </div>)}
 
             {/* ลิงก์สินค้า (ปลายทางขาย) */}
-            <div>
+            {!isHidden(dth, "links") && (<div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์สินค้า (Shopee/Lazada/Website)", "Product Links (Shopee/Lazada/Website)")}</p>
               <div className="space-y-2">
                 {links.map((l, i) => (
@@ -597,10 +606,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 ))}
                 <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
               </div>
-            </div>
+            </div>)}
 
             {/* หมายเหตุ/สิ่งที่ต้องทำ ต่อแพลตฟอร์ม (แก้ในตัว) */}
-            {contentPlatforms.length > 0 && (
+            {!isHidden(dth, "platform_notes") && contentPlatforms.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("สิ่งที่ต้องทำ ต่อแพลตฟอร์ม", "Per-platform checklist")}</p>
                 <div className="space-y-2">

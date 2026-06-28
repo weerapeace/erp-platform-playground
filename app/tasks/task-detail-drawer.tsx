@@ -20,6 +20,7 @@ const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then
 import { ImageInput } from "@/components/image-input";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useDrawerTheme, DrawerThemeButton, drawerZoom, isHidden } from "./drawer-theme";
 import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
@@ -142,6 +143,12 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
   const [submitNudge, setSubmitNudge] = useState(false); // เด้งเตือนเล็ก ๆ หลังแนบงาน (งานไม่มีงานย่อย) ให้ส่งงานเลย
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
+  const { theme: dth, update: dthUpdate } = useDrawerTheme("task");   // ธีม drawer (ต่อคน)
+  const DRAWER_SECTIONS = [
+    { key: "cover", label: t("รูปปก", "Cover") }, { key: "brand", label: t("แบรนด์", "Brand") }, { key: "platform", label: "Platform" },
+    { key: "assignee", label: t("ผู้รับผิดชอบ", "Assignee") }, { key: "reviewer", label: t("ผู้ตรวจ", "Reviewer") }, { key: "assigned_by", label: t("ผู้มอบหมาย", "Assigned by") },
+    { key: "campaign", label: t("แคมเปญ", "Campaign") }, { key: "parent", label: "Parent SKU" },
+  ];
   const wideScreen = useMediaQuery("(min-width: 860px)");   // จอกว้างพอ (แท็บเล็ตแนวนอน/เดสก์ท็อป)
   const twoCol = drawerW >= 820 && wideScreen;   // กว้างพอ → ซ้าย/ขวาเรียงข้างกัน · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
 
@@ -213,6 +220,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
       <div style={{ width: drawerW }} className="fixed right-0 top-0 h-full max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+        {/* แถบสีหลัก (ธีม) */}
+        <div className="h-1 shrink-0" style={{ background: dth.accent }} />
         {/* ที่จับลากปรับความกว้าง (ขอบซ้าย) */}
         <div onMouseDown={startResize} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute left-0 top-0 h-full w-1.5 cursor-ew-resize hover:bg-violet-400/40 active:bg-violet-400/60 z-[60]" />
         {/* header */}
@@ -224,13 +233,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             <span className="font-mono text-xs text-slate-500">{d.task_no}</span>
           </div>
           <div className="flex items-center gap-1">
+            <DrawerThemeButton theme={dth} update={dthUpdate} sections={DRAWER_SECTIONS} />
             {!editing && <button onClick={startEdit} className="h-8 px-2 text-xs text-violet-700 hover:bg-violet-50 rounded-md">✏️ {t("แก้ไข", "Edit")}</button>}
             <button onClick={() => onDelete(d.id)} className="h-8 px-2 text-xs text-red-500 hover:bg-red-50 rounded-md">{t("ลบ", "Delete")}</button>
             <button onClick={onClose} className="h-8 w-8 flex items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100">✕</button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" style={{ background: dth.bg ?? undefined, zoom: drawerZoom(dth.size) }}>
           {/* บนสุด: สถานะ + ความคืบหน้า (รูปปกย้ายไปคอลัมน์ขวา) */}
           <div className="p-5 pb-4 space-y-4">
             {/* status row */}
@@ -259,7 +269,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
           {/* 2 คอลัมน์: ซ้าย (เนื้องาน ~2/3) · ขวา (ข้อมูล ~1/3) — เรียงข้างกันเมื่อ drawer กว้างพอ */}
           {tab === "task" && (<>
-          <div className={`flex ${twoCol ? "flex-row" : "flex-col"} items-stretch`}>
+          <div className={`flex ${twoCol ? (dth.swap ? "flex-row-reverse" : "flex-row") : "flex-col"} items-stretch`}>
             {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
             <div className="flex-1 min-w-0 w-full p-5 space-y-4">
               {/* รายละเอียดงาน (ถ้ามี) */}
@@ -343,6 +353,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
             <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 p-5 space-y-3 bg-slate-50/40 border-slate-100`}>
               {/* รูปปก (เล็ก) — โชว์ทั้งโหมดดู/แก้ */}
+              {!isHidden(dth, "cover") && (
               <div>
                 {coverKey ? (
                   <div className="relative rounded-lg overflow-hidden border border-slate-200">
@@ -361,6 +372,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   </div>
                 )}
               </div>
+              )}
               {editing && ef ? (
                 <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3">
                   <div className="grid grid-cols-2 gap-3">
@@ -406,7 +418,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   )}
 
                   {/* แบรนด์ — โลโก้เด่น */}
-                  {qf === "brand" ? (
+                  {!isHidden(dth, "brand") && (qf === "brand" ? (
                     <div><p className="text-xs text-slate-400 mb-0.5">{t("แบรนด์", "Brand")}</p>
                       <div className="flex items-start gap-1"><div className="flex-1"><ERPSelect value={d.brand_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => saveQuick({ brand_id: e.target.value || null })} /></div>
                         <button type="button" onClick={() => setQf(null)} className="text-slate-300 hover:text-slate-600 text-xs mt-2 shrink-0">✕</button></div>
@@ -420,10 +432,10 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     </button>
                   ) : (
                     <button type="button" onClick={() => setQf("brand")} className="text-xs text-slate-400 hover:text-violet-600">＋ {t("เลือกแบรนด์", "Set brand")}</button>
-                  )}
+                  ))}
 
                   {/* แพลตฟอร์มที่ลง */}
-                  {d.platforms && d.platforms.length > 0 && (
+                  {!isHidden(dth, "platform") && d.platforms && d.platforms.length > 0 && (
                     <div><p className="text-[10px] text-slate-400 mb-1">Platform</p>
                       <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <PlatformChip key={p} code={p} />)}</div>
                     </div>
@@ -434,20 +446,20 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     <QuickField label={t("ประเภทงาน", "Task Type")} value={d.task_type ? taskTypeLabel(d.task_type) : null}
                       active={qf === "task_type"} onOpen={() => setQf("task_type")} onClose={() => setQf(null)}
                       editor={<ERPSelect value={d.task_type ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...taskTypes]} onChange={(e) => saveQuick({ task_type: e.target.value || null })} />} />
-                    <MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
-                      onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} />
+                    {!isHidden(dth, "assignee") && <MultiAssigneeField list={d.assignees ?? []} canEdit={canManageAssignees}
+                      onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} />}
                     {/* ผู้ตรวจ/ผู้มอบหมาย/แคมเปญ/Parent SKU — จัด 2 คอลัมน์ (2 แถว) ให้โปร่ง ไม่เบียด */}
                     <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-                      <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={(d.reviewers ?? []).length ? (d.reviewers ?? []).map((r) => r.label).filter(Boolean).join(", ") : (d.reviewer_label || d.approver_label)}
+                      {!isHidden(dth, "reviewer") && <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={(d.reviewers ?? []).length ? (d.reviewers ?? []).map((r) => r.label).filter(Boolean).join(", ") : (d.reviewer_label || d.approver_label)}
                         active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
-                        editor={<MultiUserPicker value={(d.reviewers ?? []).map((r) => ({ id: r.id, name: r.label } as UserPickerValue))} onChange={(v) => saveQuick({ reviewer_ids: v.map((x) => x.id) }, true)} disableCreate />} />
-                      <QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
+                        editor={<MultiUserPicker value={(d.reviewers ?? []).map((r) => ({ id: r.id, name: r.label } as UserPickerValue))} onChange={(v) => saveQuick({ reviewer_ids: v.map((x) => x.id) }, true)} disableCreate />} />}
+                      {!isHidden(dth, "assigned_by") && <QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
                         active={qf === "assigned_by"} onOpen={() => setQf("assigned_by")} onClose={() => setQf(null)}
-                        editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} />
-                      <QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
+                        editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} />}
+                      {!isHidden(dth, "campaign") && <QuickField label={t("แคมเปญ", "Campaign")} value={campaignName}
                         active={qf === "campaign"} onOpen={() => setQf("campaign")} onClose={() => setQf(null)}
-                        editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} />
-                      <QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
+                        editor={<ERPSelect value={d.campaign_id ?? ""} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => saveQuick({ campaign_id: e.target.value || null })} />} />}
+                      {!isHidden(dth, "parent") && <QuickField label="Parent SKU" value={parentList.length ? parentList.map((p) => p.code).filter(Boolean).join(", ") : (d.parent_sku_code || null)}
                         active={qf === "parent_sku"} onOpen={() => setQf("parent_sku")} onClose={() => setQf(null)}
                         editor={
                           <div className="space-y-1.5">
@@ -457,7 +469,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                             </div>
                             <ParentSkuPicker value={null} onChange={(v) => { if (v && !parentList.some((p) => p.id === v.id)) saveQuick({ parent_sku_ids: [...parentList.map((p) => p.id), v.id] }, true); }} />
                           </div>
-                        } />
+                        } />}
                     </div>
                   </div>
                 </>
