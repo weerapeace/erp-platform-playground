@@ -26,24 +26,26 @@ async function _GET(
   { params }: { params: Promise<{ entity: string; id: string }> }
 ): Promise<NextResponse> {
   const { entity, id } = await params;
-  // ตรวจสิทธิ์ก่อน — กันข้อมูล master หลุดให้คนที่ไม่ได้ล็อกอิน
-  const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const cfg = await resolveEntity(entity);
+  // ⚡ ยิงขนาน: ตรวจสิทธิ์ + อ่าน config โมดูล (อิสระต่อกัน) — แทนการรอทีละจังหวะ → เปิด drawer เร็วขึ้นทุกหน้า
+  const [denied, cfg] = await Promise.all([
+    guardApi(request, "products.view"),   // กันข้อมูล master หลุดให้คนที่ไม่ได้ล็อกอิน
+    resolveEntity(entity),
+  ]);
+  if (denied) return denied;   // ตรวจสิทธิ์ก่อนคืนข้อมูลเสมอ (data fetch อยู่จังหวะถัดไป)
   if (!cfg) return NextResponse.json({ data: null, error: "entity ไม่รองรับ" }, { status: 400 });
 
   const supabase = supabaseFromRequest(request);
-  const { data, error } = await supabase
-    .from(cfg.table)
-    .select(cfg.selectColumns)
-    .eq("id", id)
-    .single();
-
+  // ⚡ ยิงขนาน: ดึงแถว + สิทธิ์ระดับฟิลด์ (ทั้งคู่ใช้ cfg แต่ไม่ขึ้นต่อกัน)
+  const [rowRes, access] = await Promise.all([
+    supabase.from(cfg.table).select(cfg.selectColumns).eq("id", id).single(),
+    getFieldAccess(request, supabaseAdmin(), cfg.table),
+  ]);
+  const { data, error } = rowRes;
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
+  // relation labels ต้องรอ row ก่อน (ใช้ค่าจากแถว)
   const [row] = await resolveRelationLabels(supabase, cfg, [processed]);
-  // สิทธิ์ระดับฟิลด์ (ของกลาง) — ตัดคอลัมน์ที่ role นี้ไม่มีสิทธิ์เห็น
-  const { hiddenCols } = await getFieldAccess(request, supabaseAdmin(), cfg.table);
-  const [safe] = stripHidden([row as Record<string, unknown>], hiddenCols);
+  const [safe] = stripHidden([row as Record<string, unknown>], access.hiddenCols);
   return NextResponse.json({ data: safe, error: null });
 }
 
