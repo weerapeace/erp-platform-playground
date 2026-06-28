@@ -20,7 +20,8 @@ export type PageTheme = { mode: "none" | "color" | "image"; color: string; image
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
 // มุมมองงานหลัก: Kanban การ์ด (ลากเปลี่ยนสถานะ) หรือ ตาราง · ปรับการจัดกลุ่ม + ข้อมูลบนการ์ดได้
 export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
-export type KanbanTheme = { view: "kanban" | "table"; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean };
+export type KanbanView = "kanban" | "table" | "calendar";
+export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean };
 export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme };
 
 export const DEFAULT_THEME: OverviewTheme = {
@@ -34,7 +35,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   page: { mode: "none", color: "#f8fafc", imageUrl: null },
   show: { shortcuts: true, campaigns: true, filters: true },
   accent: "#7c3aed",   // สีหลัก (ปุ่ม/ไฮไลต์) ของหน้า
-  kanban: { view: "kanban", groupBy: "status", cover: true, brand: true, assignee: true, due: true, priority: true, progress: true },
+  kanban: { view: "kanban", groupBy: "status", cover: true, brand: true, assignee: true, due: true, priority: true, progress: true, brandBorder: false },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -311,7 +312,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("มุมมองงานหลัก", "Main task view")}</div>
         {/* เลือกแบบ Kanban / ตาราง */}
         <div className="flex items-center gap-2 mb-3">
-          {([["kanban", t("📋 การ์ด Kanban", "📋 Kanban cards")], ["table", t("▦ ตาราง", "▦ Table")]] as const).map(([m, label]) => (
+          {([["kanban", t("📋 การ์ด Kanban", "📋 Kanban cards")], ["table", t("▦ ตาราง", "▦ Table")], ["calendar", t("🗓 ปฏิทิน", "🗓 Calendar")]] as const).map(([m, label]) => (
             <button key={m} onClick={() => setKanban({ view: m })} className={`h-8 px-3 text-sm rounded-lg border ${theme.kanban.view === m ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
           ))}
         </div>
@@ -331,7 +332,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             <div>
               <div className="text-xs text-slate-500 mb-1">{t("ข้อมูลบนการ์ด", "Card fields")}</div>
               <div className="flex flex-wrap gap-3">
-                {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["progress", t("ความคืบหน้า", "Progress")]] as const).map(([k, label]) => (
+                {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["progress", t("ความคืบหน้า", "Progress")], ["brandBorder", t("กรอบสีตามแบรนด์", "Brand color border")]] as const).map(([k, label]) => (
                   <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
                     <input type="checkbox" checked={theme.kanban[k]} onChange={(e) => setKanban({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
                   </label>

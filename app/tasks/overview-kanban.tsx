@@ -14,6 +14,7 @@ import {
   useDraggable, useDroppable, type DragStartEvent, type DragEndEvent,
 } from "@dnd-kit/core";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { HoverPreview } from "@/components/hover-image";
 import { AssigneeStack } from "./assignee-avatar";
 import { taskTypeLabel } from "./use-options";
 import { statusMeta, type Status } from "./use-statuses";
@@ -42,11 +43,17 @@ function CardBody({ task, cfg, dragging }: { task: CreativeTask; cfg: KanbanThem
   const overdue = isOverdue(task);
   const cover = cfg.cover ? coverKey(task) : null;
   const coverUrl = cover ? r2ImageUrl(cover, 320) : null;
+  // กรอบสีตามแบรนด์ (ถ้าเปิด + แบรนด์มีสี hex)
+  const bc = task.brand_color;
+  const brandBorder = cfg.brandBorder && bc && /^#[0-9a-fA-F]{6}$/.test(String(bc));
   return (
-    <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}>
+    <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
+      style={brandBorder ? { borderColor: String(bc), borderLeftWidth: 3 } : undefined}>
       {coverUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={coverUrl} alt="" loading="lazy" decoding="async" className="h-20 w-full object-cover bg-slate-50 border-b border-slate-100" />
+        <HoverPreview url={cover} previewW={640}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={coverUrl} alt="" loading="lazy" decoding="async" className="h-20 w-full object-cover bg-slate-50 border-b border-slate-100" />
+        </HoverPreview>
       )}
       <div className="p-2.5">
         <div className="flex items-center justify-between gap-2 mb-1.5">

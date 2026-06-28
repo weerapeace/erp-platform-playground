@@ -240,7 +240,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
           </div>
 
           {/* 2 คอลัมน์: ซ้าย (เนื้องาน ~2/3) · ขวา (ข้อมูล ~1/3) — เรียงข้างกันเมื่อ drawer กว้างพอ */}
-          {tab === "task" && (
+          {tab === "task" && (<>
           <div className={`flex ${twoCol ? "flex-row" : "flex-col"} items-stretch`}>
             {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
             <div className="flex-1 min-w-0 w-full p-5 space-y-4">
@@ -431,35 +431,36 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 </>
               )}
 
-              {/* ความคิดเห็น */}
-              <div className="border-t border-slate-100 pt-3">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
-                <div className="space-y-2 mb-3">
-                  {d.comments.map((c) => (
-                    <div key={c.id} className="bg-white border border-slate-100 rounded-lg px-3 py-2">
-                      <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
-                      <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
-                    </div>
-                  ))}
-                  {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
-                </div>
-                <div className="flex gap-2">
-                  <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
-                  <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">{t("ส่ง", "Send")}</button>
-                </div>
-                {/* แจ้งเตือนถึง (@mention) — คนที่เลือกจะได้แจ้งเตือนเมื่อส่งคอมเมนต์ */}
-                <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                  <span className="text-[11px] text-slate-400">🔔 {t("แจ้งถึง", "Notify")}:</span>
-                  {mentionUsers.map((u) => (
-                    <span key={u.id} className="inline-flex items-center gap-1 text-[11px] bg-violet-50 text-violet-700 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">{u.name}
-                      <button onClick={() => setMentionUsers((xs) => xs.filter((x) => x.id !== u.id))} className="text-violet-300 hover:text-red-500">✕</button></span>
-                  ))}
-                  <div className="w-40"><UserPicker value={mentionAdding} onChange={(v) => { if (v && !mentionUsers.some((x) => x.id === v.id)) setMentionUsers((xs) => [...xs, v]); setMentionAdding(null); }} disableCreate /></div>
-                </div>
-              </div>
             </div>
           </div>
-          )}
+
+          {/* ความคิดเห็น — section เต็มกว้างใต้ 2 คอลัมน์ */}
+          <div className="border-t border-slate-100 px-5 py-4">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ความคิดเห็น", "Comments")} ({d.comments.length})</p>
+            <div className="space-y-2 mb-3">
+              {d.comments.map((c) => (
+                <div key={c.id} className="bg-white border border-slate-100 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 mb-0.5"><span className="text-xs font-medium text-slate-700">{c.author_name || t("ผู้ใช้", "User")}</span><span className="text-xs text-slate-400">{c.created_at.slice(0, 16).replace("T", " ")}</span></div>
+                  <p className="text-sm text-slate-600 whitespace-pre-wrap">{c.body}</p>
+                </div>
+              ))}
+              {d.comments.length === 0 && <p className="text-sm text-slate-400 italic">{t("ยังไม่มีความคิดเห็น", "No comments yet")}</p>}
+            </div>
+            <div className="flex gap-2">
+              <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
+              <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">{t("ส่ง", "Send")}</button>
+            </div>
+            {/* แจ้งเตือนถึง (@mention) — คนที่เลือกจะได้แจ้งเตือนเมื่อส่งคอมเมนต์ */}
+            <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+              <span className="text-[11px] text-slate-400">🔔 {t("แจ้งถึง", "Notify")}:</span>
+              {mentionUsers.map((u) => (
+                <span key={u.id} className="inline-flex items-center gap-1 text-[11px] bg-violet-50 text-violet-700 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">{u.name}
+                  <button onClick={() => setMentionUsers((xs) => xs.filter((x) => x.id !== u.id))} className="text-violet-300 hover:text-red-500">✕</button></span>
+              ))}
+              <div className="w-40"><UserPicker value={mentionAdding} onChange={(v) => { if (v && !mentionUsers.some((x) => x.id === v.id)) setMentionUsers((xs) => [...xs, v]); setMentionAdding(null); }} disableCreate /></div>
+            </div>
+          </div>
+          </>)}
 
           {tab === "content" && (
             <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} />

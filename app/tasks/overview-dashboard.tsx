@@ -11,6 +11,7 @@ import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { OverviewKanban } from "./overview-kanban";
+import { CalendarBoard } from "./calendar-board";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { isOverdue, updateTask, PRIORITY_META, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
@@ -65,7 +66,7 @@ export function OverviewDashboard({
   const [typeFilter, setTypeFilter] = useState("");    // ประเภทงาน (Tab) — "" = ทั้งหมด
   const [brandFilter, setBrandFilter] = useState("");  // แบรนด์ (ชิป) — "" = ทั้งหมด
   const [kanbanSearch, setKanbanSearch] = useState(""); // ค้นหาในบอร์ด Kanban
-  const setKanbanView = (v: "kanban" | "table") => onThemeChange({ ...theme, kanban: { ...theme.kanban, view: v } });
+  const setKanbanView = (v: "kanban" | "table" | "calendar") => onThemeChange({ ...theme, kanban: { ...theme.kanban, view: v } });
 
   // งานของฉัน = งานหลักของฉัน ∪ งานที่มีงานย่อย (subtask) ของฉัน
   const myTaskIds = useMemo(() => {
@@ -278,7 +279,7 @@ export function OverviewDashboard({
         {/* คอลัมน์ 2 — งาน: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง (กว้างสุด) */}
         <section className="flex-1 min-w-0 space-y-2">
           <div className="flex items-center justify-between gap-2">
-            {theme.kanban.view === "kanban"
+            {theme.kanban.view !== "table"
               ? <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
               : <span />}
             <div className="flex items-center gap-2">
@@ -288,7 +289,7 @@ export function OverviewDashboard({
                   className="h-8 w-40 max-w-[40vw] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
               )}
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-                {([["kanban", "📋", t("การ์ด", "Cards")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
+                {([["kanban", "📋", t("การ์ด", "Cards")], ["calendar", "🗓", t("ปฏิทิน", "Calendar")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
                   const on = theme.kanban.view === v;
                   return <button key={v} onClick={() => setKanbanView(v)} style={on ? { background: theme.accent } : undefined}
                     className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
@@ -300,6 +301,10 @@ export function OverviewDashboard({
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
               <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent}
                 onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
+            </div>
+          ) : theme.kanban.view === "calendar" ? (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm p-3">
+              <CalendarBoard tasks={kanbanTasks} onCardClick={onOpenTask} />
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
