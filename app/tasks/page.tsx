@@ -141,8 +141,17 @@ export default function TasksPage() {
   // หลังบันทึก/ลบ → บังคับโหลดงานใหม่ (focus revalidate มีในตัว hook แล้ว)
   const reload = useCallback(async () => { await Promise.all([tasksSWR.revalidate(true), mineSWR.revalidate(true), subsSWR.revalidate(true)]); }, [tasksSWR, mineSWR, subsSWR]);
 
-  // ธีมหน้าภาพรวม "ของฉัน" — โหลดครั้งเดียว + บันทึกอัตโนมัติเมื่อแต่ง
-  useEffect(() => { apiFetch("/api/user-prefs?key=tasks_overview_theme").then((r) => r.json()).then((j) => { if (j && !j.error) setOvTheme(mergeTheme(j.value)); }).catch(() => {}); }, []);
+  // ธีมหน้าภาพรวม "ของฉัน" — มีธีมส่วนตัวใช้เลย · ไม่มี → ใช้ธีมเริ่มต้นของทีม (ถ้าแอดมินตั้งไว้)
+  useEffect(() => {
+    (async () => {
+      try {
+        const j = await apiFetch("/api/user-prefs?key=tasks_overview_theme").then((r) => r.json());
+        if (j && !j.error && j.value && Object.keys(j.value).length > 0) { setOvTheme(mergeTheme(j.value)); return; }
+        const tj = await apiFetch("/api/ui-config?key=tasks_overview_theme_default").then((r) => r.json());
+        if (tj && !tj.error && tj.value && Object.keys(tj.value).length > 0) setOvTheme(mergeTheme(tj.value));
+      } catch { /* ใช้ค่าเริ่มต้น */ }
+    })();
+  }, []);
   // sweep แจ้งเตือน "ใกล้/เกินกำหนด" ให้ผู้รับผิดชอบ (lazy ตอนเปิดหน้า, กันซ้ำวันละครั้ง) — fire-and-forget
   useEffect(() => { void apiFetch("/api/creative-tasks/reminders").catch(() => {}); }, []);
   const saveTheme = useCallback((th: OverviewTheme) => {

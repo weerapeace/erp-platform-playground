@@ -115,6 +115,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [mentionUsers, setMentionUsers] = useState<UserPickerValue[]>([]);   // แจ้งเตือนถึงใครบ้างเมื่อส่งคอมเมนต์
+  const [mentionAdding, setMentionAdding] = useState<UserPickerValue | null>(null);
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [editing, setEditing] = useState(false);
@@ -162,7 +164,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const canManageAssignees = isManager || (!!user?.id && user.id === d.created_by);
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
-  const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(d.id, commentText.trim()); setCommentText(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(d.id, commentText.trim(), mentionUsers.map((u) => u.id)); setCommentText(""); setMentionUsers([]); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(d.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
 
   const brandSel = brands.find((b) => b.id === d.brand_id);
@@ -412,6 +414,15 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 <div className="flex gap-2">
                   <ERPInput value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder={t("เขียนความคิดเห็น...", "Write a comment...")} />
                   <button onClick={sendComment} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 shrink-0">{t("ส่ง", "Send")}</button>
+                </div>
+                {/* แจ้งเตือนถึง (@mention) — คนที่เลือกจะได้แจ้งเตือนเมื่อส่งคอมเมนต์ */}
+                <div className="flex items-center gap-1.5 flex-wrap mt-1.5">
+                  <span className="text-[11px] text-slate-400">🔔 {t("แจ้งถึง", "Notify")}:</span>
+                  {mentionUsers.map((u) => (
+                    <span key={u.id} className="inline-flex items-center gap-1 text-[11px] bg-violet-50 text-violet-700 border border-violet-200 rounded-full pl-2 pr-1 py-0.5">{u.name}
+                      <button onClick={() => setMentionUsers((xs) => xs.filter((x) => x.id !== u.id))} className="text-violet-300 hover:text-red-500">✕</button></span>
+                  ))}
+                  <div className="w-40"><UserPicker value={mentionAdding} onChange={(v) => { if (v && !mentionUsers.some((x) => x.id === v.id)) setMentionUsers((xs) => [...xs, v]); setMentionAdding(null); }} disableCreate /></div>
                 </div>
               </div>
             </div>

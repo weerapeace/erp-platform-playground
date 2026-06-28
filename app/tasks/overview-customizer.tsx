@@ -103,10 +103,11 @@ async function uploadImage(file: File): Promise<string> {
   return j.r2_key as string;
 }
 
-export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }: {
+export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, onClose }: {
   open: boolean;
   theme: OverviewTheme;
   canUpload: boolean;
+  isAdmin?: boolean;
   onChange: (t: OverviewTheme) => void;   // อัปเดต + บันทึก (parent จัดการ)
   onClose: () => void;
 }) {
@@ -116,6 +117,17 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
   // ธีมที่ผู้ใช้บันทึกเอง (เก็บใน user_ui_prefs key=tasks_overview_themes)
   const [saved, setSaved] = useState<{ name: string; theme: OverviewTheme }[]>([]);
   const [newName, setNewName] = useState("");
+  const [teamMsg, setTeamMsg] = useState<string | null>(null);
+
+  // (แอดมิน) ตั้งธีมปัจจุบันเป็นค่าเริ่มต้นของทีม — เก็บ ui_config (global) คนที่ยังไม่เคยแต่งจะได้ธีมนี้
+  const setTeamDefault = async () => {
+    setTeamMsg(t("กำลังบันทึก…", "Saving…"));
+    try {
+      const r = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_overview_theme_default", value: theme }) });
+      setTeamMsg((await r.json()).error ? t("บันทึกไม่สำเร็จ", "Failed") : t("ตั้งเป็นธีมทีมแล้ว ✓", "Set as team default ✓"));
+    } catch { setTeamMsg(t("บันทึกไม่สำเร็จ", "Failed")); }
+    setTimeout(() => setTeamMsg(null), 2500);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -170,6 +182,13 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
               className="h-8 px-2 text-sm border border-slate-200 rounded flex-1 min-w-[160px]" />
             <button onClick={saveCurrent} disabled={!newName.trim()} className="h-8 px-3 text-xs font-medium text-white bg-violet-600 rounded hover:bg-violet-700 disabled:opacity-40">💾 {t("บันทึกธีมของฉัน", "Save my theme")}</button>
           </div>
+          {isAdmin && (
+            <div className="flex items-center gap-2 mt-2">
+              <button onClick={setTeamDefault} className="h-8 px-3 text-xs font-medium text-slate-700 border border-slate-200 rounded hover:bg-slate-50">🏢 {t("ตั้งธีมนี้เป็นค่าเริ่มต้นของทีม", "Set as team default")}</button>
+              {teamMsg && <span className="text-[11px] text-emerald-600">{teamMsg}</span>}
+              <span className="text-[11px] text-slate-400">{t("(คนที่ยังไม่เคยแต่งหน้าจะได้ธีมนี้)", "(new users get this theme)")}</span>
+            </div>
+          )}
           {saved.length > 0 && (
             <div className="flex items-center gap-1.5 flex-wrap mt-2">
               <span className="text-[11px] text-slate-400">{t("ธีมของฉัน", "My themes")}:</span>
