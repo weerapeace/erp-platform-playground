@@ -14,7 +14,7 @@ import { useT } from "@/components/i18n";
 export type CardKey = "all" | "mine" | "review" | "overdue";
 export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
 
-export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string };
+export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; petUrl?: string | null };
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
@@ -22,10 +22,10 @@ export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: b
 export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
 export type KanbanView = "kanban" | "table" | "calendar";
 export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean };
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme };
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number };
 
 export const DEFAULT_THEME: OverviewTheme = {
-  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff" },
+  hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null },
   cards: {
     all: { icon: "📋", iconUrl: null, color: "slate", bgUrl: null, label: null },
     mine: { icon: "🙋", iconUrl: null, color: "violet", bgUrl: null, label: null },
@@ -36,6 +36,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   show: { shortcuts: true, campaigns: true, filters: true },
   accent: "#7c3aed",   // สีหลัก (ปุ่ม/ไฮไลต์) ของหน้า
   kanban: { view: "kanban", groupBy: "status", cover: true, brand: true, assignee: true, due: true, priority: true, progress: true, brandBorder: false },
+  cardIconSize: 18,    // ขนาดไอคอนการ์ดสรุป (px)
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -58,7 +59,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) } };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -267,6 +268,30 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
           <label className="flex items-center gap-2 text-xs text-slate-600">{t("สีตัวอักษร", "Text color")}
             <input type="color" value={theme.hero.textColor} onChange={(e) => setHero({ textColor: e.target.value })} className="w-9 h-8 p-0 border border-slate-200 rounded cursor-pointer" /></label>
         </div>
+        {/* ขนาด/ตำแหน่งหัวข้อ + ไอคอนลอย (Pet) */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{t("ขนาดหัวข้อ", "Title size")}</span>
+            {(["sm", "md", "lg", "xl"] as const).map((s) => (
+              <button key={s} onClick={() => setHero({ titleSize: s })} className={`h-7 w-9 text-xs rounded border ${(theme.hero.titleSize ?? "lg") === s ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{s.toUpperCase()}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{t("ตำแหน่ง", "Align")}</span>
+            {([["left", t("ซ้าย", "Left")], ["center", t("กลาง", "Center")]] as const).map(([a, lbl]) => (
+              <button key={a} onClick={() => setHero({ align: a })} className={`h-7 px-2.5 text-xs rounded border ${(theme.hero.align ?? "left") === a ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">{t("ไอคอนลอย (Pet)", "Floating pet")}</span>
+            {canUpload ? (
+              <label className={`h-7 px-2 leading-7 text-[11px] font-medium rounded cursor-pointer ${busy === "pet" ? "bg-slate-200 text-slate-400" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("รองรับ GIF — ลอยมุมล่างขวาของแถบ Hero", "Supports GIF — floats at the hero's bottom-right")}>
+                {busy === "pet" ? "…" : (theme.hero.petUrl ? t("เปลี่ยน", "Change") : t("⬆ อัปโหลด (GIF ได้)", "⬆ Upload (GIF ok)"))}
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" disabled={busy === "pet"} onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f, (k) => setHero({ petUrl: k }), "pet"); e.target.value = ""; }} /></label>
+            ) : <span className="text-[11px] text-amber-600">{t("ต้องมีสิทธิ์อัปโหลด", "Need upload permission")}</span>}
+            {theme.hero.petUrl && <button onClick={() => setHero({ petUrl: null })} className="text-[11px] text-rose-500 hover:text-rose-700">{t("ลบ", "Remove")}</button>}
+          </div>
+        </div>
       </section>
 
       {/* ===== พื้นหลังทั้งหน้า ===== */}
@@ -346,6 +371,12 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       {/* ===== Cards ===== */}
       <section>
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("การ์ดสรุป (ไอคอน · รูปเต็ม · ชื่อ · สี)", "Summary cards (icon · full image · label · color)")}</div>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-xs text-slate-500">{t("ขนาดไอคอน", "Icon size")}</span>
+          <input type="range" min={14} max={40} value={theme.cardIconSize ?? 18} onChange={(e) => onChange({ ...theme, cardIconSize: Number(e.target.value) })} className="w-32 accent-violet-600" />
+          <span className="text-xs text-slate-400 w-9">{theme.cardIconSize ?? 18}px</span>
+          <span className="text-[11px] text-slate-400 ml-2">{t("💡 รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64", "💡 Full image ~400×400 · icon ~64×64")}</span>
+        </div>
         <div className="space-y-2">
           {CARD_KEYS.map((k) => {
             const c = theme.cards[k];

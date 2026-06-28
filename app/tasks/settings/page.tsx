@@ -15,12 +15,13 @@ import { listStatuses, createStatus, updateStatus, deleteStatus, setTransition, 
 import { STATUS_COLOR_OPTIONS, statusColor } from "@/lib/creative-status-colors";
 import { ColorInput } from "@/components/color-picker";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { loadMySubView, saveMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "../my-subtasks-view";
 import { useT } from "@/components/i18n";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
-type Tab = "perm" | "task_type" | "platform" | "status" | "transition";
+type Tab = "perm" | "task_type" | "platform" | "status" | "transition" | "mysub";
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -47,6 +48,7 @@ export default function TaskSettingsPage() {
             <TabBtn active={tab === "platform"} onClick={() => setTab("platform")}>📱 {t("แพลตฟอร์ม", "Platforms")}</TabBtn>
             <TabBtn active={tab === "status"} onClick={() => setTab("status")}>🚦 {t("สถานะ", "Status")}</TabBtn>
             <TabBtn active={tab === "transition"} onClick={() => setTab("transition")}>🔀 {t("เส้นทาง", "Transitions")}</TabBtn>
+            <TabBtn active={tab === "mysub"} onClick={() => setTab("mysub")}>🧩 {t("งานย่อยของฉัน", "My subtasks")}</TabBtn>
           </div>
         )}
       </div>
@@ -60,6 +62,7 @@ export default function TaskSettingsPage() {
         ) : tab === "perm" ? <PermissionMatrix showToast={showToast} />
           : tab === "status" ? <StatusManager showToast={showToast} />
           : tab === "transition" ? <TransitionManager showToast={showToast} />
+          : tab === "mysub" ? <MySubViewManager showToast={showToast} />
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
       </div>
 
@@ -164,6 +167,41 @@ function PermissionMatrix({ showToast }: { showToast: (m: string) => void }) {
 // ============================================================
 // แท็บจัดการตัวเลือก (ประเภทงาน / แพลตฟอร์ม)
 // ============================================================
+// จัดกลุ่ม/เรียง "งานย่อยของฉัน" (admin ตั้งกลาง ใช้กับทุกคน)
+function MySubViewManager({ showToast }: { showToast: (m: string) => void }) {
+  const t = useT();
+  const [v, setV] = useState<MySubView>(DEFAULT_MYSUB_VIEW);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { loadMySubView().then((x) => { setV(x); setLoading(false); }).catch(() => setLoading(false)); }, []);
+  const save = async () => { setSaving(true); try { await saveMySubView(v); showToast(t("บันทึกแล้ว — ใช้กับทุกคน", "Saved — applies to everyone")); } catch (e) { showToast((e as Error).message); } finally { setSaving(false); } };
+  const SORTS = [["priority", t("ความสำคัญ", "Priority")], ["deadline", t("กำหนดส่ง", "Deadline")], ["status", t("สถานะ", "Status")], ["none", t("ไม่เรียง", "None")]] as const;
+  if (loading) return <div className="py-10 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>;
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 max-w-xl space-y-4">
+      <div>
+        <h2 className="font-semibold text-slate-800">🧩 {t("งานย่อยของฉัน", "My subtasks")}</h2>
+        <p className="text-xs text-slate-400 mt-0.5">{t('ตั้งครั้งเดียว ใช้กับทุกคน — จัดกลุ่ม + เรียงในรายการ "งานย่อยของฉัน" (คิวงาน + ภาพรวม)', 'Set once for everyone — grouping + sorting of the "My subtasks" list (queue + overview)')}</p>
+      </div>
+      <div>
+        <div className="text-xs font-semibold text-slate-500 mb-1">{t("จัดกลุ่ม", "Group by")}</div>
+        <div className="flex gap-2">
+          {([["none", t("ไม่จัดกลุ่ม", "None")], ["status", t("ตามสถานะ (กำลังทำบนสุด)", "By status (in-progress first)")]] as const).map(([g, lbl]) => (
+            <button key={g} onClick={() => setV({ ...v, groupBy: g })} className={`h-8 px-3 text-sm rounded-lg border ${v.groupBy === g ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><div className="text-xs font-semibold text-slate-500 mb-1">{t("เรียงลำดับ 1", "Sort 1")}</div>
+          <select value={v.sort1} onChange={(e) => setV({ ...v, sort1: e.target.value as MySubView["sort1"] })} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm">{SORTS.map(([val, lbl]) => <option key={val} value={val}>{lbl}</option>)}</select></div>
+        <div><div className="text-xs font-semibold text-slate-500 mb-1">{t("เรียงลำดับ 2", "Sort 2")}</div>
+          <select value={v.sort2} onChange={(e) => setV({ ...v, sort2: e.target.value as MySubView["sort2"] })} className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm">{SORTS.map(([val, lbl]) => <option key={val} value={val}>{lbl}</option>)}</select></div>
+      </div>
+      <div className="flex justify-end"><button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button></div>
+    </div>
+  );
+}
+
 function OptionsManager({ kind, title, showToast }: { kind: string; title: string; showToast: (m: string) => void }) {
   const t = useT();
   const [opts, setOpts] = useState<Option[]>([]);

@@ -26,12 +26,13 @@ import { AssigneeStack } from "./assignee-avatar";
 import { apiFetch } from "@/lib/api";
 import { applyTaskTransition } from "./task-actions";
 import { OverviewDashboard } from "./overview-dashboard";
+import { arrangeMySubtasks, loadMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { DEFAULT_THEME, mergeTheme, type OverviewTheme } from "./overview-customizer";
 import { type MetricDef } from "./metrics";
 import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
-  PRIORITY_RANK, isOverdue,
+  PRIORITY_RANK, PRIORITY_META, isOverdue,
   listTasks, deleteTask, updateTask,
   listCampaigns, listBrands, listMySubtasks,
   type CreativeTask, type CreativeStatus, type CreativePriority,
@@ -100,6 +101,8 @@ export default function TasksPage() {
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
   const [ovTheme, setOvTheme] = useState<OverviewTheme>(DEFAULT_THEME); // ธีมหน้าภาพรวม "ของฉัน" (per-user)
   const [ovMetrics, setOvMetrics] = useState<MetricDef[]>([]); // การ์ดเมตริกของฉัน (per-user)
+  const [mySubView, setMySubView] = useState<MySubView>(DEFAULT_MYSUB_VIEW); // จัดกลุ่ม/เรียงงานย่อยของฉัน (admin ตั้งกลาง)
+  useEffect(() => { loadMySubView().then(setMySubView).catch(() => {}); }, []);
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -249,10 +252,11 @@ export default function TasksPage() {
                 onChanged={reload}
                 metrics={ovMetrics}
                 onMetricsChange={saveMetrics}
+                mySubView={mySubView}
               />
             )}
 
-            {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
+            {view === "queue" && <QueueView tasks={myTasks} subtasks={mySubs} mySubView={mySubView} onOpen={(id) => setDetailId(id)} onMove={applyMove} onCreate={openCreate} />}
 
             {view === "calendar" && (
               <div>
@@ -361,8 +365,8 @@ function ViewSwitcher({ view, setView, t, onHero }: {
 const SUB_STATUS_LABEL: Record<string, string> = { todo: "ยังไม่เริ่ม", in_progress: "กำลังทำ", submitted: "รออนุมัติ", approved: "อนุมัติแล้ว", doing: "กำลังทำ", done: "อนุมัติแล้ว", posted: "อนุมัติแล้ว" };
 const SUB_STATUS_DOT: Record<string, string> = { todo: "bg-slate-400", in_progress: "bg-blue-500", submitted: "bg-amber-500", approved: "bg-emerald-500", doing: "bg-blue-500", done: "bg-emerald-500", posted: "bg-emerald-500" };
 
-function QueueView({ tasks, subtasks, onOpen, onMove, onCreate }: {
-  tasks: CreativeTask[]; subtasks: MySubtask[]; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void;
+function QueueView({ tasks, subtasks, mySubView, onOpen, onMove, onCreate }: {
+  tasks: CreativeTask[]; subtasks: MySubtask[]; mySubView: MySubView; onOpen: (id: string) => void; onMove: (t: CreativeTask, toKey: string) => void; onCreate: () => void;
 }) {
   const t = useT();
   const ordered = useMemo(() => [...tasks].filter((t) => !isTerminal(t.status)).sort((a, b) => {
@@ -388,17 +392,25 @@ function QueueView({ tasks, subtasks, onOpen, onMove, onCreate }: {
       {subtasks.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({subtasks.length})</p>
-          <div className="space-y-1.5">
-            {subtasks.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 cursor-pointer" onClick={() => onOpen(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}>
-                <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_STATUS_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm text-slate-700">{s.title}</span>
-                  <span className="ml-2 text-[10px] text-slate-400">{SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
-                  {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must complete first")}</span>}
-                  <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+          <div className="space-y-3">
+            {arrangeMySubtasks(subtasks, mySubView).map((g) => (
+              <div key={g.key}>
+                {g.label && <p className="text-[11px] font-semibold text-slate-500 mb-1">{g.label} ({g.items.length})</p>}
+                <div className="space-y-1.5">
+                  {g.items.map((s) => (
+                    <div key={s.id} className="flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 cursor-pointer" onClick={() => onOpen(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}>
+                      <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_STATUS_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm text-slate-700">{s.title}</span>
+                        <span className="ml-2 text-[10px] text-slate-400">{SUB_STATUS_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
+                        {s.priority && s.priority !== "normal" && <span className="ml-2 text-[10px] text-slate-400">· {PRIORITY_META[s.priority as CreativePriority]?.label ?? s.priority}</span>}
+                        {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must complete first")}</span>}
+                        <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+                      </div>
+                      {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
+                    </div>
+                  ))}
                 </div>
-                {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
               </div>
             ))}
           </div>

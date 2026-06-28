@@ -12,6 +12,7 @@ import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { OverviewKanban } from "./overview-kanban";
 import { CalendarBoard } from "./calendar-board";
+import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { isOverdue, updateTask, PRIORITY_META, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
@@ -32,7 +33,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
   theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField, viewSwitcher,
-  onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange,
+  onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange, mySubView = DEFAULT_MYSUB_VIEW,
 }: {
   userName?: string;
   counts: Counts;
@@ -58,6 +59,7 @@ export function OverviewDashboard({
   onChanged?: () => void | Promise<void>;
   metrics: MetricDef[];
   onMetricsChange: (list: MetricDef[]) => void;
+  mySubView?: MySubView;
 }) {
   const t = useT();
   const [customizing, setCustomizing] = useState(false);
@@ -155,6 +157,9 @@ export function OverviewDashboard({
   ];
 
   const heroImage = theme.hero.mode === "image" && !!theme.hero.imageUrl;
+  const heroTitleCls = ({ sm: "text-base sm:text-lg", md: "text-lg sm:text-xl", lg: "text-xl sm:text-2xl", xl: "text-2xl sm:text-3xl" } as const)[theme.hero.titleSize ?? "lg"];
+  const heroAlign = (theme.hero.align ?? "left") === "center" ? "text-center" : "";
+  const cardIconSize = theme.cardIconSize ?? 18;
 
   const hasPageBg = theme.page.mode !== "none";
   return (
@@ -164,6 +169,11 @@ export function OverviewDashboard({
       {/* Hero (ธีมแต่งได้) — บนสุด: เมนูมุมมอง ☰ + ทักทาย + ปุ่ม + ทางลัด รวมในตัว */}
       <div className="relative rounded-2xl overflow-hidden shadow-sm text-white" style={heroStyle(theme.hero)}>
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
+        {/* ไอคอนลอย (Pet) — มุมล่างขวา (GIF จะขยับเอง) */}
+        {theme.hero.petUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`/api/r2-image?key=${encodeURIComponent(theme.hero.petUrl)}&w=200`} alt="" className="absolute bottom-1 right-3 h-16 w-16 object-contain drop-shadow-lg pointer-events-none select-none" />
+        )}
         <div className="relative p-5 sm:p-6">
           {/* แถวบน: เมนูเลือกมุมมอง (ซ้าย) + ปุ่ม (ขวา) */}
           <div className="flex items-center justify-between gap-3 mb-4">
@@ -174,12 +184,14 @@ export function OverviewDashboard({
               <button onClick={onCreate} style={{ color: theme.accent }} className="h-10 px-4 bg-white font-semibold rounded-xl shadow hover:bg-slate-50">＋ {t("สร้างงานใหม่", "New task")}</button>
             </div>
           </div>
-          {/* ทักทาย */}
-          <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm" style={{ color: theme.hero.textColor }}>{theme.hero.title || defaultTitle}</h2>
-          <p className="text-sm mt-1 drop-shadow-sm opacity-90" style={{ color: theme.hero.textColor }}>{theme.hero.subtitle || heroLine}</p>
+          {/* ทักทาย (ขนาด/ตำแหน่งปรับได้) */}
+          <div className={heroAlign}>
+            <h2 className={`${heroTitleCls} font-bold drop-shadow-sm`} style={{ color: theme.hero.textColor }}>{theme.hero.title || defaultTitle}</h2>
+            <p className="text-sm mt-1 drop-shadow-sm opacity-90" style={{ color: theme.hero.textColor }}>{theme.hero.subtitle || heroLine}</p>
+          </div>
           {/* ทางลัด — ในตัว Hero */}
           {theme.show.shortcuts && (
-            <div className="flex items-center gap-2 flex-wrap mt-4">
+            <div className={`flex items-center gap-2 flex-wrap mt-4 ${theme.hero.align === "center" ? "justify-center" : ""}`}>
               <span className="text-xs font-semibold text-white/70 mr-0.5">{t("ทางลัด", "Shortcuts")}</span>
               <ShortcutPill icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
               <ShortcutPill icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
@@ -194,7 +206,7 @@ export function OverviewDashboard({
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cardMeta.map((m) => (
-          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label}
+          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize}
             active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
             onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
         ))}
@@ -224,19 +236,26 @@ export function OverviewDashboard({
         filter === "mine" ? (
           <div className="bg-white rounded-xl border border-slate-200 p-3 shadow-sm">
             <p className="text-sm font-semibold text-slate-700 mb-2">🧩 {t("งานย่อยของฉัน", "My subtasks")} ({mySubs.length})</p>
-            <div className="space-y-1.5">
-              {mySubs.map((s) => (
-                <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
-                  className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left">
-                  <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-slate-700">{s.title}</span>
-                    <span className="ml-2 text-[10px] text-slate-400">{SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
-                    {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
-                    <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+            <div className="space-y-3">
+              {arrangeMySubtasks(mySubs, mySubView).map((g) => (
+                <div key={g.key}>
+                  {g.label && <p className="text-[11px] font-semibold text-slate-500 mb-1">{g.label} ({g.items.length})</p>}
+                  <div className="space-y-1.5">
+                    {g.items.map((s) => (
+                      <button key={s.id} onClick={() => onOpenTask(s.task_id)} title={t("กดเพื่อเปิดงาน → เริ่ม/ส่งงาน", "Click to open task → start / submit")}
+                        className="w-full flex items-center gap-2 border border-slate-100 rounded-lg px-3 py-2 hover:border-violet-200 text-left">
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${SUB_DOT[s.status] ?? "bg-slate-400"}`} title={SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")} />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm text-slate-700">{s.title}</span>
+                          <span className="ml-2 text-[10px] text-slate-400">{SUB_LABEL[s.status] ?? t("ยังไม่เริ่ม", "Not started")}</span>
+                          {s.required_before_next && <span className="ml-2 text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
+                          <div className="text-xs text-slate-400 truncate">↳ {s.task_no ? <span className="font-mono">{s.task_no}</span> : null} {s.task_title}</div>
+                        </div>
+                        {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
+                      </button>
+                    ))}
                   </div>
-                  {s.due_date && <span className="text-xs text-slate-400 shrink-0">{s.due_date}</span>}
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -372,7 +391,7 @@ export function OverviewDashboard({
   );
 }
 
-function SummaryCard({ card, value, label, active, hint, onClick }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void }) {
+function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18 }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void; iconSize?: number }) {
   const c = CARD_COLORS[card.color] ?? CARD_COLORS.slate;
   // โหมดรูปเต็ม — รูปพื้นหลังการ์ด + ฉากดำจาง + ตัวอักษรขาว
   if (card.bgUrl) {
@@ -385,8 +404,8 @@ function SummaryCard({ card, value, label, active, hint, onClick }: { card: Card
           <div className="flex items-center justify-between">
             {card.iconUrl
               // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="w-6 h-6 object-contain drop-shadow" />
-              : <span className="text-lg drop-shadow">{card.icon}</span>}
+              ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="object-contain drop-shadow" style={{ width: iconSize, height: iconSize }} />
+              : <span className="drop-shadow leading-none" style={{ fontSize: iconSize }}>{card.icon}</span>}
             <span className="text-2xl font-bold tabular-nums drop-shadow">{value}</span>
           </div>
           <p className="text-sm font-medium mt-1 drop-shadow">{label}</p>
@@ -400,8 +419,8 @@ function SummaryCard({ card, value, label, active, hint, onClick }: { card: Card
       <div className="flex items-center justify-between">
         {card.iconUrl
           // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="w-6 h-6 object-contain" />
-          : <span className="text-lg">{card.icon}</span>}
+          ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="object-contain" style={{ width: iconSize, height: iconSize }} />
+          : <span className="leading-none" style={{ fontSize: iconSize }}>{card.icon}</span>}
         <span className="text-2xl font-bold tabular-nums">{value}</span>
       </div>
       <p className="text-sm font-medium mt-1">{label}</p>

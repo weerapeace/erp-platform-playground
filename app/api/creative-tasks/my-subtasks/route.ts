@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (!ids.length) return NextResponse.json({ data: [], error: null });
 
   const { data, error } = await admin.from("erp_creative_subtasks")
-    .select("id, title, status, due_date, required_before_next, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active)")
+    .select("id, title, status, due_date, required_before_next, task_id, task:erp_creative_tasks!task_id(task_no, title, status, is_active, priority)")
     .in("id", ids)
     .not("status", "in", "(done,posted,approved)")
     .order("due_date", { ascending: true });
@@ -40,6 +40,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       id: r.id, title: r.title, status: r.status, due_date: r.due_date, required_before_next: r.required_before_next,
       task_id: r.task_id, task_no: t?.task_no ?? null, task_title: t?.title ?? null, task_status: t?.status ?? null,
+      priority: t?.priority ?? null,
       task_active: t?.is_active ?? true,
     };
   }).filter((r) => r.task_active);
