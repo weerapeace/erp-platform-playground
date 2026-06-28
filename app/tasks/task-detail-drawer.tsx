@@ -19,7 +19,9 @@ import { useAuth } from "@/components/auth";
 import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
-import { taskTypeLabel, platformLabel, useCreativeOptions } from "./use-options";
+import { taskTypeLabel, useCreativeOptions } from "./use-options";
+import { PlatformChip } from "./platform-chip";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_META, APPROVAL_META, ASSET_META, isOverdue,
@@ -333,7 +335,17 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ (หลายคน) แก้ที่ช่อง \"ผู้รับผิดชอบ\" ในโหมดดู — รวมคนที่กดเริ่มงานย่อยอัตโนมัติ", "Edit assignees (multiple) in the \"Assignees\" field in view mode — auto-includes whoever started subtasks")}</div>
                   </div>
                   <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
-                    <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => { const on = ef.platforms.includes(p.value); return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`px-2.5 py-1 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>; })}</div>
+                    <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => {
+                      const on = ef.platforms.includes(p.value);
+                      const img = p.icon_key ? r2ImageUrl(p.icon_key, 32) : null;
+                      const hex = p.color && /^#[0-9a-fA-F]{6}$/.test(p.color) ? p.color : null;
+                      const offStyle = !on && hex ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined;
+                      const cls = on ? "bg-violet-600 text-white border-violet-600" : hex ? "" : "bg-white text-slate-600 border-slate-200";
+                      return <button key={p.value} type="button" onClick={() => setEf({ ...ef, platforms: on ? ef.platforms.filter((x) => x !== p.value) : [...ef.platforms, p.value] })} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border ${cls}`} style={offStyle}>
+                        {img ? <img src={img} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : p.icon ? <span className="leading-none">{p.icon}</span> : null}
+                        {p.label}
+                      </button>;
+                    })}</div>
                   </div>
                   <div className="flex justify-end gap-2">
                     <button onClick={() => setEditing(false)} className="h-8 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button>
@@ -377,7 +389,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   {/* แพลตฟอร์มที่ลง */}
                   {d.platforms && d.platforms.length > 0 && (
                     <div><p className="text-[10px] text-slate-400 mb-1">Platform</p>
-                      <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <span key={p} className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{platformLabel(p)}</span>)}</div>
+                      <div className="flex flex-wrap gap-1.5">{d.platforms.map((p) => <PlatformChip key={p} code={p} />)}</div>
                     </div>
                   )}
 

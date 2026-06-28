@@ -13,6 +13,8 @@ import { apiFetch } from "@/lib/api";
 import { listOptions, createOption, updateOption, deleteOption, type Option } from "../use-options";
 import { listStatuses, createStatus, updateStatus, deleteStatus, setTransition, deleteTransition, type Status, type Transition } from "../use-statuses";
 import { STATUS_COLOR_OPTIONS, statusColor } from "@/lib/creative-status-colors";
+import { ColorInput } from "@/components/color-picker";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
@@ -179,6 +181,18 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
     catch (e) { showToast((e as Error).message); } finally { setBusy(false); }
   };
   const rename = async (o: Option, label: string) => { if (label.trim() === o.label || !label.trim()) return; try { await updateOption(o.id, { label: label.trim() }); setOpts((p) => p.map((x) => x.id === o.id ? { ...x, label: label.trim() } : x)); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); } };
+  // แก้ meta แพลตฟอร์ม (สี/ไอคอน emoji/รูปไอคอน) — อัปเดตทันทีบนจอ
+  const patchMeta = async (o: Option, patch: Partial<Option>) => { setOpts((p) => p.map((x) => x.id === o.id ? { ...x, ...patch } : x)); try { await updateOption(o.id, patch as Record<string, unknown>); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); } };
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const uploadIcon = async (o: Option, file: File) => {
+    setUploadingId(o.id);
+    try {
+      const fd = new FormData(); fd.append("file", file); fd.append("folder", "platform-icons");
+      const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
+      if (j.error || !j.r2_key) throw new Error(j.error || t("อัปโหลดไม่สำเร็จ", "Upload failed"));
+      await patchMeta(o, { icon_key: j.r2_key });
+    } catch (e) { showToast((e as Error).message); } finally { setUploadingId(null); }
+  };
   const remove = async (o: Option) => { if (!window.confirm(`${t("ลบ", "Delete")} "${o.label}" ?`)) return; try { await deleteOption(o.id); await load(); showToast(t("ลบแล้ว", "Deleted")); } catch (e) { showToast((e as Error).message); } };
   const move = async (i: number, dir: -1 | 1) => {
     const j = i + dir; if (j < 0 || j >= opts.length) return;
@@ -191,7 +205,9 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-2xl">
       <div className="px-5 py-4 border-b border-slate-100">
         <h2 className="font-semibold text-slate-800">{title}</h2>
-        <p className="text-xs text-slate-400 mt-0.5">{t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ — เปลี่ยนที่นี่แล้วฟอร์มสร้างงาน/เทมเพลต/คอนเทนต์จะใช้ตามทันที", "Add / rename / delete / reorder — changes here apply immediately to task, template, and content forms")}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{kind === "platform"
+          ? t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ + ตั้งสีหรือไอคอน (emoji/รูป) ต่อแพลตฟอร์ม — ชิปในหน้างานจะใช้สี/ไอคอนนี้ · ใส่รูปไอคอนจะแทนที่สี", "Add / rename / delete / reorder + set a color or icon (emoji/image) per platform — task chips use this · an icon image replaces the color")
+          : t("เพิ่ม/แก้ชื่อ/ลบ/จัดลำดับ — เปลี่ยนที่นี่แล้วฟอร์มสร้างงาน/เทมเพลต/คอนเทนต์จะใช้ตามทันที", "Add / rename / delete / reorder — changes here apply immediately to task, template, and content forms")}</p>
       </div>
       <div className="p-5">
         <div className="flex gap-2 mb-4">
@@ -202,17 +218,41 @@ function OptionsManager({ kind, title, showToast }: { kind: string; title: strin
           : opts.length === 0 ? <div className="py-10 text-center text-slate-400">{t("ยังไม่มีตัวเลือก", "No options yet")}</div>
           : (
             <div className="space-y-1.5">
-              {opts.map((o, i) => (
+              {opts.map((o, i) => {
+                const iconImg = o.icon_key ? r2ImageUrl(o.icon_key, 48) : null;
+                const hex = o.color && /^#[0-9a-fA-F]{6}$/.test(o.color) ? o.color : null;
+                return (
                 <div key={o.id} className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2">
                   <div className="flex flex-col text-slate-300">
                     <button onClick={() => move(i, -1)} disabled={i === 0} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▲</button>
                     <button onClick={() => move(i, 1)} disabled={i === opts.length - 1} className="h-3 leading-none hover:text-slate-600 disabled:opacity-30">▼</button>
                   </div>
-                  <input defaultValue={o.label} onBlur={(e) => rename(o, e.target.value)} className="flex-1 text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
+                  {/* พรีวิวชิปจริง — รูปไอคอน > สี+emoji > slate */}
+                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border shrink-0 max-w-[140px]" style={hex && !iconImg ? { backgroundColor: `${hex}1a`, color: hex, borderColor: `${hex}55` } : undefined}
+                    title={t("ตัวอย่างชิป", "Chip preview")}>
+                    {iconImg ? <img src={iconImg} alt="" className="h-3.5 w-3.5 rounded-sm object-contain" /> : o.icon ? <span className="leading-none">{o.icon}</span> : null}
+                    <span className="truncate">{o.label}</span>
+                  </span>
+                  <input defaultValue={o.label} onBlur={(e) => rename(o, e.target.value)} className="flex-1 min-w-[80px] text-sm bg-transparent outline-none border-b border-transparent focus:border-violet-300 py-0.5" />
+                  {kind === "platform" && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* สีประเภท */}
+                      <div title={t("สีประเภท", "Color")}><ColorInput value={o.color || "#64748b"} onChange={(v) => patchMeta(o, { color: v })} allowText={false} /></div>
+                      {/* ไอคอน emoji */}
+                      <input defaultValue={o.icon || ""} maxLength={2} placeholder="😀" onBlur={(e) => { const v = e.target.value.trim(); if (v !== (o.icon || "")) patchMeta(o, { icon: v }); }} title={t("ไอคอน emoji", "Emoji icon")} className="w-9 h-7 text-center border border-slate-200 rounded text-sm" />
+                      {/* รูปไอคอน (อัปโหลด) */}
+                      <label className={`h-7 px-2 inline-flex items-center text-[11px] rounded border cursor-pointer ${uploadingId === o.id ? "opacity-50 pointer-events-none" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`} title={t("อัปโหลดรูปไอคอน (แทนสี)", "Upload icon image (replaces color)")}>
+                        {uploadingId === o.id ? "..." : iconImg ? "🖼" : t("รูป", "Img")}
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadIcon(o, f); e.target.value = ""; }} />
+                      </label>
+                      {iconImg && <button onClick={() => patchMeta(o, { icon_key: null })} title={t("ลบรูปไอคอน", "Remove icon image")} className="text-slate-300 hover:text-red-500 text-xs">⊘</button>}
+                    </div>
+                  )}
                   <span className="text-[10px] text-slate-300 font-mono">{o.key}</span>
                   <button onClick={() => remove(o)} className="text-slate-300 hover:text-red-500 text-sm">✕</button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
       </div>
