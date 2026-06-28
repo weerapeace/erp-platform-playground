@@ -203,6 +203,7 @@ export function OverviewDashboard({
               <ShortcutPill icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
               <ShortcutPill icon="📱" label={t("คอนเทนต์", "Content")} href="/tasks/content" />
               <ShortcutPill icon="🔁" label={t("เทมเพลต", "Templates")} href="/tasks/templates" />
+              <ShortcutPill icon="🟡" label={t("คิวรอตรวจ", "Review queue")} href="/tasks/review" />
               <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
               {isAdmin && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
             </div>
@@ -214,8 +215,8 @@ export function OverviewDashboard({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cardMeta.map((m) => (
           <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign}
-            active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
-            onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
+            active={filter === m.key && !activeMetric && m.key !== "review"} hint={m.key === "review" ? t("กดเพื่อเปิดคิวตรวจ →", "open review queue →") : filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
+            onClick={m.key === "review" ? () => { window.location.href = "/tasks/review"; } : () => { setActiveMetric(null); onFilter(m.key); }} />
         ))}
       </div>
 

@@ -169,6 +169,18 @@ export async function deleteTask(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-tasks/${id}`, { method: "DELETE" }));
 }
 
+// ---- คิวรอตรวจ/อนุมัติ (งานย่อยที่ส่งมาแล้ว) ----
+export type ReviewQueueItem = {
+  id: string; title: string; updated_at: string;
+  task_id: string; task_no: string | null; task_title: string;
+  brand_label: string | null; brand_color: string | null;
+  assignees: SubtaskAssignee[]; images: { r2_key: string; file_name: string | null }[];
+};
+export async function listReviewQueue(): Promise<ReviewQueueItem[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-tasks/review-queue"));
+  return (j.data as ReviewQueueItem[]) ?? [];
+}
+
 // ---- Subtasks ----
 export async function listSubtasks(taskId: string): Promise<CreativeSubtask[]> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-tasks/${taskId}/subtasks`));
