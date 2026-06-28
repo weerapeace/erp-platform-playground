@@ -20,7 +20,7 @@ import { isOverdue, updateTask, PRIORITY_META, type CreativeTask, type Campaign,
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
-import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
+import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, type OverviewTheme, type CardKey, type CardTheme, type CardAlign } from "./overview-customizer";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
 
@@ -162,6 +162,9 @@ export function OverviewDashboard({
   const heroTitleCls = ({ sm: "text-base sm:text-lg", md: "text-lg sm:text-xl", lg: "text-xl sm:text-2xl", xl: "text-2xl sm:text-3xl" } as const)[theme.hero.titleSize ?? "lg"];
   const heroAlign = (theme.hero.align ?? "left") === "center" ? "text-center" : "";
   const cardIconSize = theme.cardIconSize ?? 18;
+  const cardLabelSize = theme.cardLabelSize ?? 14;
+  const cardValueSize = theme.cardValueSize ?? 24;
+  const cardAlign = theme.cardAlign ?? "left";
 
   const hasPageBg = theme.page.mode !== "none";
   return (
@@ -210,7 +213,7 @@ export function OverviewDashboard({
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cardMeta.map((m) => (
-          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize}
+          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign}
             active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
             onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
         ))}
@@ -396,39 +399,40 @@ export function OverviewDashboard({
   );
 }
 
-function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18 }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void; iconSize?: number }) {
+function SummaryCard({ card, value, label, active, hint, onClick, iconSize = 18, labelSize = 14, valueSize = 24, align = "left" }: { card: CardTheme; value: number; label: string; active?: boolean; hint: string; onClick: () => void; iconSize?: number; labelSize?: number; valueSize?: number; align?: CardAlign }) {
   const c = CARD_COLORS[card.color] ?? CARD_COLORS.slate;
+  // ตำแหน่งตัวอักษร: ซ้าย=ไอคอนซ้าย-เลขขวา (คลาสสิก) · กลาง/ขวา=ไอคอน+เลขชิดด้วยกัน + ข้อความตามแนว
+  const textAlign = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
+  const rowJustify = align === "center" ? "justify-center gap-2" : align === "right" ? "justify-end gap-2" : "justify-between";
+  const icon = (extra: string) => card.iconUrl
+    // eslint-disable-next-line @next/next/no-img-element
+    ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className={`object-contain ${extra}`} style={{ width: iconSize, height: iconSize }} />
+    : <span className={`leading-none ${extra}`} style={{ fontSize: iconSize }}>{card.icon}</span>;
   // โหมดรูปเต็ม — รูปพื้นหลังการ์ด + ฉากดำจาง + ตัวอักษรขาว
   if (card.bgUrl) {
     return (
-      <button onClick={onClick} className={`relative text-left rounded-xl border overflow-hidden p-4 min-h-[92px] transition-all hover:shadow-sm ${active ? `ring-2 ${c.ring} border-transparent` : "border-slate-200"}`}>
+      <button onClick={onClick} className={`relative ${textAlign} rounded-xl border overflow-hidden p-4 min-h-[92px] transition-all hover:shadow-sm ${active ? `ring-2 ${c.ring} border-transparent` : "border-slate-200"}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={`/api/r2-image?key=${encodeURIComponent(card.bgUrl)}&w=400`} alt="" className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute inset-0 bg-black/40" />
         <div className="relative text-white">
-          <div className="flex items-center justify-between">
-            {card.iconUrl
-              // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="object-contain drop-shadow" style={{ width: iconSize, height: iconSize }} />
-              : <span className="drop-shadow leading-none" style={{ fontSize: iconSize }}>{card.icon}</span>}
-            <span className="text-2xl font-bold tabular-nums drop-shadow">{value}</span>
+          <div className={`flex items-center ${rowJustify}`}>
+            {icon("drop-shadow")}
+            <span className="font-bold tabular-nums drop-shadow leading-none" style={{ fontSize: valueSize }}>{value}</span>
           </div>
-          <p className="text-sm font-medium mt-1 drop-shadow">{label}</p>
+          <p className="font-medium mt-1 drop-shadow leading-snug" style={{ fontSize: labelSize }}>{label}</p>
           <p className="text-[11px] opacity-85 mt-0.5">{hint}</p>
         </div>
       </button>
     );
   }
   return (
-    <button onClick={onClick} className={`text-left rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
-      <div className="flex items-center justify-between">
-        {card.iconUrl
-          // eslint-disable-next-line @next/next/no-img-element
-          ? <img src={`/api/r2-image?key=${encodeURIComponent(card.iconUrl)}`} alt="" className="object-contain" style={{ width: iconSize, height: iconSize }} />
-          : <span className="leading-none" style={{ fontSize: iconSize }}>{card.icon}</span>}
-        <span className="text-2xl font-bold tabular-nums">{value}</span>
+    <button onClick={onClick} className={`${textAlign} rounded-xl border p-4 transition-all hover:shadow-sm hover:brightness-[0.98] ${c.box} ${active ? `ring-2 ${c.ring}` : ""}`}>
+      <div className={`flex items-center ${rowJustify}`}>
+        {icon("")}
+        <span className="font-bold tabular-nums leading-none" style={{ fontSize: valueSize }}>{value}</span>
       </div>
-      <p className="text-sm font-medium mt-1">{label}</p>
+      <p className="font-medium mt-1 leading-snug" style={{ fontSize: labelSize }}>{label}</p>
       <p className="text-[11px] opacity-70 mt-0.5">{hint}</p>
     </button>
   );

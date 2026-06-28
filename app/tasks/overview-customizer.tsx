@@ -23,7 +23,8 @@ export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: b
 export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
 export type KanbanView = "kanban" | "table" | "calendar";
 export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; compact?: boolean };
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number };
+export type CardAlign = "left" | "center" | "right";
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme; cardIconSize?: number; cardLabelSize?: number; cardValueSize?: number; cardAlign?: CardAlign };
 
 export const DEFAULT_THEME: OverviewTheme = {
   hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff", titleSize: "lg", align: "left", petUrl: null },
@@ -38,6 +39,9 @@ export const DEFAULT_THEME: OverviewTheme = {
   accent: "#7c3aed",   // สีหลัก (ปุ่ม/ไฮไลต์) ของหน้า
   kanban: { view: "kanban", groupBy: "status", cover: true, brand: true, assignee: true, due: true, priority: true, progress: true, brandBorder: false, sku: true, taskNo: true, compact: false },
   cardIconSize: 18,    // ขนาดไอคอนการ์ดสรุป (px)
+  cardLabelSize: 14,   // ขนาดตัวอักษร "หัวข้อ" บนการ์ด (px)
+  cardValueSize: 24,   // ขนาดตัวเลข "จำนวนงาน" บนการ์ด (px)
+  cardAlign: "left",   // ตำแหน่งตัวอักษรบนการ์ด (ซ้าย/กลาง/ขวา)
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -60,7 +64,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) }, cardIconSize: (o.cardIconSize as number) ?? DEFAULT_THEME.cardIconSize, cardLabelSize: (o.cardLabelSize as number) ?? DEFAULT_THEME.cardLabelSize, cardValueSize: (o.cardValueSize as number) ?? DEFAULT_THEME.cardValueSize, cardAlign: (o.cardAlign as CardAlign) ?? DEFAULT_THEME.cardAlign };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -350,11 +354,29 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
       {/* ===== Cards ===== */}
       <section>
         <div className="text-sm font-semibold text-slate-700 mb-2">{t("การ์ดสรุป (ไอคอน · รูปเต็ม · ชื่อ · สี)", "Summary cards (icon · full image · label · color)")}</div>
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs text-slate-500">{t("ขนาดไอคอน", "Icon size")}</span>
-          <input type="range" min={14} max={40} value={theme.cardIconSize ?? 18} onChange={(e) => onChange({ ...theme, cardIconSize: Number(e.target.value) })} className="w-32 accent-violet-600" />
-          <span className="text-xs text-slate-400 w-9">{theme.cardIconSize ?? 18}px</span>
-          <span className="text-[11px] text-slate-400 ml-2">{t("💡 รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64", "💡 Full image ~400×400 · icon ~64×64")}</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 w-20">{t("ขนาดไอคอน", "Icon size")}</span>
+            <input type="range" min={14} max={40} value={theme.cardIconSize ?? 18} onChange={(e) => onChange({ ...theme, cardIconSize: Number(e.target.value) })} className="w-28 accent-violet-600" />
+            <span className="text-xs text-slate-400 w-9">{theme.cardIconSize ?? 18}px</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 w-20">{t("ขนาดตัวเลข", "Number size")}</span>
+            <input type="range" min={16} max={48} value={theme.cardValueSize ?? 24} onChange={(e) => onChange({ ...theme, cardValueSize: Number(e.target.value) })} className="w-28 accent-violet-600" />
+            <span className="text-xs text-slate-400 w-9">{theme.cardValueSize ?? 24}px</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 w-20">{t("ขนาดหัวข้อ", "Label size")}</span>
+            <input type="range" min={11} max={22} value={theme.cardLabelSize ?? 14} onChange={(e) => onChange({ ...theme, cardLabelSize: Number(e.target.value) })} className="w-28 accent-violet-600" />
+            <span className="text-xs text-slate-400 w-9">{theme.cardLabelSize ?? 14}px</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-slate-500">{t("ตำแหน่งตัวอักษร", "Text position")}</span>
+            {([["left", t("ซ้าย", "Left")], ["center", t("กลาง", "Center")], ["right", t("ขวา", "Right")]] as const).map(([a, lbl]) => (
+              <button key={a} onClick={() => onChange({ ...theme, cardAlign: a })} className={`h-7 px-2.5 text-xs rounded border ${(theme.cardAlign ?? "left") === a ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{lbl}</button>
+            ))}
+          </div>
+          <span className="text-[11px] text-slate-400 w-full">{t("💡 รูปเต็มแนะนำ ~400×400 · ไอคอน ~64×64", "💡 Full image ~400×400 · icon ~64×64")}</span>
         </div>
         <div className="space-y-2">
           {CARD_KEYS.map((k) => {
