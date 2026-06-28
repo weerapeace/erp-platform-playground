@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { ImageLightbox } from "@/components/image-lightbox";
 
 type Img = { id: string; r2_key: string | null; file_name?: string | null };
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
@@ -46,6 +47,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 8
   maxSize?: number;   // ด้านยาวสุดที่ย่อก่อนอัป (ดีฟอลต์ 800)
 }) {
   const [busy, setBusy] = useState(false);
+  const [lbIndex, setLbIndex] = useState(-1);   // รูปที่กำลังเปิดดูเต็มจอ (-1 = ปิด)
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = async (files: FileList | File[]) => {
@@ -84,15 +86,16 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 8
       </div>
       {images.length > 0 && (
         <div className="grid grid-cols-4 gap-2 mt-2">
-          {images.map((im) => (
+          {images.map((im, i) => (
             <div key={im.id} className="relative group">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key ?? "")}`} alt={im.file_name ?? ""} className="w-full h-20 object-cover rounded-lg border border-slate-200" />
+              <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key ?? "")}&w=320`} alt={im.file_name ?? ""} onClick={() => setLbIndex(i)} title="กดเพื่อดูเต็มจอ" className="w-full h-20 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
               <button onClick={() => void onDelete(im.id)} title="ลบรูป" className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>
             </div>
           ))}
         </div>
       )}
+      <ImageLightbox images={images.map((im) => ({ url: `/api/r2-image?key=${encodeURIComponent(im.r2_key ?? "")}&w=1600`, label: im.file_name }))} index={lbIndex} onClose={() => setLbIndex(-1)} onIndex={setLbIndex} />
     </div>
   );
 }

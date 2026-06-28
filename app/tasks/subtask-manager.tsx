@@ -12,6 +12,7 @@ import { ERPModal } from "@/components/modal";
 import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
 import { UserPicker, ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { HoverImage } from "@/components/hover-image";
+import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { apiFetch } from "@/lib/api";
 import { cachedJson } from "@/lib/client-cache";
 import { useAuth } from "@/components/auth";
@@ -349,6 +350,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [linkedSkuIds, setLinkedSkuIds] = useState<string[]>([]);          // SKU ที่ผูกกับงาน (ใช้ติ๊กล่วงหน้า)
   const [skuDraftImages, setSkuDraftImages] = useState<Record<string, { r2_key: string; file_name: string }[]>>({}); // รูปร่างต่อ SKU (เข้าตอนอนุมัติ)
   const syncInit = useRef(false);
+  const [skuLb, setSkuLb] = useState<{ images: LightboxImage[]; index: number }>({ images: [], index: -1 }); // ดูรูปต่อ SKU เต็มจอ
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
   const attachCount = sub.attachments?.length ?? 0;
@@ -553,7 +555,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
                                   {drafts.map((im, j) => (
                                     <div key={j} className="relative group">
                                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key)}&w=64`} alt="" className="h-10 w-10 object-cover rounded border border-slate-200" />
+                                      <img src={`/api/r2-image?key=${encodeURIComponent(im.r2_key)}&w=64`} alt="" title={t("กดเพื่อดูเต็มจอ", "Click to view full")} onClick={() => setSkuLb({ images: drafts.map((d) => ({ url: `/api/r2-image?key=${encodeURIComponent(d.r2_key)}&w=1600`, label: s.code })), index: j })} className="h-10 w-10 object-cover rounded border border-slate-200 cursor-zoom-in" />
                                       <button type="button" onClick={() => removeSkuDraftImage(s.id, j)} className="absolute -top-1 -right-1 h-4 w-4 flex items-center justify-center bg-white rounded-full text-red-500 text-[9px] shadow opacity-0 group-hover:opacity-100">✕</button>
                                     </div>
                                   ))}
@@ -615,6 +617,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
           onClose={() => { const pid = skuEditor.parentId; setSkuEditor(null); reloadSkusFor(pid); }}
           onChanged={() => { reloadSkusFor(skuEditor.parentId); }} />
       )}
+      {/* ดูรูปต่อ SKU เต็มจอ + เลื่อนดูได้ */}
+      <ImageLightbox images={skuLb.images} index={skuLb.index} onClose={() => setSkuLb((s) => ({ ...s, index: -1 }))} onIndex={(i) => setSkuLb((s) => ({ ...s, index: i }))} />
     </>
   );
 }
