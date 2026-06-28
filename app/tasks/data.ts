@@ -352,6 +352,44 @@ export async function deleteHashtag(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-hashtags?id=${id}`, { method: "DELETE" }));
 }
 
+// ---- Content attachments (รูป/วิดีโอ/ลิงก์ ของคอนเทนต์) ----
+export type ContentAttachment = {
+  id: string; kind: string; label: string | null; url: string | null; r2_key: string | null;
+  file_name: string | null; content_type: string | null; size_bytes: number | null; created_at?: string;
+};
+export async function listContentAttachments(contentId: string): Promise<ContentAttachment[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments`));
+  return (j.data as ContentAttachment[]) ?? [];
+}
+export async function addContentAttachment(contentId: string, body: { kind?: string; label?: string | null; url?: string | null; r2_key?: string | null; file_name?: string | null; content_type?: string | null; size_bytes?: number | null }): Promise<ContentAttachment> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments`, { method: "POST", body: JSON.stringify(body) }));
+  return j.data as ContentAttachment;
+}
+export async function deleteContentAttachment(contentId: string, attId: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments?attachment_id=${attId}`, { method: "DELETE" }));
+}
+
+// ---- ตั้งค่าต่อแพลตฟอร์ม (แม่แบบเริ่มต้น/ปิดแคปชั่น-แฮชแท็ก/ลิงก์โพสต์/โน้ต) ----
+export type PlatformSetting = { template_key?: string | null; use_caption?: boolean; use_hashtags?: boolean; post_url?: string | null; note?: string | null };
+export type PlatformSettings = Record<string, PlatformSetting>;
+export async function getPlatformSettings(): Promise<PlatformSettings> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-platform-settings"));
+  return (j.settings as PlatformSettings) ?? {};
+}
+export async function savePlatformSettings(settings: PlatformSettings): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/creative-platform-settings", { method: "PUT", body: JSON.stringify({ settings }) }));
+}
+
+// ---- พรีวิวลิงก์ (ดึง OG/meta) ----
+export type LinkPreview = { url: string; title: string | null; description: string | null; image: string | null; site: string | null };
+export async function getLinkPreview(url: string): Promise<LinkPreview> {
+  // ไม่ throw เมื่อ error เป็น soft (เช่น timeout) — API ยังคืน data fallback (hostname) มาให้
+  const res = await apiFetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
+  const j = await res.json().catch(() => ({}));
+  if (j?.data) return j.data as LinkPreview;
+  throw new Error((j?.error as string) || "ดึงข้อมูลลิงก์ไม่สำเร็จ");
+}
+
 // ============================================================
 // Templates + Recurring
 // ============================================================
