@@ -151,6 +151,59 @@ export async function userIdsReviewers(admin: Admin, taskId: string): Promise<Se
   return new Set(((data ?? []) as { user_id: string }[]).map((r) => String(r.user_id)));
 }
 
+/**
+ * เลื่อนสถานะ "งานหลัก" อัตโนมัติตามสถานะ "งานย่อย" — ใช้กับงานที่มีงานย่อยเท่านั้น
+ * แมปคีย์เส้นทางหลักจาก workflow เอง (ทนต่อการเปลี่ยน label/คีย์):
+ *   เริ่มต้น(is_default) → กำลังทำ → รอตรวจ(จุดก่อน approve) → อนุมัติ(ปลายทาง approve)
+ * เงื่อนไขจากงานย่อย (ไม่นับที่ยกเลิก): อนุมัติครบ→อนุมัติ · ส่งครบ→รอตรวจ · มีคนเริ่ม→กำลังทำ · ไม่มี→เริ่มต้น
+ * ความปลอดภัย: แตะเฉพาะตอนงานหลัก "ยังอยู่บนเส้นทางหลัก" (ไม่ยุ่งงานที่เผยแพร่/ปิด/ยกเลิก/บล็อก/แอดมินตั้งเอง)
+ */
+export async function recomputeTaskStatusFromSubtasks(admin: Admin, taskId: string): Promise<void> {
+  const { data: subs } = await admin.from("erp_creative_subtasks").select("status").eq("task_id", taskId);
+  const list = ((subs ?? []) as { status: string }[]).map((s) => s.status).filter((s) => s !== "canceled");
+  const N = list.length;
+  if (N === 0) return;   // ไม่มีงานย่อย (ที่ใช้งาน) → ไม่ยุ่งสถานะงานหลัก
+
+  const [{ data: statuses }, { data: trans }, { data: task }] = await Promise.all([
+    admin.from("erp_creative_statuses").select("key, progress_percent, is_default, is_terminal").eq("is_active", true),
+    admin.from("erp_creative_status_transitions").select("from_key, to_key, kind"),
+    admin.from("erp_creative_tasks").select("status").eq("id", taskId).maybeSingle(),
+  ]);
+  const sts = (statuses ?? []) as { key: string; progress_percent: number; is_default: boolean; is_terminal: boolean }[];
+  const trs = (trans ?? []) as { from_key: string; to_key: string; kind: string }[];
+  const approveTr = trs.find((t) => t.kind === "approve");
+  if (!approveTr) return;   // workflow ไม่มีจุดอนุมัติ → ไม่เดา
+  const approvedKey = approveTr.to_key;
+  const reviewKey = approveTr.from_key;
+  const inProgressKey = trs.find((t) => t.to_key === reviewKey && t.kind === "normal")?.from_key;
+  const defaultKey = sts.find((s) => s.is_default)?.key;
+  const mainKeys = [defaultKey, inProgressKey, reviewKey, approvedKey].filter(Boolean) as string[];
+
+  // เป้าหมายตามงานย่อย → คีย์เส้นทางหลัก
+  const approved = list.filter((s) => s === "approved").length;
+  const sent = list.filter((s) => s === "submitted" || s === "approved").length;
+  const started = list.filter((s) => ["in_progress", "submitted", "approved", "revision_requested"].includes(s)).length;
+  const target = approved === N ? approvedKey : sent === N ? reviewKey : started > 0 ? inProgressKey : defaultKey;
+
+  const cur = (task as { status?: string } | null)?.status;
+  if (!target || !cur || cur === target || !mainKeys.includes(target)) return;
+
+  // สถานะที่ "ห้ามแตะ" = ปลายทาง(terminal เช่น เสร็จ/ยกเลิก) ∪ ปลายทางบล็อก ∪ หลังอนุมัติ(เผยแพร่/ตั้งเวลา ฯลฯ)
+  const protectedSet = new Set<string>();
+  for (const s of sts) if (s.is_terminal) protectedSet.add(s.key);
+  for (const tr of trs) if (tr.kind === "block") protectedSet.add(tr.to_key);
+  let frontier = trs.filter((t) => t.from_key === approvedKey).map((t) => t.to_key).filter((k) => !mainKeys.includes(k));
+  while (frontier.length) {
+    const nf: string[] = [];
+    for (const k of frontier) { if (protectedSet.has(k)) continue; protectedSet.add(k); for (const tr of trs) if (tr.from_key === k && !mainKeys.includes(tr.to_key) && !protectedSet.has(tr.to_key)) nf.push(tr.to_key); }
+    frontier = nf;
+  }
+  if (protectedSet.has(cur)) return;   // งานเผยแพร่/ปิด/ยกเลิก/บล็อก/แอดมินดันไปไกลแล้ว → ไม่แตะ
+
+  const prog = sts.find((s) => s.key === target)?.progress_percent;
+  await admin.from("erp_creative_tasks").update({ status: target, ...(typeof prog === "number" ? { progress_percent: prog } : {}), updated_at: new Date().toISOString() }).eq("id", taskId);
+}
+
 /** task ids ที่ user เป็นผู้รับผิดชอบ (ตั้งเอง) หรือเป็นคนเริ่มงานย่อย — ใช้กรอง "งานของฉัน" */
 export async function taskIdsForUser(admin: Admin, userId: string): Promise<string[]> {
   const set = new Set<string>();

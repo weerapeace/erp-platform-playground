@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers } from "@/lib/creative-tasks-server";
+import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks } from "@/lib/creative-tasks-server";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
 import { renderPrompt } from "@/lib/subtask-prompt";
 
@@ -134,6 +134,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   if (ids.length) await setSubtaskAssignees(admin, row.id, ids);
   await writeAudit(admin, { action: "subtask:create", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { title } });
+  try { await recomputeTaskStatusFromSubtasks(admin, id); } catch { /* best-effort */ }
   const aMap = await subtaskAssigneesMap(admin, [row.id]);
   return NextResponse.json({ data: { ...row, assignees: aMap.get(String(row.id)) ?? [] }, error: null });
 }
@@ -254,6 +255,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     } catch { /* แจ้งเตือนล้มเหลวไม่ทำให้บันทึกพัง */ }
   }
 
+  // เลื่อนสถานะงานหลักอัตโนมัติตามงานย่อย (เมื่อสถานะงานย่อยเปลี่ยน) — best-effort
+  if ("status" in patch) { try { await recomputeTaskStatusFromSubtasks(admin, id); } catch { /* ไม่ให้กระทบการบันทึกงานย่อย */ } }
+
   const aMap = await subtaskAssigneesMap(admin, [subtaskId]);
   return NextResponse.json({ data: row ? { ...row, assignees: aMap.get(subtaskId) ?? [] } : null, error: null });
 }
@@ -266,5 +270,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_creative_subtasks").delete().eq("id", subtaskId).eq("task_id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  try { await recomputeTaskStatusFromSubtasks(admin, id); } catch { /* best-effort */ }
   return NextResponse.json({ success: true, error: null });
 }
