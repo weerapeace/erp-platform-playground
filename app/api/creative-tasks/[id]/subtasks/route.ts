@@ -57,30 +57,31 @@ async function resolvePrompt(admin: ReturnType<typeof supabaseAdmin>, taskId: st
   return NextResponse.json({ prompt, image_urls: imageUrls, error: null });
 }
 
-// ฟิลด์ Parent SKU ที่ "บังคับก่อนส่งงาน" ได้ (key → คอลัมน์ + ป้าย)
-const SUBMIT_FIELD_DEFS: { key: string; col: string; label: string }[] = [
-  { key: "description", col: "description", label: "รายละเอียด" },
-  { key: "introduction", col: "introduction", label: "เกริ่นนำ (Introduction)" },
-  { key: "english_description", col: "english_description", label: "รายละเอียด (อังกฤษ)" },
-  { key: "name_en", col: "name_en", label: "ชื่ออังกฤษ" },
-  { key: "name_th", col: "name_th", label: "ชื่อไทย" },
-  { key: "cover_image", col: "cover_image_r2_key", label: "รูปสินค้า" },
-];
+// ค่าว่างไหม (รองรับ text/array/null) — ใช้เช็คฟิลด์บังคับก่อนส่ง
+function isEmptyVal(v: unknown): boolean { return v == null || (typeof v === "string" && !v.trim()) || (Array.isArray(v) && v.length === 0); }
 
-// รายละเอียด Platform ของ Parent SKU ที่ผูกกับงาน — ใช้ "ยืนยัน" ตอนส่งงาน + เช็คฟิลด์บังคับก่อนส่ง
+// รายละเอียด Platform ของ Parent SKU ที่ผูกกับงาน — ใช้ "ยืนยัน" ตอนส่งงาน + เช็คฟิลด์บังคับก่อนส่ง (dynamic จาก field registry)
 async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: string): Promise<NextResponse> {
   // SKU ที่ผูกกับงาน (ใช้ prefill ปลายทางรูปในป๊อปอัปส่งงาน)
   const { data: sl } = await admin.from("erp_creative_task_skus").select("sku_id").eq("task_id", taskId);
   const linkedSkuIds = ((sl ?? []) as { sku_id: string }[]).map((r) => r.sku_id).filter(Boolean);
-  // ฟิลด์บังคับก่อนส่ง (ค่ากลาง) → ป้ายที่จะส่งให้ client
+  // ฟิลด์บังคับก่อนส่ง (ค่ากลาง) = รายชื่อ "คอลัมน์" Parent SKU · ป้ายดึงจากทะเบียนฟิลด์กลาง (ไม่ hardcode)
   const { data: cfg } = await admin.from("ui_config").select("value").eq("key", "creative_submit_required_fields").maybeSingle();
-  const reqKeys = Array.isArray((cfg as { value?: unknown } | null)?.value) ? ((cfg as { value: string[] }).value) : [];
-  const reqDefs = SUBMIT_FIELD_DEFS.filter((d) => reqKeys.includes(d.key));
-  const required = reqDefs.map((d) => ({ key: d.key, label: d.label }));
+  const reqCols = Array.isArray((cfg as { value?: unknown } | null)?.value) ? ((cfg as { value: string[] }).value).filter((x) => typeof x === "string") : [];
+  const colLabel: Record<string, string> = {};
+  if (reqCols.length) {
+    const { data: mod } = await admin.from("erp_modules").select("id").eq("module_key", "parent-skus-v2").maybeSingle();
+    if ((mod as { id?: string } | null)?.id) {
+      const { data: mf } = await admin.from("erp_module_fields").select("column_name, field_label").eq("module_id", (mod as { id: string }).id);
+      for (const f of ((mf ?? []) as { column_name: string | null; field_label: string | null }[])) if (f.column_name) colLabel[f.column_name] = f.field_label || f.column_name;
+    }
+  }
+  const required = reqCols.map((c) => ({ key: c, label: colLabel[c] ?? c }));
   const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("parent_sku_id").eq("task_id", taskId);
   const pIds = ((pl ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
   if (!pIds.length) return NextResponse.json({ parents: [], linked_sku_ids: linkedSkuIds, required, error: null });
-  const { data } = await admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key").in("id", pIds);
+  // select * เพื่อรองรับ "ทุกฟิลด์" ที่ admin เลือกบังคับ (parent มีไม่กี่แถว)
+  const { data } = await admin.from("parent_skus_v2").select("*").in("id", pIds);
   const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
     id: (p.id as string) ?? "",
     code: (p.code as string) ?? "",
@@ -90,8 +91,8 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
     description: (p.description as string) ?? "",
     english_description: (p.english_description as string) ?? "",
     has_description: !!((p.description as string) ?? "").trim(),
-    // ฟิลด์บังคับที่ยังว่าง (ป้ายภาษาคน) — ใช้โชว์ * + บล็อกส่งงาน
-    missing: reqDefs.filter((d) => !String((p[d.col] as string) ?? "").trim()).map((d) => d.label),
+    // ฟิลด์บังคับที่ยังว่าง (ป้ายจากทะเบียนฟิลด์) — ใช้โชว์ * + บล็อกส่งงาน
+    missing: reqCols.filter((c) => isEmptyVal(p[c])).map((c) => colLabel[c] ?? c),
   }));
   return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, error: null });
 }

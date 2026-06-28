@@ -170,14 +170,12 @@ export async function deleteTask(id: string): Promise<void> {
 }
 
 // ---- ฟิลด์ Parent SKU ที่ต้องกรอกก่อนส่งงาน (ค่ากลาง) ----
-export const SUBMIT_REQUIRED_FIELD_OPTIONS: { key: string; label: string }[] = [
-  { key: "description", label: "รายละเอียด (Description)" },
-  { key: "introduction", label: "เกริ่นนำ (Introduction)" },
-  { key: "english_description", label: "รายละเอียด (อังกฤษ)" },
-  { key: "name_en", label: "ชื่ออังกฤษ (Name En)" },
-  { key: "name_th", label: "ชื่อไทย" },
-  { key: "cover_image", label: "รูปสินค้า" },
-];
+// ตัวเลือกฟิลด์ = ดึง "ทุกฟิลด์ Parent SKU" จาก field registry กลาง (ไม่ hardcode)
+export async function getParentSkuFieldOptions(): Promise<{ col: string; label: string }[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/admin/field-registry-v2?module=parent-skus-v2"));
+  const fields = (j.fields as { column_name: string | null; field_label: string; is_editable: boolean }[]) ?? [];
+  return fields.filter((f) => f.column_name && f.is_editable).map((f) => ({ col: f.column_name as string, label: f.field_label || (f.column_name as string) }));
+}
 export async function getSubmitRequiredFields(): Promise<string[]> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-submit-settings"));
   return (j.fields as string[]) ?? [];

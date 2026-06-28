@@ -16,7 +16,7 @@ import { STATUS_COLOR_OPTIONS, statusColor } from "@/lib/creative-status-colors"
 import { ColorInput } from "@/components/color-picker";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { loadMySubView, saveMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "../my-subtasks-view";
-import { SUBMIT_REQUIRED_FIELD_OPTIONS, getSubmitRequiredFields, saveSubmitRequiredFields } from "../data";
+import { getParentSkuFieldOptions, getSubmitRequiredFields, saveSubmitRequiredFields } from "../data";
 import { useT } from "@/components/i18n";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
@@ -419,21 +419,26 @@ function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
 function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }) {
   const t = useT();
   const [fields, setFields] = useState<string[] | null>(null);
+  const [options, setOptions] = useState<{ col: string; label: string }[]>([]);
   const [saving, setSaving] = useState(false);
-  useEffect(() => { getSubmitRequiredFields().then(setFields).catch(() => setFields([])); }, []);
+  useEffect(() => {
+    getSubmitRequiredFields().then(setFields).catch(() => setFields([]));
+    getParentSkuFieldOptions().then(setOptions).catch(() => setOptions([]));
+  }, []);
   const toggle = (key: string) => setFields((f) => (f ?? []).includes(key) ? (f ?? []).filter((x) => x !== key) : [...(f ?? []), key]);
   const save = async () => { if (!fields) return; setSaving(true); try { await saveSubmitRequiredFields(fields); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); } finally { setSaving(false); } };
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl">
       <h2 className="text-lg font-semibold text-slate-800">📤 {t("ฟิลด์บังคับก่อนส่งงาน", "Required before submit")}</h2>
-      <p className="text-sm text-slate-500 mt-1 mb-4">{t("เลือกฟิลด์ของ Parent SKU ที่ต้องกรอกครบก่อน — ระบบจะใส่ * และกดส่งงานไม่ได้จนกว่าจะกรอกครบ (ใช้ตอนส่งงานเขียนคำอธิบาย/ตรวจรายละเอียด Platform)", "Pick Parent SKU fields that must be filled — they get a * and submit is blocked until complete")}</p>
+      <p className="text-sm text-slate-500 mt-1 mb-4">{t("เลือกฟิลด์ของ Parent SKU ที่ต้องกรอกครบก่อน (ดึงทุกฟิลด์จากทะเบียนฟิลด์กลาง) — ระบบจะใส่ * และกดส่งงานไม่ได้จนกว่าจะกรอกครบ", "Pick Parent SKU fields that must be filled (all fields from the central field registry) — they get a * and submit is blocked until complete")}</p>
       {fields === null ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
         <>
-          <div className="space-y-2">
-            {SUBMIT_REQUIRED_FIELD_OPTIONS.map((o) => (
-              <label key={o.key} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-                <input type="checkbox" checked={fields.includes(o.key)} onChange={() => toggle(o.key)} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
-                {o.label}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+            {options.length === 0 && <p className="text-sm text-slate-400">{t("ไม่พบฟิลด์ Parent SKU", "No Parent SKU fields found")}</p>}
+            {options.map((o) => (
+              <label key={o.col} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={fields.includes(o.col)} onChange={() => toggle(o.col)} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
+                {o.label} <span className="text-[10px] text-slate-300">{o.col}</span>
               </label>
             ))}
           </div>
