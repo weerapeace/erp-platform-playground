@@ -97,6 +97,10 @@ export function OverviewDashboard({
   const heroLine = mineCount > 0
     ? `${t("คุณมีงานในมือ", "You have")} ${mineCount} ${t("งาน", "tasks on your plate")}${counts.overdue ? ` · ${t("เกินกำหนด", "overdue")} ${counts.overdue}` : ""}`
     : t("ไม่มีงานค้างในมือคุณตอนนี้ 🎉", "Nothing on your plate right now 🎉");
+  // ทักทายตามเวลา (ใช้เมื่อไม่ได้ตั้งข้อความเอง)
+  const hr = new Date().getHours();
+  const greetWord = hr < 12 ? t("สวัสดีตอนเช้า", "Good morning") : hr < 17 ? t("สวัสดีตอนบ่าย", "Good afternoon") : t("สวัสดีตอนเย็น", "Good evening");
+  const defaultTitle = `${greetWord}${userName ? " " + userName : ""} 👋`;
 
   const cardMeta: { key: CardKey; value: number; label: string }[] = [
     { key: "all", value: counts.total, label: t("งานทั้งหมด", "All tasks") },
@@ -117,7 +121,7 @@ export function OverviewDashboard({
         {heroImage && <div className="absolute inset-0 bg-black/35" />}
         <div className="relative p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm" style={{ color: theme.hero.textColor }}>{theme.hero.title || (userName ? `${t("สวัสดี", "Hi")} ${userName} 👋` : `${t("สวัสดี", "Hi")} 👋`)}</h2>
+            <h2 className="text-xl sm:text-2xl font-bold drop-shadow-sm" style={{ color: theme.hero.textColor }}>{theme.hero.title || defaultTitle}</h2>
             <p className="text-sm mt-1 drop-shadow-sm opacity-90" style={{ color: theme.hero.textColor }}>{theme.hero.subtitle || heroLine}</p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -129,6 +133,7 @@ export function OverviewDashboard({
       </div>
 
       {/* ทางลัด — แถบปุ่มเล็กแนวนอน ใต้ Hero (กว้างเท่ากล่องม่วง) */}
+      {theme.show.shortcuts && (
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs font-semibold text-slate-400 mr-0.5">{t("ทางลัด", "Shortcuts")}</span>
         <ShortcutPill icon="📣" label={t("แคมเปญ", "Campaigns")} href="/tasks/campaigns" />
@@ -137,6 +142,7 @@ export function OverviewDashboard({
         <ShortcutPill icon="📚" label={t("คลังความรู้", "Knowledge")} onClick={onOpenKnowledge} />
         {isAdmin && <ShortcutPill icon="⚙️" label={t("ตั้งค่า", "Settings")} href="/tasks/settings" />}
       </div>
+      )}
 
       {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -147,9 +153,9 @@ export function OverviewDashboard({
         ))}
       </div>
 
-      {/* สองคอลัมน์: ตาราง (ซ้าย 2/3) + แคมเปญที่กำลังทำ (ขวา 1/3) */}
+      {/* สองคอลัมน์: ตาราง (ซ้าย 2/3) + แคมเปญที่กำลังทำ (ขวา 1/3) · ซ่อนแคมเปญ → ตารางเต็มกว้าง */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        <div className="lg:col-span-2 min-w-0 space-y-2">
+        <div className={`${theme.show.campaigns ? "lg:col-span-2" : "lg:col-span-3"} min-w-0 space-y-2`}>
           {mySubs.length > 0 && (
             filter === "mine" ? (
               // กดการ์ด "งานของฉัน" → โชว์งานย่อยของฉันเต็มๆ (เหมือนแท็บคิวงานของฉัน) กดเปิดงานแม่ได้
@@ -179,6 +185,7 @@ export function OverviewDashboard({
           )}
 
           {/* ตัวกรองด่วน: ประเภทงาน (Tabs, จากข้อมูลจริง) + แบรนด์ (ชิป) — ซ้อนกับการ์ดด้านบน */}
+          {theme.show.filters && (
           <div className="space-y-1.5">
             <div className="flex items-center gap-1 overflow-x-auto pb-1">
               <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} />
@@ -196,6 +203,7 @@ export function OverviewDashboard({
               </div>
             )}
           </div>
+          )}
 
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
             <DataTable<CreativeTask>
@@ -213,6 +221,7 @@ export function OverviewDashboard({
         </div>
 
         {/* แคมเปญที่กำลังทำ */}
+        {theme.show.campaigns && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
           <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
             <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
@@ -248,6 +257,7 @@ export function OverviewDashboard({
             )}
           </div>
         </div>
+        )}
       </div>
 
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} onChange={onThemeChange} onClose={() => setCustomizing(false)} />

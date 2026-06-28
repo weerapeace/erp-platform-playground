@@ -15,7 +15,7 @@ import type { UserPickerValue } from "@/components/pickers";
 import {
   PRIORITY_META,
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
-  listRecurring, createRecurring, deleteRecurring, runRecurringNow,
+  listRecurring, createRecurring, updateRecurring, deleteRecurring, runRecurringNow,
   listCampaigns, listBrands, listSubtaskTypes,
   type TaskTemplate, type RecurringRule, type Campaign, type BrandOption, type SubtaskType,
 } from "../data";
@@ -194,6 +194,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const [assignee, setAssignee] = useState<UserPickerValue | null>(null);
   const [saving, setSaving] = useState(false);
   const [delId, setDelId] = useState<RecurringRule | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);   // null = สร้างใหม่
 
   const load = useCallback(async (run: boolean) => {
     try { const r = await listRecurring(run); setItems(r.data); if (run && r.generated > 0) pushToast("success", `${t("สร้างงานอัตโนมัติ", "Auto-created")} ${r.generated} ${t("งานที่ถึงรอบ", "tasks due this cycle")}`); }
@@ -201,14 +202,22 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   }, [pushToast]);
   useEffect(() => { (async () => { setLoading(true); await load(true); try { const [t, b, c] = await Promise.all([listTemplates(), listBrands(), listCampaigns()]); setTemplates(t); setBrands(b); setCampaigns(c); } catch { /* ignore */ } setLoading(false); })(); }, [load]);
 
-  const openNew = () => { setForm(EMPTY_REC); setAssignee(null); setOpen(true); };
+  const openNew = () => { setEditId(null); setForm(EMPTY_REC); setAssignee(null); setOpen(true); };
+  const openEdit = (r: RecurringRule) => {
+    setEditId(r.id);
+    setForm({ name: r.name, template_id: r.template_id || "", frequency: r.frequency, interval_n: String(r.interval_n ?? 1), brand_id: r.brand_id || "", campaign_id: r.campaign_id || "", start_date: r.start_date || "", end_date: r.end_date || "",
+      description: r.description ?? "", task_type: r.task_type ?? "", priority: r.priority ?? "normal", platforms: r.platforms ?? [], due_day: r.due_day != null ? String(r.due_day) : "" });
+    setAssignee(r.assignee_id ? ({ id: r.assignee_id, name: r.assignee_label ?? "" } as UserPickerValue) : null);
+    setOpen(true);
+  };
   const save = async () => {
     if (!form.name.trim()) { pushToast("error", t("กรุณาใส่ชื่อกฎ", "Please enter a rule name")); return; }
     setSaving(true);
+    const payload = { name: form.name.trim(), template_id: form.template_id || null, frequency: form.frequency, interval_n: Number(form.interval_n) || 1, assignee_id: assignee?.id ?? null, brand_id: form.brand_id || null, campaign_id: form.campaign_id || null, start_date: form.start_date || null, end_date: form.end_date || null,
+      description: form.description.trim() || null, task_type: form.task_type || null, priority: form.priority || null, platforms: form.platforms, due_day: form.due_day ? Number(form.due_day) : null };
     try {
-      await createRecurring({ name: form.name.trim(), template_id: form.template_id || null, frequency: form.frequency, interval_n: Number(form.interval_n) || 1, assignee_id: assignee?.id ?? null, brand_id: form.brand_id || null, campaign_id: form.campaign_id || null, start_date: form.start_date || null, end_date: form.end_date || null,
-        description: form.description.trim() || null, task_type: form.task_type || null, priority: form.priority || null, platforms: form.platforms, due_day: form.due_day ? Number(form.due_day) : null });
-      setOpen(false); pushToast("success", t("สร้างกฎงานประจำแล้ว", "Recurring rule created")); await load(true);
+      if (editId) { await updateRecurring(editId, payload); setOpen(false); pushToast("success", t("บันทึกกฎงานประจำแล้ว", "Recurring rule saved")); await load(false); }
+      else { await createRecurring(payload); setOpen(false); pushToast("success", t("สร้างกฎงานประจำแล้ว", "Recurring rule created")); await load(true); }
     } catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
   };
@@ -246,6 +255,7 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
                   </div>
                 </div>
                 <button onClick={() => runNow(r)} className="h-8 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">▶ {t("สร้างเดี๋ยวนี้", "Run Now")}</button>
+                <button onClick={() => openEdit(r)} title={t("แก้ไขกฎงานประจำ", "Edit recurring rule")} className="h-8 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">✎ {t("แก้ไข", "Edit")}</button>
                 <button onClick={() => copyRule(r)} title={t("คัดลอกงานประจำ", "Copy recurring rule")} className="h-8 px-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">⧉ {t("คัดลอก", "Copy")}</button>
                 <button onClick={() => setDelId(r)} className="text-xs text-slate-300 hover:text-red-500 shrink-0">{t("ลบ", "Delete")}</button>
               </div>
@@ -253,10 +263,10 @@ function RecurringTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
           </div>
         )}
 
-      <ERPModal open={open} onClose={() => setOpen(false)} title={t("สร้างงานประจำ", "Create Recurring Rule")} size="lg"
+      <ERPModal open={open} onClose={() => setOpen(false)} title={editId ? t("แก้กฎงานประจำ", "Edit Recurring Rule") : t("สร้างงานประจำ", "Create Recurring Rule")} size="lg"
         footer={<>
           <button onClick={() => setOpen(false)} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง", "Create")}</button>
+          <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : (editId ? t("บันทึก", "Save") : t("สร้าง", "Create"))}</button>
         </>}>
         <ERPFormSection title={t("กฎงานประจำ", "Recurring Rule")} columns={2}>
           <ERPFormField label={t("ชื่อกฎ/ชื่องาน", "Rule name / Task name")} required span={2}><ERPInput value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder={t("เช่น ทำ Content Calendar รายสัปดาห์", "e.g. Weekly Content Calendar")} /></ERPFormField>

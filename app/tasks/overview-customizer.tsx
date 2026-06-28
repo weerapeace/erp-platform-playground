@@ -17,7 +17,8 @@ export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
 export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string };
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme };
+export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme };
 
 export const DEFAULT_THEME: OverviewTheme = {
   hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff" },
@@ -28,6 +29,7 @@ export const DEFAULT_THEME: OverviewTheme = {
     overdue: { icon: "⚠️", iconUrl: null, color: "red", bgUrl: null, label: null },
   },
   page: { mode: "none", color: "#f8fafc", imageUrl: null },
+  show: { shortcuts: true, campaigns: true, filters: true },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -50,7 +52,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) } };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) } };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -80,6 +82,7 @@ function makePreset(c1: string, c2: string, pageColor: string | null, cardColors
       overdue: { ...DEFAULT_THEME.cards.overdue, color: cardColors[3] },
     },
     page: pageColor ? { mode: "color", color: pageColor, imageUrl: null } : { mode: "none", color: "#f8fafc", imageUrl: null },
+    show: { ...DEFAULT_THEME.show },
   };
 }
 
@@ -132,6 +135,7 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
   const setHero = (p: Partial<HeroTheme>) => onChange({ ...theme, hero: { ...theme.hero, ...p } });
   const setCard = (k: CardKey, p: Partial<CardTheme>) => onChange({ ...theme, cards: { ...theme.cards, [k]: { ...theme.cards[k], ...p } } });
   const setPage = (p: Partial<PageTheme>) => onChange({ ...theme, page: { ...theme.page, ...p } });
+  const setShow = (p: Partial<SectionsTheme>) => onChange({ ...theme, show: { ...theme.show, ...p } });
 
   const doUpload = async (file: File, apply: (key: string) => void, tag: string) => {
     setBusy(tag); setErr(null);
@@ -248,6 +252,18 @@ export function OverviewCustomizer({ open, theme, canUpload, onChange, onClose }
           )}
         </div>
         <p className="text-[11px] text-slate-400">{t("รูปพื้นหลังจะอยู่หลังการ์ด/ตาราง (มีฉากจางทับให้อ่านง่าย)", "Background sits behind cards/table (with a soft scrim for readability)")}</p>
+      </section>
+
+      {/* ===== ส่วนที่แสดงบนหน้า ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-2">{t("ส่วนที่แสดงบนหน้า", "Sections to show")}</div>
+        <div className="flex flex-wrap gap-3">
+          {([["shortcuts", t("ทางลัด", "Shortcuts")], ["filters", t("แถบกรอง (ประเภท/แบรนด์)", "Filter bar")], ["campaigns", t("แคมเปญที่กำลังทำ", "Active campaigns")]] as const).map(([k, label]) => (
+            <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input type="checkbox" checked={theme.show[k]} onChange={(e) => setShow({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
+            </label>
+          ))}
+        </div>
       </section>
 
       {/* ===== Cards ===== */}

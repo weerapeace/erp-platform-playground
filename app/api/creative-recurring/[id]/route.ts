@@ -12,7 +12,7 @@ import { runRule, type RecurringRule, type Template } from "@/lib/creative-recur
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["name", "template_id", "frequency", "interval_n", "weekday", "day_of_month", "assignee_id", "brand_id", "campaign_id", "start_date", "end_date", "next_run", "is_active"]);
+const EDITABLE = new Set(["name", "template_id", "frequency", "interval_n", "weekday", "day_of_month", "assignee_id", "brand_id", "campaign_id", "start_date", "end_date", "next_run", "is_active", "description", "task_type", "priority", "platforms", "due_day"]);
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
