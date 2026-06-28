@@ -51,6 +51,7 @@ export type AttendanceParsedRow = {
   rowKey?: string;
   sourceType?: string;
   scannerCode: string;
+  scannerName?: string;   // ชื่อพนักงานตามที่เครื่องสแกนบันทึก (ถ้าไฟล์มีคอลัมน์ชื่อ) — ช่วยจับคู่ตอนยังไม่ผูก
   date: string;
   rawScans: string[];
   sourceLine?: string;
@@ -347,9 +348,10 @@ function parseDelimitedAttendanceLine(line: string, headers: string[] = []): Att
   };
   const scannerCode = getByHeader("scanner_employee_code", "scanner_code", "employee_code", "code", "id") || cells[0] || "";
   const date = getByHeader("date", "work_date", "scan_date") || cells[1] || "";
+  const scannerName = getByHeader("name", "employee_name", "full_name", "scanner_name", "user_name", "username", "ชื่อ", "ชื่อพนักงาน");
   const scanText = getByHeader("raw_scans", "scans", "scan_times", "times") || cells.slice(2).join(" ");
   const rawScans = scanText.match(/\b\d{1,2}:\d{2}\b/g) || [];
-  return { scannerCode: normalizeScannerEmployeeCode(scannerCode), date: normalizeImportDate(date), rawScans, sourceLine: line };
+  return { scannerCode: normalizeScannerEmployeeCode(scannerCode), scannerName: String(scannerName || "").trim() || undefined, date: normalizeImportDate(date), rawScans, sourceLine: line };
 }
 
 function extractTrailingScannerTimes(text: string): string[] {

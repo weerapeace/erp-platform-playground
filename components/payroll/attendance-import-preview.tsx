@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   buildAttendanceImportPreview,
   buildAttendanceManualEntryPayloads,
+  calculateAttendanceDay,
   type AttendanceImportContract,
   type AttendanceImportStatus,
   type AttendancePreviewRow,
@@ -34,6 +36,8 @@ type PayrollImportPeriod = {
 
 type DuplicateMode = "skip" | "replace" | "error";
 type ReviewDecision = "absence" | "skip" | "normal";
+// การตัดสินจากป๊อปอัป "ตรวจ/แก้" รายแถว: นอกจาก absence/skip/normal ยังแก้เวลาเอง (recompute) หรือ ราชการ ได้
+type RowDecision = ReviewDecision | { kind: "official" | "recompute"; scans?: string[]; note?: string };
 
 type AttendanceDraftRow = {
   id: string;
@@ -67,6 +71,7 @@ type DisplayImportRow = {
   rowKey: string;
   date: string;
   scannerCode: string;
+  scannerName?: string;       // ชื่อตามเครื่องสแกน (โชว์ตอนยังไม่ผูก)
   employeeId?: string | null;
   employeeLabel: string;
   rawScans: string[];
@@ -77,6 +82,22 @@ type DisplayImportRow = {
   canCommit: boolean;
   canSelect: boolean;
 };
+
+type SortKey = "date" | "scannerCode" | "employeeLabel" | "rawScans" | "result" | "status";
+
+// ตัวกรองแบบ "กลุ่ม" (ใช้ทั้งการ์ดสรุปและแถบแท็บ) — กดพร้อม=รวม ready/approved/normal ฯลฯ
+function matchesFilter(row: DisplayImportRow, filter: string): boolean {
+  switch (filter) {
+    case "all": return true;
+    case "ready": return ["ready", "approved", "normal"].includes(row.status);
+    case "needs_review": return row.status === "needs_review" || row.status === "review";
+    case "unmapped": return ["unmapped", "blocked"].includes(row.status);
+    case "skipped": return row.status === "skipped";
+    case "committed": return row.status === "committed";
+    case "willCreate": return row.payloadCount > 0;
+    default: return row.status === filter;
+  }
+}
 
 const SAMPLE_TEXT = "scanner_code,date,scans\n1,2026-05-04,07:41 12:51 17:04\n2,04/05/2026,07:55 12:49 16:40";
 
@@ -182,6 +203,44 @@ function absencePayload(input: { employeeId?: string | null; workDate?: string |
   }];
 }
 
+function cleanTimes(times: (string | undefined | null)[]): string[] {
+  return times.map((t) => String(t || "").trim()).filter((t) => /^\d{1,2}:\d{2}$/.test(t));
+}
+
+// คำนวณผล/รายการที่จะสร้าง/สถานะ/หมายเหตุ ของ 1 แถว ตาม decision — reuse ตัวคำนวณตัวเดียวกับ preview (เลขไม่เพี้ยน)
+function outcomeFor(previewRow: AttendancePreviewRow, decision: RowDecision | undefined, hoursPerDay?: number | null): {
+  status: string; payloads: Record<string, unknown>[]; note: string; rawScans: string[];
+} {
+  const baseRaw = previewRow.result.rawScans;
+  if (!decision) {
+    return {
+      status: previewRow.importStatus === "needs_review" ? "review" : previewRow.importStatus,
+      payloads: buildAttendanceManualEntryPayloads(previewRow, { default_hours_per_day: hoursPerDay }),
+      note: flagText(previewRow.result.flags) || "-",
+      rawScans: baseRaw,
+    };
+  }
+  if (decision === "absence") {
+    return { status: "ready", payloads: absencePayload({ employeeId: previewRow.employee?.id, workDate: previewRow.date, scannerCode: previewRow.scannerCode, rawScans: baseRaw, hoursPerDay }), note: "ยืนยันเป็นขาดงาน", rawScans: baseRaw };
+  }
+  if (decision === "skip") return { status: "skipped", payloads: [], note: "ข้าม ไม่หัก", rawScans: baseRaw };
+  if (decision === "normal") return { status: "normal", payloads: [], note: "บันทึกเป็นปกติ ไม่หัก", rawScans: baseRaw };
+  if (decision.kind === "official") {
+    return { status: "normal", payloads: [], note: decision.note?.trim() || "ราชการ (มาทำงาน ไม่หัก)", rawScans: cleanTimes(decision.scans ?? baseRaw) };
+  }
+  // recompute: แก้เวลาเอง → คำนวณสาย/ออกก่อน/ขาด ใหม่ด้วยกฎเดิมของแถวนั้น
+  const scans = cleanTimes(decision.scans ?? baseRaw);
+  const recomputed = calculateAttendanceDay({ rawScans: scans, scheduleStatus: previewRow.scheduleStatus }, previewRow.ruleConfig);
+  const payloads = buildAttendanceManualEntryPayloads(
+    { ...previewRow, rawScans: scans, result: { ...recomputed, importStatus: recomputed.importStatus } },
+    { default_hours_per_day: hoursPerDay },
+  );
+  const summary = recomputed.totalLateMinutes ? `สาย ${recomputed.totalLateMinutes} นาที`
+    : recomputed.earlyOutMinutes ? `ออกก่อน ${recomputed.earlyOutMinutes} นาที`
+    : recomputed.absent ? "ขาด" : "ปกติ";
+  return { status: "ready", payloads, note: `${decision.note?.trim() ? decision.note.trim() + " · " : ""}ตรวจแล้ว (${summary})`, rawScans: scans };
+}
+
 function flagText(flags: string[]): string {
   const labels: Record<string, string> = {
     late_morning: "สายช่วงเช้า",
@@ -233,14 +292,18 @@ export function AttendanceImportPreview({
 }) {
   const [text, setText] = useState("");
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | AttendanceImportStatus | "committed" | "error">("all");
+  const [filter, setFilter] = useState<string>("all");
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState<AttendanceDraftBatch | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
   const [duplicateMode, setDuplicateMode] = useState<DuplicateMode>("skip");
-  const [reviewDecisions, setReviewDecisions] = useState<Record<string, ReviewDecision>>({});
+  const [reviewDecisions, setReviewDecisions] = useState<Record<string, RowDecision>>({});
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);   // กดหัวคอลัมน์เพื่อเรียง
+  const [editRow, setEditRow] = useState<DisplayImportRow | null>(null);                   // แถวที่กำลังเปิดป๊อปอัปตรวจ/แก้
+  const [pendingMatches, setPendingMatches] = useState<Record<string, string>>({});        // รหัสสแกน → employee_id ที่จะจับคู่
+  const [matchSaving, setMatchSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const rowsByEmployeeId = useMemo(() => new Map(rows.map((row) => [row.employee_id, row])), [rows]);
@@ -274,26 +337,29 @@ export function AttendanceImportPreview({
     },
   }), [holidaySet, period?.default_hours_per_day, period?.id, rows, rowsByEmployeeId, text]);
 
+  const previewByKey = useMemo(() => new Map(preview.rows.map((r) => [r.rowKey, r])), [preview.rows]);
+
   const previewDisplayRows: DisplayImportRow[] = useMemo(() => preview.rows.map((row) => {
     const decision = reviewDecisions[row.rowKey];
-    const manualPayloads = decision === "absence"
-      ? absencePayload({ employeeId: row.employee?.id, workDate: row.date, scannerCode: row.scannerCode, rawScans: row.result.rawScans, hoursPerDay: period?.default_hours_per_day })
-      : decision ? [] : buildAttendanceManualEntryPayloads(row, { default_hours_per_day: period?.default_hours_per_day });
-    const status = decision ? decisionStatus(decision) : row.importStatus;
+    const o = outcomeFor(row, decision, period?.default_hours_per_day);
+    const result = typeof decision === "object"
+      ? (o.payloads.length ? `${o.payloads.length} รายการ` : "ปกติ")
+      : decision === "normal" ? "ปกติ" : decision === "skip" ? "ข้าม" : decision === "absence" ? "ขาดงาน" : resultText(row);
     return {
       id: row.rowKey,
       rowKey: row.rowKey,
       date: row.date,
       scannerCode: row.scannerCode,
+      scannerName: row.scannerName,
       employeeId: row.employee?.id || null,
       employeeLabel: employeeShortName(row.employee),
-      rawScans: row.result.rawScans,
-      result: decision === "normal" ? "ปกติ" : decision === "skip" ? "ข้าม" : resultText(row),
-      status,
-      note: decision ? decisionNote(decision) : flagText(row.result.flags) || "-",
-      payloadCount: manualPayloads.length,
+      rawScans: o.rawScans,
+      result,
+      status: o.status,
+      note: o.note,
+      payloadCount: o.payloads.length,
       canCommit: false,
-      canSelect: isReviewStatus(status),
+      canSelect: isReviewStatus(o.status),
     };
   }), [period?.default_hours_per_day, preview.rows, reviewDecisions]);
 
@@ -302,11 +368,13 @@ export function AttendanceImportPreview({
     const result = (row.result_payload || {}) as Record<string, unknown>;
     const flags = Array.isArray(result.flags) ? result.flags.map(String) : [];
     const status = String(row.status || "blocked");
+    const rowKey = String(row.row_key || row.id);
     return {
       id: row.id,
-      rowKey: String(row.row_key || row.id),
+      rowKey,
       date: String(row.work_date || ""),
       scannerCode: String(row.scanner_code || ""),
+      scannerName: previewByKey.get(rowKey)?.scannerName,
       employeeId: String(row.employee_id || "") || null,
       employeeLabel: String(row.employee_label || row.employee_id || "-"),
       rawScans: Array.isArray(row.raw_scans) ? row.raw_scans : [],
@@ -317,24 +385,28 @@ export function AttendanceImportPreview({
       canCommit: isCommitReadyStatus(status),
       canSelect: isReviewStatus(status) || isCommitReadyStatus(status),
     };
-  }), [draft?.rows]);
+  }), [draft?.rows, previewByKey]);
 
   const displayRows = draft ? draftDisplayRows : previewDisplayRows;
 
-  const filteredRows = displayRows
-    .filter((row) => filter === "all" || row.status === filter || (filter === "needs_review" && row.status === "review"))
-    .filter((row) => {
-      const q = query.trim().toLowerCase();
-      if (!q) return true;
-      return [
-        row.date,
-        row.scannerCode,
-        row.employeeLabel,
-        row.rawScans.join(" "),
-        row.result,
-        row.note,
-      ].join(" ").toLowerCase().includes(q);
-    });
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let out = displayRows
+      .filter((row) => matchesFilter(row, filter))
+      .filter((row) => !q || [row.date, row.scannerCode, row.scannerName, row.employeeLabel, row.rawScans.join(" "), row.result, row.note].join(" ").toLowerCase().includes(q));
+    if (sort) {
+      const dir = sort.dir === "asc" ? 1 : -1;
+      const val = (r: DisplayImportRow): string =>
+        sort.key === "rawScans" ? r.rawScans.join(" ")
+        : sort.key === "employeeLabel" ? r.employeeLabel
+        : sort.key === "scannerCode" ? r.scannerCode
+        : sort.key === "result" ? r.result
+        : sort.key === "status" ? statusLabel(r.status)
+        : r.date;
+      out = [...out].sort((a, b) => val(a).localeCompare(val(b), "th", { numeric: true }) * dir);
+    }
+    return out;
+  }, [displayRows, filter, query, sort]);
 
   const payloadCount = displayRows.reduce((sum, row) => sum + row.payloadCount, 0);
   const canCommitCount = draftDisplayRows.filter((row) => row.canCommit).length;
@@ -391,10 +463,7 @@ export function AttendanceImportPreview({
   };
 
   const draftRowsFromPreview = () => preview.rows.map((row, index) => {
-    const decision = reviewDecisions[row.rowKey];
-    const manualPayloads = decision === "absence"
-      ? absencePayload({ employeeId: row.employee?.id, workDate: row.date, scannerCode: row.scannerCode, rawScans: row.result.rawScans, hoursPerDay: period?.default_hours_per_day })
-      : decision ? [] : buildAttendanceManualEntryPayloads(row, { default_hours_per_day: period?.default_hours_per_day });
+    const o = outcomeFor(row, reviewDecisions[row.rowKey], period?.default_hours_per_day);
     return {
       row_key: row.rowKey,
       employee_id: row.employee?.id || null,
@@ -402,11 +471,11 @@ export function AttendanceImportPreview({
       scanner_code: row.scannerCode || null,
       mapped_scanner_code: row.scannerCode || null,
       employee_label: employeeShortName(row.employee),
-      raw_scans: row.result.rawScans,
+      raw_scans: o.rawScans,
       result_payload: row.result,
-      manual_payloads: manualPayloads,
-      status: decision ? decisionStatus(decision) : row.importStatus === "needs_review" ? "review" : row.importStatus,
-      note: decision ? decisionNote(decision) : flagText(row.result.flags) || null,
+      manual_payloads: o.payloads,
+      status: o.status,
+      note: o.note,
       source_lines: row.sourceLines,
       sort_order: index,
     };
@@ -588,6 +657,74 @@ export function AttendanceImportPreview({
     });
   };
 
+  const toggleSort = (key: SortKey) =>
+    setSort((cur) => (cur?.key === key ? (cur.dir === "asc" ? { key, dir: "desc" } : null) : { key, dir: "asc" }));
+
+  // รายชื่อพนักงาน (จากงวดนี้) สำหรับ dropdown จับคู่รหัสสแกน
+  const employeeOptions = useMemo(
+    () => rows.map((r) => ({ id: r.employee_id, label: `${r.employee_code} · ${r.employee_name}` }))
+      .sort((a, b) => a.label.localeCompare(b.label, "th", { numeric: true })),
+    [rows],
+  );
+  const pendingMatchCount = Object.values(pendingMatches).filter(Boolean).length;
+
+  // บันทึกผลตรวจ/แก้ของ 1 แถว (จากป๊อปอัป) — รองรับทั้งโหมด preview และ draft
+  const applyRowEdit = async (rowKey: string, decision: RowDecision) => {
+    if (!editable) { setEditRow(null); return; }
+    try {
+      if (draft) {
+        const pr = previewByKey.get(rowKey);
+        const o = pr ? outcomeFor(pr, decision, period?.default_hours_per_day) : null;
+        if (o) {
+          const nextRows = (draft.rows || []).map((r) =>
+            String(r.row_key || r.id) !== rowKey ? r : { ...r, status: o.status, manual_payloads: o.payloads, note: o.note, raw_scans: o.rawScans });
+          setBusy(true);
+          await persistDraftRows(nextRows, "บันทึกการตรวจแล้ว");
+        }
+      } else {
+        setReviewDecisions((cur) => ({ ...cur, [rowKey]: decision }));
+        setMessage("ตรวจแล้ว — กดบันทึก draft เพื่อเก็บผลนี้");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "บันทึกการตรวจไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+      setEditRow(null);
+    }
+  };
+
+  // จับคู่รหัสสแกน → พนักงาน (เขียนถาวรลง employees.scanner_employee_code) แล้วให้หน้าแม่โหลดใหม่ → ผูกอัตโนมัติ
+  const saveMatches = async () => {
+    const entries = Object.entries(pendingMatches).filter(([code, empId]) => code && empId);
+    if (entries.length === 0) { setMessage("ยังไม่ได้เลือกพนักงานให้รหัสสแกนไหน"); return; }
+    setMatchSaving(true);
+    setMessage("");
+    try {
+      const edits = entries.map(([code, empId]) => ({ id: empId, changes: { scanner_employee_code: code } }));
+      const res = await apiFetch("/api/master-v2/employees/bulk-update", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ edits }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) throw new Error(json.error || `HTTP ${res.status}`);
+      setPendingMatches({});
+      setMessage(`จับคู่แล้ว ${entries.length} รหัส — กำลังโหลดข้อมูลพนักงานใหม่`);
+      onCommitted?.();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "จับคู่พนักงานไม่สำเร็จ");
+    } finally {
+      setMatchSaving(false);
+    }
+  };
+
+  const sortArrow = (key: SortKey) => (
+    <span className="text-[9px] text-slate-300">{sort?.key === key ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+  );
+  const sortTh = (key: SortKey, label: string) => (
+    <th className="px-3 py-2 text-left">
+      <button type="button" onClick={() => toggleSort(key)} className="inline-flex items-center gap-1 hover:text-slate-700">{label} {sortArrow(key)}</button>
+    </th>
+  );
+
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-100 px-4 py-3">
@@ -689,11 +826,11 @@ export function AttendanceImportPreview({
 
         <div className="min-w-0 space-y-3">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-            <SummaryBox label="ทั้งหมด" value={displayRows.length} />
-            <SummaryBox label="พร้อม" value={draft ? canCommitCount : readyCount} tone="text-emerald-700" />
-            <SummaryBox label="ต้องตรวจ" value={reviewCount} tone="text-amber-700" />
-            <SummaryBox label="ยังไม่ผูก" value={blockedCount} tone="text-red-700" />
-            <SummaryBox label="รายการที่จะสร้าง" value={payloadCount} tone="text-slate-800" />
+            <SummaryBox label="ทั้งหมด" value={displayRows.length} active={filter === "all"} onClick={() => setFilter("all")} />
+            <SummaryBox label="พร้อม" value={draft ? canCommitCount : readyCount} tone="text-emerald-700" active={filter === "ready"} onClick={() => setFilter("ready")} />
+            <SummaryBox label="ต้องตรวจ" value={reviewCount} tone="text-amber-700" active={filter === "needs_review"} onClick={() => setFilter("needs_review")} />
+            <SummaryBox label="ยังไม่ผูก" value={blockedCount} tone="text-red-700" active={filter === "unmapped"} onClick={() => setFilter("unmapped")} />
+            <SummaryBox label="รายการที่จะสร้าง" value={payloadCount} tone="text-slate-800" active={filter === "willCreate"} onClick={() => setFilter("willCreate")} />
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -753,6 +890,23 @@ export function AttendanceImportPreview({
             </button>
           </div>
 
+          {(blockedCount > 0 || pendingMatchCount > 0) && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2">
+              <div className="mr-auto text-xs font-medium text-red-700">
+                รหัสสแกนยังไม่ผูกพนักงาน — เลือกพนักงานในคอลัมน์ “พนักงาน” แล้วกดบันทึกจับคู่ (จับครั้งเดียวใช้ตลอด)
+                {pendingMatchCount > 0 && <span className="ml-1">· เลือกแล้ว {pendingMatchCount}</span>}
+              </div>
+              <button
+                type="button"
+                onClick={() => void saveMatches()}
+                disabled={!editable || matchSaving || pendingMatchCount === 0}
+                className="h-8 rounded-lg bg-red-600 px-3 text-xs font-semibold text-white hover:bg-red-700 disabled:bg-slate-100 disabled:text-slate-400"
+              >
+                {matchSaving ? "กำลังบันทึก…" : `บันทึกจับคู่ (${pendingMatchCount})`}
+              </button>
+            </div>
+          )}
+
           <div className="max-h-[560px] overflow-auto rounded-xl border border-slate-200">
             <table className="min-w-[900px] w-full text-sm">
               <thead className="sticky top-0 bg-slate-50 text-xs text-slate-500">
@@ -774,13 +928,14 @@ export function AttendanceImportPreview({
                       }}
                     />
                   </th>
-                  <th className="px-3 py-2 text-left">วันที่</th>
-                  <th className="px-3 py-2 text-left">รหัสสแกน</th>
-                  <th className="px-3 py-2 text-left">พนักงาน</th>
-                  <th className="px-3 py-2 text-left">เวลา Scan</th>
-                  <th className="px-3 py-2 text-left">ผล</th>
-                  <th className="px-3 py-2 text-left">สถานะ</th>
+                  {sortTh("date", "วันที่")}
+                  {sortTh("scannerCode", "รหัสสแกน")}
+                  {sortTh("employeeLabel", "พนักงาน")}
+                  {sortTh("rawScans", "เวลา Scan")}
+                  {sortTh("result", "ผล")}
+                  {sortTh("status", "สถานะ")}
                   <th className="px-3 py-2 text-left">หมายเหตุ</th>
+                  <th className="px-3 py-2 text-left">ตรวจ</th>
                 </tr>
               </thead>
               <tbody>
@@ -796,7 +951,22 @@ export function AttendanceImportPreview({
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">{formatDate(row.date)}</td>
                     <td className="px-3 py-2 font-mono text-xs">{row.scannerCode || "-"}</td>
-                    <td className="px-3 py-2">{row.employeeLabel}</td>
+                    <td className="px-3 py-2">
+                      {(row.status === "unmapped" || row.status === "blocked") ? (
+                        <div className="space-y-1">
+                          {row.scannerName && <div className="text-xs text-slate-500">เครื่อง: <span className="text-slate-700">{row.scannerName}</span></div>}
+                          <select
+                            value={pendingMatches[row.scannerCode] || ""}
+                            onChange={(event) => setPendingMatches((cur) => ({ ...cur, [row.scannerCode]: event.target.value }))}
+                            disabled={!editable}
+                            className="h-7 w-44 max-w-full rounded border border-slate-200 bg-white px-1 text-xs"
+                          >
+                            <option value="">— จับคู่พนักงาน —</option>
+                            {employeeOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          </select>
+                        </div>
+                      ) : row.employeeLabel}
+                    </td>
                     <td className="px-3 py-2 font-mono text-xs">{row.rawScans.join(" ") || "-"}</td>
                     <td className="px-3 py-2">{row.result}</td>
                     <td className="px-3 py-2">
@@ -805,11 +975,23 @@ export function AttendanceImportPreview({
                       </span>
                     </td>
                     <td className="px-3 py-2 text-xs text-slate-500">{row.note}</td>
+                    <td className="px-3 py-2">
+                      {row.status !== "committed" && (
+                        <button
+                          type="button"
+                          onClick={() => setEditRow(row)}
+                          disabled={!editable}
+                          className="h-7 whitespace-nowrap rounded-lg border border-slate-200 px-2 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:text-slate-300"
+                        >
+                          ตรวจ/แก้
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {filteredRows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-10 text-center text-slate-400">
+                    <td colSpan={9} className="px-3 py-10 text-center text-slate-400">
                       {text.trim() || draft ? "ไม่พบรายการตามเงื่อนไข" : "วางข้อความหรือเลือกไฟล์ เพื่อดู preview ก่อน"}
                     </td>
                   </tr>
@@ -819,15 +1001,93 @@ export function AttendanceImportPreview({
           </div>
         </div>
       </div>
+
+      {editRow && (
+        <AttendanceReviewModal
+          row={editRow}
+          previewRow={previewByKey.get(editRow.rowKey)}
+          onClose={() => setEditRow(null)}
+          onApply={(decision) => void applyRowEdit(editRow.rowKey, decision)}
+        />
+      )}
     </div>
   );
 }
 
-function SummaryBox({ label, value, tone = "text-slate-700" }: { label: string; value: number; tone?: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+function SummaryBox({ label, value, tone = "text-slate-700", active, onClick }: { label: string; value: number; tone?: string; active?: boolean; onClick?: () => void }) {
+  const cls = `rounded-xl border px-3 py-2 text-left transition-colors ${active ? "border-slate-900 ring-1 ring-slate-900 bg-white" : "border-slate-200 bg-slate-50"} ${onClick ? "cursor-pointer hover:border-slate-400" : ""}`;
+  const inner = (
+    <>
       <div className={`text-lg font-bold tabular-nums ${tone}`}>{value.toLocaleString("th-TH")}</div>
       <div className="text-xs text-slate-500">{label}</div>
-    </div>
+    </>
+  );
+  return onClick
+    ? <button type="button" onClick={onClick} className={`w-full ${cls}`}>{inner}</button>
+    : <div className={cls}>{inner}</div>;
+}
+
+// ป๊อปอัป "ตรวจ/แก้รายการเวลา" รายแถว — แก้เวลา เข้า/พัก/ออก, ราชการ, ปกติ/ขาด/ข้าม
+function AttendanceReviewModal({ row, previewRow, onClose, onApply }: {
+  row: DisplayImportRow;
+  previewRow?: AttendancePreviewRow;
+  onClose: () => void;
+  onApply: (decision: RowDecision) => void;
+}) {
+  const result = previewRow?.result;
+  const [morningIn, setMorningIn] = useState(result?.morningIn || row.rawScans[0] || "");
+  const [noonIn, setNoonIn] = useState(result?.noonIn || "");
+  const [finalOut, setFinalOut] = useState(result?.finalOut || (row.rawScans.length > 1 ? row.rawScans[row.rawScans.length - 1] : ""));
+  const [official, setOfficial] = useState(false);
+  const [note, setNote] = useState("");
+  const flags = previewRow?.result.flags ?? [];
+
+  const saveTimes = () => onApply(official
+    ? { kind: "official", scans: [morningIn, noonIn, finalOut], note }
+    : { kind: "recompute", scans: [morningIn, noonIn, finalOut], note });
+
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <div>
+            <div className="text-sm font-semibold text-slate-800">ตรวจ/แก้รายการเวลา</div>
+            <div className="text-xs text-slate-500">{formatDate(row.date)} · {row.employeeLabel !== "-" ? row.employeeLabel : (row.scannerName || row.scannerCode)}</div>
+          </div>
+          <button onClick={onClose} className="text-lg text-slate-400 hover:text-slate-700">✕</button>
+        </div>
+        <div className="space-y-3 px-4 py-3">
+          <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">กรอกเวลาให้ครบ แล้วกด “บันทึกตามเวลาที่กรอก” ระบบจะคิดสาย/ออกก่อนให้เอง · หรือใช้ปุ่มลัด (ปกติ/ขาด/ข้าม) ด้านล่าง</div>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="text-xs text-slate-500">สแกนเข้า
+              <input value={morningIn} onChange={(event) => setMorningIn(event.target.value)} placeholder="08:00" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">กลับจากพัก
+              <input value={noonIn} onChange={(event) => setNoonIn(event.target.value)} placeholder="13:00" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
+            </label>
+            <label className="text-xs text-slate-500">สแกนออก
+              <input value={finalOut} onChange={(event) => setFinalOut(event.target.value)} placeholder="17:00" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
+            </label>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input type="checkbox" checked={official} onChange={(event) => setOfficial(event.target.checked)} /> ราชการ / ออกนอกสถานที่ (นับมาทำงาน ไม่หัก)
+          </label>
+          <label className="block text-xs text-slate-500">หมายเหตุ
+            <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="เช่น ลืมสแกนออก / รถติด" className="mt-1 h-8 w-full rounded border border-slate-200 px-2 text-sm" />
+          </label>
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            <div>สแกนดิบ: <span className="font-mono text-slate-700">{row.rawScans.join(" ") || "-"}</span></div>
+            {flags.length > 0 && <div className="mt-1">ปัญหาที่เจอ: {flagText(flags)}</div>}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 px-4 py-3">
+          <button onClick={() => onApply("skip")} className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">ข้าม ไม่หัก</button>
+          <button onClick={() => onApply("absence")} className="h-9 rounded-lg border border-amber-200 px-3 text-xs font-medium text-amber-700 hover:bg-amber-50">ขาดงาน</button>
+          <button onClick={() => onApply("normal")} className="h-9 rounded-lg border border-emerald-200 px-3 text-xs font-medium text-emerald-700 hover:bg-emerald-50">ปกติ ไม่หัก</button>
+          <button onClick={saveTimes} className="h-9 rounded-lg bg-slate-900 px-4 text-xs font-semibold text-white hover:bg-slate-800">บันทึกตามเวลาที่กรอก</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
