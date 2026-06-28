@@ -11,6 +11,7 @@ import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
 import { OverviewKanban } from "./overview-kanban";
+import { ReviewQueueView } from "./review-queue-view";
 import { KanbanSettings } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
 import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
@@ -215,8 +216,8 @@ export function OverviewDashboard({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cardMeta.map((m) => (
           <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign}
-            active={filter === m.key && !activeMetric && m.key !== "review"} hint={m.key === "review" ? t("กดเพื่อเปิดคิวตรวจ →", "open review queue →") : filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
-            onClick={m.key === "review" ? () => { window.location.href = "/tasks/review"; } : () => { setActiveMetric(null); onFilter(m.key); }} />
+            active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : m.key === "review" ? t("กดดูคิวรอตรวจ", "tap to review") : t("กดเพื่อกรอง", "tap to filter")}
+            onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
         ))}
       </div>
 
@@ -303,8 +304,14 @@ export function OverviewDashboard({
           </section>
         )}
 
-        {/* คอลัมน์ 2 — งาน: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง (กว้างสุด) */}
+        {/* คอลัมน์ 2 — งาน: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง (กว้างสุด) · review = ตารางคิวรอตรวจในตัว */}
         <section className="flex-1 min-w-0 space-y-2">
+          {filter === "review" ? (
+            <>
+              <p className="text-sm font-semibold text-slate-700">🟡 {t("รอตรวจ/อนุมัติ — งานย่อยที่ส่งมา", "Review queue — submitted subtasks")}</p>
+              <ReviewQueueView onChanged={onChanged} />
+            </>
+          ) : (<>
           <div className="flex items-center justify-between gap-2">
             {theme.kanban.view !== "table"
               ? <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
@@ -350,6 +357,7 @@ export function OverviewDashboard({
               />
             </div>
           )}
+          </>)}
         </section>
 
         {/* คอลัมน์ 3 — แคมเปญที่กำลังทำ (แคบขวา, รายการแนวตั้ง) */}
