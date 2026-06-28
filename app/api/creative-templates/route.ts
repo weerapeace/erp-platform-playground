@@ -37,7 +37,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 type Step = { type?: string; title?: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; config?: Record<string, unknown> };
-type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; description?: string | null; platforms?: string[]; steps?: Step[] };
+type ContentItem = { title?: string; post_type?: string | null; platforms?: string[] };
+type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
 
 // เก็บ step ครบรูปแบบ type-driven: type + title + config + description + ผู้รับผิดชอบ (ของกลาง — ไม่ตัดทิ้ง)
 function normalizeSteps(raw?: Step[]): Record<string, unknown>[] {
@@ -52,6 +53,16 @@ function normalizeSteps(raw?: Step[]): Record<string, unknown>[] {
   }));
 }
 
+// บลูพรินต์คอนเทนต์ที่จะสร้างอัตโนมัติตอนสร้างงานจากแม่แบบนี้
+function normalizeContent(raw?: ContentItem[]): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((c) => (c?.title ?? "").trim()).map((c) => ({
+    title: (c.title ?? "").trim(),
+    post_type: c.post_type || null,
+    platforms: Array.isArray(c.platforms) ? c.platforms : [],
+  }));
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.create"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -60,11 +71,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const name = (body.name ?? "").trim();
   if (!name) return NextResponse.json({ error: "กรุณาใส่ชื่อเทมเพลต" }, { status: 400 });
   const steps = normalizeSteps(body.steps);
+  const content_items = normalizeContent(body.content_items);
 
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_creative_task_templates").insert({
     name, task_type: body.task_type || null, default_priority: body.default_priority || "normal",
-    brand_id: body.brand_id || null, description: body.description?.trim() || null, platforms: body.platforms ?? [], steps, created_by: user?.id ?? null,
+    brand_id: body.brand_id || null, description: body.description?.trim() || null, platforms: body.platforms ?? [], steps, content_items, created_by: user?.id ?? null,
   }).select("id, name").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "create", entityType: "creative_template", entityId: data.id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name } });

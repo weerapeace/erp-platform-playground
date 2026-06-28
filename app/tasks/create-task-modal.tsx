@@ -18,7 +18,7 @@ import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
 import {
   PRIORITY_META, createTask, listCampaigns, listBrands, listTemplates,
-  type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig,
+  type CreativePriority, type Campaign, type BrandOption, type TaskTemplate, type SubtaskStepConfig, type TemplateContentItem,
 } from "./data";
 
 const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
@@ -60,6 +60,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const [tplId, setTplId] = useState("");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [subs, setSubs] = useState<SubRow[]>([]);
+  const [contentItems, setContentItems] = useState<TemplateContentItem[]>([]);   // คอนเทนต์พ่วงจากแม่แบบ
   const [step, setStep] = useState(1);
   const [formErr, setFormErr] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -70,7 +71,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   useEffect(() => {
     (async () => { try { const [b, c, tp] = await Promise.all([listBrands(), listCampaigns(), listTemplates()]); setBrands(b); setCampaigns(c); setTemplates(tp); } catch { /* ignore */ } })();
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "" }); setSubs([]); setTplId(""); setStep(1); setFormErr(null); setDirty(false); } }, [open, lockedCampaignId]);
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? "" }); setSubs([]); setContentItems([]); setTplId(""); setStep(1); setFormErr(null); setDirty(false); } }, [open, lockedCampaignId]);
 
   const updateForm = (patch: Partial<FormState>) => { setForm((p) => ({ ...p, ...patch })); setDirty(true); };
   const togglePlatform = (v: string) => updateForm({ platforms: form.platforms.includes(v) ? form.platforms.filter((x) => x !== v) : [...form.platforms, v] });
@@ -79,8 +80,9 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   const applyTemplate = (id: string) => {
     setTplId(id); setDirty(true);
     const tpl = templates.find((x) => x.id === id);
-    if (!tpl) { setSubs([]); return; }
+    if (!tpl) { setSubs([]); setContentItems([]); return; }
     setForm((p) => ({ ...p, task_type: tpl.task_type ?? p.task_type, priority: (tpl.default_priority as CreativePriority) ?? p.priority, platforms: tpl.platforms ?? [], brand_id: tpl.brand_id ?? p.brand_id }));
+    setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []);
     setSubs((tpl.steps ?? []).filter((s) => s.title?.trim()).map((s) => ({
       include: true, title: s.title, description: s.description ?? null, required_before_next: !!s.required_before_next,
       assignees: (s.assignee_ids ?? []).map((aid, i) => ({ id: aid, label: s.assignee_labels?.[i] ?? "ผู้ใช้" })),
@@ -110,6 +112,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
         platforms: form.platforms, drive_folder_url: form.drive_folder_url.trim() || null,
         cover_image_r2_key: form.cover_image_r2_key || null,
         subtasks,
+        content_items: contentItems.filter((c) => c.title?.trim()),
       });
       setDirty(false);
       onCreated({ id, task_no, title: form.title.trim(), subtasks: subtasks.map((s) => ({ title: s.title })) });
@@ -152,6 +155,11 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
               <option value="">— {t("ไม่ใช้เทมเพลต","No Template")} —</option>
               {templates.map((tmpl) => <option key={tmpl.id} value={tmpl.id}>{tmpl.name} ({tmpl.steps?.length ?? 0} {t("ขั้นตอน","steps")})</option>)}
             </select>
+          </div>
+        )}
+        {contentItems.length > 0 && (
+          <div className="mb-4 flex items-center gap-2 bg-fuchsia-50/60 border border-fuchsia-100 rounded-lg px-3 py-2 text-sm text-fuchsia-700">
+            📱 {t("แม่แบบนี้จะสร้างคอนเทนต์", "This template will create")} {contentItems.length} {t("ชิ้นพ่วงกับงาน (ดู/แก้ได้ที่แท็บคอนเทนต์ในงาน)", "content item(s) linked to the task (view/edit in the task's Content tab)")}
           </div>
         )}
         <ERPFormSection title={t("ข้อมูลงาน","Task info")} columns={2}>

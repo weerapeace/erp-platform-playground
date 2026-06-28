@@ -26,6 +26,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const campaign = (searchParams.get("campaign_id") ?? "").trim();
   const brandId  = (searchParams.get("brand_id") ?? "").trim();
   const platform = (searchParams.get("platform") ?? "").trim();
+  const taskId   = (searchParams.get("task_id") ?? "").trim();   // คอนเทนต์ของงานนี้
+  const onlyUnlinked = searchParams.get("unlinked") === "1";     // เฉพาะคอนเทนต์ที่ยังไม่ผูกงาน (สำหรับ "แนบ")
   const includeInactive = searchParams.get("include_inactive") === "1";
   const templatesOnly = searchParams.get("templates") === "1";
 
@@ -39,6 +41,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (campaign) q = q.eq("campaign_id", campaign);
   if (brandId)  q = q.eq("brand_id", brandId);
   if (platform) q = q.contains("platforms", [platform]);
+  if (taskId)   q = q.eq("task_id", taskId);
+  if (onlyUnlinked) q = q.is("task_id", null);
 
   const { data, error, count } = await q;
   if (error) return NextResponse.json({ data: [], total: 0, error: friendlyDbError(error.message) }, { status: 500 });
@@ -48,7 +52,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 type Caption = { platform: string; caption?: string | null; hashtags?: string | null; caption_type?: string | null };
 type CreateBody = {
-  title?: string; campaign_id?: string | null; brand_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
+  title?: string; task_id?: string | null; campaign_id?: string | null; brand_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
   post_type?: string | null; platforms?: string[]; status?: string; scheduled_at?: string | null;
   product_links?: { platform: string; url: string }[]; note?: string | null; captions?: Caption[]; is_template?: boolean;
   discount_value?: number | null; discount_is_percent?: boolean;
@@ -64,7 +68,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const row = (no: string) => ({
-    content_no: no, title, campaign_id: body.campaign_id || null, brand_id: body.brand_id || null,
+    content_no: no, title, task_id: body.task_id || null, campaign_id: body.campaign_id || null, brand_id: body.brand_id || null,
     sku_id: body.sku_id || null, parent_sku_id: body.parent_sku_id || null, product_name: body.product_name?.trim() || null, post_type: body.post_type || null,
     platforms: body.platforms ?? [], status: body.status || "draft", scheduled_at: body.scheduled_at || null,
     product_links: body.product_links ?? [], note: body.note?.trim() || null, is_template: !!body.is_template, created_by: user?.id ?? null,

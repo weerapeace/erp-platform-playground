@@ -1,6 +1,6 @@
 /** ของใช้ร่วมของ creative-content API (แยกจาก route.ts — route ต้อง export แค่ handler) */
 
-export const SELECT = `id, content_no, title, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
+export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sku_id, parent_sku_id, product_name, post_type,
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, note,
   discount_value, discount_is_percent,
   is_template, is_active, created_at, updated_at,

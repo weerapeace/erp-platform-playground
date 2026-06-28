@@ -38,7 +38,7 @@ const EMPTY_FORM = { title: "", post_type: "image", status: "draft" as ContentSt
 export function ContentPageView() {
   const t = useT();
   const { platforms } = useCreativeOptions();
-  const [view, setView] = useState<"list" | "calendar">("list");
+  const [view, setView] = useState<"list" | "calendar" | "templates">("list");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [delTarget, setDelTarget] = useState<ContentItem | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -98,7 +98,14 @@ export function ContentPageView() {
     finally { setSaving(false); }
   };
 
-  const onDelete = async () => { if (!delTarget) return; try { await deleteContent(delTarget.id); pushToast("info", t("ลบแล้ว", "Deleted")); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
+  const onDelete = async () => { if (!delTarget) return; try { await deleteContent(delTarget.id); pushToast("info", t("ลบแล้ว", "Deleted")); await load(); await reloadTemplates(); } catch (e) { pushToast("error", (e as Error).message); } finally { setDelTarget(null); } };
+  // สร้างแม่แบบคอนเทนต์เปล่า → เปิด drawer ให้กรอกแคปชั่น/แพลตฟอร์ม
+  const createTpl = async () => {
+    const name = window.prompt(t("ชื่อแม่แบบคอนเทนต์", "Content template name"));
+    if (!name?.trim()) return;
+    try { const { id } = await createContent({ title: name.trim(), is_template: true }); await reloadTemplates(); setDetailId(id); pushToast("success", t("สร้างแม่แบบแล้ว", "Template created")); }
+    catch (e) { pushToast("error", (e as Error).message); }
+  };
 
   return (
     <StandaloneShell title={t("คอนเทนต์ Social", "Social Content")} icon="📱" accent="violet">
@@ -116,11 +123,42 @@ export function ContentPageView() {
         <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
           <button onClick={() => setView("list")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "list" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>📋 {t("รายการ", "List")}</button>
           <button onClick={() => setView("calendar")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🗓️ {t("ปฏิทิน", "Calendar")}</button>
+          <button onClick={() => setView("templates")} className={`h-8 px-3 rounded-md text-sm font-medium ${view === "templates" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>🧩 {t("แม่แบบ", "Templates")}</button>
         </div>
       </div>
 
       <div className="px-8 py-6">
         {loading ? <div className="py-20 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div>
+          : view === "templates" ? (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm text-slate-500">{t("แม่แบบคอนเทนต์ — ตั้งแคปชั่น/แพลตฟอร์มไว้ล่วงหน้า เลือกใช้ตอนสร้างคอนเทนต์ได้", "Content templates — preset captions/platforms, pick when creating content")}</p>
+                <button onClick={createTpl} className="h-9 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {t("สร้างแม่แบบ", "New Template")}</button>
+              </div>
+              {templates.length === 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">
+                  <div className="text-4xl mb-3">🧩</div>
+                  <p className="text-slate-600 font-medium">{t("ยังไม่มีแม่แบบคอนเทนต์", "No content templates yet")}</p>
+                  <p className="text-slate-400 text-sm mt-1">{t('สร้างใหม่ หรือกด "บันทึกเป็นเทมเพลต" จากคอนเทนต์ที่มีอยู่', 'Create one, or click "Save as Template" from existing content')}</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {templates.map((c) => (
+                    <div key={c.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:border-violet-300 hover:shadow transition-colors">
+                      <div className="flex items-start justify-between gap-2">
+                        <button onClick={() => setDetailId(c.id)} className="min-w-0 text-left flex-1">
+                          <span className="text-[10px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-1.5 py-0.5">🧩 {t("แม่แบบ", "Template")}</span>
+                          <p className="text-base font-semibold text-slate-800 leading-snug line-clamp-2 mt-1.5">{c.title}</p>
+                          <div className="flex flex-wrap gap-1 mt-2">{(c.platforms ?? []).map((p) => <span key={p} className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{platformLabel(p)}</span>)}</div>
+                        </button>
+                        <button onClick={() => setDelTarget(c)} title={t("ลบแม่แบบ", "Delete template")} className="text-slate-300 hover:text-red-500 shrink-0">✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
           : view === "calendar" ? <MonthCalendar items={items} onOpen={(id) => setDetailId(id)} />
           : items.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-12 text-center">

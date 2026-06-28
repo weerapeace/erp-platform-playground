@@ -4,7 +4,7 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
-import { nextTaskNo, setSubtaskAssignees } from "@/lib/creative-tasks-server";
+import { nextTaskNo, nextContentNo, setSubtaskAssignees } from "@/lib/creative-tasks-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -18,9 +18,10 @@ export type RecurringRule = {
   description?: string | null; task_type?: string | null; priority?: string | null; platforms?: string[] | null; due_day?: number | null;
 };
 export type TemplateStepDef = { title: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[] };
+export type TemplateContentDef = { title: string; post_type?: string | null; platforms?: string[] };
 export type Template = {
   id: string; task_type: string | null; default_priority: string; brand_id: string | null;
-  platforms: string[] | null; steps: TemplateStepDef[] | null;
+  platforms: string[] | null; steps: TemplateStepDef[] | null; content_items?: TemplateContentDef[] | null;
 };
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -76,6 +77,14 @@ async function createTaskFromRule(admin: Admin, rule: RecurringRule, tpl: Templa
       if (Array.isArray(ids) && ids.length) await setSubtaskAssignees(admin, subIds[i].id, ids);
     }
   }
+  // คอนเทนต์พ่วงจากแม่แบบ → สร้างผูกกับงานที่ระบบสร้าง
+  const contentItems = (Array.isArray(tpl?.content_items) ? tpl!.content_items! : []).filter((c) => c?.title);
+  for (const ci of contentItems) {
+    let cno = await nextContentNo(admin);
+    const crow = { content_no: cno, title: ci.title, task_id: data.id, brand_id: rule.brand_id ?? tpl?.brand_id ?? null, post_type: ci.post_type ?? null, platforms: ci.platforms ?? [], status: "draft", created_by: rule.created_by ?? null };
+    let { error: cErr } = await admin.from("erp_creative_content").insert(crow);
+    if (cErr && /duplicate|unique/i.test(cErr.message)) { cno = await nextContentNo(admin); ({ error: cErr } = await admin.from("erp_creative_content").insert({ ...crow, content_no: cno })); }
+  }
   await writeAudit(admin, { action: "recurring:generate", entityType: "creative_task", entityId: data.id, actorId: rule.created_by ?? null, actorName: null, metadata: { rule: rule.id, due: dueDate } });
   return data.id;
 }
@@ -107,7 +116,7 @@ export async function runAllDue(admin: Admin): Promise<{ created: number; rules:
   const tplIds = [...new Set(list.map((r) => r.template_id).filter(Boolean))] as string[];
   const tplMap = new Map<string, Template>();
   if (tplIds.length) {
-    const { data: tpls } = await admin.from("erp_creative_task_templates").select("id, task_type, default_priority, brand_id, platforms, steps").in("id", tplIds);
+    const { data: tpls } = await admin.from("erp_creative_task_templates").select("id, task_type, default_priority, brand_id, platforms, steps, content_items").in("id", tplIds);
     for (const tp of (tpls ?? []) as Template[]) tplMap.set(tp.id, tp);
   }
   let created = 0;

@@ -21,6 +21,7 @@ import { SubtaskManager } from "./subtask-manager";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { PlatformChip } from "./platform-chip";
+import { TaskContentTab } from "./task-content-tab";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { statusMeta, transitionsFrom, isTerminal } from "./use-statuses";
 import {
@@ -128,6 +129,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [editing, setEditing] = useState(false);
   const [ef, setEf] = useState<EditForm | null>(null);
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
+  const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
   const twoCol = drawerW >= 820;   // กว้างพอ → ซ้าย/ขวาเรียงข้างกัน · แคบ → เรียงบน-ล่าง (อิงความกว้าง drawer จริง ไม่ใช่ viewport)
@@ -230,8 +232,16 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
           </div>
 
+          {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) */}
+          <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100">
+            {([["task", t("📋 งาน", "📋 Task")], ["content", t("📱 คอนเทนต์", "📱 Content")]] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setTab(k)} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors ${tab === k ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}>{label}</button>
+            ))}
+          </div>
+
           {/* 2 คอลัมน์: ซ้าย (เนื้องาน ~2/3) · ขวา (ข้อมูล ~1/3) — เรียงข้างกันเมื่อ drawer กว้างพอ */}
-          <div className={`flex ${twoCol ? "flex-row" : "flex-col"} items-stretch border-t border-slate-100`}>
+          {tab === "task" && (
+          <div className={`flex ${twoCol ? "flex-row" : "flex-col"} items-stretch`}>
             {/* ===== ซ้าย: รายละเอียดงาน + งานย่อย + ไฟล์ ===== */}
             <div className="flex-1 min-w-0 w-full p-5 space-y-4">
               {/* รายละเอียดงาน (ถ้ามี) */}
@@ -449,6 +459,11 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               </div>
             </div>
           </div>
+          )}
+
+          {tab === "content" && (
+            <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} />
+          )}
         </div>
 
         {assetPickerOpen && (

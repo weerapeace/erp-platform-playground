@@ -139,7 +139,7 @@ export async function getTask(id: string): Promise<TaskDetail> {
   return j.data as TaskDetail;
 }
 
-export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: SubtaskStepConfig }[] };
+export type CreateTaskBody = Partial<Omit<CreativeTask, "id">> & { title: string; platforms?: string[]; subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: SubtaskStepConfig }[]; content_items?: TemplateContentItem[] };
 
 export async function createTask(body: CreateTaskBody): Promise<{ id: string; task_no: string }> {
   const res = await apiFetch("/api/creative-tasks", { method: "POST", body: JSON.stringify(body) });
@@ -267,6 +267,7 @@ export type ContentCaption = { id?: string; platform: string; caption: string | 
 export type ContentItem = {
   [key: string]: unknown;
   id: string; content_no: string | null; title: string;
+  task_id?: string | null;
   campaign_id: string | null; campaign_label: string | null;
   brand_id: string | null; brand_label: string | null; brand_color: string | null;
   sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_color: string | null; sku_price: number | null; product_name: string | null;
@@ -300,7 +301,7 @@ export async function saveCaptionTemplates(brandId: string | null, templates: Ca
 export type ContentDetail = ContentItem & { captions: ContentCaption[] };
 export type Hashtag = { id: string; text: string; brand_id: string | null; category: string; platform: string | null; usage_count: number; status: string };
 
-export type ContentListParams = { search?: string; status?: string; campaign_id?: string; brand_id?: string; platform?: string; templates?: boolean };
+export type ContentListParams = { search?: string; status?: string; campaign_id?: string; brand_id?: string; platform?: string; templates?: boolean; task_id?: string; unlinked?: boolean };
 export async function listContent(p: ContentListParams = {}): Promise<ContentItem[]> {
   const q = new URLSearchParams();
   if (p.search) q.set("search", p.search);
@@ -309,6 +310,8 @@ export async function listContent(p: ContentListParams = {}): Promise<ContentIte
   if (p.brand_id) q.set("brand_id", p.brand_id);
   if (p.platform) q.set("platform", p.platform);
   if (p.templates) q.set("templates", "1");
+  if (p.task_id) q.set("task_id", p.task_id);
+  if (p.unlinked) q.set("unlinked", "1");
   const j = await jsonOrThrow(await apiFetch(`/api/creative-content?${q.toString()}`));
   return (j.data as ContentItem[]) ?? [];
 }
@@ -388,10 +391,11 @@ export async function listBrandPrompts(brandId: string): Promise<BrandPrompt[]> 
 export async function saveBrandPrompt(brand_id: string, subtask_type: string, prompt_template: string | null): Promise<void> {
   await jsonOrThrow(await apiFetch("/api/brand-prompts", { method: "PATCH", body: JSON.stringify({ brand_id, subtask_type, prompt_template }) }));
 }
+export type TemplateContentItem = { title: string; post_type?: string | null; platforms?: string[] };
 export type TaskTemplate = {
   id: string; name: string; task_type: string | null; default_priority: string;
   brand_id: string | null; brand_label?: string | null; description: string | null;
-  platforms: string[] | null; steps: TemplateStep[];
+  platforms: string[] | null; steps: TemplateStep[]; content_items?: TemplateContentItem[];
 };
 export type RecurringRule = {
   id: string; name: string; template_id: string | null; template_label?: string | null;

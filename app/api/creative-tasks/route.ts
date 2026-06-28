@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
-import { nextTaskNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser } from "@/lib/creative-tasks-server";
+import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -92,6 +92,7 @@ type CreateBody = {
   asset_status?: string | null; platforms?: string[] | null;
   drive_folder_url?: string | null; cover_image_r2_key?: string | null;
   subtasks?: { title: string; description?: string | null; assignee_id?: string | null; assignee_ids?: string[]; required_before_next?: boolean; type?: string | null; config?: Record<string, unknown> }[];
+  content_items?: { title: string; post_type?: string | null; platforms?: string[] }[];   // คอนเทนต์พ่วงจากแม่แบบ → สร้างผูกงานอัตโนมัติ
 };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -145,6 +146,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const ids = steps[i]?.assignee_ids;
         if (Array.isArray(ids) && ids.length) await setSubtaskAssignees(admin, subIds[i].id, ids);
       }
+    }
+  }
+
+  // คอนเทนต์พ่วง (จากแม่แบบงาน) — สร้างคอนเทนต์ผูกกับงานนี้อัตโนมัติ (status=draft, brand ตามงาน)
+  if (Array.isArray(body.content_items) && body.content_items.length > 0) {
+    const blueprints = body.content_items.filter((c) => c?.title?.trim());
+    for (const ci of blueprints) {
+      let cno = await nextContentNo(admin);
+      const crow = { content_no: cno, title: ci.title.trim(), task_id: row.id, brand_id: body.brand_id || null, post_type: ci.post_type || null, platforms: ci.platforms ?? [], status: "draft", created_by: user?.id ?? null };
+      let { error: cErr } = await admin.from("erp_creative_content").insert(crow);
+      if (cErr && /duplicate|unique/i.test(cErr.message)) { cno = await nextContentNo(admin); ({ error: cErr } = await admin.from("erp_creative_content").insert({ ...crow, content_no: cno })); }
     }
   }
 

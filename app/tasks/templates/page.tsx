@@ -13,11 +13,11 @@ import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "
 import { UserPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import {
-  PRIORITY_META,
+  PRIORITY_META, POST_TYPES,
   listTemplates, createTemplate, updateTemplate, deleteTemplate,
   listRecurring, createRecurring, updateRecurring, deleteRecurring, runRecurringNow,
   listCampaigns, listBrands, listSubtaskTypes,
-  type TaskTemplate, type RecurringRule, type Campaign, type BrandOption, type SubtaskType,
+  type TaskTemplate, type RecurringRule, type Campaign, type BrandOption, type SubtaskType, type TemplateContentItem,
 } from "../data";
 import { useCreativeOptions, taskTypeLabel } from "../use-options";
 import { BulletTextarea } from "@/components/bullet-textarea";
@@ -83,6 +83,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_TPL);
   const [steps, setSteps] = useState<EditStep[]>([]);
+  const [contentItems, setContentItems] = useState<TemplateContentItem[]>([]);   // บลูพรินต์คอนเทนต์ที่จะสร้างตอนสร้างงาน
   const [types, setTypes] = useState<SubtaskType[]>([]);   // registry ชนิดงานย่อย (no hardcode)
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -100,9 +101,10 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   });
   const setFormD = (updater: (f: typeof EMPTY_TPL) => typeof EMPTY_TPL) => { setForm(updater); setDirty(true); };
   const setStepsD = (s: EditStep[]) => { setSteps(s); setDirty(true); };
+  const setContentD = (c: TemplateContentItem[]) => { setContentItems(c); setDirty(true); };
 
-  const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setDirty(false); setOpen(true); };
-  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [] }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setDirty(false); setOpen(true); };
+  const openNew = () => { setEditId(null); setForm(EMPTY_TPL); setSteps([]); setContentItems([]); setDirty(false); setOpen(true); };
+  const openEdit = (tpl: TaskTemplate) => { setEditId(tpl.id); setForm({ name: tpl.name, task_type: tpl.task_type ?? "photo_shoot", default_priority: tpl.default_priority, brand_id: tpl.brand_id ?? "", description: tpl.description ?? "", platforms: tpl.platforms ?? [] }); setSteps((Array.isArray(tpl.steps) ? tpl.steps : []).map(toEditStep)); setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []); setDirty(false); setOpen(true); };
   const togglePlat = (v: string) => setFormD((f) => ({ ...f, platforms: f.platforms.includes(v) ? f.platforms.filter((x) => x !== v) : [...f.platforms, v] }));
 
   // EditStep → body step (type-driven)
@@ -111,7 +113,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
   const save = async () => {
     if (!form.name.trim()) { pushToast("error", t("กรุณาใส่ชื่อเทมเพลต", "Please enter a template name")); return; }
     setSaving(true);
-    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody) };
+    const body = { name: form.name.trim(), task_type: form.task_type || null, default_priority: form.default_priority, brand_id: form.brand_id || null, description: form.description.trim() || null, platforms: form.platforms, steps: steps.filter((s) => s.title.trim()).map(stepBody), content_items: contentItems.filter((c) => c.title.trim()) };
     try { if (editId) await updateTemplate(editId, body); else await createTemplate(body); setOpen(false); setDirty(false); pushToast("success", t("บันทึกเทมเพลตแล้ว", "Template saved")); await load(); }
     catch (e) { pushToast("error", (e as Error).message); }
     finally { setSaving(false); }
@@ -123,6 +125,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
         name: `${tpl.name} (${t("สำเนา", "Copy")})`, task_type: tpl.task_type ?? null, default_priority: tpl.default_priority,
         brand_id: tpl.brand_id ?? null, description: tpl.description ?? null, platforms: tpl.platforms ?? [],
         steps: (Array.isArray(tpl.steps) ? tpl.steps : []).map((s) => stepBody(toEditStep(s))),
+        content_items: Array.isArray(tpl.content_items) ? tpl.content_items : [],
       });
       pushToast("success", t("ทำสำเนาเทมเพลตแล้ว", "Template duplicated")); await load();
     } catch (e) { pushToast("error", (e as Error).message); }
@@ -148,7 +151,7 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
                   </div>
                 </div>
                 <p className="font-semibold text-slate-800">{tpl.name}</p>
-                <p className="text-xs text-slate-400 mt-1">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน", "steps")} · {(tpl.platforms?.length ?? 0)} {t("แพลตฟอร์ม", "platforms")}</p>
+                <p className="text-xs text-slate-400 mt-1">{(tpl.steps?.length ?? 0)} {t("ขั้นตอน", "steps")} · {(tpl.platforms?.length ?? 0)} {t("แพลตฟอร์ม", "platforms")}{(tpl.content_items?.length ?? 0) > 0 ? ` · 📱 ${tpl.content_items!.length} ${t("คอนเทนต์", "content")}` : ""}</p>
               </div>
             ))}
           </div>
@@ -169,6 +172,38 @@ function TemplatesTab({ pushToast }: { pushToast: (t: Toast["type"], m: string) 
         </ERPFormSection>
         <div className="mt-4 border-t border-slate-100 pt-4">
           <SubtaskTypePicker steps={steps} types={types} onChange={setStepsD} />
+        </div>
+
+        {/* คอนเทนต์ที่จะสร้างอัตโนมัติเมื่อใช้แม่แบบนี้ (พ่วงกับงาน) */}
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-700">📱 {t("คอนเทนต์ที่จะสร้าง", "Content to create")}</p>
+              <p className="text-xs text-slate-400">{t("เมื่อสร้างงานจากแม่แบบนี้ ระบบจะสร้างคอนเทนต์เหล่านี้ผูกกับงานให้อัตโนมัติ", "When a task is created from this template, these content items are auto-created and linked to the task")}</p>
+            </div>
+            <button type="button" onClick={() => setContentD([...contentItems, { title: "", post_type: "image", platforms: [] }])} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">＋ {t("เพิ่มคอนเทนต์", "Add content")}</button>
+          </div>
+          {contentItems.length === 0 ? <p className="text-xs text-slate-400 italic">{t("ยังไม่มี — แม่แบบนี้จะไม่สร้างคอนเทนต์", "None — this template won't create content")}</p> : (
+            <div className="space-y-2">
+              {contentItems.map((ci, i) => (
+                <div key={i} className="border border-slate-200 rounded-lg p-2.5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <ERPInput value={ci.title} onChange={(e) => setContentD(contentItems.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} placeholder={t("ชื่อคอนเทนต์ เช่น โพสต์เปิดตัวสินค้า", "Content title, e.g. Launch post")} />
+                    <select value={ci.post_type ?? "image"} onChange={(e) => setContentD(contentItems.map((x, j) => j === i ? { ...x, post_type: e.target.value } : x))} className="h-9 border border-slate-200 rounded-lg px-2 text-sm shrink-0">
+                      {POST_TYPES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                    <button type="button" onClick={() => setContentD(contentItems.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500 shrink-0">✕</button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {platforms.map((p) => { const on = (ci.platforms ?? []).includes(p.value); return (
+                      <button key={p.value} type="button" onClick={() => setContentD(contentItems.map((x, j) => j === i ? { ...x, platforms: on ? (x.platforms ?? []).filter((y) => y !== p.value) : [...(x.platforms ?? []), p.value] } : x))}
+                        className={`px-2 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-200"}`}>{p.label}</button>
+                    ); })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </ERPModal>
 

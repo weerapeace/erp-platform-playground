@@ -11,7 +11,7 @@ import { friendlyDbError } from "../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["name", "task_type", "default_priority", "brand_id", "description", "platforms", "steps"]);
+const EDITABLE = new Set(["name", "task_type", "default_priority", "brand_id", "description", "platforms", "steps", "content_items"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
