@@ -7,7 +7,6 @@ import {
   buildAttendanceManualEntryPayloads,
   calculateAttendanceDay,
   type AttendanceImportContract,
-  type AttendanceImportStatus,
   type AttendancePreviewRow,
 } from "@/lib/payroll-attendance-import";
 import { apiFetch } from "@/lib/api";
@@ -66,6 +65,8 @@ type AttendanceDraftBatch = {
   rows?: AttendanceDraftRow[];
 };
 
+type ManualEditInfo = { before: string[]; after: string[]; label: string };
+
 type DisplayImportRow = {
   id: string;
   rowKey: string;
@@ -81,6 +82,7 @@ type DisplayImportRow = {
   payloadCount: number;
   canCommit: boolean;
   canSelect: boolean;
+  manualEdit?: ManualEditInfo;   // ถ้าถูกแก้มือผ่านป๊อปอัป/ปุ่มเหมา — เก็บ เดิม→ใหม่ ไว้โชว์
 };
 
 type SortKey = "date" | "scannerCode" | "employeeLabel" | "rawScans" | "result" | "status";
@@ -95,8 +97,21 @@ function matchesFilter(row: DisplayImportRow, filter: string): boolean {
     case "skipped": return row.status === "skipped";
     case "committed": return row.status === "committed";
     case "willCreate": return row.payloadCount > 0;
+    case "abnormal": return row.result !== "ปกติ" && row.result !== "ข้าม" && row.result !== "-" && row.status !== "committed";
+    case "edited": return !!row.manualEdit;
     default: return row.status === filter;
   }
+}
+
+// สรุปการแก้มือ 1 แถว (เดิม→ใหม่) — ใช้โชว์ป้าย "แก้มือ" + เก็บลง draft (result_payload.manual_edit)
+function manualEditInfo(previewRow: AttendancePreviewRow, decision: RowDecision | undefined): ManualEditInfo | null {
+  if (!decision) return null;
+  const before = previewRow.result.rawScans;
+  if (decision === "absence") return { before, after: before, label: "ยืนยันขาดงาน" };
+  if (decision === "skip") return { before, after: before, label: "ข้าม ไม่หัก" };
+  if (decision === "normal") return { before, after: before, label: "ตั้งเป็นปกติ" };
+  if (decision.kind === "official") return { before, after: cleanTimes(decision.scans ?? before), label: "ราชการ" };
+  return { before, after: cleanTimes(decision.scans ?? before), label: "แก้เวลา" };
 }
 
 const SAMPLE_TEXT = "scanner_code,date,scans\n1,2026-05-04,07:41 12:51 17:04\n2,04/05/2026,07:55 12:49 16:40";
@@ -295,6 +310,8 @@ export function AttendanceImportPreview({
   const [filter, setFilter] = useState<string>("all");
   const [message, setMessage] = useState("");
   const [draft, setDraft] = useState<AttendanceDraftBatch | null>(null);
+  const [drafts, setDrafts] = useState<AttendanceDraftBatch[]>([]);   // draft ทั้งหมดของงวดนี้ (เลือกดู/สลับได้)
+  const [draftName, setDraftName] = useState("");                      // ชื่อ draft (ตั้งเอง) = source_filename
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [draftLoading, setDraftLoading] = useState(false);
@@ -360,6 +377,7 @@ export function AttendanceImportPreview({
       payloadCount: o.payloads.length,
       canCommit: false,
       canSelect: isReviewStatus(o.status),
+      manualEdit: manualEditInfo(row, decision) || undefined,
     };
   }), [period?.default_hours_per_day, preview.rows, reviewDecisions]);
 
@@ -378,12 +396,13 @@ export function AttendanceImportPreview({
       employeeId: String(row.employee_id || "") || null,
       employeeLabel: String(row.employee_label || row.employee_id || "-"),
       rawScans: Array.isArray(row.raw_scans) ? row.raw_scans : [],
-      result: payloads.length ? `${payloads.length} รายการ` : status === "normal" ? "ปกติ" : "-",
+      result: payloads.length ? `${payloads.length} รายการ` : status === "skipped" ? "ข้าม" : isCommitReadyStatus(status) ? "ปกติ" : "-",
       status,
       note: row.note || flagText(flags) || "-",
       payloadCount: payloads.length,
       canCommit: isCommitReadyStatus(status),
       canSelect: isReviewStatus(status) || isCommitReadyStatus(status),
+      manualEdit: (result.manual_edit as ManualEditInfo | undefined) || undefined,
     };
   }), [draft?.rows, previewByKey]);
 
@@ -418,37 +437,45 @@ export function AttendanceImportPreview({
   const selectableFilteredRows = filteredRows.filter((row) => row.canSelect && row.status !== "committed");
   const selectedSelectableCount = selectableFilteredRows.filter((row) => selectedIds.has(row.id)).length;
 
-  const loadDraft = useCallback(async () => {
-    if (!period?.id) {
-      setDraft(null);
-      return;
-    }
+  // โหลด draft 1 ตัว (ตาม id) เข้าหน้าจอ
+  const selectDraft = useCallback(async (id: string) => {
     setDraftLoading(true);
     try {
-      const list = await apiFetch(`/api/payroll/attendance-import-batches?period_id=${encodeURIComponent(period.id)}`).then((res) => res.json());
-      if (list.error) throw new Error(list.error);
-      const latest = ((list.data || []) as AttendanceDraftBatch[]).find((item) => String(item.status || "draft") === "draft");
-      if (!latest?.id) {
-        setDraft(null);
-        setSelectedIds(new Set());
-        return;
-      }
-      const detail = await apiFetch(`/api/payroll/attendance-import-batches/${latest.id}`).then((res) => res.json());
+      const detail = await apiFetch(`/api/payroll/attendance-import-batches/${id}`).then((res) => res.json());
       if (detail.error) throw new Error(detail.error);
       const next = detail.data as AttendanceDraftBatch;
       setDraft(next);
       setText(String(next.source_text || ""));
+      setDraftName(String(next.source_filename || ""));
       setReviewDecisions({});
       setDuplicateMode((next.duplicate_mode === "replace" || next.duplicate_mode === "error") ? next.duplicate_mode : "skip");
       setSelectedIds(new Set((next.rows || []).filter((row) => ["ready", "approved", "normal"].includes(String(row.status))).map((row) => row.id)));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "โหลด draft import ไม่สำเร็จ");
+      setMessage(error instanceof Error ? error.message : "โหลด draft ไม่สำเร็จ");
     } finally {
       setDraftLoading(false);
     }
-  }, [period?.id]);
+  }, []);
 
-  useEffect(() => { void loadDraft(); }, [loadDraft]);
+  // โหลดรายการ draft ทั้งหมดของงวด (ไว้ในแถบเลือก) + เปิดอันล่าสุดให้
+  const loadDrafts = useCallback(async () => {
+    if (!period?.id) { setDraft(null); setDrafts([]); return; }
+    setDraftLoading(true);
+    try {
+      const list = await apiFetch(`/api/payroll/attendance-import-batches?period_id=${encodeURIComponent(period.id)}`).then((res) => res.json());
+      if (list.error) throw new Error(list.error);
+      const all = ((list.data || []) as AttendanceDraftBatch[]).filter((item) => String(item.status || "draft") === "draft");
+      setDrafts(all);
+      if (all[0]?.id) await selectDraft(all[0].id);
+      else { setDraft(null); setDraftName(""); setSelectedIds(new Set()); }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "โหลดรายการ draft ไม่สำเร็จ");
+    } finally {
+      setDraftLoading(false);
+    }
+  }, [period?.id, selectDraft]);
+
+  useEffect(() => { void loadDrafts(); }, [loadDrafts]);
 
   const readFile = async (file?: File | null) => {
     if (!file) return;
@@ -463,7 +490,9 @@ export function AttendanceImportPreview({
   };
 
   const draftRowsFromPreview = () => preview.rows.map((row, index) => {
-    const o = outcomeFor(row, reviewDecisions[row.rowKey], period?.default_hours_per_day);
+    const decision = reviewDecisions[row.rowKey];
+    const o = outcomeFor(row, decision, period?.default_hours_per_day);
+    const edit = manualEditInfo(row, decision);
     return {
       row_key: row.rowKey,
       employee_id: row.employee?.id || null,
@@ -472,7 +501,7 @@ export function AttendanceImportPreview({
       mapped_scanner_code: row.scannerCode || null,
       employee_label: employeeShortName(row.employee),
       raw_scans: o.rawScans,
-      result_payload: row.result,
+      result_payload: edit ? { ...row.result, manual_edit: edit } : row.result,
       manual_payloads: o.payloads,
       status: o.status,
       note: o.note,
@@ -505,6 +534,7 @@ export function AttendanceImportPreview({
       body: JSON.stringify({
         batch_id: draft.id,
         payroll_period_id: period.id,
+        source_filename: draftName || null,
         source_text: text,
         duplicate_mode: duplicateMode,
         rows: draftRowsFromDraftRows(sourceRows),
@@ -514,6 +544,7 @@ export function AttendanceImportPreview({
     if (!res.ok || json.error) throw new Error(json.error || "อัปเดต draft ไม่สำเร็จ");
     const next = json.data as AttendanceDraftBatch;
     setDraft(next);
+    setDrafts((cur) => [next, ...cur.filter((d) => d.id !== next.id)]);
     setSelectedIds(new Set((next.rows || []).filter((row) => isCommitReadyStatus(String(row.status))).map((row) => row.id)));
     setMessage(successText);
   };
@@ -531,6 +562,7 @@ export function AttendanceImportPreview({
         body: JSON.stringify({
           batch_id: draft?.id || null,
           payroll_period_id: period.id,
+          source_filename: (draftName.trim() || `draft ${drafts.length + 1}`),
           source_text: text,
           duplicate_mode: duplicateMode,
           rows: draft ? draftRowsFromDraftRows(draft.rows || []) : draftRowsFromPreview(),
@@ -540,9 +572,11 @@ export function AttendanceImportPreview({
       if (!res.ok || json.error) throw new Error(json.error || "บันทึก draft ไม่สำเร็จ");
       const next = json.data as AttendanceDraftBatch;
       setDraft(next);
+      setDraftName(String(next.source_filename || ""));
+      setDrafts((cur) => [next, ...cur.filter((d) => d.id !== next.id)]);
       setReviewDecisions({});
       setSelectedIds(new Set((next.rows || []).filter((row) => ["ready", "approved", "normal"].includes(String(row.status))).map((row) => row.id)));
-      setMessage(`บันทึก draft แล้ว ${next.rows?.length || 0} รายการ`);
+      setMessage(`บันทึก draft “${next.source_filename || ""}” แล้ว ${next.rows?.length || 0} รายการ`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึก draft ไม่สำเร็จ");
     } finally {
@@ -558,9 +592,8 @@ export function AttendanceImportPreview({
         const res = await apiFetch(`/api/payroll/attendance-import-batches/${draft.id}`, { method: "DELETE" });
         const json = await res.json();
         if (!res.ok || json.error) throw new Error(json.error || "ลบ draft ไม่สำเร็จ");
-        setDraft(null);
-        setSelectedIds(new Set());
         setMessage("ลบ draft แล้ว");
+        await loadDrafts();   // โหลดรายการใหม่ + เปิด draft อื่นที่เหลือ (ถ้ามี)
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "ลบ draft ไม่สำเร็จ");
       } finally {
@@ -575,10 +608,21 @@ export function AttendanceImportPreview({
     fileRef.current?.form?.reset();
   };
 
+  // เริ่ม draft ใหม่ (ว่าง) — สำหรับนำเข้าอีกไฟล์ในงวดเดียวกัน
+  const newDraft = () => {
+    setDraft(null);
+    setText("");
+    setDraftName("");
+    setReviewDecisions({});
+    setSelectedIds(new Set());
+    setMessage("เริ่ม draft ใหม่ — วางข้อมูล/อัปไฟล์ แล้วตั้งชื่อ + กดบันทึก draft");
+  };
+
   const commitSelected = async () => {
     if (!draft?.id) { setMessage("ต้องบันทึก draft ก่อน"); return; }
     const rowIds = draftDisplayRows.filter((row) => row.canCommit && selectedIds.has(row.id)).map((row) => row.id);
     if (rowIds.length === 0) { setMessage("เลือกรายการที่พร้อมก่อน"); return; }
+    if (!confirm(`ยืนยันบันทึกจริง ${rowIds.length} รายการเข้างวดนี้?\nลงแล้วจะไปอยู่หน้าคำนวณเงินเดือน (แก้ย้อนได้ที่หน้าคำนวณ)`)) return;
     setBusy(true);
     setMessage("");
     try {
@@ -592,7 +636,7 @@ export function AttendanceImportPreview({
       const result = json.data as { inserted?: number; skipped?: number; failed?: number; errors?: string[] };
       setMessage(`บันทึกจริงแล้ว ${result.inserted || 0} รายการ · ข้าม ${result.skipped || 0} · ผิดพลาด ${result.failed || 0}${result.errors?.length ? ` (${result.errors.join(" / ")})` : ""}`);
       onCommitted?.();
-      await loadDraft();
+      await loadDrafts();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "บันทึกจริงไม่สำเร็จ");
     } finally {
@@ -622,11 +666,14 @@ export function AttendanceImportPreview({
                 hoursPerDay: period?.default_hours_per_day,
               })
             : [];
+          const pr = previewByKey.get(String(row.row_key || row.id));
+          const edit = (pr && manualEditInfo(pr, decision)) || { before: row.raw_scans ?? [], after: row.raw_scans ?? [], label: decisionNote(decision) };
           return {
             ...row,
             status: decisionStatus(decision),
             manual_payloads: payloads,
             note: decisionNote(decision),
+            result_payload: { ...(row.result_payload || {}), manual_edit: edit },
           };
         });
         await persistDraftRows(nextRows, `${decisionNote(decision)} แล้ว ${selectedReviewCount} รายการ`);
@@ -675,9 +722,10 @@ export function AttendanceImportPreview({
       if (draft) {
         const pr = previewByKey.get(rowKey);
         const o = pr ? outcomeFor(pr, decision, period?.default_hours_per_day) : null;
+        const edit = pr ? manualEditInfo(pr, decision) : null;
         if (o) {
           const nextRows = (draft.rows || []).map((r) =>
-            String(r.row_key || r.id) !== rowKey ? r : { ...r, status: o.status, manual_payloads: o.payloads, note: o.note, raw_scans: o.rawScans });
+            String(r.row_key || r.id) !== rowKey ? r : { ...r, status: o.status, manual_payloads: o.payloads, note: o.note, raw_scans: o.rawScans, result_payload: { ...(r.result_payload || {}), manual_edit: edit ?? undefined } });
           setBusy(true);
           await persistDraftRows(nextRows, "บันทึกการตรวจแล้ว");
         }
@@ -743,6 +791,35 @@ export function AttendanceImportPreview({
 
       <div className="grid gap-4 p-4 lg:grid-cols-[360px_1fr]">
         <div className="space-y-3">
+          {/* draft ของงวดนี้ (มีได้หลายอัน เช่นหลายไฟล์/หลายเครื่อง) */}
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-500">draft ของงวดนี้</span>
+              <span className="text-[11px] text-slate-400">({drafts.length})</span>
+              <button type="button" onClick={newDraft} disabled={busy}
+                className="ml-auto h-7 rounded-lg border border-emerald-200 bg-white px-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50">＋ draft ใหม่</button>
+            </div>
+            {drafts.length > 0 && (
+              <select
+                value={draft?.id || ""}
+                onChange={(event) => { const id = event.target.value; if (id) void selectDraft(id); else newDraft(); }}
+                disabled={busy}
+                className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
+              >
+                <option value="">— draft ใหม่ (ยังไม่บันทึก) —</option>
+                {drafts.map((d) => <option key={d.id} value={d.id}>{d.source_filename || "(ไม่มีชื่อ)"}</option>)}
+              </select>
+            )}
+            <label className="block text-xs font-medium text-slate-500">
+              ชื่อ draft (ตั้งเอง)
+              <input
+                value={draftName}
+                onChange={(event) => setDraftName(event.target.value)}
+                placeholder="เช่น เครื่อง 1 รอบเช้า"
+                className="mt-1 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
+              />
+            </label>
+          </div>
           <label className="block text-xs font-medium text-slate-500">
             ไฟล์รายงาน / CSV / TXT
             <input
@@ -838,14 +915,16 @@ export function AttendanceImportPreview({
               ["all", "ทั้งหมด"],
               ["ready", "พร้อม"],
               ["needs_review", "ต้องตรวจ"],
+              ["abnormal", "ไม่ปกติ"],
               ["unmapped", "ยังไม่ผูก"],
+              ["edited", "แก้มือ"],
               ["skipped", "ข้าม"],
               ["committed", "บันทึกแล้ว"],
             ].map(([key, label]) => (
               <button
                 key={key}
                 type="button"
-                onClick={() => setFilter(key as "all" | AttendanceImportStatus | "committed")}
+                onClick={() => setFilter(key)}
                 className={`h-9 rounded-lg border px-3 text-xs font-medium ${filter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
               >
                 {label}
@@ -974,7 +1053,18 @@ export function AttendanceImportPreview({
                         {statusLabel(row.status)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{row.note}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">
+                      {row.manualEdit && (
+                        <div className="mb-0.5">
+                          <span className="inline-flex items-center rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">✏️ แก้มือ</span>
+                          <span className="ml-1 text-[10px] text-slate-500">{row.manualEdit.label}</span>
+                          {row.manualEdit.before.join(" ") !== row.manualEdit.after.join(" ") && (
+                            <div className="font-mono text-[10px] text-slate-400">{row.manualEdit.before.join(" ") || "—"} → <span className="text-slate-600">{row.manualEdit.after.join(" ") || "—"}</span></div>
+                          )}
+                        </div>
+                      )}
+                      {row.note}
+                    </td>
                     <td className="px-3 py-2">
                       {row.status !== "committed" && (
                         <button
