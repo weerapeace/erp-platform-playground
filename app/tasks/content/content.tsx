@@ -6,7 +6,7 @@
 // ข้อมูลจาก /api/creative-content + /api/creative-hashtags (ดู app/tasks/data.ts)
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSWRLite } from "@/lib/swr-lite";
 import { renderCaption, computeRealPrice, CAPTION_VARS, type ShopChannel } from "@/lib/caption-template";
 import { StandaloneShell } from "@/components/standalone-shell";
@@ -14,15 +14,21 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
+import { ImageAttach } from "@/components/image-attach";
+import { r2ImageUrl } from "@/lib/r2-image";
 import {
   CONTENT_STATUS_META, POST_TYPES,
   listContent, listContentTemplates, getContent, createContent, updateContent, deleteContent,
-  listCampaigns, listBrands, listHashtags, createHashtag,
+  listCampaigns, listBrands, listHashtags, createHashtag, getTask,
   getCaptionTemplates, saveCaptionTemplates, getParentSkuColors,
+  listContentAttachments, addContentAttachment, deleteContentAttachment,
+  getPlatformSettings, savePlatformSettings, getLinkPreview,
   type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus,
   type BrandOption, type Hashtag, type CaptionTemplate,
+  type ContentAttachment, type PlatformSettings, type PlatformSetting, type LinkPreview,
 } from "../data";
 import { useCreativeOptions, platformLabel } from "../use-options";
+import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 
 const POST_TYPE_LABEL = Object.fromEntries(POST_TYPES.map((p) => [p.value, p.label]));
@@ -303,10 +309,21 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [discountValue, setDiscountValue] = useState<string>("");
   const [discountPct, setDiscountPct] = useState(false);
   const [tplSettingsOpen, setTplSettingsOpen] = useState(false);
+  const [psOpen, setPsOpen] = useState(false);   // โมดอลตั้งค่าแพลตฟอร์ม
   // สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [parent, setParent] = useState<ParentSkuPickerValue | null>(null);
   const [parentColors, setParentColors] = useState<string[]>([]);
+  const [pullBusy, setPullBusy] = useState(false);
+  // แนบงาน (รูป/วิดีโอ/ลิงก์) + ตั้งค่าแพลตฟอร์มกลาง
+  const [attachments, setAttachments] = useState<ContentAttachment[]>([]);
+  const [pset, setPset] = useState<PlatformSettings>({});
+  // แบ่ง 2 ฝั่ง ปรับขนาดได้ (ลากเส้นกลาง) — จำสัดส่วนใน localStorage
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const leftPctRef = useRef(46);
+  const [leftPct, setLeftPctState] = useState(46);
+  const setLeftPct = useCallback((v: number) => { leftPctRef.current = v; setLeftPctState(v); }, []);
+  const draggingRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -325,6 +342,27 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   }, [contentId, pushToast]);
   useEffect(() => { load(); }, [load]);
 
+  // โหลดไฟล์แนบ + ตั้งค่าแพลตฟอร์มกลาง
+  const loadAttachments = useCallback(async () => { try { setAttachments(await listContentAttachments(contentId)); } catch { /* ว่าง */ } }, [contentId]);
+  useEffect(() => { loadAttachments(); }, [loadAttachments]);
+  const loadPset = useCallback(async () => { try { setPset(await getPlatformSettings()); } catch { /* ว่าง */ } }, []);
+  useEffect(() => { loadPset(); }, [loadPset]);
+
+  // ปรับสัดส่วน 2 ฝั่งด้วยการลากเส้นแบ่ง
+  useEffect(() => {
+    try { const s = Number(localStorage.getItem("content_drawer_left_pct")); if (s >= 30 && s <= 68) setLeftPct(s); } catch { /* ไม่มีค่าเก็บไว้ */ }
+    const move = (e: MouseEvent) => {
+      if (!draggingRef.current || !bodyRef.current) return;
+      const rect = bodyRef.current.getBoundingClientRect();
+      const pct = Math.max(30, Math.min(68, ((e.clientX - rect.left) / rect.width) * 100));
+      setLeftPct(pct);
+    };
+    const up = () => { if (!draggingRef.current) return; draggingRef.current = false; document.body.style.userSelect = ""; try { localStorage.setItem("content_drawer_left_pct", String(Math.round(leftPctRef.current))); } catch { /* noop */ } };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+  }, [setLeftPct]);
+  const startDrag = (e: React.MouseEvent) => { draggingRef.current = true; document.body.style.userSelect = "none"; e.preventDefault(); };
+
   // โหลดแม่แบบ + ช่องทางร้านของแบรนด์คอนเทนต์
   const loadTemplates = useCallback(async () => {
     try { const r = await getCaptionTemplates(d?.brand_id ?? null); setTemplates(r.templates); setShopChannels(r.shop_channels); } catch { /* ใช้ค่าว่าง */ }
@@ -335,6 +373,41 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
 
   // เลือก Parent SKU → ดึงสีของ SKU ลูกทั้งหมดมารวม
   useEffect(() => { if (!parent?.id) { setParentColors([]); return; } let live = true; getParentSkuColors(parent.id).then((cs) => { if (live) setParentColors(cs); }).catch(() => {}); return () => { live = false; }; }, [parent?.id]);
+
+  // ดึงสินค้า (SKU/Parent) จากงานที่ผูกไว้
+  const pullFromTask = async () => {
+    if (!d?.task_id) return;
+    setPullBusy(true);
+    try {
+      const task = await getTask(d.task_id);
+      const s = task.skus?.[0]; const p = task.parent_skus?.[0];
+      if (s) setSku({ id: s.id, code: s.code ?? "", name: s.name ?? "", color: s.color ?? null, list_price: s.price ?? null });
+      if (p) setParent({ id: p.id, code: p.code ?? "", name: p.name ?? "" });
+      pushToast(s || p ? "success" : "info", s || p ? t("ดึงสินค้าจากงานแล้ว", "Pulled product from task") : t("งานนี้ยังไม่ได้ผูกสินค้า", "This task has no linked product"));
+    } catch (e) { pushToast("error", (e as Error).message); }
+    finally { setPullBusy(false); }
+  };
+
+  // ไฟล์แนบ: รูป (ย่อก่อนอัป) / วิดีโอสั้น (อัปตรง) / ลิงก์ (พรีวิว OG)
+  const onAttachImage = async (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => { await addContentAttachment(contentId, { kind: "image", r2_key: r.r2_key, file_name: r.file_name, content_type: r.content_type, size_bytes: r.size_bytes }); await loadAttachments(); };
+  const onDelAttachment = async (id: string) => { await deleteContentAttachment(contentId, id); await loadAttachments(); };
+  const onUploadVideo = async (file: File) => {
+    const fd = new FormData(); fd.append("file", file); fd.append("folder", "creative-content");
+    const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
+    const j = await res.json().catch(() => ({ error: "อัปโหลดไม่สำเร็จ" }));
+    if (j.error) { pushToast("error", j.error as string); return; }
+    await addContentAttachment(contentId, { kind: "video", r2_key: j.r2_key as string, file_name: file.name, content_type: j.content_type as string, size_bytes: j.size as number });
+    await loadAttachments();
+  };
+  const onAddLink = async (url: string) => {
+    const pv = await getLinkPreview(url);
+    await addContentAttachment(contentId, { kind: "link", url: pv.url, label: pv.title, file_name: pv.image });
+    await loadAttachments();
+  };
+
+  // โน้ตต่อแพลตฟอร์ม (แก้ในตัว) — บันทึกตอนเลิกโฟกัส
+  const setPlatNote = (platform: string, note: string) => setPset((ps) => ({ ...ps, [platform]: { ...ps[platform], note } }));
+  const persistPset = async () => { try { await savePlatformSettings(pset); } catch (e) { pushToast("error", (e as Error).message); } };
 
   // ราคาเต็ม = ราคา SKU ที่เลือก · ราคาขาย = ราคา − ส่วนลด · สี = SKU เดี่ยว หรือ รวมสีลูกของ Parent
   const fakePrice = sku?.list_price ?? null;
@@ -368,12 +441,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     } catch (e) { pushToast("error", (e as Error).message); }
   };
 
-  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[640px] max-w-[97vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
+  if (!d) return (<><div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} /><div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex items-center justify-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div></>);
+
+  const contentPlatforms = d.platforms ?? [];
 
   return (
     <>
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[640px] max-w-[97vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
+      <div className="fixed right-0 top-0 h-full w-[1180px] max-w-[98vw] bg-white shadow-2xl z-50 flex flex-col border-l border-slate-200">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
           <div className="min-w-0"><h3 className="text-base font-semibold text-slate-900 truncate">{d.title}</h3><span className="font-mono text-xs text-slate-500">{d.content_no}</span></div>
           <div className="flex items-center gap-1">
@@ -382,72 +457,113 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* status + schedule */}
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
-            <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
-          </div>
-          {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("สินค้า", "Product")}</p>
+        {/* ===== 2 ฝั่ง ปรับขนาดได้: ซ้าย = งาน/แนบไฟล์/สินค้า · ขวา = แคปชั่น ===== */}
+        <div ref={bodyRef} className="flex-1 flex min-h-0">
+          {/* ───── ฝั่งซ้าย: ข้อมูล + แนบงาน ───── */}
+          <div className="overflow-y-auto p-5 space-y-5 min-w-0" style={{ flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 }}>
+            {/* status + schedule */}
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
-              <div><label className="text-xs text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
+              <div><label className="text-xs text-slate-400">{t("สถานะ", "Status")}</label><ERPSelect value={status} options={Object.entries(CONTENT_STATUS_META).map(([v, m]) => ({ value: v, label: m.label }))} onChange={(e) => setStatus(e.target.value as ContentStatus)} /></div>
+              <div><label className="text-xs text-slate-400">{t("ตั้งเวลาโพสต์", "Schedule Post")}</label><ERPInput type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
             </div>
-            <div className="mt-2">
-              <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
-              <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">{t("— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)", "— Select SKU (single color) or Parent SKU (all child colors)")}</span>}</div>
-            </div>
-          </div>
 
-          {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ราคา / ส่วนลด", "Price / Discount")}</p>
-            <div className="flex items-end gap-2 flex-wrap">
-              <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
-              <div><label className="text-xs text-slate-400">{t("ส่วนลด", "Discount")}</label>
-                <div className="flex">
-                  <input value={discountValue} onChange={(e) => setDiscountValue(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" className="h-9 w-24 border border-slate-200 rounded-l-lg px-2 text-sm" />
-                  <button type="button" onClick={() => setDiscountPct((p) => !p)} title={t("สลับ บาท/เปอร์เซ็นต์", "Toggle Baht/Percent")} className="h-9 px-3 text-sm border border-l-0 border-slate-200 rounded-r-lg bg-slate-50 hover:bg-slate-100">{discountPct ? "%" : "฿"}</button>
-                </div>
+            {/* สินค้า: SKU เดี่ยว + Parent SKU + สีที่มี + ดึงจากงาน */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("สินค้า", "Product")}</p>
+                {d.task_id && <button onClick={pullFromTask} disabled={pullBusy} className="text-xs text-violet-700 hover:underline disabled:opacity-50">{pullBusy ? t("กำลังดึง…", "Pulling…") : t("⬇ ดึงสินค้าจากงาน", "⬇ Pull from task")}</button>}
               </div>
-              <div><label className="text-xs text-slate-400">{t("ราคาขายจริง", "Selling Price")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-slate-400">SKU ({t("สีเดี่ยว", "single color")})</label><SkuPicker value={sku} onChange={setSku} /></div>
+                <div><label className="text-xs text-slate-400">Parent SKU ({t("ทุกสี", "all colors")})</label><ParentSkuPicker value={parent} onChange={setParent} /></div>
+              </div>
+              <div className="mt-2">
+                <label className="text-xs text-slate-400">{t("สีที่มี", "Available Colors")} ({"{color}"})</label>
+                <div className="min-h-9 px-3 py-1.5 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg">{colorText || <span className="text-slate-400">{t("— เลือก SKU (ได้สีเดียว) หรือ Parent SKU (รวมทุกสีลูก)", "— Select SKU (single color) or Parent SKU (all child colors)")}</span>}</div>
+              </div>
             </div>
+
+            {/* ราคา / ส่วนลด — ใช้กับตัวแปร {fake_price}/{real_price} */}
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ราคา / ส่วนลด", "Price / Discount")}</p>
+              <div className="flex items-end gap-2 flex-wrap">
+                <div><label className="text-xs text-slate-400">{t("ราคาเต็ม (จาก SKU)", "Full Price (from SKU)")}</label><div className="h-9 px-3 flex items-center text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg min-w-24">{fakePrice != null ? `${Number(fakePrice).toLocaleString("th-TH")} ฿` : t("— (ไม่มี SKU)", "— (no SKU)")}</div></div>
+                <div><label className="text-xs text-slate-400">{t("ส่วนลด", "Discount")}</label>
+                  <div className="flex">
+                    <input value={discountValue} onChange={(e) => setDiscountValue(e.target.value.replace(/[^\d.]/g, ""))} placeholder="0" className="h-9 w-24 border border-slate-200 rounded-l-lg px-2 text-sm" />
+                    <button type="button" onClick={() => setDiscountPct((p) => !p)} title={t("สลับ บาท/เปอร์เซ็นต์", "Toggle Baht/Percent")} className="h-9 px-3 text-sm border border-l-0 border-slate-200 rounded-r-lg bg-slate-50 hover:bg-slate-100">{discountPct ? "%" : "฿"}</button>
+                  </div>
+                </div>
+                <div><label className="text-xs text-slate-400">{t("ราคาขายจริง", "Selling Price")}</label><div className="h-9 px-3 flex items-center text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg min-w-24">{realPrice != null ? `${Number(realPrice).toLocaleString("th-TH")} ฿` : "—"}</div></div>
+              </div>
+            </div>
+
+            {/* แนบงาน: รูป / วิดีโอ / ลิงก์พรีวิว */}
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("แนบงาน (รูป · วิดีโอ · ลิงก์)", "Attach work (image · video · link)")}</p>
+              <ContentAttachments attachments={attachments} onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onDelete={onDelAttachment} pushToast={pushToast} />
+            </div>
+
+            {/* ลิงก์สินค้า (ปลายทางขาย) */}
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์สินค้า (Shopee/Lazada/Website)", "Product Links (Shopee/Lazada/Website)")}</p>
+              <div className="space-y-2">
+                {links.map((l, i) => (
+                  <div key={i} className="flex gap-2">
+                    <select value={l.platform} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, platform: e.target.value } : x))} className="h-9 border border-slate-200 rounded-lg px-2 text-sm w-32">
+                      {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                    <ERPInput value={l.url} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, url: e.target.value } : x))} placeholder="https://..." />
+                    <button onClick={() => setLinks((ls) => ls.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
+                  </div>
+                ))}
+                <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
+              </div>
+            </div>
+
+            {/* หมายเหตุ/สิ่งที่ต้องทำ ต่อแพลตฟอร์ม (แก้ในตัว) */}
+            {contentPlatforms.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("สิ่งที่ต้องทำ ต่อแพลตฟอร์ม", "Per-platform checklist")}</p>
+                <div className="space-y-2">
+                  {contentPlatforms.map((p) => (
+                    <div key={p} className="border border-slate-200 rounded-lg p-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-slate-600">{platformLabel(p)}</span>
+                        {pset[p]?.post_url && <a href={pset[p].post_url ?? "#"} target="_blank" rel="noreferrer" className="text-[11px] text-violet-700 hover:underline">↗ {t("ไปโพสต์", "Open to post")}</a>}
+                      </div>
+                      <textarea value={pset[p]?.note ?? ""} onChange={(e) => setPlatNote(p, e.target.value)} onBlur={persistPset} rows={2} placeholder={t("หมายเหตุ/สิ่งที่ต้องแนบ เช่น รูป 1:1 อย่างน้อย 5 รูป", "Notes / what to attach")} className="mt-1 w-full border border-slate-200 rounded px-2 py-1 text-xs" />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-slate-300 mt-1">{t("โน้ตเป็นค่ากลาง (ทุกคอนเทนต์เห็นเหมือนกัน) · ตั้งลิงก์ไปโพสต์ที่ ⚙️ ตั้งค่าแพลตฟอร์ม", "Notes are global · set post links in ⚙️ Platform settings")}</p>
+              </div>
+            )}
+
+            {/* published url */}
+            {(status === "published") && <div><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
           </div>
 
-          {/* captions per platform */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
+          {/* ───── เส้นแบ่งลากได้ ───── */}
+          <div onMouseDown={startDrag} title={t("ลากเพื่อปรับขนาด", "Drag to resize")} className="w-1.5 shrink-0 cursor-col-resize bg-slate-100 hover:bg-violet-300 active:bg-violet-400 transition-colors relative">
+            <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
+          </div>
+
+          {/* ───── ฝั่งขวา: แคปชั่นแยกแพลตฟอร์ม ───── */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-3 min-w-0 bg-slate-50/40">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("Caption แยกตามแพลตฟอร์ม", "Caption per Platform")}</p>
-              <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("จัดการแม่แบบ", "Manage Templates")}</button>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setPsOpen(true)} className="text-xs text-violet-700 hover:underline">⚙️ {t("ตั้งค่าแพลตฟอร์ม", "Platform settings")}</button>
+                <button onClick={() => setTplSettingsOpen(true)} className="text-xs text-violet-700 hover:underline">📝 {t("แม่แบบ", "Templates")}</button>
+              </div>
             </div>
             {caps.length === 0 ? <p className="text-sm text-slate-400 italic">{t("ยังไม่ได้เลือกแพลตฟอร์ม (แก้ที่ตอนสร้าง)", "No platforms selected (edit at creation time)")}</p> : (
               <div className="space-y-3">
-                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
+                {caps.map((c) => <CaptionCard key={c.platform} cap={c} templates={templates} sharedVars={sharedVars} brandId={d.brand_id} setting={pset[c.platform]} onChange={(patch) => setCap(c.platform, patch)} pushToast={pushToast} />)}
               </div>
             )}
           </div>
-
-          {/* product links */}
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ลิงก์สินค้า (Shopee/Lazada/Website)", "Product Links (Shopee/Lazada/Website)")}</p>
-            <div className="space-y-2">
-              {links.map((l, i) => (
-                <div key={i} className="flex gap-2">
-                  <select value={l.platform} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, platform: e.target.value } : x))} className="h-9 border border-slate-200 rounded-lg px-2 text-sm w-32">
-                    {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                  </select>
-                  <ERPInput value={l.url} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, url: e.target.value } : x))} placeholder="https://..." />
-                  <button onClick={() => setLinks((ls) => ls.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
-                </div>
-              ))}
-              <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
-            </div>
-          </div>
-
-          {/* published url */}
-          {(status === "published") && <div><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
         </div>
 
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
@@ -458,77 +574,237 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       </div>
 
       {tplSettingsOpen && <CaptionTemplateSettings brandId={d.brand_id} brandLabel={d.brand_label} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
+      {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); setPsOpen(false); }} pushToast={pushToast} />}
     </>
   );
 }
 
 type SharedVars = { shop: ShopChannel[]; fake_price: number | null; real_price: number | null; price: number | null; color: string | null; sku: string | null; product: string | null };
 
-// caption ต่อ 1 แพลตฟอร์ม: เลือกแม่แบบ + พิมพ์ข้อความล้วน + preview ที่ประกอบเสร็จ (คัดลอกได้)
-function CaptionCard({ cap, templates, sharedVars, brandId, onChange, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+// ============================================================
+// ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)
+// ============================================================
+function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onDelete, pushToast }: {
+  attachments: ContentAttachment[];
+  onAttachImage: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
+  onUploadVideo: (f: File) => Promise<void>;
+  onAddLink: (url: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  pushToast: (type: Toast["type"], m: string) => void;
+}) {
   const t = useT();
-  const [showTags, setShowTags] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [vidBusy, setVidBusy] = useState(false);
+  const vidRef = useRef<HTMLInputElement>(null);
+  const images = attachments.filter((a) => a.kind === "image");
+  const videos = attachments.filter((a) => a.kind === "video");
+  const linkAtts = attachments.filter((a) => a.kind === "link");
+
+  const addLink = async () => {
+    const u = linkUrl.trim(); if (!u) return;
+    setLinkBusy(true);
+    try { await onAddLink(u); setLinkUrl(""); }
+    catch (e) { pushToast("error", (e as Error).message); }
+    finally { setLinkBusy(false); }
+  };
+  const pickVideo = async (f: File) => { setVidBusy(true); try { await onUploadVideo(f); } finally { setVidBusy(false); } };
+
+  return (
+    <div className="space-y-3">
+      {/* รูปภาพ */}
+      <div>
+        <p className="text-xs text-slate-500 mb-1">🖼 {t("รูปภาพ", "Images")}</p>
+        <ImageAttach images={images.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))} onAttach={onAttachImage} onDelete={onDelete} pushToast={pushToast} />
+      </div>
+      {/* วิดีโอ */}
+      <div>
+        <p className="text-xs text-slate-500 mb-1">🎬 {t("วิดีโอ", "Video")}</p>
+        <input ref={vidRef} type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickVideo(f); e.target.value = ""; }} />
+        <button onClick={() => vidRef.current?.click()} disabled={vidBusy} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">{vidBusy ? t("⏳ กำลังอัป…", "⏳ Uploading…") : t("⬆ อัปวิดีโอสั้น (≤25MB)", "⬆ Upload short video (≤25MB)")}</button>
+        <span className="text-[11px] text-slate-400 ml-2">{t("คลิปยาวใช้ลิงก์ด้านล่าง", "Long clips → use link below")}</span>
+        {videos.length > 0 && (
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            {videos.map((v) => (
+              <div key={v.id} className="relative group">
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                <video src={r2ImageUrl(v.r2_key) ?? undefined} controls className="w-full h-28 object-cover rounded-lg border border-slate-200 bg-black" />
+                <button onClick={() => void onDelete(v.id)} title={t("ลบ", "Delete")} className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {/* ลิงก์ (พรีวิวเต็ม) */}
+      <div>
+        <p className="text-xs text-slate-500 mb-1">🔗 {t("ลิงก์ (มีพรีวิว)", "Links (with preview)")}</p>
+        <div className="flex gap-1.5">
+          <input value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void addLink(); }} placeholder="https://..." className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
+          <button onClick={addLink} disabled={linkBusy} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50 disabled:opacity-50">{linkBusy ? t("⏳", "⏳") : t("＋ พรีวิว", "＋ Preview")}</button>
+        </div>
+        {linkAtts.length > 0 && <div className="space-y-2 mt-2">{linkAtts.map((l) => <LinkPreviewCard key={l.id} att={l} onDelete={() => void onDelete(l.id)} />)}</div>}
+      </div>
+    </div>
+  );
+}
+
+// การ์ดพรีวิวลิงก์ (รูป OG + หัวข้อ + โดเมน)
+function LinkPreviewCard({ att, onDelete }: { att: ContentAttachment; onDelete: () => void }) {
+  const host = (() => { try { return new URL(att.url ?? "").hostname.replace(/^www\./, ""); } catch { return att.url ?? ""; } })();
+  return (
+    <div className="relative group flex gap-2 border border-slate-200 rounded-lg overflow-hidden bg-white">
+      {att.file_name
+        // eslint-disable-next-line @next/next/no-img-element
+        ? <img src={att.file_name} alt="" className="w-20 h-20 object-cover bg-slate-100 shrink-0" />
+        : <div className="w-20 h-20 bg-slate-100 flex items-center justify-center text-2xl shrink-0">🔗</div>}
+      <a href={att.url ?? "#"} target="_blank" rel="noreferrer" className="min-w-0 py-1.5 pr-6 flex-1">
+        <p className="text-sm font-medium text-slate-700 line-clamp-2">{att.label || host}</p>
+        <p className="text-[11px] text-slate-400 truncate mt-0.5">{host}</p>
+      </a>
+      <button onClick={onDelete} title="ลบ" className="absolute top-1 right-1 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-red-500 text-xs opacity-0 group-hover:opacity-100 shadow">✕</button>
+    </div>
+  );
+}
+
+// ช่องกรอก hashtag พร้อม typeahead (กรองจากคลัง + เพิ่มใหม่เข้าคลังได้)
+function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value: string | null; onChange: (v: string) => void; brandId: string | null; platform: string; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
   const [tags, setTags] = useState<Hashtag[]>([]);
-  const [newTag, setNewTag] = useState("");
-  const [loadingTags, setLoadingTags] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const loadTags = useCallback(async () => { try { setTags(await listHashtags({ brand_id: brandId || undefined, platform })); setLoaded(true); } catch { /* ว่าง */ } }, [brandId, platform]);
+  useEffect(() => { if (focus && !loaded) loadTags(); }, [focus, loaded, loadTags]);
 
-  const loadTags = useCallback(async () => {
-    setLoadingTags(true);
-    try { setTags(await listHashtags({ brand_id: brandId || undefined, platform: cap.platform })); } catch { /* ignore */ }
-    finally { setLoadingTags(false); }
-  }, [brandId, cap.platform]);
-  useEffect(() => { if (showTags) loadTags(); }, [showTags, loadTags]);
+  const tokens = (value ?? "").split(/\s+/).filter(Boolean);
+  const lastTok = (value ?? "").split(/\s+/).pop() ?? "";
+  const q = lastTok.replace(/^#/, "").toLowerCase();
+  const suggestions = tags
+    .filter((h) => { const txt = h.text.toLowerCase().replace(/^#/, ""); return q ? txt.includes(q) : true; })
+    .filter((h) => !tokens.includes(h.text))
+    .slice(0, 12);
+  const exists = tags.some((h) => h.text.toLowerCase().replace(/^#/, "") === q);
 
-  const appendTag = (text: string) => { const cur = cap.hashtags ?? ""; if (cur.includes(text)) return; onChange({ hashtags: (cur ? cur + " " : "") + text }); };
+  const applyTag = (text: string) => {
+    const parts = (value ?? "").split(/\s+/);
+    if (parts.length === 0) { onChange(text + " "); return; }
+    parts[parts.length - 1] = text;   // แทนที่ token ที่กำลังพิมพ์
+    onChange(parts.join(" ") + " ");
+  };
   const addNew = async () => {
-    const t = newTag.trim(); if (!t) return;
-    try { const h = await createHashtag({ text: t, brand_id: brandId || null, platform: cap.platform }); setNewTag(""); appendTag(h.text); await loadTags(); }
+    const raw = q.trim(); if (!raw) return;
+    const text = "#" + raw.replace(/^#/, "");
+    try { const h = await createHashtag({ text, brand_id: brandId || null, platform }); applyTag(h.text); await loadTags(); }
     catch (e) { pushToast("error", (e as Error).message); }
   };
 
-  const typeKey = cap.caption_type ?? templates[0]?.key ?? "short";
-  const tpl = templates.find((t) => t.key === typeKey) ?? templates[0];
-  // ประกอบ preview จากแม่แบบ + ตัวแปร (ถ้าไม่มีแม่แบบ → caption + hashtags ตรงๆ)
-  const preview = tpl ? renderCaption(tpl.body, { caption: cap.caption, hashtags: cap.hashtags, ...sharedVars }) : `${cap.caption ?? ""}\n\n${cap.hashtags ?? ""}`.trim();
+  return (
+    <div className="relative">
+      <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} onFocus={() => setFocus(true)} onBlur={() => setTimeout(() => setFocus(false), 150)}
+        placeholder={t("#hashtag คั่นด้วยเว้นวรรค (พิมพ์เพื่อค้นหาจากคลัง)", "#hashtag (type to search library)")} className="w-full h-9 border border-slate-200 rounded-lg px-2 text-sm" />
+      {focus && (suggestions.length > 0 || (q && !exists)) && (
+        <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-44 overflow-y-auto p-1">
+          {suggestions.map((h) => (
+            <button key={h.id} onMouseDown={(e) => { e.preventDefault(); applyTag(h.text); }} className="flex w-full items-center justify-between gap-2 text-left px-2 py-1 text-sm rounded hover:bg-violet-50 text-slate-700">
+              <span className="truncate">{h.text}</span><span className="text-[10px] text-slate-300 shrink-0">{h.usage_count}</span>
+            </button>
+          ))}
+          {q && !exists && <button onMouseDown={(e) => { e.preventDefault(); void addNew(); }} className="block w-full text-left px-2 py-1 text-sm rounded hover:bg-emerald-50 text-emerald-700">＋ {t("เพิ่ม", "Add")} “#{q}” {t("เข้าคลัง", "to library")}</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
+// เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
+function CaptionCard({ cap, templates, sharedVars, brandId, setting, onChange, pushToast }: { cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
+  const useCaption = setting?.use_caption !== false;
+  const useHashtags = setting?.use_hashtags !== false;
+  const postUrl = (setting?.post_url ?? "").trim();
+
+  const typeKey = cap.caption_type ?? setting?.template_key ?? templates[0]?.key ?? "short";
+  const tpl = templates.find((x) => x.key === typeKey) ?? templates[0];
+  // ประกอบ preview จากแม่แบบ + ตัวแปร (ตัด caption/hashtags ออกถ้าปิดไว้)
+  const preview = tpl
+    ? renderCaption(tpl.body, { caption: useCaption ? cap.caption : "", hashtags: useHashtags ? cap.hashtags : "", ...sharedVars })
+    : `${useCaption ? (cap.caption ?? "") : ""}\n\n${useHashtags ? (cap.hashtags ?? "") : ""}`.trim();
   const copy = async () => { try { await navigator.clipboard.writeText(preview); pushToast("success", t(`คัดลอก ${platformLabel(cap.platform)} แล้ว`, `Copied ${platformLabel(cap.platform)}`)); } catch { pushToast("error", t("คัดลอกไม่สำเร็จ", "Copy failed")); } };
 
   return (
-    <div className="border border-slate-200 rounded-lg p-3">
-      <div className="flex items-center justify-between mb-2">
+    <div className="border border-slate-200 rounded-lg p-3 bg-white">
+      <div className="flex items-center justify-between gap-2 mb-2">
         <span className="text-sm font-medium text-slate-700">{platformLabel(cap.platform)}</span>
-        <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอกผลลัพธ์", "Copy Result")}</button>
+        <div className="flex items-center gap-3 shrink-0">
+          {postUrl && <a href={postUrl} target="_blank" rel="noreferrer" className="text-xs text-violet-700 hover:underline">↗ {t("ไปโพสต์", "Post")}</a>}
+          <button onClick={copy} className="text-xs text-violet-700 hover:underline">📋 {t("คัดลอก", "Copy")}</button>
+        </div>
       </div>
       {/* เลือกแม่แบบ */}
       <div className="flex flex-wrap gap-1.5 mb-2">
         {templates.map((tp) => { const on = typeKey === tp.key; return (
           <button key={tp.key} onClick={() => onChange({ caption_type: tp.key })} className={`px-2.5 py-0.5 rounded-full text-xs border ${on ? "bg-violet-600 text-white border-violet-600" : "bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100"}`}>{tp.label}</button>
         ); })}
-        {templates.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มีแม่แบบ — กด ⚙️ จัดการแม่แบบ", "No templates yet — click ⚙️ Manage Templates")}</span>}
+        {templates.length === 0 && <span className="text-xs text-slate-400">{t("ยังไม่มีแม่แบบ — กด 📝 แม่แบบ", "No templates yet — click 📝 Templates")}</span>}
       </div>
-      <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />
-      <div className="mt-2">
-        <ERPInput value={cap.hashtags ?? ""} onChange={(e) => onChange({ hashtags: e.target.value })} placeholder={t("#hashtag คั่นด้วยเว้นวรรค", "#hashtag separated by space")} />
-        <button onClick={() => setShowTags((s) => !s)} className="text-xs text-violet-700 hover:underline mt-1">{showTags ? t("ซ่อนคลัง hashtag", "Hide Hashtag Library") : t("＋ เลือกจากคลัง hashtag", "＋ Select from Hashtag Library")}</button>
-        {showTags && (
-          <div className="mt-2 bg-slate-50 rounded-lg p-2">
-            <div className="flex gap-1.5 mb-2">
-              <input value={newTag} onChange={(e) => setNewTag(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNew()} placeholder={t("เพิ่ม hashtag ใหม่เข้าคลัง", "Add new hashtag to library")} className="flex-1 h-8 border border-slate-200 rounded-md px-2 text-sm" />
-              <button onClick={addNew} className="h-8 px-3 text-xs font-medium text-violet-700 border border-violet-200 rounded-md hover:bg-violet-50">{t("เพิ่ม", "Add")}</button>
-            </div>
-            {loadingTags ? <p className="text-xs text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : tags.length === 0 ? <p className="text-xs text-slate-400">{t("ยังไม่มี hashtag ในคลัง (พิมพ์เพิ่มด้านบน)", "No hashtags in library yet (type above to add)")}</p> : (
-              <div className="flex flex-wrap gap-1.5">
-                {tags.map((h) => <button key={h.id} onClick={() => appendTag(h.text)} className="text-xs bg-white border border-slate-200 rounded-full px-2 py-0.5 text-slate-600 hover:border-violet-300 hover:text-violet-700" title={t(`ใช้ ${h.usage_count} ครั้ง`, `Used ${h.usage_count} times`)}>{h.text}</button>)}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {useCaption
+        ? <ERPTextarea value={cap.caption ?? ""} rows={3} onChange={(e) => onChange({ caption: e.target.value })} placeholder={t(`เขียน caption สำหรับ ${platformLabel(cap.platform)}...`, `Write caption for ${platformLabel(cap.platform)}...`)} />
+        : <p className="text-[11px] text-slate-400 italic bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-2">{t("ปิดแคปชั่นสำหรับแพลตฟอร์มนี้ (เปิดได้ที่ ⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption off for this platform (toggle in ⚙️ Platform settings)")}</p>}
+      {useHashtags && <div className="mt-2"><HashtagInput value={cap.hashtags} onChange={(v) => onChange({ hashtags: v })} brandId={brandId} platform={cap.platform} pushToast={pushToast} /></div>}
       {/* preview ผลลัพธ์ที่จะคัดลอก */}
       <div className="mt-2">
         <p className="text-[11px] text-slate-400 mb-1">{t("ตัวอย่างที่จะโพสต์ (ประกอบจากแม่แบบ)", "Preview (assembled from template)")}</p>
         <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 whitespace-pre-wrap font-sans leading-relaxed">{preview || "—"}</pre>
       </div>
     </div>
+  );
+}
+
+// ตั้งค่าต่อแพลตฟอร์ม (ค่ากลาง): แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์ / โน้ตบอกคนทำงาน
+function PlatformSettingsModal({ platforms, templates, settings, onClose, onSaved, pushToast }: { platforms: { value: string; label: string }[]; templates: CaptionTemplate[]; settings: PlatformSettings; onClose: () => void; onSaved: (v: PlatformSettings) => void; pushToast: (type: Toast["type"], m: string) => void }) {
+  const t = useT();
+  const [val, setVal] = useState<PlatformSettings>(settings);
+  const [saving, setSaving] = useState(false);
+  const setP = (p: string, patch: Partial<PlatformSetting>) => setVal((v) => ({ ...v, [p]: { ...v[p], ...patch } }));
+  const save = async () => {
+    setSaving(true);
+    try { await savePlatformSettings(val); pushToast("success", t("บันทึกแล้ว", "Saved")); onSaved(val); }
+    catch (e) { pushToast("error", (e as Error).message); } finally { setSaving(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="xl" title={t("⚙️ ตั้งค่าต่อแพลตฟอร์ม", "⚙️ Platform Settings")}
+      footer={<>
+        <button onClick={onClose} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ปิด", "Close")}</button>
+        <button onClick={save} disabled={saving} className="h-9 px-5 text-sm text-white bg-violet-600 rounded-lg disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
+      </>}>
+      <p className="text-xs text-slate-400 mb-3">{t("ค่ากลาง ใช้กับทุกคอนเทนต์: แม่แบบเริ่มต้น · ปิดแคปชั่น/แฮชแท็กที่ไม่ต้องใช้ · ลิงก์ไปหน้าโพสต์ · โน้ตบอกคนทำงาน", "Global settings for all content: default template · skip caption/hashtags · post link · worker note")}</p>
+      <div className="space-y-3">
+        {platforms.map((p) => { const s = val[p.value] ?? {}; return (
+          <div key={p.value} className="border border-slate-200 rounded-lg p-3">
+            <p className="text-sm font-semibold text-slate-700 mb-2">{p.label}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label className="text-xs text-slate-500">{t("แม่แบบเริ่มต้น", "Default template")}
+                <select value={s.template_key ?? ""} onChange={(e) => setP(p.value, { template_key: e.target.value || null })} className="mt-0.5 w-full h-8 border border-slate-200 rounded-md px-2 text-sm bg-white">
+                  <option value="">{t("— อัตโนมัติ —", "— Auto —")}</option>
+                  {templates.map((tp) => <option key={tp.key} value={tp.key}>{tp.label}</option>)}
+                </select>
+              </label>
+              <label className="text-xs text-slate-500">{t("ลิงก์ไปโพสต์", "Post URL")}
+                <input value={s.post_url ?? ""} onChange={(e) => setP(p.value, { post_url: e.target.value })} placeholder="https://..." className="mt-0.5 w-full h-8 border border-slate-200 rounded-md px-2 text-sm" />
+              </label>
+            </div>
+            <div className="flex items-center gap-4 mt-2">
+              <label className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" checked={s.use_caption !== false} onChange={(e) => setP(p.value, { use_caption: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("ใช้แคปชั่น", "Use caption")}</label>
+              <label className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer"><input type="checkbox" checked={s.use_hashtags !== false} onChange={(e) => setP(p.value, { use_hashtags: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{t("ใช้แฮชแท็ก", "Use hashtags")}</label>
+            </div>
+            <label className="text-xs text-slate-500 block mt-2">{t("โน้ตบอกคนทำงาน", "Note for the worker")}
+              <textarea value={s.note ?? ""} onChange={(e) => setP(p.value, { note: e.target.value })} rows={2} placeholder={t("เช่น ใส่รูป 1:1 อย่างน้อย 5 รูป + วิดีโอ 15 วิ", "e.g. 5+ square images + 15s video")} className="mt-0.5 w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm" />
+            </label>
+          </div>
+        ); })}
+        {platforms.length === 0 && <p className="text-sm text-slate-400">{t("ยังไม่มีแพลตฟอร์ม", "No platforms")}</p>}
+      </div>
+    </ERPModal>
   );
 }
 

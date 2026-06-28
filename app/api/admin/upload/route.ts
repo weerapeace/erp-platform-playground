@@ -17,8 +17,9 @@ import { writeAudit } from "@/lib/audit";
 import { detectAssetType, extOf, sha256Hex } from "@/lib/assets";
 import { attachTags } from "@/app/api/assets/shared";
 
-const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"]);
-const MAX_SIZE = 10 * 1024 * 1024;  // 10 MB (รองรับ PDF บิล/ใบรับ)
+const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "video/mp4", "video/webm", "video/quicktime"]);
+const MAX_SIZE = 10 * 1024 * 1024;        // 10 MB (รูป/PDF บิล/ใบรับ)
+const MAX_SIZE_VIDEO = 25 * 1024 * 1024;  // 25 MB (วิดีโอสั้น — คลิปยาวให้ใช้ลิงก์ YouTube/TikTok/Drive)
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
 
 // แท็กในคลังกลางตาม "ที่มา" (folder) — ใส่ชื่ออ่านง่าย ไม่งั้นใช้ชื่อ folder ตรง ๆ
@@ -68,8 +69,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: `ประเภทไฟล์ไม่รองรับ: ${file.type}` }, { status: 400 });
   }
 
-  if (file.size > MAX_SIZE) {
-    return NextResponse.json({ error: `ไฟล์ใหญ่เกิน 5MB (${(file.size / 1024 / 1024).toFixed(1)}MB)` }, { status: 400 });
+  const isVideo = file.type.startsWith("video/");
+  const cap = isVideo ? MAX_SIZE_VIDEO : MAX_SIZE;
+  if (file.size > cap) {
+    return NextResponse.json({ error: `ไฟล์ใหญ่เกิน ${(cap / 1024 / 1024).toFixed(0)}MB (${(file.size / 1024 / 1024).toFixed(1)}MB)${isVideo ? " — คลิปยาวให้ใช้ลิงก์แทน" : ""}` }, { status: 400 });
   }
 
   const folder = (formData.get("folder") as string ?? "uploads").replace(/[^a-zA-Z0-9_-]/g, "");
