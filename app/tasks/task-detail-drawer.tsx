@@ -137,11 +137,13 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
   const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
+  const [submitNudge, setSubmitNudge] = useState(false); // เด้งเตือนเล็ก ๆ หลังแนบงาน (งานไม่มีงานย่อย) ให้ส่งงานเลย
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
   const wideScreen = useMediaQuery("(min-width: 860px)");   // จอกว้างพอ (แท็บเล็ตแนวนอน/เดสก์ท็อป)
   const twoCol = drawerW >= 820 && wideScreen;   // กว้างพอ → ซ้าย/ขวาเรียงข้างกัน · มือถือ/แท็บเล็ตแคบ → เรียงบน-ล่าง
 
   const load = useCallback(async () => {
+    setSubmitNudge(false);   // เคลียร์เด้งเตือนทุกครั้งที่โหลดใหม่ (เปลี่ยนงาน/รีเฟรช/หลังส่งงาน)
     try { setDetail(await getTask(taskId)); }
     catch (e) { pushToast("error", `${t("โหลดรายละเอียดไม่สำเร็จ", "Failed to load details")}: ${(e as Error).message}`); }
   }, [taskId, pushToast]);
@@ -172,6 +174,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const d = detail;
   const isClosed = isTerminal(d.status);
   const actions = transitionsFrom(d.status);
+  // ปุ่ม "ส่งงาน" = การเปลี่ยนสถานะไปข้างหน้า (ไม่ใช่ อนุมัติ/ตีกลับ/บล็อก) — ใช้กับเด้งเตือนหลังแนบงาน
+  const forwardAction = actions.find((a) => !["approve", "reject", "revise", "block"].includes(a.kind));
   // สิทธิ์งานย่อย: ผจก./admin = จัดการได้หมด · ผู้ตรวจ = อนุมัติได้ · คนสร้างงาน = แก้ผู้รับผิดชอบได้
   const isManager = user?.role === "admin" || user?.role === "manager";
   const canApproveSub = isManager || (!!user?.id && (user.id === d.reviewer_id || (d.reviewers ?? []).some((r) => r.id === user.id)));
@@ -179,7 +183,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
   const sendComment = async () => { if (!commentText.trim()) return; try { await addComment(d.id, commentText.trim(), mentionUsers.map((u) => u.id)); setCommentText(""); setMentionUsers([]); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
-  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(d.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); } catch (e) { pushToast("error", (e as Error).message); } };
+  const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(d.id, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim() }); setLinkLabel(""); setLinkUrl(""); await load(); if ((detail?.subtasks?.length ?? 0) === 0) setSubmitNudge(true); } catch (e) { pushToast("error", (e as Error).message); } };
 
   const brandSel = brands.find((b) => b.id === d.brand_id);
   const brandColor = brandSel?.color ?? d.brand_color;
@@ -290,6 +294,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
               {/* รูปแนบ + ลิงก์แนบ ระดับงาน — ซ่อนเมื่อมีงานย่อย (ไฟล์/งานไปอยู่ที่งานย่อยแทน) */}
               {!hasSubtasks && (<>
+              {/* เด้งเตือนเล็ก ๆ (ไม่ใช่ popup) หลังแนบงาน → ถามว่าส่งงานเลยไหม */}
+              {submitNudge && forwardAction && (
+                <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800">
+                  <span className="flex-1">📤 {t("แนบงานแล้ว — ต้องการส่งงานเลยไหม?", "Work attached — submit it now?")}</span>
+                  <button disabled={busy} onClick={async () => { setSubmitNudge(false); await handleMove(forwardAction.to_key); }} className="h-7 px-3 text-xs font-medium text-white bg-amber-500 rounded-md hover:bg-amber-600 disabled:opacity-50 shrink-0">{forwardAction.label}</button>
+                  <button onClick={() => setSubmitNudge(false)} className="h-7 px-2 text-xs text-amber-700 hover:underline shrink-0">{t("ไว้ก่อน", "Later")}</button>
+                </div>
+              )}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("รูปแนบ", "Images")}</p>
@@ -297,7 +309,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 </div>
                 <ImageAttach
                   images={d.attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
-                  onAttach={async (r) => { await addAttachment(d.id, { kind: "image", ...r }); await load(); }}
+                  onAttach={async (r) => { await addAttachment(d.id, { kind: "image", ...r }); await load(); if (!hasSubtasks) setSubmitNudge(true); }}
                   onDelete={async (aid) => { await deleteAttachment(d.id, aid); await load(); }}
                   pushToast={pushToast} />
               </div>
