@@ -18,7 +18,7 @@ export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; 
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme };
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string };
 
 export const DEFAULT_THEME: OverviewTheme = {
   hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff" },
@@ -30,6 +30,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   },
   page: { mode: "none", color: "#f8fafc", imageUrl: null },
   show: { shortcuts: true, campaigns: true, filters: true },
+  accent: "#7c3aed",   // สีหลัก (ปุ่ม/ไฮไลต์) ของหน้า
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -52,7 +53,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) } };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -83,6 +84,7 @@ function makePreset(c1: string, c2: string, pageColor: string | null, cardColors
     },
     page: pageColor ? { mode: "color", color: pageColor, imageUrl: null } : { mode: "none", color: "#f8fafc", imageUrl: null },
     show: { ...DEFAULT_THEME.show },
+    accent: c1,   // สีหลักตามธีม
   };
 }
 
@@ -200,6 +202,19 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
               ))}
             </div>
           )}
+        </div>
+      </section>
+
+      {/* ===== สีหลักของหน้า (accent) ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-1">{t("สีหลักของหน้า (ปุ่ม/ไฮไลต์)", "Page accent (buttons/highlights)")}</div>
+        <div className="flex items-center gap-3">
+          <input type="color" value={theme.accent} onChange={(e) => onChange({ ...theme, accent: e.target.value })} className="w-10 h-9 p-0 border border-slate-200 rounded cursor-pointer" />
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            <span className="px-2.5 py-1 rounded-lg text-white text-[11px] font-medium" style={{ background: theme.accent }}>{t("ตัวอย่างปุ่ม", "Button")}</span>
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-medium border" style={{ borderColor: theme.accent, color: theme.accent, background: theme.accent + "14" }}>{t("ตัวกรอง", "Chip")}</span>
+          </span>
+          <span className="text-[11px] text-slate-400">{t("ใช้กับแถบกรอง/ปุ่มลัด/ลิงก์บนหน้าภาพรวม", "Applies to filters/links on the overview")}</span>
         </div>
       </section>
 

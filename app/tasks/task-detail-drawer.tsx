@@ -10,6 +10,9 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { ImageAttach } from "@/components/image-attach";
+import dynamic from "next/dynamic";
+// คลังไฟล์กลาง (DAM) — เลือกรูปที่มีอยู่แล้วมาแนบ · dynamic กันลาก bundle ใหญ่
+const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
 import { ImageInput } from "@/components/image-input";
 import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { useAuth } from "@/components/auth";
@@ -117,6 +120,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [commentText, setCommentText] = useState("");
   const [mentionUsers, setMentionUsers] = useState<UserPickerValue[]>([]);   // แจ้งเตือนถึงใครบ้างเมื่อส่งคอมเมนต์
   const [mentionAdding, setMentionAdding] = useState<UserPickerValue | null>(null);
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);   // เลือกรูปจากคลังไฟล์กลาง (DAM)
   const [linkLabel, setLinkLabel] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [editing, setEditing] = useState(false);
@@ -281,9 +285,12 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 </div>
               )}
 
-              {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) */}
+              {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) + เลือกจากคลังกลาง (DAM) */}
               <div>
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("รูปแนบ", "Images")}</p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("รูปแนบ", "Images")}</p>
+                  <button onClick={() => setAssetPickerOpen(true)} className="text-xs font-medium text-violet-700 border border-violet-200 rounded-lg px-2 py-0.5 hover:bg-violet-50">📁 {t("เลือกจากคลังกลาง", "From asset library")}</button>
+                </div>
                 <ImageAttach
                   images={d.attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))}
                   onAttach={async (r) => { await addAttachment(d.id, { kind: "image", ...r }); await load(); }}
@@ -428,6 +435,17 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
             </div>
           </div>
         </div>
+
+        {assetPickerOpen && (
+          <AssetPicker open onClose={() => setAssetPickerOpen(false)} multiple typeFilter="image"
+            title={t("เลือกรูปจากคลังไฟล์กลาง", "Pick images from asset library")}
+            contextLabel={d.task_no ? `${d.task_no} ${d.title}` : d.title}
+            onSelect={async (assets) => {
+              setAssetPickerOpen(false);
+              for (const a of assets) { try { await addAttachment(d.id, { kind: "image", r2_key: a.r2_key, file_name: a.file_name }); } catch { /* ข้ามรูปที่แนบไม่ได้ */ } }
+              await load();
+            }} />
+        )}
 
         {/* footer actions */}
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2 flex-wrap">

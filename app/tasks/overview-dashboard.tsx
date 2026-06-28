@@ -142,7 +142,7 @@ export function OverviewDashboard({
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => setCustomizing(true)} title={t("แต่งหน้านี้ของฉัน", "Customize my overview")}
               className="h-9 px-3 bg-white/20 hover:bg-white/30 text-white text-sm font-medium rounded-lg backdrop-blur-sm">🎨 {t("แต่งหน้า", "Customize")}</button>
-            <button onClick={onCreate} className="h-11 px-5 bg-white text-violet-700 font-semibold rounded-xl shadow hover:bg-violet-50">＋ {t("สร้างงานใหม่", "New task")}</button>
+            <button onClick={onCreate} style={{ color: theme.accent }} className="h-11 px-5 bg-white font-semibold rounded-xl shadow hover:bg-slate-50">＋ {t("สร้างงานใหม่", "New task")}</button>
           </div>
         </div>
       </div>
@@ -203,17 +203,17 @@ export function OverviewDashboard({
           {theme.show.filters && (
           <div className="space-y-1.5">
             <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} />
+              <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} accent={theme.accent} />
               {typeOptions.map((o) => (
-                <FilterTab key={o.value} active={typeFilter === o.value} onClick={() => setTypeFilter(o.value)} label={o.label} />
+                <FilterTab key={o.value} active={typeFilter === o.value} onClick={() => setTypeFilter(o.value)} label={o.label} accent={theme.accent} />
               ))}
             </div>
             {brands.length > 0 && (
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-xs text-slate-400 mr-0.5">{t("แบรนด์", "Brand")}:</span>
-                <BrandChip active={!brandFilter} onClick={() => setBrandFilter("")} label={t("ทั้งหมด", "All")} />
+                <BrandChip active={!brandFilter} onClick={() => setBrandFilter("")} label={t("ทั้งหมด", "All")} accent={theme.accent} />
                 {brands.map((b) => (
-                  <BrandChip key={b.id} active={brandFilter === b.id} color={b.color} onClick={() => setBrandFilter(b.id)} label={b.name} />
+                  <BrandChip key={b.id} active={brandFilter === b.id} color={b.color} onClick={() => setBrandFilter(b.id)} label={b.name} accent={theme.accent} />
                 ))}
               </div>
             )}
@@ -241,7 +241,7 @@ export function OverviewDashboard({
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
           <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
             <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
-            <a href="/tasks/campaigns" className="text-xs font-medium text-violet-700 hover:underline">{t("ดูทั้งหมด", "See all")} →</a>
+            <a href="/tasks/campaigns" style={{ color: theme.accent }} className="text-xs font-medium hover:underline">{t("ดูทั้งหมด", "See all")} →</a>
           </div>
           <div className="p-2">
             {activeCampaigns.length === 0 ? (
@@ -320,13 +320,15 @@ function SummaryCard({ card, value, label, active, hint, onClick }: { card: Card
   );
 }
 
-function FilterTab({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
-  return <button onClick={onClick} className={`shrink-0 h-7 px-3 rounded-full text-xs font-medium transition-colors ${active ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{label}</button>;
+function FilterTab({ active, onClick, label, accent }: { active: boolean; onClick: () => void; label: string; accent?: string }) {
+  return <button onClick={onClick} style={active && accent ? { background: accent, color: "#fff" } : undefined}
+    className={`shrink-0 h-7 px-3 rounded-full text-xs font-medium transition-colors ${active ? "text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{label}</button>;
 }
 
-function BrandChip({ active, color, onClick, label }: { active: boolean; color?: string | null; onClick: () => void; label: string }) {
+function BrandChip({ active, color, onClick, label, accent }: { active: boolean; color?: string | null; onClick: () => void; label: string; accent?: string }) {
   return (
-    <button onClick={onClick} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-medium border transition-colors ${active ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+    <button onClick={onClick} style={active && accent ? { borderColor: accent, color: accent, background: accent + "14" } : undefined}
+      className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-medium border transition-colors ${active ? "" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
       {color && <span className="h-2 w-2 rounded-full" style={{ background: color || "#cbd5e1" }} />}{label}
     </button>
   );
