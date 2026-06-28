@@ -13,6 +13,7 @@ import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea } from "@/components/form";
 import { UserPicker, SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue, SkuPickerValue, ParentSkuPickerValue } from "@/components/pickers";
+import { MultiUserPicker } from "./multi-user-picker";
 import { ImageInput } from "@/components/image-input";
 import { useCreativeOptions } from "./use-options";
 import { useT } from "@/components/i18n";
@@ -33,14 +34,14 @@ function addDaysStr(dateStr: string, days: number): string {
 type FormState = {
   title: string; description: string; task_type: string;
   brand_id: string; campaign_id: string;
-  assignee: UserPickerValue | null; reviewer: UserPickerValue | null;
+  assignee: UserPickerValue | null; reviewers: UserPickerValue[];
   priority: CreativePriority; order_date: string; due_date: string;
   products: SkuPickerValue[]; parents: ParentSkuPickerValue[]; platforms: string[]; drive_folder_url: string;
   cover_image_r2_key: string;
 };
 const EMPTY_FORM: FormState = {
   title: "", description: "", task_type: "photo_shoot", brand_id: "", campaign_id: "",
-  assignee: null, reviewer: null, priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
+  assignee: null, reviewers: [], priority: "normal", order_date: "", due_date: "", products: [], parents: [], platforms: [], drive_folder_url: "", cover_image_r2_key: "",
 };
 
 // แถวงานย่อยในขั้นที่ 2
@@ -96,7 +97,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       task_type: tpl.task_type ?? p.task_type, priority: (tpl.default_priority as CreativePriority) ?? p.priority,
       platforms: tpl.platforms ?? [], brand_id: tpl.brand_id ?? p.brand_id,
       description: tpl.description ?? p.description,
-      reviewer: tpl.default_reviewer_id ? ({ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue) : p.reviewer,
+      reviewers: (tpl.default_reviewers && tpl.default_reviewers.length) ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : p.reviewers),
       due_date: (offset != null && p.order_date) ? addDaysStr(p.order_date, offset) : p.due_date,
     }));
     setContentItems(Array.isArray(tpl.content_items) ? tpl.content_items : []);
@@ -126,7 +127,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       const { id, task_no } = await createTask({
         title: form.title.trim(), description: form.description.trim() || null, task_type: form.task_type || null,
         brand_id: form.brand_id || null, campaign_id: (lockedCampaignId ?? form.campaign_id) || null,
-        assignee_id: form.assignee?.id ?? null, reviewer_id: form.reviewer?.id ?? null,
+        assignee_id: form.assignee?.id ?? null, reviewer_ids: form.reviewers.map((r) => r.id),
         priority: form.priority, start_date: form.order_date || null, due_date: form.due_date || null,
         sku_id: form.products[0]?.id ?? null, product_name: form.products[0]?.name ?? null, sku_ids: form.products.map((p) => p.id),
         parent_sku_id: form.parents[0]?.id ?? null, parent_sku_ids: form.parents.map((p) => p.id),
@@ -219,7 +220,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
           <ERPFormField label={t("แบรนด์","Brand")}><ERPSelect value={form.brand_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => updateForm({ brand_id: e.target.value })} /></ERPFormField>
           {!lockedCampaignId && <ERPFormField label="Campaign"><ERPSelect value={form.campaign_id} options={[{ value: "", label: `— ${t("ไม่ระบุ","Not specified")} —` }, ...campaigns.map((c) => ({ value: c.id, label: c.name }))]} onChange={(e) => updateForm({ campaign_id: e.target.value })} /></ERPFormField>}
           <ERPFormField label={t("ผู้รับผิดชอบ","Assignee")}><UserPicker value={form.assignee} onChange={(v) => updateForm({ assignee: v })} disableCreate /></ERPFormField>
-          <ERPFormField label={t("ผู้ตรวจ/อนุมัติ","Reviewer / Approver")}><UserPicker value={form.reviewer} onChange={(v) => updateForm({ reviewer: v })} disableCreate /></ERPFormField>
+          <ERPFormField label={t("ผู้ตรวจ/อนุมัติ (เลือกได้หลายคน)","Reviewer / Approver (multiple)")}><MultiUserPicker value={form.reviewers} onChange={(v) => updateForm({ reviewers: v })} disableCreate /></ERPFormField>
           <ERPFormField label={t("วันที่สั่ง","Order date")}><ERPInput type="date" value={form.order_date} onChange={(e) => setOrderDate(e.target.value)} /></ERPFormField>
           <ERPFormField label={t("กำหนดส่ง","Due date")} hint={tplDueOffset != null ? t(`อัตโนมัติ = วันที่สั่ง + ${tplDueOffset} วัน (แก้เองได้)`, `auto = order date + ${tplDueOffset}d (editable)`) : undefined}><ERPInput type="date" value={form.due_date} onChange={(e) => updateForm({ due_date: e.target.value })} /></ERPFormField>
           <ERPFormField label={t("โฟลเดอร์ Drive (ลิงก์)","Drive folder (link)")} span={2}><ERPInput value={form.drive_folder_url} onChange={(e) => updateForm({ drive_folder_url: e.target.value })} placeholder="https://drive.google.com/..." /></ERPFormField>

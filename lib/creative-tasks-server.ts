@@ -125,6 +125,32 @@ export async function taskAssigneesMap(admin: Admin, taskIds: string[]): Promise
   return map;
 }
 
+/** ตั้งผู้ตรวจ/อนุมัติงานหลัก (หลายคน) แบบแทนที่ทั้งชุด — junction erp_creative_task_reviewers */
+export async function setTaskReviewers(admin: Admin, taskId: string, userIds: (string | null | undefined)[]): Promise<void> {
+  await admin.from("erp_creative_task_reviewers").delete().eq("task_id", taskId);
+  const clean = [...new Set(userIds.filter(Boolean).map(String))];
+  if (clean.length) await admin.from("erp_creative_task_reviewers").insert(clean.map((user_id) => ({ task_id: taskId, user_id })));
+}
+
+/** ผู้ตรวจของแต่ละงาน → Map<task_id, AssigneeInfo[]> */
+export async function taskReviewersMap(admin: Admin, taskIds: string[]): Promise<Map<string, AssigneeInfo[]>> {
+  const map = new Map<string, AssigneeInfo[]>();
+  if (!taskIds.length) return map;
+  const ids = [...new Set(taskIds.map(String))];
+  const { data } = await admin.from("erp_creative_task_reviewers").select("task_id, user_id").in("task_id", ids);
+  const byTask = new Map<string, string[]>();
+  for (const r of (data ?? []) as { task_id: string; user_id: string }[]) { const tid = String(r.task_id); const arr = byTask.get(tid) ?? []; arr.push(String(r.user_id)); byTask.set(tid, arr); }
+  const info = await usersInfo(admin, [...new Set([...byTask.values()].flat())]);
+  for (const [tid, arr] of byTask) map.set(tid, arr.map((uid) => info.get(uid) ?? { id: uid, label: "", color: null, avatar_url: null }));
+  return map;
+}
+
+/** user เป็นผู้ตรวจของงานนี้ไหม (ในรายชื่อ reviewers) */
+export async function userIdsReviewers(admin: Admin, taskId: string): Promise<Set<string>> {
+  const { data } = await admin.from("erp_creative_task_reviewers").select("user_id").eq("task_id", taskId);
+  return new Set(((data ?? []) as { user_id: string }[]).map((r) => String(r.user_id)));
+}
+
 /** task ids ที่ user เป็นผู้รับผิดชอบ (ตั้งเอง) หรือเป็นคนเริ่มงานย่อย — ใช้กรอง "งานของฉัน" */
 export async function taskIdsForUser(admin: Admin, userId: string): Promise<string[]> {
   const set = new Set<string>();

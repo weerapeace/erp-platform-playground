@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const EDITABLE = new Set(["name", "task_type", "default_priority", "brand_id", "default_reviewer_id", "due_offset_days", "description", "platforms", "steps", "content_items"]);
+// ผู้ตรวจหลายคน: เก็บ default_reviewer_ids (array) + sync default_reviewer_id เดี่ยว = ตัวแรก
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -30,6 +31,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
+  if (Array.isArray(body.default_reviewer_ids)) {
+    const revIds = [...new Set((body.default_reviewer_ids as string[]).filter(Boolean))];
+    patch.default_reviewer_ids = revIds;
+    patch.default_reviewer_id = revIds[0] ?? null;
+  }
   if (Object.keys(patch).length === 1) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้ไข" }, { status: 400 });
   const admin = supabaseAdmin();
   const { error } = await admin.from("erp_creative_task_templates").update(patch).eq("id", id);

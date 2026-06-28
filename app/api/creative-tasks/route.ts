@@ -14,7 +14,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { defaultStatusKey, getStatusMeta } from "@/lib/creative-statuses-server";
-import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser } from "@/lib/creative-tasks-server";
+import { nextTaskNo, nextContentNo, notify, employeeLabelMap, employeeAuthId, setSubtaskAssignees, setTaskAssignees, taskAssigneesMap, taskIdsForUser, setTaskReviewers } from "@/lib/creative-tasks-server";
 import { SELECT, flattenTask } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -87,7 +87,7 @@ type CreateBody = {
   brand_id?: string | null; campaign_id?: string | null; sku_id?: string | null; parent_sku_id?: string | null; product_name?: string | null;
   sku_ids?: string[]; parent_sku_ids?: string[];
   priority?: string; status?: string; progress_percent?: number | null;
-  assignee_id?: string | null; assignee_ids?: string[]; reviewer_id?: string | null; approver_id?: string | null; assigned_by_id?: string | null;
+  assignee_id?: string | null; assignee_ids?: string[]; reviewer_id?: string | null; reviewer_ids?: string[]; approver_id?: string | null; assigned_by_id?: string | null;
   start_date?: string | null; due_date?: string | null;
   asset_status?: string | null; platforms?: string[] | null;
   drive_folder_url?: string | null; cover_image_r2_key?: string | null;
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     brand_id: body.brand_id || null, campaign_id: body.campaign_id || null, sku_id: body.sku_id || null,
     parent_sku_id: body.parent_sku_id || null,
     product_name: body.product_name?.trim() || null, priority: body.priority || "normal", status,
-    progress_percent: progress, assignee_id: body.assignee_ids?.[0] || body.assignee_id || null, reviewer_id: body.reviewer_id || null,
+    progress_percent: progress, assignee_id: body.assignee_ids?.[0] || body.assignee_id || null, reviewer_id: body.reviewer_ids?.[0] || body.reviewer_id || null,
     approver_id: body.approver_id || null, assigned_by_id: body.assigned_by_id || user?.id || null, start_date: body.start_date || null, due_date: body.due_date || null,
     asset_status: body.asset_status || "missing", platforms: body.platforms ?? [],
     drive_folder_url: body.drive_folder_url?.trim() || null, cover_image_r2_key: body.cover_image_r2_key || null,
@@ -133,6 +133,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ผู้รับผิดชอบงานหลัก (m2m) — ตั้งหลายคน หรือ mirror จาก assignee_id เดี่ยว (ให้ตารางเชื่อมตรงกับ assignee_id)
   const taskAssignees = [...new Set((Array.isArray(body.assignee_ids) ? body.assignee_ids : (body.assignee_id ? [body.assignee_id] : [])).filter(Boolean))] as string[];
   if (taskAssignees.length) await setTaskAssignees(admin, row.id, taskAssignees);
+
+  // ผู้ตรวจงานหลัก (m2m) — หลายคน หรือ mirror จาก reviewer_id เดี่ยว
+  const taskReviewers = [...new Set((Array.isArray(body.reviewer_ids) ? body.reviewer_ids : (body.reviewer_id ? [body.reviewer_id] : [])).filter(Boolean))] as string[];
+  if (taskReviewers.length) await setTaskReviewers(admin, row.id, taskReviewers);
 
   // งานย่อยเริ่มต้น (ถ้าส่งมาจาก template) — รองรับ description + ผู้รับผิดชอบหลายคน
   if (Array.isArray(body.subtasks) && body.subtasks.length > 0) {

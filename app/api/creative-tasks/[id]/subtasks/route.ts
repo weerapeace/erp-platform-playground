@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
-import { subtaskAssigneesMap, setSubtaskAssignees, notify } from "@/lib/creative-tasks-server";
+import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers } from "@/lib/creative-tasks-server";
 import { applySubtaskSync, reverseSubtaskSync } from "@/lib/subtask-sync";
 import { renderPrompt } from "@/lib/subtask-prompt";
 
@@ -148,14 +148,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (!subtaskId) return NextResponse.json({ error: "subtask_id required" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  // งานแม่ (ผู้สร้าง + ผู้ตรวจ) + role ผู้ใช้ — ใช้คุมสิทธิ์ละเอียด
-  const [{ data: parent }, role] = await Promise.all([
+  // งานแม่ (ผู้สร้าง + ผู้ตรวจ) + รายชื่อผู้ตรวจ (m2m) + role ผู้ใช้ — ใช้คุมสิทธิ์ละเอียด
+  const [{ data: parent }, role, reviewerSet] = await Promise.all([
     admin.from("erp_creative_tasks").select("created_by, reviewer_id, task_no, title").eq("id", id).maybeSingle(),
     currentRole(request),
+    userIdsReviewers(admin, id),
   ]);
   const isManager = role === "admin" || role === "manager";
   const isCreator = !!user?.id && user.id === (parent?.created_by as string | null);
-  const isReviewer = !!user?.id && user.id === (parent?.reviewer_id as string | null);
+  // ผู้ตรวจ = อยู่ในรายชื่อผู้ตรวจหลายคน หรือ reviewer_id เดี่ยว (เผื่อข้อมูลเก่า)
+  const isReviewer = !!user?.id && (reviewerSet.has(user.id) || user.id === (parent?.reviewer_id as string | null));
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;

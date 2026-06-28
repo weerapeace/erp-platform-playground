@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
+import { MultiUserPicker } from "./multi-user-picker";
 import { ImageAttach } from "@/components/image-attach";
 import dynamic from "next/dynamic";
 // คลังไฟล์กลาง (DAM) — เลือกรูปที่มีอยู่แล้วมาแนบ · dynamic กันลาก bundle ใหญ่
@@ -36,7 +37,7 @@ import {
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 const PRIORITY_OPTIONS = (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label }));
 // ผู้รับผิดชอบ (หลายคน) จัดการแยกที่ MultiAssigneeField ในโหมดดู — ฟอร์มแก้ไขเต็มไม่มี assignee แล้ว (กันรีเซ็ตหลายคน)
-type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[]; reviewer: UserPickerValue | null };
+type EditForm = { task_type: string; priority: CreativePriority; brand_id: string; due_date: string; platforms: string[] };
 
 export function StatusBadge({ status }: { status: string }) {
   const m = statusMeta(status);
@@ -147,14 +148,13 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const refresh = async () => { await load(); await onChanged(); };
   const startEdit = () => {
     const d = detail; if (!d) return;
-    setEf({ task_type: d.task_type ?? "", priority: d.priority, brand_id: d.brand_id ?? "", due_date: d.due_date ?? "", platforms: d.platforms ?? [],
-      reviewer: d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null });
+    setEf({ task_type: d.task_type ?? "", priority: d.priority, brand_id: d.brand_id ?? "", due_date: d.due_date ?? "", platforms: d.platforms ?? [] });
     setEditing(true);
   };
   const saveEdit = async () => {
     if (!ef || !detail) return; setBusy(true);
     try {
-      await updateTask(detail.id, { task_type: ef.task_type || null, priority: ef.priority, brand_id: ef.brand_id || null, due_date: ef.due_date || null, platforms: ef.platforms, reviewer_id: ef.reviewer?.id ?? null });
+      await updateTask(detail.id, { task_type: ef.task_type || null, priority: ef.priority, brand_id: ef.brand_id || null, due_date: ef.due_date || null, platforms: ef.platforms });
       setEditing(false); await refresh(); pushToast("success", t("บันทึกแล้ว", "Saved"));
     } catch (e) { pushToast("error", (e as Error).message); } finally { setBusy(false); }
   };
@@ -172,7 +172,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const actions = transitionsFrom(d.status);
   // สิทธิ์งานย่อย: ผจก./admin = จัดการได้หมด · ผู้ตรวจ = อนุมัติได้ · คนสร้างงาน = แก้ผู้รับผิดชอบได้
   const isManager = user?.role === "admin" || user?.role === "manager";
-  const canApproveSub = isManager || (!!user?.id && user.id === d.reviewer_id);
+  const canApproveSub = isManager || (!!user?.id && (user.id === d.reviewer_id || (d.reviewers ?? []).some((r) => r.id === user.id)));
   const canManageAssignees = isManager || (!!user?.id && user.id === d.created_by);
 
   const handleMove = async (toKey: string) => { setBusy(true); await onMove(d, toKey); await refresh(); setBusy(false); };
@@ -348,8 +348,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                     <div><label className="text-xs text-slate-400">{t("ความสำคัญ", "Priority")}</label><ERPSelect value={ef.priority} options={PRIORITY_OPTIONS} onChange={(e) => setEf({ ...ef, priority: e.target.value as CreativePriority })} /></div>
                     <div><label className="text-xs text-slate-400">{t("แบรนด์", "Brand")}</label><ERPSelect value={ef.brand_id} options={[{ value: "", label: t("— ไม่ระบุ —", "— None —") }, ...brands.map((b) => ({ value: b.id, label: b.name }))]} onChange={(e) => setEf({ ...ef, brand_id: e.target.value })} /></div>
                     <div><label className="text-xs text-slate-400">{t("กำหนดส่ง", "Due Date")}</label><ERPInput type="date" value={ef.due_date} onChange={(e) => setEf({ ...ef, due_date: e.target.value })} /></div>
-                    <div><label className="text-xs text-slate-400">{t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")}</label><UserPicker value={ef.reviewer} onChange={(v) => setEf({ ...ef, reviewer: v })} disableCreate /></div>
-                    <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ (หลายคน) แก้ที่ช่อง \"ผู้รับผิดชอบ\" ในโหมดดู — รวมคนที่กดเริ่มงานย่อยอัตโนมัติ", "Edit assignees (multiple) in the \"Assignees\" field in view mode — auto-includes whoever started subtasks")}</div>
+                    <div className="col-span-2 text-[11px] text-slate-400">{t("ผู้รับผิดชอบ / ผู้ตรวจ (หลายคน) แก้ที่ช่องในโหมดดู", "Edit assignees / reviewers (multiple) in view mode")}</div>
                   </div>
                   <div><label className="text-xs text-slate-400">{t("แพลตฟอร์ม", "Platform")}</label>
                     <div className="flex flex-wrap gap-1.5 mt-1">{platformOpts.map((p) => {
@@ -419,9 +418,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                       onSave={(ids) => saveQuick({ assignee_ids: ids }, true)} />
                     {/* ผู้ตรวจ/ผู้มอบหมาย/แคมเปญ/Parent SKU — จัด 2 คอลัมน์ (2 แถว) ให้โปร่ง ไม่เบียด */}
                     <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-                      <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={d.reviewer_label || d.approver_label}
+                      <QuickField label={t("ผู้ตรวจ/อนุมัติ", "Reviewer / Approver")} value={(d.reviewers ?? []).length ? (d.reviewers ?? []).map((r) => r.label).filter(Boolean).join(", ") : (d.reviewer_label || d.approver_label)}
                         active={qf === "reviewer"} onOpen={() => setQf("reviewer")} onClose={() => setQf(null)}
-                        editor={<UserPicker value={d.reviewer_id ? ({ id: d.reviewer_id, name: d.reviewer_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ reviewer_id: v?.id ?? null })} disableCreate />} />
+                        editor={<MultiUserPicker value={(d.reviewers ?? []).map((r) => ({ id: r.id, name: r.label } as UserPickerValue))} onChange={(v) => saveQuick({ reviewer_ids: v.map((x) => x.id) }, true)} disableCreate />} />
                       <QuickField label={t("ผู้มอบหมาย", "Assigned by")} value={d.assigned_by_label}
                         active={qf === "assigned_by"} onOpen={() => setQf("assigned_by")} onClose={() => setQf(null)}
                         editor={<UserPicker value={d.assigned_by_id ? ({ id: d.assigned_by_id, name: d.assigned_by_label ?? "" } as UserPickerValue) : null} onChange={(v) => saveQuick({ assigned_by_id: v?.id ?? null })} disableCreate />} />

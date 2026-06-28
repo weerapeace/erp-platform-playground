@@ -15,7 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenTask } from "../shared";
 import { canTransition as canTransitionDB, getStatusMeta } from "@/lib/creative-statuses-server";
-import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap, setTaskAssignees, taskAssigneesMap } from "@/lib/creative-tasks-server";
+import { notify, employeeLabelMap, employeeAuthId, subtaskAssigneesMap, setTaskAssignees, taskAssigneesMap, setTaskReviewers, taskReviewersMap } from "@/lib/creative-tasks-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,13 +58,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const subRows = (subtasks ?? []) as Record<string, unknown>[];
   // empMap (จาก row) กับ aMap (จาก subRows) อิสระต่อกัน → ยิงพร้อมกัน ลด round-trip ตอนเปิดงาน
-  const [empMap, aMap, taMap] = await Promise.all([
+  const [empMap, aMap, taMap, trMap] = await Promise.all([
     employeeLabelMap(admin, [row.assignee_id as string, row.reviewer_id as string, row.approver_id as string, row.assigned_by_id as string]),
     subtaskAssigneesMap(admin, subRows.map((s) => String(s.id))),
     taskAssigneesMap(admin, [id]),
+    taskReviewersMap(admin, [id]),
   ]);
   const task = flattenTask(row, empMap);
   task.assignees = taMap.get(id) ?? [];   // ผู้รับผิดชอบหลายคน (ตั้งเอง ∪ คนเริ่มงานย่อย)
+  task.reviewers = trMap.get(id) ?? [];   // ผู้ตรวจหลายคน
 
   // แยกไฟล์แนบ: ระดับงาน (subtask_id null) vs ระดับ subtask
   const allAtt = (attachments ?? []) as Record<string, unknown>[];
@@ -164,6 +166,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       const added = mAssignees.filter((uid) => !oldSet.has(uid) && uid !== user?.id);
       for (const uid of added) await notify(admin, { userId: uid, eventType: "task_assigned", priority: "normal", title: `มอบหมายงาน: ${current.title}`, body: String(current.task_no ?? ""), linkUrl: `/tasks?task=${id}`, entityId: id });
     }
+    // m2m: ผู้ตรวจหลายคน — แทนที่ทั้งชุด + sync reviewer_id เดี่ยว (= ตัวแรก) · แจ้งคนที่เพิ่งถูกเพิ่ม
+    const mReviewers = Array.isArray(body.reviewer_ids) ? [...new Set((body.reviewer_ids as string[]).filter(Boolean))] : null;
+    if (mReviewers) {
+      const { data: curR } = await admin.from("erp_creative_task_reviewers").select("user_id").eq("task_id", id);
+      const oldR = new Set(((curR ?? []) as { user_id: string }[]).map((r) => r.user_id));
+      await setTaskReviewers(admin, id, mReviewers);
+      patch.reviewer_id = mReviewers[0] ?? null;
+      for (const uid of mReviewers.filter((u) => !oldR.has(u) && u !== user?.id)) await notify(admin, { userId: uid, eventType: "task_need_review", priority: "normal", title: `เป็นผู้ตรวจงาน: ${current.title}`, body: String(current.task_no ?? ""), linkUrl: `/tasks?task=${id}`, entityId: id });
+    }
     if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้ไข" }, { status: 400 });
     // เปลี่ยนผู้รับผิดชอบ → แจ้งคนใหม่
     if ("assignee_id" in patch && patch.assignee_id && patch.assignee_id !== current.assignee_id) {
@@ -186,12 +197,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (authId) await notify(admin, { userId: authId, eventType: notifyTarget.eventType, title: notifyTarget.title, body: String(current.task_no ?? ""), entityId: id });
   }
 
-  const [empMap, taMap] = await Promise.all([
+  const [empMap, taMap, trMap] = await Promise.all([
     employeeLabelMap(admin, [updated.assignee_id, updated.reviewer_id, updated.approver_id, updated.assigned_by_id] as string[]),
     taskAssigneesMap(admin, [id]),
+    taskReviewersMap(admin, [id]),
   ]);
   const out = flattenTask(updated as Record<string, unknown>, empMap);
   out.assignees = taMap.get(id) ?? [];
+  out.reviewers = trMap.get(id) ?? [];
   return NextResponse.json({ data: out, error: null });
 }
 

@@ -37,6 +37,7 @@ export type CreativeTask = {
   assignee_id: string | null; assignee_label: string | null;
   assignees?: SubtaskAssignee[];   // ผู้รับผิดชอบหลายคน (ตั้งเอง ∪ คนเริ่มงานย่อย) — m2m
   reviewer_id: string | null; reviewer_label: string | null;
+  reviewers?: SubtaskAssignee[];   // ผู้ตรวจหลายคน — m2m
   approver_id: string | null; approver_label: string | null;
   assigned_by_id?: string | null; assigned_by_label?: string | null;
   start_date: string | null; due_date: string | null; completed_at: string | null;
@@ -436,6 +437,7 @@ export type TaskTemplate = {
   id: string; name: string; task_type: string | null; default_priority: string;
   brand_id: string | null; brand_label?: string | null; brand_color?: string | null; description: string | null;
   default_reviewer_id?: string | null; default_reviewer_label?: string | null; due_offset_days?: number | null;
+  default_reviewer_ids?: string[]; default_reviewers?: { id: string; label: string }[];   // ผู้ตรวจหลายคน
   platforms: string[] | null; steps: TemplateStep[]; content_items?: TemplateContentItem[];
 };
 export type RecurringRule = {

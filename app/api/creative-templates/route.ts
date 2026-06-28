@@ -26,22 +26,33 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
   const rows = (data ?? []) as Record<string, unknown>[];
   // resolve ชื่อผู้รับผิดชอบของทุกขั้นตอน (m2m ใน jsonb) + ผู้ตรวจเริ่มต้นของแม่แบบ
+  const revIdsOf = (r: Record<string, unknown>): string[] => (Array.isArray(r.default_reviewer_ids) && (r.default_reviewer_ids as string[]).length)
+    ? (r.default_reviewer_ids as string[]).filter(Boolean).map(String)
+    : (r.default_reviewer_id ? [String(r.default_reviewer_id)] : []);
   const allIds = rows.flatMap((r) => [
     ...(Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).flatMap((s) => s.assignee_ids ?? []),
-    ...(r.default_reviewer_id ? [r.default_reviewer_id as string] : []),
+    ...revIdsOf(r),
   ]);
   const empMap = await employeeLabelMap(admin, allIds);
   const items = rows.map((r) => {
     const b = (Array.isArray(r.brand) ? r.brand[0] : r.brand) as { name?: string; color?: string | null } | null;
     const steps = (Array.isArray(r.steps) ? (r.steps as StepRow[]) : []).map((s) => ({ ...s, assignee_labels: (s.assignee_ids ?? []).map((id) => empMap.get(String(id)) ?? "") }));
-    const out: Record<string, unknown> = { ...r, steps, brand_label: b?.name ?? null, brand_color: b?.color ?? null, default_reviewer_label: r.default_reviewer_id ? (empMap.get(String(r.default_reviewer_id)) ?? null) : null }; delete out.brand; return out;
+    const revIds = revIdsOf(r);
+    const out: Record<string, unknown> = { ...r, steps, brand_label: b?.name ?? null, brand_color: b?.color ?? null,
+      default_reviewer_label: revIds.length ? (empMap.get(revIds[0]) ?? null) : null,
+      default_reviewer_ids: revIds,
+      default_reviewers: revIds.map((id) => ({ id, label: empMap.get(id) ?? "" })),
+    }; delete out.brand; return out;
   });
   return NextResponse.json({ data: items, error: null });
 }
 
 type Step = { type?: string; title?: string; description?: string | null; required_before_next?: boolean; assignee_ids?: string[]; config?: Record<string, unknown> };
 type ContentItem = { title?: string; post_type?: string | null; platforms?: string[] };
-type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; default_reviewer_id?: string | null; due_offset_days?: number | null; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
+type Body = { name?: string; task_type?: string | null; default_priority?: string; brand_id?: string | null; default_reviewer_id?: string | null; default_reviewer_ids?: string[]; due_offset_days?: number | null; description?: string | null; platforms?: string[]; steps?: Step[]; content_items?: ContentItem[] };
+
+// ผู้ตรวจเริ่มต้น (หลายคน) — ใช้ array ถ้าส่งมา ไม่งั้น fallback ค่าเดี่ยว
+function reviewerIds(body: Body): string[] { return [...new Set((Array.isArray(body.default_reviewer_ids) ? body.default_reviewer_ids : (body.default_reviewer_id ? [body.default_reviewer_id] : [])).filter(Boolean))] as string[]; }
 
 // เก็บ step ครบรูปแบบ type-driven: type + title + config + description + ผู้รับผิดชอบ (ของกลาง — ไม่ตัดทิ้ง)
 function normalizeSteps(raw?: Step[]): Record<string, unknown>[] {
@@ -77,9 +88,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const content_items = normalizeContent(body.content_items);
 
   const admin = supabaseAdmin();
+  const revIds = reviewerIds(body);
   const { data, error } = await admin.from("erp_creative_task_templates").insert({
     name, task_type: body.task_type || null, default_priority: body.default_priority || "normal",
-    brand_id: body.brand_id || null, default_reviewer_id: body.default_reviewer_id || null,
+    brand_id: body.brand_id || null, default_reviewer_id: revIds[0] || null, default_reviewer_ids: revIds,
     due_offset_days: (body.due_offset_days === null || body.due_offset_days === undefined || Number.isNaN(Number(body.due_offset_days))) ? null : Number(body.due_offset_days),
     description: body.description?.trim() || null, platforms: body.platforms ?? [], steps, content_items, created_by: user?.id ?? null,
   }).select("id, name").single();
