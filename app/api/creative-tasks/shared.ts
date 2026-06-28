@@ -4,7 +4,7 @@ export const SELECT = `id, task_no, title, description, task_type, brand_id, cam
   product_name, priority, status, progress_percent, assignee_id, reviewer_id, approver_id, assigned_by_id,
   start_date, due_date, completed_at, approval_status, asset_status, platforms,
   drive_folder_url, final_asset_url, published_url, blocker_status, blocker_reason,
-  cover_image_r2_key,
+  cover_image_r2_key, reference_html,
   is_active, created_by, created_at, updated_at,
   brand:brands!brand_id(name, color),
   campaign:erp_creative_campaigns!campaign_id(name),

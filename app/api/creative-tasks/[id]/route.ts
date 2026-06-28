@@ -26,7 +26,7 @@ const EDITABLE = new Set([
   "priority", "progress_percent", "assignee_id", "reviewer_id", "approver_id", "assigned_by_id",
   "start_date", "due_date", "asset_status", "platforms",
   "drive_folder_url", "final_asset_url", "published_url", "blocker_reason",
-  "cover_image_r2_key",
+  "cover_image_r2_key", "reference_html",
 ]);
 
 async function loadTask(admin: ReturnType<typeof supabaseAdmin>, id: string) {

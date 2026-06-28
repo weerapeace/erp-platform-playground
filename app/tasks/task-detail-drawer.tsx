@@ -10,7 +10,8 @@ import { ERPInput, ERPSelect } from "@/components/form";
 import { UserPicker, ParentSkuPicker } from "@/components/pickers";
 import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "./multi-user-picker";
-import { ImageAttach } from "@/components/image-attach";
+import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
+import { RichTextEditor } from "@/components/rich-text";
 import dynamic from "next/dynamic";
 // คลังไฟล์กลาง (DAM) — เลือกรูปที่มีอยู่แล้วมาแนบ · dynamic กันลาก bundle ใหญ่
 const AssetPicker = dynamic(() => import("@/components/asset-picker").then((m) => m.AssetPicker), { ssr: false });
@@ -135,7 +136,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const [ef, setEf] = useState<EditForm | null>(null);
   const [qf, setQf] = useState<string | null>(null); // ฟิลด์ที่กำลัง quick edit
   const [openParentId, setOpenParentId] = useState<string | null>(null); // เปิด drawer Parent SKU
-  const [tab, setTab] = useState<"task" | "content">("task"); // แท็บ: งาน / คอนเทนต์
+  const [tab, setTab] = useState<"task" | "content" | "reference">("task"); // แท็บ: งาน / คอนเทนต์ / อ้างอิง
+  const [refHtml, setRefHtml] = useState("");     // เนื้อหาแท็บอ้างอิง (rich text)
+  const [refSaving, setRefSaving] = useState(false);
   const [coverEdit, setCoverEdit] = useState(false); // เปิดช่องตั้งรูปปก
   const [submitNudge, setSubmitNudge] = useState(false); // เด้งเตือนเล็ก ๆ หลังแนบงาน (งานไม่มีงานย่อย) ให้ส่งงานเลย
   const { width: drawerW, startResize } = useDrawerResize("taskDrawerWidth", 900); // ลากปรับความกว้าง (ของกลาง) · กว้างพอโชว์ 2 คอลัมน์
@@ -148,6 +151,9 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
     catch (e) { pushToast("error", `${t("โหลดรายละเอียดไม่สำเร็จ", "Failed to load details")}: ${(e as Error).message}`); }
   }, [taskId, pushToast]);
   useEffect(() => { load(); }, [load]);
+  // sync เนื้อหาอ้างอิงตอนเปลี่ยนงาน (ไม่ override ระหว่างพิมพ์)
+  useEffect(() => { setRefHtml(detail?.reference_html ?? ""); }, [detail?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const saveRef = async () => { if (!detail) return; setRefSaving(true); try { await updateTask(detail.id, { reference_html: refHtml }); pushToast("success", t("บันทึกอ้างอิงแล้ว", "Reference saved")); await load(); } catch (e) { pushToast("error", (e as Error).message); } finally { setRefSaving(false); } };
 
   const refresh = async () => { await load(); await onChanged(); };
   const startEdit = () => {
@@ -244,7 +250,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
           {/* แท็บ: งาน / คอนเทนต์ (โซเชียลพ่วงงาน) — โชว์จำนวนงานย่อย / คอนเทนต์ */}
           <div className="flex items-center gap-1 px-5 pt-1 pb-2 border-t border-slate-100">
-            {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0]] as const).map(([k, label, count]) => (
+            {([["task", t("📋 งาน", "📋 Task"), d.subtasks?.length ?? 0], ["content", t("📱 คอนเทนต์", "📱 Content"), d.content_count ?? 0], ["reference", t("📎 อ้างอิง", "📎 Reference"), (d.reference_html ?? "").trim() ? 1 : 0]] as const).map(([k, label, count]) => (
               <button key={k} onClick={() => setTab(k)} className={`h-8 px-3 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === k ? "bg-violet-50 text-violet-700" : "text-slate-500 hover:bg-slate-50"}`}>
                 {label}{count > 0 && <span className={`text-[11px] rounded-full px-1.5 ${tab === k ? "bg-violet-200 text-violet-800" : "bg-slate-200 text-slate-600"}`}>{count}</span>}
               </button>
@@ -490,6 +496,17 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
           {tab === "content" && (
             <TaskContentTab taskId={d.id} brandId={d.brand_id} brands={brands} pushToast={pushToast} />
+          )}
+          {tab === "reference" && (
+            <div className="p-5 space-y-2">
+              <p className="text-xs text-slate-400">{t("โน้ต/ข้อมูลอ้างอิงของงานนี้ — ใส่หัวข้อ/ลิสต์/ลิงก์/รูปได้ (วาง Ctrl+V)", "Notes / references for this task — headings, lists, links, images (paste Ctrl+V)")}</p>
+              <RichTextEditor value={refHtml} onChange={setRefHtml} minHeight={320}
+                placeholder={t("พิมพ์ข้อมูลอ้างอิง…", "Type reference notes…")}
+                onUploadImage={async (f) => { const r = await uploadResizedImage(f, { folder: "creative-tasks", max: 1600 }); return r2ImageUrl(r.r2_key) ?? ""; }} />
+              <div className="flex justify-end">
+                <button onClick={saveRef} disabled={refSaving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{refSaving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกอ้างอิง", "Save reference")}</button>
+              </div>
+            </div>
           )}
         </div>
 

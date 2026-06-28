@@ -31,6 +31,7 @@ export type CreativeTask = {
   parent_sku_id: string | null; parent_sku_code: string | null; parent_sku_name: string | null;
   product_name: string | null;
   cover_image_r2_key: string | null;
+  reference_html?: string | null;   // โน้ต/อ้างอิง (rich text)
   priority: CreativePriority;
   status: CreativeStatus;
   progress_percent: number;
