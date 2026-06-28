@@ -27,6 +27,7 @@ import { apiFetch } from "@/lib/api";
 import { applyTaskTransition } from "./task-actions";
 import { OverviewDashboard } from "./overview-dashboard";
 import { DEFAULT_THEME, mergeTheme, type OverviewTheme } from "./overview-customizer";
+import { type MetricDef } from "./metrics";
 import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
@@ -99,6 +100,7 @@ export default function TasksPage() {
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
   const [ovTheme, setOvTheme] = useState<OverviewTheme>(DEFAULT_THEME); // ธีมหน้าภาพรวม "ของฉัน" (per-user)
+  const [ovMetrics, setOvMetrics] = useState<MetricDef[]>([]); // การ์ดเมตริกของฉัน (per-user)
 
   // create modal
   const [createOpen, setCreateOpen] = useState(false);
@@ -159,6 +161,12 @@ export default function TasksPage() {
   const saveTheme = useCallback((th: OverviewTheme) => {
     setOvTheme(th);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_overview_theme", value: th }) });
+  }, []);
+  // การ์ดเมตริกของฉัน — โหลดครั้งเดียว + บันทึกเมื่อแก้
+  useEffect(() => { apiFetch("/api/user-prefs?key=tasks_metric_cards").then((r) => r.json()).then((j) => { if (j && !j.error && Array.isArray(j.value)) setOvMetrics(j.value); }).catch(() => {}); }, []);
+  const saveMetrics = useCallback((list: MetricDef[]) => {
+    setOvMetrics(list);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "tasks_metric_cards", value: list }) });
   }, []);
 
   const counts = useMemo(() => ({
@@ -267,6 +275,8 @@ export default function TasksPage() {
                 onCreate={openCreate}
                 onOpenKnowledge={() => setKnowledgeOpen(true)}
                 onChanged={reload}
+                metrics={ovMetrics}
+                onMetricsChange={saveMetrics}
               />
             )}
 

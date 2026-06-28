@@ -10,9 +10,11 @@ import { useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
-import { isTerminal } from "./use-statuses";
+import { isTerminal, statusMeta } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { isOverdue, updateTask, PRIORITY_META, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
+import { matchMetric, type MetricDef } from "./metrics";
+import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-drawer";
 import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, type OverviewTheme, type CardKey, type CardTheme } from "./overview-customizer";
 
@@ -28,7 +30,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
   theme, canUpload, onThemeChange,
-  onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged,
+  onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange,
 }: {
   userName?: string;
   counts: Counts;
@@ -48,9 +50,13 @@ export function OverviewDashboard({
   onCreate: () => void;
   onOpenKnowledge: () => void;
   onChanged?: () => void | Promise<void>;
+  metrics: MetricDef[];
+  onMetricsChange: (list: MetricDef[]) => void;
 }) {
   const t = useT();
   const [customizing, setCustomizing] = useState(false);
+  const [metricsOpen, setMetricsOpen] = useState(false);
+  const [activeMetric, setActiveMetric] = useState<string | null>(null);   // การ์ดเมตริกที่กดอยู่ (กรองตาราง)
   const [typeFilter, setTypeFilter] = useState("");    // ประเภทงาน (Tab) — "" = ทั้งหมด
   const [brandFilter, setBrandFilter] = useState("");  // แบรนด์ (ชิป) — "" = ทั้งหมด
 
@@ -72,17 +78,26 @@ export function OverviewDashboard({
     return [...present].map((v) => ({ value: v, label: typeLabelMap[v] || taskTypeLabel(v) || v })).sort((a, b) => a.label.localeCompare(b.label, "th"));
   }, [tasks, typeLabelMap]);
 
-  // ตาราง: การ์ด (สถานะ/ของฉัน) × ประเภท × แบรนด์ — ซ้อนกันได้
+  // การ์ดเมตริกเอง — บริบทนับ/กรอง + จำนวนต่อการ์ด + ตัวเลือกสำหรับตัวจัดการ
+  const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+  const metricCtx = useMemo(() => ({ myTaskIds, today }), [myTaskIds, today]);
+  const metricCounts = useMemo(() => Object.fromEntries((metrics ?? []).map((m) => [m.id, tasks.filter((tk) => matchMetric(tk, m.cond, metricCtx)).length])), [metrics, tasks, metricCtx]);
+  const activeMetricDef = (metrics ?? []).find((m) => m.id === activeMetric) ?? null;
+  const statusOptions = useMemo(() => { const s = new Set<string>(); for (const tk of tasks) if (tk.status) s.add(tk.status); return [...s].map((v) => ({ value: v, label: statusMeta(v).label })); }, [tasks]);
+  const priorityOptions = useMemo(() => (Object.keys(PRIORITY_META) as CreativePriority[]).map((k) => ({ value: k, label: PRIORITY_META[k].label })), []);
+
+  // ตาราง: การ์ดเมตริก (ถ้ากด) → กรองด้วยเงื่อนไข · ไม่งั้นใช้การ์ดมาตรฐาน × ประเภท × แบรนด์
   const filteredTasks = useMemo(() => {
-    let arr = filter === "mine" ? tasks.filter((tk) => myTaskIds.has(tk.id))
+    let arr = activeMetricDef ? tasks.filter((tk) => matchMetric(tk, activeMetricDef.cond, metricCtx))
+      : filter === "mine" ? tasks.filter((tk) => myTaskIds.has(tk.id))
       : filter === "review" ? tasks.filter((tk) => tk.status === "need_review")
       : filter === "overdue" ? tasks.filter(isOverdue)
       : tasks;
     if (typeFilter) arr = arr.filter((tk) => tk.task_type === typeFilter);
     if (brandFilter) arr = arr.filter((tk) => tk.brand_id === brandFilter);
     return arr;
-  }, [filter, typeFilter, brandFilter, tasks, myTaskIds]);
-  const filterLabel = filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
+  }, [activeMetricDef, filter, typeFilter, brandFilter, tasks, myTaskIds, metricCtx]);
+  const filterLabel = activeMetricDef ? activeMetricDef.label : filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
 
   // แก้หลายงานพร้อมกัน (bulk) — เฉพาะฟิลด์ที่แก้ตรงได้ปลอดภัย (ไม่รวมสถานะ เพราะต้องผ่าน workflow)
   const bulkEditFields = useMemo(() => [
@@ -163,9 +178,28 @@ export function OverviewDashboard({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cardMeta.map((m) => (
           <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label}
-            active={filter === m.key} hint={filter === m.key ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
-            onClick={() => onFilter(m.key)} />
+            active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : t("กดเพื่อกรอง", "tap to filter")}
+            onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
         ))}
+      </div>
+
+      {/* การ์ดเมตริกของฉัน (สร้างเอง) + ปุ่มจัดการ */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {(metrics ?? []).map((m) => {
+          const c = CARD_COLORS[m.color] ?? CARD_COLORS.slate;
+          const on = activeMetric === m.id;
+          return (
+            <button key={m.id} onClick={() => setActiveMetric(on ? null : m.id)}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 transition-all hover:shadow-sm ${c.box} ${on ? `ring-2 ${c.ring}` : ""}`}>
+              <span className="text-base">{m.icon}</span>
+              <span className="text-sm font-medium">{m.label}</span>
+              <span className="text-lg font-bold tabular-nums">{metricCounts[m.id] ?? 0}</span>
+            </button>
+          );
+        })}
+        <button onClick={() => setMetricsOpen(true)} className="inline-flex items-center gap-1 h-9 px-3 rounded-xl border border-dashed border-slate-300 text-sm text-slate-500 hover:border-violet-300 hover:text-violet-600">
+          ＋ {t("การ์ดเมตริกเอง", "Custom card")}
+        </button>
       </div>
 
       {/* สองคอลัมน์: ตาราง (ซ้าย 2/3) + แคมเปญที่กำลังทำ (ขวา 1/3) · ซ่อนแคมเปญ → ตารางเต็มกว้าง */}
@@ -277,6 +311,8 @@ export function OverviewDashboard({
       </div>
 
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} isAdmin={isAdmin} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
+      <MetricCardsManager open={metricsOpen} metrics={metrics ?? []} onChange={onMetricsChange} onClose={() => setMetricsOpen(false)}
+        typeOptions={typeOptions} brands={brands} statusOptions={statusOptions} priorityOptions={priorityOptions} />
       </div>
     </div>
   );
