@@ -57,15 +57,30 @@ async function resolvePrompt(admin: ReturnType<typeof supabaseAdmin>, taskId: st
   return NextResponse.json({ prompt, image_urls: imageUrls, error: null });
 }
 
-// รายละเอียด Platform ของ Parent SKU ที่ผูกกับงาน — ใช้ "ยืนยัน" ตอนส่งงานเขียนคำอธิบาย (ไม่ต้องแนบไฟล์)
+// ฟิลด์ Parent SKU ที่ "บังคับก่อนส่งงาน" ได้ (key → คอลัมน์ + ป้าย)
+const SUBMIT_FIELD_DEFS: { key: string; col: string; label: string }[] = [
+  { key: "description", col: "description", label: "รายละเอียด" },
+  { key: "introduction", col: "introduction", label: "เกริ่นนำ (Introduction)" },
+  { key: "english_description", col: "english_description", label: "รายละเอียด (อังกฤษ)" },
+  { key: "name_en", col: "name_en", label: "ชื่ออังกฤษ" },
+  { key: "name_th", col: "name_th", label: "ชื่อไทย" },
+  { key: "cover_image", col: "cover_image_r2_key", label: "รูปสินค้า" },
+];
+
+// รายละเอียด Platform ของ Parent SKU ที่ผูกกับงาน — ใช้ "ยืนยัน" ตอนส่งงาน + เช็คฟิลด์บังคับก่อนส่ง
 async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: string): Promise<NextResponse> {
   // SKU ที่ผูกกับงาน (ใช้ prefill ปลายทางรูปในป๊อปอัปส่งงาน)
   const { data: sl } = await admin.from("erp_creative_task_skus").select("sku_id").eq("task_id", taskId);
   const linkedSkuIds = ((sl ?? []) as { sku_id: string }[]).map((r) => r.sku_id).filter(Boolean);
+  // ฟิลด์บังคับก่อนส่ง (ค่ากลาง) → ป้ายที่จะส่งให้ client
+  const { data: cfg } = await admin.from("ui_config").select("value").eq("key", "creative_submit_required_fields").maybeSingle();
+  const reqKeys = Array.isArray((cfg as { value?: unknown } | null)?.value) ? ((cfg as { value: string[] }).value) : [];
+  const reqDefs = SUBMIT_FIELD_DEFS.filter((d) => reqKeys.includes(d.key));
+  const required = reqDefs.map((d) => ({ key: d.key, label: d.label }));
   const { data: pl } = await admin.from("erp_creative_task_parent_skus").select("parent_sku_id").eq("task_id", taskId);
   const pIds = ((pl ?? []) as { parent_sku_id: string }[]).map((r) => r.parent_sku_id).filter(Boolean);
-  if (!pIds.length) return NextResponse.json({ parents: [], linked_sku_ids: linkedSkuIds, error: null });
-  const { data } = await admin.from("parent_skus_v2").select("id, code, name_th, name_platform, introduction, description, english_description").in("id", pIds);
+  if (!pIds.length) return NextResponse.json({ parents: [], linked_sku_ids: linkedSkuIds, required, error: null });
+  const { data } = await admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, english_description, cover_image_r2_key").in("id", pIds);
   const parents = ((data ?? []) as Record<string, unknown>[]).map((p) => ({
     id: (p.id as string) ?? "",
     code: (p.code as string) ?? "",
@@ -75,8 +90,10 @@ async function platformPreview(admin: ReturnType<typeof supabaseAdmin>, taskId: 
     description: (p.description as string) ?? "",
     english_description: (p.english_description as string) ?? "",
     has_description: !!((p.description as string) ?? "").trim(),
+    // ฟิลด์บังคับที่ยังว่าง (ป้ายภาษาคน) — ใช้โชว์ * + บล็อกส่งงาน
+    missing: reqDefs.filter((d) => !String((p[d.col] as string) ?? "").trim()).map((d) => d.label),
   }));
-  return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, error: null });
+  return NextResponse.json({ parents, linked_sku_ids: linkedSkuIds, required, error: null });
 }
 
 const EDITABLE = new Set(["title", "description", "assignee_id", "status", "due_date", "required_before_next", "sort_order", "image_sync_targets"]);

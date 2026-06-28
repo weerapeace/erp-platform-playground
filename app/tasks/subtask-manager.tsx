@@ -344,7 +344,7 @@ function EditSubtaskModal({ sub, taskId, reload, pushToast, canManageAssignees, 
   );
 }
 
-type PlatformParent = { id: string; code: string; name_th: string; name_platform: string; introduction: string; description: string; english_description: string; has_description: boolean };
+type PlatformParent = { id: string; code: string; name_th: string; name_platform: string; introduction: string; description: string; english_description: string; has_description: boolean; missing: string[] };
 
 // ป๊อปอัปแนบงาน/ส่งงาน
 // - งานปกติ (รับรูป/ลิงก์): แนบ ≥1 ก่อนส่ง
@@ -368,6 +368,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
   const [extraParents, setExtraParents] = useState<PlatformParent[]>([]);  // Parent ที่เลือกเพิ่มเอง (นอกเหนือที่ผูกกับงาน)
   const [addParentOpen, setAddParentOpen] = useState(false);
   const [linkedSkuIds, setLinkedSkuIds] = useState<string[]>([]);          // SKU ที่ผูกกับงาน (ใช้ติ๊กล่วงหน้า)
+  const [requiredFields, setRequiredFields] = useState<{ key: string; label: string }[]>([]);   // ฟิลด์บังคับก่อนส่ง (ค่ากลาง)
   const [skuDraftImages, setSkuDraftImages] = useState<Record<string, { r2_key: string; file_name: string }[]>>({}); // รูปร่างต่อ SKU (เข้าตอนอนุมัติ)
   const syncInit = useRef(false);
   const [skuLb, setSkuLb] = useState<{ images: LightboxImage[]; index: number }>({ images: [], index: -1 }); // ดูรูปต่อ SKU เต็มจอ
@@ -381,6 +382,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
       const j = await apiFetch(`/api/creative-tasks/${taskId}/subtasks?platform=1`).then((r) => r.json());
       const ps = (j.parents as PlatformParent[]) ?? [];
       setParents(ps);
+      setRequiredFields((j.required as { key: string; label: string }[]) ?? []);
       setLinkedSkuIds((j.linked_sku_ids as string[]) ?? []);
       const entries = await Promise.all(ps.map(async (p) => {
         try {
@@ -442,7 +444,7 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     if (!p) return;
     const exists = (parents ?? []).some((x) => x.id === p.id) || extraParents.some((x) => x.id === p.id);
     if (!exists) {
-      setExtraParents((prev) => [...prev, { id: p.id, code: p.code, name_th: p.name, name_platform: "", introduction: "", description: "", english_description: "", has_description: false }]);
+      setExtraParents((prev) => [...prev, { id: p.id, code: p.code, name_th: p.name, name_platform: "", introduction: "", description: "", english_description: "", has_description: false, missing: [] }]);
       await reloadSkusFor(p.id);
     }
     const n = new Set(syncParentIds); n.add(p.id); setSyncParentIds(n); persistTargets(n, syncSkuIds);
@@ -466,7 +468,8 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
     setSkuDraftImages((prev) => { const next = { ...prev, [skuId]: (prev[skuId] ?? []).filter((_, i) => i !== idx) }; persistTargets(syncParentIds, syncSkuIds, next); return next; });
   };
 
-  const platformReady = parents !== null && parents.length > 0 && parents.every((p) => p.has_description);
+  // ส่งงานได้เมื่อ Parent SKU ทุกตัวกรอกฟิลด์บังคับ ("*") ครบ (ค่ากลางตั้งที่ /tasks/settings)
+  const platformReady = parents !== null && parents.length > 0 && parents.every((p) => (p.missing?.length ?? 0) === 0);
   const canPressSubmit = canSubmit && !busy && (platformConfirm ? platformReady : attachCount > 0);
 
   const addLink = async () => { if (!linkUrl.trim()) return; try { await addAttachment(taskId, { kind: "drive_link", label: linkLabel.trim() || undefined, url: linkUrl.trim(), subtask_id: sub.id }); setLinkLabel(""); setLinkUrl(""); await reload(); } catch (e) { pushToast("error", (e as Error).message); } };
@@ -503,27 +506,26 @@ function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, showLinks
         {platformConfirm ? (
           <div className="space-y-3">
             <p className="text-xs text-slate-500">{t("ตรวจรายละเอียด Platform ของสินค้าให้ครบก่อนส่ง (ไม่ต้องแนบไฟล์)", "Review the product platform details before submitting (no file needed)")}</p>
+            {requiredFields.length > 0 && <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">{t("ช่องบังคับก่อนส่ง", "Required before submit")}: {requiredFields.map((f) => <span key={f.key} className="text-rose-600 font-medium">{f.label}*</span>).reduce((a, b, i) => i ? [...a, ", ", b] : [b], [] as React.ReactNode[])}</p>}
             {parents === null ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p>
               : parents.length === 0 ? <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{t("งานนี้ยังไม่ได้ผูก Parent SKU — ผูกสินค้าก่อนส่งงาน", "No Parent SKU linked — link a product first")}</p>
-              : parents.map((p) => (
-                <div key={p.id || p.code} className={`rounded-lg border p-3 space-y-1.5 ${p.has_description ? "border-slate-200" : "border-rose-200 bg-rose-50/40"}`}>
+              : parents.map((p) => { const ok = (p.missing?.length ?? 0) === 0; return (
+                <div key={p.id || p.code} className={`rounded-lg border p-3 space-y-1.5 ${ok ? "border-slate-200" : "border-rose-200 bg-rose-50/40"}`}>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs bg-white border border-slate-200 px-1.5 py-0.5 rounded">{p.code}</span>
                     <span className="text-sm font-medium text-slate-700">{p.name_platform || p.name_th || "—"}</span>
-                    {p.has_description ? <span className="text-[10px] text-emerald-600 ml-auto">✓ {t("มีรายละเอียด", "Has details")}</span> : <span className="text-[10px] text-rose-600 ml-auto">⚠ {t("ยังไม่มีรายละเอียด", "Missing details")}</span>}
+                    {ok ? <span className="text-[10px] text-emerald-600 ml-auto">✓ {t("ครบ", "Complete")}</span> : <span className="text-[10px] text-rose-600 ml-auto">⚠ {t("ยังไม่ครบ", "Incomplete")}</span>}
                   </div>
+                  {!ok && <p className="text-xs text-rose-600">{t("ต้องกรอก", "Required")}: {p.missing.map((m) => `${m}*`).join(", ")}</p>}
                   {p.introduction && <p className="text-xs text-slate-500 whitespace-pre-wrap line-clamp-3">{p.introduction}</p>}
-                  {p.description
-                    ? <p className="text-xs text-slate-600 whitespace-pre-wrap line-clamp-6 border-t border-slate-100 pt-1.5">{p.description}</p>
-                    : <p className="text-xs text-rose-600 border-t border-rose-100 pt-1.5">{t("ยังไม่มี Description — กดปุ่มด้านล่างกรอกได้เลย", "No Description yet — use the button below to fill it")}</p>}
-                  <button onClick={() => setEditParentId(p.id)} disabled={!p.id} className={`w-full mt-1 h-8 rounded-md text-xs font-medium border disabled:opacity-50 ${p.has_description ? "text-violet-700 border-violet-200 hover:bg-violet-50" : "text-white bg-violet-600 border-violet-600 hover:bg-violet-700"}`}>
-                    ✏️ {p.has_description ? t("แก้รายละเอียดสินค้า", "Edit product details") : t("กรอกรายละเอียดสินค้า (รายละเอียด Platform)", "Fill product details (Platform)")}
+                  {p.description && <p className="text-xs text-slate-600 whitespace-pre-wrap line-clamp-6 border-t border-slate-100 pt-1.5">{p.description}</p>}
+                  <button onClick={() => setEditParentId(p.id)} disabled={!p.id} className={`w-full mt-1 h-8 rounded-md text-xs font-medium border disabled:opacity-50 ${ok ? "text-violet-700 border-violet-200 hover:bg-violet-50" : "text-white bg-violet-600 border-violet-600 hover:bg-violet-700"}`}>
+                    ✏️ {ok ? t("แก้รายละเอียดสินค้า", "Edit product details") : t("กรอกข้อมูลสินค้าที่ขาด", "Fill missing product details")}
                   </button>
-                  {/* สร้าง/แก้ SKU ทำในตัวแก้สินค้า (ปุ่มด้านบน) — ที่นี่แค่ตรวจคำอธิบาย */}
-                  <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-2 mt-1">💡 {t('ถ้าต้องการสร้าง/แก้ SKU ของสินค้านี้ ให้กดปุ่ม "กรอกรายละเอียดสินค้า" ด้านบนได้เลย', 'To create/edit SKUs for this product, use the "Fill product details" button above')}</p>
+                  <p className="text-[11px] text-slate-400 border-t border-slate-100 pt-2 mt-1">💡 {t('ถ้าต้องการสร้าง/แก้ SKU ของสินค้านี้ ให้กดปุ่ม "แก้รายละเอียดสินค้า" ด้านบนได้เลย', 'To create/edit SKUs for this product, use the button above')}</p>
                 </div>
-              ))}
-            {parents !== null && parents.length > 0 && !platformReady && <p className="text-xs text-rose-600">{t("ต้องมีรายละเอียด (Description) ครบทุกสินค้าก่อนถึงจะส่งงานได้", "All products need a Description before you can submit")}</p>}
+              ); })}
+            {parents !== null && parents.length > 0 && !platformReady && <p className="text-xs text-rose-600">{t("กรอกช่องบังคับ (*) ให้ครบทุกสินค้าก่อนถึงจะส่งงานได้", "Fill all required (*) fields on every product before you can submit")}</p>}
           </div>
         ) : (
           <>

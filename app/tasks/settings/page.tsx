@@ -16,12 +16,13 @@ import { STATUS_COLOR_OPTIONS, statusColor } from "@/lib/creative-status-colors"
 import { ColorInput } from "@/components/color-picker";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { loadMySubView, saveMySubView, DEFAULT_MYSUB_VIEW, type MySubView } from "../my-subtasks-view";
+import { SUBMIT_REQUIRED_FIELD_OPTIONS, getSubmitRequiredFields, saveSubmitRequiredFields } from "../data";
 import { useT } from "@/components/i18n";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
-type Tab = "perm" | "task_type" | "platform" | "status" | "transition" | "mysub";
+type Tab = "perm" | "task_type" | "platform" | "status" | "transition" | "mysub" | "submit";
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -49,6 +50,7 @@ export default function TaskSettingsPage() {
             <TabBtn active={tab === "status"} onClick={() => setTab("status")}>🚦 {t("สถานะ", "Status")}</TabBtn>
             <TabBtn active={tab === "transition"} onClick={() => setTab("transition")}>🔀 {t("เส้นทาง", "Transitions")}</TabBtn>
             <TabBtn active={tab === "mysub"} onClick={() => setTab("mysub")}>🧩 {t("งานย่อยของฉัน", "My subtasks")}</TabBtn>
+            <TabBtn active={tab === "submit"} onClick={() => setTab("submit")}>📤 {t("ส่งงาน", "Submit")}</TabBtn>
           </div>
         )}
       </div>
@@ -63,6 +65,7 @@ export default function TaskSettingsPage() {
           : tab === "status" ? <StatusManager showToast={showToast} />
           : tab === "transition" ? <TransitionManager showToast={showToast} />
           : tab === "mysub" ? <MySubViewManager showToast={showToast} />
+          : tab === "submit" ? <SubmitRequiredManager showToast={showToast} />
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
       </div>
 
@@ -408,6 +411,37 @@ function TransitionManager({ showToast }: { showToast: (m: string) => void }) {
           <button onClick={add} className="h-8 px-3 bg-violet-600 text-white text-sm rounded-md hover:bg-violet-700">{t("เพิ่ม", "Add")}</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── ตั้งค่า "ฟิลด์ Parent SKU ที่ต้องกรอกก่อนส่งงาน" (ค่ากลาง) ──
+function SubmitRequiredManager({ showToast }: { showToast: (m: string) => void }) {
+  const t = useT();
+  const [fields, setFields] = useState<string[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { getSubmitRequiredFields().then(setFields).catch(() => setFields([])); }, []);
+  const toggle = (key: string) => setFields((f) => (f ?? []).includes(key) ? (f ?? []).filter((x) => x !== key) : [...(f ?? []), key]);
+  const save = async () => { if (!fields) return; setSaving(true); try { await saveSubmitRequiredFields(fields); showToast(t("บันทึกแล้ว", "Saved")); } catch (e) { showToast((e as Error).message); } finally { setSaving(false); } };
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl">
+      <h2 className="text-lg font-semibold text-slate-800">📤 {t("ฟิลด์บังคับก่อนส่งงาน", "Required before submit")}</h2>
+      <p className="text-sm text-slate-500 mt-1 mb-4">{t("เลือกฟิลด์ของ Parent SKU ที่ต้องกรอกครบก่อน — ระบบจะใส่ * และกดส่งงานไม่ได้จนกว่าจะกรอกครบ (ใช้ตอนส่งงานเขียนคำอธิบาย/ตรวจรายละเอียด Platform)", "Pick Parent SKU fields that must be filled — they get a * and submit is blocked until complete")}</p>
+      {fields === null ? <p className="text-sm text-slate-400">{t("กำลังโหลด...", "Loading...")}</p> : (
+        <>
+          <div className="space-y-2">
+            {SUBMIT_REQUIRED_FIELD_OPTIONS.map((o) => (
+              <label key={o.key} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={fields.includes(o.key)} onChange={() => toggle(o.key)} className="h-4 w-4 rounded border-slate-300 text-violet-600" />
+                {o.label}
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-end mt-4">
+            <button onClick={save} disabled={saving} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -169,6 +169,23 @@ export async function deleteTask(id: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-tasks/${id}`, { method: "DELETE" }));
 }
 
+// ---- ฟิลด์ Parent SKU ที่ต้องกรอกก่อนส่งงาน (ค่ากลาง) ----
+export const SUBMIT_REQUIRED_FIELD_OPTIONS: { key: string; label: string }[] = [
+  { key: "description", label: "รายละเอียด (Description)" },
+  { key: "introduction", label: "เกริ่นนำ (Introduction)" },
+  { key: "english_description", label: "รายละเอียด (อังกฤษ)" },
+  { key: "name_en", label: "ชื่ออังกฤษ (Name En)" },
+  { key: "name_th", label: "ชื่อไทย" },
+  { key: "cover_image", label: "รูปสินค้า" },
+];
+export async function getSubmitRequiredFields(): Promise<string[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-submit-settings"));
+  return (j.fields as string[]) ?? [];
+}
+export async function saveSubmitRequiredFields(fields: string[]): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/creative-submit-settings", { method: "PUT", body: JSON.stringify({ fields }) }));
+}
+
 // ---- คิวรอตรวจ/อนุมัติ (งานย่อยที่ส่งมาแล้ว) ----
 export type ReviewQueueItem = {
   id: string; title: string; updated_at: string;
