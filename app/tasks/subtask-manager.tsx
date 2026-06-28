@@ -136,6 +136,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
   const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
   const [editOpen, setEditOpen] = useState(false); // ป๊อปอัปแก้ไขงานย่อย
+  const [cardLb, setCardLb] = useState(-1); // ดูรูปบนการ์ดเต็มจอ
   const [busy, setBusy] = useState(false);
   const attachCount = sub.attachments?.length ?? 0;
   const st = sub.status;
@@ -150,6 +151,13 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
   const hasPrompt = (ty?.has_copy_prompt ?? cfg.has_copy_prompt) === true;
   const imageAtts = (sub.attachments ?? []).filter((a) => a.kind === "image" && a.r2_key);
   const linkAtts = (sub.attachments ?? []).filter((a) => a.kind !== "image");
+  // รูปที่ผูกเข้าสินค้า (จะเข้าแกลเลอรี SKU ตอนอนุมัติ) — โชว์บนการ์ดด้วย
+  const skuImgKeys = Object.values((sub.image_sync_targets?.sku_images ?? {}) as Record<string, string[]>).flat().filter(Boolean);
+  // รวมรูปทั้งหมดบนการ์ด (รูปงาน + รูปเข้าสินค้า) ไว้กดดูเต็มจอ/เลื่อน
+  const cardImages: LightboxImage[] = [
+    ...imageAtts.map((a) => ({ url: `/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=1600`, label: a.file_name ?? t("รูปแนบงาน", "Work image") })),
+    ...skuImgKeys.map((k) => ({ url: `/api/r2-image?key=${encodeURIComponent(k)}&w=1600`, label: t("รูปเข้าสินค้า", "Product image") })),
+  ];
   const canSubmit = st === "in_progress"; // ส่งงานได้เฉพาะตอนกำลังทำ
   // งานที่ไม่รับรูป+ลิงก์ (เช่น เขียนคำอธิบาย) → ส่งงานโดยยืนยันรายละเอียด Platform แทนการแนบไฟล์
   const platformConfirm = !showImages && !showLinks;
@@ -200,6 +208,7 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
         {sub.required_before_next && <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 rounded px-1">{t("ต้องเสร็จก่อน", "Must finish first")}</span>}
         <div className="flex -space-x-1">{sub.assignees.slice(0, 3).map((a) => <AssigneeAvatar key={a.id} a={a} size={20} />)}</div>
         {attachCount > 0 && <span className="text-[10px] text-slate-400">📎{attachCount}</span>}
+        <button onClick={() => setEditOpen(true)} title={t("แก้ไขงานย่อย", "Edit subtask")} className="shrink-0 text-slate-300 hover:text-violet-600 text-xs">✏️</button>
         <button onClick={() => setOpen((o) => !o)} className="text-slate-300 text-xs">{open ? "▲" : "▼"}</button>
       </div>
       {open && (
@@ -226,9 +235,22 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
           {/* ③ ไฟล์แนบ (compact) — โชว์เฉพาะที่มีอยู่ · ฟอร์มแนบ/ส่งงาน/ยืนยันไปอยู่ในป๊อปอัป */}
           <div className="space-y-2">
             {imageAtts.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {imageAtts.slice(0, 8).map((a) => <img key={a.id} src={`/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=120`} alt={a.file_name ?? ""} className="h-12 w-12 rounded object-cover border border-slate-200" />)}
-                {imageAtts.length > 8 && <span className="self-center text-[11px] text-slate-400">+{imageAtts.length - 8}</span>}
+              <div>
+                <p className="text-[11px] text-slate-400 mb-1">{t("รูปแนบงาน", "Work images")}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {imageAtts.map((a, i) => <img key={a.id} src={`/api/r2-image?key=${encodeURIComponent(a.r2_key as string)}&w=160`} alt={a.file_name ?? ""} onClick={() => setCardLb(i)} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-slate-200 cursor-zoom-in" />)}
+                </div>
+              </div>
+            )}
+            {/* รูปเข้าสินค้า (จะเข้าแกลเลอรี SKU ตอนอนุมัติ) — โชว์บนการ์ด + กดดูเต็มจอ */}
+            {skuImgKeys.length > 0 && (
+              <div>
+                <p className="text-[11px] text-slate-400 mb-1">📦 {t("รูปเข้าสินค้า", "Product images")}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {skuImgKeys.map((k, j) => <img key={k} src={`/api/r2-image?key=${encodeURIComponent(k)}&w=160`} alt="" onClick={() => setCardLb(imageAtts.length + j)} title={t("กดดูเต็มจอ", "Click to view full")} className="h-12 w-12 rounded object-cover border border-amber-200 cursor-zoom-in" />)}
+                </div>
               </div>
             )}
             {linkAtts.length > 0 && (
@@ -242,12 +264,10 @@ export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false
                 : (platformConfirm ? `🔎 ${t("ดูรายละเอียด Platform", "View platform details")}` : `📎 ${attachCount > 0 ? t("จัดการไฟล์แนบ", "Manage attachments") : t("แนบงาน", "Attach work")}`)}
             </button>
           </div>
-          {/* ปุ่มแก้ไขงานย่อย (รายละเอียด/ผู้รับผิดชอบ/ตั้งค่าต่างๆ ไปแก้ในป๊อปอัป) */}
-          <div className="flex justify-end">
-            <button onClick={() => setEditOpen(true)} className="text-xs text-slate-500 border border-slate-200 rounded-md px-2 py-1 hover:bg-slate-50">✏️ {t("แก้ไขงานย่อย", "Edit subtask")}</button>
-          </div>
         </div>
       )}
+      {/* ดูรูปบนการ์ดเต็มจอ + เลื่อน (รูปงาน + รูปเข้าสินค้า) */}
+      <ImageLightbox images={cardImages} index={cardLb} onClose={() => setCardLb(-1)} onIndex={setCardLb} />
       {workOpen && <SubmitWorkModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} showImages={showImages} showLinks={showLinks} canSubmit={canSubmit} platformConfirm={platformConfirm} onClose={() => setWorkOpen(false)} />}
       {editOpen && <EditSubtaskModal sub={sub} taskId={taskId} reload={reload} pushToast={pushToast} canManageAssignees={canManageAssignees} onClose={() => setEditOpen(false)} />}
     </div>
