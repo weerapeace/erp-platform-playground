@@ -10,7 +10,8 @@ import { useMemo, useState } from "react";
 import { useT } from "@/components/i18n";
 import { DataTable } from "@/components/data-table";
 import type { ColumnDef } from "@tanstack/react-table";
-import { isTerminal, statusMeta } from "./use-statuses";
+import { OverviewKanban } from "./overview-kanban";
+import { isTerminal, statusMeta, type Status } from "./use-statuses";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
 import { isOverdue, updateTask, PRIORITY_META, type CreativeTask, type Campaign, type MySubtask, type BrandOption, type CreativePriority } from "./data";
 import { matchMetric, type MetricDef } from "./metrics";
@@ -29,7 +30,7 @@ type Counts = { total: number; mine: number; overdue: number; review: number };
 
 export function OverviewDashboard({
   userName, counts, myTasks, mySubs, campaigns, tasks, brands, columns, filter, isAdmin,
-  theme, canUpload, onThemeChange,
+  theme, canUpload, onThemeChange, statuses, onMoveStatus, onSetField,
   onFilter, onOpenTask, onCreate, onOpenKnowledge, onChanged, metrics, onMetricsChange,
 }: {
   userName?: string;
@@ -45,6 +46,9 @@ export function OverviewDashboard({
   theme: OverviewTheme;
   canUpload: boolean;
   onThemeChange: (t: OverviewTheme) => void;
+  statuses: Status[];
+  onMoveStatus: (taskId: string, toKey: string) => void;
+  onSetField: (taskId: string, field: string, value: string | null) => void;
   onFilter: (f: OvFilter) => void;
   onOpenTask: (id: string) => void;
   onCreate: () => void;
@@ -59,6 +63,8 @@ export function OverviewDashboard({
   const [activeMetric, setActiveMetric] = useState<string | null>(null);   // การ์ดเมตริกที่กดอยู่ (กรองตาราง)
   const [typeFilter, setTypeFilter] = useState("");    // ประเภทงาน (Tab) — "" = ทั้งหมด
   const [brandFilter, setBrandFilter] = useState("");  // แบรนด์ (ชิป) — "" = ทั้งหมด
+  const [kanbanSearch, setKanbanSearch] = useState(""); // ค้นหาในบอร์ด Kanban
+  const setKanbanView = (v: "kanban" | "table") => onThemeChange({ ...theme, kanban: { ...theme.kanban, view: v } });
 
   // งานของฉัน = งานหลักของฉัน ∪ งานที่มีงานย่อย (subtask) ของฉัน
   const myTaskIds = useMemo(() => {
@@ -98,6 +104,13 @@ export function OverviewDashboard({
     return arr;
   }, [activeMetricDef, filter, typeFilter, brandFilter, tasks, myTaskIds, metricCtx]);
   const filterLabel = activeMetricDef ? activeMetricDef.label : filter === "mine" ? t("งานของฉัน", "My tasks") : filter === "review" ? t("รอตรวจ/อนุมัติ", "In review") : filter === "overdue" ? t("เกินกำหนด", "Overdue") : t("งานทั้งหมด", "All tasks");
+
+  // Kanban: กรองข้อความเพิ่ม (เลขที่/ชื่อ/ผู้รับผิดชอบ/แบรนด์/SKU)
+  const kanbanTasks = useMemo(() => {
+    const q = kanbanSearch.trim().toLowerCase();
+    if (!q) return filteredTasks;
+    return filteredTasks.filter((tk) => `${tk.task_no ?? ""} ${tk.title} ${tk.assignee_label ?? ""} ${tk.brand_label ?? ""} ${tk.sku_code ?? ""}`.toLowerCase().includes(q));
+  }, [filteredTasks, kanbanSearch]);
 
   // แก้หลายงานพร้อมกัน (bulk) — เฉพาะฟิลด์ที่แก้ตรงได้ปลอดภัย (ไม่รวมสถานะ เพราะต้องผ่าน workflow)
   const bulkEditFields = useMemo(() => [
@@ -254,20 +267,44 @@ export function OverviewDashboard({
           </div>
           )}
 
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-            <DataTable<CreativeTask>
-              data={filteredTasks} columns={columns}
-              title={`${filterLabel} (${filteredTasks.length})`}
-              emptyMessage={t("ไม่มีงานในตัวกรองนี้", "No tasks in this filter")}
-              searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
-              searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
-              tableId="creative-tasks" exportFilename="งาน-creative"
-              selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
-              enableCards
-              cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
-              onRowClick={(row) => onOpenTask(row.id)}
-            />
+          {/* สลับมุมมอง: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง — เก็บไว้ในธีมของฉัน */}
+          <div className="flex items-center justify-end">
+            <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+              {([["kanban", "📋", t("การ์ด", "Cards")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
+                const on = theme.kanban.view === v;
+                return <button key={v} onClick={() => setKanbanView(v)} style={on ? { background: theme.accent } : undefined}
+                  className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
+              })}
+            </div>
           </div>
+
+          {theme.kanban.view === "kanban" ? (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
+                <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
+                <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
+                  placeholder={t("ค้นหาในบอร์ด...", "Search board...")}
+                  className="h-8 w-44 max-w-[50%] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+              </div>
+              <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent}
+                onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <DataTable<CreativeTask>
+                data={filteredTasks} columns={columns}
+                title={`${filterLabel} (${filteredTasks.length})`}
+                emptyMessage={t("ไม่มีงานในตัวกรองนี้", "No tasks in this filter")}
+                searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
+                searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
+                tableId="creative-tasks" exportFilename="งาน-creative"
+                selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
+                enableCards
+                cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
+                onRowClick={(row) => onOpenTask(row.id)}
+              />
+            </div>
+          )}
         </div>
 
         {/* แคมเปญที่กำลังทำ */}

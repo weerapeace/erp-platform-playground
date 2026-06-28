@@ -18,7 +18,10 @@ export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; 
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
 export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
-export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string };
+// มุมมองงานหลัก: Kanban การ์ด (ลากเปลี่ยนสถานะ) หรือ ตาราง · ปรับการจัดกลุ่ม + ข้อมูลบนการ์ดได้
+export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
+export type KanbanTheme = { view: "kanban" | "table"; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean };
+export type OverviewTheme = { hero: HeroTheme; cards: Record<CardKey, CardTheme>; page: PageTheme; show: SectionsTheme; accent: string; kanban: KanbanTheme };
 
 export const DEFAULT_THEME: OverviewTheme = {
   hero: { mode: "gradient", color1: "#7c3aed", color2: "#4f46e5", imageUrl: null, title: null, subtitle: null, textColor: "#ffffff" },
@@ -31,6 +34,7 @@ export const DEFAULT_THEME: OverviewTheme = {
   page: { mode: "none", color: "#f8fafc", imageUrl: null },
   show: { shortcuts: true, campaigns: true, filters: true },
   accent: "#7c3aed",   // สีหลัก (ปุ่ม/ไฮไลต์) ของหน้า
+  kanban: { view: "kanban", groupBy: "status", cover: true, brand: true, assignee: true, due: true, priority: true, progress: true },
 };
 
 // สีกล่องการ์ด (คลาส static — ไม่โดน purge) box=พื้น/ขอบ/ตัวอักษร · ring=กรอบเลือก · swatch=ปุ่มเลือกสี
@@ -53,7 +57,7 @@ export function mergeTheme(v: unknown): OverviewTheme {
   const o = (v ?? {}) as Partial<OverviewTheme>;
   const cards = {} as Record<CardKey, CardTheme>;
   for (const k of CARD_KEYS) cards[k] = { ...DEFAULT_THEME.cards[k], ...(o.cards?.[k] ?? {}) };
-  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent };
+  return { hero: { ...DEFAULT_THEME.hero, ...(o.hero ?? {}) }, cards, page: { ...DEFAULT_THEME.page, ...(o.page ?? {}) }, show: { ...DEFAULT_THEME.show, ...(o.show ?? {}) }, accent: (o.accent as string) ?? DEFAULT_THEME.accent, kanban: { ...DEFAULT_THEME.kanban, ...(o.kanban ?? {}) } };
 }
 
 // สไตล์พื้นหลัง Hero ตามธีม
@@ -85,6 +89,7 @@ function makePreset(c1: string, c2: string, pageColor: string | null, cardColors
     page: pageColor ? { mode: "color", color: pageColor, imageUrl: null } : { mode: "none", color: "#f8fafc", imageUrl: null },
     show: { ...DEFAULT_THEME.show },
     accent: c1,   // สีหลักตามธีม
+    kanban: { ...DEFAULT_THEME.kanban },
   };
 }
 
@@ -150,6 +155,7 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
   const setCard = (k: CardKey, p: Partial<CardTheme>) => onChange({ ...theme, cards: { ...theme.cards, [k]: { ...theme.cards[k], ...p } } });
   const setPage = (p: Partial<PageTheme>) => onChange({ ...theme, page: { ...theme.page, ...p } });
   const setShow = (p: Partial<SectionsTheme>) => onChange({ ...theme, show: { ...theme.show, ...p } });
+  const setKanban = (p: Partial<KanbanTheme>) => onChange({ ...theme, kanban: { ...theme.kanban, ...p } });
 
   const doUpload = async (file: File, apply: (key: string) => void, tag: string) => {
     setBusy(tag); setErr(null);
@@ -298,6 +304,42 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
             </label>
           ))}
         </div>
+      </section>
+
+      {/* ===== มุมมองงานหลัก (Kanban / ตาราง) ===== */}
+      <section className="mb-5">
+        <div className="text-sm font-semibold text-slate-700 mb-2">{t("มุมมองงานหลัก", "Main task view")}</div>
+        {/* เลือกแบบ Kanban / ตาราง */}
+        <div className="flex items-center gap-2 mb-3">
+          {([["kanban", t("📋 การ์ด Kanban", "📋 Kanban cards")], ["table", t("▦ ตาราง", "▦ Table")]] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setKanban({ view: m })} className={`h-8 px-3 text-sm rounded-lg border ${theme.kanban.view === m ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+          ))}
+        </div>
+        {theme.kanban.view === "kanban" && (
+          <>
+            {/* จัดกลุ่มคอลัมน์ */}
+            <div className="mb-2">
+              <div className="text-xs text-slate-500 mb-1">{t("จัดกลุ่มคอลัมน์ตาม", "Group columns by")}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {([["status", t("สถานะ", "Status")], ["brand", t("แบรนด์", "Brand")], ["priority", t("ความสำคัญ", "Priority")], ["task_type", t("ประเภทงาน", "Task type")]] as const).map(([g, label]) => (
+                  <button key={g} onClick={() => setKanban({ groupBy: g })} className={`h-8 px-3 text-sm rounded-lg border ${theme.kanban.groupBy === g ? "bg-violet-50 border-violet-300 text-violet-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">{t("ลากการ์ดข้ามคอลัมน์ = เปลี่ยนค่านั้น (สถานะผ่าน workflow)", "Drag a card across columns to change that value (status via workflow)")}</p>
+            </div>
+            {/* ข้อมูลบนการ์ด */}
+            <div>
+              <div className="text-xs text-slate-500 mb-1">{t("ข้อมูลบนการ์ด", "Card fields")}</div>
+              <div className="flex flex-wrap gap-3">
+                {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["progress", t("ความคืบหน้า", "Progress")]] as const).map(([k, label]) => (
+                  <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                    <input type="checkbox" checked={theme.kanban[k]} onChange={(e) => setKanban({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       {/* ===== Cards ===== */}

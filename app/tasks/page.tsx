@@ -32,7 +32,7 @@ import { taskTypeLabel } from "./use-options";
 import { useCreativeStatuses, transitionsFrom, isTerminal } from "./use-statuses";
 import {
   PRIORITY_RANK, isOverdue,
-  listTasks, deleteTask,
+  listTasks, deleteTask, updateTask,
   listCampaigns, listBrands, listMySubtasks,
   type CreativeTask, type CreativeStatus, type CreativePriority,
   type Campaign, type BrandOption, type MySubtask,
@@ -270,6 +270,9 @@ export default function TasksPage() {
                 theme={ovTheme}
                 canUpload={can("files.upload")}
                 onThemeChange={saveTheme}
+                statuses={statuses}
+                onMoveStatus={(taskId, to) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to); }}
+                onSetField={async (taskId, field, value) => { try { await updateTask(taskId, { [field]: value }); await reload(); } catch (e) { pushToast("error", (e as Error).message); } }}
                 isAdmin={user?.role === "admin"}
                 onOpenTask={(id) => setDetailId(id)}
                 onCreate={openCreate}
