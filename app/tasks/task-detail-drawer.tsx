@@ -297,7 +297,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
               {/* เด้งเตือนเล็ก ๆ (ไม่ใช่ popup) หลังแนบงาน → ถามว่าส่งงานเลยไหม */}
               {submitNudge && forwardAction && (
                 <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800">
-                  <span className="flex-1">📤 {t("แนบงานแล้ว — ต้องการส่งงานเลยไหม?", "Work attached — submit it now?")}</span>
+                  <span className="flex-1">📤 {t("แนบงานแล้ว — ", "Work attached — ")}{forwardAction.label}{t("เลยไหม?", " now?")}</span>
                   <button disabled={busy} onClick={async () => { setSubmitNudge(false); await handleMove(forwardAction.to_key); }} className="h-7 px-3 text-xs font-medium text-white bg-amber-500 rounded-md hover:bg-amber-600 disabled:opacity-50 shrink-0">{forwardAction.label}</button>
                   <button onClick={() => setSubmitNudge(false)} className="h-7 px-2 text-xs text-amber-700 hover:underline shrink-0">{t("ไว้ก่อน", "Later")}</button>
                 </div>
