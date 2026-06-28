@@ -187,6 +187,7 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
   const parentImg = parentList.find((p) => p.image_key)?.image_key ?? null;
   const coverKey = parentImg || d.cover_image_r2_key;
   const coverFromParent = !!parentImg;
+  const hasSubtasks = (d.subtasks?.length ?? 0) > 0;   // มีงานย่อย → ซ่อนกล่องแนบระดับงานหลัก
 
   return (
     <>
@@ -210,27 +211,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {/* บนสุด (เต็มกว้าง): รูปปก + สถานะ + ความคืบหน้า */}
+          {/* บนสุด: สถานะ + ความคืบหน้า (รูปปกย้ายไปคอลัมน์ขวา) */}
           <div className="p-5 pb-4 space-y-4">
-            {/* รูปปกของงาน — ไม่มี = ใช้รูปจาก Parent SKU · กดเปลี่ยน/เพิ่มได้ */}
-            <div>
-              {coverKey ? (
-                <div className="relative rounded-xl overflow-hidden border border-slate-200">
-                  <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=900`} alt="" className="w-full max-h-56 object-cover" />
-                  {coverFromParent && <span className="absolute top-2 left-2 text-[10px] bg-black/55 text-white px-1.5 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
-                  <button type="button" onClick={() => setCoverEdit((v) => !v)} className="absolute top-2 right-2 text-xs bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded-md px-2 py-0.5">✎ {t("เปลี่ยนรูปปก", "Change cover")}</button>
-                </div>
-              ) : (
-                <button type="button" onClick={() => setCoverEdit(true)} className="w-full h-20 rounded-xl border-2 border-dashed border-slate-200 text-sm text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-colors">🖼️ {t("เพิ่มรูปปก", "Add cover image")}</button>
-              )}
-              {coverEdit && (
-                <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-3 space-y-2">
-                  <p className="text-[11px] text-slate-500">{t("รูปปกสำรอง — ถ้า Parent SKU มีรูป จะใช้รูป Parent SKU แทน", "Fallback cover — Parent SKU image takes priority when it has one")}</p>
-                  <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
-                  <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-xs text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
-                </div>
-              )}
-            </div>
             {/* status row */}
             <div className="flex items-center gap-2 flex-wrap">
               <StatusBadge status={d.status} />
@@ -285,7 +267,8 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                 </div>
               )}
 
-              {/* รูปแนบ (อัปโหลด + ย่อ ≤800px) + เลือกจากคลังกลาง (DAM) */}
+              {/* รูปแนบ + ลิงก์แนบ ระดับงาน — ซ่อนเมื่อมีงานย่อย (ไฟล์/งานไปอยู่ที่งานย่อยแทน) */}
+              {!hasSubtasks && (<>
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{t("รูปแนบ", "Images")}</p>
@@ -315,10 +298,30 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
                   <button onClick={addLink} className="h-9 px-3 text-sm font-medium text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 shrink-0">{t("แนบ", "Attach")}</button>
                 </div>
               </div>
+              </>)}
             </div>
 
             {/* ===== ขวา: ข้อมูลงาน + ความคิดเห็น ===== */}
             <div className={`${twoCol ? "w-[340px] border-l" : "w-full border-t"} shrink-0 p-5 space-y-3 bg-slate-50/40 border-slate-100`}>
+              {/* รูปปก (เล็ก) — โชว์ทั้งโหมดดู/แก้ */}
+              <div>
+                {coverKey ? (
+                  <div className="relative rounded-lg overflow-hidden border border-slate-200">
+                    <img src={`/api/r2-image?key=${encodeURIComponent(coverKey)}&w=480`} alt="" className="w-full h-28 object-cover" />
+                    {coverFromParent && <span className="absolute top-1.5 left-1.5 text-[9px] bg-black/55 text-white px-1 py-0.5 rounded">{t("รูปจาก Parent SKU", "From Parent SKU")}</span>}
+                    <button type="button" onClick={() => setCoverEdit((v) => !v)} title={t("เปลี่ยนรูปปก", "Change cover")} className="absolute top-1.5 right-1.5 text-[10px] bg-white/90 hover:bg-white text-slate-700 border border-slate-200 rounded px-1.5 py-0.5">✎</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setCoverEdit(true)} className="w-full h-16 rounded-lg border-2 border-dashed border-slate-200 text-xs text-slate-400 hover:border-violet-300 hover:text-violet-500 transition-colors">🖼️ {t("เพิ่มรูปปก", "Add cover")}</button>
+                )}
+                {coverEdit && (
+                  <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50/30 p-2 space-y-2">
+                    <p className="text-[10px] text-slate-500">{t("รูปปกสำรอง — ถ้า Parent SKU มีรูป จะใช้รูป Parent SKU แทน", "Fallback cover — Parent SKU image takes priority")}</p>
+                    <ImageInput value={d.cover_image_r2_key ?? null} onChange={(k) => saveQuick({ cover_image_r2_key: k })} folder="creative-tasks" />
+                    <div className="flex justify-end"><button type="button" onClick={() => setCoverEdit(false)} className="text-[11px] text-slate-500 hover:underline">{t("เสร็จ", "Done")}</button></div>
+                  </div>
+                )}
+              </div>
               {editing && ef ? (
                 <div className="border border-violet-200 rounded-lg p-3 bg-violet-50/30 space-y-3">
                   <div className="grid grid-cols-2 gap-3">

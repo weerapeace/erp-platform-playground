@@ -132,7 +132,7 @@ export function AddSubtaskForm({ onAdd, pushToast }: { onAdd: (body: { title: st
 // การ์ดงานย่อย — สถานะเป็นปุ่มกด (เริ่ม→ส่งงาน→อนุมัติ) + ผู้รับผิดชอบ + ไฟล์แนบ
 export function SubtaskCard({ sub, taskId, reload, pushToast, canApprove = false, canManageAssignees = false, typeMeta = {} }: { sub: CreativeSubtask; taskId: string; reload: () => Promise<void>; pushToast: ToastFn; canApprove?: boolean; canManageAssignees?: boolean; typeMeta?: TypeMeta }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);   // กาง (ขยาย) งานย่อยเป็นค่าเริ่มต้น
   const [workOpen, setWorkOpen] = useState(false); // ป๊อปอัปแนบงาน/ส่งงาน
   const [editOpen, setEditOpen] = useState(false); // ป๊อปอัปแก้ไขงานย่อย
   const [busy, setBusy] = useState(false);

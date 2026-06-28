@@ -189,15 +189,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // ⑦ "เริ่มงาน" = คนกดเป็นผู้รับผิดชอบ "คนเดียว" (ลบคนอื่นออก — งานย่อย 1 งาน = ผู้ทำ 1 คน)
   //    "ยกเลิกเริ่มงาน" (กลับเป็นยังไม่เริ่ม) = เคลียร์ผู้รับผิดชอบ · ส่งงาน/อนุมัติแล้วยกเลิกไม่ได้
   if (patch.status === "in_progress" && user?.id && !Array.isArray(body.assignee_ids)) {
+    // เริ่มงาน = คนกดเป็นผู้ทำคนเดียว (ลบคนอื่น) · คง assignee_id = "ผู้รับผิดชอบเริ่มต้น" ที่หัวหน้ามอบไว้
     await setSubtaskAssignees(admin, subtaskId, [user.id]);
-    patch.assignee_id = user.id;   // sync ฟิลด์เดี่ยว legacy
   } else if (patch.status === "todo" && user?.id && !Array.isArray(body.assignee_ids)) {
-    const { data: cur } = await admin.from("erp_creative_subtasks").select("status").eq("id", subtaskId).eq("task_id", id).maybeSingle();
+    const { data: cur } = await admin.from("erp_creative_subtasks").select("status, assignee_id").eq("id", subtaskId).eq("task_id", id).maybeSingle();
     const curStatus = (cur as { status?: string } | null)?.status;
     if (curStatus === "submitted" || curStatus === "approved")
       return NextResponse.json({ error: "ส่งงานแล้ว ยกเลิกการเริ่มงานไม่ได้" }, { status: 400 });
-    await setSubtaskAssignees(admin, subtaskId, []);
-    patch.assignee_id = null;
+    // ยกเลิกเริ่ม = กลับไปเป็น "ผู้รับผิดชอบเริ่มต้น" (assignee_id ที่หัวหน้ามอบ) ถ้ามี · ไม่มีก็ว่าง
+    const def = (cur as { assignee_id?: string | null } | null)?.assignee_id ?? null;
+    await setSubtaskAssignees(admin, subtaskId, def ? [def] : []);
   }
   let row: Record<string, unknown> | null = null;
   if (Object.keys(patch).length > 1) {
