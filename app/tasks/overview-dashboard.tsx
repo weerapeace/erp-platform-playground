@@ -246,110 +246,118 @@ export function OverviewDashboard({
         )
       )}
 
-      {/* ── Section 1 — ตัวกรอง: ประเภทงาน + แบรนด์ ── */}
-      {theme.show.filters && (
-        <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 space-y-2">
-          <div className="text-xs font-semibold text-slate-500">🔎 {t("ตัวกรอง", "Filters")}</div>
-          <div className="flex items-center gap-1 overflow-x-auto pb-1">
-            <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} accent={theme.accent} />
-            {typeOptions.map((o) => (
-              <FilterTab key={o.value} active={typeFilter === o.value} onClick={() => setTypeFilter(o.value)} label={o.label} accent={theme.accent} />
-            ))}
+      {/* ── 3 คอลัมน์เรียงข้างกัน: ตัวกรอง (แคบ) | Kanban/ตาราง (กว้าง) | แคมเปญ (แคบ) ── */}
+      <div className="flex flex-col lg:flex-row gap-4 items-stretch">
+        {/* คอลัมน์ 1 — ตัวกรอง: ประเภทงาน + แบรนด์ (แนวตั้ง) */}
+        {theme.show.filters && (
+          <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 lg:w-52 lg:shrink-0 space-y-3">
+            <div className="text-xs font-semibold text-slate-500">🔎 {t("ตัวกรอง", "Filters")}</div>
+            <div>
+              <div className="text-[11px] text-slate-400 mb-1">{t("ประเภทงาน", "Type")}</div>
+              <div className="flex flex-wrap lg:flex-col gap-1 items-start">
+                <FilterTab active={!typeFilter} onClick={() => setTypeFilter("")} label={t("ทุกประเภท", "All types")} accent={theme.accent} />
+                {typeOptions.map((o) => (
+                  <FilterTab key={o.value} active={typeFilter === o.value} onClick={() => setTypeFilter(o.value)} label={o.label} accent={theme.accent} />
+                ))}
+              </div>
+            </div>
+            {brands.length > 0 && (
+              <div>
+                <div className="text-[11px] text-slate-400 mb-1">{t("แบรนด์", "Brand")}</div>
+                <div className="flex flex-wrap lg:flex-col gap-1.5 items-start">
+                  <BrandChip active={!brandFilter} onClick={() => setBrandFilter("")} label={t("ทั้งหมด", "All")} accent={theme.accent} />
+                  {brands.map((b) => (
+                    <BrandChip key={b.id} active={brandFilter === b.id} color={b.color} onClick={() => setBrandFilter(b.id)} label={b.name} accent={theme.accent} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* คอลัมน์ 2 — งาน: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง (กว้างสุด) */}
+        <section className="flex-1 min-w-0 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            {theme.kanban.view === "kanban"
+              ? <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
+              : <span />}
+            <div className="flex items-center gap-2">
+              {theme.kanban.view === "kanban" && (
+                <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
+                  placeholder={t("ค้นหาในบอร์ด...", "Search board...")}
+                  className="h-8 w-40 max-w-[40vw] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
+              )}
+              <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+                {([["kanban", "📋", t("การ์ด", "Cards")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
+                  const on = theme.kanban.view === v;
+                  return <button key={v} onClick={() => setKanbanView(v)} style={on ? { background: theme.accent } : undefined}
+                    className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
+                })}
+              </div>
+            </div>
           </div>
-          {brands.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs text-slate-400 mr-0.5">{t("แบรนด์", "Brand")}:</span>
-              <BrandChip active={!brandFilter} onClick={() => setBrandFilter("")} label={t("ทั้งหมด", "All")} accent={theme.accent} />
-              {brands.map((b) => (
-                <BrandChip key={b.id} active={brandFilter === b.id} color={b.color} onClick={() => setBrandFilter(b.id)} label={b.name} accent={theme.accent} />
-              ))}
+          {theme.kanban.view === "kanban" ? (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent}
+                onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+              <DataTable<CreativeTask>
+                data={filteredTasks} columns={columns}
+                title={`${filterLabel} (${filteredTasks.length})`}
+                emptyMessage={t("ไม่มีงานในตัวกรองนี้", "No tasks in this filter")}
+                searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
+                searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
+                tableId="creative-tasks" exportFilename="งาน-creative"
+                selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
+                enableCards
+                cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
+                onRowClick={(row) => onOpenTask(row.id)}
+              />
             </div>
           )}
         </section>
-      )}
 
-      {/* ── Section 2 — งาน: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง ── */}
-      <section className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          {theme.kanban.view === "kanban"
-            ? <p className="text-sm font-semibold text-slate-700">{filterLabel} ({kanbanTasks.length})</p>
-            : <span />}
-          <div className="flex items-center gap-2">
-            {theme.kanban.view === "kanban" && (
-              <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
-                placeholder={t("ค้นหาในบอร์ด...", "Search board...")}
-                className="h-8 w-40 max-w-[40vw] rounded-lg border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-200" />
-            )}
-            <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
-              {([["kanban", "📋", t("การ์ด", "Cards")], ["table", "▦", t("ตาราง", "Table")]] as const).map(([v, icon, label]) => {
-                const on = theme.kanban.view === v;
-                return <button key={v} onClick={() => setKanbanView(v)} style={on ? { background: theme.accent } : undefined}
-                  className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
-              })}
+        {/* คอลัมน์ 3 — แคมเปญที่กำลังทำ (แคบขวา, รายการแนวตั้ง) */}
+        {theme.show.campaigns && (
+          <section className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col lg:w-72 lg:shrink-0">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
+              <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
+              <a href="/tasks/campaigns" style={{ color: theme.accent }} className="text-xs font-medium hover:underline">{t("ดูทั้งหมด", "See all")} →</a>
             </div>
-          </div>
-        </div>
-        {theme.kanban.view === "kanban" ? (
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-            <OverviewKanban tasks={kanbanTasks} statuses={statuses} brands={brands} cfg={theme.kanban} accent={theme.accent}
-              onMoveStatus={onMoveStatus} onSetField={onSetField} onCardClick={onOpenTask} />
-          </div>
-        ) : (
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-            <DataTable<CreativeTask>
-              data={filteredTasks} columns={columns}
-              title={`${filterLabel} (${filteredTasks.length})`}
-              emptyMessage={t("ไม่มีงานในตัวกรองนี้", "No tasks in this filter")}
-              searchPlaceholder={t("ค้นหา เลขที่ / ชื่องาน / ผู้รับผิดชอบ...", "Search no. / title / assignee...")}
-              searchableKeys={["task_no", "title", "assignee_label", "brand_label", "sku_code"]}
-              tableId="creative-tasks" exportFilename="งาน-creative"
-              selectable bulkEditFields={bulkEditFields} onBulkEdit={onBulkEdit}
-              enableCards
-              cardConfig={{ primary: "title", subtitle: "task_no", badges: ["status", "priority"], lines: ["assignee_label", "due_date", "brand_label"] }}
-              onRowClick={(row) => onOpenTask(row.id)}
-            />
-          </div>
+            <div className="p-2">
+              {activeCampaigns.length === 0 ? (
+                <div className="py-8 text-center">
+                  <div className="text-3xl mb-1">📣</div>
+                  <p className="text-slate-500 text-sm">{t("ยังไม่มีแคมเปญที่กำลังทำ", "No active campaigns")}</p>
+                  <a href="/tasks/campaigns" className="mt-3 inline-flex items-center h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</a>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {activeCampaigns.map((c) => {
+                    const st = CSTATUS[c.status];
+                    const open = openByCampaign[c.id] ?? 0;
+                    return (
+                      <a key={c.id} href={`/tasks/campaigns/${c.id}`} className="block w-full text-left p-3 rounded-lg border border-slate-100 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${st?.cls ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{st?.label ?? c.status}</span>
+                          {open > 0 && <span className="text-[11px] text-slate-500">{open} {t("งานค้าง", "open")}</span>}
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 mt-1.5 line-clamp-2">{c.name}</p>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1 flex-wrap">
+                          {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
+                          {(c.start_date || c.end_date) && <span>🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
         )}
-      </section>
-
-      {/* ── Section 3 — แคมเปญที่กำลังทำ (เต็มกว้าง) ── */}
-      {theme.show.campaigns && (
-        <section className="bg-white rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
-            <p className="text-sm font-semibold text-slate-700">📣 {t("แคมเปญที่กำลังทำ", "Active campaigns")}</p>
-            <a href="/tasks/campaigns" style={{ color: theme.accent }} className="text-xs font-medium hover:underline">{t("ดูทั้งหมด", "See all")} →</a>
-          </div>
-          <div className="p-3">
-            {activeCampaigns.length === 0 ? (
-              <div className="py-8 text-center">
-                <div className="text-3xl mb-1">📣</div>
-                <p className="text-slate-500 text-sm">{t("ยังไม่มีแคมเปญที่กำลังทำ", "No active campaigns")}</p>
-                <a href="/tasks/campaigns" className="mt-3 inline-flex items-center h-9 px-4 bg-violet-50 text-violet-700 text-sm font-medium rounded-lg hover:bg-violet-100">＋ {t("สร้างแคมเปญ", "New campaign")}</a>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {activeCampaigns.map((c) => {
-                  const st = CSTATUS[c.status];
-                  const open = openByCampaign[c.id] ?? 0;
-                  return (
-                    <a key={c.id} href={`/tasks/campaigns/${c.id}`} className="block w-full text-left p-3 rounded-lg border border-slate-100 hover:border-violet-300 hover:bg-violet-50/40 transition-colors">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${st?.cls ?? "bg-slate-50 text-slate-500 border-slate-200"}`}>{st?.label ?? c.status}</span>
-                        {open > 0 && <span className="text-[11px] text-slate-500">{open} {t("งานค้าง", "open")}</span>}
-                      </div>
-                      <p className="text-sm font-semibold text-slate-800 mt-1.5 line-clamp-2">{c.name}</p>
-                      <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1 flex-wrap">
-                        {c.brand_label && <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: c.brand_color || "#cbd5e1" }} />{c.brand_label}</span>}
-                        {(c.start_date || c.end_date) && <span>🗓 {c.start_date ?? "?"} → {c.end_date ?? "?"}</span>}
-                      </div>
-                    </a>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+      </div>
 
       <OverviewCustomizer open={customizing} theme={theme} canUpload={canUpload} isAdmin={isAdmin} onChange={onThemeChange} onClose={() => setCustomizing(false)} />
       <MetricCardsManager open={metricsOpen} metrics={metrics ?? []} onChange={onMetricsChange} onClose={() => setMetricsOpen(false)}
